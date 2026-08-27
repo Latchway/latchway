@@ -81,7 +81,7 @@ func TestValidateRejectsBindingsAndPrivateJWK(t *testing.T) {
 	t.Run("private jwk", func(t *testing.T) {
 		proof := signProofWithJWK(t, privateKey, claims, true)
 		_, err := Validate(proof, Options{Method: "POST", URI: target, AccessToken: "access-token", Now: now})
-		if !IsCode(err, "dpop_jwk_private") {
+		if !IsCode(err, "dpop_invalid") {
 			t.Fatalf("error = %v", err)
 		}
 	})

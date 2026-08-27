@@ -61,7 +61,7 @@ func (j PublicJWK) Thumbprint() (string, error) {
 // PublicKey validates and converts the JWK.
 func (j PublicJWK) PublicKey() (*ecdsa.PublicKey, error) {
 	if j.Kty != "EC" || j.Crv != "P-256" {
-		return nil, validationError("dpop_jwk_unsupported")
+		return nil, validationError("dpop_invalid")
 	}
 	xBytes, err := decodeCoordinate(j.X)
 	if err != nil {
@@ -75,7 +75,7 @@ func (j PublicJWK) PublicKey() (*ecdsa.PublicKey, error) {
 	y := new(big.Int).SetBytes(yBytes)
 	curve := elliptic.P256()
 	if x.Sign() == 0 || y.Sign() == 0 || !curve.IsOnCurve(x, y) {
-		return nil, validationError("dpop_jwk_invalid")
+		return nil, validationError("dpop_invalid")
 	}
 	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }
@@ -146,7 +146,7 @@ func Validate(proof string, opts Options) (Result, error) {
 	}
 	jwkMap, ok := header["jwk"].(map[string]any)
 	if !ok {
-		return Result{}, validationError("dpop_jwk_invalid")
+		return Result{}, validationError("dpop_invalid")
 	}
 	jwk, err := parsePublicJWK(jwkMap)
 	if err != nil {
@@ -212,6 +212,9 @@ func Validate(proof string, opts Options) (Result, error) {
 	}
 
 	nonce := stringValue(claims["nonce"])
+	if len(nonce) > 512 || strings.ContainsAny(nonce, "\r\n\x00") {
+		return Result{}, validationError("dpop_invalid")
+	}
 	if opts.ExpectedNonce != "" && subtle.ConstantTimeCompare([]byte(nonce), []byte(opts.ExpectedNonce)) != 1 {
 		return Result{}, validationError("dpop_nonce_required")
 	}
@@ -225,6 +228,8 @@ func Validate(proof string, opts Options) (Result, error) {
 		if subtle.ConstantTimeCompare([]byte(ath), []byte(expectedATH)) != 1 {
 			return Result{}, validationError("dpop_invalid")
 		}
+	} else if ath != "" {
+		return Result{}, validationError("dpop_invalid")
 	}
 
 	jkt, err := jwk.Thumbprint()
@@ -364,9 +369,16 @@ func removeLastPathSegment(value string) string {
 }
 
 func parsePublicJWK(values map[string]any) (PublicJWK, error) {
-	for _, privateMember := range []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"} {
-		if _, present := values[privateMember]; present {
-			return PublicJWK{}, validationError("dpop_jwk_private")
+	for member := range values {
+		switch member {
+		case "kty", "crv", "x", "y":
+		default:
+			if member == "d" || member == "p" || member == "q" || member == "dp" || member == "dq" || member == "qi" || member == "oth" || member == "k" {
+				return PublicJWK{}, validationError("dpop_invalid")
+			}
+			// Embedded proof keys are self-contained. Reject even ignored remote
+			// key metadata so it cannot acquire meaning in a future refactor.
+			return PublicJWK{}, validationError("dpop_invalid")
 		}
 	}
 	jwk := PublicJWK{
@@ -384,7 +396,7 @@ func parsePublicJWK(values map[string]any) (PublicJWK, error) {
 func decodeCoordinate(encoded string) ([]byte, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
-		return nil, validationError("dpop_jwk_invalid")
+		return nil, validationError("dpop_invalid")
 	}
 	return decoded, nil
 }
