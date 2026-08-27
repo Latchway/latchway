@@ -3,6 +3,7 @@ package configuration
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,121 @@ func TestValidatorRejectsSchemaReferencesAndBadPolicy(t *testing.T) {
 		if !hasIssue(report.Issues, code) {
 			t.Errorf("missing %s in %+v", code, report.Issues)
 		}
+	}
+}
+
+func TestValidatorRejectsUnsupportedUpstreamDestinationRelaxation(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		field string
+		value any
+		code  string
+	}{
+		{name: "redirects", field: "allowRedirects", value: true, code: "upstream_redirects_unsupported"},
+		{name: "DNS validation", field: "dnsPinning", value: false, code: "upstream_dns_pinning_required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			upstream := objectArray(objectValue(document, "spec"), "upstreams")[0]
+			destination := map[string]any{test.field: test.value}
+			upstream["destinationPolicy"] = destination
+			encoded, _ := json.Marshal(document)
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("unsafe destination policy compiled: %+v", report.Issues)
+			}
+		})
+	}
+}
+
+func TestValidatorNeverEmitsAnUnloadableRuntimeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	upstream := objectArray(objectValue(document, "spec"), "upstreams")[0]
+	authentication := objectValue(upstream, "authentication")
+	// The canonical schema permits this irrelevant member for a "none"
+	// strategy. Runtime compilation rejects it so activation cannot create an
+	// active revision that every data-plane snapshot load would reject.
+	authentication["headerName"] = "X-Provider-Key"
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "runtime_configuration_invalid") {
+		t.Fatalf("unloadable configuration compiled: report=%+v compiled=%s", report, compiled)
+	}
+
+	valid := validConfigurationDocument(t)
+	report, compiled = validator.Validate(valid, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("valid configuration did not compile: %+v", report.Issues)
+	}
+	if _, err := newActiveSnapshot("validation", "validation", valid, compiled); err != nil {
+		t.Fatalf("validator emitted an unloadable snapshot: %v", err)
+	}
+}
+
+func TestValidatorRequiresOutputPolicyForTokenGeneratingProtocols(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, protocol := range []string{"openai_responses", "openai_chat", "anthropic_messages"} {
+		t.Run(protocol, func(t *testing.T) {
+			document := configurationObject(t)
+			spec := objectValue(document, "spec")
+			feature := objectArray(spec, "features")[0]
+			feature["protocol"] = protocol
+			delete(feature, "output")
+			objectArray(spec, "models")[0]["capabilities"] = []any{protocol}
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "output_policy_required") {
+				t.Fatalf("token-generating feature without output policy compiled: %+v", report.Issues)
+			}
+		})
+	}
+}
+
+func TestValidatorRejectsMixedStickyKeysWithinOnePriority(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	feature := objectArray(objectValue(document, "spec"), "features")[0]
+	routes := objectArray(feature, "routes")
+	second := deepClone(routes[0]).(map[string]any)
+	second["id"] = "secondary"
+	second["stickyBy"] = "user"
+	feature["routes"] = append(routes, second)
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "route_sticky_group_mismatch") {
+		t.Fatalf("ambiguous weighted group compiled: %+v", report.Issues)
 	}
 }
 
@@ -400,7 +516,20 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := validConfigurationDocument(t)
+	configuration := configurationObject(t)
+	spec := objectValue(configuration, "spec")
+	upstreamObject := objectArray(spec, "upstreams")[0]
+	upstreamObject["staticHeaders"] = map[string]any{"X-Provider-Tenant": "configured"}
+	limitObject := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+	limitObject["scope"] = []any{"user", "feature"}
+	featureObject := objectArray(spec, "features")[0]
+	featureObject["output"] = map[string]any{"defaultMaximumTokens": json.Number("800"), "absoluteMaximumTokens": json.Number("1500")}
+	routeObject := objectArray(featureObject, "routes")[0]
+	routeObject["fallbackOn"] = []any{"status_503"}
+	document, err := json.Marshal(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
 	report, compiled := validator.Validate(document, testEnvironment(), time.Now())
 	if !report.Valid {
 		t.Fatalf("configuration rejected: %+v", report.Issues)
@@ -460,6 +589,44 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	if _, _, ok := ambiguous.RequiredAttestationForPlatform("ios"); ok {
 		t.Fatal("multiple required attestation policies were treated as unambiguous")
 	}
+	upstream, ok := snapshot.Upstream("primary")
+	if !ok || upstream.BaseURL != "https://api.example.test/v1" || upstream.Timeouts.Total != 2*time.Minute || len(upstream.DestinationPolicy.AllowedPorts) != 1 || upstream.DestinationPolicy.AllowedPorts[0] != 443 || upstream.StaticHeaders["X-Provider-Tenant"] != "configured" {
+		t.Fatalf("upstream snapshot = %+v ok=%t", upstream, ok)
+	}
+	upstream.DestinationPolicy.AllowedPorts[0] = 80
+	upstream.StaticHeaders["X-Provider-Tenant"] = "changed"
+	upstreamAgain, _ := snapshot.Upstream("primary")
+	if upstreamAgain.DestinationPolicy.AllowedPorts[0] != 443 || upstreamAgain.StaticHeaders["X-Provider-Tenant"] != "configured" {
+		t.Fatalf("upstream snapshot was mutable: %+v", upstreamAgain)
+	}
+	model, ok := snapshot.Model("fast")
+	if !ok || model.UpstreamID != "primary" || model.UpstreamModel != "configured-fast-model" || !slices.Contains(model.Capabilities, "openai_chat") {
+		t.Fatalf("model snapshot = %+v ok=%t", model, ok)
+	}
+	model.Capabilities[0] = "changed"
+	modelAgain, _ := snapshot.Model("fast")
+	if slices.Contains(modelAgain.Capabilities, "changed") {
+		t.Fatalf("model snapshot was mutable: %+v", modelAgain)
+	}
+	plan, ok := snapshot.LimitPlan("free")
+	if !ok || len(plan.Limits) != 1 || plan.Limits[0].Metric != "logical_requests" || plan.Limits[0].Algorithm != "calendar" || plan.Limits[0].Maximum != 5 || !slices.Equal(plan.Limits[0].Scope, []string{"user", "feature"}) {
+		t.Fatalf("limit plan snapshot = %+v ok=%t", plan, ok)
+	}
+	plan.Limits[0].Scope[0] = "changed"
+	planAgain, _ := snapshot.LimitPlan("free")
+	if planAgain.Limits[0].Scope[0] != "user" {
+		t.Fatalf("limit plan snapshot was mutable: %+v", planAgain)
+	}
+	feature, ok := snapshot.Feature("assistant")
+	if !ok || feature.Protocol != "openai_responses" || feature.Output == nil || feature.Output.DefaultMaximumTokens != 800 || feature.Output.AbsoluteMaximumTokens != 1500 || len(feature.Routes) != 1 || !slices.Equal(feature.Routes[0].FallbackOn, []string{"status_503"}) {
+		t.Fatalf("feature snapshot = %+v ok=%t", feature, ok)
+	}
+	feature.Output.DefaultMaximumTokens = 1
+	feature.Routes[0].FallbackOn[0] = "changed"
+	featureAgain, _ := snapshot.Feature("assistant")
+	if featureAgain.Output.DefaultMaximumTokens != 800 || featureAgain.Routes[0].FallbackOn[0] != "status_503" {
+		t.Fatalf("feature snapshot was mutable: %+v", featureAgain)
+	}
 	compiledCopy := snapshot.CompiledJSON()
 	compiledCopy[0] = '['
 	if bytes.Equal(compiledCopy, snapshot.CompiledJSON()) {
@@ -517,7 +684,7 @@ func configurationObject(t *testing.T) map[string]any {
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
 			"models":[{"id":"fast","upstream":"primary","upstreamModel":"configured-fast-model"}],
 			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","window":"1d","maximum":5}]}],
-			"features":[{"id":"assistant","protocol":"openai_responses","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"routes":[{"id":"primary","when":"true","model":"fast","priority":10}]}]
+			"features":[{"id":"assistant","protocol":"openai_responses","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"output":{"defaultMaximumTokens":800,"absoluteMaximumTokens":1500},"routes":[{"id":"primary","when":"true","model":"fast","priority":10}]}]
 		}
 	}`))
 	if err != nil {

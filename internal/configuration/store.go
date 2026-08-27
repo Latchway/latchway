@@ -314,6 +314,12 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	if revision.storedState != StateValid || revision.Validation == nil || !revision.Validation.Valid || len(revision.compiled) == 0 {
 		return Revision{}, ErrConfigurationInvalid
 	}
+	// Recheck the persisted compiled artifact at activation time. This protects
+	// upgrades that add stricter runtime invariants from activating a revision
+	// whose older validation report can no longer be loaded safely.
+	if _, err := newActiveSnapshot(revision.ID, environment.EnvironmentID, revision.Document, revision.compiled); err != nil {
+		return Revision{}, ErrConfigurationInvalid
+	}
 	if revision.ActivatedAt != nil || revision.baseRevisionID != activeRevisionID || activeRevisionID == revision.ID {
 		return Revision{}, ErrConflict
 	}

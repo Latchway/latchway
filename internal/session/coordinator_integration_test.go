@@ -472,6 +472,9 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 				"id": "assistant", "protocol": "openai_responses", "attestationPolicy": "native",
 				"access":    map[string]any{"expression": "principal.authenticated"},
 				"limitPlan": map[string]any{"expression": "'free'"},
+				"output": map[string]any{
+					"defaultMaximumTokens": 800, "absoluteMaximumTokens": 1500,
+				},
 				"routes": []any{map[string]any{
 					"id": "primary", "when": "true", "model": "fast", "priority": 10,
 				}},

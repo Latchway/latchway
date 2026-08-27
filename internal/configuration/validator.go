@@ -111,6 +111,19 @@ func (validator *Validator) Validate(document json.RawMessage, environment Envir
 	if err != nil {
 		return report(checkedAt, []Issue{errorIssue("compilation_failed", "/", "The normalized configuration could not be compiled.")}), nil
 	}
+	// Keep validation and active loading as one safety boundary. Runtime
+	// configuration deliberately rechecks invariants because compiled snapshots
+	// are persisted, but a newly validated document must never compile into a
+	// snapshot that would take the active data plane offline.
+	if _, err := newActiveSnapshot("validation", "validation", document, compiled); err != nil {
+		issues = append(issues, errorIssue(
+			"runtime_configuration_invalid",
+			"/spec",
+			"The normalized data-plane configuration could not be loaded safely.",
+		))
+		sortIssues(issues)
+		return report(checkedAt, issues), nil
+	}
 	return result, compiled
 }
 

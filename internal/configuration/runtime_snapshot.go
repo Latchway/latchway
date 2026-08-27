@@ -1,0 +1,505 @@
+package configuration
+
+import (
+	"math/big"
+	"net/http"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var (
+	runtimeIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	runtimeSecretRefPattern  = regexp.MustCompile(`^secret/[a-z][a-z0-9_-]{0,62}$`)
+	runtimeHeaderNamePattern = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+	runtimeWindowPattern     = regexp.MustCompile(`^[1-9][0-9]*(m|h|d|mo)$`)
+)
+
+type compiledUpstream struct {
+	ID                         string `json:"id"`
+	Type                       string `json:"type"`
+	BaseURL                    string `json:"baseUrl"`
+	DangerousAllowInsecureHTTP bool   `json:"dangerousAllowInsecureHttp"`
+	Authentication             struct {
+		Type       string `json:"type"`
+		SecretRef  string `json:"secretRef"`
+		HeaderName string `json:"headerName"`
+	} `json:"authentication"`
+	Timeouts struct {
+		Connect   string `json:"connect"`
+		FirstByte string `json:"firstByte"`
+		Idle      string `json:"idle"`
+		Total     string `json:"total"`
+	} `json:"timeouts"`
+	DestinationPolicy struct {
+		AllowedPorts         []int `json:"allowedPorts"`
+		AllowRedirects       bool  `json:"allowRedirects"`
+		AllowPrivateNetworks bool  `json:"allowPrivateNetworks"`
+		DNSPinning           bool  `json:"dnsPinning"`
+	} `json:"destinationPolicy"`
+	StaticHeaders map[string]string `json:"staticHeaders"`
+}
+
+type compiledModel struct {
+	ID            string   `json:"id"`
+	UpstreamID    string   `json:"upstream"`
+	UpstreamModel string   `json:"upstreamModel"`
+	PricingRef    string   `json:"pricingRef"`
+	Capabilities  []string `json:"capabilities"`
+}
+
+type compiledLimitPlan struct {
+	ID     string  `json:"id"`
+	Limits []Limit `json:"limits"`
+}
+
+type compiledFeature struct {
+	ID                  string `json:"id"`
+	Protocol            string `json:"protocol"`
+	AttestationPolicyID string `json:"attestationPolicy"`
+	Access              struct {
+		Expression string `json:"expression"`
+	} `json:"access"`
+	LimitPlan struct {
+		Expression string `json:"expression"`
+	} `json:"limitPlan"`
+	Output *struct {
+		DefaultMaximumTokens  int64 `json:"defaultMaximumTokens"`
+		AbsoluteMaximumTokens int64 `json:"absoluteMaximumTokens"`
+	} `json:"output"`
+	Routes []struct {
+		ID         string   `json:"id"`
+		When       string   `json:"when"`
+		ModelID    string   `json:"model"`
+		Priority   int64    `json:"priority"`
+		Weight     int64    `json:"weight"`
+		StickyBy   string   `json:"stickyBy"`
+		FallbackOn []string `json:"fallbackOn"`
+	} `json:"routes"`
+	OpaqueHTTP *struct {
+		AllowedMethods        []string `json:"allowedMethods"`
+		PathPrefixes          []string `json:"pathPrefixes"`
+		MaximumBodyBytes      int64    `json:"maxBodyBytes"`
+		AllowedRequestHeaders []string `json:"allowedRequestHeaders"`
+	} `json:"opaqueHttp"`
+}
+
+func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
+	rawUpstreams []compiledUpstream,
+	rawModels []compiledModel,
+	rawPlans []compiledLimitPlan,
+	rawFeatures []compiledFeature,
+) error {
+	for _, raw := range rawUpstreams {
+		upstream, err := runtimeUpstream(raw)
+		if err != nil || !insertUnique(snapshot.upstreams, upstream.ID, upstream) {
+			return errorsCorruptSnapshot("upstream")
+		}
+	}
+	for _, raw := range rawModels {
+		model, err := runtimeModel(raw)
+		if err != nil || !insertUnique(snapshot.models, model.ID, model) {
+			return errorsCorruptSnapshot("model")
+		}
+		if _, ok := snapshot.upstreams[model.UpstreamID]; !ok {
+			return errorsCorruptSnapshot("model upstream reference")
+		}
+	}
+	for _, raw := range rawPlans {
+		plan, err := runtimeLimitPlan(raw)
+		if err != nil || !insertUnique(snapshot.limitPlans, plan.ID, plan) {
+			return errorsCorruptSnapshot("limit plan")
+		}
+	}
+	for _, raw := range rawFeatures {
+		feature, err := snapshot.runtimeFeature(raw)
+		if err != nil || !insertUnique(snapshot.features, feature.ID, feature) {
+			return errorsCorruptSnapshot("feature")
+		}
+	}
+	if len(snapshot.upstreams) == 0 || len(snapshot.models) == 0 || len(snapshot.limitPlans) == 0 || len(snapshot.features) == 0 {
+		return errorsCorruptSnapshot("data-plane configuration")
+	}
+	return nil
+}
+
+func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) ||
+		!slices.Contains([]string{"openai_compatible", "anthropic", "generic"}, raw.Type) {
+		return Upstream{}, ErrInvalid
+	}
+	parsedURL, issues := validateUpstreamURL(raw.BaseURL, "/baseUrl")
+	if len(issues) != 0 || parsedURL == nil ||
+		(parsedURL.Scheme == "http" && !raw.DangerousAllowInsecureHTTP) {
+		return Upstream{}, ErrInvalid
+	}
+	authentication := UpstreamAuthentication{
+		Type: raw.Authentication.Type, SecretRef: raw.Authentication.SecretRef,
+		HeaderName: raw.Authentication.HeaderName,
+	}
+	switch authentication.Type {
+	case "none":
+		if authentication.SecretRef != "" || authentication.HeaderName != "" {
+			return Upstream{}, ErrInvalid
+		}
+	case "bearer":
+		if !runtimeSecretRefPattern.MatchString(authentication.SecretRef) || authentication.HeaderName != "" {
+			return Upstream{}, ErrInvalid
+		}
+	case "header":
+		if !runtimeSecretRefPattern.MatchString(authentication.SecretRef) ||
+			!runtimeHeaderNamePattern.MatchString(authentication.HeaderName) ||
+			runtimeCredentialHeaderForbidden(authentication.HeaderName) {
+			return Upstream{}, ErrInvalid
+		}
+	default:
+		return Upstream{}, ErrInvalid
+	}
+	timeouts, err := runtimeTimeouts(raw)
+	if err != nil {
+		return Upstream{}, err
+	}
+	policy := UpstreamDestinationPolicy{
+		AllowedPorts:         append([]int(nil), raw.DestinationPolicy.AllowedPorts...),
+		AllowRedirects:       raw.DestinationPolicy.AllowRedirects,
+		AllowPrivateNetworks: raw.DestinationPolicy.AllowPrivateNetworks,
+		DNSPinning:           raw.DestinationPolicy.DNSPinning,
+	}
+	if policy.AllowRedirects || policy.AllowPrivateNetworks || !policy.DNSPinning || len(policy.AllowedPorts) == 0 {
+		return Upstream{}, ErrInvalid
+	}
+	seenPorts := make(map[int]struct{}, len(policy.AllowedPorts))
+	for _, port := range policy.AllowedPorts {
+		if port < 1 || port > 65535 {
+			return Upstream{}, ErrInvalid
+		}
+		if _, duplicate := seenPorts[port]; duplicate {
+			return Upstream{}, ErrInvalid
+		}
+		seenPorts[port] = struct{}{}
+	}
+	port := parsedURL.Port()
+	if port == "" {
+		if parsedURL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	if !slices.Contains(policy.AllowedPorts, mustPort(port)) {
+		return Upstream{}, ErrInvalid
+	}
+	staticHeaders := cloneStringMap(raw.StaticHeaders)
+	if len(staticHeaders) > 32 {
+		return Upstream{}, ErrInvalid
+	}
+	seenHeaders := make(map[string]struct{}, len(staticHeaders))
+	totalHeaderBytes := 0
+	for name, value := range staticHeaders {
+		canonical := http.CanonicalHeaderKey(name)
+		totalHeaderBytes += len(canonical) + len(value)
+		if !runtimeHeaderNamePattern.MatchString(name) || runtimeStaticHeaderForbidden(canonical) ||
+			!runtimeStaticHeaderValueValid(value) || totalHeaderBytes > 32<<10 {
+			return Upstream{}, ErrInvalid
+		}
+		if _, duplicate := seenHeaders[canonical]; duplicate {
+			return Upstream{}, ErrInvalid
+		}
+		seenHeaders[canonical] = struct{}{}
+	}
+	return Upstream{
+		ID: raw.ID, Type: raw.Type, BaseURL: raw.BaseURL,
+		DangerousAllowInsecureHTTP: raw.DangerousAllowInsecureHTTP,
+		Authentication:             authentication, Timeouts: timeouts,
+		DestinationPolicy: policy, StaticHeaders: staticHeaders,
+	}, nil
+}
+
+func runtimeTimeouts(raw compiledUpstream) (UpstreamTimeouts, error) {
+	values := []string{raw.Timeouts.Connect, raw.Timeouts.FirstByte, raw.Timeouts.Idle, raw.Timeouts.Total}
+	parsed := make([]time.Duration, len(values))
+	for index, value := range values {
+		duration, err := parseConfigDuration(value)
+		if err != nil || duration <= 0 {
+			return UpstreamTimeouts{}, ErrInvalid
+		}
+		parsed[index] = duration
+	}
+	if parsed[3] > 10*time.Minute || parsed[0] > parsed[3] || parsed[1] > parsed[3] || parsed[2] > parsed[3] {
+		return UpstreamTimeouts{}, ErrInvalid
+	}
+	return UpstreamTimeouts{Connect: parsed[0], FirstByte: parsed[1], Idle: parsed[2], Total: parsed[3]}, nil
+}
+
+func runtimeModel(raw compiledModel) (Model, error) {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || !runtimeIdentifierPattern.MatchString(raw.UpstreamID) ||
+		raw.UpstreamModel == "" || len(raw.UpstreamModel) > 256 || strings.ContainsAny(raw.UpstreamModel, "\r\n\x00") ||
+		(raw.PricingRef != "" && !runtimeIdentifierPattern.MatchString(raw.PricingRef)) || len(raw.Capabilities) == 0 {
+		return Model{}, ErrInvalid
+	}
+	allowed := []string{"openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"}
+	seen := make(map[string]struct{}, len(raw.Capabilities))
+	for _, capability := range raw.Capabilities {
+		if !slices.Contains(allowed, capability) {
+			return Model{}, ErrInvalid
+		}
+		if _, duplicate := seen[capability]; duplicate {
+			return Model{}, ErrInvalid
+		}
+		seen[capability] = struct{}{}
+	}
+	return Model{
+		ID: raw.ID, UpstreamID: raw.UpstreamID, UpstreamModel: raw.UpstreamModel,
+		PricingRef: raw.PricingRef, Capabilities: append([]string(nil), raw.Capabilities...),
+	}, nil
+}
+
+func runtimeLimitPlan(raw compiledLimitPlan) (LimitPlan, error) {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || len(raw.Limits) == 0 || len(raw.Limits) > 128 {
+		return LimitPlan{}, ErrInvalid
+	}
+	plan := LimitPlan{ID: raw.ID, Limits: append([]Limit(nil), raw.Limits...)}
+	for index := range plan.Limits {
+		limit := &plan.Limits[index]
+		limit.Scope = append([]string(nil), limit.Scope...)
+		if !runtimeLimitValid(*limit) {
+			return LimitPlan{}, ErrInvalid
+		}
+	}
+	return plan, nil
+}
+
+func runtimeLimitValid(limit Limit) bool {
+	metrics := []string{"logical_requests", "input_tokens", "output_tokens", "total_tokens", "cost_nano_usd", "concurrent_requests", "concurrent_streams"}
+	if !slices.Contains(metrics, limit.Metric) || !slices.Contains([]string{"calendar", "token_bucket", "concurrency", "per_request"}, limit.Algorithm) {
+		return false
+	}
+	allowedScopes := []string{"organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model"}
+	seenScopes := make(map[string]struct{}, len(limit.Scope))
+	for _, scope := range limit.Scope {
+		if !slices.Contains(allowedScopes, scope) {
+			return false
+		}
+		if _, duplicate := seenScopes[scope]; duplicate {
+			return false
+		}
+		seenScopes[scope] = struct{}{}
+	}
+	switch limit.Algorithm {
+	case "calendar":
+		return runtimeWindowPattern.MatchString(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
+	case "token_bucket":
+		refill, ok := new(big.Rat).SetString(limit.RefillPerSecond.String())
+		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 && limit.Capacity > 0 && ok && refill.Sign() > 0
+	case "concurrency":
+		return (limit.Metric == "concurrent_requests" || limit.Metric == "concurrent_streams") && limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
+	case "per_request":
+		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
+	default:
+		return false
+	}
+}
+
+func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, error) {
+	protocols := []string{"openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"}
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || !slices.Contains(protocols, raw.Protocol) ||
+		!runtimeIdentifierPattern.MatchString(raw.AttestationPolicyID) ||
+		len(raw.Access.Expression) == 0 || len(raw.Access.Expression) > 4096 ||
+		len(raw.LimitPlan.Expression) == 0 || len(raw.LimitPlan.Expression) > 4096 ||
+		len(raw.Routes) == 0 || len(raw.Routes) > 32 {
+		return Feature{}, ErrInvalid
+	}
+	if _, ok := snapshot.attestations[raw.AttestationPolicyID]; !ok {
+		return Feature{}, ErrInvalid
+	}
+	feature := Feature{
+		ID: raw.ID, Protocol: raw.Protocol, AttestationPolicyID: raw.AttestationPolicyID,
+		AccessExpression: raw.Access.Expression, LimitPlanExpression: raw.LimitPlan.Expression,
+		Routes: make([]Route, 0, len(raw.Routes)),
+	}
+	if raw.Output != nil {
+		if raw.Output.DefaultMaximumTokens <= 0 || raw.Output.AbsoluteMaximumTokens <= 0 || raw.Output.DefaultMaximumTokens > raw.Output.AbsoluteMaximumTokens {
+			return Feature{}, ErrInvalid
+		}
+		feature.Output = &OutputPolicy{
+			DefaultMaximumTokens:  raw.Output.DefaultMaximumTokens,
+			AbsoluteMaximumTokens: raw.Output.AbsoluteMaximumTokens,
+		}
+	} else if protocolRequiresOutputPolicy(raw.Protocol) {
+		return Feature{}, ErrInvalid
+	}
+	seenRoutes := make(map[string]struct{}, len(raw.Routes))
+	stickyByPriority := make(map[int64]string, len(raw.Routes))
+	for _, rawRoute := range raw.Routes {
+		if !runtimeIdentifierPattern.MatchString(rawRoute.ID) || !runtimeIdentifierPattern.MatchString(rawRoute.ModelID) ||
+			len(rawRoute.When) == 0 || len(rawRoute.When) > 4096 || rawRoute.Priority < 0 ||
+			rawRoute.Weight < 1 || rawRoute.Weight > 10_000 ||
+			!slices.Contains([]string{"none", "user", "installation"}, rawRoute.StickyBy) {
+			return Feature{}, ErrInvalid
+		}
+		if _, duplicate := seenRoutes[rawRoute.ID]; duplicate {
+			return Feature{}, ErrInvalid
+		}
+		seenRoutes[rawRoute.ID] = struct{}{}
+		if existing, ok := stickyByPriority[rawRoute.Priority]; ok && existing != rawRoute.StickyBy {
+			return Feature{}, ErrInvalid
+		}
+		stickyByPriority[rawRoute.Priority] = rawRoute.StickyBy
+		model, ok := snapshot.models[rawRoute.ModelID]
+		if !ok || !slices.Contains(model.Capabilities, raw.Protocol) {
+			return Feature{}, ErrInvalid
+		}
+		seenFallback := make(map[string]struct{}, len(rawRoute.FallbackOn))
+		for _, fallback := range rawRoute.FallbackOn {
+			if !slices.Contains([]string{"connect_error", "timeout_before_headers", "status_429", "status_500", "status_502", "status_503", "status_504"}, fallback) {
+				return Feature{}, ErrInvalid
+			}
+			if _, duplicate := seenFallback[fallback]; duplicate {
+				return Feature{}, ErrInvalid
+			}
+			seenFallback[fallback] = struct{}{}
+		}
+		feature.Routes = append(feature.Routes, Route{
+			ID: rawRoute.ID, When: rawRoute.When, ModelID: rawRoute.ModelID,
+			Priority: rawRoute.Priority, Weight: rawRoute.Weight, StickyBy: rawRoute.StickyBy,
+			FallbackOn: append([]string(nil), rawRoute.FallbackOn...),
+		})
+	}
+	if raw.OpaqueHTTP != nil {
+		if raw.Protocol != "opaque_http" || raw.OpaqueHTTP.MaximumBodyBytes < 0 {
+			return Feature{}, ErrInvalid
+		}
+		opaque := OpaqueHTTPPolicy{
+			AllowedMethods:        append([]string(nil), raw.OpaqueHTTP.AllowedMethods...),
+			PathPrefixes:          append([]string(nil), raw.OpaqueHTTP.PathPrefixes...),
+			MaximumBodyBytes:      raw.OpaqueHTTP.MaximumBodyBytes,
+			AllowedRequestHeaders: append([]string(nil), raw.OpaqueHTTP.AllowedRequestHeaders...),
+		}
+		if !runtimeOpaquePolicyValid(opaque) {
+			return Feature{}, ErrInvalid
+		}
+		feature.OpaqueHTTP = &opaque
+	} else if raw.Protocol == "opaque_http" {
+		return Feature{}, ErrInvalid
+	}
+	return feature, nil
+}
+
+func protocolRequiresOutputPolicy(protocol string) bool {
+	return slices.Contains([]string{"openai_responses", "openai_chat", "anthropic_messages"}, protocol)
+}
+
+func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
+	if len(policy.AllowedMethods) == 0 || len(policy.PathPrefixes) == 0 || policy.MaximumBodyBytes > 100<<20 {
+		return false
+	}
+	seenMethods := make(map[string]struct{}, len(policy.AllowedMethods))
+	for _, method := range policy.AllowedMethods {
+		if !slices.Contains([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}, method) {
+			return false
+		}
+		if _, duplicate := seenMethods[method]; duplicate {
+			return false
+		}
+		seenMethods[method] = struct{}{}
+	}
+	seenPrefixes := make(map[string]struct{}, len(policy.PathPrefixes))
+	for _, prefix := range policy.PathPrefixes {
+		if prefix == "" || len(prefix) > 512 || !strings.HasPrefix(prefix, "/") || strings.ContainsRune(prefix, '\x00') {
+			return false
+		}
+		if _, duplicate := seenPrefixes[prefix]; duplicate {
+			return false
+		}
+		seenPrefixes[prefix] = struct{}{}
+	}
+	seenHeaders := make(map[string]struct{}, len(policy.AllowedRequestHeaders))
+	for _, header := range policy.AllowedRequestHeaders {
+		canonical := http.CanonicalHeaderKey(header)
+		if !runtimeHeaderNamePattern.MatchString(header) || runtimeForwardHeaderForbidden(canonical) {
+			return false
+		}
+		if _, duplicate := seenHeaders[canonical]; duplicate {
+			return false
+		}
+		seenHeaders[canonical] = struct{}{}
+	}
+	return true
+}
+
+func runtimeForwardHeaderForbidden(name string) bool {
+	canonical := http.CanonicalHeaderKey(name)
+	if strings.HasPrefix(strings.ToLower(canonical), "x-latchway-") {
+		return true
+	}
+	switch canonical {
+	case "Authorization", "Connection", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host", "Keep-Alive",
+		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
+		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeStaticHeaderForbidden(name string) bool {
+	canonical := http.CanonicalHeaderKey(name)
+	if strings.HasPrefix(strings.ToLower(canonical), "x-latchway-") {
+		return true
+	}
+	switch canonical {
+	case "Accept", "Authorization", "Connection", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host",
+		"Keep-Alive", "Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
+		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeCredentialHeaderForbidden(name string) bool {
+	canonical := http.CanonicalHeaderKey(name)
+	if strings.HasPrefix(strings.ToLower(canonical), "x-latchway-") {
+		return true
+	}
+	switch canonical {
+	case "Accept", "Connection", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host", "Keep-Alive",
+		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeStaticHeaderValueValid(value string) bool {
+	if len(value) > 2048 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if (value[index] < 0x20 && value[index] != '\t') || value[index] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func insertUnique[T any](target map[string]T, identifier string, value T) bool {
+	if _, exists := target[identifier]; exists {
+		return false
+	}
+	target[identifier] = value
+	return true
+}
+
+func mustPort(value string) int {
+	port, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return port
+}

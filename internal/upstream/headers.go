@@ -11,7 +11,11 @@ const maximumForwardedHeaderBytes = 32 << 10
 var forbiddenHeaders = map[string]struct{}{
 	"Authorization":       {},
 	"Proxy-Authorization": {},
+	"Dpop":                {},
+	"Dpop-Nonce":          {},
 	"Connection":          {},
+	"Content-Length":      {},
+	"Host":                {},
 	"Proxy-Connection":    {},
 	"Keep-Alive":          {},
 	"Transfer-Encoding":   {},
@@ -30,6 +34,7 @@ var forbiddenHeaders = map[string]struct{}{
 	"X-Forwarded-Host":    {},
 	"X-Forwarded-Proto":   {},
 	"X-Goog-Api-Key":      {},
+	"X-Auth-Token":        {},
 }
 
 // ForwardHeaders constructs a new outbound header map from an explicit

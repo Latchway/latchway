@@ -294,6 +294,13 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 				issues = append(issues, errorIssue("upstream_port_not_allowed", base+"/destinationPolicy/allowedPorts", "The upstream base URL port must be explicitly allowed."))
 			}
 		}
+		destinationPolicy := objectValue(upstream, "destinationPolicy")
+		if allowRedirects, _ := destinationPolicy["allowRedirects"].(bool); allowRedirects {
+			issues = append(issues, errorIssue("upstream_redirects_unsupported", base+"/destinationPolicy/allowRedirects", "Upstream redirects are not supported because each destination must be selected and validated by configuration."))
+		}
+		if dnsPinning, _ := destinationPolicy["dnsPinning"].(bool); !dnsPinning {
+			issues = append(issues, errorIssue("upstream_dns_pinning_required", base+"/destinationPolicy/dnsPinning", "DNS destination validation must remain enabled."))
+		}
 		authentication := objectValue(upstream, "authentication")
 		if environmentKind == "production" && stringValue(authentication, "type") == "none" {
 			issues = append(issues, warningIssue("upstream_authentication_disabled", base+"/authentication/type", "This production upstream has no configured authentication."))
@@ -460,15 +467,25 @@ func (validator *Validator) featureSemanticIssues(features, models, attestations
 			if defaultMaximum > absoluteMaximum {
 				issues = append(issues, errorIssue("output_default_exceeds_absolute", base+"/output/defaultMaximumTokens", "The default output maximum cannot exceed the absolute maximum."))
 			}
+		} else if protocolRequiresOutputPolicy(protocol) {
+			issues = append(issues, errorIssue("output_policy_required", base+"/output", "Token-generating protocols require a server-owned output limit."))
 		}
 		routes, routeIssues := indexObjects(objectArray(feature, "routes"), base+"/routes")
 		issues = append(issues, routeIssues...)
 		hasFallback := false
+		stickyByPriority := make(map[int64]string, len(routes))
 		for _, routeID := range sortedMapKeys(routes) {
 			route := routes[routeID]
 			routePath := base + "/routes/" + pointerToken(routeID)
 			when := strings.TrimSpace(stringValue(route, "when"))
 			issues = append(issues, validator.celIssues(validator.policyCEL, when, routePath+"/when", cel.BoolType)...)
+			priority, _ := integerField(route, "priority")
+			stickyBy := stringValue(route, "stickyBy")
+			if existing, ok := stickyByPriority[priority]; ok && existing != stickyBy {
+				issues = append(issues, errorIssue("route_sticky_group_mismatch", routePath+"/stickyBy", "Routes at one priority must use the same deterministic selection key."))
+			} else {
+				stickyByPriority[priority] = stickyBy
+			}
 			if when == "true" {
 				hasFallback = true
 			}

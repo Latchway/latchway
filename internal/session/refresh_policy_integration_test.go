@@ -277,9 +277,7 @@ func activateRefreshPolicyRevision(t *testing.T, ctx context.Context, pool *pgxp
 	`, previousRevisionID).Scan(&adminUserID); err != nil {
 		t.Fatalf("resolve refresh-policy revision owner: %v", err)
 	}
-	compiled, err := json.Marshal(map[string]any{"spec": map[string]any{
-		"identityProviders": identityProviders, "attestationPolicies": attestationPolicies,
-	}})
+	compiled, err := json.Marshal(map[string]any{"spec": sessionTestCompiledSpec(identityProviders, attestationPolicies)})
 	if err != nil {
 		t.Fatalf("encode refresh-policy revision: %v", err)
 	}

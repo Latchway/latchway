@@ -884,15 +884,13 @@ func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, 
 	if provider == "debug" {
 		selection["secretRef"] = "secret/debug-attestation-public-keys"
 	}
-	compiledDocument, err := json.Marshal(map[string]any{
-		"spec": map[string]any{
-			"identityProviders": []any{map[string]any{"id": "firebase", "type": "firebase"}},
-			"attestationPolicies": []any{map[string]any{
-				"id": "native", "maxAge": maximumAge,
-				"platforms": map[string]any{"ios": selection},
-			}},
-		},
-	})
+	compiledDocument, err := json.Marshal(map[string]any{"spec": sessionTestCompiledSpec(
+		[]any{map[string]any{"id": "firebase", "type": "firebase"}},
+		[]any{map[string]any{
+			"id": "native", "maxAge": maximumAge,
+			"platforms": map[string]any{"ios": selection},
+		}},
+	)})
 	if err != nil {
 		t.Fatalf("encode active session test revision: %v", err)
 	}
@@ -942,18 +940,36 @@ func activateNextChallengeTestRevision(t *testing.T, ctx context.Context, pool *
 		t.Fatalf("resolve active policy owner: %v", err)
 	}
 	revisionID := mustSessionID(t, id.ConfigRevision)
+	compiledSpec := sessionTestCompiledSpec(
+		[]any{map[string]any{"id": "firebase", "type": "firebase"}},
+		[]any{map[string]any{
+			"id": "native", "maxAge": "10m", "platforms": map[string]any{
+				"ios": map[string]any{
+					"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
+					"secretRef": "secret/debug-attestation-public-keys",
+				},
+			},
+		}},
+	)
+	compiledSpec["session"] = map[string]any{
+		"accessTokenTtl": "7m", "challengeTtl": "4m", "refreshTokenTtl": "48h", "maximumClockSkewSeconds": 30,
+	}
+	compiledDocument, err := json.Marshal(map[string]any{"spec": compiledSpec})
+	if err != nil {
+		t.Fatalf("encode next active session test revision: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO config_revisions (
 			config_revision_id, organization_id, application_id, environment_id,
 			revision_number, etag, status, document, compiled_document,
 			validation_report, created_by_admin_user_id, validated_at, activated_at
-		) VALUES (
-			$1, $2, $3, $4, 2, 'session-test-etag-0002', 'valid', '{}'::jsonb,
-			'{"spec":{"session":{"accessTokenTtl":"7m","challengeTtl":"4m","refreshTokenTtl":"48h","maximumClockSkewSeconds":30},"identityProviders":[{"id":"firebase","type":"firebase"}],"attestationPolicies":[{"id":"native","maxAge":"10m","platforms":{"ios":{"provider":"debug","mode":"required","minimumTrustLevel":"debug","secretRef":"secret/debug-attestation-public-keys"}}}]}}'::jsonb,
-			'{"valid":true,"checked_at":"2026-08-27T12:05:01Z","issues":[]}'::jsonb,
-			$5, $6, $6
-		)
-	`, revisionID, fixture.organizationID, fixture.applicationID, fixture.environmentID, adminUserID, now); err != nil {
+			) VALUES (
+				$1, $2, $3, $4, 2, 'session-test-etag-0002', 'valid', '{}'::jsonb,
+				$7::jsonb,
+				'{"valid":true,"checked_at":"2026-08-27T12:05:01Z","issues":[]}'::jsonb,
+				$5, $6, $6
+			)
+		`, revisionID, fixture.organizationID, fixture.applicationID, fixture.environmentID, adminUserID, now, compiledDocument); err != nil {
 		t.Fatalf("create next active session test revision: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -964,6 +980,55 @@ func activateNextChallengeTestRevision(t *testing.T, ctx context.Context, pool *
 		t.Fatalf("activate next session test revision: %v", err)
 	}
 	return revisionID
+}
+
+func sessionTestCompiledSpec(identityProviders, attestationPolicies []any) map[string]any {
+	if len(attestationPolicies) == 0 {
+		// Canonical configuration requires at least one policy. A disabled policy
+		// represents the refresh test's intentional removal of every required
+		// policy while keeping the active snapshot structurally loadable.
+		attestationPolicies = []any{map[string]any{
+			"id": "disabled", "maxAge": "10m", "platforms": map[string]any{
+				"ios": map[string]any{
+					"provider": "debug", "mode": "disabled", "minimumTrustLevel": "debug",
+				},
+			},
+		}}
+	}
+	policyID, _ := attestationPolicies[0].(map[string]any)["id"].(string)
+	return map[string]any{
+		"identityProviders":   identityProviders,
+		"attestationPolicies": attestationPolicies,
+		"upstreams": []any{map[string]any{
+			"id": "primary", "type": "openai_compatible", "baseUrl": "https://api.example.test/v1",
+			"authentication": map[string]any{"type": "none"},
+			"timeouts": map[string]any{
+				"connect": "5s", "firstByte": "30s", "idle": "1m", "total": "2m",
+			},
+			"destinationPolicy": map[string]any{
+				"allowedPorts": []any{443}, "allowRedirects": false, "allowPrivateNetworks": false, "dnsPinning": true,
+			},
+		}},
+		"models": []any{map[string]any{
+			"id": "fast", "upstream": "primary", "upstreamModel": "configured-fast-model",
+			"capabilities": []any{"openai_responses"},
+		}},
+		"limitPlans": []any{map[string]any{
+			"id": "free", "limits": []any{map[string]any{
+				"metric": "logical_requests", "algorithm": "calendar", "window": "1d", "maximum": 5, "hard": true,
+			}},
+		}},
+		"features": []any{map[string]any{
+			"id": "assistant", "protocol": "openai_responses", "attestationPolicy": policyID,
+			"access":    map[string]any{"expression": "principal.authenticated"},
+			"limitPlan": map[string]any{"expression": "'free'"},
+			"output":    map[string]any{"defaultMaximumTokens": 800, "absoluteMaximumTokens": 1500},
+			"routes": []any{map[string]any{
+				"id": "primary", "when": "true", "model": "fast", "priority": 10,
+				"weight": 1, "stickyBy": "none", "fallbackOn": []any{},
+			}},
+		}},
+	}
 }
 
 func assertSessionExchangePersistence(t *testing.T, ctx context.Context, pool *pgxpool.Pool, issued IssuedSession) {

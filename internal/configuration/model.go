@@ -192,6 +192,170 @@ type AttestationPolicy struct {
 	Platforms map[string]PlatformAttestation `json:"-"`
 }
 
+// UpstreamAuthentication identifies how server-held credentials are applied.
+// SecretRef is only a name; decrypted secret material never enters a snapshot.
+type UpstreamAuthentication struct {
+	Type       string
+	SecretRef  string
+	HeaderName string
+}
+
+// UpstreamTimeouts are the fully defaulted transport limits for one target.
+type UpstreamTimeouts struct {
+	Connect   time.Duration
+	FirstByte time.Duration
+	Idle      time.Duration
+	Total     time.Duration
+}
+
+// UpstreamDestinationPolicy contains the validated, server-owned SSRF policy.
+// Version 1 keeps private-network access disabled even if persisted state is
+// corrupted; explicit CIDR exceptions are not part of the current contract.
+type UpstreamDestinationPolicy struct {
+	AllowedPorts         []int
+	AllowRedirects       bool
+	AllowPrivateNetworks bool
+	DNSPinning           bool
+}
+
+func (policy UpstreamDestinationPolicy) clone() UpstreamDestinationPolicy {
+	policy.AllowedPorts = append([]int(nil), policy.AllowedPorts...)
+	return policy
+}
+
+// Upstream is an immutable target description selected only by active config.
+type Upstream struct {
+	ID                         string
+	Type                       string
+	BaseURL                    string
+	DangerousAllowInsecureHTTP bool
+	Authentication             UpstreamAuthentication
+	Timeouts                   UpstreamTimeouts
+	DestinationPolicy          UpstreamDestinationPolicy
+	StaticHeaders              map[string]string
+}
+
+func (upstream Upstream) clone() Upstream {
+	upstream.DestinationPolicy = upstream.DestinationPolicy.clone()
+	upstream.StaticHeaders = cloneStringMap(upstream.StaticHeaders)
+	return upstream
+}
+
+// Model maps a client-facing feature route to one physical provider model.
+type Model struct {
+	ID            string
+	UpstreamID    string
+	UpstreamModel string
+	PricingRef    string
+	Capabilities  []string
+}
+
+func (model Model) clone() Model {
+	model.Capabilities = append([]string(nil), model.Capabilities...)
+	return model
+}
+
+// Limit is the normalized shape of one configured quota rule. Numeric fields
+// are retained as integers or decimal text so enforced budgets never depend on
+// binary floating-point arithmetic.
+type Limit struct {
+	Metric            string
+	Algorithm         string
+	Scope             []string
+	Window            string
+	Maximum           int64
+	PerRequestMaximum int64
+	Capacity          int64
+	RefillPerSecond   json.Number
+	Hard              bool
+}
+
+func (limit Limit) clone() Limit {
+	limit.Scope = append([]string(nil), limit.Scope...)
+	return limit
+}
+
+// LimitPlan is the immutable set of rules selected by a feature policy.
+type LimitPlan struct {
+	ID     string
+	Limits []Limit
+}
+
+func (plan LimitPlan) clone() LimitPlan {
+	plan.Limits = append([]Limit(nil), plan.Limits...)
+	for index := range plan.Limits {
+		plan.Limits[index] = plan.Limits[index].clone()
+	}
+	return plan
+}
+
+// OutputPolicy defines the server-owned default and absolute output clamp.
+type OutputPolicy struct {
+	DefaultMaximumTokens  int64
+	AbsoluteMaximumTokens int64
+}
+
+// Route is one policy-guarded model choice within a feature.
+type Route struct {
+	ID         string
+	When       string
+	ModelID    string
+	Priority   int64
+	Weight     int64
+	StickyBy   string
+	FallbackOn []string
+}
+
+func (route Route) clone() Route {
+	route.FallbackOn = append([]string(nil), route.FallbackOn...)
+	return route
+}
+
+// OpaqueHTTPPolicy is the explicit request boundary for generic HTTP routes.
+type OpaqueHTTPPolicy struct {
+	AllowedMethods        []string
+	PathPrefixes          []string
+	MaximumBodyBytes      int64
+	AllowedRequestHeaders []string
+}
+
+func (policy OpaqueHTTPPolicy) clone() OpaqueHTTPPolicy {
+	policy.AllowedMethods = append([]string(nil), policy.AllowedMethods...)
+	policy.PathPrefixes = append([]string(nil), policy.PathPrefixes...)
+	policy.AllowedRequestHeaders = append([]string(nil), policy.AllowedRequestHeaders...)
+	return policy
+}
+
+// Feature is the complete, immutable application-facing data-plane policy.
+// CEL source is retained for bounded compilation by the policy resolver; raw
+// client input can never introduce or replace these expressions.
+type Feature struct {
+	ID                  string
+	Protocol            string
+	AttestationPolicyID string
+	AccessExpression    string
+	LimitPlanExpression string
+	Output              *OutputPolicy
+	Routes              []Route
+	OpaqueHTTP          *OpaqueHTTPPolicy
+}
+
+func (feature Feature) clone() Feature {
+	if feature.Output != nil {
+		output := *feature.Output
+		feature.Output = &output
+	}
+	if feature.OpaqueHTTP != nil {
+		opaque := feature.OpaqueHTTP.clone()
+		feature.OpaqueHTTP = &opaque
+	}
+	feature.Routes = append([]Route(nil), feature.Routes...)
+	for index := range feature.Routes {
+		feature.Routes[index] = feature.Routes[index].clone()
+	}
+	return feature
+}
+
 func (policy AttestationPolicy) clone() AttestationPolicy {
 	platforms := make(map[string]PlatformAttestation, len(policy.Platforms))
 	for platform, selection := range policy.Platforms {
@@ -212,7 +376,17 @@ type ActiveSnapshot struct {
 	session      SessionPolicy
 	identities   map[string]IdentityProvider
 	attestations map[string]AttestationPolicy
+	upstreams    map[string]Upstream
+	models       map[string]Model
+	limitPlans   map[string]LimitPlan
+	features     map[string]Feature
 }
+
+// PolicyRevision returns the immutable cache identity for data-plane policy.
+func (snapshot ActiveSnapshot) PolicyRevision() string { return snapshot.RevisionID }
+
+// PolicyEnvironment returns the authoritative environment bound to the policy.
+func (snapshot ActiveSnapshot) PolicyEnvironment() string { return snapshot.EnvironmentID }
 
 // DocumentJSON returns a copy of the immutable source document.
 func (snapshot ActiveSnapshot) DocumentJSON() json.RawMessage {
@@ -237,6 +411,30 @@ func (snapshot ActiveSnapshot) IdentityProvider(providerID string) (IdentityProv
 func (snapshot ActiveSnapshot) AttestationPolicy(policyID string) (AttestationPolicy, bool) {
 	policy, ok := snapshot.attestations[policyID]
 	return policy.clone(), ok
+}
+
+// Upstream returns a deep copy of one configured server-owned target.
+func (snapshot ActiveSnapshot) Upstream(upstreamID string) (Upstream, bool) {
+	upstream, ok := snapshot.upstreams[upstreamID]
+	return upstream.clone(), ok
+}
+
+// Model returns a deep copy of one configured physical model mapping.
+func (snapshot ActiveSnapshot) Model(modelID string) (Model, bool) {
+	model, ok := snapshot.models[modelID]
+	return model.clone(), ok
+}
+
+// LimitPlan returns a deep copy of one configured quota plan.
+func (snapshot ActiveSnapshot) LimitPlan(planID string) (LimitPlan, bool) {
+	plan, ok := snapshot.limitPlans[planID]
+	return plan.clone(), ok
+}
+
+// Feature returns a deep copy of one application-facing feature policy.
+func (snapshot ActiveSnapshot) Feature(featureID string) (Feature, bool) {
+	feature, ok := snapshot.features[featureID]
+	return feature.clone(), ok
 }
 
 // SelectAttestation returns the exact provider selection for a policy and

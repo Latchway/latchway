@@ -20,6 +20,10 @@ type compiledSnapshotDocument struct {
 			MaxAge    string                         `json:"maxAge"`
 			Platforms map[string]PlatformAttestation `json:"platforms"`
 		} `json:"attestationPolicies"`
+		Upstreams  []compiledUpstream  `json:"upstreams"`
+		Models     []compiledModel     `json:"models"`
+		LimitPlans []compiledLimitPlan `json:"limitPlans"`
+		Features   []compiledFeature   `json:"features"`
 	} `json:"spec"`
 }
 
@@ -39,6 +43,10 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 		session:      session,
 		identities:   make(map[string]IdentityProvider, len(parsed.Spec.IdentityProviders)),
 		attestations: make(map[string]AttestationPolicy, len(parsed.Spec.AttestationPolicy)),
+		upstreams:    make(map[string]Upstream, len(parsed.Spec.Upstreams)),
+		models:       make(map[string]Model, len(parsed.Spec.Models)),
+		limitPlans:   make(map[string]LimitPlan, len(parsed.Spec.LimitPlans)),
+		features:     make(map[string]Feature, len(parsed.Spec.Features)),
 	}
 	for _, provider := range parsed.Spec.IdentityProviders {
 		if provider.ID == "" {
@@ -62,6 +70,9 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 			policy.Platforms[platform] = selection.clone()
 		}
 		snapshot.attestations[policy.ID] = policy
+	}
+	if err := snapshot.loadRuntimeConfiguration(parsed.Spec.Upstreams, parsed.Spec.Models, parsed.Spec.LimitPlans, parsed.Spec.Features); err != nil {
+		return ActiveSnapshot{}, err
 	}
 	return snapshot, nil
 }
