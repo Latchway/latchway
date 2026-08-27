@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/controlplane"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
@@ -38,6 +39,7 @@ type principalContextKey struct{}
 type API struct {
 	auth            *adminauth.Store
 	control         *controlplane.Store
+	configurations  *configuration.Store
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -55,6 +57,10 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, err
 	}
+	configurations, err := configuration.NewStore(pool)
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		return nil, errors.New("admin API logger is nil")
 	}
@@ -64,7 +70,7 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		return nil, fmt.Errorf("create login equalization hash: %w", err)
 	}
 	return &API{
-		auth: auth, control: control, hasher: hasher, dummyHash: dummyHash,
+		auth: auth, control: control, configurations: configurations, hasher: hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
 	}, nil
@@ -103,6 +109,15 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/applications", api.createApplication)
 		protected.Get("/applications/{applicationID}/environments", api.environments)
 		protected.With(api.mutationProtection).Post("/applications/{applicationID}/environments", api.createEnvironment)
+		protected.Get("/environments/{environmentID}/config", api.activeConfiguration)
+		protected.Get("/environments/{environmentID}/config-revisions", api.configurationRevisions)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/config-revisions", api.createConfigurationRevision)
+		protected.Get("/config-revisions/{revisionID}", api.configurationRevision)
+		protected.With(api.mutationProtection).Patch("/config-revisions/{revisionID}", api.replaceDraftConfiguration)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/validate", api.validateConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
 		protected.Get("/api-tokens", api.apiTokens)
 		protected.With(api.mutationProtection).Post("/api-tokens", api.createAPIToken)
 		protected.With(api.mutationProtection).Delete("/api-tokens/{tokenID}", api.revokeAPIToken)
@@ -405,6 +420,173 @@ func (api *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, item)
 }
 
+func (api *API) activeConfiguration(w http.ResponseWriter, r *http.Request) {
+	revision, err := api.configurations.GetActiveRevision(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "environmentID"),
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusOK, revision)
+}
+
+func (api *API) configurationRevisions(w http.ResponseWriter, r *http.Request) {
+	parsed, err := parsePageRequest(r, id.ConfigRevision)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
+		return
+	}
+	pageRequest := configuration.PageRequest{
+		Before: parsed.After, BeforeID: parsed.AfterID, Size: parsed.Size,
+	}
+	items, err := api.configurations.ListRevisions(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "environmentID"), pageRequest,
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	items, page := buildPage(items, int(pageRequest.Size), func(item configuration.Revision) cursorDocument {
+		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": page})
+}
+
+type createConfigurationRevisionRequest struct {
+	BaseRevisionID string          `json:"base_revision_id"`
+	Document       json.RawMessage `json:"document"`
+	Description    string          `json:"description"`
+}
+
+func (api *API) createConfigurationRevision(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[createConfigurationRevisionRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The configuration draft request is invalid."))
+		return
+	}
+	revision, err := api.configurations.CreateRevision(r.Context(), mustPrincipal(r.Context()), configuration.CreateInput{
+		EnvironmentID: chi.URLParam(r, "environmentID"), BaseRevisionID: request.BaseRevisionID,
+		Document: request.Document, Description: request.Description,
+	})
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusCreated, revision)
+}
+
+func (api *API) configurationRevision(w http.ResponseWriter, r *http.Request) {
+	revision, err := api.configurations.GetRevision(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusOK, revision)
+}
+
+func (api *API) replaceDraftConfiguration(w http.ResponseWriter, r *http.Request) {
+	etag, ok := api.requireETag(w, r)
+	if !ok {
+		return
+	}
+	document, err := decodeJSON[json.RawMessage](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The configuration document is invalid."))
+		return
+	}
+	revision, err := api.configurations.ReplaceDraft(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag, document,
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusOK, revision)
+}
+
+func (api *API) validateConfigurationRevision(w http.ResponseWriter, r *http.Request) {
+	report, err := api.configurations.ValidateRevision(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (api *API) planConfigurationRevision(w http.ResponseWriter, r *http.Request) {
+	plan, err := api.configurations.PlanRevision(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+func (api *API) activateConfigurationRevision(w http.ResponseWriter, r *http.Request) {
+	etag, ok := api.requireETag(w, r)
+	if !ok {
+		return
+	}
+	revision, err := api.configurations.ActivateRevision(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"), etag,
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusOK, revision)
+}
+
+type rollbackConfigurationRequest struct {
+	RevisionID string `json:"revision_id"`
+}
+
+func (api *API) rollbackEnvironmentConfiguration(w http.ResponseWriter, r *http.Request) {
+	etag, ok := api.requireETag(w, r)
+	if !ok {
+		return
+	}
+	request, err := decodeJSON[rollbackConfigurationRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The rollback request is invalid."))
+		return
+	}
+	revision, err := api.configurations.Rollback(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "environmentID"), request.RevisionID, etag,
+	)
+	if err != nil {
+		api.handleConfigurationError(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", revision.ETag)
+	writeJSON(w, http.StatusOK, revision)
+}
+
+func (api *API) requireETag(w http.ResponseWriter, r *http.Request) (string, bool) {
+	etag := strings.TrimSpace(r.Header.Get("If-Match"))
+	if etag == "" {
+		api.writeProblem(w, r, problem.Error{Code: "etag_required", Detail: "The mutation requires the current strong ETag."})
+		return "", false
+	}
+	if len(etag) < 3 || len(etag) > 256 || strings.HasPrefix(etag, "W/") || etag[0] != '"' || etag[len(etag)-1] != '"' || strings.ContainsAny(etag, "\r\n,") {
+		api.writeProblem(w, r, invalidRequest("The If-Match header must contain one strong ETag."))
+		return "", false
+	}
+	return etag, true
+}
+
 func (api *API) apiTokens(w http.ResponseWriter, r *http.Request) {
 	items, err := api.auth.ListAPITokens(r.Context(), mustPrincipal(r.Context()))
 	if err != nil {
@@ -688,6 +870,34 @@ func (api *API) handleControlError(w http.ResponseWriter, r *http.Request, err e
 	}
 }
 
+func (api *API) handleConfigurationError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, configuration.ErrInvalid):
+		api.writeProblem(w, r, invalidRequest("The configuration operation is invalid."))
+	case errors.Is(err, configuration.ErrForbidden):
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The administrator cannot perform this configuration operation."})
+	case errors.Is(err, configuration.ErrNotFound):
+		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The requested configuration revision was not found."})
+	case errors.Is(err, configuration.ErrETagMismatch):
+		api.writeProblem(w, r, problem.Error{Code: "etag_mismatch", Detail: "The configuration changed after the supplied ETag was issued."})
+	case errors.Is(err, configuration.ErrConflict):
+		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "The configuration operation conflicts with the current active revision."})
+	case errors.Is(err, configuration.ErrConfigurationInvalid):
+		fields := make([]problem.FieldError, 0)
+		var failure *configuration.ValidationFailure
+		if errors.As(err, &failure) {
+			for _, issue := range failure.Issues {
+				if issue.Severity == "error" {
+					fields = append(fields, problem.FieldError{Path: issue.Path, Code: issue.Code, Message: issue.Message})
+				}
+			}
+		}
+		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The configuration has validation errors and cannot be used.", Fields: fields})
+	default:
+		api.internal(w, r, err)
+	}
+}
+
 func (api *API) handleAdminAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, adminauth.ErrInvalidAdminInput), errors.Is(err, adminauth.ErrEmptyTokenScope), errors.Is(err, adminauth.ErrInvalidCapability):
@@ -764,6 +974,18 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.application_create", "admin_request"
 	case strings.HasSuffix(path, "/environments"):
 		return "admin.environment_create", "admin_request"
+	case strings.HasSuffix(path, "/config-revisions") && method == http.MethodPost:
+		return "admin.configuration_revision_create", "admin_request"
+	case strings.Contains(path, "/config-revisions/") && method == http.MethodPatch:
+		return "admin.configuration_revision_update", "admin_request"
+	case strings.HasSuffix(path, "/validate"):
+		return "admin.configuration_revision_validate", "admin_request"
+	case strings.HasSuffix(path, "/plan"):
+		return "admin.configuration_plan", "admin_request"
+	case strings.HasSuffix(path, "/activate"):
+		return "admin.configuration_activate", "admin_request"
+	case strings.HasSuffix(path, "/rollback"):
+		return "admin.configuration_rollback", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodPost:
 		return "admin.api_token_create", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodDelete:
