@@ -222,6 +222,102 @@ func TestPrepareRequestSupportsBoundedOutputTokenShapes(t *testing.T) {
 	}
 }
 
+func TestPrepareRequestSupportsApplicableConcurrencyShapes(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Streaming = true
+	input.Rules = []Rule{
+		{
+			Metric: ConcurrentRequestsMetric, Algorithm: ConcurrencyAlgorithm,
+			Scope: []string{"environment"}, Maximum: 7, Hard: true,
+		},
+		{
+			Metric: ConcurrentStreamsMetric, Algorithm: ConcurrencyAlgorithm,
+			Scope: []string{"feature", "user"}, Maximum: 3, Hard: true,
+		},
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare concurrency request: %v", err)
+	}
+	plans, err := plannedBucketsAt(prepared, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("plan concurrency request: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("applicable concurrency plans = %d, want 2", len(plans))
+	}
+	for _, plan := range plans {
+		if plan.period.key != "active" || !plan.period.end.IsZero() || plan.reservedUnits != 1 ||
+			!isConcurrencyMetric(plan.rule.Metric) {
+			t.Fatalf("unexpected concurrency plan: %#v", plan)
+		}
+	}
+
+	nonStreaming := cloneReserveInput(input)
+	nonStreaming.Streaming = false
+	nonStreamingPrepared, err := prepareRequest(nonStreaming)
+	if err != nil {
+		t.Fatalf("prepare non-streaming request: %v", err)
+	}
+	nonStreamingPlans, err := plannedBucketsAt(nonStreamingPrepared, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("plan non-streaming request: %v", err)
+	}
+	if len(nonStreamingPlans) != 1 || nonStreamingPlans[0].rule.Metric != ConcurrentRequestsMetric {
+		t.Fatalf("non-streaming plans = %#v, want request concurrency only", nonStreamingPlans)
+	}
+	if requestFingerprint(prepared) == requestFingerprint(nonStreamingPrepared) {
+		t.Fatal("stream applicability was omitted from the trusted fingerprint")
+	}
+
+	requestOnly := cloneReserveInput(input)
+	requestOnly.Rules = requestOnly.Rules[:1]
+	requestOnly.Streaming = false
+	requestOnlyPrepared, err := prepareRequest(requestOnly)
+	if err != nil {
+		t.Fatalf("prepare request-only concurrency: %v", err)
+	}
+	requestOnly.Streaming = true
+	requestOnlyStreaming, err := prepareRequest(requestOnly)
+	if err != nil {
+		t.Fatalf("prepare streaming request-only concurrency: %v", err)
+	}
+	if requestFingerprint(requestOnlyPrepared) != requestFingerprint(requestOnlyStreaming) {
+		t.Fatal("irrelevant streaming metadata changed request-concurrency fingerprint")
+	}
+}
+
+func TestPrepareRequestRejectsMalformedConcurrencyRules(t *testing.T) {
+	t.Parallel()
+	base := validReserveInput(t)
+	base.Rules = []Rule{{
+		Metric: ConcurrentRequestsMetric, Algorithm: ConcurrencyAlgorithm,
+		Scope: []string{"user"}, Maximum: 2, Hard: true,
+	}}
+	tests := []struct {
+		name   string
+		mutate func(*Rule)
+	}{
+		{name: "soft", mutate: func(rule *Rule) { rule.Hard = false }},
+		{name: "zero maximum", mutate: func(rule *Rule) { rule.Maximum = 0 }},
+		{name: "window", mutate: func(rule *Rule) { rule.Window = "1m" }},
+		{name: "per request", mutate: func(rule *Rule) { rule.PerRequestMaximum = 1 }},
+		{name: "reserved units", mutate: func(rule *Rule) { rule.ReservedUnits = 1 }},
+		{name: "wrong algorithm", mutate: func(rule *Rule) { rule.Algorithm = CalendarAlgorithm; rule.Window = "1m" }},
+		{name: "wrong metric", mutate: func(rule *Rule) { rule.Metric = "concurrent_tokens" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := cloneReserveInput(base)
+			test.mutate(&input.Rules[0])
+			if _, err := prepareRequest(input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("malformed concurrency rule returned %v", err)
+			}
+		})
+	}
+}
+
 func TestReserveIdentifierGenerationPreservesLegacyOrderAndSupportsZeroEntries(t *testing.T) {
 	t.Parallel()
 	var calls []id.Prefix
@@ -249,6 +345,20 @@ func TestReserveIdentifierGenerationPreservesLegacyOrderAndSupportsZeroEntries(t
 	if !slices.Equal(calls, []id.Prefix{id.QuotaReservation}) ||
 		len(entryless.buckets) != 0 || len(entryless.entries) != 0 || entryless.reservation == "" {
 		t.Fatalf("entryless generation calls=%v IDs=%#v", calls, entryless)
+	}
+	calls = nil
+	withLeases, err := store.newReserveIDs(3, 2)
+	if err != nil {
+		t.Fatalf("generate concurrency reserve IDs: %v", err)
+	}
+	wantConcurrencyOrder := []id.Prefix{
+		id.QuotaBucket, id.QuotaBucket, id.QuotaBucket,
+		id.QuotaReservation,
+		id.QuotaEntry, id.QuotaEntry, id.QuotaEntry,
+		id.ConcurrencyLease, id.ConcurrencyLease,
+	}
+	if !slices.Equal(calls, wantConcurrencyOrder) || len(withLeases.leases) != 2 {
+		t.Fatalf("concurrency generation calls=%v IDs=%#v", calls, withLeases)
 	}
 }
 

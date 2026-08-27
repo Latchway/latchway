@@ -1,11 +1,12 @@
 // Package quota owns durable quota reservations and request accounting.
 //
 // The bounded implementation in this package supports hard calendar
-// logical-request and output-token rules plus hard per-request output-token
-// enforcement metadata plus immutable configured-price attribution. One
-// request may resolve to multiple rules, which are reserved and finalized
-// atomically. The package does not accept client supplied counters, bucket
-// keys, rule hashes, usage totals, costs, or timestamps.
+// logical-request and output-token rules, hard concurrent-request and
+// concurrent-stream leases, hard per-request output-token enforcement
+// metadata, and immutable configured-price attribution. One request may
+// resolve to multiple rules, which are reserved and finalized atomically. The
+// package does not accept client supplied counters, bucket keys, rule hashes,
+// usage totals, costs, or timestamps.
 package quota
 
 import (
@@ -27,12 +28,15 @@ import (
 )
 
 const (
-	LogicalRequestsMetric  = "logical_requests"
-	OutputTokensMetric     = "output_tokens"
-	CostNanoUSDMetric      = "cost_nano_usd"
-	CalendarAlgorithm      = "calendar"
-	PerRequestAlgorithm    = "per_request"
-	maximumRulesPerRequest = 128
+	LogicalRequestsMetric    = "logical_requests"
+	OutputTokensMetric       = "output_tokens"
+	ConcurrentRequestsMetric = "concurrent_requests"
+	ConcurrentStreamsMetric  = "concurrent_streams"
+	CostNanoUSDMetric        = "cost_nano_usd"
+	CalendarAlgorithm        = "calendar"
+	PerRequestAlgorithm      = "per_request"
+	ConcurrencyAlgorithm     = "concurrency"
+	maximumRulesPerRequest   = 128
 
 	ProviderReportedProvenance = "provider_reported"
 	UnknownUsageProvenance     = "unknown"
@@ -47,17 +51,18 @@ const (
 )
 
 var (
-	ErrInvalidInput       = errors.New("invalid quota input")
-	ErrExceeded           = errors.New("logical request quota exceeded")
-	ErrNotFound           = errors.New("quota state not found")
-	ErrExpired            = errors.New("quota reservation expired")
-	ErrFinalized          = errors.New("quota reservation already finalized")
-	ErrInvalidState       = errors.New("quota state is inconsistent")
-	ErrDependency         = errors.New("quota persistence unavailable")
-	identifierPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	clientRequestPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
-	failureCodePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
-	allowedProtocolValues = []string{
+	ErrInvalidInput        = errors.New("invalid quota input")
+	ErrExceeded            = errors.New("logical request quota exceeded")
+	ErrConcurrencyExceeded = errors.New("concurrency quota exceeded")
+	ErrNotFound            = errors.New("quota state not found")
+	ErrExpired             = errors.New("quota reservation expired")
+	ErrFinalized           = errors.New("quota reservation already finalized")
+	ErrInvalidState        = errors.New("quota state is inconsistent")
+	ErrDependency          = errors.New("quota persistence unavailable")
+	identifierPattern      = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	clientRequestPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+	failureCodePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+	allowedProtocolValues  = []string{
 		"openai_responses",
 		"openai_chat",
 		"openai_embeddings",
@@ -86,9 +91,9 @@ const (
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
 // output cap applied to the provider request. It is zero for logical-request
-// rules, whose one unit is derived by the store. PerRequestMaximum is populated
-// only for output_tokens/per_request metadata, which is fingerprinted but does
-// not create a durable bucket.
+// and concurrency rules, whose one unit is derived by the store.
+// PerRequestMaximum is populated only for output_tokens/per_request metadata,
+// which is fingerprinted but does not create a durable bucket.
 type Rule struct {
 	Metric            string
 	Algorithm         string
@@ -133,6 +138,7 @@ type ReserveInput struct {
 	ModelKey        string
 	PhysicalModel   string
 	Pricing         PricingSelection
+	Streaming       bool
 
 	Rules []Rule
 }
@@ -199,6 +205,7 @@ type selectedPricing struct {
 type reservationEntry struct {
 	bucketID      string
 	entryID       string
+	leaseID       string
 	metric        string
 	reservedUnits int64
 	resetAt       time.Time
@@ -240,6 +247,23 @@ func (denial *ExceededError) RetryAt() time.Time { return denial.retryAt }
 func (denial *ExceededError) Maximum() int64     { return denial.maximum }
 func (denial *ExceededError) Used() int64        { return denial.used }
 func (denial *ExceededError) Reserved() int64    { return denial.reserved }
+
+// ConcurrencyExceededError reports a durable concurrency denial without a
+// retry timestamp. Capacity becomes available only when another lease is
+// released, so manufacturing a time-based retry boundary would be misleading.
+type ConcurrencyExceededError struct {
+	logicalRequestID string
+	maximum          int64
+	active           int64
+}
+
+func (denial *ConcurrencyExceededError) Error() string { return ErrConcurrencyExceeded.Error() }
+func (denial *ConcurrencyExceededError) Unwrap() error { return ErrConcurrencyExceeded }
+func (denial *ConcurrencyExceededError) LogicalRequestID() string {
+	return denial.logicalRequestID
+}
+func (denial *ConcurrencyExceededError) Maximum() int64 { return denial.maximum }
+func (denial *ConcurrencyExceededError) Active() int64  { return denial.active }
 
 type preparedRequest struct {
 	ReserveInput
@@ -326,6 +350,13 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.PerRequestMaximum {
 				return preparedRequest{}, ErrInvalidInput
 			}
+		case (rule.Metric == ConcurrentRequestsMetric || rule.Metric == ConcurrentStreamsMetric) &&
+			rule.Algorithm == ConcurrencyAlgorithm:
+			if rule.Window != "" || rule.Maximum <= 0 || rule.PerRequestMaximum != 0 ||
+				rule.ReservedUnits != 0 {
+				return preparedRequest{}, ErrInvalidInput
+			}
+			stateful = true
 		default:
 			return preparedRequest{}, ErrInvalidInput
 		}
@@ -336,7 +367,7 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 				return preparedRequest{}, ErrInvalidInput
 			}
 		}
-		if stateful {
+		if stateful && rule.Algorithm == CalendarAlgorithm {
 			if _, err := parseCalendarSpec(rule.Window); err != nil {
 				return preparedRequest{}, ErrInvalidInput
 			}
@@ -461,6 +492,12 @@ func requestFingerprint(prepared preparedRequest) string {
 				strconv.FormatInt(rule.PerRequestMaximum, 10),
 				strconv.FormatInt(rule.ReservedUnits, 10),
 			)
+		}
+	}
+	for _, rule := range prepared.rules {
+		if rule.Metric == ConcurrentStreamsMetric {
+			parts = append(parts, strconv.FormatBool(prepared.Streaming))
+			break
 		}
 	}
 	// Preserve the byte-for-byte historical unpriced serialization. A priced
@@ -600,17 +637,20 @@ func (reservation Reservation) validate() error {
 		}
 		return nil
 	}
-	if reservation.windowResetAt.IsZero() {
-		return ErrInvalidInput
-	}
 	var maximumReset time.Time
 	entryIDs := make(map[string]struct{}, len(reservation.entries))
+	leaseIDs := make(map[string]struct{}, len(reservation.entries))
 	for index, entry := range reservation.entries {
+		concurrency := isConcurrencyMetric(entry.metric)
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
-			id.Validate(entry.entryID, id.QuotaEntry) != nil || entry.resetAt.IsZero() ||
-			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
+			id.Validate(entry.entryID, id.QuotaEntry) != nil ||
+			(!concurrency && entry.resetAt.IsZero()) || (concurrency && !entry.resetAt.IsZero()) ||
+			(!isStatefulMetric(entry.metric)) ||
 			entry.reservedUnits <= 0 ||
 			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) ||
+			(concurrency && entry.reservedUnits != 1) ||
+			(concurrency && id.Validate(entry.leaseID, id.ConcurrencyLease) != nil) ||
+			(!concurrency && entry.leaseID != "") ||
 			(index > 0 && reservation.entries[index-1].bucketID >= entry.bucketID) {
 			return ErrInvalidInput
 		}
@@ -618,6 +658,12 @@ func (reservation Reservation) validate() error {
 			return ErrInvalidInput
 		}
 		entryIDs[entry.entryID] = struct{}{}
+		if concurrency {
+			if _, duplicate := leaseIDs[entry.leaseID]; duplicate {
+				return ErrInvalidInput
+			}
+			leaseIDs[entry.leaseID] = struct{}{}
+		}
 		if entry.resetAt.After(maximumReset) {
 			maximumReset = entry.resetAt
 		}
@@ -626,6 +672,14 @@ func (reservation Reservation) validate() error {
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+func isConcurrencyMetric(metric string) bool {
+	return metric == ConcurrentRequestsMetric || metric == ConcurrentStreamsMetric
+}
+
+func isStatefulMetric(metric string) bool {
+	return metric == LogicalRequestsMetric || metric == OutputTokensMetric || isConcurrencyMetric(metric)
 }
 
 func (attempt Attempt) validate() error {

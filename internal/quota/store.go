@@ -61,15 +61,24 @@ type reserveIDs struct {
 	reservation string
 	buckets     []string
 	entries     []string
+	leases      []string
 }
 
-func (store *Store) newReserveIDs(ruleCount int) (reserveIDs, error) {
-	if ruleCount < 0 || ruleCount > maximumRulesPerRequest {
+func (store *Store) newReserveIDs(ruleCount int, concurrencyCounts ...int) (reserveIDs, error) {
+	if ruleCount < 0 || ruleCount > maximumRulesPerRequest || len(concurrencyCounts) > 1 {
+		return reserveIDs{}, ErrInvalidInput
+	}
+	concurrencyCount := 0
+	if len(concurrencyCounts) == 1 {
+		concurrencyCount = concurrencyCounts[0]
+	}
+	if concurrencyCount < 0 || concurrencyCount > ruleCount {
 		return reserveIDs{}, ErrInvalidInput
 	}
 	result := reserveIDs{
 		buckets: make([]string, ruleCount),
 		entries: make([]string, ruleCount),
+		leases:  make([]string, concurrencyCount),
 	}
 	// Keep the historical single-rule generation order: bucket, reservation,
 	// entry. Multiple bucket and entry identifiers are generated in canonical
@@ -93,6 +102,16 @@ func (store *Store) newReserveIDs(ruleCount int) (reserveIDs, error) {
 		}
 		result.entries[index] = value
 	}
+	// Lease IDs are deliberately appended after the historical
+	// bucket/reservation/entry sequence, so plans without concurrency consume
+	// exactly the same identifier stream as before this feature existed.
+	for index := range result.leases {
+		value, err := store.newID(id.ConcurrencyLease)
+		if err != nil {
+			return reserveIDs{}, fmt.Errorf("generate %s identifier: %w", id.ConcurrencyLease, err)
+		}
+		result.leases[index] = value
+	}
 	return result, nil
 }
 
@@ -102,14 +121,16 @@ type plannedBucket struct {
 	reservedUnits int64
 	bucketID      string
 	entryID       string
+	leaseID       string
 	locked        lockedBucket
 }
 
 // Reserve records one logical request and atomically reserves the trusted
-// units in every applicable calendar bucket. Per-request-only decisions still
-// create the durable logical-request and reservation lifecycle with no bucket
-// entries. Quota denial is committed as a denied logical request but changes
-// no bucket counters and creates neither a reservation nor an upstream attempt.
+// units in every applicable calendar bucket and concurrency lease.
+// Per-request-only decisions still create the durable logical-request and
+// reservation lifecycle with no bucket entries. Quota denial is committed as
+// a denied logical request but changes no bucket counters and creates neither
+// a reservation, lease, nor upstream attempt.
 func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservation, error) {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil {
 		return Reservation{}, ErrInvalidInput
@@ -161,13 +182,18 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		return Reservation{}, ErrInvalidState
 	}
 
-	identifiers, err := store.newReserveIDs(len(plans))
+	identifiers, err := store.newReserveIDs(len(plans), concurrencyPlanCount(plans))
 	if err != nil {
 		return Reservation{}, err
 	}
+	leaseIndex := 0
 	for index := range plans {
 		plans[index].bucketID = identifiers.buckets[index]
 		plans[index].entryID = identifiers.entries[index]
+		if isConcurrencyMetric(plans[index].rule.Metric) {
+			plans[index].leaseID = identifiers.leases[leaseIndex]
+			leaseIndex++
+		}
 		plan := &plans[index]
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO quota_buckets (
@@ -203,23 +229,29 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	if !expiresAt.After(decisionAt) {
 		return Reservation{}, ErrInvalidInput
 	}
-	exceeded := make([]int, 0, len(plans))
+	calendarExceeded := make([]int, 0, len(plans))
+	concurrencyExceeded := make([]int, 0, len(plans))
 	occupancies := make([]int64, len(plans))
 	for index := range plans {
 		plan := &plans[index]
 		bucket := plan.locked
 		if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
 			plan.reservedUnits <= 0 ||
-			bucket.used > math.MaxInt64-bucket.reserved {
+			bucket.used > math.MaxInt64-bucket.reserved ||
+			(isConcurrencyMetric(plan.rule.Metric) && bucket.used != 0) {
 			return Reservation{}, ErrInvalidState
 		}
 		occupancy := bucket.used + bucket.reserved
 		occupancies[index] = occupancy
 		if plan.rule.Maximum < occupancy || plan.rule.Maximum-occupancy < plan.reservedUnits {
-			exceeded = append(exceeded, index)
+			if isConcurrencyMetric(plan.rule.Metric) {
+				concurrencyExceeded = append(concurrencyExceeded, index)
+			} else {
+				calendarExceeded = append(calendarExceeded, index)
+			}
 		}
 	}
-	if len(exceeded) != 0 {
+	if len(calendarExceeded) != 0 || len(concurrencyExceeded) != 0 {
 		for index := range plans {
 			plan := &plans[index]
 			if plan.rule.Maximum < occupancies[index] || *plan.locked.hardMaximum == plan.rule.Maximum {
@@ -239,12 +271,16 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 				return Reservation{}, ErrInvalidState
 			}
 		}
+		failureCode := "concurrency_exceeded"
+		if len(calendarExceeded) != 0 {
+			failureCode = "quota_exceeded"
+		}
 		command, updateErr := tx.Exec(ctx, `
 			UPDATE logical_requests
 			SET status = 'denied', completed_at = GREATEST(requested_at, $2),
-			    failure_code = 'quota_exceeded'
+			    failure_code = $3
 			WHERE logical_request_id = $1 AND status = 'reserved'
-		`, logicalRequestID, decisionAt)
+		`, logicalRequestID, decisionAt, failureCode)
 		if updateErr != nil {
 			return Reservation{}, persistenceFailure("record quota denial", updateErr)
 		}
@@ -254,7 +290,10 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		if err := tx.Commit(ctx); err != nil {
 			return Reservation{}, persistenceFailure("commit quota denial", err)
 		}
-		return Reservation{}, exceededError(logicalRequestID, plans, exceeded)
+		if len(calendarExceeded) != 0 {
+			return Reservation{}, exceededError(logicalRequestID, plans, calendarExceeded)
+		}
+		return Reservation{}, concurrencyExceededError(logicalRequestID, plans, concurrencyExceeded)
 	}
 
 	for index := range plans {
@@ -279,6 +318,23 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		}
 		if command.RowsAffected() != 1 {
 			return Reservation{}, ErrInvalidState
+		}
+	}
+	for index := range plans {
+		plan := plans[index]
+		if !isConcurrencyMetric(plan.rule.Metric) {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO concurrency_leases (
+				concurrency_lease_id, organization_id, application_id,
+				environment_id, quota_bucket_id, logical_request_id,
+				acquired_at, expires_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, plan.leaseID, prepared.OrganizationID, prepared.ApplicationID,
+			prepared.EnvironmentID, plan.locked.id, logicalRequestID,
+			decisionAt, expiresAt); err != nil {
+			return Reservation{}, mapWriteError("insert concurrency lease", err)
 		}
 	}
 
@@ -327,10 +383,12 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 //
 // All lifecycle transactions take locks in this order for a request that has
 // a reservation: quota_reservations, logical_requests, upstream_attempts, then
-// quota_reservation_entries/quota_buckets. Taking the reservation lock before
-// reading the logical row keeps later READ COMMITTED statements on one stable
-// lifecycle state without reversing that order. Denied requests have no
-// reservation and are immutable, so they lock logical_requests first.
+// quota_reservation_entries/quota_buckets, then concurrency_leases. Bucket and
+// lease families are each locked in stable identifier order. Taking the
+// reservation lock before reading the logical row keeps later READ COMMITTED
+// statements on one stable lifecycle state without reversing that order.
+// Denied requests have no reservation and are immutable, so they lock
+// logical_requests first.
 func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedRequest, fingerprint string) (Reservation, error) {
 	var lockedReservationID string
 	reservationErr := tx.QueryRow(ctx, `
@@ -395,33 +453,62 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		if reservationErr == nil || len(plans) == 0 {
 			return Reservation{}, ErrInvalidState
 		}
-		if logical.failureCode == nil || *logical.failureCode != "quota_exceeded" {
+		if logical.failureCode == nil ||
+			(*logical.failureCode != "quota_exceeded" && *logical.failureCode != "concurrency_exceeded") {
 			return Reservation{}, ErrInvalidState
 		}
 		if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
 			return Reservation{}, err
 		}
-		exceeded := make([]int, 0, len(plans))
+		calendarPlans := make([]int, 0, len(plans))
+		calendarExceeded := make([]int, 0, len(plans))
+		concurrencyPlans := make([]int, 0, len(plans))
+		concurrencyExceeded := make([]int, 0, len(plans))
 		for index := range plans {
 			bucket := plans[index].locked
 			if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
 				plans[index].reservedUnits <= 0 ||
-				bucket.used > math.MaxInt64-bucket.reserved {
+				bucket.used > math.MaxInt64-bucket.reserved ||
+				(isConcurrencyMetric(plans[index].rule.Metric) && bucket.used != 0) {
 				return Reservation{}, ErrInvalidState
+			}
+			if isConcurrencyMetric(plans[index].rule.Metric) {
+				concurrencyPlans = append(concurrencyPlans, index)
+			} else {
+				calendarPlans = append(calendarPlans, index)
 			}
 			occupancy := bucket.used + bucket.reserved
 			if plans[index].rule.Maximum < occupancy ||
 				plans[index].rule.Maximum-occupancy < plans[index].reservedUnits {
-				exceeded = append(exceeded, index)
+				if isConcurrencyMetric(plans[index].rule.Metric) {
+					concurrencyExceeded = append(concurrencyExceeded, index)
+				} else {
+					calendarExceeded = append(calendarExceeded, index)
+				}
 			}
 		}
-		if len(exceeded) == 0 {
-			exceeded = make([]int, len(plans))
-			for index := range plans {
-				exceeded[index] = index
+		// The durable failure code is authoritative for an exact replay. Active
+		// leases may have been released since the original decision, so current
+		// occupancy must not turn a stored denial into an acceptance or change
+		// its class.
+		if *logical.failureCode == "quota_exceeded" {
+			if len(calendarPlans) == 0 {
+				return Reservation{}, ErrInvalidState
 			}
+			if len(calendarExceeded) == 0 {
+				calendarExceeded = calendarPlans
+			}
+			return Reservation{}, exceededError(prepared.LogicalRequestID.String(), plans, calendarExceeded)
 		}
-		return Reservation{}, exceededError(prepared.LogicalRequestID.String(), plans, exceeded)
+		if len(concurrencyPlans) == 0 {
+			return Reservation{}, ErrInvalidState
+		}
+		if len(concurrencyExceeded) == 0 {
+			concurrencyExceeded = concurrencyPlans
+		}
+		return Reservation{}, concurrencyExceededError(
+			prepared.LogicalRequestID.String(), plans, concurrencyExceeded,
+		)
 	}
 	if reservationErr != nil {
 		return Reservation{}, ErrInvalidState
@@ -441,6 +528,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		limitPlanKey, ruleKey, metric, scopeType     string
 		scopeDimensions                              []string
 		scopeKey, algorithm, windowKey               string
+		bucketUsed                                   int64
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT reservation.organization_id, reservation.application_id,
@@ -452,7 +540,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		       bucket.organization_id, bucket.application_id,
 		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
 		       bucket.scope_type, bucket.scope_dimensions, bucket.scope_key,
-		       bucket.algorithm, bucket.window_key
+		       bucket.algorithm, bucket.window_key, bucket.used_units
 		FROM quota_reservations AS reservation
 		JOIN quota_reservation_entries AS entry
 		  ON entry.organization_id = reservation.organization_id
@@ -490,7 +578,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			&existing.bucketOrganizationID, &existing.bucketApplicationID,
 			&existing.limitPlanKey, &existing.ruleKey, &existing.metric,
 			&existing.scopeType, &existing.scopeDimensions, &existing.scopeKey,
-			&existing.algorithm, &existing.windowKey,
+			&existing.algorithm, &existing.windowKey, &existing.bucketUsed,
 		); err != nil {
 			return Reservation{}, persistenceFailure("scan existing quota reservation", err)
 		}
@@ -509,7 +597,8 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			existing.limitPlanKey != prepared.LimitPlanKey ||
 			existing.metric != plan.rule.Metric || existing.scopeType != plan.rule.scopeType ||
 			!slicesEqual(existing.scopeDimensions, plan.rule.scopeDimensions) ||
-			existing.algorithm != plan.rule.Algorithm || existing.windowKey != plan.period.key {
+			existing.algorithm != plan.rule.Algorithm || existing.windowKey != plan.period.key ||
+			(isConcurrencyMetric(existing.metric) && existing.bucketUsed != 0) {
 			return Reservation{}, ErrInvalidInput
 		}
 		if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
@@ -546,6 +635,44 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			return Reservation{}, ErrInvalidState
 		}
 	}
+	_, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
+	if err != nil {
+		return Reservation{}, err
+	}
+	if !existingAttemptPresenceMatches(logical.status, reservationStatus, attemptExists) {
+		return Reservation{}, ErrInvalidState
+	}
+	replayed := lockedReservation{
+		Reservation: Reservation{
+			organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
+			environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
+			reservationID: reservationID, entries: entries, expiresAt: expiresAt,
+		},
+		status: reservationStatus, expiresAt: expiresAt,
+	}
+	lockedEntries, err := lockEntries(ctx, tx, replayed)
+	if err != nil {
+		return Reservation{}, err
+	}
+	leases, err := lockConcurrencyLeases(ctx, tx, replayed, lockedEntries)
+	if err != nil {
+		return Reservation{}, err
+	}
+	leaseIDsByBucket := make(map[string]string, len(leases))
+	for _, lease := range leases {
+		leaseIDsByBucket[lease.bucketID] = lease.id
+	}
+	for index := range entries {
+		entries[index].leaseID = leaseIDsByBucket[entries[index].bucketID]
+	}
+	if reservationStatus == "pending" {
+		replayed.entries = entries
+		if !pendingEntriesMatch(logical.status, replayed, lockedEntries, leases) {
+			return Reservation{}, ErrInvalidState
+		}
+	} else if !terminalEntriesMatch(logical.status, reservationStatus, lockedEntries, leases) {
+		return Reservation{}, ErrInvalidState
+	}
 	return Reservation{
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 		environmentID:    prepared.EnvironmentID,
@@ -571,7 +698,7 @@ func loadExistingEntrylessReservation(
 		logicalRequestID, reservationID, idempotency string
 		status                                       string
 		expiresAt                                    time.Time
-		entryCount                                   int64
+		entryCount, leaseCount                       int64
 	}
 	var existing existingReservation
 	err := tx.QueryRow(ctx, `
@@ -582,14 +709,18 @@ func loadExistingEntrylessReservation(
 		       (SELECT count(*)
 		          FROM quota_reservation_entries AS entry
 		         WHERE entry.environment_id = reservation.environment_id
-		           AND entry.quota_reservation_id = reservation.quota_reservation_id)
+		           AND entry.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*)
+		          FROM concurrency_leases AS lease
+		         WHERE lease.environment_id = reservation.environment_id
+		           AND lease.logical_request_id = reservation.logical_request_id)
 		FROM quota_reservations AS reservation
 		WHERE reservation.logical_request_id = $1
 		  AND reservation.quota_reservation_id = $2
 	`, prepared.LogicalRequestID.String(), lockedReservationID).Scan(
 		&existing.organizationID, &existing.applicationID, &existing.environmentID,
 		&existing.logicalRequestID, &existing.reservationID, &existing.idempotency,
-		&existing.status, &existing.expiresAt, &existing.entryCount,
+		&existing.status, &existing.expiresAt, &existing.entryCount, &existing.leaseCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reservation{}, ErrInvalidState
@@ -604,6 +735,10 @@ func loadExistingEntrylessReservation(
 		existing.reservationID != lockedReservationID || existing.idempotency != fingerprint {
 		return Reservation{}, ErrInvalidInput
 	}
+	_, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
+	if err != nil {
+		return Reservation{}, err
+	}
 	validLifecycle := false
 	switch existing.status {
 	case "pending":
@@ -614,7 +749,8 @@ func loadExistingEntrylessReservation(
 		validLifecycle = logicalStatus == "failed"
 	}
 	if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
-		existing.entryCount != 0 || !validLifecycle {
+		existing.entryCount != 0 || existing.leaseCount != 0 || !validLifecycle ||
+		!existingAttemptPresenceMatches(logicalStatus, existing.status, attemptExists) {
 		return Reservation{}, ErrInvalidState
 	}
 	return Reservation{
@@ -638,8 +774,8 @@ func existingReservationStateMatches(
 ) bool {
 	if expected <= 0 || reserved != expected || settled < 0 || released < 0 ||
 		settled > reserved || released > reserved-settled ||
-		(metric != LogicalRequestsMetric && metric != OutputTokensMetric) ||
-		(metric == LogicalRequestsMetric && reserved != 1) {
+		!isStatefulMetric(metric) ||
+		((metric == LogicalRequestsMetric || isConcurrencyMetric(metric)) && reserved != 1) {
 		return false
 	}
 	switch reservationStatus {
@@ -650,12 +786,32 @@ func existingReservationStateMatches(
 		if logicalStatus != "succeeded" && logicalStatus != "failed" && logicalStatus != "cancelled" {
 			return false
 		}
+		if isConcurrencyMetric(metric) {
+			return settled == 0 && released == reserved
+		}
 		if metric == LogicalRequestsMetric || logicalStatus != "succeeded" {
 			return settled == reserved && released == 0
 		}
 		return settled+released == reserved
 	case "released", "expired":
 		return settled == 0 && released == reserved && logicalStatus == "failed"
+	default:
+		return false
+	}
+}
+
+func existingAttemptPresenceMatches(logicalStatus, reservationStatus string, attemptExists bool) bool {
+	switch reservationStatus {
+	case "pending":
+		if logicalStatus == "reserved" {
+			return !attemptExists
+		}
+		return attemptExists && (logicalStatus == "dispatched" || logicalStatus == "streaming")
+	case "settled":
+		return attemptExists &&
+			(logicalStatus == "succeeded" || logicalStatus == "failed" || logicalStatus == "cancelled")
+	case "released", "expired":
+		return !attemptExists && logicalStatus == "failed"
 	default:
 		return false
 	}
@@ -687,12 +843,21 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 		if !rule.stateful {
 			continue
 		}
-		period, err := calendarWindow(at, rule.Window)
-		if err != nil {
-			return nil, err
+		if rule.Metric == ConcurrentStreamsMetric && !prepared.Streaming {
+			continue
+		}
+		var period calendarPeriod
+		if isConcurrencyMetric(rule.Metric) {
+			period.key = "active"
+		} else {
+			var err error
+			period, err = calendarWindow(at, rule.Window)
+			if err != nil {
+				return nil, err
+			}
 		}
 		reservedUnits := rule.ReservedUnits
-		if rule.Metric == LogicalRequestsMetric {
+		if rule.Metric == LogicalRequestsMetric || isConcurrencyMetric(rule.Metric) {
 			reservedUnits = 1
 		}
 		if reservedUnits <= 0 {
@@ -701,6 +866,16 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 		plans = append(plans, plannedBucket{rule: rule, period: period, reservedUnits: reservedUnits})
 	}
 	return plans, nil
+}
+
+func concurrencyPlanCount(plans []plannedBucket) int {
+	count := 0
+	for index := range plans {
+		if isConcurrencyMetric(plans[index].rule.Metric) {
+			count++
+		}
+	}
+	return count
 }
 
 func plannedBucketIdentity(ruleKey, scopeKey string) string {
@@ -808,6 +983,7 @@ func reservationEntries(plans []plannedBucket) []reservationEntry {
 		entries[index] = reservationEntry{
 			bucketID:      plans[index].locked.id,
 			entryID:       plans[index].entryID,
+			leaseID:       plans[index].leaseID,
 			metric:        plans[index].rule.Metric,
 			reservedUnits: plans[index].reservedUnits,
 			resetAt:       plans[index].period.end,
@@ -848,6 +1024,23 @@ func exceededError(logicalRequestID string, plans []plannedBucket, exceeded []in
 	}
 }
 
+func concurrencyExceededError(logicalRequestID string, plans []plannedBucket, exceeded []int) *ConcurrencyExceededError {
+	selected := exceeded[0]
+	for _, index := range exceeded[1:] {
+		candidate, current := plans[index], plans[selected]
+		if candidate.rule.ruleKey < current.rule.ruleKey ||
+			(candidate.rule.ruleKey == current.rule.ruleKey && candidate.rule.scopeKey < current.rule.scopeKey) {
+			selected = index
+		}
+	}
+	plan := plans[selected]
+	return &ConcurrencyExceededError{
+		logicalRequestID: logicalRequestID,
+		maximum:          plan.rule.Maximum,
+		active:           plan.locked.reserved,
+	}
+}
+
 // BeginAttempt atomically marks the logical request dispatched and records the
 // single bounded upstream attempt. Call it only after every pre-dispatch step
 // succeeds and immediately before invoking the HTTP transport. dispatchOwner
@@ -875,10 +1068,30 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	if err != nil {
 		return Attempt{}, false, err
 	}
+	entries, err := lockEntries(ctx, tx, lockedReservation)
+	if err != nil {
+		return Attempt{}, false, err
+	}
+	leases, err := lockConcurrencyLeases(ctx, tx, lockedReservation, entries)
+	if err != nil {
+		return Attempt{}, false, err
+	}
 	if found {
 		if existing.routeKey != reservation.routeKey || existing.upstreamKey != reservation.upstreamKey ||
 			existing.physicalModel == nil || *existing.physicalModel != reservation.physicalModel ||
 			!attemptPricingMatchesReservation(existing, reservation) {
+			return Attempt{}, false, ErrInvalidState
+		}
+		switch lockedReservation.status {
+		case "pending":
+			if !pendingEntriesMatch(logical.status, lockedReservation, entries, leases) {
+				return Attempt{}, false, ErrInvalidState
+			}
+		case "settled":
+			if !terminalEntriesMatch(logical.status, lockedReservation.status, entries, leases) {
+				return Attempt{}, false, ErrInvalidState
+			}
+		default:
 			return Attempt{}, false, ErrInvalidState
 		}
 		return Attempt{reservation: reservation, attemptID: existing.id, number: 1}, false, nil
@@ -887,6 +1100,9 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		return Attempt{}, false, ErrFinalized
 	}
 	if logical.status != "reserved" {
+		return Attempt{}, false, ErrInvalidState
+	}
+	if !pendingEntriesMatch(logical.status, lockedReservation, entries, leases) {
 		return Attempt{}, false, ErrInvalidState
 	}
 	attemptID, err := store.newID(id.UpstreamAttempt)
@@ -1035,7 +1251,21 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
+	if !attemptPricingMatchesReservation(storedAttempt, reservation.Reservation) {
+		return ErrInvalidState
+	}
 	if reservation.status == "settled" {
+		entries, entryErr := lockEntries(ctx, tx, reservation)
+		if entryErr != nil {
+			return entryErr
+		}
+		leases, leaseErr := lockConcurrencyLeases(ctx, tx, reservation, entries)
+		if leaseErr != nil {
+			return leaseErr
+		}
+		if !terminalEntriesMatch(logical.status, reservation.status, entries, leases) {
+			return ErrInvalidState
+		}
 		matches, matchErr := terminalSettlementMatches(ctx, tx, reservation, storedAttempt, outcome)
 		if matchErr != nil {
 			return matchErr
@@ -1045,9 +1275,6 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		}
 		return ErrFinalized
 	}
-	if !attemptPricingMatchesReservation(storedAttempt, reservation.Reservation) {
-		return ErrInvalidState
-	}
 	if reservation.status != "pending" {
 		return ErrFinalized
 	}
@@ -1056,6 +1283,10 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		return ErrInvalidState
 	}
 	entries, err := lockEntries(ctx, tx, reservation)
+	if err != nil {
+		return err
+	}
+	leases, err := lockConcurrencyLeases(ctx, tx, reservation, entries)
 	if err != nil {
 		return err
 	}
@@ -1073,7 +1304,7 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
-	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entries, outcome, usageIDs, now); err != nil {
+	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entries, leases, outcome, usageIDs, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1106,8 +1337,18 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 	if err != nil {
 		return err
 	}
+	entries, err := lockEntries(ctx, tx, lockedReservation)
+	if err != nil {
+		return err
+	}
+	leases, err := lockConcurrencyLeases(ctx, tx, lockedReservation, entries)
+	if err != nil {
+		return err
+	}
 	if lockedReservation.status == "released" {
-		if !attemptExists && logical.status == "failed" && logical.failureCode != nil && *logical.failureCode == failureCode {
+		if !attemptExists && logical.status == "failed" && logical.failureCode != nil &&
+			*logical.failureCode == failureCode &&
+			terminalEntriesMatch(logical.status, lockedReservation.status, entries, leases) {
 			return nil
 		}
 		return ErrFinalized
@@ -1121,15 +1362,11 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 	if logical.status != "reserved" {
 		return ErrInvalidState
 	}
-	entries, err := lockEntries(ctx, tx, lockedReservation)
-	if err != nil {
-		return err
-	}
 	now, err := statementTime(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, "released", failureCode, now); err != nil {
+	if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, leases, "released", failureCode, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1203,6 +1440,10 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	leases, err := lockConcurrencyLeases(ctx, tx, lockedReservation, entries)
+	if err != nil {
+		return false, err
+	}
 	var usageIDs settlementUsageIDs
 	var recoveredOutcome Outcome
 	if attemptExists {
@@ -1242,11 +1483,11 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if attemptExists {
-		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, recoveredOutcome, usageIDs, now); err != nil {
+		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, leases, recoveredOutcome, usageIDs, now); err != nil {
 			return false, err
 		}
 	} else {
-		if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, "expired", expiryFailureCode, now); err != nil {
+		if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, leases, "expired", expiryFailureCode, now); err != nil {
 			return false, err
 		}
 	}
@@ -1467,6 +1708,8 @@ type lockedEntry struct {
 	id             string
 	bucketID       string
 	metric         string
+	algorithm      string
+	windowKey      string
 	reservedUnits  int64
 	settledUnits   int64
 	releasedUnits  int64
@@ -1478,7 +1721,7 @@ type lockedEntry struct {
 func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
-		       bucket.metric,
+		       bucket.metric, bucket.algorithm, bucket.window_key,
 		       entry.reserved_units, entry.settled_units, entry.released_units,
 		       bucket.used_units, bucket.reserved_units, bucket.hard_maximum
 		FROM quota_reservation_entries AS entry
@@ -1504,14 +1747,18 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		}
 		var entry lockedEntry
 		if err := rows.Scan(
-			&entry.id, &entry.bucketID, &entry.metric, &entry.reservedUnits,
+			&entry.id, &entry.bucketID, &entry.metric, &entry.algorithm, &entry.windowKey,
+			&entry.reservedUnits,
 			&entry.settledUnits, &entry.releasedUnits, &entry.bucketUsed,
 			&entry.bucketReserved, &entry.hardMaximum,
 		); err != nil {
 			return nil, persistenceFailure("scan quota reservation entry", err)
 		}
 		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
-			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
+			!isStatefulMetric(entry.metric) ||
+			(isConcurrencyMetric(entry.metric) !=
+				(entry.algorithm == ConcurrencyAlgorithm && entry.windowKey == "active")) ||
+			(!isConcurrencyMetric(entry.metric) && entry.algorithm != CalendarAlgorithm) ||
 			(len(entries) > 0 && entries[len(entries)-1].bucketID >= entry.bucketID) {
 			return nil, ErrInvalidState
 		}
@@ -1540,6 +1787,89 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		}
 	}
 	return entries, nil
+}
+
+type lockedConcurrencyLease struct {
+	id         string
+	bucketID   string
+	acquiredAt time.Time
+	expiresAt  time.Time
+	releasedAt *time.Time
+}
+
+// lockConcurrencyLeases is always called after lockEntries, and acquires
+// lease rows in their globally stable identifier order.
+func lockConcurrencyLeases(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	entries []lockedEntry,
+) ([]lockedConcurrencyLease, error) {
+	expectedBuckets := make(map[string]struct{})
+	for _, entry := range entries {
+		if isConcurrencyMetric(entry.metric) {
+			expectedBuckets[entry.bucketID] = struct{}{}
+		}
+	}
+	expectedIDs := make(map[string]string)
+	for _, entry := range reservation.entries {
+		if isConcurrencyMetric(entry.metric) && entry.leaseID != "" {
+			expectedIDs[entry.bucketID] = entry.leaseID
+		}
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT concurrency_lease_id, organization_id, application_id,
+		       environment_id, quota_bucket_id, logical_request_id,
+		       acquired_at, expires_at, released_at
+		FROM concurrency_leases
+		WHERE environment_id = $1 AND logical_request_id = $2
+		ORDER BY concurrency_lease_id COLLATE "C"
+		FOR UPDATE
+	`, reservation.environmentID, reservation.logicalRequestID)
+	if err != nil {
+		return nil, persistenceFailure("lock concurrency leases", err)
+	}
+	defer rows.Close()
+	leases := make([]lockedConcurrencyLease, 0, len(expectedBuckets))
+	seenBuckets := make(map[string]struct{}, len(expectedBuckets))
+	for rows.Next() {
+		var lease lockedConcurrencyLease
+		var organizationID, applicationID, environmentID, logicalRequestID string
+		if err := rows.Scan(
+			&lease.id, &organizationID, &applicationID, &environmentID,
+			&lease.bucketID, &logicalRequestID, &lease.acquiredAt,
+			&lease.expiresAt, &lease.releasedAt,
+		); err != nil {
+			return nil, persistenceFailure("scan concurrency lease", err)
+		}
+		_, expectedBucket := expectedBuckets[lease.bucketID]
+		_, duplicateBucket := seenBuckets[lease.bucketID]
+		if !expectedBucket || duplicateBucket || id.Validate(lease.id, id.ConcurrencyLease) != nil ||
+			organizationID != reservation.organizationID || applicationID != reservation.applicationID ||
+			environmentID != reservation.environmentID || logicalRequestID != reservation.logicalRequestID ||
+			!lease.expiresAt.Equal(reservation.expiresAt) || !lease.expiresAt.After(lease.acquiredAt) {
+			return nil, ErrInvalidState
+		}
+		if expectedID, ok := expectedIDs[lease.bucketID]; ok && expectedID != lease.id {
+			return nil, ErrInvalidState
+		}
+		if reservation.status == "pending" {
+			if lease.releasedAt != nil {
+				return nil, ErrInvalidState
+			}
+		} else if lease.releasedAt == nil {
+			return nil, ErrInvalidState
+		}
+		seenBuckets[lease.bucketID] = struct{}{}
+		leases = append(leases, lease)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, persistenceFailure("iterate concurrency leases", err)
+	}
+	if len(leases) != len(expectedBuckets) {
+		return nil, ErrInvalidState
+	}
+	return leases, nil
 }
 
 type settlementUsageIDs struct {
@@ -1867,6 +2197,102 @@ func terminalSettlementMatches(
 	return len(seen) == len(expected), nil
 }
 
+func terminalEntriesMatch(
+	logicalStatus string,
+	reservationStatus string,
+	entries []lockedEntry,
+	leases []lockedConcurrencyLease,
+) bool {
+	concurrencyEntries := 0
+	for _, entry := range entries {
+		if entry.hardMaximum == nil || entry.bucketUsed < 0 || entry.bucketReserved < 0 ||
+			!existingReservationStateMatches(
+				logicalStatus, reservationStatus, entry.metric, entry.reservedUnits,
+				entry.reservedUnits, entry.settledUnits, entry.releasedUnits,
+			) {
+			return false
+		}
+		if isConcurrencyMetric(entry.metric) {
+			concurrencyEntries++
+			if entry.bucketUsed != 0 {
+				return false
+			}
+		}
+	}
+	return len(leases) == concurrencyEntries
+}
+
+func pendingEntriesMatch(
+	logicalStatus string,
+	reservation lockedReservation,
+	entries []lockedEntry,
+	leases []lockedConcurrencyLease,
+) bool {
+	for _, entry := range entries {
+		if entry.hardMaximum == nil || entry.bucketUsed < 0 || entry.bucketReserved < entry.reservedUnits ||
+			!existingReservationStateMatches(
+				logicalStatus, reservation.status, entry.metric, entry.reservedUnits,
+				entry.reservedUnits, entry.settledUnits, entry.releasedUnits,
+			) || (isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
+			return false
+		}
+	}
+	return pendingConcurrencyLeasesMatch(reservation, entries, leases)
+}
+
+func pendingConcurrencyLeasesMatch(
+	reservation lockedReservation,
+	entries []lockedEntry,
+	leases []lockedConcurrencyLease,
+) bool {
+	expectedBuckets := make(map[string]struct{})
+	for _, entry := range entries {
+		if isConcurrencyMetric(entry.metric) {
+			expectedBuckets[entry.bucketID] = struct{}{}
+		}
+	}
+	if len(leases) != len(expectedBuckets) {
+		return false
+	}
+	for _, lease := range leases {
+		if _, ok := expectedBuckets[lease.bucketID]; !ok || lease.releasedAt != nil ||
+			!lease.expiresAt.Equal(reservation.expiresAt) || !lease.expiresAt.After(lease.acquiredAt) {
+			return false
+		}
+		delete(expectedBuckets, lease.bucketID)
+	}
+	return len(expectedBuckets) == 0
+}
+
+func releaseLockedConcurrencyLeases(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	leases []lockedConcurrencyLease,
+	now time.Time,
+) error {
+	for _, lease := range leases {
+		command, err := tx.Exec(ctx, `
+			UPDATE concurrency_leases
+			SET released_at = GREATEST(acquired_at, $2)
+			WHERE concurrency_lease_id = $1
+			  AND environment_id = $3
+			  AND logical_request_id = $4
+			  AND quota_bucket_id = $5
+			  AND expires_at = $6
+			  AND released_at IS NULL
+		`, lease.id, now, reservation.environmentID, reservation.logicalRequestID,
+			lease.bucketID, reservation.expiresAt)
+		if err != nil {
+			return persistenceFailure("release concurrency lease", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidState
+		}
+	}
+	return nil
+}
+
 func settleLocked(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -1874,6 +2300,7 @@ func settleLocked(
 	logical lockedLogical,
 	attempt storedAttempt,
 	entries []lockedEntry,
+	leases []lockedConcurrencyLease,
 	outcome Outcome,
 	usageIDs settlementUsageIDs,
 	now time.Time,
@@ -1890,14 +2317,21 @@ func settleLocked(
 	for _, entry := range entries {
 		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
 			entry.bucketReserved < entry.reservedUnits || entry.hardMaximum == nil ||
-			entry.bucketUsed < 0 || entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric ||
-			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) {
+			entry.bucketUsed < 0 || !isStatefulMetric(entry.metric) ||
+			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
+				entry.reservedUnits != 1) ||
+			(isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
 			return ErrInvalidState
 		}
 	}
+	if !pendingConcurrencyLeasesMatch(reservation, entries, leases) {
+		return ErrInvalidState
+	}
 	for index, entry := range entries {
 		settled := entry.reservedUnits
-		if entry.metric == OutputTokensMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
+		if isConcurrencyMetric(entry.metric) {
+			settled = 0
+		} else if entry.metric == OutputTokensMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
 			settled = outcome.Usage.OutputTokens
 			if settled > entry.reservedUnits {
 				return ErrInvalidInput
@@ -1945,6 +2379,9 @@ func settleLocked(
 		if command.RowsAffected() != 1 {
 			return ErrInvalidState
 		}
+	}
+	if err := releaseLockedConcurrencyLeases(ctx, tx, reservation, leases, now); err != nil {
+		return err
 	}
 	var command pgconn.CommandTag
 	var err error
@@ -2011,7 +2448,17 @@ func settleLocked(
 	return nil
 }
 
-func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, entries []lockedEntry, reservationStatus, failureCode string, now time.Time) error {
+func releaseLocked(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	logical lockedLogical,
+	entries []lockedEntry,
+	leases []lockedConcurrencyLease,
+	reservationStatus string,
+	failureCode string,
+	now time.Time,
+) error {
 	if reservation.status != "pending" || logical.status != "reserved" ||
 		len(entries) > maximumRulesPerRequest {
 		return ErrInvalidState
@@ -2019,10 +2466,15 @@ func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation
 	for _, entry := range entries {
 		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
 			entry.bucketReserved < entry.reservedUnits ||
-			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
-			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) {
+			!isStatefulMetric(entry.metric) ||
+			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
+				entry.reservedUnits != 1) ||
+			(isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
 			return ErrInvalidState
 		}
+	}
+	if !pendingConcurrencyLeasesMatch(reservation, entries, leases) {
+		return ErrInvalidState
 	}
 	for _, entry := range entries {
 		command, err := tx.Exec(ctx, `
@@ -2050,6 +2502,9 @@ func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation
 		if command.RowsAffected() != 1 {
 			return ErrInvalidState
 		}
+	}
+	if err := releaseLockedConcurrencyLeases(ctx, tx, reservation, leases, now); err != nil {
+		return err
 	}
 	var command pgconn.CommandTag
 	var err error

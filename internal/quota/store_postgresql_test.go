@@ -2070,6 +2070,386 @@ func TestStorePostgreSQLConfiguredPricing(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLConcurrencyLeases(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+
+	t.Run("request and stream leases replay and release on every terminal path", func(t *testing.T) {
+		nonStream := fixture.concurrencyInput(t, "concurrency-basic", 3, 2, false, true)
+		reservation, err := fixture.store.Reserve(fixture.ctx, nonStream)
+		if err != nil {
+			t.Fatalf("reserve non-streaming concurrency: %v", err)
+		}
+		if len(reservation.entries) != 1 || reservation.entries[0].metric != ConcurrentRequestsMetric ||
+			!reservation.ResetAt().IsZero() {
+			t.Fatalf("non-streaming reservation entries=%#v reset=%s", reservation.entries, reservation.ResetAt())
+		}
+		replay, err := fixture.store.Reserve(fixture.ctx, nonStream)
+		if err != nil || replay.ID() != reservation.ID() ||
+			replay.entries[0].leaseID != reservation.entries[0].leaseID {
+			t.Fatalf("replay non-streaming reservation=%#v err=%v", replay, err)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM quota_buckets
+			WHERE limit_plan_key = $1 AND metric = 'concurrent_streams'
+		`, nonStream.LimitPlanKey); got != 0 {
+			t.Fatalf("non-streaming stream buckets = %d, want 0", got)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM concurrency_leases AS lease
+			JOIN quota_reservations AS reservation USING (logical_request_id)
+			WHERE reservation.quota_reservation_id = $1
+			  AND lease.expires_at = reservation.expires_at
+			  AND lease.released_at IS NULL
+		`, reservation.ID()); got != 1 {
+			t.Fatalf("active non-streaming leases with exact expiry = %d, want 1", got)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin concurrency attempt owner=%t: %v", owner, err)
+		}
+		outcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 204}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle concurrency attempt: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("replay concurrency settlement: %v", err)
+		}
+		settledReplay, err := fixture.store.Reserve(fixture.ctx, nonStream)
+		if err != nil || settledReplay.ID() != reservation.ID() ||
+			settledReplay.entries[0].leaseID != reservation.entries[0].leaseID {
+			t.Fatalf("settled reserve replay=%#v err=%v", settledReplay, err)
+		}
+		assertConcurrencyEntryState(t, fixture, reservation.ID(), ConcurrentRequestsMetric, 1, 0, 1, 0, 0, true)
+		if got := fixture.count(t, `
+			SELECT count(*) FROM usage_records
+			WHERE logical_request_id = $1
+			  AND metric IN ('concurrent_requests', 'concurrent_streams')
+		`, nonStream.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("concurrency usage records = %d, want 0", got)
+		}
+
+		stream := fixture.concurrencyInput(t, "concurrency-basic", 3, 2, true, true)
+		streamReservation, err := fixture.store.Reserve(fixture.ctx, stream)
+		if err != nil {
+			t.Fatalf("reserve streaming concurrency: %v", err)
+		}
+		if len(streamReservation.entries) != 2 || !streamReservation.ResetAt().IsZero() {
+			t.Fatalf("streaming entries=%d reset=%s, want 2 and zero", len(streamReservation.entries), streamReservation.ResetAt())
+		}
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM concurrency_leases AS lease
+			JOIN quota_reservations AS reservation USING (logical_request_id)
+			WHERE reservation.quota_reservation_id = $1
+			  AND lease.expires_at = reservation.expires_at
+			  AND lease.released_at IS NULL
+		`, streamReservation.ID()); got != 2 {
+			t.Fatalf("active streaming leases with exact expiry = %d, want 2", got)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, streamReservation, "transport_setup_failed"); err != nil {
+			t.Fatalf("release streaming concurrency: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, streamReservation, "transport_setup_failed"); err != nil {
+			t.Fatalf("replay streaming release: %v", err)
+		}
+		releasedReplay, err := fixture.store.Reserve(fixture.ctx, stream)
+		if err != nil || releasedReplay.ID() != streamReservation.ID() {
+			t.Fatalf("released reserve replay=%#v err=%v", releasedReplay, err)
+		}
+		for index := range releasedReplay.entries {
+			if releasedReplay.entries[index].leaseID != streamReservation.entries[index].leaseID {
+				t.Fatalf("released replay lease %d = %q, want %q", index,
+					releasedReplay.entries[index].leaseID, streamReservation.entries[index].leaseID)
+			}
+		}
+		assertConcurrencyEntryState(t, fixture, streamReservation.ID(), ConcurrentRequestsMetric, 1, 0, 1, 0, 0, true)
+		assertConcurrencyEntryState(t, fixture, streamReservation.ID(), ConcurrentStreamsMetric, 1, 0, 1, 0, 0, true)
+	})
+
+	t.Run("every settled outcome releases its lease without consuming usage", func(t *testing.T) {
+		outcomes := []Outcome{
+			{Status: AttemptSucceeded, HTTPStatus: 204},
+			{Status: AttemptFailed, HTTPStatus: 502, FailureCode: "upstream_unavailable"},
+			{Status: AttemptCancelled, FailureCode: "client_cancelled"},
+			{Status: AttemptTimedOut, FailureCode: "upstream_timeout"},
+		}
+		for index, outcome := range outcomes {
+			input := fixture.concurrencyInput(t, "concurrency-outcomes", 1, 0, false, false)
+			reservation, err := fixture.store.Reserve(fixture.ctx, input)
+			if err != nil {
+				t.Fatalf("outcome %d reserve: %v", index, err)
+			}
+			attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+			if err != nil || !owner {
+				t.Fatalf("outcome %d begin owner=%t: %v", index, owner, err)
+			}
+			if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+				t.Fatalf("outcome %d settle: %v", index, err)
+			}
+			assertConcurrencyEntryState(
+				t, fixture, reservation.ID(), ConcurrentRequestsMetric,
+				1, 0, 1, 0, 0, true,
+			)
+		}
+	})
+
+	t.Run("denial is atomic replay-stable and calendar denial wins", func(t *testing.T) {
+		holderInput := fixture.concurrencyInput(t, "concurrency-denial", 1, 0, false, false)
+		holder, err := fixture.store.Reserve(fixture.ctx, holderInput)
+		if err != nil {
+			t.Fatalf("reserve concurrency holder: %v", err)
+		}
+		deniedInput := fixture.concurrencyInput(t, "concurrency-denial", 1, 0, false, false)
+		deniedInput.Rules = append(deniedInput.Rules, Rule{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: "1d", Maximum: 10, Hard: true,
+		})
+		_, denialErr := fixture.store.Reserve(fixture.ctx, deniedInput)
+		var denial *ConcurrencyExceededError
+		if !errors.As(denialErr, &denial) || !errors.Is(denialErr, ErrConcurrencyExceeded) ||
+			errors.Is(denialErr, ErrExceeded) || denial.LogicalRequestID() != deniedInput.LogicalRequestID.String() ||
+			denial.Maximum() != 1 || denial.Active() != 1 {
+			t.Fatalf("concurrency denial = %#v / %v", denial, denialErr)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied reservations = %d, want 0", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM concurrency_leases WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied leases = %d, want 0", got)
+		}
+		var calendarUsed, calendarReserved int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT used_units, reserved_units FROM quota_buckets
+			WHERE limit_plan_key = $1 AND metric = 'logical_requests'
+		`, deniedInput.LimitPlanKey).Scan(&calendarUsed, &calendarReserved); err != nil {
+			t.Fatalf("read atomically denied calendar bucket: %v", err)
+		}
+		if calendarUsed != 0 || calendarReserved != 0 {
+			t.Fatalf("atomically denied calendar bucket = %d/%d, want 0/0", calendarUsed, calendarReserved)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, holder, "holder_done"); err != nil {
+			t.Fatalf("release concurrency holder: %v", err)
+		}
+		if _, replayErr := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(replayErr, ErrConcurrencyExceeded) {
+			t.Fatalf("released-capacity denial replay = %v, want ErrConcurrencyExceeded", replayErr)
+		}
+		reuseInput := fixture.concurrencyInput(t, "concurrency-denial", 1, 0, false, false)
+		reuse, err := fixture.store.Reserve(fixture.ctx, reuseInput)
+		if err != nil {
+			t.Fatalf("reuse concurrency capacity: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reuse, "reuse_done"); err != nil {
+			t.Fatalf("release reused concurrency capacity: %v", err)
+		}
+
+		priorityHolderInput := fixture.concurrencyInput(t, "concurrency-priority", 1, 0, false, false)
+		priorityHolderInput.Rules = append(priorityHolderInput.Rules, Rule{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true,
+		})
+		priorityHolder, err := fixture.store.Reserve(fixture.ctx, priorityHolderInput)
+		if err != nil {
+			t.Fatalf("reserve mixed priority holder: %v", err)
+		}
+		if priorityHolder.ResetAt().IsZero() {
+			t.Fatal("mixed calendar/concurrency reservation lost its calendar reset")
+		}
+		priorityDenied := cloneReserveInput(priorityHolderInput)
+		priorityDenied.LogicalRequestID = mustLogicalID(t)
+		_, priorityErr := fixture.store.Reserve(fixture.ctx, priorityDenied)
+		if !errors.Is(priorityErr, ErrExceeded) || errors.Is(priorityErr, ErrConcurrencyExceeded) {
+			t.Fatalf("mixed calendar-priority denial = %v, want ErrExceeded only", priorityErr)
+		}
+		var failureCode string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT failure_code FROM logical_requests WHERE logical_request_id = $1
+		`, priorityDenied.LogicalRequestID.String()).Scan(&failureCode); err != nil {
+			t.Fatalf("read mixed denial code: %v", err)
+		}
+		if failureCode != "quota_exceeded" {
+			t.Fatalf("mixed denial code = %q, want quota_exceeded", failureCode)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, priorityHolder, "priority_done"); err != nil {
+			t.Fatalf("release mixed priority holder: %v", err)
+		}
+	})
+
+	t.Run("expiry releases undispatched and dispatched leases and terminal replay detects tamper", func(t *testing.T) {
+		dispatchedInput := fixture.concurrencyInput(t, "concurrency-expiry", 3, 0, false, false)
+		dispatchedReservation, err := fixture.store.Reserve(fixture.ctx, dispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve dispatched expiry: %v", err)
+		}
+		dispatchedAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, dispatchedReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin dispatched expiry owner=%t: %v", owner, err)
+		}
+		undispatchedInput := fixture.concurrencyInput(t, "concurrency-expiry", 3, 0, false, false)
+		undispatchedReservation, err := fixture.store.Reserve(fixture.ctx, undispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve undispatched expiry: %v", err)
+		}
+		backdateConcurrencyReservations(t, fixture, dispatchedReservation.ID(), undispatchedReservation.ID())
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 10)
+		if err != nil || processed != 2 {
+			t.Fatalf("expire concurrency reservations processed=%d err=%v, want 2 nil", processed, err)
+		}
+		assertConcurrencyEntryState(t, fixture, dispatchedReservation.ID(), ConcurrentRequestsMetric, 1, 0, 1, 0, 0, true)
+		assertConcurrencyEntryState(t, fixture, undispatchedReservation.ID(), ConcurrentRequestsMetric, 1, 0, 1, 0, 0, true)
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, dispatchedInput.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("dispatched expiry usage rows = %d, want logical request only", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, undispatchedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("undispatched expiry usage rows = %d, want 0", got)
+		}
+		expiryOutcome := Outcome{
+			Status: AttemptTimedOut, FailureCode: expiryFailureCode,
+			Usage: Usage{Provenance: UnknownUsageProvenance},
+		}
+		if err := fixture.store.Settle(fixture.ctx, dispatchedAttempt, expiryOutcome); err != nil {
+			t.Fatalf("replay recovered concurrency settlement: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE concurrency_leases SET released_at = NULL WHERE logical_request_id = $1
+		`, dispatchedInput.LogicalRequestID.String()); err != nil {
+			t.Fatalf("tamper terminal concurrency lease: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, dispatchedAttempt, expiryOutcome); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("tampered terminal settlement replay = %v, want ErrInvalidState", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE concurrency_leases
+			SET released_at = statement_timestamp()
+			WHERE logical_request_id = $1
+		`, dispatchedInput.LogicalRequestID.String()); err != nil {
+			t.Fatalf("restore terminal concurrency lease: %v", err)
+		}
+	})
+
+	t.Run("contention enforces exact maximum and capacity is reusable", func(t *testing.T) {
+		const maximum = 5
+		const callers = 24
+		start := make(chan struct{})
+		acceptedChannel := make(chan Reservation, callers)
+		failures := make(chan error, callers)
+		var wait sync.WaitGroup
+		for range callers {
+			input := fixture.concurrencyInput(t, "concurrency-contention", maximum, 0, false, false)
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				<-start
+				reservation, reserveErr := fixture.store.Reserve(fixture.ctx, input)
+				if reserveErr != nil {
+					failures <- reserveErr
+					return
+				}
+				acceptedChannel <- reservation
+			}()
+		}
+		close(start)
+		wait.Wait()
+		close(acceptedChannel)
+		close(failures)
+		accepted := make([]Reservation, 0, maximum)
+		for reservation := range acceptedChannel {
+			accepted = append(accepted, reservation)
+		}
+		denied := 0
+		for reserveErr := range failures {
+			if !errors.Is(reserveErr, ErrConcurrencyExceeded) {
+				t.Errorf("contention failure = %v, want ErrConcurrencyExceeded", reserveErr)
+			}
+			denied++
+		}
+		if len(accepted) != maximum || denied != callers-maximum {
+			t.Fatalf("contention accepted=%d denied=%d, want %d/%d", len(accepted), denied, maximum, callers-maximum)
+		}
+		var used, reserved, activeLeases int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT bucket.used_units, bucket.reserved_units,
+			       count(*) FILTER (WHERE lease.released_at IS NULL)
+			FROM quota_buckets AS bucket
+			JOIN concurrency_leases AS lease USING (quota_bucket_id)
+			WHERE bucket.limit_plan_key = 'concurrency-contention'
+			GROUP BY bucket.quota_bucket_id
+		`).Scan(&used, &reserved, &activeLeases); err != nil {
+			t.Fatalf("read contention occupancy: %v", err)
+		}
+		if used != 0 || reserved != maximum || activeLeases != maximum {
+			t.Fatalf("contention bucket used=%d reserved=%d leases=%d", used, reserved, activeLeases)
+		}
+		for _, reservation := range accepted {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "contention_done"); err != nil {
+				t.Fatalf("release contention reservation: %v", err)
+			}
+		}
+		for range maximum {
+			reuseInput := fixture.concurrencyInput(t, "concurrency-contention", maximum, 0, false, false)
+			reuse, err := fixture.store.Reserve(fixture.ctx, reuseInput)
+			if err != nil {
+				t.Fatalf("reuse contention capacity: %v", err)
+			}
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reuse, "reuse_done"); err != nil {
+				t.Fatalf("release reused contention capacity: %v", err)
+			}
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM quota_buckets
+			WHERE limit_plan_key = 'concurrency-contention'
+			  AND used_units = 0 AND reserved_units = 0
+		`); got != 1 {
+			t.Fatalf("reusable empty concurrency bucket = %d, want 1", got)
+		}
+	})
+
+	t.Run("settlement and expiry serialize one lease release", func(t *testing.T) {
+		for iteration := range 8 {
+			input := fixture.concurrencyInput(t, "concurrency-race", 1, 0, false, false)
+			reservation, err := fixture.store.Reserve(fixture.ctx, input)
+			if err != nil {
+				t.Fatalf("iteration %d reserve: %v", iteration, err)
+			}
+			attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+			if err != nil || !owner {
+				t.Fatalf("iteration %d begin owner=%t: %v", iteration, owner, err)
+			}
+			backdateConcurrencyReservations(t, fixture, reservation.ID())
+			start := make(chan struct{})
+			settlement := make(chan error, 1)
+			expiry := make(chan struct {
+				processed int64
+				err       error
+			}, 1)
+			go func() {
+				<-start
+				settlement <- fixture.store.Settle(
+					fixture.ctx, attempt, Outcome{Status: AttemptSucceeded, HTTPStatus: 204},
+				)
+			}()
+			go func() {
+				<-start
+				processed, expiryErr := fixture.store.ExpirePendingBatch(fixture.ctx, 1)
+				expiry <- struct {
+					processed int64
+					err       error
+				}{processed: processed, err: expiryErr}
+			}()
+			close(start)
+			settleErr := <-settlement
+			expiryResult := <-expiry
+			settleWon := settleErr == nil && expiryResult.err == nil && expiryResult.processed == 0
+			expiryWon := errors.Is(settleErr, ErrFinalized) && expiryResult.err == nil && expiryResult.processed == 1
+			if !settleWon && !expiryWon {
+				t.Fatalf("iteration %d settle=%v expiry=%d/%v", iteration, settleErr, expiryResult.processed, expiryResult.err)
+			}
+			assertConcurrencyEntryState(t, fixture, reservation.ID(), ConcurrentRequestsMetric, 1, 0, 1, 0, 0, true)
+		}
+	})
+}
+
 func newQuotaPostgreSQLFixture(t *testing.T) quotaPostgreSQLFixture {
 	t.Helper()
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
@@ -2270,6 +2650,103 @@ func (fixture quotaPostgreSQLFixture) perRequestOutputInput(
 		ReservedUnits: reservedUnits, Hard: true,
 	}}
 	return input
+}
+
+func (fixture quotaPostgreSQLFixture) concurrencyInput(
+	t *testing.T,
+	plan string,
+	requestMaximum int64,
+	streamMaximum int64,
+	streaming bool,
+	includeStreamRule bool,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, plan, 1)
+	input.LimitPlanKey = plan
+	input.Streaming = streaming
+	input.Rules = []Rule{{
+		Metric: ConcurrentRequestsMetric, Algorithm: ConcurrencyAlgorithm,
+		Scope: []string{"user"}, Maximum: requestMaximum, Hard: true,
+	}}
+	if includeStreamRule {
+		input.Rules = append(input.Rules, Rule{
+			Metric: ConcurrentStreamsMetric, Algorithm: ConcurrencyAlgorithm,
+			Scope: []string{"user"}, Maximum: streamMaximum, Hard: true,
+		})
+	}
+	return input
+}
+
+func assertConcurrencyEntryState(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	reservationID string,
+	metric string,
+	wantReserved int64,
+	wantSettled int64,
+	wantReleased int64,
+	wantBucketUsed int64,
+	wantBucketReserved int64,
+	wantLeaseReleased bool,
+) {
+	t.Helper()
+	var reserved, settled, released, bucketUsed, bucketReserved int64
+	var algorithm, windowKey string
+	var leaseReleased bool
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT entry.reserved_units, entry.settled_units, entry.released_units,
+		       bucket.used_units, bucket.reserved_units, bucket.algorithm,
+		       bucket.window_key, lease.released_at IS NOT NULL
+		FROM quota_reservation_entries AS entry
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		JOIN quota_reservations AS reservation USING (quota_reservation_id)
+		JOIN concurrency_leases AS lease
+		  ON lease.quota_bucket_id = bucket.quota_bucket_id
+		 AND lease.logical_request_id = reservation.logical_request_id
+		WHERE entry.quota_reservation_id = $1 AND bucket.metric = $2
+	`, reservationID, metric).Scan(
+		&reserved, &settled, &released, &bucketUsed, &bucketReserved,
+		&algorithm, &windowKey, &leaseReleased,
+	); err != nil {
+		t.Fatalf("read %s concurrency state: %v", metric, err)
+	}
+	if reserved != wantReserved || settled != wantSettled || released != wantReleased ||
+		bucketUsed != wantBucketUsed || bucketReserved != wantBucketReserved ||
+		algorithm != ConcurrencyAlgorithm || windowKey != "active" ||
+		leaseReleased != wantLeaseReleased {
+		t.Fatalf(
+			"%s state entry=%d/%d/%d bucket=%d/%d algorithm=%s window=%s released=%t, want %d/%d/%d %d/%d concurrency/active released=%t",
+			metric, reserved, settled, released, bucketUsed, bucketReserved,
+			algorithm, windowKey, leaseReleased, wantReserved, wantSettled,
+			wantReleased, wantBucketUsed, wantBucketReserved, wantLeaseReleased,
+		)
+	}
+}
+
+func backdateConcurrencyReservations(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	reservationIDs ...string,
+) {
+	t.Helper()
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE quota_reservations
+		SET created_at = statement_timestamp() - interval '2 hours',
+		    expires_at = statement_timestamp() - interval '1 hour'
+		WHERE quota_reservation_id = ANY($1::text[])
+	`, reservationIDs); err != nil {
+		t.Fatalf("backdate concurrency reservations: %v", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE concurrency_leases AS lease
+		SET acquired_at = reservation.created_at,
+		    expires_at = reservation.expires_at
+		FROM quota_reservations AS reservation
+		WHERE lease.logical_request_id = reservation.logical_request_id
+		  AND reservation.quota_reservation_id = ANY($1::text[])
+	`, reservationIDs); err != nil {
+		t.Fatalf("backdate concurrency leases: %v", err)
+	}
 }
 
 func assertOutputEntryState(
