@@ -127,6 +127,12 @@ func TestStorePostgreSQL(t *testing.T) {
 		t.Fatalf("BootstrapOwner(replaced token) error = %v", err)
 	}
 	bootstrapToken = replacementToken
+	if err := store.ValidateBootstrapToken(ctx, strings.Repeat("wrong-bootstrap-value-", 2)); !errors.Is(err, ErrBootstrapTokenInvalid) {
+		t.Fatalf("ValidateBootstrapToken(wrong token) error = %v", err)
+	}
+	if err := store.ValidateBootstrapToken(ctx, bootstrapToken); err != nil {
+		t.Fatalf("ValidateBootstrapToken(valid token) error = %v", err)
+	}
 	if _, err := store.BootstrapOwner(ctx, strings.Repeat("wrong-bootstrap-value-", 2), BootstrapOwnerInput{
 		OrganizationSlug: "example",
 		OrganizationName: "Example",
@@ -181,6 +187,9 @@ func TestStorePostgreSQL(t *testing.T) {
 	}
 	if _, err := store.BootstrapOwner(ctx, bootstrapToken, input); !errors.Is(err, ErrBootstrapDisabled) {
 		t.Fatalf("reused BootstrapOwner() error = %v", err)
+	}
+	if err := store.ValidateBootstrapToken(ctx, bootstrapToken); !errors.Is(err, ErrBootstrapDisabled) {
+		t.Fatalf("ValidateBootstrapToken(consumed token) error = %v", err)
 	}
 
 	adminUserID, storedPassword, err := store.PasswordCredentialByEmail(ctx, "OWNER@example.com")

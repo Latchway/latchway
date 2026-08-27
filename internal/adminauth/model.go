@@ -153,7 +153,7 @@ func (input CreateAPITokenInput) validate(now time.Time) error {
 		return fmt.Errorf("%w: creator admin user ID", ErrInvalidAdminInput)
 	}
 	name := strings.TrimSpace(input.Name)
-	if len(name) == 0 || len(name) > 100 || strings.ContainsAny(name, "\r\n\x00") {
+	if len(name) == 0 || len(name) > 256 || strings.ContainsAny(name, "\r\n\x00") {
 		return fmt.Errorf("%w: token name", ErrInvalidAdminInput)
 	}
 	if len(input.Scope.values) == 0 {
@@ -172,7 +172,18 @@ func (input CreateAPITokenInput) validate(now time.Time) error {
 type IssuedAPIToken struct {
 	APITokenID string
 	Token      SecretToken
+	CreatedAt  time.Time
 	ExpiresAt  *time.Time
+}
+
+// APITokenMetadata is the non-secret administrative token representation.
+type APITokenMetadata struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Scopes    []string   `json:"scopes"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Revoked   bool       `json:"revoked"`
 }
 
 // AuthenticationMethod identifies how an admin principal authenticated.
@@ -186,12 +197,13 @@ const (
 // Principal is the active organization membership produced by credential
 // authentication.
 type Principal struct {
-	OrganizationID string
-	AdminUserID    string
-	Role           Role
-	Method         AuthenticationMethod
-	CredentialID   string
-	scope          *CapabilitySet
+	OrganizationID      string
+	AdminUserID         string
+	Role                Role
+	Method              AuthenticationMethod
+	CredentialID        string
+	CredentialExpiresAt *time.Time
+	scope               *CapabilitySet
 }
 
 // Allows evaluates membership role and optional API-token scope.

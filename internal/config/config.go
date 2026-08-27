@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,15 +24,18 @@ const (
 // Config contains bootstrap configuration. Product policy is loaded from
 // revisioned PostgreSQL configuration rather than environment variables.
 type Config struct {
-	ListenAddress    string
-	DatabaseURL      string
-	Role             Role
-	LogLevel         string
-	MigrateOnStart   bool
-	ShutdownTimeout  time.Duration
-	ReadTimeout      time.Duration
-	IdleTimeout      time.Duration
-	DBMaxConnections int32
+	ListenAddress        string
+	DatabaseURL          string
+	Role                 Role
+	LogLevel             string
+	MigrateOnStart       bool
+	ShutdownTimeout      time.Duration
+	ReadTimeout          time.Duration
+	IdleTimeout          time.Duration
+	DBMaxConnections     int32
+	PublicOrigin         string
+	AdminBootstrapToken  string
+	AdminSessionLifetime time.Duration
 }
 
 // Load reads process configuration from environment variables.
@@ -42,18 +46,23 @@ func Load() (Config, error) {
 	readTimeout, readErr := parseDurationEnv("LATCHWAY_READ_TIMEOUT", 15*time.Second)
 	idleTimeout, idleErr := parseDurationEnv("LATCHWAY_IDLE_TIMEOUT", 90*time.Second)
 	maxConnections, maxConnectionsErr := parseIntEnv("LATCHWAY_DB_MAX_CONNECTIONS", 20)
+	adminSessionLifetime, adminSessionErr := parseDurationEnv("LATCHWAY_ADMIN_SESSION_LIFETIME", 12*time.Hour)
+	publicOrigin := envOr("LATCHWAY_PUBLIC_ORIGIN", "http://"+net.JoinHostPort("localhost", port))
 	cfg := Config{
-		ListenAddress:    envOr("LATCHWAY_LISTEN_ADDRESS", net.JoinHostPort("0.0.0.0", port)),
-		DatabaseURL:      firstNonEmpty(os.Getenv("LATCHWAY_DATABASE_URL"), os.Getenv("DATABASE_URL")),
-		Role:             Role(envOr("LATCHWAY_ROLE", string(RoleAll))),
-		LogLevel:         strings.ToLower(envOr("LATCHWAY_LOG_LEVEL", "info")),
-		MigrateOnStart:   migrateOnStart,
-		ShutdownTimeout:  shutdownTimeout,
-		ReadTimeout:      readTimeout,
-		IdleTimeout:      idleTimeout,
-		DBMaxConnections: int32(maxConnections),
+		ListenAddress:        envOr("LATCHWAY_LISTEN_ADDRESS", net.JoinHostPort("0.0.0.0", port)),
+		DatabaseURL:          firstNonEmpty(os.Getenv("LATCHWAY_DATABASE_URL"), os.Getenv("DATABASE_URL")),
+		Role:                 Role(envOr("LATCHWAY_ROLE", string(RoleAll))),
+		LogLevel:             strings.ToLower(envOr("LATCHWAY_LOG_LEVEL", "info")),
+		MigrateOnStart:       migrateOnStart,
+		ShutdownTimeout:      shutdownTimeout,
+		ReadTimeout:          readTimeout,
+		IdleTimeout:          idleTimeout,
+		DBMaxConnections:     int32(maxConnections),
+		PublicOrigin:         publicOrigin,
+		AdminBootstrapToken:  os.Getenv("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"),
+		AdminSessionLifetime: adminSessionLifetime,
 	}
-	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, cfg.Validate()); err != nil {
+	if err := errors.Join(migrateErr, shutdownErr, readErr, idleErr, maxConnectionsErr, adminSessionErr, cfg.Validate()); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -90,7 +99,27 @@ func (c Config) Validate() error {
 	if c.DBMaxConnections < 2 || c.DBMaxConnections > 500 {
 		errs = append(errs, errors.New("database max connections must be between 2 and 500"))
 	}
+	origin, originErr := url.Parse(c.PublicOrigin)
+	if originErr != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
+		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must be an absolute origin without credentials, path, query, or fragment"))
+	} else if origin.Scheme != "https" && !(origin.Scheme == "http" && isLoopbackHost(origin.Hostname())) {
+		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must use HTTPS except on localhost or a loopback address"))
+	}
+	if c.AdminBootstrapToken != "" && (len(c.AdminBootstrapToken) < 32 || len(c.AdminBootstrapToken) > 4096) {
+		errs = append(errs, errors.New("LATCHWAY_ADMIN_BOOTSTRAP_TOKEN must be between 32 and 4096 bytes"))
+	}
+	if c.AdminSessionLifetime < 5*time.Minute || c.AdminSessionLifetime > 30*24*time.Hour {
+		errs = append(errs, errors.New("admin session lifetime must be between 5 minutes and 30 days"))
+	}
 	return errors.Join(errs...)
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback()
 }
 
 func envOr(key, fallback string) string {

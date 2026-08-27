@@ -15,9 +15,9 @@ type Querier interface {
 	CreateApplication(ctx context.Context, arg CreateApplicationParams) (CreateApplicationRow, error)
 	CreateEnvironment(ctx context.Context, arg CreateEnvironmentParams) (CreateEnvironmentRow, error)
 	CreateOrganization(ctx context.Context, organizationID string, slug string, displayName string, createdAt pgtype.Timestamptz) (CreateOrganizationRow, error)
-	ListApplications(ctx context.Context, organizationID string, column2 pgtype.Timestamptz, createdAt pgtype.Timestamptz, limit int32) ([]ListApplicationsRow, error)
+	ListApplications(ctx context.Context, organizationID string, cursorCreatedAt pgtype.Timestamptz, cursorID *string, pageLimit int32) ([]ListApplicationsRow, error)
 	ListEnvironments(ctx context.Context, organizationID string, applicationID string) ([]ListEnvironmentsRow, error)
-	ListOrganizationsForAdmin(ctx context.Context, adminUserID string, column2 pgtype.Timestamptz, createdAt pgtype.Timestamptz, limit int32) ([]ListOrganizationsForAdminRow, error)
+	ListOrganizationsForAdmin(ctx context.Context, adminUserID string, cursorCreatedAt pgtype.Timestamptz, cursorID *string, pageLimit int32) ([]ListOrganizationsForAdminRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

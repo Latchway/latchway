@@ -1,0 +1,825 @@
+// Package adminapi implements the canonical HTTP control plane used by both
+// the embedded console and administrative CLI clients.
+package adminapi
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/controlplane"
+	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/problem"
+)
+
+const (
+	adminCookieName = "__Host-latchway_admin"
+	csrfHeader      = "X-CSRF-Token"
+	maxAdminBody    = 1 << 20
+)
+
+type principalContextKey struct{}
+
+type API struct {
+	auth            *adminauth.Store
+	control         *controlplane.Store
+	hasher          *adminauth.PasswordHasher
+	dummyHash       adminauth.PasswordHash
+	publicOrigin    string
+	sessionLifetime time.Duration
+	logger          *slog.Logger
+	loginLimiter    *failureLimiter
+}
+
+func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger) (*API, error) {
+	auth, err := adminauth.NewStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	control, err := controlplane.NewStore(pool)
+	if err != nil {
+		return nil, err
+	}
+	if logger == nil {
+		return nil, errors.New("admin API logger is nil")
+	}
+	hasher := adminauth.NewDefaultPasswordHasher()
+	dummyHash, err := hasher.Hash([]byte("latchway-login-equalization-only"))
+	if err != nil {
+		return nil, fmt.Errorf("create login equalization hash: %w", err)
+	}
+	return &API{
+		auth: auth, control: control, hasher: hasher, dummyHash: dummyHash,
+		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
+		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
+	}, nil
+}
+
+// InitializeBootstrap installs the configured one-time secret. A consumed
+// token never prevents startup; its continued presence is logged as a warning.
+func (api *API) InitializeBootstrap(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	err := api.auth.InitializeBootstrapToken(ctx, token, nil)
+	if errors.Is(err, adminauth.ErrBootstrapDisabled) {
+		api.logger.Warn("administrative bootstrap is disabled but LATCHWAY_ADMIN_BOOTSTRAP_TOKEN remains configured")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("initialize administrative bootstrap: %w", err)
+	}
+	return nil
+}
+
+func (api *API) Handler() http.Handler {
+	router := chi.NewRouter()
+	router.Use(noStore)
+	router.Use(api.auditRejectedMutation)
+	router.Post("/auth/bootstrap", api.bootstrap)
+	router.Post("/auth/login", api.login)
+	router.Group(func(protected chi.Router) {
+		protected.Use(api.authenticate)
+		protected.Get("/auth/session", api.session)
+		protected.With(api.mutationProtection).Post("/auth/logout", api.logout)
+		protected.Get("/organizations", api.organizations)
+		protected.With(api.mutationProtection).Post("/organizations", api.createOrganization)
+		protected.Get("/applications", api.applications)
+		protected.With(api.mutationProtection).Post("/applications", api.createApplication)
+		protected.Get("/applications/{applicationID}/environments", api.environments)
+		protected.With(api.mutationProtection).Post("/applications/{applicationID}/environments", api.createEnvironment)
+		protected.Get("/api-tokens", api.apiTokens)
+		protected.With(api.mutationProtection).Post("/api-tokens", api.createAPIToken)
+		protected.With(api.mutationProtection).Delete("/api-tokens/{tokenID}", api.revokeAPIToken)
+	})
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The administrative endpoint was not found."})
+	})
+	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		api.writeProblem(w, r, problem.Error{Code: "request_invalid", Detail: "The HTTP method is not supported by this administrative endpoint."})
+	})
+	return router
+}
+
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+type bootstrapRequest struct {
+	BootstrapToken   string `json:"bootstrap_token"`
+	OrganizationSlug string `json:"organization_slug"`
+	OrganizationName string `json:"organization_name"`
+	Email            string `json:"email"`
+	DisplayName      string `json:"display_name"`
+	Password         string `json:"password"`
+}
+
+func (api *API) bootstrap(w http.ResponseWriter, r *http.Request) {
+	if !api.optionalOriginValid(r) {
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The request origin is not allowed."})
+		return
+	}
+	request, err := decodeJSON[bootstrapRequest](r)
+	if err != nil || len(request.Password) < 12 {
+		api.writeProblem(w, r, invalidRequest("The bootstrap request is invalid."))
+		return
+	}
+	if err := api.auth.ValidateBootstrapToken(r.Context(), request.BootstrapToken); err != nil {
+		api.handleBootstrapError(w, r, err)
+		return
+	}
+	password := []byte(request.Password)
+	hash, err := api.hasher.Hash(password)
+	clear(password)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The bootstrap password is invalid."))
+		return
+	}
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	result, issued, err := api.auth.BootstrapOwnerAndSession(r.Context(), request.BootstrapToken, adminauth.BootstrapOwnerInput{
+		OrganizationSlug: request.OrganizationSlug, OrganizationName: request.OrganizationName,
+		Email: request.Email, DisplayName: request.DisplayName, PasswordHash: hash, RequestID: auditRequestID,
+	}, api.sessionLifetime)
+	if err != nil {
+		api.handleBootstrapError(w, r, err)
+		return
+	}
+	api.setSession(w, issued)
+	view, err := api.control.AdminView(r.Context(), result.AdminUserID)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, api.sessionDocument(view, principalFromIssued(result, issued)))
+}
+
+func (api *API) handleBootstrapError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, adminauth.ErrBootstrapDisabled), errors.Is(err, adminauth.ErrBootstrapAlreadyInitialized):
+		api.writeProblem(w, r, problem.Error{Code: "bootstrap_disabled", Detail: "First-owner setup is permanently unavailable."})
+	case errors.Is(err, adminauth.ErrBootstrapTokenInvalid), errors.Is(err, adminauth.ErrBootstrapTokenExpired):
+		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The bootstrap credential is invalid."})
+	case errors.Is(err, adminauth.ErrInvalidAdminInput):
+		api.writeProblem(w, r, invalidRequest("The bootstrap request is invalid."))
+	default:
+		api.internal(w, r, err)
+	}
+}
+
+type loginRequest struct {
+	Email          string `json:"email"`
+	Password       string `json:"password"`
+	OrganizationID string `json:"organization_id"`
+}
+
+func (api *API) login(w http.ResponseWriter, r *http.Request) {
+	if !api.optionalOriginValid(r) {
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The request origin is not allowed."})
+		return
+	}
+	request, err := decodeJSON[loginRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The login request is invalid."))
+		return
+	}
+	key := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(request.Email))))
+	if !api.loginLimiter.allow(key, time.Now()) {
+		api.writeProblem(w, r, problem.Error{Code: "rate_limited", Detail: "Too many failed login attempts.", RetryAfterSeconds: 300})
+		return
+	}
+	adminUserID, stored, credentialErr := api.auth.PasswordCredentialByEmail(r.Context(), request.Email)
+	if credentialErr != nil {
+		stored = api.dummyHash
+	}
+	password := []byte(request.Password)
+	verification, verifyErr := api.hasher.Verify(password, stored)
+	clear(password)
+	if credentialErr != nil || verifyErr != nil || !verification.Match {
+		if credentialErr != nil && !errors.Is(credentialErr, adminauth.ErrAdminAuthentication) {
+			api.internal(w, r, credentialErr)
+			return
+		}
+		api.loginLimiter.failure(key, time.Now())
+		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
+		return
+	}
+	view, err := api.control.AdminView(r.Context(), adminUserID)
+	if err != nil || len(view.Memberships) == 0 {
+		if err == nil {
+			err = errors.New("authenticated administrator has no active membership")
+		}
+		api.internal(w, r, err)
+		return
+	}
+	membership, ok := selectMembership(view.Memberships, request.OrganizationID)
+	if !ok {
+		api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "The administrator credentials are invalid."})
+		return
+	}
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	issued, err := api.auth.CreateSession(r.Context(), adminauth.CreateSessionInput{
+		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
+		Lifetime: api.sessionLifetime, RequestID: auditRequestID,
+	})
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	api.loginLimiter.success(key)
+	api.setSession(w, issued)
+	writeJSON(w, http.StatusOK, api.sessionDocument(view, adminauth.Principal{
+		OrganizationID: membership.OrganizationID, AdminUserID: adminUserID,
+		Role: membership.Role, Method: adminauth.AuthenticationSession,
+		CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt,
+	}))
+}
+
+func (api *API) session(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r.Context())
+	view, err := api.control.AdminView(r.Context(), principal.AdminUserID)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, api.sessionDocument(view, principal))
+}
+
+func (api *API) logout(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r.Context())
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	var actor adminauth.AuditActor
+	if principal.Method == adminauth.AuthenticationAPIToken {
+		actor, err = adminauth.NewAPITokenActor(principal.CredentialID)
+		if err == nil {
+			err = api.auth.RevokeAPIToken(r.Context(), principal.CredentialID, actor, auditRequestID, "logout")
+		}
+	} else {
+		actor, err = adminauth.NewAdminUserActor(principal.AdminUserID)
+		if err == nil {
+			err = api.auth.RevokeSession(r.Context(), principal.CredentialID, actor, auditRequestID, "logout")
+		}
+		api.clearSession(w)
+	}
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) organizations(w http.ResponseWriter, r *http.Request) {
+	pageRequest, err := parsePageRequest(r, id.Organization)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
+		return
+	}
+	items, err := api.control.ListOrganizations(r.Context(), mustPrincipal(r.Context()), pageRequest)
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	items, page := buildPage(items, int(pageRequest.Size), func(item controlplane.Organization) cursorDocument {
+		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": page})
+}
+
+func (api *API) createOrganization(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[controlplane.NamedInput](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The organization is invalid."))
+		return
+	}
+	item, err := api.control.CreateOrganization(r.Context(), mustPrincipal(r.Context()), request)
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (api *API) applications(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r.Context())
+	organizationID := r.URL.Query().Get("organization_id")
+	if organizationID == "" {
+		organizationID = principal.OrganizationID
+	}
+	pageRequest, err := parsePageRequest(r, id.Application)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
+		return
+	}
+	items, err := api.control.ListApplications(r.Context(), principal, organizationID, pageRequest)
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	items, page := buildPage(items, int(pageRequest.Size), func(item controlplane.Application) cursorDocument {
+		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": page})
+}
+
+type applicationRequest struct {
+	OrganizationID string `json:"organization_id"`
+	Slug           string `json:"slug"`
+	DisplayName    string `json:"display_name"`
+}
+
+func (api *API) createApplication(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[applicationRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The application is invalid."))
+		return
+	}
+	item, err := api.control.CreateApplication(r.Context(), mustPrincipal(r.Context()), controlplane.ApplicationInput{
+		OrganizationID: request.OrganizationID, NamedInput: controlplane.NamedInput{Slug: request.Slug, DisplayName: request.DisplayName},
+	})
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (api *API) environments(w http.ResponseWriter, r *http.Request) {
+	items, err := api.control.ListEnvironments(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "applicationID"))
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+type environmentRequest struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Kind        string `json:"kind"`
+}
+
+func (api *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[environmentRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The environment is invalid."))
+		return
+	}
+	item, err := api.control.CreateEnvironment(r.Context(), mustPrincipal(r.Context()), controlplane.EnvironmentInput{
+		ApplicationID: chi.URLParam(r, "applicationID"), Kind: request.Kind,
+		NamedInput: controlplane.NamedInput{Slug: request.Slug, DisplayName: request.DisplayName},
+	})
+	if err != nil {
+		api.handleControlError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (api *API) apiTokens(w http.ResponseWriter, r *http.Request) {
+	items, err := api.auth.ListAPITokens(r.Context(), mustPrincipal(r.Context()))
+	if err != nil {
+		api.handleAdminAuthError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+type apiTokenRequest struct {
+	Name      string                 `json:"name"`
+	Scopes    []adminauth.Capability `json:"scopes"`
+	ExpiresAt *time.Time             `json:"expires_at"`
+}
+
+func (api *API) createAPIToken(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[apiTokenRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The API token request is invalid."))
+		return
+	}
+	scope, err := adminauth.NewCapabilitySet(request.Scopes...)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The API token scope is invalid."))
+		return
+	}
+	principal := mustPrincipal(r.Context())
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	issued, err := api.auth.CreateAPIToken(r.Context(), adminauth.CreateAPITokenInput{
+		OrganizationID: principal.OrganizationID, AdminUserID: principal.AdminUserID,
+		CreatedByAdminUserID: principal.AdminUserID, Name: request.Name, Scope: scope,
+		ExpiresAt: request.ExpiresAt, RequestID: auditRequestID,
+	})
+	if err != nil {
+		api.handleAdminAuthError(w, r, err)
+		return
+	}
+	metadata := adminauth.APITokenMetadata{
+		ID: issued.APITokenID, Name: strings.TrimSpace(request.Name), Scopes: capabilityStrings(scope),
+		CreatedAt: issued.CreatedAt, ExpiresAt: issued.ExpiresAt, Revoked: false,
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"token": issued.Token.Reveal(), "metadata": metadata})
+}
+
+func (api *API) revokeAPIToken(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r.Context())
+	var actor adminauth.AuditActor
+	var err error
+	if principal.Method == adminauth.AuthenticationAPIToken {
+		actor, err = adminauth.NewAPITokenActor(principal.CredentialID)
+	} else {
+		actor, err = adminauth.NewAdminUserActor(principal.AdminUserID)
+	}
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	if err := api.auth.RevokeAPIToken(r.Context(), chi.URLParam(r, "tokenID"), actor, auditRequestID, "administrative revocation"); err != nil {
+		api.handleAdminAuthError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func capabilityStrings(scope adminauth.CapabilitySet) []string {
+	values := scope.Values()
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = string(value)
+	}
+	return result
+}
+
+func (api *API) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bearer := strings.TrimSpace(r.Header.Get("Authorization"))
+		cookie, cookieErr := r.Cookie(adminCookieName)
+		if bearer != "" && cookieErr == nil {
+			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Ambiguous administrator credentials are not accepted."})
+			return
+		}
+		var principal adminauth.Principal
+		var err error
+		switch {
+		case strings.HasPrefix(bearer, "Bearer "):
+			principal, err = api.auth.AuthenticateAPIToken(r.Context(), strings.TrimPrefix(bearer, "Bearer "))
+		case cookieErr == nil:
+			principal, err = api.auth.AuthenticateSession(r.Context(), cookie.Value)
+		default:
+			err = adminauth.ErrAdminAuthentication
+		}
+		if err != nil {
+			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Administrator authentication is required."})
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal)))
+	})
+}
+
+func (api *API) mutationProtection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal := mustPrincipal(r.Context())
+		if principal.Method == adminauth.AuthenticationSession {
+			if r.Header.Get("Origin") != api.publicOrigin {
+				api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The request origin is not allowed."})
+				return
+			}
+			if err := api.auth.ValidateSessionCSRF(r.Context(), principal.CredentialID, r.Header.Get(csrfHeader)); err != nil {
+				api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The CSRF credential is invalid."})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (api *API) optionalOriginValid(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	return origin == "" || origin == api.publicOrigin
+}
+
+func (api *API) setSession(w http.ResponseWriter, session adminauth.IssuedSession) {
+	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: session.Token.Reveal(), Path: "/", Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	w.Header().Set(csrfHeader, session.CSRFToken.Reveal())
+	w.Header().Set("Cache-Control", "no-store")
+}
+
+func (api *API) clearSession(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+}
+
+func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth.Principal) map[string]any {
+	var expiresAt any
+	if principal.CredentialExpiresAt != nil {
+		expiresAt = principal.CredentialExpiresAt.UTC()
+	}
+	capabilities := make([]string, 0)
+	for _, capability := range []adminauth.Capability{adminauth.ManageOwners, adminauth.ManageSecrets, adminauth.ActivateConfiguration, adminauth.RunSelfTests, adminauth.InspectUsers, adminauth.RevokeInstallations, adminauth.ViewPromptBodies} {
+		if principal.Allows(capability, adminauth.AuthorizationContext{}) {
+			capabilities = append(capabilities, string(capability))
+		}
+	}
+	return map[string]any{
+		"administrator":   map[string]any{"id": view.ID, "email": view.Email, "enabled": true},
+		"organization_id": principal.OrganizationID, "memberships": view.Memberships,
+		"capabilities": capabilities, "expires_at": expiresAt,
+	}
+}
+
+func selectMembership(memberships []controlplane.Membership, organizationID string) (controlplane.Membership, bool) {
+	if organizationID == "" && len(memberships) > 0 {
+		return memberships[0], true
+	}
+	for _, membership := range memberships {
+		if membership.OrganizationID == organizationID {
+			return membership, true
+		}
+	}
+	return controlplane.Membership{}, false
+}
+
+type cursorDocument struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+func parsePageRequest(r *http.Request, prefix id.Prefix) (controlplane.PageRequest, error) {
+	size := 50
+	if raw := r.URL.Query().Get("page_size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			return controlplane.PageRequest{}, controlplane.ErrInvalid
+		}
+		size = parsed
+	}
+	page := controlplane.PageRequest{Size: int32(size)}
+	rawCursor := r.URL.Query().Get("cursor")
+	if rawCursor == "" {
+		return page, nil
+	}
+	if len(rawCursor) > 2048 {
+		return controlplane.PageRequest{}, controlplane.ErrInvalid
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(rawCursor)
+	if err != nil {
+		return controlplane.PageRequest{}, controlplane.ErrInvalid
+	}
+	value, err := jsonsafe.DecodeReader(bytes.NewReader(decoded), 4096)
+	if err != nil {
+		return controlplane.PageRequest{}, controlplane.ErrInvalid
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return controlplane.PageRequest{}, controlplane.ErrInvalid
+	}
+	decoder := json.NewDecoder(bytes.NewReader(canonical))
+	decoder.DisallowUnknownFields()
+	var cursor cursorDocument
+	if err := decoder.Decode(&cursor); err != nil || cursor.CreatedAt.IsZero() || id.Validate(cursor.ID, prefix) != nil {
+		return controlplane.PageRequest{}, controlplane.ErrInvalid
+	}
+	page.After = cursor.CreatedAt.UTC()
+	page.AfterID = cursor.ID
+	return page, nil
+}
+
+func buildPage[T any](items []T, size int, cursorFor func(T) cursorDocument) ([]T, map[string]any) {
+	hasMore := len(items) > size
+	if hasMore {
+		items = items[:size]
+	}
+	page := map[string]any{"has_more": hasMore}
+	if hasMore && len(items) > 0 {
+		encoded, err := json.Marshal(cursorFor(items[len(items)-1]))
+		if err == nil {
+			page["next_cursor"] = base64.RawURLEncoding.EncodeToString(encoded)
+		}
+	}
+	return items, page
+}
+
+func principalFromIssued(result adminauth.BootstrapResult, issued adminauth.IssuedSession) adminauth.Principal {
+	return adminauth.Principal{OrganizationID: result.OrganizationID, AdminUserID: result.AdminUserID, Role: adminauth.RoleOwner, Method: adminauth.AuthenticationSession, CredentialID: issued.SessionID, CredentialExpiresAt: &issued.ExpiresAt}
+}
+
+func decodeJSON[T any](r *http.Request) (T, error) {
+	var zero T
+	if media := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); media != "application/json" {
+		return zero, errors.New("content type must be application/json")
+	}
+	value, err := jsonsafe.DecodeReader(r.Body, maxAdminBody)
+	if err != nil {
+		return zero, err
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return zero, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(canonical)))
+	decoder.DisallowUnknownFields()
+	var result T
+	if err := decoder.Decode(&result); err != nil {
+		return zero, err
+	}
+	return result, nil
+}
+
+func mustPrincipal(ctx context.Context) adminauth.Principal {
+	principal, ok := ctx.Value(principalContextKey{}).(adminauth.Principal)
+	if !ok {
+		panic("admin principal middleware invariant violated")
+	}
+	return principal
+}
+
+func invalidRequest(detail string) problem.Error {
+	return problem.Error{Code: "request_invalid", Detail: detail}
+}
+
+func (api *API) handleControlError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, controlplane.ErrInvalid):
+		api.writeProblem(w, r, invalidRequest("The administrative resource is invalid."))
+	case errors.Is(err, controlplane.ErrForbidden):
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The administrator cannot perform this operation."})
+	case errors.Is(err, controlplane.ErrConflict):
+		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "A resource with the same identifier already exists."})
+	case errors.Is(err, controlplane.ErrNotFound):
+		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The requested resource was not found."})
+	default:
+		api.internal(w, r, err)
+	}
+}
+
+func (api *API) handleAdminAuthError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, adminauth.ErrInvalidAdminInput), errors.Is(err, adminauth.ErrEmptyTokenScope), errors.Is(err, adminauth.ErrInvalidCapability):
+		api.writeProblem(w, r, invalidRequest("The administrative credential request is invalid."))
+	case errors.Is(err, adminauth.ErrAdminAuthentication):
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The administrator cannot perform this credential operation."})
+	case errors.Is(err, adminauth.ErrAdminNotFound):
+		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The administrative credential was not found."})
+	default:
+		api.internal(w, r, err)
+	}
+}
+
+func (api *API) writeProblem(w http.ResponseWriter, r *http.Request, value problem.Error) {
+	problem.Write(w, requestID(r.Context()), value)
+}
+
+func (api *API) internal(w http.ResponseWriter, r *http.Request, err error) {
+	api.logger.ErrorContext(r.Context(), "admin API operation failed", "request_id", requestID(r.Context()), "error_class", fmt.Sprintf("%T", err))
+	api.writeProblem(w, r, problem.Error{Code: "internal_error", Detail: "The administrative operation could not be completed."})
+}
+
+func requestID(ctx context.Context) string {
+	value := middleware.GetReqID(ctx)
+	if value != "" {
+		return value
+	}
+	generated, err := id.New(id.LogicalRequest)
+	if err != nil {
+		return "request_unknown"
+	}
+	return generated
+}
+
+func (api *API) recordDenied(ctx context.Context, action, resourceType string) {
+	eventID, eventErr := id.New(id.AuditEvent)
+	requestID, requestErr := id.New(id.AdminRequest)
+	change, changeErr := adminauth.NewSensitiveAuditChange("credential", adminauth.AuditSet)
+	if eventErr != nil || requestErr != nil || changeErr != nil {
+		return
+	}
+	mutation, err := adminauth.NewAuditMutation(eventID, "", "", adminauth.SystemActor(), action, resourceType, requestID, adminauth.AuditDenied, requestID, time.Now().UTC(), []adminauth.AuditChange{change})
+	if err == nil {
+		_ = api.auth.RecordAuditMutation(ctx, mutation)
+	}
+}
+
+func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch && r.Method != http.MethodDelete {
+			next.ServeHTTP(w, r)
+			return
+		}
+		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(wrapped, r)
+		if wrapped.Status() >= http.StatusBadRequest {
+			action, resourceType := rejectedMutationDescriptor(r.Method, r.URL.Path)
+			api.recordDenied(r.Context(), action, resourceType)
+		}
+	})
+}
+
+func rejectedMutationDescriptor(method, path string) (string, string) {
+	switch {
+	case strings.HasSuffix(path, "/auth/bootstrap"):
+		return "admin.bootstrap_owner", "admin_request"
+	case strings.HasSuffix(path, "/auth/login"):
+		return "admin.login", "admin_request"
+	case strings.HasSuffix(path, "/auth/logout"):
+		return "admin.logout", "admin_request"
+	case strings.HasSuffix(path, "/organizations"):
+		return "admin.organization_create", "admin_request"
+	case strings.HasSuffix(path, "/applications"):
+		return "admin.application_create", "admin_request"
+	case strings.HasSuffix(path, "/environments"):
+		return "admin.environment_create", "admin_request"
+	case strings.Contains(path, "/api-tokens") && method == http.MethodPost:
+		return "admin.api_token_create", "admin_request"
+	case strings.Contains(path, "/api-tokens") && method == http.MethodDelete:
+		return "admin.api_token_revoke", "admin_request"
+	default:
+		return "admin.request_rejected", "admin_request"
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+type failureLimiter struct {
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+	failures map[[sha256.Size]byte][]time.Time
+}
+
+func newFailureLimiter(limit int, window time.Duration) *failureLimiter {
+	return &failureLimiter{limit: limit, window: window, failures: make(map[[sha256.Size]byte][]time.Time)}
+}
+
+func (limiter *failureLimiter) allow(key [sha256.Size]byte, now time.Time) bool {
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	limiter.prune(key, now)
+	return len(limiter.failures[key]) < limiter.limit
+}
+
+func (limiter *failureLimiter) failure(key [sha256.Size]byte, now time.Time) {
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	limiter.prune(key, now)
+	limiter.failures[key] = append(limiter.failures[key], now)
+}
+
+func (limiter *failureLimiter) success(key [sha256.Size]byte) {
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	delete(limiter.failures, key)
+}
+
+func (limiter *failureLimiter) prune(key [sha256.Size]byte, now time.Time) {
+	cutoff := now.Add(-limiter.window)
+	values := limiter.failures[key]
+	first := 0
+	for first < len(values) && values[first].Before(cutoff) {
+		first++
+	}
+	if first == len(values) {
+		delete(limiter.failures, key)
+		return
+	}
+	limiter.failures[key] = values[first:]
+}

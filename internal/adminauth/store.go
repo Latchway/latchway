@@ -194,6 +194,48 @@ func (store *Store) bootstrapInitializationOutcome(
 	return ErrBootstrapAlreadyInitialized
 }
 
+// ValidateBootstrapToken performs the cheap, read-only credential check used
+// before the API spends resources deriving an Argon2id owner password. The
+// atomic bootstrap transaction always validates the token again under lock.
+func (store *Store) ValidateBootstrapToken(ctx context.Context, plaintext string) error {
+	presented, err := HashBootstrapToken(plaintext)
+	if err != nil {
+		return ErrBootstrapTokenInvalid
+	}
+	var storedBytes []byte
+	var expiresAt *time.Time
+	var consumedAt *time.Time
+	var owner bool
+	err = store.pool.QueryRow(ctx, `
+		SELECT token_hash,
+		       expires_at,
+		       consumed_at,
+		       EXISTS (SELECT 1 FROM admin_memberships WHERE role = 'owner' AND status = 'active')
+		FROM admin_bootstrap_tokens
+		WHERE generation = 1
+	`).Scan(&storedBytes, &expiresAt, &consumedAt, &owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrBootstrapTokenInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("validate bootstrap token: %w", err)
+	}
+	if consumedAt != nil || owner {
+		return ErrBootstrapDisabled
+	}
+	if expiresAt != nil && !expiresAt.After(store.now().UTC()) {
+		return ErrBootstrapTokenExpired
+	}
+	stored, err := ParseTokenHash(storedBytes)
+	if err != nil {
+		return fmt.Errorf("parse bootstrap token hash: %w", err)
+	}
+	if !stored.Equal(presented) {
+		return ErrBootstrapTokenInvalid
+	}
+	return nil
+}
+
 // BootstrapOwner atomically consumes the one-time token and creates the first
 // organization, administrator, owner membership, password, and audit event.
 func (store *Store) BootstrapOwner(
@@ -201,34 +243,59 @@ func (store *Store) BootstrapOwner(
 	plaintext string,
 	input BootstrapOwnerInput,
 ) (BootstrapResult, error) {
+	result, _, err := store.bootstrapOwner(ctx, plaintext, input, 0)
+	return result, err
+}
+
+// BootstrapOwnerAndSession performs first-owner setup and issues the initial
+// browser session in the same transaction. No owner is left behind if session
+// issuance, persistence, auditing, or commit fails.
+func (store *Store) BootstrapOwnerAndSession(
+	ctx context.Context,
+	plaintext string,
+	input BootstrapOwnerInput,
+	sessionLifetime time.Duration,
+) (BootstrapResult, IssuedSession, error) {
+	if sessionLifetime == 0 {
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("%w: session lifetime", ErrInvalidAdminInput)
+	}
+	return store.bootstrapOwner(ctx, plaintext, input, sessionLifetime)
+}
+
+func (store *Store) bootstrapOwner(
+	ctx context.Context,
+	plaintext string,
+	input BootstrapOwnerInput,
+	sessionLifetime time.Duration,
+) (BootstrapResult, IssuedSession, error) {
 	presentedHash, err := HashBootstrapToken(plaintext)
 	if err != nil {
-		return BootstrapResult{}, ErrBootstrapTokenInvalid
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapTokenInvalid
 	}
 	if err := input.validate(); err != nil {
-		return BootstrapResult{}, err
+		return BootstrapResult{}, IssuedSession{}, err
 	}
 	emailNormalized, err := NormalizeEmail(input.Email)
 	if err != nil {
-		return BootstrapResult{}, err
+		return BootstrapResult{}, IssuedSession{}, err
 	}
 
 	result := BootstrapResult{}
 	result.OrganizationID, err = store.newID(id.Organization)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("generate organization ID: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate organization ID: %w", err)
 	}
 	result.AdminUserID, err = store.newID(id.AdminUser)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("generate admin user ID: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate admin user ID: %w", err)
 	}
 	result.AdminMembershipID, err = store.newID(id.AdminMembership)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("generate admin membership ID: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate admin membership ID: %w", err)
 	}
 	eventID, err := store.newID(id.AuditEvent)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("generate audit event ID: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate audit event ID: %w", err)
 	}
 	bootstrapChange, _ := NewSensitiveAuditChange("bootstrap_token", AuditConsume)
 	passwordChange, _ := NewSensitiveAuditChange("password_hash", AuditSet)
@@ -248,7 +315,63 @@ func (store *Store) BootstrapOwner(
 		[]AuditChange{bootstrapChange, passwordChange, roleChange},
 	)
 	if err != nil {
-		return BootstrapResult{}, err
+		return BootstrapResult{}, IssuedSession{}, err
+	}
+
+	var issuedSession IssuedSession
+	var sessionMutation AuditMutation
+	if sessionLifetime != 0 {
+		sessionInput := CreateSessionInput{
+			OrganizationID: result.OrganizationID,
+			AdminUserID:    result.AdminUserID,
+			Lifetime:       sessionLifetime,
+			RequestID:      input.RequestID,
+		}
+		if err := sessionInput.validate(); err != nil {
+			return BootstrapResult{}, IssuedSession{}, err
+		}
+		issuedSession.SessionID, err = store.newID(id.AdminSession)
+		if err != nil {
+			return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate bootstrap session ID: %w", err)
+		}
+		sessionToken, issueErr := store.tokens.Issue(AdminSessionKind)
+		if issueErr != nil {
+			return BootstrapResult{}, IssuedSession{}, issueErr
+		}
+		csrfToken, issueErr := store.tokens.Issue(CSRFTokenKind)
+		if issueErr != nil {
+			return BootstrapResult{}, IssuedSession{}, issueErr
+		}
+		issuedSession.Token = sessionToken.Secret
+		issuedSession.CSRFToken = csrfToken.Secret
+		issuedSession.ExpiresAt = now.Add(sessionLifetime)
+
+		sessionEventID, eventErr := store.newID(id.AuditEvent)
+		if eventErr != nil {
+			return BootstrapResult{}, IssuedSession{}, fmt.Errorf("generate bootstrap session audit event ID: %w", eventErr)
+		}
+		actor, actorErr := NewAdminUserActor(result.AdminUserID)
+		if actorErr != nil {
+			return BootstrapResult{}, IssuedSession{}, actorErr
+		}
+		sessionChange, _ := NewSensitiveAuditChange("session_token", AuditSet)
+		csrfChange, _ := NewSensitiveAuditChange("csrf_token", AuditSet)
+		sessionMutation, err = NewAuditMutation(
+			sessionEventID,
+			result.OrganizationID,
+			"",
+			actor,
+			"admin.session_create",
+			"admin_session",
+			issuedSession.SessionID,
+			AuditSucceeded,
+			input.RequestID,
+			now,
+			[]AuditChange{sessionChange, csrfChange},
+		)
+		if err != nil {
+			return BootstrapResult{}, IssuedSession{}, err
+		}
 	}
 
 	// Locking the singleton row is sufficient to serialize consumers. Under
@@ -256,7 +379,7 @@ func (store *Store) BootstrapOwner(
 	// after the lock is released and returns the stable disabled result.
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("begin owner bootstrap: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("begin owner bootstrap: %w", err)
 	}
 	defer rollback(tx)
 
@@ -270,30 +393,30 @@ func (store *Store) BootstrapOwner(
 		FOR UPDATE
 	`).Scan(&storedHashBytes, &expiresAt, &consumedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return BootstrapResult{}, ErrBootstrapTokenInvalid
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapTokenInvalid
 	}
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("lock bootstrap token: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("lock bootstrap token: %w", err)
 	}
 	if consumedAt != nil {
-		return BootstrapResult{}, ErrBootstrapDisabled
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapDisabled
 	}
 	owner, err := hasOwner(ctx, tx)
 	if err != nil {
-		return BootstrapResult{}, err
+		return BootstrapResult{}, IssuedSession{}, err
 	}
 	if owner {
-		return BootstrapResult{}, ErrBootstrapDisabled
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapDisabled
 	}
 	storedHash, err := ParseTokenHash(storedHashBytes)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("read bootstrap token hash: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("read bootstrap token hash: %w", err)
 	}
 	if !storedHash.Equal(presentedHash) {
-		return BootstrapResult{}, ErrBootstrapTokenInvalid
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapTokenInvalid
 	}
 	if expiresAt != nil && !expiresAt.After(now) {
-		return BootstrapResult{}, ErrBootstrapTokenExpired
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapTokenExpired
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -301,7 +424,7 @@ func (store *Store) BootstrapOwner(
 			organization_id, slug, display_name, status, created_at, updated_at
 		) VALUES ($1, $2, $3, 'active', $4, $4)
 	`, result.OrganizationID, input.OrganizationSlug, strings.TrimSpace(input.OrganizationName), now); err != nil {
-		return BootstrapResult{}, fmt.Errorf("create bootstrap organization: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("create bootstrap organization: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO admin_users (
@@ -314,14 +437,14 @@ func (store *Store) BootstrapOwner(
 			updated_at
 		) VALUES ($1, $2, $3, $4, 'active', $5, $5)
 	`, result.AdminUserID, strings.TrimSpace(input.Email), emailNormalized, strings.TrimSpace(input.DisplayName), now); err != nil {
-		return BootstrapResult{}, fmt.Errorf("create bootstrap admin user: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("create bootstrap admin user: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO admin_password_credentials (
 			admin_user_id, password_hash, created_at, changed_at
 		) VALUES ($1, $2, $3, $3)
 	`, result.AdminUserID, input.PasswordHash.Encoded(), now); err != nil {
-		return BootstrapResult{}, fmt.Errorf("create bootstrap password: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("create bootstrap password: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO admin_memberships (
@@ -334,7 +457,34 @@ func (store *Store) BootstrapOwner(
 			updated_at
 		) VALUES ($1, $2, $3, 'owner', 'active', $4, $4)
 	`, result.AdminMembershipID, result.OrganizationID, result.AdminUserID, now); err != nil {
-		return BootstrapResult{}, fmt.Errorf("create bootstrap owner membership: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("create bootstrap owner membership: %w", err)
+	}
+	if sessionLifetime != 0 {
+		sessionHash, hashErr := HashToken(AdminSessionKind, issuedSession.Token.Reveal())
+		if hashErr != nil {
+			return BootstrapResult{}, IssuedSession{}, hashErr
+		}
+		csrfHash, hashErr := HashToken(CSRFTokenKind, issuedSession.CSRFToken.Reveal())
+		if hashErr != nil {
+			return BootstrapResult{}, IssuedSession{}, hashErr
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO admin_sessions (
+				admin_session_id,
+				organization_id,
+				admin_user_id,
+				token_hash,
+				token_hint,
+				csrf_token_hash,
+				created_at,
+				expires_at,
+				last_seen_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7)
+		`, issuedSession.SessionID, result.OrganizationID, result.AdminUserID,
+			sessionHash.Bytes(), issuedSession.Token.Hint(), csrfHash.Bytes(), now,
+			issuedSession.ExpiresAt); err != nil {
+			return BootstrapResult{}, IssuedSession{}, fmt.Errorf("create bootstrap session: %w", err)
+		}
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE admin_bootstrap_tokens
@@ -342,21 +492,26 @@ func (store *Store) BootstrapOwner(
 		WHERE generation = 1 AND consumed_at IS NULL
 	`, now, result.AdminUserID)
 	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("consume bootstrap token: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("consume bootstrap token: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
-		return BootstrapResult{}, ErrBootstrapDisabled
+		return BootstrapResult{}, IssuedSession{}, ErrBootstrapDisabled
 	}
 	if err := insertAuditMutation(ctx, tx, mutation); err != nil {
-		return BootstrapResult{}, err
+		return BootstrapResult{}, IssuedSession{}, err
+	}
+	if sessionLifetime != 0 {
+		if err := insertAuditMutation(ctx, tx, sessionMutation); err != nil {
+			return BootstrapResult{}, IssuedSession{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		if isSerializationFailure(err) {
-			return BootstrapResult{}, ErrBootstrapDisabled
+			return BootstrapResult{}, IssuedSession{}, ErrBootstrapDisabled
 		}
-		return BootstrapResult{}, fmt.Errorf("commit owner bootstrap: %w", err)
+		return BootstrapResult{}, IssuedSession{}, fmt.Errorf("commit owner bootstrap: %w", err)
 	}
-	return result, nil
+	return result, issuedSession, nil
 }
 
 // PasswordCredentialByEmail returns a validated hash for a currently active
@@ -512,12 +667,13 @@ func (store *Store) AuthenticateSession(ctx context.Context, plaintext string) (
 		  AND m.organization_id = s.organization_id
 		  AND m.admin_user_id = s.admin_user_id
 		  AND m.status = 'active'
-		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id
+		RETURNING s.organization_id, s.admin_user_id, m.role, s.admin_session_id, s.expires_at
 	`, hash.Bytes(), now).Scan(
 		&principal.OrganizationID,
 		&principal.AdminUserID,
 		&role,
 		&principal.CredentialID,
+		&principal.CredentialExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Principal{}, ErrAdminAuthentication
@@ -778,8 +934,48 @@ func (store *Store) CreateAPIToken(
 	return IssuedAPIToken{
 		APITokenID: tokenID,
 		Token:      token.Secret,
+		CreatedAt:  now,
 		ExpiresAt:  input.ExpiresAt,
 	}, nil
+}
+
+// ListAPITokens returns only metadata for the current administrator in the
+// active organization. Token hashes and plaintext values never cross this API.
+func (store *Store) ListAPITokens(ctx context.Context, principal Principal) ([]APITokenMetadata, error) {
+	if err := id.Validate(principal.OrganizationID, id.Organization); err != nil {
+		return nil, ErrInvalidAdminInput
+	}
+	if err := id.Validate(principal.AdminUserID, id.AdminUser); err != nil {
+		return nil, ErrInvalidAdminInput
+	}
+	rows, err := store.pool.Query(ctx, `
+		SELECT admin_api_token_id,
+		       name,
+		       scopes,
+		       created_at,
+		       expires_at,
+		       revoked_at IS NOT NULL
+		FROM admin_api_tokens
+		WHERE organization_id = $1
+		  AND admin_user_id = $2
+		ORDER BY created_at, admin_api_token_id
+	`, principal.OrganizationID, principal.AdminUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list admin API tokens: %w", err)
+	}
+	defer rows.Close()
+	items := make([]APITokenMetadata, 0)
+	for rows.Next() {
+		var item APITokenMetadata
+		if err := rows.Scan(&item.ID, &item.Name, &item.Scopes, &item.CreatedAt, &item.ExpiresAt, &item.Revoked); err != nil {
+			return nil, fmt.Errorf("scan admin API token metadata: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate admin API token metadata: %w", err)
+	}
+	return items, nil
 }
 
 // AuthenticateAPIToken validates and touches an active scoped token.
@@ -805,13 +1001,14 @@ func (store *Store) AuthenticateAPIToken(ctx context.Context, plaintext string) 
 		  AND m.admin_user_id = token.admin_user_id
 		  AND m.status = 'active'
 		RETURNING token.organization_id, token.admin_user_id, m.role,
-		          token.admin_api_token_id, token.scopes
+		          token.admin_api_token_id, token.scopes, token.expires_at
 	`, hash.Bytes(), now).Scan(
 		&principal.OrganizationID,
 		&principal.AdminUserID,
 		&role,
 		&principal.CredentialID,
 		&scopes,
+		&principal.CredentialExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Principal{}, ErrAdminAuthentication
@@ -930,6 +1127,15 @@ func (store *Store) RecordAuditMutation(ctx context.Context, mutation AuditMutat
 		return fmt.Errorf("commit audit mutation: %w", err)
 	}
 	return nil
+}
+
+// InsertAuditMutation writes a validated mutation into an existing transaction
+// so control-plane resource changes and their audit evidence commit atomically.
+func InsertAuditMutation(ctx context.Context, tx pgx.Tx, mutation AuditMutation) error {
+	if tx == nil {
+		return errors.New("audit transaction is nil")
+	}
+	return insertAuditMutation(ctx, tx, mutation)
 }
 
 func insertAuditMutation(ctx context.Context, tx pgx.Tx, mutation AuditMutation) error {

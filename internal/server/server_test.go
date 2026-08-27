@@ -1,9 +1,15 @@
 package server
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/latchway/latchway/internal/config"
+	"github.com/latchway/latchway/internal/id"
 )
 
 func TestHealthHandler(t *testing.T) {
@@ -29,5 +35,32 @@ func TestSecurityHeaders(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
 	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff header")
+	}
+}
+
+func TestAdminAPIIsMountedAheadOfConsoleFallback(t *testing.T) {
+	t.Parallel()
+
+	admin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/admin/v1/probe" {
+			t.Fatalf("mounted admin path = %q, want /admin/v1/probe", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server, err := New(config.Config{
+		ListenAddress: "127.0.0.1:8080",
+		ReadTimeout:   time.Second,
+		IdleTimeout:   time.Second,
+	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), admin)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/v1/probe", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("admin route status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if err := id.Validate(recorder.Header().Get("X-Latchway-Request-ID"), id.LogicalRequest); err != nil {
+		t.Fatalf("response request ID is not canonical: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/latchway/latchway/internal/adminapi"
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/server"
@@ -26,7 +27,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		}
 	}
 
-	httpServer, err := server.New(cfg, pool, logger)
+	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger)
+	if err != nil {
+		return fmt.Errorf("construct administrative API: %w", err)
+	}
+	if err := adminAPI.InitializeBootstrap(ctx, cfg.AdminBootstrapToken); err != nil {
+		return err
+	}
+
+	httpServer, err := server.New(cfg, pool, logger, adminAPI.Handler())
 	if err != nil {
 		return err
 	}

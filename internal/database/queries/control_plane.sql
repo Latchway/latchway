@@ -21,15 +21,18 @@ SELECT
 FROM organizations AS organization
 JOIN admin_memberships AS membership
     ON membership.organization_id = organization.organization_id
-WHERE membership.admin_user_id = $1
+WHERE membership.admin_user_id = sqlc.arg(admin_user_id)
   AND membership.status = 'active'
   AND organization.status = 'active'
   AND (
-      $2::timestamptz IS NULL
-      OR (organization.created_at, organization.organization_id) > ($2, $3)
+      sqlc.narg(cursor_created_at)::timestamptz IS NULL
+      OR (organization.created_at, organization.organization_id) > (
+          sqlc.narg(cursor_created_at)::timestamptz,
+          sqlc.narg(cursor_id)::text
+      )
   )
 ORDER BY organization.created_at, organization.organization_id
-LIMIT $4;
+LIMIT sqlc.arg(page_limit);
 
 -- name: CreateApplication :one
 INSERT INTO applications (
@@ -46,14 +49,17 @@ RETURNING application_id, organization_id, slug, display_name, status, created_a
 -- name: ListApplications :many
 SELECT application_id, organization_id, slug, display_name, status, created_at, updated_at
 FROM applications
-WHERE organization_id = $1
+WHERE organization_id = sqlc.arg(organization_id)
   AND status = 'active'
   AND (
-      $2::timestamptz IS NULL
-      OR (created_at, application_id) > ($2, $3)
+      sqlc.narg(cursor_created_at)::timestamptz IS NULL
+      OR (created_at, application_id) > (
+          sqlc.narg(cursor_created_at)::timestamptz,
+          sqlc.narg(cursor_id)::text
+      )
   )
 ORDER BY created_at, application_id
-LIMIT $4;
+LIMIT sqlc.arg(page_limit);
 
 -- name: CreateEnvironment :one
 INSERT INTO environments (

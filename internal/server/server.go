@@ -17,6 +17,7 @@ import (
 	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/database"
+	"github.com/latchway/latchway/internal/id"
 	console "github.com/latchway/latchway/web/console"
 )
 
@@ -27,13 +28,16 @@ type Server struct {
 }
 
 // New builds a server whose readiness reflects PostgreSQL and schema state.
-func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
+func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, adminHandler http.Handler) (*Server, error) {
+	if adminHandler == nil {
+		return nil, errors.New("admin API handler is nil")
+	}
 	consoleAssets, err := console.Assets()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded admin console: %w", err)
 	}
 	router := chi.NewRouter()
-	router.Use(middleware.RequestID)
+	router.Use(latchwayRequestID)
 	router.Use(requestIDHeader)
 	router.Use(recoverer(logger))
 	router.Use(securityHeaders)
@@ -41,6 +45,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*Server, e
 
 	router.Get("/healthz", healthHandler)
 	router.Get("/readyz", readinessHandler(pool))
+	router.Mount("/admin/v1", adminHandler)
 	router.NotFound(newConsoleHandler(consoleAssets).ServeHTTP)
 
 	return &Server{
@@ -54,6 +59,24 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*Server, e
 		},
 		logger: logger,
 	}, nil
+}
+
+func latchwayRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID, err := id.New(id.LogicalRequest)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"type":      "about:blank",
+				"title":     "Service Unavailable",
+				"status":    http.StatusServiceUnavailable,
+				"code":      "server_not_ready",
+				"retryable": true,
+			})
+			return
+		}
+		ctx := context.WithValue(r.Context(), middleware.RequestIDKey, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // Run serves until context cancellation and then drains in-flight work.

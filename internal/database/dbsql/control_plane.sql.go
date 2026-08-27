@@ -225,7 +225,10 @@ WHERE organization_id = $1
   AND status = 'active'
   AND (
       $2::timestamptz IS NULL
-      OR (created_at, application_id) > ($2, $3)
+      OR (created_at, application_id) > (
+          $2::timestamptz,
+          $3::text
+      )
   )
 ORDER BY created_at, application_id
 LIMIT $4
@@ -241,12 +244,12 @@ type ListApplicationsRow struct {
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
-func (q *Queries) ListApplications(ctx context.Context, organizationID string, column2 pgtype.Timestamptz, createdAt pgtype.Timestamptz, limit int32) ([]ListApplicationsRow, error) {
+func (q *Queries) ListApplications(ctx context.Context, organizationID string, cursorCreatedAt pgtype.Timestamptz, cursorID *string, pageLimit int32) ([]ListApplicationsRow, error) {
 	rows, err := q.db.Query(ctx, listApplications,
 		organizationID,
-		column2,
-		createdAt,
-		limit,
+		cursorCreatedAt,
+		cursorID,
+		pageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -342,7 +345,10 @@ WHERE membership.admin_user_id = $1
   AND organization.status = 'active'
   AND (
       $2::timestamptz IS NULL
-      OR (organization.created_at, organization.organization_id) > ($2, $3)
+      OR (organization.created_at, organization.organization_id) > (
+          $2::timestamptz,
+          $3::text
+      )
   )
 ORDER BY organization.created_at, organization.organization_id
 LIMIT $4
@@ -358,12 +364,12 @@ type ListOrganizationsForAdminRow struct {
 	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
-func (q *Queries) ListOrganizationsForAdmin(ctx context.Context, adminUserID string, column2 pgtype.Timestamptz, createdAt pgtype.Timestamptz, limit int32) ([]ListOrganizationsForAdminRow, error) {
+func (q *Queries) ListOrganizationsForAdmin(ctx context.Context, adminUserID string, cursorCreatedAt pgtype.Timestamptz, cursorID *string, pageLimit int32) ([]ListOrganizationsForAdminRow, error) {
 	rows, err := q.db.Query(ctx, listOrganizationsForAdmin,
 		adminUserID,
-		column2,
-		createdAt,
-		limit,
+		cursorCreatedAt,
+		cursorID,
+		pageLimit,
 	)
 	if err != nil {
 		return nil, err
