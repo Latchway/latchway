@@ -34,6 +34,7 @@ type ClientCoordinatorConfig struct {
 	Configuration      *configuration.Store
 	Users              *identity.UserStore
 	Sessions           *Store
+	AccessTokens       *AccessTokenVerifier
 	Secrets            clientSecretStore
 	IdentityHTTPClient *http.Client
 	Now                func() time.Time
@@ -44,6 +45,7 @@ type clientCoordinator struct {
 	configuration *configuration.Store
 	users         *identity.UserStore
 	sessions      *Store
+	accessTokens  *AccessTokenVerifier
 	challenges    *ChallengeStore
 	secrets       clientSecretStore
 	identityHTTP  *http.Client
@@ -56,7 +58,7 @@ type clientCoordinator struct {
 // NewClientCoordinator constructs the fail-closed implementation used by the
 // client HTTP API.
 func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator, error) {
-	if config.Pool == nil || config.Configuration == nil || config.Users == nil || config.Sessions == nil || config.Secrets == nil {
+	if config.Pool == nil || config.Configuration == nil || config.Users == nil || config.Sessions == nil || config.AccessTokens == nil || config.Secrets == nil {
 		return nil, errors.New("client coordinator dependency is nil")
 	}
 	if config.Now == nil {
@@ -70,7 +72,8 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 	}
 	return &clientCoordinator{
 		pool: config.Pool, configuration: config.Configuration, users: config.Users,
-		sessions: config.Sessions, challenges: challenges, secrets: config.Secrets,
+		sessions: config.Sessions, accessTokens: config.AccessTokens,
+		challenges: challenges, secrets: config.Secrets,
 		identityHTTP: config.IdentityHTTPClient, now: config.Now,
 		identityCache: make(map[string]identity.IdentityVerifier),
 	}, nil
@@ -256,6 +259,29 @@ func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input 
 		return clientapi.GrantResult{}, clientFailure(mapSessionError(err))
 	}
 	return clientGrant(issued)
+}
+
+func (coordinator *clientCoordinator) RevokeCurrentInstallation(ctx context.Context, input clientapi.RevokeInstallationInput) error {
+	accessToken, err := NewAccessToken(input.AccessToken.Reveal())
+	if err != nil {
+		return clientFailure("session_expired")
+	}
+	principal, err := coordinator.accessTokens.Verify(ctx, accessToken)
+	if err != nil {
+		return clientFailure(mapAccessRequestError(err))
+	}
+	proof, err := NewDPoPProof(input.Metadata.DPoPProof.Reveal())
+	if err != nil {
+		return clientFailure("dpop_invalid")
+	}
+	err = coordinator.sessions.RevokeCurrentInstallation(ctx, AccessRequestInput{
+		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
+		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+	})
+	if err != nil {
+		return clientFailure(mapAccessRequestError(err))
+	}
+	return nil
 }
 
 func (coordinator *clientCoordinator) resolveEnvironment(ctx context.Context, applicationID, environmentSlug string) (clientEnvironment, error) {
@@ -727,6 +753,8 @@ func mapChallengeError(err error) string {
 	switch {
 	case errors.Is(err, ErrDPoPReplayed):
 		return "dpop_replayed"
+	case errors.Is(err, ErrReplayInvalid):
+		return "dpop_invalid"
 	case errors.Is(err, ErrSessionScope):
 		return "conflict"
 	case errors.Is(err, ErrChallengeInvalid):
@@ -794,6 +822,33 @@ func mapSessionError(err error) string {
 		return "session_revoked"
 	case errors.Is(err, ErrSessionInvalid):
 		return "attestation_invalid"
+	case errors.Is(err, ErrSigningKeyUnavailable):
+		return "server_not_ready"
+	default:
+		return "internal_error"
+	}
+}
+
+func mapAccessRequestError(err error) string {
+	if dpop.IsCode(err, "dpop_nonce_required") {
+		return "dpop_nonce_required"
+	}
+	if dpop.IsCode(err, "dpop_invalid") {
+		return "dpop_invalid"
+	}
+	switch {
+	case errors.Is(err, ErrDPoPReplayed):
+		return "dpop_replayed"
+	case errors.Is(err, ErrReplayInvalid):
+		return "dpop_invalid"
+	case errors.Is(err, ErrTokenInvalid), errors.Is(err, ErrTokenExpired):
+		return "session_expired"
+	case errors.Is(err, ErrInstallationRevoked):
+		return "installation_revoked"
+	case errors.Is(err, ErrAttestationRefreshNeeded):
+		return "attestation_stale"
+	case errors.Is(err, ErrSessionRevoked), errors.Is(err, ErrSessionScope), errors.Is(err, ErrSessionInvalid):
+		return "session_revoked"
 	case errors.Is(err, ErrSigningKeyUnavailable):
 		return "server_not_ready"
 	default:

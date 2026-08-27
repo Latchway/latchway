@@ -31,9 +31,11 @@ type fakeCoordinator struct {
 	exchangeErr     error
 	refreshResult   GrantResult
 	refreshErr      error
+	revokeErr       error
 	challengeInputs []ChallengeInput
 	exchangeInputs  []ExchangeInput
 	refreshInputs   []RefreshInput
+	revokeInputs    []RevokeInstallationInput
 }
 
 func (fake *fakeCoordinator) CreateChallenge(_ context.Context, input ChallengeInput) (ChallengeResult, error) {
@@ -49,6 +51,11 @@ func (fake *fakeCoordinator) ExchangeSession(_ context.Context, input ExchangeIn
 func (fake *fakeCoordinator) RefreshSession(_ context.Context, input RefreshInput) (GrantResult, error) {
 	fake.refreshInputs = append(fake.refreshInputs, input)
 	return fake.refreshResult, fake.refreshErr
+}
+
+func (fake *fakeCoordinator) RevokeCurrentInstallation(_ context.Context, input RevokeInstallationInput) error {
+	fake.revokeInputs = append(fake.revokeInputs, input)
+	return fake.revokeErr
 }
 
 type fakeJWKSProvider struct {

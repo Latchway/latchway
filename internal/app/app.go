@@ -84,6 +84,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("construct client access-token issuer: %w", err)
 	}
+	accessVerifier, err := session.NewAccessTokenVerifier(session.AccessTokenVerifierConfig{
+		Keys: keyManager, Issuer: cfg.PublicOrigin, Audience: clientAccessTokenAudience,
+	})
+	if err != nil {
+		return fmt.Errorf("construct client access-token verifier: %w", err)
+	}
 	sessionStore, err := session.NewStore(session.StoreConfig{
 		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
 	})
@@ -92,7 +98,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	coordinator, err := session.NewClientCoordinator(session.ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
-		Sessions: sessionStore, Secrets: secretStore,
+		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
 	})
 	if err != nil {
 		return fmt.Errorf("construct client session coordinator: %w", err)

@@ -284,7 +284,8 @@ type AccessPrincipal struct {
 	IssuedAt          time.Time
 	ExpiresAt         time.Time
 
-	seal [sha256.Size]byte
+	tokenHash [sha256.Size]byte
+	seal      [sha256.Size]byte
 }
 
 func (verifier *AccessTokenVerifier) Verify(ctx context.Context, token AccessToken) (AccessPrincipal, error) {
@@ -310,6 +311,9 @@ func (verifier *AccessTokenVerifier) Verify(ctx context.Context, token AccessTok
 			return nil, ErrTokenInvalid
 		}
 		key, keyErr := verifier.keys.PublicKey(ctx, kid)
+		if errors.Is(keyErr, ErrSigningKeyNotFound) {
+			return nil, ErrTokenInvalid
+		}
 		if keyErr != nil {
 			return nil, ErrSigningKeyUnavailable
 		}
@@ -334,7 +338,7 @@ func (verifier *AccessTokenVerifier) Verify(ctx context.Context, token AccessTok
 		IdentityProvider: claims.IdentityProvider, TrustLevel: claims.AttestationLevel,
 		PolicyRevisionID: claims.PolicyRevision, DPoPJKT: claims.Confirmation.JKT,
 		JTIHash: sha256.Sum256([]byte(claims.ID)), IssuedAt: claims.IssuedAt.Time.UTC(),
-		ExpiresAt: claims.ExpiresAt.Time.UTC(),
+		ExpiresAt: claims.ExpiresAt.Time.UTC(), tokenHash: sha256.Sum256([]byte(token.value)),
 	}
 	principal.seal = accessPrincipalSeal(principal)
 	return principal, nil
@@ -353,6 +357,7 @@ func accessPrincipalSeal(principal AccessPrincipal) [sha256.Size]byte {
 		payload = append(payload, 0)
 	}
 	payload = append(payload, principal.JTIHash[:]...)
+	payload = append(payload, principal.tokenHash[:]...)
 	return sha256.Sum256(payload)
 }
 

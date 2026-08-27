@@ -664,7 +664,13 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify installation-revocation access token: %v", err)
 	}
-	if err := sessionStore.RevokeInstallation(ctx, revocationPrincipal, "test_revocation"); err != nil {
+	revocationURI := mustSessionURL(t, "https://gateway.example.test/client/v1/installations/current")
+	if err := sessionStore.RevokeCurrentInstallation(ctx, AccessRequestInput{
+		AccessToken: revocationSession.Access.Token, Principal: revocationPrincipal,
+		DPoPProof: signedSessionAccessDPoP(t, dpopKey, "DELETE", revocationURI, now,
+			revocationSession.Access.Token.Reveal(), "installation-revocation-request"),
+		HTTPMethod: "DELETE", RequestURI: revocationURI,
+	}); err != nil {
 		t.Fatalf("revoke current installation: %v", err)
 	}
 	if _, err := sessionStore.Authorize(ctx, revocationPrincipal); !errors.Is(err, ErrInstallationRevoked) {

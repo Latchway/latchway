@@ -281,6 +281,8 @@ func TestCoordinatorMapsSafeDependencyErrors(t *testing.T) {
 		{name: "user database outage", got: mapUserResolutionError(errors.New("postgres unavailable")), want: "server_not_ready"},
 		{name: "DPoP invalid", got: mapDPoPError(&dpop.Error{Code: "dpop_invalid"}), want: "dpop_invalid"},
 		{name: "DPoP replay", got: mapSessionError(ErrDPoPReplayed), want: "dpop_replayed"},
+		{name: "access replay input", got: mapAccessRequestError(ErrReplayInvalid), want: "dpop_invalid"},
+		{name: "access token expiry", got: mapAccessRequestError(ErrTokenExpired), want: "session_expired"},
 		{name: "challenge consumed", got: mapSessionError(ErrChallengeConsumed), want: "conflict"},
 		{name: "refresh reuse", got: mapSessionError(ErrRefreshReused), want: "refresh_token_reused"},
 		{name: "installation revoked", got: mapSessionError(ErrInstallationRevoked), want: "installation_revoked"},

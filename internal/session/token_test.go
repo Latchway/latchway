@@ -25,7 +25,7 @@ func (keys staticAccessTokenKeys) Active(context.Context) (signingKey, error) {
 
 func (keys staticAccessTokenKeys) PublicKey(_ context.Context, kid string) (*ecdsa.PublicKey, error) {
 	if kid != keys.key.KeyID() {
-		return nil, ErrSigningKeyUnavailable
+		return nil, ErrSigningKeyNotFound
 	}
 	privateKey := keys.key.privateKey()
 	return &privateKey.PublicKey, nil
@@ -88,6 +88,56 @@ func TestAccessTokenVerifierHonorsExplicitZeroClockSkew(t *testing.T) {
 	}
 	if _, err := zeroSkewVerifier.Verify(context.Background(), issued.Token); !errors.Is(err, ErrTokenInvalid) {
 		t.Fatalf("explicit zero skew accepted token one second in the future: %v", err)
+	}
+}
+
+func TestAccessPrincipalExpiredWithinVerifierLeewayStaysExpired(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	issuedAt := time.Unix(1_787_820_000, 0).UTC()
+	keys := staticAccessTokenKeys{key: signingKey{material: &signingKeyMaterial{
+		kid: "gsk_expiry-leeway", private: privateKey,
+		notBefore: issuedAt.Add(-time.Hour), notAfter: issuedAt.Add(24 * time.Hour),
+	}}}
+	issuer, err := NewAccessTokenIssuer(AccessTokenIssuerConfig{
+		Keys: keys, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		Lifetime: time.Minute, Now: func() time.Time { return issuedAt },
+	})
+	if err != nil {
+		t.Fatalf("construct access-token issuer: %v", err)
+	}
+	issued, err := issuer.Issue(context.Background(), AccessIssueInput{
+		OrganizationID: mustTokenID(t, id.Organization), ApplicationID: mustTokenID(t, id.Application),
+		EnvironmentID: mustTokenID(t, id.Environment), ApplicationUserID: mustTokenID(t, id.ApplicationUser),
+		InstallationID: mustTokenID(t, id.Installation), SessionGrantID: mustTokenID(t, id.SessionGrant),
+		IdentityProvider: "firebase", TrustLevel: "app_verified",
+		PolicyRevisionID: mustTokenID(t, id.ConfigRevision),
+		DPoPJKT:          base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	})
+	if err != nil {
+		t.Fatalf("issue access token: %v", err)
+	}
+	requestTime := issued.ExpiresAt.Add(30 * time.Second)
+	verifier, err := NewAccessTokenVerifier(AccessTokenVerifierConfig{
+		Keys: keys, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		ClockSkew: time.Minute, ClockSkewSet: true, Now: func() time.Time { return requestTime },
+	})
+	if err != nil {
+		t.Fatalf("construct leeway verifier: %v", err)
+	}
+	principal, err := verifier.Verify(context.Background(), issued.Token)
+	if err != nil {
+		t.Fatalf("verifier should parse a token inside signature-validation leeway: %v", err)
+	}
+	if err := validateAccessPrincipal(principal, requestTime); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("request authorization expiry error=%v, want token expired", err)
+	}
+	if code := mapAccessRequestError(ErrTokenExpired); code != "session_expired" {
+		t.Fatalf("expired access mapping=%q", code)
 	}
 }
 

@@ -27,6 +27,7 @@ const signingKeyAdvisoryLock int64 = 0x4c41544348534b59
 
 var (
 	ErrSigningKeyUnavailable = errors.New("gateway signing key is unavailable")
+	ErrSigningKeyNotFound    = errors.New("gateway signing key is not found")
 	ErrTokenInvalid          = errors.New("client access token is invalid")
 	ErrTokenExpired          = errors.New("client access token is expired")
 )
@@ -239,7 +240,7 @@ func (manager *SigningKeyManager) PublicJWKS(ctx context.Context) (JWKS, error) 
 
 func (manager *SigningKeyManager) PublicKey(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
 	if len(kid) < 8 || len(kid) > 128 || strings.ContainsAny(kid, "\r\n\x00") {
-		return nil, ErrSigningKeyUnavailable
+		return nil, ErrSigningKeyNotFound
 	}
 	var encoded []byte
 	err := manager.pool.QueryRow(ctx, `
@@ -251,10 +252,10 @@ func (manager *SigningKeyManager) PublicKey(ctx context.Context, kid string) (*e
 		  AND not_after > $2
 	`, kid, manager.now().UTC()).Scan(&encoded)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrSigningKeyUnavailable
+		return nil, ErrSigningKeyNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read public signing key: %w", err)
+		return nil, fmt.Errorf("read public signing key: %w", ErrSigningKeyUnavailable)
 	}
 	jwk, err := decodePublicSigningJWK(encoded)
 	if err != nil || jwk.Kid != kid {

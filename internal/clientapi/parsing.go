@@ -18,6 +18,8 @@ const (
 	maximumEvidenceBytes      = 64 << 10
 	maximumEvidenceMembers    = 64
 	maximumDPoPBytes          = 16 << 10
+	maximumAccessTokenBytes   = 16 << 10
+	minimumAccessTokenBytes   = 64
 )
 
 var (
@@ -86,6 +88,28 @@ func parseDPoPHeader(r *http.Request) (SensitiveString, *requestViolation) {
 		return SensitiveString{}, &requestViolation{code: "dpop_invalid", detail: "The DPoP proof header is invalid."}
 	}
 	return NewSensitiveString(proof), nil
+}
+
+func parseDPoPAuthorization(r *http.Request) (SensitiveString, *requestViolation) {
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		return SensitiveString{}, invalidAt("header.Authorization", "Exactly one DPoP access token is required.")
+	}
+	value := values[0]
+	scheme, token, found := strings.Cut(value, " ")
+	if !found || !strings.EqualFold(scheme, "DPoP") || len(token) < minimumAccessTokenBytes || len(token) > maximumAccessTokenBytes || strings.TrimSpace(value) != value || !validAuthorizationCredential(token) {
+		return SensitiveString{}, invalidAt("header.Authorization", "Authorization must use exactly one bounded DPoP access token.")
+	}
+	return NewSensitiveString(token), nil
+}
+
+func validAuthorizationCredential(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if value[index] <= ' ' || value[index] >= 0x7f || value[index] == ',' {
+			return false
+		}
+	}
+	return true
 }
 
 func exactlyOneHeader(header http.Header, name string) (string, bool) {
@@ -358,11 +382,11 @@ func validAttestationProvider(value string) bool {
 }
 
 func ensureBodyless(r *http.Request) *requestViolation {
-	if r.Body == nil || r.Body == http.NoBody {
-		return nil
-	}
 	if r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
 		return invalidAt("body", "This endpoint does not accept a request body.")
+	}
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil
 	}
 	var one [1]byte
 	if _, err := r.Body.Read(one[:]); err == io.EOF {

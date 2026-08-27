@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/url"
@@ -131,6 +132,14 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 		return IssuedSession{}, fmt.Errorf("begin refresh rotation: %w", err)
 	}
 	defer rollbackSigning(tx)
+	// Installation is the stable root of every session mutation. Lock it before
+	// the refresh row so rotation, exchange, and installation revocation share
+	// one lock order. This prevents a rotated child credential from appearing
+	// after revocation has taken its snapshot and avoids refresh/revoke
+	// deadlocks (refresh-token -> installation versus installation -> token).
+	if err := lockRefreshInstallation(ctx, tx, preflightBinding); err != nil {
+		return IssuedSession{}, err
+	}
 	binding, err := loadRefreshBinding(ctx, tx, refreshDigest[:], true)
 	if err != nil {
 		return IssuedSession{}, err
@@ -266,6 +275,29 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 			VerifiedAt: binding.AttestedAt, ExpiresAt: binding.AttestationExpiresAt,
 		},
 	}, nil
+}
+
+func lockRefreshInstallation(ctx context.Context, tx pgx.Tx, binding RefreshBinding) error {
+	var storedJKT, status string
+	err := tx.QueryRow(ctx, `
+		SELECT dpop_jkt, status
+		FROM installations
+		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
+		  AND application_user_id = $4 AND installation_id = $5
+		FOR SHARE
+	`, binding.OrganizationID, binding.ApplicationID, binding.EnvironmentID,
+		binding.ApplicationUserID, binding.InstallationID).Scan(&storedJKT, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRefreshInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("lock refresh installation: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(storedJKT), []byte(binding.DPoPJKT)) != 1 ||
+		(status != "active" && status != "revoked") {
+		return ErrRefreshInvalid
+	}
+	return nil
 }
 
 func currentRefreshPolicyError(snapshot configuration.ActiveSnapshot, binding RefreshBinding, now time.Time) error {

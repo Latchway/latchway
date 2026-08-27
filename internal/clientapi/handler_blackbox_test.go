@@ -18,6 +18,7 @@ type blackBoxCoordinator struct {
 	challenge clientapi.ChallengeInput
 	exchange  clientapi.ExchangeInput
 	refresh   clientapi.RefreshInput
+	revoke    clientapi.RevokeInstallationInput
 }
 
 func (fake *blackBoxCoordinator) CreateChallenge(_ context.Context, input clientapi.ChallengeInput) (clientapi.ChallengeResult, error) {
@@ -39,6 +40,11 @@ func (fake *blackBoxCoordinator) ExchangeSession(_ context.Context, input client
 func (fake *blackBoxCoordinator) RefreshSession(_ context.Context, input clientapi.RefreshInput) (clientapi.GrantResult, error) {
 	fake.refresh = input
 	return blackBoxGrant(), nil
+}
+
+func (fake *blackBoxCoordinator) RevokeCurrentInstallation(_ context.Context, input clientapi.RevokeInstallationInput) error {
+	fake.revoke = input
+	return nil
 }
 
 type blackBoxKeys struct{}
@@ -92,6 +98,21 @@ func TestExportedHandlerBlackBox(t *testing.T) {
 	assertBlackBoxStatus(t, refreshResponse, http.StatusOK)
 	if coordinator.refresh.Metadata.TargetURL.String() != "https://public.example.test/client/v1/sessions/refresh" {
 		t.Fatalf("refresh target = %q", coordinator.refresh.Metadata.TargetURL.String())
+	}
+
+	revoke := httptest.NewRequest(http.MethodDelete, "/client/v1/installations/current", nil)
+	revoke.Header.Set("X-Latchway-Protocol-Version", "1")
+	revoke.Header.Set("X-Latchway-SDK", "javascript")
+	revoke.Header.Set("X-Latchway-SDK-Version", "1.2.3")
+	revoke.Header.Set("Authorization", "DPoP "+strings.Repeat("access-", 12))
+	revoke.Header.Set("DPoP", "header.payload.signature")
+	revokeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(revokeResponse, revoke)
+	if revokeResponse.Code != http.StatusNoContent || revokeResponse.Body.Len() != 0 {
+		t.Fatalf("revoke status = %d, body = %s", revokeResponse.Code, revokeResponse.Body.String())
+	}
+	if coordinator.revoke.Metadata.TargetURL.String() != "https://public.example.test/client/v1/installations/current" || coordinator.revoke.AccessToken.Reveal() != strings.Repeat("access-", 12) {
+		t.Fatalf("revoke input = %#v", coordinator.revoke)
 	}
 
 	jwksResponse := httptest.NewRecorder()

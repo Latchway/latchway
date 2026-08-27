@@ -26,6 +26,7 @@ const (
 	challengePath = "/client/v1/session-challenges"
 	exchangePath  = "/client/v1/sessions"
 	refreshPath   = "/client/v1/sessions/refresh"
+	revokePath    = "/client/v1/installations/current"
 	jwksPath      = "/.well-known/jwks.json"
 	discoveryPath = "/.well-known/latchway"
 )
@@ -50,8 +51,8 @@ func New(config Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets := make(map[string]url.URL, 3)
-	for _, path := range []string{challengePath, exchangePath, refreshPath} {
+	targets := make(map[string]url.URL, 4)
+	for _, path := range []string{challengePath, exchangePath, refreshPath, revokePath} {
 		targets[path] = url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: path}
 	}
 	return &API{coordinator: config.Coordinator, jwks: config.JWKS, targets: targets}, nil
@@ -129,6 +130,12 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		api.refreshSession(w, r, requestID)
+	case revokePath:
+		if r.Method != http.MethodDelete {
+			api.methodNotAllowed(w, requestID)
+			return
+		}
+		api.revokeCurrentInstallation(w, r, requestID)
 	case jwksPath:
 		if r.Method != http.MethodGet {
 			api.methodNotAllowed(w, requestID)
@@ -234,6 +241,38 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
+}
+
+func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request, requestID string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input := RevokeInstallationInput{
+		Metadata:    api.metadata(requestID, declaration, http.MethodDelete, revokePath, proof),
+		AccessToken: accessToken,
+	}
+	if err := api.coordinator.RevokeCurrentInstallation(r.Context(), input); err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (api *API) publicJWKS(w http.ResponseWriter, r *http.Request, requestID string) {

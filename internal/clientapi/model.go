@@ -142,6 +142,15 @@ type RefreshInput struct {
 	Attestation      *AttestationEvidence
 }
 
+// RevokeInstallationInput contains the DPoP access credential and the
+// server-constructed request metadata needed to authenticate revocation of
+// the installation named by that credential. Neither sensitive value is
+// exposed through ordinary formatting.
+type RevokeInstallationInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
+}
+
 type AttestationRequirement struct {
 	Provider        string
 	Mode            string
@@ -188,6 +197,7 @@ type Coordinator interface {
 	CreateChallenge(context.Context, ChallengeInput) (ChallengeResult, error)
 	ExchangeSession(context.Context, ExchangeInput) (GrantResult, error)
 	RefreshSession(context.Context, RefreshInput) (GrantResult, error)
+	RevokeCurrentInstallation(context.Context, RevokeInstallationInput) error
 }
 
 type PublicJWK struct {

@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
@@ -117,6 +118,13 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct access-token issuer: %v", err)
 	}
+	accessVerifier, err := NewAccessTokenVerifier(AccessTokenVerifierConfig{
+		Keys: keyManager, Issuer: clientHTTPOrigin, Audience: clientHTTPAudience,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct access-token verifier: %v", err)
+	}
 	sessionStore, err := NewStore(StoreConfig{
 		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
 		Now: func() time.Time { return now },
@@ -126,7 +134,8 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	coordinator, err := NewClientCoordinator(ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
-		Sessions: sessionStore, Secrets: secretStore, Now: func() time.Time { return now },
+		Sessions: sessionStore, AccessTokens: accessVerifier,
+		Secrets: secretStore, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("construct client coordinator: %v", err)
@@ -267,6 +276,47 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	assertClientHTTPAccessToken(t, ctx, keyManager, refreshed.AccessToken, fixture, revisionID, dpopJKT, now)
 
+	revokeTarget := clientHTTPURL(t, "/client/v1/installations/current")
+	unknownKeyToken := clientHTTPAccessTokenWithKeyID(t, refreshed.AccessToken, dpopPrivateKey,
+		"gsk_unknown-attacker-selected-key")
+	unknownKeyProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
+		now, unknownKeyToken, "client-http-revoke-unknown-access-kid")
+	unknownKeyResponse := clientHTTPDeleteInstallation(t, handler, unknownKeyToken, unknownKeyProof)
+	assertClientHTTPProblem(t, unknownKeyResponse, http.StatusUnauthorized, "session_expired")
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+
+	wrongRevokeKey, _, _ := newChallengeKey(t)
+	wrongKeyProof := signedSessionAccessDPoP(t, wrongRevokeKey, http.MethodDelete, revokeTarget,
+		now, refreshed.AccessToken, "client-http-revoke-wrong-key")
+	wrongKeyResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongKeyProof)
+	assertClientHTTPProblem(t, wrongKeyResponse, http.StatusUnauthorized, "dpop_invalid")
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+
+	wrongAccessHashProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
+		now, exchanged.AccessToken, "client-http-revoke-wrong-ath")
+	wrongAccessHashResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongAccessHashProof)
+	assertClientHTTPProblem(t, wrongAccessHashResponse, http.StatusUnauthorized, "dpop_invalid")
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+
+	revokeProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
+		now, refreshed.AccessToken, "client-http-revoke")
+	revokeResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, revokeProof)
+	assertClientHTTPNoContent(t, revokeResponse)
+
+	replayResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, revokeProof)
+	assertClientHTTPProblem(t, replayResponse, http.StatusUnauthorized, "dpop_replayed")
+
+	idempotentProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
+		now, refreshed.AccessToken, "client-http-revoke-idempotent")
+	idempotentResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, idempotentProof)
+	assertClientHTTPNoContent(t, idempotentResponse)
+
+	postRevocationRefreshProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, refreshTarget,
+		now, "client-http-refresh-after-revoke")
+	postRevocationRefreshResponse := clientHTTPPostJSONResponse(t, handler, "/client/v1/sessions/refresh",
+		postRevocationRefreshProof, map[string]any{"refresh_token": refreshed.RefreshToken})
+	assertClientHTTPProblem(t, postRevocationRefreshResponse, http.StatusUnauthorized, "session_revoked")
+
 	request := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	request.Host = "untrusted-inbound.example.test"
 	response := httptest.NewRecorder()
@@ -287,19 +337,23 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatal("public JWKS did not contain the access-token verification key")
 	}
 
-	var activeRefresh, rotatedRefresh, grantCount int
+	var activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE status = 'active'),
-		       count(*) FILTER (WHERE status = 'rotated')
+		       count(*) FILTER (WHERE status = 'rotated'),
+		       count(*) FILTER (WHERE status = 'revoked')
 		FROM refresh_tokens
-	`).Scan(&activeRefresh, &rotatedRefresh); err != nil {
+	`).Scan(&activeRefresh, &rotatedRefresh, &revokedRefresh); err != nil {
 		t.Fatalf("inspect refresh rotation state: %v", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_grants`).Scan(&grantCount); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE revoked_at IS NOT NULL) FROM session_grants
+	`).Scan(&grantCount, &revokedGrants); err != nil {
 		t.Fatalf("inspect session grants: %v", err)
 	}
-	if activeRefresh != 1 || rotatedRefresh != 1 || grantCount != 2 {
-		t.Fatalf("persisted session rotation state = active:%d rotated:%d grants:%d", activeRefresh, rotatedRefresh, grantCount)
+	if activeRefresh != 0 || rotatedRefresh != 1 || revokedRefresh != 1 || grantCount != 2 || revokedGrants != 2 {
+		t.Fatalf("persisted revoked session state = active:%d rotated:%d revoked:%d grants:%d revoked_grants:%d",
+			activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants)
 	}
 }
 
@@ -478,22 +532,7 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 
 func clientHTTPPostJSON(t *testing.T, handler http.Handler, path string, proof DPoPProof, body any, wantStatus int, output any) {
 	t.Helper()
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("encode client HTTP request: %v", err)
-	}
-	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
-	request.Host = "untrusted-inbound.example.test"
-	request.Header.Set("Forwarded", "host=untrusted-forwarded.example.test;proto=http")
-	request.Header.Set("X-Forwarded-Host", "untrusted-forwarded.example.test")
-	request.Header.Set("X-Forwarded-Proto", "http")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Latchway-Protocol-Version", "1")
-	request.Header.Set("X-Latchway-SDK", "ios")
-	request.Header.Set("X-Latchway-SDK-Version", "1.2.3")
-	request.Header.Set("DPoP", proof.value)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
+	response := clientHTTPPostJSONResponse(t, handler, path, proof, body)
 	if response.Code != wantStatus {
 		var failure struct {
 			Code string `json:"code"`
@@ -509,6 +548,84 @@ func clientHTTPPostJSON(t *testing.T, handler http.Handler, path string, proof D
 	}
 	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
 		t.Fatalf("decode client HTTP %s response: %v", path, err)
+	}
+}
+
+func clientHTTPPostJSONResponse(t *testing.T, handler http.Handler, path string, proof DPoPProof, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode client HTTP request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/json")
+	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func clientHTTPDeleteInstallation(t *testing.T, handler http.Handler, accessToken string, proof DPoPProof) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodDelete, "/client/v1/installations/current", nil)
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func setClientHTTPProtectedHeaders(request *http.Request, proof DPoPProof) {
+	request.Host = "untrusted-inbound.example.test"
+	request.Header.Set("Forwarded", "host=untrusted-forwarded.example.test;proto=http")
+	request.Header.Set("X-Forwarded-Host", "untrusted-forwarded.example.test")
+	request.Header.Set("X-Forwarded-Proto", "http")
+	request.Header.Set("X-Latchway-Protocol-Version", "1")
+	request.Header.Set("X-Latchway-SDK", "ios")
+	request.Header.Set("X-Latchway-SDK-Version", "1.2.3")
+	request.Header.Set("DPoP", proof.value)
+}
+
+func assertClientHTTPNoContent(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 ||
+		response.Header().Get("Content-Type") != "" || response.Header().Get("Content-Length") != "" ||
+		response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("client HTTP DELETE response status=%d headers=%#v body=%q",
+			response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func assertClientHTTPProblem(t *testing.T, response *httptest.ResponseRecorder, wantStatus int, wantCode string) {
+	t.Helper()
+	var failure struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&failure); err != nil {
+		t.Fatalf("decode client HTTP problem: %v", err)
+	}
+	if response.Code != wantStatus || failure.Code != wantCode || response.Header().Get("Cache-Control") != "no-store" ||
+		response.Header().Get("Content-Type") != "application/problem+json" || response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("client HTTP problem status=%d code=%q headers=%#v want=%d/%q",
+			response.Code, failure.Code, response.Header(), wantStatus, wantCode)
+	}
+}
+
+func assertClientHTTPInstallationLive(t *testing.T, ctx context.Context, pool *pgxpool.Pool, installationID string, wantLiveGrants, wantActiveRefresh int) {
+	t.Helper()
+	var status string
+	var liveGrants, activeRefresh int
+	if err := pool.QueryRow(ctx, `
+		SELECT status,
+		       (SELECT count(*) FROM session_grants WHERE installation_id = $1 AND revoked_at IS NULL),
+		       (SELECT count(*) FROM refresh_tokens WHERE installation_id = $1 AND status = 'active')
+		FROM installations WHERE installation_id = $1
+	`, installationID).Scan(&status, &liveGrants, &activeRefresh); err != nil {
+		t.Fatalf("inspect live client HTTP installation: %v", err)
+	}
+	if status != "active" || liveGrants != wantLiveGrants || activeRefresh != wantActiveRefresh {
+		t.Fatalf("client HTTP installation status=%q live_grants=%d active_refresh=%d wants=active/%d/%d",
+			status, liveGrants, activeRefresh, wantLiveGrants, wantActiveRefresh)
 	}
 }
 
@@ -576,4 +693,24 @@ func clientHTTPAccessTokenKeyID(t *testing.T, raw string) string {
 		t.Fatal("client HTTP access token omitted its signing-key identifier")
 	}
 	return header.KeyID
+}
+
+func clientHTTPAccessTokenWithKeyID(t *testing.T, raw string, signingKey *ecdsa.PrivateKey, keyID string) string {
+	t.Helper()
+	segments := strings.Split(raw, ".")
+	if len(segments) != 3 || signingKey == nil {
+		t.Fatal("cannot rewrite malformed client HTTP access token")
+	}
+	header, err := json.Marshal(map[string]any{"alg": "ES256", "kid": keyID, "typ": "JWT"})
+	if err != nil {
+		t.Fatalf("encode rewritten access-token header: %v", err)
+	}
+	headerSegment := base64.RawURLEncoding.EncodeToString(header)
+	digest := sha256.Sum256([]byte(headerSegment + "." + segments[1]))
+	r, s, err := ecdsa.Sign(rand.Reader, signingKey, digest[:])
+	if err != nil {
+		t.Fatalf("sign rewritten access token: %v", err)
+	}
+	signature := append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
+	return headerSegment + "." + segments[1] + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
