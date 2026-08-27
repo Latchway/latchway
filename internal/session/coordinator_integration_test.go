@@ -1,0 +1,579 @@
+package session
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/internal/attestation"
+	"github.com/latchway/latchway/internal/clientapi"
+	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/identity"
+	"github.com/latchway/latchway/internal/secrets"
+)
+
+const (
+	clientHTTPOrigin           = "https://gateway.example.test"
+	clientHTTPAudience         = "latchway-data-plane"
+	clientHTTPIdentityIssuer   = "https://identity.example.test"
+	clientHTTPIdentityAudience = "latchway-client"
+)
+
+func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSessionPool(t)
+	now := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
+	fixture := createChallengeFixture(t, ctx, pool)
+
+	masterKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x76}, 32))
+	envelope, err := secrets.NewEnvironmentMasterKey(masterKey)
+	if err != nil {
+		t.Fatalf("construct test envelope provider: %v", err)
+	}
+	adminUserID := insertClientHTTPAdministrator(t, ctx, pool, fixture.organizationID, now)
+
+	identityPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate identity signing key: %v", err)
+	}
+	identityPublicDER, err := x509.MarshalPKIXPublicKey(&identityPrivateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("encode identity public key: %v", err)
+	}
+	identityPublicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: identityPublicDER})
+
+	debugSeed := sha256.Sum256([]byte("latchway/client-http/debug-key/v1"))
+	debugPrivateKey := ed25519.NewKeyFromSeed(debugSeed[:])
+	debugKeyID := "client-http-debug-key-01"
+	debugPublicKeyDocument, err := json.Marshal(map[string]any{
+		"version": 1,
+		"keys": []any{map[string]any{
+			"key_id":     debugKeyID,
+			"public_key": base64.RawURLEncoding.EncodeToString(debugPrivateKey.Public().(ed25519.PublicKey)),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("encode debug public-key document: %v", err)
+	}
+
+	insertClientHTTPEncryptedSecret(t, ctx, pool, envelope, fixture, adminUserID,
+		"identity-public-key", identityPublicPEM, now.Add(-time.Minute))
+	insertClientHTTPEncryptedSecret(t, ctx, pool, envelope, fixture, adminUserID,
+		"debug-attestation-public-keys", debugPublicKeyDocument, now.Add(-time.Minute))
+	revisionID := activateClientHTTPConfiguration(t, ctx, pool, fixture, adminUserID, now)
+
+	secretStore, err := secrets.NewStore(secrets.StoreConfig{
+		Pool: pool, Provider: envelope, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct encrypted secret store: %v", err)
+	}
+	configurationStore, err := configuration.NewStore(pool)
+	if err != nil {
+		t.Fatalf("construct configuration store: %v", err)
+	}
+	var subjectProtector *identity.SubjectProtector
+	if err := envelope.UseIdentitySubjectHMACKey(func(key []byte) error {
+		var protectorErr error
+		subjectProtector, protectorErr = identity.NewSubjectProtector(key)
+		return protectorErr
+	}); err != nil {
+		t.Fatalf("construct identity subject protector: %v", err)
+	}
+	userStore, err := identity.NewUserStore(pool, subjectProtector)
+	if err != nil {
+		t.Fatalf("construct identity user store: %v", err)
+	}
+	keyManager, err := NewSigningKeyManager(SigningKeyManagerConfig{
+		Pool: pool, Envelope: envelope, Now: func() time.Time { return now },
+		KeyLifetime: 48 * time.Hour, RotationLead: 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("construct signing-key manager: %v", err)
+	}
+	if _, err := keyManager.Active(ctx); err != nil {
+		t.Fatalf("initialize signing key: %v", err)
+	}
+	accessIssuer, err := NewAccessTokenIssuer(AccessTokenIssuerConfig{
+		Keys: keyManager, Issuer: clientHTTPOrigin, Audience: clientHTTPAudience,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct access-token issuer: %v", err)
+	}
+	sessionStore, err := NewStore(StoreConfig{
+		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct session store: %v", err)
+	}
+	coordinator, err := NewClientCoordinator(ClientCoordinatorConfig{
+		Pool: pool, Configuration: configurationStore, Users: userStore,
+		Sessions: sessionStore, Secrets: secretStore, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("construct client coordinator: %v", err)
+	}
+	publicKeys, err := NewClientJWKSProvider(keyManager)
+	if err != nil {
+		t.Fatalf("construct client JWKS provider: %v", err)
+	}
+	api, err := clientapi.New(clientapi.Config{
+		Coordinator: coordinator, JWKS: publicKeys, PublicOrigin: clientHTTPOrigin,
+	})
+	if err != nil {
+		t.Fatalf("construct client HTTP API: %v", err)
+	}
+	handler := api.Handler()
+
+	identityClaims := jwt.MapClaims{
+		"iss": clientHTTPIdentityIssuer, "aud": clientHTTPIdentityAudience,
+		"sub": "external-user-001", "iat": now.Add(-time.Minute).Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+	}
+	identityToken, err := jwt.NewWithClaims(jwt.SigningMethodRS256, identityClaims).SignedString(identityPrivateKey)
+	if err != nil {
+		t.Fatalf("sign identity credential: %v", err)
+	}
+	dpopPrivateKey, _, dpopJKT := newChallengeKey(t)
+
+	challengeTarget := clientHTTPURL(t, "/client/v1/session-challenges")
+	challengeProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, challengeTarget, now, "client-http-challenge")
+	t.Run("attestation secret preflight precedes user persistence", func(t *testing.T) {
+		var initialUserCount int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM application_users
+			WHERE organization_id = $1 AND application_id = $2
+		`, fixture.organizationID, fixture.applicationID).Scan(&initialUserCount); err != nil {
+			t.Fatalf("count initial application users: %v", err)
+		}
+		var secretRecordID string
+		var originalCiphertext []byte
+		if err := pool.QueryRow(ctx, `
+			SELECT secret_record_id, ciphertext
+			FROM secret_records
+			WHERE organization_id = $1
+			  AND application_id = $2
+			  AND environment_id = $3
+			  AND name = 'debug-attestation-public-keys'
+			  AND rotated_at IS NULL
+			  AND destroyed_at IS NULL
+		`, fixture.organizationID, fixture.applicationID, fixture.environmentID).Scan(&secretRecordID, &originalCiphertext); err != nil {
+			t.Fatalf("load debug attestation ciphertext: %v", err)
+		}
+		corruptedCiphertext := append([]byte(nil), originalCiphertext...)
+		corruptedCiphertext[len(corruptedCiphertext)-1] ^= 0xff
+		if _, err := pool.Exec(ctx, `UPDATE secret_records SET ciphertext = $2 WHERE secret_record_id = $1`, secretRecordID, corruptedCiphertext); err != nil {
+			t.Fatalf("corrupt debug attestation ciphertext: %v", err)
+		}
+		t.Cleanup(func() {
+			if _, err := pool.Exec(ctx, `UPDATE secret_records SET ciphertext = $2 WHERE secret_record_id = $1`, secretRecordID, originalCiphertext); err != nil {
+				t.Errorf("restore debug attestation ciphertext: %v", err)
+			}
+		})
+
+		_, err := coordinator.CreateChallenge(ctx, clientapi.ChallengeInput{
+			Metadata: clientapi.RequestMetadata{
+				HTTPMethod: http.MethodPost, TargetURL: *challengeTarget,
+				DPoPProof: clientapi.NewSensitiveString(challengeProof.value),
+			},
+			ApplicationID: fixture.applicationID, Environment: "development",
+			IdentityProvider: "custom", IdentityToken: clientapi.NewSensitiveString(identityToken),
+			Platform: "ios",
+		})
+		var failure *clientapi.DependencyError
+		if !errors.As(err, &failure) || failure.Code != "server_not_ready" {
+			t.Fatalf("challenge with unusable attestation secret error = %v", err)
+		}
+		var userCount int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM application_users
+			WHERE organization_id = $1 AND application_id = $2
+		`, fixture.organizationID, fixture.applicationID).Scan(&userCount); err != nil {
+			t.Fatalf("count application users: %v", err)
+		}
+		if userCount != initialUserCount {
+			t.Fatalf("unusable attestation secret changed application-user count from %d to %d", initialUserCount, userCount)
+		}
+	})
+	var challenge clientHTTPChallengeDocument
+	clientHTTPPostJSON(t, handler, "/client/v1/session-challenges", challengeProof, map[string]any{
+		"application_id": fixture.applicationID, "environment": "development",
+		"identity_provider": "custom", "identity_token": identityToken,
+		"platform": "ios", "sdk_version": "1.2.3",
+	}, http.StatusCreated, &challenge)
+	if id.Validate(challenge.ChallengeID, id.SessionChallenge) != nil || challenge.BindingVersion != 1 ||
+		challenge.IssuedAt != now.Unix() || !challenge.ExpiresAt.Equal(now.Add(5*time.Minute)) ||
+		challenge.Attestation.Provider != "debug" || challenge.Attestation.Mode != "required" {
+		t.Fatal("challenge response did not preserve the active identity and attestation policy")
+	}
+	bindingHashBytes, err := base64.RawURLEncoding.Strict().DecodeString(challenge.Attestation.ClientDataHash)
+	if err != nil || len(bindingHashBytes) != sha256.Size ||
+		base64.RawURLEncoding.EncodeToString(bindingHashBytes) != challenge.Attestation.ClientDataHash {
+		t.Fatal("challenge response contained an invalid client-data hash")
+	}
+	var bindingHash [sha256.Size]byte
+	copy(bindingHash[:], bindingHashBytes)
+	attestationExpiresAt := now.Add(10 * time.Minute).Unix()
+	debugSignature := ed25519.Sign(debugPrivateKey, attestation.DebugSigningMessage(bindingHash, attestationExpiresAt))
+
+	exchangeTarget := clientHTTPURL(t, "/client/v1/sessions")
+	exchangeProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, exchangeTarget, now, "client-http-exchange")
+	var exchanged clientHTTPGrantDocument
+	clientHTTPPostJSON(t, handler, "/client/v1/sessions", exchangeProof, map[string]any{
+		"challenge_id": challenge.ChallengeID,
+		"attestation": map[string]any{
+			"provider": "debug",
+			"evidence": map[string]any{
+				"key_id": debugKeyID, "binding_hash": challenge.Attestation.ClientDataHash,
+				"expires_at": attestationExpiresAt,
+				"signature":  base64.RawURLEncoding.EncodeToString(debugSignature),
+			},
+		},
+		"installation": map[string]any{"app_version": "1.0.0"},
+	}, http.StatusCreated, &exchanged)
+	assertClientHTTPGrant(t, exchanged, dpopJKT)
+	assertClientHTTPAccessToken(t, ctx, keyManager, exchanged.AccessToken, fixture, revisionID, dpopJKT, now)
+
+	refreshTarget := clientHTTPURL(t, "/client/v1/sessions/refresh")
+	refreshProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, refreshTarget, now, "client-http-refresh")
+	var refreshed clientHTTPGrantDocument
+	clientHTTPPostJSON(t, handler, "/client/v1/sessions/refresh", refreshProof, map[string]any{
+		"refresh_token": exchanged.RefreshToken,
+	}, http.StatusOK, &refreshed)
+	assertClientHTTPGrant(t, refreshed, dpopJKT)
+	if refreshed.Installation.ID != exchanged.Installation.ID ||
+		refreshed.AccessToken == exchanged.AccessToken || refreshed.RefreshToken == exchanged.RefreshToken {
+		t.Fatal("refresh response did not rotate credentials for the same installation")
+	}
+	assertClientHTTPAccessToken(t, ctx, keyManager, refreshed.AccessToken, fixture, revisionID, dpopJKT, now)
+
+	request := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	request.Host = "untrusted-inbound.example.test"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("public JWKS status = %d", response.Code)
+	}
+	if response.Header().Get("Cache-Control") != "public, max-age=300" {
+		t.Fatalf("public JWKS Cache-Control = %q", response.Header().Get("Cache-Control"))
+	}
+	var jwks clientapi.JWKS
+	if err := json.NewDecoder(response.Body).Decode(&jwks); err != nil {
+		t.Fatalf("decode public JWKS response: %v", err)
+	}
+	wantKeyID := clientHTTPAccessTokenKeyID(t, refreshed.AccessToken)
+	if len(jwks.Keys) != 1 || jwks.Keys[0].Kid != wantKeyID || jwks.Keys[0].Kty != "EC" ||
+		jwks.Keys[0].Crv != "P-256" || jwks.Keys[0].Use != "sig" || jwks.Keys[0].Alg != "ES256" {
+		t.Fatal("public JWKS did not contain the access-token verification key")
+	}
+
+	var activeRefresh, rotatedRefresh, grantCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE status = 'active'),
+		       count(*) FILTER (WHERE status = 'rotated')
+		FROM refresh_tokens
+	`).Scan(&activeRefresh, &rotatedRefresh); err != nil {
+		t.Fatalf("inspect refresh rotation state: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_grants`).Scan(&grantCount); err != nil {
+		t.Fatalf("inspect session grants: %v", err)
+	}
+	if activeRefresh != 1 || rotatedRefresh != 1 || grantCount != 2 {
+		t.Fatalf("persisted session rotation state = active:%d rotated:%d grants:%d", activeRefresh, rotatedRefresh, grantCount)
+	}
+}
+
+type clientHTTPChallengeDocument struct {
+	ChallengeID    string    `json:"challenge_id"`
+	ChallengeNonce string    `json:"challenge_nonce"`
+	BindingVersion int       `json:"binding_version"`
+	IssuedAt       int64     `json:"issued_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Attestation    struct {
+		Provider       string `json:"provider"`
+		Mode           string `json:"mode"`
+		ClientDataHash string `json:"client_data_hash"`
+	} `json:"attestation"`
+}
+
+type clientHTTPGrantDocument struct {
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	ExpiresIn        int    `json:"expires_in"`
+	RefreshToken     string `json:"refresh_token"`
+	RefreshExpiresIn int    `json:"refresh_expires_in"`
+	Installation     struct {
+		ID       string `json:"id"`
+		Platform string `json:"platform"`
+		DPoPJKT  string `json:"dpop_jkt"`
+		Status   string `json:"status"`
+	} `json:"installation"`
+	Trust struct {
+		Provider   string    `json:"provider"`
+		Level      string    `json:"level"`
+		VerifiedAt time.Time `json:"verified_at"`
+		ExpiresAt  time.Time `json:"expires_at"`
+	} `json:"trust"`
+}
+
+func insertClientHTTPAdministrator(t *testing.T, ctx context.Context, pool *pgxpool.Pool, organizationID string, now time.Time) string {
+	t.Helper()
+	adminUserID := mustSessionID(t, id.AdminUser)
+	membershipID := mustSessionID(t, id.AdminMembership)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_users (
+			admin_user_id, email, email_normalized, display_name, created_at, updated_at
+		) VALUES ($1, 'client-http@example.test', 'client-http@example.test', 'Client HTTP Test', $2, $2)
+	`, adminUserID, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("insert client HTTP administrator: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_memberships (
+			admin_membership_id, organization_id, admin_user_id, role, created_at, updated_at
+		) VALUES ($1, $2, $3, 'owner', $4, $4)
+	`, membershipID, organizationID, adminUserID, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("insert client HTTP administrator membership: %v", err)
+	}
+	return adminUserID
+}
+
+func insertClientHTTPEncryptedSecret(t *testing.T, ctx context.Context, pool *pgxpool.Pool, provider secrets.Provider, fixture challengeFixture, adminUserID, name string, plaintext []byte, createdAt time.Time) {
+	t.Helper()
+	recordID := mustSessionID(t, id.SecretRecord)
+	encrypted, err := provider.Encrypt(plaintext, secrets.AssociatedData{
+		OrganizationID: fixture.organizationID, EnvironmentID: fixture.environmentID,
+		SecretID: recordID, SecretVersion: 1, FormatVersion: 1,
+	})
+	if err != nil {
+		t.Fatalf("encrypt client HTTP secret fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO secret_records (
+			secret_record_id, organization_id, application_id, environment_id,
+			name, version, encryption_format_version, algorithm,
+			master_key_identifier, ciphertext, nonce, created_by_admin_user_id, created_at
+		) VALUES ($1, $2, $3, $4, $5, 1, $6, 'aes-256-gcm', $7, $8, $9, $10, $11)
+	`, recordID, fixture.organizationID, fixture.applicationID, fixture.environmentID,
+		name, int16(encrypted.FormatVersion), encrypted.KeyID, encrypted.Ciphertext,
+		encrypted.Nonce, adminUserID, createdAt); err != nil {
+		t.Fatalf("insert encrypted client HTTP secret fixture: %v", err)
+	}
+}
+
+func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, adminUserID string, now time.Time) string {
+	t.Helper()
+	document, err := json.Marshal(map[string]any{
+		"apiVersion": "latchway.dev/v1alpha1",
+		"kind":       "EnvironmentConfig",
+		"metadata": map[string]any{
+			"organization": "challenge-test", "application": "challenge-app", "environment": "development",
+		},
+		"spec": map[string]any{
+			"identityProviders": []any{map[string]any{
+				"id": "custom", "type": "custom_jwt", "issuer": clientHTTPIdentityIssuer,
+				"audiences": []any{clientHTTPIdentityAudience}, "allowedAlgorithms": []any{"RS256"},
+				"staticPublicKeySecretRef": "secret/identity-public-key",
+				"subjectClaim":             "sub", "clockSkewSeconds": 0,
+			}},
+			"attestationPolicies": []any{map[string]any{
+				"id": "native", "maxAge": "10m",
+				"platforms": map[string]any{"ios": map[string]any{
+					"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
+					"secretRef": "secret/debug-attestation-public-keys",
+				}},
+			}},
+			"upstreams": []any{map[string]any{
+				"id": "primary", "type": "openai_compatible", "baseUrl": "https://api.example.test/v1",
+				"authentication": map[string]any{"type": "none"},
+			}},
+			"models": []any{map[string]any{
+				"id": "fast", "upstream": "primary", "upstreamModel": "configured-fast-model",
+			}},
+			"limitPlans": []any{map[string]any{
+				"id": "free", "limits": []any{map[string]any{
+					"metric": "logical_requests", "window": "1d", "maximum": 5,
+				}},
+			}},
+			"features": []any{map[string]any{
+				"id": "assistant", "protocol": "openai_responses", "attestationPolicy": "native",
+				"access":    map[string]any{"expression": "principal.authenticated"},
+				"limitPlan": map[string]any{"expression": "'free'"},
+				"routes": []any{map[string]any{
+					"id": "primary", "when": "true", "model": "fast", "priority": 10,
+				}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode client HTTP configuration: %v", err)
+	}
+	validator, err := configuration.NewValidator()
+	if err != nil {
+		t.Fatalf("construct configuration validator: %v", err)
+	}
+	report, compiled := validator.Validate(document, configuration.EnvironmentDescriptor{
+		TenantScope: configuration.TenantScope{
+			OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
+			EnvironmentID: fixture.environmentID,
+		},
+		OrganizationSlug: "challenge-test", ApplicationSlug: "challenge-app",
+		EnvironmentSlug: "development", EnvironmentKind: "development",
+		SecretNames: map[string]struct{}{
+			"identity-public-key": {}, "debug-attestation-public-keys": {},
+		},
+	}, now)
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("client HTTP configuration did not compile: %+v", report.Issues)
+	}
+	reportJSON, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("encode client HTTP validation report: %v", err)
+	}
+	revisionID := mustSessionID(t, id.ConfigRevision)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO config_revisions (
+			config_revision_id, organization_id, application_id, environment_id,
+			revision_number, etag, status, document, compiled_document,
+			validation_errors, validation_report, created_by_admin_user_id,
+			validated_at, activated_at
+		) VALUES (
+			$1, $2, $3, $4, 1, 'client-http-etag-0001', 'valid', $5::jsonb, $6::jsonb,
+			'[]'::jsonb, $7::jsonb, $8, $9, $9
+		)
+	`, revisionID, fixture.organizationID, fixture.applicationID, fixture.environmentID,
+		document, compiled, reportJSON, adminUserID, now); err != nil {
+		t.Fatalf("insert client HTTP configuration revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO active_config_revisions (
+			organization_id, application_id, environment_id, config_revision_id,
+			revision_status, activated_by_admin_user_id, activated_at
+		) VALUES ($1, $2, $3, $4, 'valid', $5, $6)
+	`, fixture.organizationID, fixture.applicationID, fixture.environmentID,
+		revisionID, adminUserID, now); err != nil {
+		t.Fatalf("activate client HTTP configuration revision: %v", err)
+	}
+	return revisionID
+}
+
+func clientHTTPPostJSON(t *testing.T, handler http.Handler, path string, proof DPoPProof, body any, wantStatus int, output any) {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode client HTTP request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	request.Host = "untrusted-inbound.example.test"
+	request.Header.Set("Forwarded", "host=untrusted-forwarded.example.test;proto=http")
+	request.Header.Set("X-Forwarded-Host", "untrusted-forwarded.example.test")
+	request.Header.Set("X-Forwarded-Proto", "http")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Latchway-Protocol-Version", "1")
+	request.Header.Set("X-Latchway-SDK", "ios")
+	request.Header.Set("X-Latchway-SDK-Version", "1.2.3")
+	request.Header.Set("DPoP", proof.value)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != wantStatus {
+		var failure struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &failure)
+		t.Fatalf("client HTTP %s status = %d, problem code = %q", path, response.Code, failure.Code)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("client HTTP %s Cache-Control = %q", path, response.Header().Get("Cache-Control"))
+	}
+	if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("client HTTP %s omitted required success headers", path)
+	}
+	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
+		t.Fatalf("decode client HTTP %s response: %v", path, err)
+	}
+}
+
+func clientHTTPURL(t *testing.T, path string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(clientHTTPOrigin + path)
+	if err != nil {
+		t.Fatalf("parse trusted client HTTP target: %v", err)
+	}
+	return parsed
+}
+
+func assertClientHTTPGrant(t *testing.T, grant clientHTTPGrantDocument, dpopJKT string) {
+	t.Helper()
+	if grant.TokenType != "DPoP" || grant.ExpiresIn != 600 || grant.RefreshExpiresIn != 30*24*60*60 ||
+		len(grant.AccessToken) < 64 || len(grant.RefreshToken) < 32 ||
+		id.Validate(grant.Installation.ID, id.Installation) != nil || grant.Installation.Platform != "ios" ||
+		grant.Installation.DPoPJKT != dpopJKT || grant.Installation.Status != "active" ||
+		grant.Trust.Provider != "debug" || grant.Trust.Level != "debug" ||
+		grant.Trust.VerifiedAt.IsZero() || !grant.Trust.ExpiresAt.After(grant.Trust.VerifiedAt) {
+		t.Fatal("client HTTP grant response violated the session contract")
+	}
+}
+
+func assertClientHTTPAccessToken(t *testing.T, ctx context.Context, keyManager *SigningKeyManager, raw string, fixture challengeFixture, revisionID, dpopJKT string, now time.Time) {
+	t.Helper()
+	token, err := NewAccessToken(raw)
+	if err != nil {
+		t.Fatal("client HTTP response contained a malformed access token")
+	}
+	verifier, err := NewAccessTokenVerifier(AccessTokenVerifierConfig{
+		Keys: keyManager, Issuer: clientHTTPOrigin, Audience: clientHTTPAudience,
+		Now: func() time.Time { return now }, ClockSkewSet: true,
+	})
+	if err != nil {
+		t.Fatalf("construct client HTTP access-token verifier: %v", err)
+	}
+	principal, err := verifier.Verify(ctx, token)
+	if err != nil {
+		t.Fatalf("verify client HTTP access token: %v", err)
+	}
+	if principal.OrganizationID != fixture.organizationID || principal.ApplicationID != fixture.applicationID ||
+		principal.EnvironmentID != fixture.environmentID || id.Validate(principal.ApplicationUserID, id.ApplicationUser) != nil ||
+		id.Validate(principal.InstallationID, id.Installation) != nil || id.Validate(principal.SessionGrantID, id.SessionGrant) != nil ||
+		principal.IdentityProvider != "custom" || principal.TrustLevel != "debug" ||
+		principal.PolicyRevisionID != revisionID || principal.DPoPJKT != dpopJKT {
+		t.Fatal("client HTTP access token did not preserve the verified session scope")
+	}
+}
+
+func clientHTTPAccessTokenKeyID(t *testing.T, raw string) string {
+	t.Helper()
+	segments := strings.Split(raw, ".")
+	if len(segments) != 3 {
+		t.Fatal("client HTTP access token was not compact JWT syntax")
+	}
+	headerBytes, err := base64.RawURLEncoding.Strict().DecodeString(segments[0])
+	if err != nil || base64.RawURLEncoding.EncodeToString(headerBytes) != segments[0] {
+		t.Fatal("client HTTP access token had a noncanonical protected header")
+	}
+	var header struct {
+		KeyID string `json:"kid"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil || id.Validate(header.KeyID, id.GatewaySigningKey) != nil {
+		t.Fatal("client HTTP access token omitted its signing-key identifier")
+	}
+	return header.KeyID
+}

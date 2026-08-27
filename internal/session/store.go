@@ -305,7 +305,7 @@ func challengeAttestationAllows(policy ChallengeAttestationPolicy, result attest
 		!trustLevelPattern.MatchString(policy.MinimumTrustLevel) ||
 		policy.MaximumAge < time.Minute || policy.MaximumAge > 30*24*time.Hour ||
 		result.Provider != policy.Provider || now.IsZero() ||
-		now.After(result.VerifiedAt.Add(policy.MaximumAge)) {
+		!result.VerifiedAt.Add(policy.MaximumAge).After(now) {
 		return false
 	}
 	return trustSatisfies(result.TrustLevel, policy.MinimumTrustLevel)

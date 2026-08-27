@@ -76,6 +76,9 @@ func TestChallengeAttestationPolicyEnforcement(t *testing.T) {
 		{name: "maximum age exceeded", mutate: func(_ *ChallengeAttestationPolicy, _ *attestation.Result, now *time.Time) {
 			*now = now.Add(5 * time.Minute)
 		}},
+		{name: "maximum age boundary reached", mutate: func(policy *ChallengeAttestationPolicy, result *attestation.Result, now *time.Time) {
+			*now = result.VerifiedAt.Add(policy.MaximumAge)
+		}},
 		{name: "invalid maximum age", mutate: func(policy *ChallengeAttestationPolicy, _ *attestation.Result, _ *time.Time) { policy.MaximumAge = 0 }},
 	}
 	for _, test := range tests {
