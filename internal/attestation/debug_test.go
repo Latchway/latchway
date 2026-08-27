@@ -181,6 +181,27 @@ func TestDebugVerifierRequiresExplicitEnvironmentPermission(t *testing.T) {
 	}
 }
 
+func TestDebugVerifierPreservesExplicitZeroClockSkew(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := mustDebugVerifier(t, DebugConfig{
+		Enabled: true, EnvironmentKind: "development",
+		PublicKeys: map[string]ed25519.PublicKey{"fixture-key-01": publicKey},
+		Now:        func() time.Time { return debugTestNow }, ClockSkewSet: true,
+	})
+	binding := testBinding()
+	evidence := signedDebugEvidence(t, binding, privateKey, "fixture-key-01", debugTestNow.Add(time.Second))
+	if _, err := verifier.Verify(context.Background(), evidence, binding); err != nil {
+		t.Fatalf("unexpired evidence should be valid: %v", err)
+	}
+	evidence = signedDebugEvidence(t, binding, privateKey, "fixture-key-01", debugTestNow)
+	if _, err := verifier.Verify(context.Background(), evidence, binding); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("explicit zero skew accepted evidence at its expiry boundary: %v", err)
+	}
+}
+
 func deterministicDebugKey() (ed25519.PublicKey, ed25519.PrivateKey) {
 	seed := make([]byte, ed25519.SeedSize)
 	for index := range seed {

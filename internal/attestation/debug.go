@@ -27,6 +27,7 @@ type DebugConfig struct {
 	Now                        func() time.Time
 	MaximumEvidenceLifetime    time.Duration
 	ClockSkew                  time.Duration
+	ClockSkewSet               bool
 }
 
 type DebugVerifier struct {
@@ -46,7 +47,7 @@ func NewDebugVerifier(config DebugConfig) (*DebugVerifier, error) {
 	if config.MaximumEvidenceLifetime == 0 {
 		config.MaximumEvidenceLifetime = 10 * time.Minute
 	}
-	if config.ClockSkew == 0 {
+	if !config.ClockSkewSet && config.ClockSkew == 0 {
 		config.ClockSkew = time.Minute
 	}
 	if config.MaximumEvidenceLifetime < time.Minute || config.MaximumEvidenceLifetime > time.Hour || config.ClockSkew < 0 || config.ClockSkew > 5*time.Minute {
