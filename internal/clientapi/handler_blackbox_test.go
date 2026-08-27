@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/clientapi"
+	"github.com/latchway/latchway/internal/requestidentity"
 )
 
 type blackBoxCoordinator struct {
@@ -69,7 +70,15 @@ func TestExportedHandlerBlackBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	handler := api.Handler()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, contextErr := requestidentity.NewContext(r.Context())
+		if contextErr != nil {
+			t.Errorf("requestidentity.NewContext() error = %v", contextErr)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		api.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
 
 	challenge := blackBoxRequest("/client/v1/session-challenges", `{"application_id":"app_public","environment":"production","identity_provider":"firebase","identity_token":"identity-token-123","platform":"web","sdk_version":"1.2.3"}`)
 	challenge.Header.Set("X-Latchway-SDK", "javascript")

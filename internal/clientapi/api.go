@@ -17,9 +17,9 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/latchway/latchway/internal/buildinfo"
-	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/requestidentity"
 )
 
 const (
@@ -98,62 +98,69 @@ func isLoopback(host string) bool {
 func (api *API) Handler() http.Handler { return api }
 
 func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	requestID := selectRequestID(r)
-	w.Header().Set("X-Latchway-Request-ID", requestID)
+	correlationID := selectCorrelationID(r)
+	w.Header().Set("X-Latchway-Request-ID", correlationID)
+	logicalID, ok := requestidentity.FromContext(r.Context())
+	if !ok {
+		api.writeProblem(w, correlationID, problem.Error{
+			Code: "server_not_ready", Detail: "The server could not initialize request processing.",
+		})
+		return
+	}
 
 	path := r.URL.EscapedPath()
 	if path != r.URL.Path {
-		api.writeProblem(w, requestID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
+		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		api.writeViolation(w, requestID, invalidAt("query", "Query parameters are not supported by this endpoint."))
+		api.writeViolation(w, correlationID, invalidAt("query", "Query parameters are not supported by this endpoint."))
 		return
 	}
 
 	switch path {
 	case challengePath:
 		if r.Method != http.MethodPost {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.createChallenge(w, r, requestID)
+		api.createChallenge(w, r, correlationID, logicalID.String())
 	case exchangePath:
 		if r.Method != http.MethodPost {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.exchangeSession(w, r, requestID)
+		api.exchangeSession(w, r, correlationID, logicalID.String())
 	case refreshPath:
 		if r.Method != http.MethodPost {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.refreshSession(w, r, requestID)
+		api.refreshSession(w, r, correlationID, logicalID.String())
 	case revokePath:
 		if r.Method != http.MethodDelete {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.revokeCurrentInstallation(w, r, requestID)
+		api.revokeCurrentInstallation(w, r, correlationID, logicalID.String())
 	case jwksPath:
 		if r.Method != http.MethodGet {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.publicJWKS(w, r, requestID)
+		api.publicJWKS(w, r, correlationID)
 	case discoveryPath:
 		if r.Method != http.MethodGet {
-			api.methodNotAllowed(w, requestID)
+			api.methodNotAllowed(w, correlationID)
 			return
 		}
-		api.publicDiscovery(w, r, requestID)
+		api.publicDiscovery(w, r, correlationID)
 	default:
-		api.writeProblem(w, requestID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
+		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 	}
 }
 
-func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestID string) {
+func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
 	declaration, violation := parseClientDeclaration(r)
 	if violation != nil {
 		api.writeViolation(w, requestID, violation)
@@ -169,7 +176,7 @@ func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestI
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(requestID, declaration, http.MethodPost, challengePath, proof)
+	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, challengePath, proof)
 	result, err := api.coordinator.CreateChallenge(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -183,7 +190,7 @@ func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestI
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
 }
 
-func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestID string) {
+func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
 	declaration, violation := parseClientDeclaration(r)
 	if violation != nil {
 		api.writeViolation(w, requestID, violation)
@@ -199,7 +206,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(requestID, declaration, http.MethodPost, exchangePath, proof)
+	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, exchangePath, proof)
 	result, err := api.coordinator.ExchangeSession(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -213,7 +220,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
 }
 
-func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID string) {
+func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
 	declaration, violation := parseClientDeclaration(r)
 	if violation != nil {
 		api.writeViolation(w, requestID, violation)
@@ -229,7 +236,7 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(requestID, declaration, http.MethodPost, refreshPath, proof)
+	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, refreshPath, proof)
 	result, err := api.coordinator.RefreshSession(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -243,7 +250,7 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
 }
 
-func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request, requestID string) {
+func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
 	declaration, violation := parseClientDeclaration(r)
 	if violation != nil {
 		api.writeViolation(w, requestID, violation)
@@ -264,7 +271,7 @@ func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	input := RevokeInstallationInput{
-		Metadata:    api.metadata(requestID, declaration, http.MethodDelete, revokePath, proof),
+		Metadata:    api.metadata(logicalRequestID, declaration, http.MethodDelete, revokePath, proof),
 		AccessToken: accessToken,
 	}
 	if err := api.coordinator.RevokeCurrentInstallation(r.Context(), input); err != nil {
@@ -446,18 +453,19 @@ func (api *API) writeSuccess(w http.ResponseWriter, requestID string, status int
 	}
 }
 
-func selectRequestID(r *http.Request) string {
+// selectCorrelationID preserves the bounded client-facing request hint. It is
+// never an authoritative logical request identifier.
+func selectCorrelationID(r *http.Request) string {
 	if current := middleware.GetReqID(r.Context()); validRequestID(current) {
 		return current
 	}
 	if candidate, ok := exactlyOneHeader(r.Header, "X-Latchway-Request-ID"); ok && validRequestID(candidate) {
 		return candidate
 	}
-	generated, err := id.New(id.LogicalRequest)
-	if err != nil {
-		return "request_unknown"
+	if logicalID, ok := requestidentity.FromContext(r.Context()); ok {
+		return logicalID.String()
 	}
-	return generated
+	return "request_unknown"
 }
 
 func validRequestID(value string) bool {

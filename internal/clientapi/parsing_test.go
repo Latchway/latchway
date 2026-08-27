@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/latchway/latchway/internal/id"
 )
 
 func TestSessionTransportRejectsAmbiguousHeadersBodiesPathsAndQueries(t *testing.T) {
@@ -229,7 +230,7 @@ func TestEvidenceMemberAndByteLimitsAreEnforced(t *testing.T) {
 	}
 }
 
-func TestRequestIDSelectionUsesSafePrecedenceAndFallback(t *testing.T) {
+func TestCorrelationIDSelectionUsesSafePrecedenceAndFallback(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -240,6 +241,7 @@ func TestRequestIDSelectionUsesSafePrecedenceAndFallback(t *testing.T) {
 		wantPrefix string
 	}{
 		{name: "valid client hint", clientID: []string{validRequestIDText}, want: validRequestIDText},
+		{name: "logical-looking client hint", clientID: []string{logicalLookingHint}, want: logicalLookingHint},
 		{name: "middleware wins", clientID: []string{validRequestIDText}, contextID: "server-request-456", want: "server-request-456"},
 		{name: "invalid client hint", clientID: []string{"bad id"}, wantPrefix: "req_"},
 		{name: "short client hint", clientID: []string{"short"}, wantPrefix: "req_"},
@@ -270,8 +272,15 @@ func TestRequestIDSelectionUsesSafePrecedenceAndFallback(t *testing.T) {
 			if test.wantPrefix != "" && !strings.HasPrefix(actual, test.wantPrefix) {
 				t.Fatalf("request ID = %q, want prefix %q", actual, test.wantPrefix)
 			}
-			if len(coordinator.challengeInputs) != 1 || coordinator.challengeInputs[0].Metadata.RequestID != actual {
-				t.Fatalf("metadata request ID mismatch: %#v", coordinator.challengeInputs)
+			if len(coordinator.challengeInputs) != 1 {
+				t.Fatalf("challenge inputs = %#v", coordinator.challengeInputs)
+			}
+			logicalRequestID := coordinator.challengeInputs[0].Metadata.RequestID
+			if err := id.Validate(logicalRequestID, id.LogicalRequest); err != nil {
+				t.Fatalf("metadata logical request ID is not canonical: %v", err)
+			}
+			if len(test.clientID) == 1 && logicalRequestID == test.clientID[0] {
+				t.Fatalf("client request hint became logical request ID: %q", logicalRequestID)
 			}
 		})
 	}

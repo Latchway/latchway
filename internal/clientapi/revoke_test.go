@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/latchway/latchway/internal/id"
 )
 
 const validAccessToken = "headerheaderheaderheaderheader.payloadpayloadpayloadpayloadpayload.signaturesignaturesignature"
@@ -39,7 +41,10 @@ func TestRevokeCurrentInstallationUsesBoundedCredentialsAndCanonicalTarget(t *te
 		t.Fatalf("revoke calls = %d", len(coordinator.revokeInputs))
 	}
 	input := coordinator.revokeInputs[0]
-	if input.AccessToken.Reveal() != validAccessToken || input.Metadata.DPoPProof.Reveal() != validProof || input.Metadata.RequestID != validRequestIDText || input.Metadata.SDK != "ios" || input.Metadata.SDKVersion != "1.2.3" || input.Metadata.HTTPMethod != http.MethodDelete {
+	if err := id.Validate(input.Metadata.RequestID, id.LogicalRequest); err != nil {
+		t.Fatalf("metadata logical request ID is not canonical: %v", err)
+	}
+	if input.AccessToken.Reveal() != validAccessToken || input.Metadata.DPoPProof.Reveal() != validProof || input.Metadata.RequestID == validRequestIDText || input.Metadata.SDK != "ios" || input.Metadata.SDKVersion != "1.2.3" || input.Metadata.HTTPMethod != http.MethodDelete {
 		t.Fatalf("unexpected revoke input: %#v", input)
 	}
 	if target := input.Metadata.TargetURL.String(); target != "https://gateway.example.test"+revokePath {

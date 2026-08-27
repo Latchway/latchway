@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/requestidentity"
 )
 
 const (
@@ -20,6 +23,7 @@ const (
 	validInstallation  = "ins_01K3NQ7M8P9RSTVWXYZABCDE12"
 	validProof         = "header.payload.signature"
 	validRequestIDText = "client-request-123"
+	logicalLookingHint = "req_01K3NQ7M8P9RSTVWXYZABCDE12"
 )
 
 var testInstant = time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
@@ -119,6 +123,32 @@ func TestNewValidatesDependenciesAndCanonicalPublicOrigin(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectsClientHintWithoutServerLogicalIdentity(t *testing.T) {
+	t.Parallel()
+
+	coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
+	api, err := New(Config{
+		Coordinator:  coordinator,
+		JWKS:         &fakeJWKSProvider{result: validJWKS()},
+		PublicOrigin: "https://gateway.example.test",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	request := validClientRequest(http.MethodPost, challengePath, validChallengeBody("ios"), "ios", "1.2.3")
+	request.Header.Set("X-Latchway-Request-ID", logicalLookingHint)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	assertProblem(t, response, "server_not_ready", http.StatusServiceUnavailable)
+	if got := response.Header().Get("X-Latchway-Request-ID"); got != logicalLookingHint {
+		t.Fatalf("correlation hint = %q, want %q", got, logicalLookingHint)
+	}
+	if len(coordinator.challengeInputs) != 0 {
+		t.Fatalf("coordinator ran without server logical identity: %#v", coordinator.challengeInputs)
+	}
+}
+
 func TestCreateChallengeUsesCanonicalOriginAndExactWireShape(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +178,10 @@ func TestCreateChallengeUsesCanonicalOriginAndExactWireShape(t *testing.T) {
 	if input.ApplicationID != "app_public" || input.Environment != "production" || input.IdentityProvider != "firebase" || input.IdentityToken.Reveal() != "identity-token-123" || input.Platform != "ios" {
 		t.Fatalf("unexpected challenge input: %#v", input)
 	}
-	if input.Metadata.RequestID != validRequestIDText || input.Metadata.SDK != "ios" || input.Metadata.SDKVersion != "1.2.3" || input.Metadata.HTTPMethod != http.MethodPost || input.Metadata.DPoPProof.Reveal() != validProof {
+	if err := id.Validate(input.Metadata.RequestID, id.LogicalRequest); err != nil {
+		t.Fatalf("metadata logical request ID is not canonical: %v", err)
+	}
+	if input.Metadata.RequestID == validRequestIDText || input.Metadata.SDK != "ios" || input.Metadata.SDKVersion != "1.2.3" || input.Metadata.HTTPMethod != http.MethodPost || input.Metadata.DPoPProof.Reveal() != validProof {
 		t.Fatalf("unexpected request metadata: %#v", input.Metadata)
 	}
 	if target := input.Metadata.TargetURL.String(); target != "https://gateway.example.test"+challengePath {
@@ -567,7 +600,15 @@ func newTestHandler(t *testing.T, coordinator Coordinator, keys JWKSProvider, or
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	return api.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, err := requestidentity.NewContext(r.Context())
+		if err != nil {
+			t.Errorf("requestidentity.NewContext() error = %v", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		api.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func validClientRequest(method, path, body, sdk, version string) *http.Request {

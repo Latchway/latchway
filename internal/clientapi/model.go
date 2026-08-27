@@ -95,9 +95,10 @@ func (EvidencePayload) Format(state fmt.State, _ rune) {
 	_, _ = io.WriteString(state, "[REDACTED]")
 }
 
-// RequestMetadata contains only verified transport declarations and the
-// server-constructed request target. TargetURL never derives from inbound
-// Host or forwarding headers.
+// RequestMetadata contains the server-owned logical request ID, verified
+// transport declarations, and the server-constructed request target.
+// RequestID never derives from an inbound correlation header. TargetURL never
+// derives from inbound Host or forwarding headers.
 type RequestMetadata struct {
 	RequestID  string
 	SDK        string

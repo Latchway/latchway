@@ -19,8 +19,8 @@ import (
 	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/database"
-	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/requestidentity"
 	console "github.com/latchway/latchway/web/console"
 )
 
@@ -52,7 +52,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	}
 	router := chi.NewRouter()
 	router.Use(latchwayRequestID)
-	router.Use(requestIDHeader)
+	router.Use(correlationIDHeader)
 	router.Use(recoverer(logger))
 	router.Use(securityHeaders)
 	router.Use(accessLog(logger))
@@ -83,22 +83,44 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 }
 
 func latchwayRequestID(next http.Handler) http.Handler {
+	return latchwayRequestIDWithContext(next, requestidentity.NewContext)
+}
+
+type logicalRequestContextFactory func(context.Context) (context.Context, error)
+
+func latchwayRequestIDWithContext(next http.Handler, newContext logicalRequestContextFactory) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if next == nil || newContext == nil {
+			writeRequestIdentityUnavailable(w)
+			return
+		}
+		ctx, err := newContext(r.Context())
+		if err != nil {
+			writeRequestIdentityUnavailable(w)
+			return
+		}
+		logicalID, ok := requestidentity.FromContext(ctx)
+		if !ok {
+			writeRequestIdentityUnavailable(w)
+			return
+		}
+
 		requestID := safeRequestIDHint(r.Header)
 		if requestID == "" {
-			var err error
-			requestID, err = id.New(id.LogicalRequest)
-			if err != nil {
-				const unavailableRequestID = "unavailable"
-				w.Header().Set("X-Latchway-Request-ID", unavailableRequestID)
-				problem.Write(w, unavailableRequestID, problem.Error{
-					Code: "server_not_ready", Detail: "The server could not initialize request processing.",
-				})
-				return
-			}
+			requestID = logicalID.String()
 		}
-		ctx := context.WithValue(r.Context(), middleware.RequestIDKey, requestID)
+		// chi's request ID remains a wire-compatible correlation value. Code
+		// that owns routing, quota, or persistence must use requestidentity.
+		ctx = context.WithValue(ctx, middleware.RequestIDKey, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func writeRequestIdentityUnavailable(w http.ResponseWriter) {
+	const unavailableRequestID = "unavailable"
+	w.Header().Set("X-Latchway-Request-ID", unavailableRequestID)
+	problem.Write(w, unavailableRequestID, problem.Error{
+		Code: "server_not_ready", Detail: "The server could not initialize request processing.",
 	})
 }
 
@@ -184,7 +206,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func requestIDHeader(next http.Handler) http.Handler {
+func correlationIDHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Latchway-Request-ID", middleware.GetReqID(r.Context()))
 		next.ServeHTTP(w, r)
@@ -197,7 +219,9 @@ func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 			started := time.Now()
 			wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(wrapped, r)
+			logicalID, _ := requestidentity.FromContext(r.Context())
 			logger.InfoContext(r.Context(), "HTTP request",
+				"logical_request_id", logicalID.String(),
 				"request_id", middleware.GetReqID(r.Context()),
 				"method", r.Method,
 				"path", r.URL.EscapedPath(),
