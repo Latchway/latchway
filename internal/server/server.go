@@ -36,6 +36,7 @@ type Server struct {
 type Handlers struct {
 	AdminAPI  http.Handler
 	ClientAPI http.Handler
+	DataPlane http.Handler
 }
 
 // New builds a server whose readiness reflects PostgreSQL and schema state.
@@ -45,6 +46,9 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	}
 	if handlers.ClientAPI == nil {
 		return nil, errors.New("client API handler is nil")
+	}
+	if handlers.DataPlane == nil {
+		return nil, errors.New("data-plane handler is nil")
 	}
 	consoleAssets, err := console.Assets()
 	if err != nil {
@@ -56,6 +60,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	router.Use(recoverer(logger))
 	router.Use(securityHeaders)
 	router.Use(accessLog(logger))
+	router.Use(dataPlaneRoute(handlers.DataPlane))
 
 	router.Get("/healthz", healthHandler)
 	router.Get("/readyz", readinessHandler(pool))
@@ -80,6 +85,21 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 		},
 		logger: logger,
 	}, nil
+}
+
+// dataPlaneRoute selects by Go's decoded URL path so encoded aliases reach the
+// strict data-plane endpoint validator instead of falling through to a broader
+// client route. The handler itself rejects non-canonical RawPath and queries.
+func dataPlaneRoute(handler http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL != nil && r.URL.Path == "/v1/chat/completions" {
+				handler.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func latchwayRequestID(next http.Handler) http.Handler {

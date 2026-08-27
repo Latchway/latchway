@@ -61,6 +61,7 @@ func TestAdminAPIIsMountedAheadOfConsoleFallback(t *testing.T) {
 		ClientAPI: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Fatal("client API should not handle an admin request")
 		}),
+		DataPlane: http.NotFoundHandler(),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -90,6 +91,7 @@ func TestClientAPIIsMountedAtUnstrippedPathsAheadOfConsoleFallback(t *testing.T)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), Handlers{
 		AdminAPI:  http.NotFoundHandler(),
 		ClientAPI: client,
+		DataPlane: http.NotFoundHandler(),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -113,6 +115,84 @@ func TestClientAPIIsMountedAtUnstrippedPathsAheadOfConsoleFallback(t *testing.T)
 		if got := <-seen; got != path {
 			t.Fatalf("client route path = %q, want %q", got, path)
 		}
+	}
+}
+
+func TestDataPlaneOwnsOnlyTheExactChatCompletionsRoute(t *testing.T) {
+	t.Parallel()
+
+	seenDataPlane := make(chan string, 4)
+	seenClientAPI := make(chan string, 3)
+	dataPlane := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := requestidentity.FromContext(r.Context()); !ok {
+			t.Fatal("data-plane request is missing its logical request identity")
+		}
+		target := r.URL.EscapedPath()
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		seenDataPlane <- r.Method + " " + target
+		w.WriteHeader(http.StatusAccepted)
+	})
+	clientAPI := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenClientAPI <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server, err := New(config.Config{
+		ListenAddress: "127.0.0.1:8080",
+		ReadTimeout:   time.Second,
+		IdleTimeout:   time.Second,
+	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), Handlers{
+		AdminAPI: http.NotFoundHandler(), ClientAPI: clientAPI, DataPlane: dataPlane,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodGet} {
+		recorder := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(method, "/v1/chat/completions", nil))
+		if recorder.Code != http.StatusAccepted {
+			t.Fatalf("exact data-plane route status = %d, want %d", recorder.Code, http.StatusAccepted)
+		}
+		if got := <-seenDataPlane; got != method+" /v1/chat/completions" {
+			t.Fatalf("data-plane request = %q", got)
+		}
+	}
+	for _, target := range []string{
+		"/v1/chat/completions?unexpected=true",
+		"/v1/%63hat/completions",
+	} {
+		recorder := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, target, nil))
+		if recorder.Code != http.StatusAccepted {
+			t.Fatalf("non-canonical data-plane target %q status = %d, want %d", target, recorder.Code, http.StatusAccepted)
+		}
+		if got := <-seenDataPlane; got != http.MethodPost+" "+target {
+			t.Fatalf("data-plane request = %q, want target %q", got, target)
+		}
+	}
+
+	for _, path := range []string{"/v1/chat/completions/", "/v1/chat/completions/extra", "/v1/responses"} {
+		recorder := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("neighboring client route %q status = %d, want %d", path, recorder.Code, http.StatusNoContent)
+		}
+		if got := <-seenClientAPI; got != http.MethodPost+" "+path {
+			t.Fatalf("client API request = %q", got)
+		}
+	}
+}
+
+func TestNewRejectsMissingDataPlaneHandler(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(config.Config{}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), Handlers{
+		AdminAPI: http.NotFoundHandler(), ClientAPI: http.NotFoundHandler(),
+	})
+	if err == nil || err.Error() != "data-plane handler is nil" {
+		t.Fatalf("New() error = %v, want data-plane handler validation", err)
 	}
 }
 
@@ -142,6 +222,7 @@ func TestServerPreservesSafeClientRequestIDHintWithoutTrustingItAsLogicalIdentit
 			}
 			w.WriteHeader(http.StatusNoContent)
 		}),
+		DataPlane: http.NotFoundHandler(),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -173,6 +254,7 @@ func TestServerGeneratesDistinctLogicalIDsAndUsesThemAsCorrelationFallback(t *te
 			seen <- logicalID.String()
 			w.WriteHeader(http.StatusNoContent)
 		}),
+		DataPlane: http.NotFoundHandler(),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
