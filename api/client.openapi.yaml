@@ -508,12 +508,18 @@ components:
         attestation:
           type: object
           additionalProperties: false
-          required: [provider, mode]
+          required: [provider, mode, client_data_hash]
           properties:
             provider:
               type: string
               enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
             mode: { type: string, enum: [required, preferred] }
+            client_data_hash:
+              type: string
+              minLength: 43
+              maxLength: 43
+              pattern: '^[A-Za-z0-9_-]{43}$'
+              description: Base64url SHA-256 of the server-constructed canonical attestation binding; use directly as the App Attest clientDataHash or Play Integrity requestHash input.
             provider_options:
               type: object
               description: Safe public provider parameters; never secrets or expected verdict internals.
