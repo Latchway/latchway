@@ -2450,6 +2450,475 @@ func TestStorePostgreSQLConcurrencyLeases(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLTokenBucket(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+
+	type bucketState struct {
+		capacity, used, reserved, balance, numerator, denominator, version int64
+		refilledAt                                                         time.Time
+		algorithm, windowKey                                               string
+	}
+	readBucket := func(t *testing.T, bucketID string) bucketState {
+		t.Helper()
+		var state bucketState
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT hard_maximum, used_units, reserved_units, available_units,
+			       refill_numerator, refill_denominator, refilled_at, version,
+			       algorithm, window_key
+			FROM quota_buckets
+			WHERE quota_bucket_id = $1
+		`, bucketID).Scan(
+			&state.capacity, &state.used, &state.reserved, &state.balance,
+			&state.numerator, &state.denominator, &state.refilledAt, &state.version,
+			&state.algorithm, &state.windowKey,
+		); err != nil {
+			t.Fatalf("read token bucket: %v", err)
+		}
+		state.refilledAt = state.refilledAt.UTC()
+		return state
+	}
+
+	t.Run("exact executable capacity and rate bounds", func(t *testing.T) {
+		input := fixture.tokenBucketInput(
+			t, "token-bounds", maximumTokenCapacity, tokenRateDecimalScale, 1,
+		)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve maximum token policy: %v", err)
+		}
+		state := readBucket(t, reservation.entries[0].bucketID)
+		maximumBalance, ok := tokenCapacityBalance(maximumTokenCapacity)
+		if !ok || state.capacity != maximumTokenCapacity ||
+			state.balance != maximumBalance-tokenBalanceScale ||
+			state.numerator != tokenRateDecimalScale || state.denominator != 1 {
+			t.Fatalf("maximum token policy state = %#v", state)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+			t.Fatalf("release maximum token policy: %v", err)
+		}
+
+		for _, invalid := range []ReserveInput{
+			fixture.tokenBucketInput(t, "token-capacity-overflow", maximumTokenCapacity+1, 1, 1),
+			fixture.tokenBucketInput(t, "token-rate-overflow", 1, tokenRateDecimalScale+1, 1),
+		} {
+			if _, err := fixture.store.Reserve(fixture.ctx, invalid); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("invalid bounded policy returned %v", err)
+			}
+			if got := fixture.count(t, `
+				SELECT count(*) FROM logical_requests WHERE logical_request_id = $1
+			`, invalid.LogicalRequestID.String()); got != 0 {
+				t.Fatalf("invalid bounded policy logical rows=%d", got)
+			}
+		}
+	})
+
+	t.Run("reserve denial replay and pre-dispatch release", func(t *testing.T) {
+		input := fixture.tokenBucketInput(t, "token-release", 1, 1, tokenRateDecimalScale)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve token: %v", err)
+		}
+		if len(reservation.entries) != 1 || !reservation.ResetAt().IsZero() ||
+			reservation.entries[0].algorithm != TokenBucketAlgorithm ||
+			reservation.entries[0].reservedUnits != 1 {
+			t.Fatalf("token reservation = %#v reset=%s", reservation.entries, reservation.ResetAt())
+		}
+		bucketID := reservation.entries[0].bucketID
+		state := readBucket(t, bucketID)
+		if state.capacity != 1 || state.used != 0 || state.reserved != 0 || state.balance != 0 ||
+			state.numerator != 1 || state.denominator != tokenRateDecimalScale ||
+			state.algorithm != TokenBucketAlgorithm || state.windowKey != tokenBucketWindowKey {
+			t.Fatalf("reserved token state = %#v", state)
+		}
+		var entryReserved, entrySettled, entryReleased int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT reserved_units, settled_units, released_units
+			FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&entryReserved, &entrySettled, &entryReleased); err != nil {
+			t.Fatalf("read token entry: %v", err)
+		}
+		if entryReserved != 1 || entrySettled != 0 || entryReleased != 0 {
+			t.Fatalf("token entry=%d/%d/%d, want 1/0/0", entryReserved, entrySettled, entryReleased)
+		}
+
+		replayed, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil || replayed.ID() != reservation.ID() {
+			t.Fatalf("accepted replay=%s: %v", replayed.ID(), err)
+		}
+		if afterReplay := readBucket(t, bucketID); afterReplay != state {
+			t.Fatalf("accepted replay mutated token bucket: before=%#v after=%#v", state, afterReplay)
+		}
+
+		deniedInput := fixture.tokenBucketInput(t, "token-release", 1, 1, tokenRateDecimalScale)
+		_, err = fixture.store.Reserve(fixture.ctx, deniedInput)
+		var denial *ExceededError
+		if !errors.As(err, &denial) || denial.Maximum() != 1 || denial.Reserved() != 0 ||
+			denial.Used() != 1 || denial.RetryAt().IsZero() {
+			t.Fatalf("token denial = %#v, %v", denial, err)
+		}
+		deniedState := readBucket(t, bucketID)
+		expectedRetry, retryErr := tokenRetryAt(tokenBucketState{
+			capacity: deniedState.capacity, balance: deniedState.balance,
+			numerator: deniedState.numerator, denominator: deniedState.denominator,
+			refilledAt: deniedState.refilledAt,
+		}, 1, deniedState.refilledAt)
+		if retryErr != nil || !denial.RetryAt().Equal(expectedRetry) {
+			t.Fatalf("denial retry=%s want=%s: %v", denial.RetryAt(), expectedRetry, retryErr)
+		}
+		_, replayErr := fixture.store.Reserve(fixture.ctx, deniedInput)
+		var replayDenial *ExceededError
+		if !errors.As(replayErr, &replayDenial) || !replayDenial.RetryAt().Equal(denial.RetryAt()) {
+			t.Fatalf("denied replay=%#v, %v", replayDenial, replayErr)
+		}
+		changed := cloneReserveInput(deniedInput)
+		changed.Rules[0].Capacity = 2
+		if _, replayErr := fixture.store.Reserve(fixture.ctx, changed); !errors.Is(replayErr, ErrInvalidInput) {
+			t.Fatalf("changed-policy replay = %v", replayErr)
+		}
+
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+			t.Fatalf("release token: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+			t.Fatalf("release replay: %v", err)
+		}
+		refunded := readBucket(t, bucketID)
+		var releasedAt time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT released_at FROM quota_reservations WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&releasedAt); err != nil {
+			t.Fatalf("read token release time: %v", err)
+		}
+		if refunded.balance != tokenBalanceScale || refunded.used != 0 || refunded.reserved != 0 ||
+			!refunded.refilledAt.Equal(releasedAt.UTC()) {
+			t.Fatalf("refunded token state = %#v", refunded)
+		}
+		var released int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT released_units FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&released); err != nil || released != 1 {
+			t.Fatalf("released semantic token=%d: %v", released, err)
+		}
+		afterRefund := fixture.tokenBucketInput(t, "token-release", 1, 1, tokenRateDecimalScale)
+		accepted, err := fixture.store.Reserve(fixture.ctx, afterRefund)
+		if err != nil {
+			t.Fatalf("reserve refunded token: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, accepted, "routing_failed"); err != nil {
+			t.Fatalf("clean refunded token: %v", err)
+		}
+	})
+
+	t.Run("settlement keeps the dispatch-time debit", func(t *testing.T) {
+		input := fixture.tokenBucketInput(t, "token-settle", 1, 1, tokenRateDecimalScale)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin attempt owner=%t: %v", owner, err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, Outcome{Status: AttemptSucceeded, HTTPStatus: 204}); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		state := readBucket(t, reservation.entries[0].bucketID)
+		if state.balance != 0 || state.used != 0 || state.reserved != 0 {
+			t.Fatalf("settled token state = %#v", state)
+		}
+		var settled, released int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT settled_units, released_units FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&settled, &released); err != nil {
+			t.Fatalf("read settled token entry: %v", err)
+		}
+		if settled != 1 || released != 0 {
+			t.Fatalf("settled token entry=%d/%d, want 1/0", settled, released)
+		}
+	})
+
+	t.Run("pending requests do not become accidental concurrency", func(t *testing.T) {
+		firstInput := fixture.tokenBucketInput(t, "token-refill", 1, 1_000, 1)
+		first, err := fixture.store.Reserve(fixture.ctx, firstInput)
+		if err != nil {
+			t.Fatalf("reserve first: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_buckets
+			SET refilled_at = statement_timestamp() - interval '10 milliseconds'
+			WHERE quota_bucket_id = $1
+		`, first.entries[0].bucketID); err != nil {
+			t.Fatalf("backdate token refill: %v", err)
+		}
+		secondInput := fixture.tokenBucketInput(t, "token-refill", 1, 1_000, 1)
+		second, err := fixture.store.Reserve(fixture.ctx, secondInput)
+		if err != nil {
+			t.Fatalf("reserve refilled token while first pending: %v", err)
+		}
+		state := readBucket(t, first.entries[0].bucketID)
+		if state.used != 0 || state.reserved != 0 || state.balance != 0 {
+			t.Fatalf("refilled pending state = %#v", state)
+		}
+		for _, reservation := range []Reservation{first, second} {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+				t.Fatalf("release pending token: %v", err)
+			}
+		}
+	})
+
+	t.Run("submillisecond balances enforce the exact eligibility boundary", func(t *testing.T) {
+		input := fixture.tokenBucketInput(t, "token-submillisecond", 1, 2_000, 1)
+		holder, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve submillisecond holder: %v", err)
+		}
+		credit, err := tokenCreditPerTick(2_000, 1)
+		if err != nil {
+			t.Fatalf("calculate submillisecond credit: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_buckets
+			SET available_units = $2,
+			    refilled_at = statement_timestamp() + interval '1 hour'
+			WHERE quota_bucket_id = $1
+		`, holder.entries[0].bucketID, 499*credit); err != nil {
+			t.Fatalf("set 499us-equivalent balance: %v", err)
+		}
+		at499Microseconds := fixture.tokenBucketInput(t, "token-submillisecond", 1, 2_000, 1)
+		if _, err := fixture.store.Reserve(fixture.ctx, at499Microseconds); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("499us-equivalent reserve = %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_buckets SET available_units = $2
+			WHERE quota_bucket_id = $1
+		`, holder.entries[0].bucketID, 500*credit); err != nil {
+			t.Fatalf("set 500us-equivalent balance: %v", err)
+		}
+		at500Microseconds := fixture.tokenBucketInput(t, "token-submillisecond", 1, 2_000, 1)
+		accepted, err := fixture.store.Reserve(fixture.ctx, at500Microseconds)
+		if err != nil {
+			t.Fatalf("500us-equivalent reserve: %v", err)
+		}
+		for _, reservation := range []Reservation{holder, accepted} {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+				t.Fatalf("release submillisecond reservation: %v", err)
+			}
+		}
+	})
+
+	t.Run("capacity increase gives no instantaneous tokens", func(t *testing.T) {
+		oldInput := fixture.tokenBucketInput(t, "token-policy", 1, 1, tokenRateDecimalScale)
+		oldReservation, err := fixture.store.Reserve(fixture.ctx, oldInput)
+		if err != nil {
+			t.Fatalf("reserve old policy: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, oldReservation, "routing_failed"); err != nil {
+			t.Fatalf("restore old token: %v", err)
+		}
+		newInput := fixture.tokenBucketInput(t, "token-policy", 3, 1, tokenRateDecimalScale)
+		newReservation, err := fixture.store.Reserve(fixture.ctx, newInput)
+		if err != nil {
+			t.Fatalf("reserve transitioned policy: %v", err)
+		}
+		state := readBucket(t, newReservation.entries[0].bucketID)
+		if state.capacity != 3 || state.balance != 0 || state.numerator != 1 ||
+			state.denominator != tokenRateDecimalScale {
+			t.Fatalf("capacity transition state = %#v", state)
+		}
+		third := fixture.tokenBucketInput(t, "token-policy", 3, 1, tokenRateDecimalScale)
+		if _, err := fixture.store.Reserve(fixture.ctx, third); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("instant capacity gift reserve = %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, newReservation, "routing_failed"); err != nil {
+			t.Fatalf("release transitioned token: %v", err)
+		}
+	})
+
+	t.Run("rate increase reconciles the pending interval at the lower rate", func(t *testing.T) {
+		oldInput := fixture.tokenBucketInput(t, "token-rate-policy", 2, 1, tokenRateDecimalScale)
+		first, err := fixture.store.Reserve(fixture.ctx, oldInput)
+		if err != nil {
+			t.Fatalf("reserve first old-rate token: %v", err)
+		}
+		secondInput := fixture.tokenBucketInput(t, "token-rate-policy", 2, 1, tokenRateDecimalScale)
+		second, err := fixture.store.Reserve(fixture.ctx, secondInput)
+		if err != nil {
+			t.Fatalf("reserve second old-rate token: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_buckets
+			SET available_units = 0, refilled_at = statement_timestamp()
+			WHERE quota_bucket_id = $1
+		`, first.entries[0].bucketID); err != nil {
+			t.Fatalf("anchor old-rate cursor: %v", err)
+		}
+		faster := fixture.tokenBucketInput(t, "token-rate-policy", 2, 1_000, 1)
+		if _, err := fixture.store.Reserve(fixture.ctx, faster); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("rate increase minted prior-interval token: %v", err)
+		}
+		state := readBucket(t, first.entries[0].bucketID)
+		if state.numerator != 1_000 || state.denominator != 1 ||
+			state.balance >= tokenBalanceScale || state.used != 0 || state.reserved != 0 {
+			t.Fatalf("rate transition state = %#v", state)
+		}
+		for _, reservation := range []Reservation{first, second} {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+				t.Fatalf("release old-rate reservation: %v", err)
+			}
+		}
+	})
+
+	t.Run("calendar denial does not debit a mixed token bucket", func(t *testing.T) {
+		calendarHolderInput := fixture.input(t, "token-mixed", 1)
+		calendarHolder, err := fixture.store.Reserve(fixture.ctx, calendarHolderInput)
+		if err != nil {
+			t.Fatalf("reserve calendar holder: %v", err)
+		}
+		mixed := fixture.tokenBucketInput(t, "token-mixed", 1, 1, tokenRateDecimalScale)
+		mixed.Rules = append(mixed.Rules, calendarHolderInput.Rules[0])
+		if _, err := fixture.store.Reserve(fixture.ctx, mixed); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("mixed denial = %v", err)
+		}
+		scopeKey := mustPreparedTokenScopeKey(t, mixed)
+		var tokenBucketID string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT quota_bucket_id FROM quota_buckets
+			WHERE environment_id = $1 AND limit_plan_key = $2
+			  AND algorithm = 'token_bucket' AND scope_key = $3
+		`, mixed.EnvironmentID, mixed.LimitPlanKey, scopeKey).Scan(&tokenBucketID); err != nil {
+			t.Fatalf("find mixed token bucket: %v", err)
+		}
+		state := readBucket(t, tokenBucketID)
+		if state.balance != tokenBalanceScale || state.used != 0 || state.reserved != 0 {
+			t.Fatalf("mixed-denied token state = %#v", state)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, calendarHolder, "routing_failed"); err != nil {
+			t.Fatalf("release calendar holder: %v", err)
+		}
+	})
+
+	t.Run("contention admits exactly available tokens", func(t *testing.T) {
+		const capacity = 3
+		const callers = 12
+		inputs := make([]ReserveInput, callers)
+		for index := range inputs {
+			inputs[index] = fixture.tokenBucketInput(t, "token-contention", capacity, 1, tokenRateDecimalScale)
+		}
+		start := make(chan struct{})
+		type result struct {
+			reservation Reservation
+			err         error
+		}
+		results := make(chan result, callers)
+		for index := range inputs {
+			go func(input ReserveInput) {
+				<-start
+				reservation, err := fixture.store.Reserve(fixture.ctx, input)
+				results <- result{reservation: reservation, err: err}
+			}(inputs[index])
+		}
+		close(start)
+		accepted := make([]Reservation, 0, capacity)
+		denied := 0
+		for range callers {
+			result := <-results
+			if result.err == nil {
+				accepted = append(accepted, result.reservation)
+			} else if errors.Is(result.err, ErrExceeded) {
+				denied++
+			} else {
+				t.Fatalf("contended reserve: %v", result.err)
+			}
+		}
+		if len(accepted) != capacity || denied != callers-capacity {
+			t.Fatalf("contention accepted=%d denied=%d", len(accepted), denied)
+		}
+		state := readBucket(t, accepted[0].entries[0].bucketID)
+		if state.balance >= tokenBalanceScale || state.used != 0 || state.reserved != 0 {
+			t.Fatalf("contended state = %#v", state)
+		}
+		for _, reservation := range accepted {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+				t.Fatalf("release contended reservation: %v", err)
+			}
+		}
+		if state := readBucket(t, accepted[0].entries[0].bucketID); state.balance != capacity*tokenBalanceScale {
+			t.Fatalf("released contended state = %#v", state)
+		}
+	})
+
+	t.Run("expiry refunds only an undispatched request", func(t *testing.T) {
+		undispatchedInput := fixture.tokenBucketInput(t, "token-expire-undispatched", 1, 1, tokenRateDecimalScale)
+		undispatched, err := fixture.store.Reserve(fixture.ctx, undispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve undispatched: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = $1
+		`, undispatched.ID()); err != nil {
+			t.Fatalf("backdate undispatched: %v", err)
+		}
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 1)
+		if err != nil || processed != 1 {
+			t.Fatalf("expire undispatched=%d: %v", processed, err)
+		}
+		if state := readBucket(t, undispatched.entries[0].bucketID); state.balance != tokenBalanceScale {
+			t.Fatalf("expired undispatched state = %#v", state)
+		}
+
+		dispatchedInput := fixture.tokenBucketInput(t, "token-expire-dispatched", 1, 1, tokenRateDecimalScale)
+		dispatched, err := fixture.store.Reserve(fixture.ctx, dispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve dispatched: %v", err)
+		}
+		if _, owner, err := fixture.store.BeginAttempt(fixture.ctx, dispatched); err != nil || !owner {
+			t.Fatalf("begin dispatched owner=%t: %v", owner, err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = $1
+		`, dispatched.ID()); err != nil {
+			t.Fatalf("backdate dispatched: %v", err)
+		}
+		processed, err = fixture.store.ExpirePendingBatch(fixture.ctx, 1)
+		if err != nil || processed != 1 {
+			t.Fatalf("expire dispatched=%d: %v", processed, err)
+		}
+		if state := readBucket(t, dispatched.entries[0].bucketID); state.balance != 0 {
+			t.Fatalf("expired dispatched token was refunded: %#v", state)
+		}
+	})
+
+	t.Run("corrupt persisted balance fails closed", func(t *testing.T) {
+		input := fixture.tokenBucketInput(t, "token-corrupt", 2, 1, tokenRateDecimalScale)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve token for corruption: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "routing_failed"); err != nil {
+			t.Fatalf("release token for corruption: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_buckets SET available_units = hard_maximum * $2 + 1
+			WHERE quota_bucket_id = $1
+		`, reservation.entries[0].bucketID, tokenBalanceScale); err != nil {
+			t.Fatalf("corrupt token balance: %v", err)
+		}
+		other := fixture.tokenBucketInput(t, "token-corrupt", 2, 1, tokenRateDecimalScale)
+		if _, err := fixture.store.Reserve(fixture.ctx, other); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("reserve corrupt token bucket = %v", err)
+		}
+	})
+}
+
 func newQuotaPostgreSQLFixture(t *testing.T) quotaPostgreSQLFixture {
 	t.Helper()
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
@@ -2582,6 +3051,23 @@ func (fixture quotaPostgreSQLFixture) input(t *testing.T, feature string, maximu
 			Scope: []string{"user", "feature"}, Window: "1d", Maximum: maximum, Hard: true,
 		}},
 	}
+}
+
+func (fixture quotaPostgreSQLFixture) tokenBucketInput(
+	t *testing.T,
+	feature string,
+	capacity int64,
+	numerator int64,
+	denominator int64,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, 1)
+	input.Rules = []Rule{{
+		Metric: LogicalRequestsMetric, Algorithm: TokenBucketAlgorithm,
+		Scope: []string{"user", "feature"}, Capacity: capacity,
+		RefillNumerator: numerator, RefillDenominator: denominator, Hard: true,
+	}}
+	return input
 }
 
 func (fixture quotaPostgreSQLFixture) pricedInput(
@@ -2957,6 +3443,21 @@ func mustPreparedScopeKey(t *testing.T, input ReserveInput) string {
 		t.Fatalf("prepare quota input: %v", err)
 	}
 	return prepared.rules[0].scopeKey
+}
+
+func mustPreparedTokenScopeKey(t *testing.T, input ReserveInput) string {
+	t.Helper()
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare token quota input: %v", err)
+	}
+	for _, rule := range prepared.rules {
+		if rule.Algorithm == TokenBucketAlgorithm {
+			return rule.scopeKey
+		}
+	}
+	t.Fatal("prepared quota input has no token-bucket rule")
+	return ""
 }
 
 func mustNewID(t *testing.T, prefix id.Prefix) string {

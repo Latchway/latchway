@@ -1,12 +1,13 @@
 // Package quota owns durable quota reservations and request accounting.
 //
-// The bounded implementation in this package supports hard calendar
-// logical-request and output-token rules, hard concurrent-request and
-// concurrent-stream leases, hard per-request output-token enforcement
-// metadata, and immutable configured-price attribution. One request may
-// resolve to multiple rules, which are reserved and finalized atomically. The
-// package does not accept client supplied counters, bucket keys, rule hashes,
-// usage totals, costs, or timestamps.
+// The bounded implementation in this package supports hard calendar and
+// durable token-bucket logical-request rules, hard calendar output-token
+// rules, hard concurrent-request and concurrent-stream leases, hard
+// per-request output-token enforcement metadata, and immutable
+// configured-price attribution. One request may resolve to multiple rules,
+// which are reserved and finalized atomically. The package does not accept
+// client supplied counters, bucket keys, rule hashes, usage totals, costs, or
+// timestamps.
 package quota
 
 import (
@@ -34,6 +35,7 @@ const (
 	ConcurrentStreamsMetric  = "concurrent_streams"
 	CostNanoUSDMetric        = "cost_nano_usd"
 	CalendarAlgorithm        = "calendar"
+	TokenBucketAlgorithm     = "token_bucket"
 	PerRequestAlgorithm      = "per_request"
 	ConcurrencyAlgorithm     = "concurrency"
 	maximumRulesPerRequest   = 128
@@ -91,9 +93,11 @@ const (
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
 // output cap applied to the provider request. It is zero for logical-request
-// and concurrency rules, whose one unit is derived by the store.
-// PerRequestMaximum is populated only for output_tokens/per_request metadata,
-// which is fingerprinted but does not create a durable bucket.
+// and concurrency rules, whose one unit is derived by the store. Capacity and
+// the reduced RefillNumerator/RefillDenominator are populated only for a
+// logical_requests/token_bucket rule. PerRequestMaximum is populated only for
+// output_tokens/per_request metadata, which is fingerprinted but does not
+// create a durable bucket.
 type Rule struct {
 	Metric            string
 	Algorithm         string
@@ -102,6 +106,9 @@ type Rule struct {
 	Maximum           int64
 	PerRequestMaximum int64
 	ReservedUnits     int64
+	Capacity          int64
+	RefillNumerator   int64
+	RefillDenominator int64
 	Hard              bool
 }
 
@@ -207,6 +214,7 @@ type reservationEntry struct {
 	entryID       string
 	leaseID       string
 	metric        string
+	algorithm     string
 	reservedUnits int64
 	resetAt       time.Time
 }
@@ -336,24 +344,36 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		stateful := false
 		switch {
 		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == CalendarAlgorithm:
-			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 {
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 ||
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
+				return preparedRequest{}, ErrInvalidInput
+			}
+			stateful = true
+		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == TokenBucketAlgorithm:
+			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
+				rule.ReservedUnits != 0 || validateTokenBucketPolicy(
+				rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
+			) != nil {
 				return preparedRequest{}, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == CalendarAlgorithm:
-			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits <= 0 {
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits <= 0 ||
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return preparedRequest{}, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == PerRequestAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
-				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.PerRequestMaximum {
+				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.PerRequestMaximum ||
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return preparedRequest{}, ErrInvalidInput
 			}
 		case (rule.Metric == ConcurrentRequestsMetric || rule.Metric == ConcurrentStreamsMetric) &&
 			rule.Algorithm == ConcurrencyAlgorithm:
 			if rule.Window != "" || rule.Maximum <= 0 || rule.PerRequestMaximum != 0 ||
-				rule.ReservedUnits != 0 {
+				rule.ReservedUnits != 0 || rule.Capacity != 0 ||
+				rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return preparedRequest{}, ErrInvalidInput
 			}
 			stateful = true
@@ -390,7 +410,9 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 				Metric: rule.Metric, Algorithm: rule.Algorithm,
 				Scope: append([]string(nil), dimensions...), Window: rule.Window,
 				Maximum: rule.Maximum, PerRequestMaximum: rule.PerRequestMaximum,
-				ReservedUnits: rule.ReservedUnits, Hard: rule.Hard,
+				ReservedUnits: rule.ReservedUnits, Capacity: rule.Capacity,
+				RefillNumerator:   rule.RefillNumerator,
+				RefillDenominator: rule.RefillDenominator, Hard: rule.Hard,
 			},
 			scopeDimensions: dimensions,
 			scopeType:       scopeType,
@@ -446,7 +468,8 @@ func canonicalScopeDimensions(input []string) ([]string, error) {
 
 // canonicalDigest is SHA-256(domain || uint32be(len(part)) || part ...),
 // encoded as unpadded base64url. The immutable rule digest intentionally
-// excludes Maximum; changing a limit does not manufacture a fresh bucket.
+// excludes mutable maximum, capacity, and refill values; changing a policy
+// does not manufacture a fresh bucket.
 func canonicalDigest(domain string, parts []string) string {
 	digest := sha256.New()
 	_, _ = digest.Write([]byte(domain))
@@ -461,7 +484,7 @@ func canonicalDigest(domain string, parts []string) string {
 
 // requestFingerprint is persisted on the logical request and, when accepted,
 // as the reservation idempotency key. It binds every retry (including a
-// denial) to the exact server-owned decision and mutable maximum without
+// denial) to the exact server-owned decision and mutable policy values without
 // changing bucket identity. LogicalID makes it unique per accepted HTTP request.
 func requestFingerprint(prepared preparedRequest) string {
 	parts := []string{
@@ -484,6 +507,13 @@ func requestFingerprint(prepared preparedRequest) string {
 	}
 	for _, rule := range prepared.rules {
 		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))
+		if rule.Algorithm == TokenBucketAlgorithm {
+			parts = append(parts,
+				strconv.FormatInt(rule.Capacity, 10),
+				strconv.FormatInt(rule.RefillNumerator, 10),
+				strconv.FormatInt(rule.RefillDenominator, 10),
+			)
+		}
 		// Preserve the exact historical logical_requests/calendar serialization.
 		// New output-token shapes bind both their configured per-request maximum
 		// and the exact cap applied to this provider request.
@@ -641,11 +671,14 @@ func (reservation Reservation) validate() error {
 	entryIDs := make(map[string]struct{}, len(reservation.entries))
 	leaseIDs := make(map[string]struct{}, len(reservation.entries))
 	for index, entry := range reservation.entries {
-		concurrency := isConcurrencyMetric(entry.metric)
+		concurrency := entry.algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(entry.metric)
+		calendar := entry.algorithm == CalendarAlgorithm &&
+			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
+		tokenBucket := entry.algorithm == TokenBucketAlgorithm && entry.metric == LogicalRequestsMetric
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			id.Validate(entry.entryID, id.QuotaEntry) != nil ||
-			(!concurrency && entry.resetAt.IsZero()) || (concurrency && !entry.resetAt.IsZero()) ||
-			(!isStatefulMetric(entry.metric)) ||
+			(!calendar && !entry.resetAt.IsZero()) || (calendar && entry.resetAt.IsZero()) ||
+			(!calendar && !tokenBucket && !concurrency) ||
 			entry.reservedUnits <= 0 ||
 			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) ||
 			(concurrency && entry.reservedUnits != 1) ||
@@ -680,6 +713,13 @@ func isConcurrencyMetric(metric string) bool {
 
 func isStatefulMetric(metric string) bool {
 	return metric == LogicalRequestsMetric || metric == OutputTokensMetric || isConcurrencyMetric(metric)
+}
+
+func isStatefulRule(metric, algorithm string) bool {
+	return algorithm == CalendarAlgorithm &&
+		(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
+		algorithm == TokenBucketAlgorithm && metric == LogicalRequestsMetric ||
+		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)
 }
 
 func (attempt Attempt) validate() error {
