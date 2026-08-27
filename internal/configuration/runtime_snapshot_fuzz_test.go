@@ -2,8 +2,11 @@ package configuration
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/latchway/latchway/internal/jsonsafe"
 )
 
 func FuzzActiveSnapshotCompilation(f *testing.F) {
@@ -30,6 +33,32 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 		f.Fatalf("seed configuration rejected: %+v", report.Issues)
 	}
 	f.Add([]byte(compiled))
+	addConcurrencySeed := func(name string, limit map[string]any) {
+		f.Helper()
+		value, err := jsonsafe.Decode(source)
+		if err != nil {
+			f.Fatalf("decode %s seed: %v", name, err)
+		}
+		root := value.(map[string]any)
+		objectArray(objectValue(root, "spec"), "limitPlans")[0]["limits"] = []any{limit}
+		candidateSource, err := json.Marshal(root)
+		if err != nil {
+			f.Fatalf("marshal %s seed: %v", name, err)
+		}
+		report, candidateCompiled := validator.Validate(candidateSource, testEnvironment(), time.Unix(0, 0).UTC())
+		if !report.Valid {
+			f.Fatalf("%s seed configuration rejected: %+v", name, report.Issues)
+		}
+		f.Add([]byte(candidateCompiled))
+	}
+	addConcurrencySeed("explicit request concurrency", map[string]any{
+		"metric": "concurrent_requests", "algorithm": "concurrency",
+		"scope": []any{"feature", "user"}, "maximum": json.Number("9223372036854775807.0"),
+	})
+	addConcurrencySeed("default stream concurrency", map[string]any{
+		"metric": "concurrent_streams", "scope": []any{"model", "user"},
+		"maximum": json.Number("4.096e3"),
+	})
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"spec":{"features":[]}}`))
 

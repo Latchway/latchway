@@ -142,6 +142,11 @@ func (limit compiledLimit) normalizeExecutable() (Limit, immutableLimitIdentity,
 			limit.hasCapacity || limit.hasRefillPerSecond {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
+	case "concurrency":
+		if !limit.hasMaximum || limit.hasWindow || limit.hasPerRequestMaximum ||
+			limit.hasCapacity || limit.hasRefillPerSecond {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
 	default:
 		return Limit{}, immutableLimitIdentity{}, false
 	}

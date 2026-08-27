@@ -301,6 +301,126 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "concurrency maximum removed",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				delete(limit, "maximum")
+			},
+		},
+		{
+			name: "concurrency null maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["maximum"] = nil
+			},
+		},
+		{
+			name: "concurrency zero maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["maximum"] = json.Number("0")
+			},
+		},
+		{
+			name: "concurrency quoted maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_streams"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["maximum"] = "10"
+			},
+		},
+		{
+			name: "concurrency fractional maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_streams"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["maximum"] = json.Number("1.5")
+			},
+		},
+		{
+			name: "concurrency out of range maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["maximum"] = json.Number("9.223372036854775808e18")
+			},
+		},
+		{
+			name: "concurrency with window",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+			},
+		},
+		{
+			name: "concurrency with per request maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_streams"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["perRequestMaximum"] = json.Number("10")
+			},
+		},
+		{
+			name: "concurrency with token bucket fields",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["capacity"] = json.Number("10")
+				limit["refillPerSecond"] = json.Number("1")
+			},
+		},
+		{
+			name: "concurrency with explicit zero forbidden fields",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_streams"
+				limit["algorithm"] = "concurrency"
+				limit["window"] = ""
+				limit["perRequestMaximum"] = json.Number("0")
+				limit["capacity"] = json.Number("0")
+				limit["refillPerSecond"] = nil
+			},
+		},
+		{
+			name: "concurrency with unsupported metric",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "cost_nano_usd"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+			},
+		},
+		{
+			name: "soft concurrency limit",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "concurrent_requests"
+				limit["algorithm"] = "concurrency"
+				delete(limit, "window")
+				limit["hard"] = false
+			},
+		},
+		{
 			name: "output calendar with per request field",
 			mutate: func(spec map[string]any) {
 				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
@@ -458,6 +578,22 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 				duplicate := deepClone(first).(map[string]any)
 				duplicate["scope"] = []any{"user", "model"}
 				duplicate["perRequestMaximum"] = json.Number("200")
+				plan["limits"] = []any{first, duplicate}
+			},
+		},
+		{
+			name: "duplicate concurrency identity with changed maximum",
+			mutate: func(spec map[string]any) {
+				plan := objectArray(spec, "limitPlans")[0]
+				first := objectArray(plan, "limits")[0]
+				first["metric"] = "concurrent_requests"
+				first["algorithm"] = "concurrency"
+				first["scope"] = []any{"feature", "user"}
+				delete(first, "window")
+				first["maximum"] = json.Number("10")
+				duplicate := deepClone(first).(map[string]any)
+				duplicate["scope"] = []any{"user", "feature"}
+				duplicate["maximum"] = json.Number("20")
 				plan["limits"] = []any{first, duplicate}
 			},
 		},

@@ -69,6 +69,12 @@ func TestValidatorRequiresExplicitLimitScopeAtActivation(t *testing.T) {
 				"metric": "output_tokens", "perRequestMaximum": json.Number("100"),
 			},
 		},
+		{
+			name: "concurrent stream",
+			limit: map[string]any{
+				"metric": "concurrent_streams", "maximum": json.Number("5"),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -109,9 +115,9 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			},
 		},
 		{
-			name: "concurrency",
+			name: "concurrency on logical requests",
 			limit: map[string]any{
-				"metric": "concurrent_requests", "algorithm": "concurrency", "scope": []any{"application"},
+				"metric": "logical_requests", "algorithm": "concurrency", "scope": []any{"application"},
 				"maximum": json.Number("5"),
 			},
 		},
@@ -176,11 +182,74 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			}
 			for _, issue := range report.Issues {
 				if issue.Code == "limit_capability_unsupported" &&
-					(!strings.Contains(issue.Message, "output_tokens calendar") || !strings.Contains(issue.Message, "output_tokens per_request")) {
+					(!strings.Contains(issue.Message, "output_tokens calendar") ||
+						!strings.Contains(issue.Message, "output_tokens per_request") ||
+						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)
 				}
 			}
 		})
+	}
+}
+
+func TestValidatorActivatesExplicitAndDefaultConcurrencyLimits(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
+	plan["limits"] = []any{
+		map[string]any{
+			"metric": "concurrent_requests", "algorithm": "concurrency",
+			"scope": []any{"feature", "organization", "user"}, "maximum": json.Number("9223372036854775807.0"),
+		},
+		map[string]any{
+			"metric": "concurrent_streams", "scope": []any{"model", "user"},
+			"maximum": json.Number("4.096e3"),
+		},
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("valid concurrency limits failed schema validation: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("valid concurrency limits rejected: %+v", report.Issues)
+	}
+	value, err := jsonsafe.Decode(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := objectArray(objectArray(objectValue(value.(map[string]any), "spec"), "limitPlans")[0], "limits")
+	if len(limits) != 2 ||
+		stringValue(limits[0], "algorithm") != "concurrency" ||
+		!slices.Equal(stringArray(limits[0], "scope"), []string{"organization", "user", "feature"}) ||
+		stringValue(limits[1], "algorithm") != "concurrency" ||
+		!slices.Equal(stringArray(limits[1], "scope"), []string{"user", "model"}) {
+		t.Fatalf("compiled concurrency limits = %#v", limits)
+	}
+	snapshot, err := newActiveSnapshot("rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled)
+	if err != nil {
+		t.Fatalf("newActiveSnapshot() error = %v", err)
+	}
+	runtimePlan, ok := snapshot.LimitPlan("free")
+	if !ok || len(runtimePlan.Limits) != 2 ||
+		runtimePlan.Limits[0].Metric != "concurrent_requests" || runtimePlan.Limits[0].Algorithm != "concurrency" ||
+		runtimePlan.Limits[0].Maximum != 9223372036854775807 ||
+		runtimePlan.Limits[1].Metric != "concurrent_streams" || runtimePlan.Limits[1].Algorithm != "concurrency" ||
+		runtimePlan.Limits[1].Maximum != 4096 {
+		t.Fatalf("runtime concurrency plan = %+v ok=%t", runtimePlan, ok)
+	}
+	runtimePlan.Limits[0].Scope[0] = "changed"
+	runtimeAgain, _ := snapshot.LimitPlan("free")
+	if !slices.Equal(runtimeAgain.Limits[0].Scope, []string{"organization", "user", "feature"}) {
+		t.Fatalf("runtime concurrency plan aliased returned scope: %+v", runtimeAgain)
 	}
 }
 
@@ -330,6 +399,27 @@ func TestValidatorRejectsExecutableLimitFieldShapeMismatches(t *testing.T) {
 				"perRequestMaximum": json.Number("10"), "capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
 			},
 		},
+		{
+			name: "concurrency with window",
+			limit: map[string]any{
+				"metric": "concurrent_requests", "algorithm": "concurrency", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("10"),
+			},
+		},
+		{
+			name: "concurrency with per request maximum",
+			limit: map[string]any{
+				"metric": "concurrent_streams", "algorithm": "concurrency", "scope": []any{"user"},
+				"maximum": json.Number("10"), "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
+			name: "concurrency with token bucket fields",
+			limit: map[string]any{
+				"metric": "concurrent_requests", "algorithm": "concurrency", "scope": []any{"user"},
+				"maximum": json.Number("10"), "capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -382,6 +472,20 @@ func TestValidatorRejectsNonPositiveFractionalAndOutOfRangeLimitIntegers(t *test
 				"perRequestMaximum": json.Number("9.223372036854775808e18"),
 			},
 		},
+		{
+			name: "fractional concurrency maximum",
+			limit: map[string]any{
+				"metric": "concurrent_requests", "algorithm": "concurrency", "scope": []any{"user"},
+				"maximum": json.Number("1.5"),
+			},
+		},
+		{
+			name: "out of range concurrency maximum",
+			limit: map[string]any{
+				"metric": "concurrent_streams", "algorithm": "concurrency", "scope": []any{"user"},
+				"maximum": json.Number("9.223372036854775808e18"),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -432,6 +536,20 @@ func TestValidatorRejectsDuplicateImmutableLimitIdentityByMetricAndAlgorithm(t *
 			limits: []any{
 				map[string]any{"metric": "output_tokens", "scope": []any{"model", "user"}, "perRequestMaximum": json.Number("100")},
 				map[string]any{"metric": "output_tokens", "scope": []any{"user", "model"}, "perRequestMaximum": json.Number("200")},
+			},
+		},
+		{
+			name: "request concurrency",
+			limits: []any{
+				map[string]any{"metric": "concurrent_requests", "scope": []any{"feature", "user"}, "maximum": json.Number("10")},
+				map[string]any{"metric": "concurrent_requests", "algorithm": "concurrency", "scope": []any{"user", "feature"}, "maximum": json.Number("20")},
+			},
+		},
+		{
+			name: "stream concurrency",
+			limits: []any{
+				map[string]any{"metric": "concurrent_streams", "scope": []any{"model", "user"}, "maximum": json.Number("100")},
+				map[string]any{"metric": "concurrent_streams", "algorithm": "concurrency", "scope": []any{"user", "model"}, "maximum": json.Number("200")},
 			},
 		},
 	}

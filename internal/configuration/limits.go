@@ -62,6 +62,12 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
+	case "concurrency":
+		if (limit.Metric != "concurrent_requests" && limit.Metric != "concurrent_streams") ||
+			limit.Window != "" || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
+			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
 	default:
 		return Limit{}, immutableLimitIdentity{}, false
 	}

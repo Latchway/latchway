@@ -42,7 +42,7 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 }
 
-func TestNormalizeExecutableLimitAcceptsBoundedRequestAndOutputTokenRules(t *testing.T) {
+func TestNormalizeExecutableLimitAcceptsBoundedRequestOutputTokenAndConcurrencyRules(t *testing.T) {
 	t.Parallel()
 
 	inputScope := []string{
@@ -107,6 +107,32 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestAndOutputTokenRules(t *tes
 	if !ok || changedPerRequestIdentity != outputPerRequestIdentity {
 		t.Fatalf("per-request maximum changed immutable identity: %#v != %#v", changedPerRequestIdentity, outputPerRequestIdentity)
 	}
+
+	requestConcurrency, requestConcurrencyIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"feature", "organization", "user"},
+		Maximum: math.MaxInt64, Hard: true,
+	})
+	if !ok || requestConcurrency.Maximum != math.MaxInt64 ||
+		!slices.Equal(requestConcurrency.Scope, []string{"organization", "user", "feature"}) {
+		t.Fatalf("request concurrency rule = %+v ok=%t", requestConcurrency, ok)
+	}
+	_, changedConcurrencyIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user", "feature", "organization"},
+		Maximum: 1, Hard: true,
+	})
+	if !ok || changedConcurrencyIdentity != requestConcurrencyIdentity {
+		t.Fatalf("concurrency maximum/scope order changed immutable identity: %#v != %#v", changedConcurrencyIdentity, requestConcurrencyIdentity)
+	}
+	streamConcurrency, streamConcurrencyIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "concurrent_streams", Algorithm: "concurrency", Scope: []string{"model", "user"},
+		Maximum: 4096, Hard: true,
+	})
+	if !ok || streamConcurrency.Maximum != 4096 || !slices.Equal(streamConcurrency.Scope, []string{"user", "model"}) {
+		t.Fatalf("stream concurrency rule = %+v ok=%t", streamConcurrency, ok)
+	}
+	if streamConcurrencyIdentity == requestConcurrencyIdentity {
+		t.Fatal("request and stream concurrency rules shared an immutable identity")
+	}
 }
 
 func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShapes(t *testing.T) {
@@ -120,6 +146,10 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		Metric: "output_tokens", Algorithm: "per_request", Scope: []string{"user"},
 		PerRequestMaximum: 100, Hard: true,
 	}
+	concurrency := Limit{
+		Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user"},
+		Maximum: 10, Hard: true,
+	}
 	tests := []struct {
 		name  string
 		limit Limit
@@ -127,7 +157,8 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		{name: "input token calendar", limit: withLimitMetric(calendar, "input_tokens")},
 		{name: "total token calendar", limit: withLimitMetric(calendar, "total_tokens")},
 		{name: "cost calendar", limit: withLimitMetric(calendar, "cost_nano_usd")},
-		{name: "concurrency", limit: Limit{Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user"}, Maximum: 1, Hard: true}},
+		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
+		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
 		{name: "token bucket", limit: Limit{Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user"}, Capacity: 1, RefillPerSecond: json.Number("1"), Hard: true}},
 		{name: "logical request per request", limit: withLimitMetric(perRequest, "logical_requests")},
 		{name: "soft calendar", limit: withLimitHard(calendar, false)},
@@ -143,8 +174,15 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		{name: "per request maximum field", limit: withLimitMaximum(perRequest, 1)},
 		{name: "per request capacity field", limit: withLimitCapacity(perRequest, 1)},
 		{name: "per request refill field", limit: withLimitRefill(perRequest, json.Number("1"))},
+		{name: "soft concurrency", limit: withLimitHard(concurrency, false)},
+		{name: "concurrency zero maximum", limit: withLimitMaximum(concurrency, 0)},
+		{name: "concurrency window field", limit: withLimitWindow(concurrency, "1d")},
+		{name: "concurrency per-request field", limit: withLimitPerRequestMaximum(concurrency, 1)},
+		{name: "concurrency capacity field", limit: withLimitCapacity(concurrency, 1)},
+		{name: "concurrency refill field", limit: withLimitRefill(concurrency, json.Number("1"))},
 		{name: "missing scope", limit: withLimitScope(calendar, nil)},
 		{name: "per request missing scope", limit: withLimitScope(perRequest, nil)},
+		{name: "concurrency missing scope", limit: withLimitScope(concurrency, nil)},
 		{name: "unknown scope", limit: withLimitScope(calendar, []string{"tenant"})},
 		{name: "duplicate scope", limit: withLimitScope(calendar, []string{"user", "user"})},
 	}

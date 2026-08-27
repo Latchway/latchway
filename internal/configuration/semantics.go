@@ -452,7 +452,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits, hard output_tokens calendar limits, or hard output_tokens per_request limits; calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, and every executable limit requires an explicit nonempty scope.",
+					"This release can activate only hard logical_requests calendar limits, hard output_tokens calendar limits, hard output_tokens per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
