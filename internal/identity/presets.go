@@ -20,6 +20,7 @@ type PresetCommon struct {
 	Client           *http.Client
 	Now              func() time.Time
 	ClockSkew        time.Duration
+	ClockSkewSet     bool
 	MaxTokenLifetime time.Duration
 }
 
@@ -47,7 +48,8 @@ func NewFirebaseVerifier(config FirebasePreset) (*JWTVerifier, error) {
 		ProviderID: providerID, Issuer: "https://securetoken.google.com/" + config.ProjectID,
 		Audiences: []string{config.ProjectID}, AllowedAlgorithms: []string{"RS256"},
 		RequiredClaims: []string{"auth_time"}, Mapper: config.Mapper, Keys: keys,
-		ClockSkew: config.ClockSkew, MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
+		ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
+		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
 
@@ -94,7 +96,7 @@ func NewSupabaseVerifier(config SupabasePreset) (*JWTVerifier, error) {
 	}
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: audiences, AllowedAlgorithms: algorithms,
-		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew,
+		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
@@ -124,7 +126,7 @@ func NewSupabaseHS256Verifier(config SupabasePreset, secret []byte, acknowledgeR
 	}
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: audiences, AllowedAlgorithms: []string{"HS256"},
-		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew,
+		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
@@ -172,7 +174,8 @@ func NewClerkVerifier(config ClerkPreset) (*JWTVerifier, error) {
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: config.Audiences, AllowedAlgorithms: []string{"RS256"},
 		AuthorizedParties: config.AuthorizedParties, RequiredClaims: []string{"sid"}, Mapper: config.Mapper,
-		Keys: keys, ClockSkew: config.ClockSkew, MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
+		Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
+		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
 

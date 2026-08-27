@@ -84,6 +84,19 @@ func TestSupabasePresetSupportsAsymmetricAndAcknowledgedLegacyTokens(t *testing.
 	verifyPreset(t, hsVerifier, signToken(t, jwt.SigningMethodHS256, secret, "", claims))
 }
 
+func TestPresetCommonPreservesExplicitZeroClockSkew(t *testing.T) {
+	verifier, err := NewSupabaseVerifier(SupabasePreset{
+		PresetCommon: PresetCommon{ClockSkewSet: true},
+		ProjectURL:   "https://project-ref.supabase.co",
+	})
+	if err != nil {
+		t.Fatalf("construct explicit-zero-skew preset: %v", err)
+	}
+	if verifier.clockSkew != 0 {
+		t.Fatalf("preset clock skew = %s, want exact zero", verifier.clockSkew)
+	}
+}
+
 func TestClerkPresetValidatesSessionAndAuthorizedParty(t *testing.T) {
 	key := mustRSAKey(t)
 	verifier, err := NewClerkVerifier(ClerkPreset{
