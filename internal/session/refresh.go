@@ -105,20 +105,25 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 	if err != nil {
 		return IssuedSession{}, ErrRefreshInvalid
 	}
+	preflightPolicyErr := currentRefreshPolicyError(snapshot, preflightBinding, now)
 	var preparedAccess PreparedAccessIssuer
-	if preflightBinding.Status == "active" {
+	var newRefresh RefreshToken
+	var newRefreshID string
+	var newRefreshHash [sha256.Size]byte
+	var newGrantID string
+	if preflightBinding.Status == "active" && preflightPolicyErr == nil {
 		preparedAccess, err = store.accessTokens.Prepare(ctx)
 		if err != nil {
 			return IssuedSession{}, err
 		}
-	}
-	newRefresh, newRefreshID, newRefreshHash, err := store.newRefreshToken()
-	if err != nil {
-		return IssuedSession{}, err
-	}
-	newGrantID, err := id.New(id.SessionGrant)
-	if err != nil {
-		return IssuedSession{}, fmt.Errorf("generate rotated session-grant ID: %w", err)
+		newRefresh, newRefreshID, newRefreshHash, err = store.newRefreshToken()
+		if err != nil {
+			return IssuedSession{}, err
+		}
+		newGrantID, err = id.New(id.SessionGrant)
+		if err != nil {
+			return IssuedSession{}, fmt.Errorf("generate rotated session-grant ID: %w", err)
+		}
 	}
 
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -178,8 +183,11 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 	if !binding.IdentityExpiresAt.After(now) {
 		return IssuedSession{}, ErrIdentityRefreshRequired
 	}
-	if binding.AttestedAt.IsZero() || !binding.AttestationExpiresAt.After(now) {
-		return IssuedSession{}, ErrAttestationRefreshNeeded
+	if err := lockActiveRefreshRevision(ctx, tx, binding, snapshot.RevisionID); err != nil {
+		return IssuedSession{}, err
+	}
+	if policyErr := currentRefreshPolicyError(snapshot, binding, now); policyErr != nil {
+		return IssuedSession{}, policyErr
 	}
 	if preparedAccess == nil {
 		return IssuedSession{}, ErrRefreshInvalid
@@ -258,6 +266,50 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 			VerifiedAt: binding.AttestedAt, ExpiresAt: binding.AttestationExpiresAt,
 		},
 	}, nil
+}
+
+func currentRefreshPolicyError(snapshot configuration.ActiveSnapshot, binding RefreshBinding, now time.Time) error {
+	if _, ok := snapshot.IdentityProvider(binding.IdentityProvider); !ok {
+		return ErrIdentityRefreshRequired
+	}
+	policy, selection, ok := snapshot.RequiredAttestationForPlatform(binding.Platform)
+	if !ok || policy.ID == "" || selection.Mode != "required" ||
+		!validAttestationProvider(selection.Provider) ||
+		!trustLevelPattern.MatchString(selection.MinimumTrustLevel) ||
+		policy.MaxAge < time.Minute || policy.MaxAge > 30*24*time.Hour ||
+		selection.Provider != binding.AttestationProvider ||
+		!trustSatisfies(binding.TrustLevel, selection.MinimumTrustLevel) {
+		return ErrAttestationStepUpRequired
+	}
+	if binding.AttestedAt.IsZero() || !binding.AttestationExpiresAt.After(now) {
+		return ErrAttestationRefreshNeeded
+	}
+	if now.IsZero() || !binding.AttestedAt.Add(policy.MaxAge).After(now) {
+		return ErrAttestationStepUpRequired
+	}
+	return nil
+}
+
+func lockActiveRefreshRevision(ctx context.Context, tx pgx.Tx, binding RefreshBinding, revisionID string) error {
+	var activeRevisionID string
+	err := tx.QueryRow(ctx, `
+		SELECT config_revision_id
+		FROM active_config_revisions
+		WHERE organization_id = $1
+		  AND application_id = $2
+		  AND environment_id = $3
+		FOR SHARE
+	`, binding.OrganizationID, binding.ApplicationID, binding.EnvironmentID).Scan(&activeRevisionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSessionScope
+	}
+	if err != nil {
+		return fmt.Errorf("lock active refresh policy revision: %w", err)
+	}
+	if activeRevisionID != revisionID {
+		return ErrAttestationStepUpRequired
+	}
+	return nil
 }
 
 func sameRefreshScope(left, right RefreshBinding) bool {

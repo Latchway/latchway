@@ -24,13 +24,14 @@ import (
 )
 
 var (
-	ErrSessionInvalid           = errors.New("client session exchange is invalid")
-	ErrSessionRevoked           = errors.New("client session is revoked")
-	ErrInstallationRevoked      = errors.New("client installation is revoked")
-	ErrRefreshInvalid           = errors.New("refresh token is invalid")
-	ErrRefreshReused            = errors.New("rotated refresh token was reused")
-	ErrIdentityRefreshRequired  = errors.New("fresh external identity proof is required")
-	ErrAttestationRefreshNeeded = errors.New("fresh application attestation is required")
+	ErrSessionInvalid            = errors.New("client session exchange is invalid")
+	ErrSessionRevoked            = errors.New("client session is revoked")
+	ErrInstallationRevoked       = errors.New("client installation is revoked")
+	ErrRefreshInvalid            = errors.New("refresh token is invalid")
+	ErrRefreshReused             = errors.New("rotated refresh token was reused")
+	ErrIdentityRefreshRequired   = errors.New("fresh external identity proof is required")
+	ErrAttestationRefreshNeeded  = errors.New("fresh application attestation is required")
+	ErrAttestationStepUpRequired = errors.New("current application attestation policy requires step-up")
 )
 
 var keyStoragePattern = regexp.MustCompile(`^(unknown|secure_enclave|keychain|strongbox|tee|software|webcrypto|memory)$`)
