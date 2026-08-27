@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"net/url"
 	"testing"
 	"time"
@@ -116,6 +117,32 @@ func TestValidateHonorsExplicitZeroClockSkew(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsControlCharactersInJTI(t *testing.T) {
+	t.Parallel()
+
+	privateKey := fixedDPoPFuzzKey(t)
+	now := time.Unix(1_787_820_000, 0)
+	target, _ := url.Parse("https://api.example.com/v1/sessions")
+	for name, jti := range map[string]string{
+		"nul":             "proof\x00identifier",
+		"escaped newline": "proof\nidentifier",
+		"delete":          "proof\x7fidentifier",
+		"unicode control": "proof\u0085identifier",
+	} {
+		t.Run(name, func(t *testing.T) {
+			proof := signProof(t, privateKey, map[string]any{
+				"jti": jti,
+				"htm": "POST",
+				"htu": target.String(),
+				"iat": now.Unix(),
+			})
+			if _, err := Validate(proof, Options{Method: "POST", URI: target, Now: now}); !IsCode(err, "dpop_invalid") {
+				t.Fatalf("control-character jti was accepted: %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeHTU(t *testing.T) {
 	t.Parallel()
 
@@ -129,6 +156,18 @@ func TestNormalizeHTU(t *testing.T) {
 	}
 }
 
+func TestNormalizeHTURejectsScopedIPv6Address(t *testing.T) {
+	t.Parallel()
+
+	input, err := url.Parse("https://[fe80::1%25en0]/protected")
+	if err != nil {
+		t.Fatalf("parse scoped IPv6 URI: %v", err)
+	}
+	if normalized, err := NormalizeHTU(input); err == nil {
+		t.Fatalf("scoped IPv6 URI normalized to invalid authority %q", normalized)
+	}
+}
+
 func TestDecodeUniqueJSONRejectsDuplicates(t *testing.T) {
 	t.Parallel()
 
@@ -137,12 +176,12 @@ func TestDecodeUniqueJSONRejectsDuplicates(t *testing.T) {
 	}
 }
 
-func signProof(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any) string {
+func signProof(t testing.TB, key *ecdsa.PrivateKey, claims map[string]any) string {
 	t.Helper()
 	return signProofWithJWK(t, key, claims, false)
 }
 
-func signProofWithJWK(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any, includePrivate bool) string {
+func signProofWithJWK(t testing.TB, key *ecdsa.PrivateKey, claims map[string]any, includePrivate bool) string {
 	t.Helper()
 	x := key.PublicKey.X.FillBytes(make([]byte, 32))
 	y := key.PublicKey.Y.FillBytes(make([]byte, 32))
@@ -167,4 +206,18 @@ func signProofWithJWK(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any
 	}
 	signature := append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
 	return headerSegment + "." + claimsSegment + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func fixedDPoPFuzzKey(t testing.TB) *ecdsa.PrivateKey {
+	t.Helper()
+	// Scalar one is an obviously synthetic, deterministic test key. It keeps
+	// the fuzz seed's public JWK stable without introducing credential material.
+	scalar := make([]byte, 32)
+	scalar[len(scalar)-1] = 1
+	curve := elliptic.P256()
+	x, y := curve.ScalarBaseMult(scalar)
+	return &ecdsa.PrivateKey{
+		PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y},
+		D:         new(big.Int).SetBytes(scalar),
+	}
 }

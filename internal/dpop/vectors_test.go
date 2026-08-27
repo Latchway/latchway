@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,9 +80,60 @@ func TestNormativeDPoPVectors(t *testing.T) {
 
 func FuzzValidate(f *testing.F) {
 	target, _ := url.Parse("https://gateway.example.test/client/v1/session-challenges")
+	contents, err := os.ReadFile(filepath.Join("..", "..", "api", "test-vectors", "dpop", "v1.json"))
+	if err != nil {
+		f.Fatalf("read DPoP fuzz seeds: %v", err)
+	}
+	var fixture struct {
+		Vectors []struct {
+			ID    string `json:"id"`
+			Proof string `json:"proof"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(contents, &fixture); err != nil {
+		f.Fatalf("decode DPoP fuzz seeds: %v", err)
+	}
+	for _, vector := range fixture.Vectors {
+		if vector.ID == "valid_session_challenge" {
+			f.Add(vector.Proof)
+		}
+	}
+	f.Add(signProof(f, fixedDPoPFuzzKey(f), map[string]any{
+		"jti": "escaped\ncontrol",
+		"htm": "POST",
+		"htu": target.String(),
+		"iat": int64(1700000000),
+	}))
 	f.Add("not-a-proof")
 	f.Add("e30.e30.AA")
 	f.Fuzz(func(t *testing.T, proof string) {
-		_, _ = Validate(proof, Options{Method: "POST", URI: target, Now: time.Unix(1700000030, 0)})
+		options := Options{Method: "POST", URI: target, Now: time.Unix(1700000030, 0)}
+		result, err := Validate(proof, options)
+		if err != nil {
+			if !IsCode(err, "dpop_invalid") {
+				t.Fatalf("proof parser returned an unsafe error for untrusted input: %v", err)
+			}
+			return
+		}
+		if !validJTI(result.JTI) || result.JKT == "" {
+			t.Fatalf("validated proof returned incomplete bounded identifiers: %+v", result)
+		}
+		if result.IssuedAt.After(options.Now.Add(defaultSkew)) || result.IssuedAt.Before(options.Now.Add(-defaultMaxAge-defaultSkew)) {
+			t.Fatalf("validated proof escaped its acceptance window: %s", result.IssuedAt)
+		}
+		if len(result.Nonce) > 512 || strings.ContainsAny(result.Nonce, "\r\n\x00") {
+			t.Fatalf("validated proof returned an unsafe nonce: %q", result.Nonce)
+		}
+		thumbprint, err := result.JWK.Thumbprint()
+		if err != nil || thumbprint != result.JKT {
+			t.Fatalf("validated proof JWK/thumbprint mismatch: thumbprint=%q result=%+v err=%v", thumbprint, result, err)
+		}
+		resultAgain, err := Validate(proof, options)
+		if err != nil || resultAgain != result {
+			t.Fatalf("proof validation is not deterministic: result=%+v err=%v", resultAgain, err)
+		}
+		if _, err := Validate(proof+"=", options); !IsCode(err, "dpop_invalid") {
+			t.Fatalf("proof parser accepted a padded mutation: %v", err)
+		}
 	})
 }

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
@@ -176,7 +178,7 @@ func Validate(proof string, opts Options) (Result, error) {
 	method := stringValue(claims["htm"])
 	htu := stringValue(claims["htu"])
 	issuedAt, err := numericDate(claims["iat"])
-	if jti == "" || len(jti) > maxJTIBytes || method == "" || htu == "" || err != nil {
+	if !validJTI(jti) || method == "" || htu == "" || err != nil {
 		return Result{}, validationError("dpop_invalid")
 	}
 	if subtle.ConstantTimeCompare([]byte(method), []byte(opts.Method)) != 1 {
@@ -264,8 +266,8 @@ func NormalizeHTU(uri *url.URL) (string, error) {
 		return "", errors.New("only HTTP and HTTPS URIs are supported")
 	}
 	hostname := strings.ToLower(uri.Hostname())
-	if hostname == "" || !isASCII(hostname) {
-		return "", errors.New("ASCII hostname required")
+	if hostname == "" || !isASCII(hostname) || strings.Contains(hostname, "%") {
+		return "", errors.New("ASCII hostname without a zone identifier required")
 	}
 	port := uri.Port()
 	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
@@ -422,6 +424,11 @@ func numericDate(value any) (int64, error) {
 		return 0, errors.New("numeric date required")
 	}
 	return number.Int64()
+}
+
+func validJTI(value string) bool {
+	return len(value) >= 1 && len(value) <= maxJTIBytes &&
+		utf8.ValidString(value) && strings.IndexFunc(value, unicode.IsControl) == -1
 }
 
 func stringValue(value any) string {
