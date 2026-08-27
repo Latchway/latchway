@@ -14,9 +14,6 @@ const (
 
 	// CurrencyUSD is the only currency accepted by the configuration schema.
 	CurrencyUSD = "USD"
-	// PricingSourceConfigured identifies a charge calculated from an immutable
-	// configured pricing catalog rather than a provider-reported charge.
-	PricingSourceConfigured = "configured"
 	// CostConfidenceCalculated identifies an exact gateway calculation from
 	// provider-reported token counts and configured integer rates.
 	CostConfidenceCalculated = "calculated"
@@ -101,9 +98,6 @@ func (result Result) CatalogID() string { return result.source.CatalogID() }
 
 // PriceRevision returns the immutable configuration revision identifier.
 func (result Result) PriceRevision() string { return result.source.PriceRevision() }
-
-// PricingSource reports how the charge was obtained.
-func (result Result) PricingSource() string { return PricingSourceConfigured }
 
 // Currency returns the configured pricing currency.
 func (result Result) Currency() string { return CurrencyUSD }

@@ -41,9 +41,6 @@ func TestCalculateCanonicalConfiguredPrice(t *testing.T) {
 	if got := result.Currency(); got != pricing.CurrencyUSD {
 		t.Fatalf("Currency() = %q, want %q", got, pricing.CurrencyUSD)
 	}
-	if got := result.PricingSource(); got != pricing.PricingSourceConfigured {
-		t.Fatalf("PricingSource() = %q, want %q", got, pricing.PricingSourceConfigured)
-	}
 	if got := result.Confidence(); got != pricing.CostConfidenceCalculated {
 		t.Fatalf("Confidence() = %q, want %q", got, pricing.CostConfidenceCalculated)
 	}

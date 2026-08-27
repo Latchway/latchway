@@ -266,14 +266,24 @@ type PricingEntry struct {
 }
 
 // PricingCatalog is one versioned USD price schedule. A nil EffectiveAt means
-// the catalog is immediately effective; a non-nil value is the exact
-// configured instant. Snapshot compilation deliberately does not consult a
-// clock when preserving this policy.
+// the catalog is immediately effective; a non-nil value is the configured
+// instant's representable nanosecond floor. EffectiveAfter retains and compares
+// any additional fractional precision. Snapshot compilation deliberately does
+// not consult a clock when preserving this policy.
 type PricingCatalog struct {
 	ID          string
 	Currency    string
 	EffectiveAt *time.Time
 	Entries     []PricingEntry
+
+	// Compiled snapshots retain the original RFC 3339 token and its exact
+	// representable floor. time.Time has nanosecond precision, so the final flag
+	// distinguishes an instant that falls strictly after that floor. These fields
+	// are intentionally private: callers compare through EffectiveAfter instead
+	// of reconstructing a potentially lossy timestamp.
+	effectiveAtRaw              string
+	effectiveAtFloor            time.Time
+	effectiveAtHasSubNanosecond bool
 }
 
 func (catalog PricingCatalog) clone() PricingCatalog {
@@ -283,6 +293,19 @@ func (catalog PricingCatalog) clone() PricingCatalog {
 	}
 	catalog.Entries = append([]PricingEntry(nil), catalog.Entries...)
 	return catalog
+}
+
+// EffectiveAfter reports whether this catalog's exact configured effective
+// instant is later than at. A catalog without effectiveAt is immediately
+// effective and therefore never reports a future instant. For detached values
+// assembled outside snapshot compilation, the exported EffectiveAt value is
+// used directly.
+func (catalog PricingCatalog) EffectiveAfter(at time.Time) bool {
+	if catalog.effectiveAtRaw != "" {
+		return catalog.effectiveAtFloor.After(at) ||
+			catalog.effectiveAtFloor.Equal(at) && catalog.effectiveAtHasSubNanosecond
+	}
+	return catalog.EffectiveAt != nil && catalog.EffectiveAt.After(at)
 }
 
 // Entry returns the price entry for a model from a detached catalog value.

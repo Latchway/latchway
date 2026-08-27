@@ -2,6 +2,8 @@ package configuration
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,7 +136,11 @@ func runtimePricingCatalog(raw compiledPricingCatalog, models map[string]Model) 
 		if err != nil {
 			return PricingCatalog{}, ErrInvalid
 		}
-		catalog.EffectiveAt = &effectiveAt
+		floor := effectiveAt.floor
+		catalog.EffectiveAt = &floor
+		catalog.effectiveAtRaw = effectiveAt.raw
+		catalog.effectiveAtFloor = effectiveAt.floor
+		catalog.effectiveAtHasSubNanosecond = effectiveAt.hasSubNanosecond
 	}
 	seenModels := make(map[string]struct{}, len(raw.Entries))
 	for _, rawEntry := range raw.Entries {
@@ -159,35 +165,139 @@ func runtimePricingCatalog(raw compiledPricingCatalog, models map[string]Model) 
 	return catalog, nil
 }
 
-// parsePricingEffectiveAt accepts the complete RFC 3339 date-time surface
-// admitted by the public schema, including lower-case t/z and leap seconds.
-// Go's time parser does not represent leap seconds, so their effective instant
-// is normalized to the first instant of the following minute.
-func parsePricingEffectiveAt(raw string) (time.Time, error) {
-	if len(raw) < len("2006-01-02T15:04:05Z") {
-		return time.Time{}, ErrInvalid
-	}
-	normalized := raw
-	if normalized[10] == 't' {
-		normalized = normalized[:10] + "T" + normalized[11:]
-	}
-	if strings.HasSuffix(normalized, "z") {
-		normalized = normalized[:len(normalized)-1] + "Z"
-	}
-	leapSecond := normalized[17:19] == "60"
-	if leapSecond {
-		normalized = normalized[:17] + "59" + normalized[19:]
-	}
-	effectiveAt, err := time.Parse(time.RFC3339, normalized)
+type pricingEffectiveInstant struct {
+	raw              string
+	floor            time.Time
+	hasSubNanosecond bool
+}
+
+// parsePricingEffectiveAt mirrors the configured JSON-Schema date-time format
+// validator, including lower-case t/z, numeric offsets, arbitrary dot-separated
+// fractional precision, and leap seconds. Go's time.Time stores the exact floor
+// at nanosecond precision; raw plus hasSubNanosecond retain the remaining
+// significance so callers never activate a catalog early.
+func parsePricingEffectiveAt(raw string) (pricingEffectiveInstant, error) {
+	lexeme, err := parsePricingDateTimeLexeme(raw)
 	if err != nil {
-		return time.Time{}, ErrInvalid
+		return pricingEffectiveInstant{}, err
 	}
-	if leapSecond {
-		utc := effectiveAt.UTC()
-		if utc.Hour() != 23 || utc.Minute() != 59 {
-			return time.Time{}, ErrInvalid
+	second := lexeme.second
+	if lexeme.leapSecond {
+		second = 59
+	}
+	zone := "Z"
+	if !lexeme.zulu {
+		zone = fmt.Sprintf("%c%02d:%02d", lexeme.zoneSign, lexeme.zoneHour, lexeme.zoneMinute)
+	}
+	normalized := fmt.Sprintf(
+		"%sT%02d:%02d:%02d", raw[:10], lexeme.hour, lexeme.minute, second,
+	)
+	if lexeme.fraction != "" {
+		normalized += "." + lexeme.fraction
+	}
+	normalized += zone
+	floor, parseErr := time.Parse(time.RFC3339, normalized)
+	if parseErr != nil {
+		return pricingEffectiveInstant{}, ErrInvalid
+	}
+	if lexeme.leapSecond {
+		floor = floor.Add(time.Second)
+	}
+	hasSubNanosecond := false
+	if len(lexeme.fraction) > 9 {
+		for _, digit := range lexeme.fraction[9:] {
+			if digit != '0' {
+				hasSubNanosecond = true
+				break
+			}
 		}
-		effectiveAt = effectiveAt.Add(time.Second)
 	}
-	return effectiveAt, nil
+	return pricingEffectiveInstant{
+		raw: raw, floor: floor, hasSubNanosecond: hasSubNanosecond,
+	}, nil
+}
+
+type pricingDateTimeLexeme struct {
+	hour       int
+	minute     int
+	second     int
+	fraction   string
+	zulu       bool
+	zoneSign   byte
+	zoneHour   int
+	zoneMinute int
+	leapSecond bool
+}
+
+func parsePricingDateTimeLexeme(raw string) (pricingDateTimeLexeme, error) {
+	if len(raw) < len("2006-01-02T15:04:05Z") || (raw[10] != 'T' && raw[10] != 't') {
+		return pricingDateTimeLexeme{}, ErrInvalid
+	}
+	if _, err := time.Parse("2006-01-02", raw[:10]); err != nil {
+		return pricingDateTimeLexeme{}, ErrInvalid
+	}
+	clock := raw[11:]
+	if len(clock) < len("15:04:05Z") || clock[2] != ':' || clock[5] != ':' {
+		return pricingDateTimeLexeme{}, ErrInvalid
+	}
+	fields := [3]int{}
+	for index, token := range []string{clock[:2], clock[3:5], clock[6:8]} {
+		value, err := strconv.Atoi(token)
+		if err != nil || value < 0 {
+			return pricingDateTimeLexeme{}, ErrInvalid
+		}
+		fields[index] = value
+	}
+	if fields[0] > 23 || fields[1] > 59 || fields[2] > 60 {
+		return pricingDateTimeLexeme{}, ErrInvalid
+	}
+	lexeme := pricingDateTimeLexeme{
+		hour: fields[0], minute: fields[1], second: fields[2],
+		leapSecond: fields[2] == 60,
+	}
+	remainder := clock[8:]
+	if strings.HasPrefix(remainder, ".") {
+		digits := 0
+		for digits+1 < len(remainder) && isASCIIDigit(remainder[digits+1]) {
+			digits++
+		}
+		if digits == 0 {
+			return pricingDateTimeLexeme{}, ErrInvalid
+		}
+		lexeme.fraction = remainder[1 : 1+digits]
+		remainder = remainder[1+digits:]
+	}
+	if remainder == "Z" || remainder == "z" {
+		lexeme.zulu = true
+	} else {
+		if len(remainder) != 6 || (remainder[0] != '+' && remainder[0] != '-') || remainder[3] != ':' {
+			return pricingDateTimeLexeme{}, ErrInvalid
+		}
+		zoneHour, hourErr := strconv.Atoi(remainder[1:3])
+		zoneMinute, minuteErr := strconv.Atoi(remainder[4:6])
+		if hourErr != nil || minuteErr != nil || zoneHour < 0 || zoneHour > 23 || zoneMinute < 0 || zoneMinute > 59 {
+			return pricingDateTimeLexeme{}, ErrInvalid
+		}
+		lexeme.zoneSign = remainder[0]
+		lexeme.zoneHour = zoneHour
+		lexeme.zoneMinute = zoneMinute
+	}
+	if lexeme.leapSecond {
+		utcMinutes := lexeme.hour*60 + lexeme.minute
+		if !lexeme.zulu {
+			offset := lexeme.zoneHour*60 + lexeme.zoneMinute
+			if lexeme.zoneSign == '+' {
+				utcMinutes -= offset
+			} else {
+				utcMinutes += offset
+			}
+			if utcMinutes < 0 {
+				utcMinutes += 24 * 60
+			}
+		}
+		if utcMinutes/60 != 23 || utcMinutes%60 != 59 {
+			return pricingDateTimeLexeme{}, ErrInvalid
+		}
+	}
+	return lexeme, nil
 }

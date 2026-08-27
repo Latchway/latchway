@@ -177,13 +177,23 @@ func TestValidatorCompilesRFC3339PricingEffectiveTimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := []struct {
-		raw  string
-		want string
+		raw              string
+		want             string
+		hasSubNanosecond bool
 	}{
 		{raw: "2026-08-27T12:34:56.123456789+07:00", want: "2026-08-27T05:34:56.123456789Z"},
+		{
+			raw: "2026-08-27T12:34:56.1234567891+07:00", want: "2026-08-27T05:34:56.123456789Z",
+			hasSubNanosecond: true,
+		},
+		{raw: "2026-08-27T12:34:56.1234567890+07:00", want: "2026-08-27T05:34:56.123456789Z"},
 		{raw: "2026-08-27t12:34:56z", want: "2026-08-27T12:34:56Z"},
 		{raw: "2016-12-31T23:59:60Z", want: "2017-01-01T00:00:00Z"},
 		{raw: "2017-01-01T06:59:60+07:00", want: "2017-01-01T00:00:00Z"},
+		{
+			raw: "2017-01-01T06:59:60.0000000001+07:00", want: "2017-01-01T00:00:00Z",
+			hasSubNanosecond: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.raw, func(t *testing.T) {
@@ -205,6 +215,55 @@ func TestValidatorCompilesRFC3339PricingEffectiveTimes(t *testing.T) {
 			catalog, ok := snapshot.PricingCatalog("standard")
 			if !ok || catalog.EffectiveAt == nil || catalog.EffectiveAt.UTC().Format(time.RFC3339Nano) != test.want {
 				t.Fatalf("effectiveAt = %v, want %s", catalog.EffectiveAt, test.want)
+			}
+			if catalog.effectiveAtRaw != test.raw || catalog.effectiveAtFloor != *catalog.EffectiveAt ||
+				catalog.effectiveAtHasSubNanosecond != test.hasSubNanosecond {
+				t.Fatalf(
+					"exact effective metadata = {%q %v %t}",
+					catalog.effectiveAtRaw, catalog.effectiveAtFloor, catalog.effectiveAtHasSubNanosecond,
+				)
+			}
+			if got := catalog.EffectiveAfter(*catalog.EffectiveAt); got != test.hasSubNanosecond {
+				t.Fatalf("EffectiveAfter(floor) = %t, want %t", got, test.hasSubNanosecond)
+			}
+			if catalog.EffectiveAfter(catalog.EffectiveAt.Add(time.Nanosecond)) {
+				t.Fatal("EffectiveAfter(floor + 1ns) = true")
+			}
+		})
+	}
+}
+
+func TestPricingEffectiveAtRuntimeMatchesConfiguredSchemaFormat(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		"2026-08-27T12:34:56Z",
+		"2026-08-27t12:34:56.123456789123z",
+		"2017-01-01T06:59:60.1+07:00",
+		"2016-12-31T16:59:60-07:00",
+		"2026-08-27T+1:34:56Z",
+		"2026-08-27T12:34:56,1Z",
+		"2026-08-27T12:34:56+24:00",
+		"2017-01-01T07:00:60+07:00",
+		"2017-01-01T23:59:60-00:01",
+		"2026-08-27T12:34:56.Z",
+		"2026-08-27 12:34:56Z",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			configuration := configurationWithPricing(t)
+			objectArray(objectValue(configuration, "spec"), "pricingCatalogs")[0]["effectiveAt"] = raw
+			document, err := json.Marshal(configuration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schemaValid := len(validator.SchemaIssues(document)) == 0
+			_, runtimeErr := parsePricingEffectiveAt(raw)
+			if runtimeValid := runtimeErr == nil; runtimeValid != schemaValid {
+				t.Fatalf("runtime validity = %t, schema validity = %t, error = %v", runtimeValid, schemaValid, runtimeErr)
 			}
 		})
 	}
@@ -287,6 +346,24 @@ func TestActiveSnapshotRejectsCorruptPricingCatalogs(t *testing.T) {
 		{
 			name:   "invalid effective time",
 			mutate: func(spec map[string]any) { objectArray(spec, "pricingCatalogs")[0]["effectiveAt"] = "tomorrow" },
+		},
+		{
+			name: "comma fractional effective time",
+			mutate: func(spec map[string]any) {
+				objectArray(spec, "pricingCatalogs")[0]["effectiveAt"] = "2026-08-27T12:34:56,1Z"
+			},
+		},
+		{
+			name: "invalid leap-second offset boundary",
+			mutate: func(spec map[string]any) {
+				objectArray(spec, "pricingCatalogs")[0]["effectiveAt"] = "2017-01-01T07:00:60+07:00"
+			},
+		},
+		{
+			name: "out-of-range effective-time offset",
+			mutate: func(spec map[string]any) {
+				objectArray(spec, "pricingCatalogs")[0]["effectiveAt"] = "2026-08-27T12:34:56+24:00"
+			},
 		},
 		{
 			name:   "empty entries",
