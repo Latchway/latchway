@@ -98,6 +98,26 @@ func TestJWTVerifierSupportsES256AndExplicitHS256(t *testing.T) {
 	verifySigned(t, hsVerifier, signToken(t, jwt.SigningMethodHS256, secret, "", validClaims()))
 }
 
+func TestJWTVerifierHonorsExplicitZeroClockSkew(t *testing.T) {
+	key := mustRSAKey(t)
+	keys := mustStaticKeys(t, map[string]any{"key-1": &key.PublicKey})
+	base := VerifierConfig{
+		ProviderID: "oidc_test", Issuer: "https://issuer.example.test", Audiences: []string{"latchway-api"},
+		AllowedAlgorithms: []string{"RS256"}, Keys: keys, Now: func() time.Time { return verifierTestNow },
+	}
+	claims := validClaims()
+	claims["iat"] = verifierTestNow.Add(time.Second).Unix()
+	claims["nbf"] = verifierTestNow.Add(time.Second).Unix()
+	raw := signToken(t, jwt.SigningMethodRS256, key, "key-1", claims)
+
+	defaultVerifier := mustJWTVerifier(t, base)
+	verifySigned(t, defaultVerifier, raw)
+
+	base.ClockSkewSet = true
+	zeroSkewVerifier := mustJWTVerifier(t, base)
+	assertVerifyError(t, zeroSkewVerifier, raw, ErrCredentialInvalid)
+}
+
 func TestJWTVerifierRejectsInvalidRegisteredClaims(t *testing.T) {
 	key := mustRSAKey(t)
 	verifier := mustJWTVerifier(t, VerifierConfig{
@@ -235,6 +255,9 @@ func TestRawIdentityCredentialIsRedactedAndBounded(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(credential), raw) || strings.Contains(fmt.Sprintf("%#v", credential), raw) {
 		t.Fatal("credential formatting disclosed the raw value")
+	}
+	if _, err := NewRawIdentityCredential(strings.Repeat("x", maxIdentityCredentialBytes)); err != nil {
+		t.Fatalf("OpenAPI-maximum identity credential was rejected: %v", err)
 	}
 	for _, invalid := range []string{"", "line\nbreak", strings.Repeat("x", maxIdentityCredentialBytes+1)} {
 		if _, err := NewRawIdentityCredential(invalid); !errors.Is(err, ErrCredentialInvalid) {

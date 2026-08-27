@@ -103,3 +103,48 @@ func TestWriteUnknownProblemFailsClosed(t *testing.T) {
 		t.Fatalf("unknown error did not fail closed: %#v", body)
 	}
 }
+
+func TestWriteUsesDistinctClientAndAdminErrorShapes(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     Error
+		wantKeys  []string
+		rejectKey string
+	}{
+		{
+			name:     "client field error",
+			value:    Error{Code: "request_invalid", Fields: []FieldError{{Path: "/platform", Message: "The platform is invalid."}}},
+			wantKeys: []string{"path", "message"}, rejectKey: "code",
+		},
+		{
+			name:     "admin validation issue",
+			value:    Error{Code: "configuration_invalid", ValidationIssues: []ValidationIssue{{Severity: "error", Code: "invalid_platform", Path: "/spec", Message: "The platform is invalid."}}},
+			wantKeys: []string{"severity", "code", "path", "message"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			Write(recorder, "req_error_shape", test.value)
+			var body struct {
+				Errors []map[string]any `json:"errors"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if len(body.Errors) != 1 {
+				t.Fatalf("errors=%#v", body.Errors)
+			}
+			for _, key := range test.wantKeys {
+				if _, ok := body.Errors[0][key]; !ok {
+					t.Errorf("missing error member %q: %#v", key, body.Errors[0])
+				}
+			}
+			if test.rejectKey != "" {
+				if _, ok := body.Errors[0][test.rejectKey]; ok {
+					t.Errorf("unexpected error member %q: %#v", test.rejectKey, body.Errors[0])
+				}
+			}
+		})
+	}
+}

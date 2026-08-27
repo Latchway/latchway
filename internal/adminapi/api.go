@@ -883,16 +883,16 @@ func (api *API) handleConfigurationError(w http.ResponseWriter, r *http.Request,
 	case errors.Is(err, configuration.ErrConflict):
 		api.writeProblem(w, r, problem.Error{Code: "conflict", Detail: "The configuration operation conflicts with the current active revision."})
 	case errors.Is(err, configuration.ErrConfigurationInvalid):
-		fields := make([]problem.FieldError, 0)
+		issues := make([]problem.ValidationIssue, 0)
 		var failure *configuration.ValidationFailure
 		if errors.As(err, &failure) {
 			for _, issue := range failure.Issues {
 				if issue.Severity == "error" {
-					fields = append(fields, problem.FieldError{Path: issue.Path, Code: issue.Code, Message: issue.Message})
+					issues = append(issues, problem.ValidationIssue{Severity: issue.Severity, Code: issue.Code, Path: issue.Path, Message: issue.Message})
 				}
 			}
 		}
-		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The configuration has validation errors and cannot be used.", Fields: fields})
+		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The configuration has validation errors and cannot be used.", ValidationIssues: issues})
 	default:
 		api.internal(w, r, err)
 	}

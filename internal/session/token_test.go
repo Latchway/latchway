@@ -129,6 +129,33 @@ func TestPreparedAccessIssuerFormattingIsRedacted(t *testing.T) {
 	}
 }
 
+func TestAccessTokenIssuerAllowsOnlyCanonicalSecureOrLoopbackOrigins(t *testing.T) {
+	t.Parallel()
+
+	for _, origin := range []string{
+		"https://gateway.example.test",
+		"https://gateway.example.test/",
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+	} {
+		if !canonicalIssuer(origin) {
+			t.Errorf("canonical issuer rejected %q", origin)
+		}
+	}
+	for _, origin := range []string{
+		"http://gateway.example.test",
+		"https://gateway.example.test/client",
+		"https://gateway.example.test?query=value",
+		"https://user@gateway.example.test",
+		"ftp://localhost:8080",
+	} {
+		if canonicalIssuer(origin) {
+			t.Errorf("unsafe or non-origin issuer accepted %q", origin)
+		}
+	}
+}
+
 func mustTokenID(t *testing.T, prefix id.Prefix) string {
 	t.Helper()
 	value, err := id.New(prefix)

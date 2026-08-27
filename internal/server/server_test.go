@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -62,5 +63,27 @@ func TestAdminAPIIsMountedAheadOfConsoleFallback(t *testing.T) {
 	}
 	if err := id.Validate(recorder.Header().Get("X-Latchway-Request-ID"), id.LogicalRequest); err != nil {
 		t.Fatalf("response request ID is not canonical: %v", err)
+	}
+}
+
+func TestRecovererWritesRegisteredProblem(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := latchwayRequestID(requestIDHeader(recoverer(logger)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("test panic")
+	}))))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/panic", nil))
+	if recorder.Code != http.StatusInternalServerError || recorder.Header().Get("Content-Type") != "application/problem+json" || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected panic response: status=%d headers=%v", recorder.Code, recorder.Header())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode panic problem: %v", err)
+	}
+	requestID := recorder.Header().Get("X-Latchway-Request-ID")
+	if body["code"] != "internal_error" || body["request_id"] != requestID || body["retryable"] != false || body["detail"] == "" {
+		t.Fatalf("incomplete panic problem: %#v", body)
 	}
 }

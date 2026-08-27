@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const maxIdentityCredentialBytes = 32 << 10
+const maxIdentityCredentialBytes = 64 << 10
 
 var (
 	ErrCredentialInvalid = errors.New("identity credential is invalid")

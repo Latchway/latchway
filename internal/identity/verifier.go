@@ -34,6 +34,7 @@ type VerifierConfig struct {
 	AuthorizedParties []string
 	SubjectClaim      string
 	ClockSkew         time.Duration
+	ClockSkewSet      bool
 	MaxTokenLifetime  time.Duration
 	RequiredClaims    []string
 	Mapper            ClaimMapper
@@ -71,7 +72,7 @@ func NewJWTVerifier(config VerifierConfig) (*JWTVerifier, error) {
 	if !claimPathPattern.MatchString(config.SubjectClaim) {
 		return nil, fmt.Errorf("%w: subject claim", ErrConfiguration)
 	}
-	if config.ClockSkew == 0 {
+	if !config.ClockSkewSet && config.ClockSkew == 0 {
 		config.ClockSkew = 60 * time.Second
 	}
 	if config.ClockSkew < 0 || config.ClockSkew > 5*time.Minute {

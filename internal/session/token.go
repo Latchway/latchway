@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -417,7 +418,20 @@ func preflightAccessToken(raw string) (map[string]any, map[string]any, error) {
 
 func canonicalIssuer(raw string) bool {
 	parsed, err := url.Parse(raw)
-	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.String() == raw
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || parsed.String() != raw {
+		return false
+	}
+	if parsed.Scheme == "https" {
+		return true
+	}
+	if parsed.Scheme != "http" {
+		return false
+	}
+	if strings.EqualFold(parsed.Hostname(), "localhost") {
+		return true
+	}
+	address := net.ParseIP(parsed.Hostname())
+	return address != nil && address.IsLoopback()
 }
 
 func validThumbprint(value string) bool {

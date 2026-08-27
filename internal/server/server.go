@@ -18,6 +18,7 @@ import (
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/problem"
 	console "github.com/latchway/latchway/web/console"
 )
 
@@ -65,12 +66,10 @@ func latchwayRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID, err := id.New(id.LogicalRequest)
 		if err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"type":      "about:blank",
-				"title":     "Service Unavailable",
-				"status":    http.StatusServiceUnavailable,
-				"code":      "server_not_ready",
-				"retryable": true,
+			const unavailableRequestID = "unavailable"
+			w.Header().Set("X-Latchway-Request-ID", unavailableRequestID)
+			problem.Write(w, unavailableRequestID, problem.Error{
+				Code: "server_not_ready", Detail: "The server could not initialize request processing.",
 			})
 			return
 		}
@@ -178,12 +177,8 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					logger.ErrorContext(r.Context(), "HTTP panic recovered", "stack", string(debug.Stack()))
-					writeJSON(w, http.StatusInternalServerError, map[string]any{
-						"type":       "about:blank",
-						"title":      "Internal Server Error",
-						"status":     http.StatusInternalServerError,
-						"code":       "internal_error",
-						"request_id": middleware.GetReqID(r.Context()),
+					problem.Write(w, middleware.GetReqID(r.Context()), problem.Error{
+						Code: "internal_error", Detail: "The request could not be completed.",
 					})
 				}
 			}()

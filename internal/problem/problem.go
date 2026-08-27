@@ -26,33 +26,43 @@ type Error struct {
 	Feature                   string
 	SupportedProtocolVersions []int
 	Fields                    []FieldError
+	ValidationIssues          []ValidationIssue
 }
 
 // FieldError identifies invalid request input without echoing its value.
 type FieldError struct {
 	Path    string `json:"path"`
-	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
+// ValidationIssue is the richer Admin API configuration-validation shape.
+// It is intentionally separate because the Client API field-error contract
+// permits only path and message.
+type ValidationIssue struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Path     string `json:"path"`
+	Message  string `json:"message"`
+}
+
 type document struct {
-	Type                      string       `json:"type"`
-	Title                     string       `json:"title"`
-	Status                    int          `json:"status"`
-	Detail                    string       `json:"detail"`
-	Code                      string       `json:"code"`
-	RequestID                 string       `json:"request_id"`
-	Retryable                 bool         `json:"retryable"`
-	RetryAfter                *string      `json:"retry_after,omitempty"`
-	Feature                   string       `json:"feature,omitempty"`
-	SupportedProtocolVersions []int        `json:"supported_protocol_versions,omitempty"`
-	Errors                    []FieldError `json:"errors,omitempty"`
+	Type                      string  `json:"type"`
+	Title                     string  `json:"title"`
+	Status                    int     `json:"status"`
+	Detail                    string  `json:"detail"`
+	Code                      string  `json:"code"`
+	RequestID                 string  `json:"request_id"`
+	Retryable                 bool    `json:"retryable"`
+	RetryAfter                *string `json:"retry_after,omitempty"`
+	Feature                   string  `json:"feature,omitempty"`
+	SupportedProtocolVersions []int   `json:"supported_protocol_versions,omitempty"`
+	Errors                    any     `json:"errors,omitempty"`
 }
 
 // Write emits one registered problem. Unknown codes become internal_error.
 func Write(w http.ResponseWriter, requestID string, value Error) {
 	definition, ok := Registry[value.Code]
-	if !ok {
+	if !ok || (len(value.Fields) > 0 && len(value.ValidationIssues) > 0) {
 		value = Error{Code: "internal_error", Detail: "The request could not be completed."}
 		definition = Registry[value.Code]
 	}
@@ -74,6 +84,12 @@ func Write(w http.ResponseWriter, requestID string, value Error) {
 		formatted := time.Now().UTC().Add(time.Duration(value.RetryAfterSeconds) * time.Second).Format(time.RFC3339)
 		retryAfter = &formatted
 	}
+	var responseErrors any
+	if len(value.Fields) > 0 {
+		responseErrors = value.Fields
+	} else if len(value.ValidationIssues) > 0 {
+		responseErrors = value.ValidationIssues
+	}
 	_ = json.NewEncoder(w).Encode(document{
 		Type:                      "https://latchway.dev/problems/" + value.Code,
 		Title:                     definition.Title,
@@ -85,6 +101,6 @@ func Write(w http.ResponseWriter, requestID string, value Error) {
 		RetryAfter:                retryAfter,
 		Feature:                   value.Feature,
 		SupportedProtocolVersions: value.SupportedProtocolVersions,
-		Errors:                    value.Fields,
+		Errors:                    responseErrors,
 	})
 }
