@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.claude
+.env
+.env.*
+agent
+artifacts
+bin
+coverage
+docs
+web/console/node_modules
+web/console/coverage
+skills-lock.json
+**/.DS_Store
