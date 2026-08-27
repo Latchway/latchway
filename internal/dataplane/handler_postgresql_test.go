@@ -61,6 +61,8 @@ const (
 	dataPlaneE2EPromptMarker        = "prompt-marker-dataplane-e2e-01"
 	dataPlaneE2EStreamPromptMarker  = "prompt-marker-dataplane-e2e-stream-01"
 	dataPlaneE2EProviderModel       = "configured-chat-model"
+	dataPlaneE2EPricingCatalog      = "configured_flat_rate"
+	dataPlaneE2ECalculatedCost      = int64(65_236)
 	dataPlaneE2EClientRequestID     = "client-request-dataplane-e2e-01"
 	dataPlaneE2EStreamRequestID     = "client-request-dataplane-e2e-stream-01"
 	dataPlaneE2EDeniedRequestID     = "client-request-dataplane-e2e-denied-01"
@@ -163,6 +165,17 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	}
 	if !ok || !reflect.DeepEqual(limitPlan, wantLimitPlan) {
 		t.Fatalf("active multi-rule limit plan = %+v ok=%t", limitPlan, ok)
+	}
+	pricingCatalog, ok := snapshot.PricingCatalog(dataPlaneE2EPricingCatalog)
+	pricingEntry, entryOK := snapshot.PricingEntry(dataPlaneE2EPricingCatalog, "fast")
+	if !ok || !entryOK || pricingCatalog.ID != dataPlaneE2EPricingCatalog ||
+		pricingCatalog.Currency != quota.USDCurrency || pricingCatalog.EffectiveAt == nil ||
+		!pricingCatalog.EffectiveAt.Before(now) || pricingEntry != (configuration.PricingEntry{
+		ModelID: "fast", InputNanoUSDPerMillion: 2_000_000_001,
+		OutputNanoUSDPerMillion: 6_000_000_001, RequestNanoUSD: 1_234,
+	}) {
+		t.Fatalf("active configured pricing = catalog:%+v entry:%+v ok=%t/%t",
+			pricingCatalog, pricingEntry, ok, entryOK)
 	}
 
 	secretStore, err := secrets.NewStore(secrets.StoreConfig{
@@ -383,12 +396,14 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		observations[0].RequestBytes == 0 || !observations[0].ResponseStarted {
 		t.Fatalf("mock-upstream observations = %+v", observations)
 	}
-	firstLogicalID := assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 1)
+	firstLogicalID := assertDataPlaneE2EPersistence(
+		t, ctx, pool, dataPlaneE2EClientRequestID, 1, revisionID,
+	)
 	firstQuotaState := readDataPlaneE2EQuotaBuckets(t, ctx, pool)
 	assertDataPlaneE2EQuotaBuckets(t, firstQuotaState, 1)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
 		logicalRequests: 1, reservations: 1, reservationEntries: 3,
-		buckets: 3, attempts: 1, usageRecords: 4,
+		buckets: 3, attempts: 1, usageRecords: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EProviderSecret, dataPlaneE2EPromptMarker, "Deterministic mock response.")
@@ -403,14 +418,14 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		t.Fatalf("replayed DPoP proof reached dispatch: acquisitions=%d releases=%d observations=%d",
 			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
 	}
-	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 1)
+	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 1, revisionID)
 	if replayQuotaState := readDataPlaneE2EQuotaBuckets(t, ctx, pool); !reflect.DeepEqual(replayQuotaState, firstQuotaState) {
 		t.Fatalf("replayed DPoP proof changed quota state: before=%+v after=%+v",
 			firstQuotaState, replayQuotaState)
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
 		logicalRequests: 1, reservations: 1, reservationEntries: 3,
-		buckets: 3, attempts: 1, usageRecords: 4,
+		buckets: 3, attempts: 1, usageRecords: 5,
 	})
 
 	streamProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
@@ -444,17 +459,19 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		observations[1].RequestBytes == 0 || !observations[1].ResponseStarted || observations[1].Canceled {
 		t.Fatalf("streaming mock-upstream observations = %+v", observations)
 	}
-	secondLogicalID := assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EStreamRequestID, 2)
+	secondLogicalID := assertDataPlaneE2EPersistence(
+		t, ctx, pool, dataPlaneE2EStreamRequestID, 2, revisionID,
+	)
 	if firstLogicalID == secondLogicalID {
 		t.Fatalf("streaming request reused non-streaming logical request identity %q", firstLogicalID)
 	}
-	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 2)
+	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 2, revisionID)
 	quotaStateBeforeDenial := readDataPlaneE2EQuotaBuckets(t, ctx, pool)
 	assertDataPlaneE2EQuotaBuckets(t, quotaStateBeforeDenial, 2)
 	assertDataPlaneE2EOnlyDailyRequestLimitExhausted(t, quotaStateBeforeDenial)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
 		logicalRequests: 2, reservations: 2, reservationEntries: 6,
-		buckets: 3, attempts: 2, usageRecords: 8,
+		buckets: 3, attempts: 2, usageRecords: 10,
 	})
 
 	deniedProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
@@ -483,7 +500,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	assertDataPlaneE2EDenialPersistence(t, ctx, pool, dataPlaneE2EDeniedRequestID)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
 		logicalRequests: 3, reservations: 2, reservationEntries: 6,
-		buckets: 3, attempts: 2, usageRecords: 8, deniedRequests: 1,
+		buckets: 3, attempts: 2, usageRecords: 10, deniedRequests: 1,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EProviderSecret,
@@ -647,7 +664,15 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 			}},
 			"models": []any{map[string]any{
 				"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
-				"capabilities": []any{"openai_chat"},
+				"pricingRef": dataPlaneE2EPricingCatalog, "capabilities": []any{"openai_chat"},
+			}},
+			"pricingCatalogs": []any{map[string]any{
+				"id": dataPlaneE2EPricingCatalog, "currency": quota.USDCurrency,
+				"effectiveAt": "2020-01-01T00:00:00Z",
+				"entries": []any{map[string]any{
+					"model": "fast", "inputNanoUsdPerMillion": int64(2_000_000_001),
+					"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
+				}},
 			}},
 			"limitPlans": []any{map[string]any{
 				"id": "free", "limits": []any{
@@ -1180,9 +1205,12 @@ func assertDataPlaneE2EPersistence(
 	pool *pgxpool.Pool,
 	clientRequestID string,
 	expectedSuccessfulRequests int64,
+	priceRevision string,
 ) string {
 	t.Helper()
 	var logicalID, logicalStatus, reservationStatus, attemptID, attemptStatus, physicalModel string
+	var currency, persistedPriceRevision, pricingSource, costConfidence string
+	var billedCost int64
 	var httpStatus int
 	var firstByte bool
 	var reservations, attempts, usageRecords int64
@@ -1190,6 +1218,8 @@ func assertDataPlaneE2EPersistence(
 		SELECT request.logical_request_id, request.status, reservation.status,
 		       attempt.upstream_attempt_id, attempt.status,
 		       attempt.http_status, attempt.physical_model,
+		       attempt.billed_cost_nano_usd, attempt.currency,
+		       attempt.price_revision, attempt.pricing_source, attempt.cost_confidence,
 		       attempt.first_byte_at IS NOT NULL,
 		       (SELECT count(*) FROM quota_reservations AS counted
 		        WHERE counted.logical_request_id = request.logical_request_id),
@@ -1203,7 +1233,8 @@ func assertDataPlaneE2EPersistence(
 		WHERE request.client_request_id = $1
 	`, clientRequestID).Scan(
 		&logicalID, &logicalStatus, &reservationStatus, &attemptID,
-		&attemptStatus, &httpStatus, &physicalModel, &firstByte,
+		&attemptStatus, &httpStatus, &physicalModel,
+		&billedCost, &currency, &persistedPriceRevision, &pricingSource, &costConfidence, &firstByte,
 		&reservations, &attempts, &usageRecords,
 	)
 	if err != nil {
@@ -1213,13 +1244,17 @@ func assertDataPlaneE2EPersistence(
 		logicalStatus != "succeeded" ||
 		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
 		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel || !firstByte ||
-		reservations != 1 || attempts != 1 || usageRecords != 4 {
-		t.Fatalf("persisted lifecycle request=%q/%s reservation=%s/count=%d attempt=%q/%s/%d/%s/count=%d first_byte=%t usage_count=%d",
+		billedCost != dataPlaneE2ECalculatedCost || currency != quota.USDCurrency ||
+		persistedPriceRevision != priceRevision || pricingSource != dataPlaneE2EPricingCatalog ||
+		costConfidence != quota.CalculatedCostConfidence ||
+		reservations != 1 || attempts != 1 || usageRecords != 5 {
+		t.Fatalf("persisted lifecycle request=%q/%s reservation=%s/count=%d attempt=%q/%s/%d/%s/count=%d price=%d/%s/%s/%s/%s first_byte=%t usage_count=%d",
 			logicalID, logicalStatus, reservationStatus, reservations,
 			attemptID, attemptStatus, httpStatus, physicalModel, attempts,
+			billedCost, currency, persistedPriceRevision, pricingSource, costConfidence,
 			firstByte, usageRecords)
 	}
-	assertDataPlaneE2EUsage(t, ctx, pool, logicalID, attemptID)
+	assertDataPlaneE2EUsage(t, ctx, pool, logicalID, attemptID, priceRevision)
 
 	rows, err := pool.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, bucket.quota_bucket_id,
@@ -1283,6 +1318,7 @@ func assertDataPlaneE2EUsage(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	logicalID, attemptID string,
+	priceRevision string,
 ) {
 	t.Helper()
 	type expectedUsage struct {
@@ -1290,6 +1326,7 @@ func assertDataPlaneE2EUsage(
 		confidence    string
 		provenance    string
 		attemptScoped bool
+		costed        bool
 	}
 	expected := map[string]expectedUsage{
 		quota.LogicalRequestsMetric: {
@@ -1311,9 +1348,16 @@ func assertDataPlaneE2EUsage(
 			provenance:    quota.ProviderReportedProvenance + ":" + attemptID + ":total_tokens",
 			attemptScoped: true,
 		},
+		quota.CostNanoUSDMetric: {
+			units: dataPlaneE2ECalculatedCost, confidence: quota.CalculatedCostConfidence,
+			provenance:    "configured_flat_rate:" + attemptID,
+			attemptScoped: true,
+			costed:        true,
+		},
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT usage_record_id, upstream_attempt_id, metric, units,
+		       cost_nano_usd, currency, price_revision, pricing_source,
 		       confidence, provenance_key
 		FROM usage_records
 		WHERE logical_request_id = $1
@@ -1327,17 +1371,32 @@ func assertDataPlaneE2EUsage(
 	for rows.Next() {
 		var usageID, metric, confidence, provenance string
 		var usageAttemptID *string
+		var costNanoUSD *int64
+		var currency, persistedPriceRevision, pricingSource *string
 		var units int64
-		if err := rows.Scan(&usageID, &usageAttemptID, &metric, &units, &confidence, &provenance); err != nil {
+		if err := rows.Scan(
+			&usageID, &usageAttemptID, &metric, &units,
+			&costNanoUSD, &currency, &persistedPriceRevision, &pricingSource,
+			&confidence, &provenance,
+		); err != nil {
 			t.Fatalf("scan persisted data-plane usage: %v", err)
 		}
 		want, ok := expected[metric]
 		attemptMatches := (!want.attemptScoped && usageAttemptID == nil) ||
 			(want.attemptScoped && usageAttemptID != nil && *usageAttemptID == attemptID)
+		costMatches := !want.costed && costNanoUSD == nil && currency == nil &&
+			persistedPriceRevision == nil && pricingSource == nil
+		if want.costed {
+			costMatches = costNanoUSD != nil && *costNanoUSD == dataPlaneE2ECalculatedCost &&
+				currency != nil && *currency == quota.USDCurrency &&
+				persistedPriceRevision != nil && *persistedPriceRevision == priceRevision &&
+				pricingSource != nil && *pricingSource == dataPlaneE2EPricingCatalog
+		}
 		if id.Validate(usageID, id.UsageRecord) != nil || !ok || !attemptMatches ||
-			units != want.units || confidence != want.confidence || provenance != want.provenance {
-			t.Fatalf("persisted usage id=%q attempt=%v metric=%q units=%d confidence=%q provenance=%q",
-				usageID, usageAttemptID, metric, units, confidence, provenance)
+			!costMatches || units != want.units || confidence != want.confidence || provenance != want.provenance {
+			t.Fatalf("persisted usage id=%q attempt=%v metric=%q units=%d cost=%v/%v/%v/%v confidence=%q provenance=%q",
+				usageID, usageAttemptID, metric, units, costNanoUSD, currency,
+				persistedPriceRevision, pricingSource, confidence, provenance)
 		}
 		if _, duplicate := seen[metric]; duplicate {
 			t.Fatalf("persisted usage repeated metric %q", metric)
@@ -1348,7 +1407,7 @@ func assertDataPlaneE2EUsage(
 		t.Fatalf("iterate persisted data-plane usage: %v", err)
 	}
 	if len(seen) != len(expected) {
-		t.Fatalf("persisted usage metrics = %v, want logical/input/output/total", seen)
+		t.Fatalf("persisted usage metrics = %v, want logical/input/output/total/configured-cost", seen)
 	}
 }
 

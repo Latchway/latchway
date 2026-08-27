@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +21,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
+	"github.com/latchway/latchway/internal/pricing"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/requestidentity"
@@ -60,7 +63,8 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	}
 	if fixture.quotas.reserveInput.LogicalRequestID.String() == "" ||
 		fixture.quotas.reserveInput.ClientRequestID != "client-request-123" ||
-		fixture.quotas.reserveInput.PhysicalModel != "provider-model" {
+		fixture.quotas.reserveInput.PhysicalModel != "provider-model" ||
+		fixture.quotas.reserveInput.Pricing != (quota.PricingSelection{}) {
 		t.Fatalf("quota input = %#v", fixture.quotas.reserveInput)
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
@@ -926,13 +930,255 @@ func TestQuotaOutcomeCarriesNormalizedUsageThroughSuccessUnknownAndFailure(t *te
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			outcome := quotaOutcome(test.relay, test.execution)
+			outcome := quotaOutcome(test.relay, quota.Cost{}, test.execution)
 			if outcome.Status != test.wantStatus || outcome.HTTPStatus != test.relay.StatusCode ||
 				outcome.FailureCode != test.wantCode || outcome.Usage != test.wantUsage {
 				t.Fatalf("quota outcome = %#v, want status=%s code=%s usage=%#v",
 					outcome, test.wantStatus, test.wantCode, test.wantUsage)
 			}
 		})
+	}
+}
+
+func TestConfiguredPricingCaptureAndCostCalculation(t *testing.T) {
+	t.Parallel()
+	revision := id.Must(id.ConfigRevision)
+	effectiveAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	catalog := configuration.PricingCatalog{
+		ID: "standard", Currency: quota.USDCurrency, EffectiveAt: &effectiveAt,
+		Entries: []configuration.PricingEntry{{
+			ModelID: "provider_model", InputNanoUSDPerMillion: 2_000_000_001,
+			OutputNanoUSDPerMillion: 6_000_000_001, RequestNanoUSD: 1_234,
+		}},
+	}
+	selected, err := captureConfiguredPricing(
+		"standard", revision, "provider_model", catalog, catalog.Entries[0], effectiveAt.Add(time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("capture configured pricing: %v", err)
+	}
+	if !selected.configured || selected.quotaSelection != (quota.PricingSelection{
+		CatalogID: "standard", Currency: quota.USDCurrency,
+	}) || selected.source.CatalogID() != "standard" || selected.source.PriceRevision() != revision {
+		t.Fatalf("captured configured pricing = %#v", selected)
+	}
+
+	cost, executionErr := calculateConfiguredCost(selected, protocol.Usage{
+		InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+		Known: true, Provenance: quota.ProviderReportedProvenance,
+	}, nil)
+	if executionErr != nil || cost != (quota.Cost{
+		NanoUSD: 65_236, Known: true, Confidence: quota.CalculatedCostConfidence,
+	}) {
+		t.Fatalf("calculated configured cost = %#v err=%v", cost, executionErr)
+	}
+
+	providerFailure := fmt.Errorf("%w: private failure", errUpstreamRelay)
+	cost, executionErr = calculateConfiguredCost(selected, protocol.Usage{
+		InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+		Known: true, Provenance: quota.ProviderReportedProvenance,
+	}, providerFailure)
+	if cost.NanoUSD != 65_236 || !cost.Known || executionErr != providerFailure {
+		t.Fatalf("known failed-attempt cost = %#v err=%v", cost, executionErr)
+	}
+	failedOutcome := quotaOutcome(upstream.RelayOutcome{
+		StatusCode: http.StatusOK,
+		Usage: protocol.Usage{
+			InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+			Known: true, Provenance: quota.ProviderReportedProvenance,
+		},
+	}, cost, executionErr)
+	if failedOutcome.Status != quota.AttemptFailed ||
+		failedOutcome.FailureCode != "upstream_unavailable" || failedOutcome.Cost != cost {
+		t.Fatalf("known failed-attempt outcome = %#v", failedOutcome)
+	}
+}
+
+func TestConfiguredPricingDistinguishesZeroUnknownAndUnpricedCost(t *testing.T) {
+	t.Parallel()
+	source, err := pricing.NewSource("free", id.Must(id.ConfigRevision))
+	if err != nil {
+		t.Fatalf("construct configured pricing source: %v", err)
+	}
+	selected := configuredPricing{
+		configured: true,
+		quotaSelection: quota.PricingSelection{
+			CatalogID: "free", Currency: quota.USDCurrency,
+		},
+		source: source,
+	}
+	knownUsage := protocol.Usage{Known: true, Provenance: quota.ProviderReportedProvenance}
+
+	zero, executionErr := calculateConfiguredCost(selected, knownUsage, nil)
+	if executionErr != nil || zero != (quota.Cost{
+		Known: true, Confidence: quota.CalculatedCostConfidence,
+	}) {
+		t.Fatalf("known zero configured cost = %#v err=%v", zero, executionErr)
+	}
+	unknown, executionErr := calculateConfiguredCost(selected, protocol.Usage{}, nil)
+	if executionErr != nil || unknown != (quota.Cost{}) {
+		t.Fatalf("unknown configured cost = %#v err=%v", unknown, executionErr)
+	}
+	unpriced, executionErr := calculateConfiguredCost(configuredPricing{}, knownUsage, nil)
+	if executionErr != nil || unpriced != (quota.Cost{}) {
+		t.Fatalf("unpriced cost = %#v err=%v", unpriced, executionErr)
+	}
+}
+
+func TestConfiguredPricingOverflowClassificationPreservesEarlierFailure(t *testing.T) {
+	t.Parallel()
+	source, err := pricing.NewSource("expensive", id.Must(id.ConfigRevision))
+	if err != nil {
+		t.Fatalf("construct configured pricing source: %v", err)
+	}
+	selected := configuredPricing{
+		configured: true,
+		quotaSelection: quota.PricingSelection{
+			CatalogID: "expensive", Currency: quota.USDCurrency,
+		},
+		rates:  pricing.Rates{InputNanoUSDPerMillion: math.MaxInt64},
+		source: source,
+	}
+	usage := protocol.Usage{
+		InputTokens: math.MaxInt64, Known: true,
+		Provenance: quota.ProviderReportedProvenance,
+	}
+	cost, executionErr := calculateConfiguredCost(selected, usage, nil)
+	if cost != (quota.Cost{}) || !errors.Is(executionErr, errPricingUnavailable) {
+		t.Fatalf("overflow classification = cost:%#v err:%v", cost, executionErr)
+	}
+
+	providerFailure := fmt.Errorf("%w: private failure", errUpstreamRelay)
+	cost, executionErr = calculateConfiguredCost(selected, usage, providerFailure)
+	if cost != (quota.Cost{}) || executionErr != providerFailure ||
+		errors.Is(executionErr, errPricingUnavailable) {
+		t.Fatalf("overflow masked earlier failure = cost:%#v err:%v", cost, executionErr)
+	}
+}
+
+func TestConfiguredPricingCaptureRejectsFutureAndStructuralCorruption(t *testing.T) {
+	t.Parallel()
+	revision := id.Must(id.ConfigRevision)
+	now := time.Date(2026, 8, 28, 3, 0, 0, 0, time.UTC)
+	validEntry := configuration.PricingEntry{
+		ModelID: "provider_model", InputNanoUSDPerMillion: 1,
+		OutputNanoUSDPerMillion: 2, RequestNanoUSD: 3,
+	}
+	future := now.Add(time.Hour)
+	_, err := captureConfiguredPricing(
+		"standard", revision, "provider_model",
+		configuration.PricingCatalog{
+			ID: "standard", Currency: quota.USDCurrency, EffectiveAt: &future,
+			Entries: []configuration.PricingEntry{validEntry},
+		},
+		validEntry,
+		now,
+	)
+	if !errors.Is(err, errPricingUnavailable) {
+		t.Fatalf("future pricing error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		ref     string
+		modelID string
+		catalog configuration.PricingCatalog
+		entry   configuration.PricingEntry
+	}{
+		{
+			name: "bad reference", ref: "Bad", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "Bad", Currency: quota.USDCurrency, Entries: []configuration.PricingEntry{validEntry},
+			}, entry: validEntry,
+		},
+		{
+			name: "catalog mismatch", ref: "standard", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "other", Currency: quota.USDCurrency, Entries: []configuration.PricingEntry{validEntry},
+			}, entry: validEntry,
+		},
+		{
+			name: "currency mismatch", ref: "standard", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "standard", Currency: "EUR", Entries: []configuration.PricingEntry{validEntry},
+			}, entry: validEntry,
+		},
+		{
+			name: "entry mismatch", ref: "standard", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "standard", Currency: quota.USDCurrency, Entries: []configuration.PricingEntry{validEntry},
+			}, entry: configuration.PricingEntry{ModelID: "other"},
+		},
+		{
+			name: "duplicate model entry", ref: "standard", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "standard", Currency: quota.USDCurrency,
+				Entries: []configuration.PricingEntry{validEntry, validEntry},
+			}, entry: validEntry,
+		},
+		{
+			name: "negative rate", ref: "standard", modelID: "provider_model",
+			catalog: configuration.PricingCatalog{
+				ID: "standard", Currency: quota.USDCurrency,
+				Entries: []configuration.PricingEntry{{ModelID: "provider_model", RequestNanoUSD: -1}},
+			}, entry: configuration.PricingEntry{ModelID: "provider_model", RequestNanoUSD: -1},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, captureErr := captureConfiguredPricing(
+				test.ref, revision, test.modelID, test.catalog, test.entry, now,
+			)
+			if !errors.Is(captureErr, policy.ErrConfiguration) {
+				t.Fatalf("capture error = %v", captureErr)
+			}
+		})
+	}
+}
+
+func TestHandlerRejectsMissingConfiguredPricingBeforeQuotaOrDispatch(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Model.PricingRef = "missing"
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+	if fixture.quotas.reserveCalls != 0 || fixture.quotas.beginCalls != 0 ||
+		fixture.targets.calls != 0 || fixture.target.dispatchCalls != 0 {
+		t.Fatalf("missing pricing reached quota/target/dispatch: %d/%d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.quotas.beginCalls,
+			fixture.targets.calls, fixture.target.dispatchCalls)
+	}
+}
+
+func TestPricingUnavailableUsesStableRetryableFeatureProblem(t *testing.T) {
+	t.Parallel()
+	if code := failureCode(errPricingUnavailable); code != "pricing_unavailable" {
+		t.Fatalf("pricing failure code = %q", code)
+	}
+	code, retryAfter := errorCode(errPricingUnavailable, time.Now())
+	if code != "pricing_unavailable" || retryAfter != 0 || !problemIncludesFeature(code) ||
+		safeProblemDetail(code) != "The configured price for the selected model is not available." {
+		t.Fatalf("pricing problem mapping = %q retry=%d feature=%t detail=%q",
+			code, retryAfter, problemIncludesFeature(code), safeProblemDetail(code))
+	}
+	recorder := httptest.NewRecorder()
+	writeProblem(recorder, "request_pricing_test", code, "assistant", retryAfter)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("pricing problem status = %d", recorder.Code)
+	}
+	var document struct {
+		Code      string `json:"code"`
+		Feature   string `json:"feature"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
+		t.Fatalf("decode pricing problem: %v", err)
+	}
+	if document.Code != "pricing_unavailable" || document.Feature != "assistant" || !document.Retryable {
+		t.Fatalf("pricing problem = %+v", document)
 	}
 }
 

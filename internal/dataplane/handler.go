@@ -21,6 +21,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/policy"
+	"github.com/latchway/latchway/internal/pricing"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/quota"
@@ -45,6 +46,7 @@ var (
 	errDispatchNotOwned     = errors.New("logical request dispatch is already owned")
 	errDispatchNotConsumed  = errors.New("upstream dispatch did not provide a response")
 	errTargetConfiguration  = errors.New("invalid protected upstream target")
+	errPricingUnavailable   = errors.New("configured pricing unavailable")
 	errUpstreamDispatch     = errors.New("upstream dispatch failed")
 	errUpstreamProtocol     = errors.New("upstream protocol observation failed")
 	errUpstreamRelay        = errors.New("upstream response relay failed")
@@ -266,6 +268,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	selectedPricing, err := resolveConfiguredPricing(snapshot, decision.Model, handler.now())
+	if err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
 	appliedOutputMaximum, err := handler.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
 		PhysicalModel:       decision.Model.UpstreamModel,
 		DefaultOutputTokens: validated.defaultOutputTokens,
@@ -294,7 +301,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		Protocol: decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
 		LimitPlanKey: decision.LimitPlan.ID, RouteKey: decision.Route.ID,
 		UpstreamKey: decision.Upstream.ID, ModelKey: decision.Model.ID,
-		PhysicalModel: decision.Model.UpstreamModel, Rules: validated.rules,
+		PhysicalModel: decision.Model.UpstreamModel, Pricing: selectedPricing.quotaSelection,
+		Rules: validated.rules,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -329,8 +337,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			errUpstreamProtocol,
 		)
 	}
+	var calculatedCost quota.Cost
+	calculatedCost, result.err = calculateConfiguredCost(selectedPricing, result.relay.Usage, result.err)
 
-	settlementErr := handler.settleAttempt(result.attempt, result.relay, result.err)
+	settlementErr := handler.settleAttempt(result.attempt, result.relay, calculatedCost, result.err)
 	if result.relay.ClientStarted {
 		return
 	}
@@ -524,6 +534,110 @@ type validatedDecision struct {
 	maximumOutputTokens int64
 }
 
+// configuredPricing is captured once from the immutable active snapshot and
+// then carried through reservation and settlement. In particular, settlement
+// never re-reads a potentially newer active catalog.
+type configuredPricing struct {
+	configured     bool
+	quotaSelection quota.PricingSelection
+	rates          pricing.Rates
+	source         pricing.Source
+}
+
+func resolveConfiguredPricing(
+	snapshot configuration.ActiveSnapshot,
+	model configuration.Model,
+	now time.Time,
+) (configuredPricing, error) {
+	if model.PricingRef == "" {
+		return configuredPricing{}, nil
+	}
+	snapshotModel, ok := snapshot.Model(model.ID)
+	if !ok || snapshotModel.ID != model.ID || snapshotModel.PricingRef != model.PricingRef {
+		return configuredPricing{}, policy.ErrConfiguration
+	}
+	catalog, ok := snapshot.PricingCatalog(model.PricingRef)
+	if !ok {
+		return configuredPricing{}, policy.ErrConfiguration
+	}
+	entry, ok := snapshot.PricingEntry(model.PricingRef, model.ID)
+	if !ok {
+		return configuredPricing{}, policy.ErrConfiguration
+	}
+	return captureConfiguredPricing(
+		model.PricingRef, snapshot.PolicyRevision(), model.ID, catalog, entry, now,
+	)
+}
+
+func captureConfiguredPricing(
+	pricingRef string,
+	revision string,
+	modelID string,
+	catalog configuration.PricingCatalog,
+	entry configuration.PricingEntry,
+	now time.Time,
+) (configuredPricing, error) {
+	source, err := pricing.NewSource(pricingRef, revision)
+	if err != nil || catalog.ID != pricingRef || catalog.Currency != pricing.CurrencyUSD ||
+		len(catalog.Entries) == 0 ||
+		entry.ModelID != modelID || entry.InputNanoUSDPerMillion < 0 ||
+		entry.OutputNanoUSDPerMillion < 0 || entry.RequestNanoUSD < 0 {
+		return configuredPricing{}, policy.ErrConfiguration
+	}
+	matchingEntries := 0
+	for _, candidate := range catalog.Entries {
+		if candidate.ModelID != modelID {
+			continue
+		}
+		matchingEntries++
+		if candidate != entry {
+			return configuredPricing{}, policy.ErrConfiguration
+		}
+	}
+	if matchingEntries != 1 {
+		return configuredPricing{}, policy.ErrConfiguration
+	}
+	if catalog.EffectiveAfter(now) {
+		return configuredPricing{}, errPricingUnavailable
+	}
+	return configuredPricing{
+		configured: true,
+		quotaSelection: quota.PricingSelection{
+			CatalogID: catalog.ID,
+			Currency:  catalog.Currency,
+		},
+		rates: pricing.Rates{
+			InputNanoUSDPerMillion:  entry.InputNanoUSDPerMillion,
+			OutputNanoUSDPerMillion: entry.OutputNanoUSDPerMillion,
+			RequestNanoUSD:          entry.RequestNanoUSD,
+		},
+		source: source,
+	}, nil
+}
+
+func calculateConfiguredCost(
+	selected configuredPricing,
+	usage protocol.Usage,
+	executionErr error,
+) (quota.Cost, error) {
+	if !selected.configured || !usage.Known {
+		return quota.Cost{}, executionErr
+	}
+	calculated, err := pricing.Calculate(selected.rates, pricing.Usage{
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+	}, selected.source)
+	if err != nil {
+		if executionErr == nil {
+			executionErr = fmt.Errorf("%w: calculate configured cost", errPricingUnavailable)
+		}
+		return quota.Cost{}, executionErr
+	}
+	return quota.Cost{
+		NanoUSD: calculated.CostNanoUSD(), Known: true,
+		Confidence: quota.CalculatedCostConfidence,
+	}, executionErr
+}
+
 func validateDecision(featureID string, decision policy.Decision) (validatedDecision, error) {
 	feature := decision.Feature
 	if feature.ID != featureID || feature.Protocol != openaichat.ID || feature.Output == nil ||
@@ -632,13 +746,18 @@ func (handler *Handler) releaseReservation(reservation quota.Reservation, failur
 	return handler.quotas.ReleaseBeforeDispatch(ctx, reservation, failure)
 }
 
-func (handler *Handler) settleAttempt(attempt quota.Attempt, relay upstream.RelayOutcome, executionErr error) error {
+func (handler *Handler) settleAttempt(
+	attempt quota.Attempt,
+	relay upstream.RelayOutcome,
+	cost quota.Cost,
+	executionErr error,
+) error {
 	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
 	defer cancel()
-	return handler.quotas.Settle(ctx, attempt, quotaOutcome(relay, executionErr))
+	return handler.quotas.Settle(ctx, attempt, quotaOutcome(relay, cost, executionErr))
 }
 
-func quotaOutcome(relay upstream.RelayOutcome, executionErr error) quota.Outcome {
+func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr error) quota.Outcome {
 	httpStatus := relay.StatusCode
 	if httpStatus < 100 || httpStatus > 599 {
 		httpStatus = 0
@@ -652,7 +771,7 @@ func quotaOutcome(relay upstream.RelayOutcome, executionErr error) quota.Outcome
 		usage.Provenance = quota.UnknownUsageProvenance
 	}
 	if executionErr == nil && httpStatus >= http.StatusOK && httpStatus < http.StatusMultipleChoices {
-		return quota.Outcome{Status: quota.AttemptSucceeded, HTTPStatus: httpStatus, Usage: usage}
+		return quota.Outcome{Status: quota.AttemptSucceeded, HTTPStatus: httpStatus, Usage: usage, Cost: cost}
 	}
 	status := quota.AttemptFailed
 	code := failureCode(executionErr)
@@ -664,7 +783,7 @@ func quotaOutcome(relay upstream.RelayOutcome, executionErr error) quota.Outcome
 		status = quota.AttemptTimedOut
 		code = "upstream_timeout"
 	}
-	return quota.Outcome{Status: status, HTTPStatus: httpStatus, FailureCode: code, Usage: usage}
+	return quota.Outcome{Status: status, HTTPStatus: httpStatus, FailureCode: code, Usage: usage, Cost: cost}
 }
 
 func failureCode(err error) string {
@@ -680,6 +799,8 @@ func failureCode(err error) string {
 		return "upstream_protocol_error"
 	case errors.Is(err, upstream.ErrUpstreamNonSuccess):
 		return "upstream_non_success"
+	case errors.Is(err, errPricingUnavailable):
+		return "pricing_unavailable"
 	case errors.Is(err, quota.ErrDependency), errors.Is(err, quota.ErrInvalidState):
 		return "quota_state_unavailable"
 	case errors.Is(err, errTargetConfiguration):
@@ -774,6 +895,8 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "upstream_protocol_error", 0
 	case errors.Is(err, upstream.ErrUpstreamNonSuccess):
 		return "upstream_unavailable", 0
+	case errors.Is(err, errPricingUnavailable):
+		return "pricing_unavailable", 0
 	case errors.Is(err, errUpstreamDispatch), errors.Is(err, errUpstreamRelay):
 		return "upstream_unavailable", 0
 	case errors.Is(err, errDispatchNotOwned):
@@ -795,7 +918,7 @@ func writeProblem(writer http.ResponseWriter, requestID, code, feature string, r
 func problemIncludesFeature(code string) bool {
 	switch code {
 	case "feature_not_found", "feature_not_allowed", "quota_exceeded", "route_not_found",
-		"upstream_unavailable", "upstream_timeout", "upstream_protocol_error":
+		"pricing_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_protocol_error":
 		return true
 	default:
 		return false
@@ -832,6 +955,8 @@ func safeProblemDetail(code string) string {
 		return "The configured logical request quota has been reached."
 	case "route_not_found":
 		return "No configured upstream route is available."
+	case "pricing_unavailable":
+		return "The configured price for the selected model is not available."
 	case "upstream_timeout":
 		return "The upstream request exceeded its configured time limit."
 	case "upstream_protocol_error":
