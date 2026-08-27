@@ -14,7 +14,7 @@ This is the evidence ledger required for eventual version 1.0. An empty or “no
 | JavaScript commit and tag | Not produced |
 | React Native commit and tag | Not produced |
 | OCI image digest | Not produced |
-| Contract bundle hash | Working-tree draft: `71ab98ae70a54f00d7d116d96b0561f4a36248a08bd7fb815decd1da6fd2b17d`; byte reproducible, not published |
+| Contract bundle hash | Working-tree draft: `5f775c17d9d77270fc5b4871787dafa8551c1f10333a1d266184583df8e38050`; byte reproducible, not published |
 | Database schema version | `2` in the verified local PostgreSQL 18.6 Compose service; unreleased |
 
 ## Test evidence

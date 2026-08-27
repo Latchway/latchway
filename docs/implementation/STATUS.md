@@ -35,7 +35,7 @@ Contract `0.1.0`; wire protocol `1`; status `draft`.
 ## Passing test commands
 
 - `python3 scripts/validate-contracts.py` — parsed JSON/YAML, resolved OpenAPI and schema references, checked OpenAPI structure and operation IDs, matched problem codes to the registry, validated examples/vectors, recomputed canonical attestation hashes, and verified DPoP ES256 signatures and expected semantics.
-- Two independent `python3 scripts/build-contract-bundle.py --output-directory <temporary-directory>` runs followed by `cmp -s` — byte-identical `latchway-contract-0.1.0.tar.gz` archives, SHA-256 `71ab98ae70a54f00d7d116d96b0561f4a36248a08bd7fb815decd1da6fd2b17d`.
+- Two independent `python3 scripts/build-contract-bundle.py --output-directory <temporary-directory>` runs followed by `cmp -s` — byte-identical `latchway-contract-0.1.0.tar.gz` archives, SHA-256 `5f775c17d9d77270fc5b4871787dafa8551c1f10333a1d266184583df8e38050`.
 - `shasum -a 256 -c SHA256SUMS` in each extracted archive — every bundled file verified.
 - `docker compose up -d --build` — console lint/typecheck, seven frontend tests, frontend build, all Go package tests, image build, PostgreSQL startup, and Latchway startup passed in the shared working tree.
 - `docker compose ps` — both `postgres:18.6-alpine` and `latchway` reported healthy.

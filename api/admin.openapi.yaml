@@ -951,10 +951,13 @@ components:
     BootstrapRequest:
       type: object
       additionalProperties: false
-      required: [bootstrap_token, email, password]
+      required: [bootstrap_token, organization_slug, organization_name, email, display_name, password]
       properties:
         bootstrap_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        organization_slug: { $ref: '#/components/schemas/Identifier' }
+        organization_name: { type: string, minLength: 1, maxLength: 200 }
         email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
         password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
     LoginRequest:
       type: object
