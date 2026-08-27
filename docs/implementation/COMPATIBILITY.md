@@ -6,11 +6,15 @@
 | --- | --- |
 | Contract version | `0.1.0` |
 | Wire protocol version | `1` |
-| Status | Draft; no released contract implementation |
-| Minimum server | None |
+| Status | Draft and unreleased; no compatibility promise |
+| Validated core commit | `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
+| Deterministic bundle SHA-256 | `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12` |
+| Minimum released server | None |
 | Previous wire version supported | None; version 1 is the initial draft |
 
-The working-tree server foundation advertises contract `0.1.0` and protocol `1` from its health response, but it does not implement the client or Admin contract surfaces. No SDK implements the contract. “Compatible” must not be reported until a repository pins the reviewed bundle hash in `contract.lock` and passes shared vectors plus live conformance against the corresponding core image.
+At the validated core commit, the server foundation implements one-time administrative bootstrap and tenant/configuration slices plus the local debug-attested client session plane: challenge, exchange, DPoP-bound access and rotating refresh tokens, replay enforcement, JWKS, protected authorization, and `DELETE /client/v1/installations/current`. The full authenticated proxy, quotas, production native attestation, complete control plane, operations, and release gates are not implemented.
+
+All four SDK repositories now pin the exact core commit and bundle hash above. That synchronization proves only that the repositories identify the same draft contract artifact. It does not prove behavioral compatibility. Shared vectors, current-core live server conformance, published dependency resolution where applicable, and the externally blocked device gates must pass before compatibility is reported.
 
 ## Required client declaration
 
@@ -23,7 +27,7 @@ X-Latchway-Protocol-Version: 1
 X-Latchway-Feature: <configured-feature>
 ```
 
-The optional `X-Latchway-Request-ID` is a client correlation hint, not an authorization input. Servers generate a safe request identifier when it is absent or invalid.
+The optional `X-Latchway-Request-ID` is a client correlation hint, not an authorization input. The server preserves a safe hint and generates a safe request identifier when it is absent, ambiguous, or invalid.
 
 ## Compatibility policy
 
@@ -33,27 +37,29 @@ The optional `X-Latchway-Request-ID` is a client correlation hint, not an author
 - At server 1.0, the current wire version and at least the previous minor protocol version must be supported during the documented migration window.
 - An incompatible client receives an RFC 9457 problem with `protocol_version_unsupported`, the request ID, supported versions, and safe upgrade guidance.
 - Generated wire DTOs may change with the contract. Handwritten public SDK APIs remain idiomatic and must not be replaced by generated surfaces.
+- A matching `contract.lock` is necessary but insufficient evidence. Compatibility also requires the affected shared-vector, fixture, live-server, packaging, and platform gates.
 
 ## Repository matrix
 
-| Component | Intended package | Current implementation | Contract lock |
-| --- | --- | --- | --- |
-| Server and CLI | `github.com/latchway/latchway` | Health/migration foundation only; contract endpoints not implemented | Source of truth |
-| Swift | `Latchway` | Not implemented | Not created |
-| Android | `dev.latchway:latchway-*` | Not implemented | Not created |
-| JavaScript | `@latchway/client` | Not implemented | Not created |
-| React Native | `@latchway/react-native` | Not implemented | Not created |
+| Component | Intended package | Current implementation evidence | Synchronized lock commit | Remaining compatibility evidence |
+| --- | --- | --- | --- | --- |
+| Server and CLI | `github.com/latchway/latchway` | Core normal/race/PostgreSQL suites, focused revocation race/contention, vet, six fuzz targets, contracts, deterministic bundle, `make check`, and a local non-root OCI build pass at `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` | Source of truth | Authenticated proxy, quota, native attestation, operations, Compose/registry image proof, and release gates |
+| JavaScript | `@latchway/client` | Local browser/Node/package gates pass at `273925d73a5a959f95664b1b1d838505dcce5f6c` | `8df68931730bad05ef110fe53e09d857b5bd61f8` | Live current-core conformance and publication evidence |
+| Swift | `Latchway` | Local Swift package, fixture, and conformance-source gates pass at `2972f99c59b652722a586510a9c943ac57a69a5c` | `fd670a04004787901bb19b3ab762f4d2dc050a07` | Live current-core conformance, published dependency proof, and physical App Attest validation |
+| Android | `dev.latchway:latchway-*` | Local static tests and independent Kotlin/JVM compatibility gates pass at `0042a916580d14295bd944104aae6deb2ac136c5` | `cd96781426831f464fc1e5350094aab91ca11dd2` | Configured Android SDK/`ANDROID_HOME`, user-accepted licenses, official Gradle gates, live current-core conformance, publication, and Play-distributed validation |
+| React Native | `@latchway/react-native` | Local source, type, test, code-generation, build, and native-boundary gates pass at `d730b3e4b4798f0a200caf0d0fb164ab54cfdad0` | `bf1d5e9319c859edc215677e6c02b7d0f91cc811` | CocoaPods (`pod` is absent locally), native-consumer/published-dependency gates, live current-core conformance, and physical-device validation |
 
-## Contract lock format
+## Synchronized lock fields
 
-Each SDK repository will record:
+Each SDK's existing lock serialization now records these shared values:
 
-```yaml
-contract_version: 0.1.0
-core_release: unreleased
-bundle_sha256: "<sha256 after the reviewed bundle is produced>"
-minimum_server_version: 0.1.0
-maximum_tested_server_version: 0.1.x
-```
+| Field | Synchronized value |
+| --- | --- |
+| Contract version | `0.1.0` |
+| Core commit | `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
+| Bundle SHA-256 | `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12` |
+| Wire protocol | `1` |
+| Declared minimum server version | `0.1.0` |
+| Declared maximum tested server series | `0.1.x` |
 
-The literal hash is intentionally not asserted until the working tree is reviewed and the deterministic bundle is produced.
+The field name for wire protocol is repository-specific (`wire_protocol` or `wire_protocol_version`). Release-label metadata is also repository-specific and is not evidence that a server or SDK release exists. No release tag, registry publication, or minimum compatible released pair is claimed by this document.

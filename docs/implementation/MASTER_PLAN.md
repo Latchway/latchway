@@ -4,34 +4,34 @@ The authoritative execution contract defines twenty sequential phases. Work shou
 
 | Phase | Objective | Current state | Gate summary |
 | --- | --- | --- | --- |
-| 0 | Audit all repositories and classify existing work | Complete; governance baselines committed | Baseline complete and trees clean |
-| 1 | Governance, protocol contracts, threat model, ADRs | Draft contract locked across all repositories and reproducibly validated | Schemas validate and all repositories identify contract `0.1.0` |
-| 2 | Go, PostgreSQL, CLI, dashboard and image foundation | Runnable foundation and prior Compose gate pass; current-image rebuild remains | Compose starts; `/healthz` and `/readyz` pass |
-| 3 | Database and one-time administrative bootstrap | Canonical Admin API, CLI and embedded owner setup/login committed; schema version 3 | Exactly one owner can bootstrap; all mutations audited |
-| 4 | Immutable configuration revisions | Not started | Concurrency-safe activation, validation, diff and rollback |
-| 5 | Identity verification and normalized principals | Standalone verifier/JWKS/privacy/user-store implementation and adversarial gates pass; active-config wiring pending | Strict JWT presets and adversarial identity tests pass |
-| 6 | RFC 9449 DPoP and session vertical slice | P-256 proof/JWK primitives implemented; challenge, tokens, replay and refresh pending | Challenge, exchange, protected request, refresh and replay tests pass |
+| 0 | Audit all repositories and classify existing work | Complete; governance baselines committed | Baseline complete and tracked trees clean at recorded passing revisions |
+| 1 | Governance, protocol contracts, threat model, ADRs | Draft contract `0.1.0`/protocol `1` is reproducibly validated and its current core commit/bundle are locked across all SDK repositories | Core schemas, deterministic bundle, and lock equality validate; no release or compatibility promise |
+| 2 | Go, PostgreSQL, CLI, dashboard and image foundation | Runnable foundation, prior Compose gate, and current local non-root OCI build pass; current Compose smoke and registry digest remain open | Local runtime/image gates pass; release image evidence is absent |
+| 3 | Database and one-time administrative bootstrap | Canonical Admin API, CLI, embedded owner setup/login, and schema version 7 committed | Exactly one owner can bootstrap; implemented mutations are audited |
+| 4 | Immutable configuration revisions | Revision creation, validation, planning, conflict-safe activation, rollback, and compiled snapshots committed and locally tested | Local immutable-revision and concurrency gates pass |
+| 5 | Identity verification and normalized principals | Strict verifier/JWKS/privacy/user store is wired into active configuration and session exchange | Local identity, rotation, mapping, policy, and adversarial gates pass |
+| 6 | RFC 9449 DPoP and session vertical slice | Local debug-attested challenge/exchange, access/refresh issuance, replay, JWKS, protected authorization, reuse detection, and current-installation revocation committed | Full local Phase 6 and public protected-revoke gates pass; production native trust is outside this phase evidence |
 | 7 | First end-to-end proxy | OpenAI Chat adapter and deterministic mock upstream implemented; authenticated composition pending | Authenticated debug-attested request streams through mock upstream |
 | 8 | Quota, pricing and usage settlement | Not started | Contention cannot overspend; reservations recover |
-| 9 | Protocol adapters and routing | Not started | OpenAI, Anthropic and restricted opaque routes conform |
-| 10 | Apple App Attest and Swift SDK | Implementation and local generic-build validation in progress; physical proof externally blocked | Fixtures and physical-device validation pass |
-| 11 | Play Integrity and Android SDK | SDK committed; static/JVM tests pass; Android SDK licenses and Play-track proof remain | Fixtures and Play-distributed validation pass |
-| 12 | Browser/Node JavaScript SDK | Core SDK committed; local browser/Node/package gates pass | Browser and Node conformance pass |
-| 13 | React Native bridge SDK | Implementation in progress | Native dependency and example-app conformance pass |
-| 14 | Complete Admin API, CLI and dashboard | Bootstrap/auth/tenant/API-token slice committed; remaining resources/views pending | All control planes use one API and audit every mutation |
+| 9 | Protocol adapters and routing | Initial OpenAI Chat adapter exists; routing, fallback, Anthropic, and restricted opaque routes remain | OpenAI, Anthropic and restricted opaque routes conform |
+| 10 | Apple App Attest and Swift SDK | Swift SDK, local fixture sources, and current-core lock committed; server trust-root verification and physical proof remain | Fixtures and physical-device validation pass |
+| 11 | Play Integrity and Android SDK | Android SDK and current-core lock committed with local static/JVM gates; server verification, Android SDK/`ANDROID_HOME`, license-bound build, and Play-track proof remain | Fixtures and Play-distributed validation pass |
+| 12 | Browser/Node JavaScript SDK | Core SDK and current-core lock committed; local browser/Node/package gates pass; live conformance remains | Browser and Node conformance pass against the selected core |
+| 13 | React Native bridge SDK | Native-backed SDK and current-core lock committed with local source gates; CocoaPods/native-consumer, published native dependencies, and device conformance remain | Native dependency and example-app conformance pass |
+| 14 | Complete Admin API, CLI and dashboard | Bootstrap/auth/tenant/config/API-token slices committed; remaining resources and views pending | All control planes use one API and audit every mutation |
 | 15 | Observability and PostgreSQL jobs | Not started | Metrics, traces, health and crash recovery pass |
-| 16 | Deployment assets | Not started | Compose and documented cloud smoke tests pass |
-| 17 | Cross-repository conformance | Not started | Shared vectors and real proxied requests pass for every SDK |
-| 18 | Security, race, fuzz, load and upgrade hardening | Not started | Security and reliability targets have recorded evidence |
-| 19 | Documentation and version 1.0 release | Not started | Every Definition of Done item links to post-build evidence |
+| 16 | Deployment assets | Foundation exists; current image, cloud smoke, and operational deployment evidence remain | Compose and documented cloud smoke tests pass |
+| 17 | Cross-repository conformance | Current core commit/bundle locks are synchronized; live current-core matrix is not run | Shared vectors and real proxied requests pass for every SDK |
+| 18 | Security, race, fuzz, load and upgrade hardening | Full core race suite, six fuzz smoke targets, focused PostgreSQL race, and revocation contention pass; load/soak/upgrade and remaining audits are open | Security and reliability targets have recorded evidence |
+| 19 | Documentation and version 1.0 release | Evidence ledgers are maintained; no release artifacts, tags, or publications exist | Every Definition of Done item links to post-build evidence |
 
 ## Immediate execution sequence
 
-1. Complete and commit local iOS and React Native SDK gates without claiming externally blocked device evidence.
-2. Implement immutable configuration revisions, conflict-safe activation, validation, rollback, and compiled snapshots.
-3. Connect identity and RFC 9449 primitives through challenge, attestation, access/refresh session, replay, and revocation persistence.
-4. Deliver the first authenticated debug-attested proxy request through the deterministic mock upstream.
-5. Add quota reserve/execute/settle and then broaden providers, protocols, control-plane resources, and deployment proof.
+1. Compose the committed active-configuration, identity, debug-attestation, DPoP session, and protected authorization boundaries into the first authenticated mock-upstream proxy request.
+2. Implement quota reserve/execute/settle with contention and recovery proof, then broaden routing and protocol adapters.
+3. Add production App Attest and Play Integrity server verification and run the cross-repository conformance matrix at the synchronized locks without claiming externally blocked physical evidence early.
+4. Complete control-plane resources, observability/jobs, deployment smoke tests, and operational recovery gates.
+5. Finish load/soak/upgrade/security hardening and produce signed, published release artifacts only after every release gate passes.
 6. Update `STATUS.md` after each material change and keep `COMPLETION_REPORT.md` evidence-only.
 
 ## Release slices
