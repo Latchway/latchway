@@ -35,7 +35,8 @@ func TestFirebasePresetDerivesOfficialVerificationParameters(t *testing.T) {
 	verifier, err := NewFirebaseVerifier(FirebasePreset{
 		PresetCommon: PresetCommon{
 			Client: &http.Client{Transport: handler}, Now: func() time.Time { return verifierTestNow },
-			Mapper: PathMapper{"email_verified": "email_verified"},
+			Mapper: PathMapper{"email_verified": "email_verified"}, SubjectClaim: "uid",
+			RequiredClaims: []string{"tenant"}, AuthorizedParties: []string{"mobile-app"},
 		},
 		ProjectID: "latchway-production",
 	})
@@ -46,12 +47,18 @@ func TestFirebasePresetDerivesOfficialVerificationParameters(t *testing.T) {
 	claims["iss"] = "https://securetoken.google.com/latchway-production"
 	claims["aud"] = "latchway-production"
 	claims["email_verified"] = true
+	claims["uid"] = "firebase-user"
+	claims["tenant"] = "production"
+	claims["azp"] = "mobile-app"
 	raw := signToken(t, jwt.SigningMethodRS256, key, "google-key", claims)
 	principal := verifyPreset(t, verifier, raw)
-	if principal.ProviderID != "firebase" || principal.Claims["email_verified"] != true {
+	if principal.ProviderID != "firebase" || principal.Subject != "firebase-user" || principal.Claims["email_verified"] != true {
 		t.Fatalf("unexpected Firebase principal: %#v", principal)
 	}
 	delete(claims, "auth_time")
+	assertVerifyError(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "google-key", claims), ErrCredentialInvalid)
+	claims["auth_time"] = verifierTestNow.Add(-time.Minute).Unix()
+	delete(claims, "tenant")
 	assertVerifyError(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "google-key", claims), ErrCredentialInvalid)
 }
 
@@ -63,7 +70,10 @@ func TestSupabasePresetSupportsAsymmetricAndAcknowledgedLegacyTokens(t *testing.
 		}
 		return jsonResponse(http.StatusOK, jwksJSON(t, rsaJWK("supabase-key", "RS256", &key.PublicKey)), nil), nil
 	})
-	common := PresetCommon{Client: &http.Client{Transport: handler}, Now: func() time.Time { return verifierTestNow }}
+	common := PresetCommon{
+		Client: &http.Client{Transport: handler}, Now: func() time.Time { return verifierTestNow },
+		RequiredClaims: []string{"tenant"}, AuthorizedParties: []string{"mobile-app"},
+	}
 	verifier, err := NewSupabaseVerifier(SupabasePreset{PresetCommon: common, ProjectURL: "https://project-ref.supabase.co"})
 	if err != nil {
 		t.Fatalf("construct Supabase verifier: %v", err)
@@ -71,6 +81,8 @@ func TestSupabasePresetSupportsAsymmetricAndAcknowledgedLegacyTokens(t *testing.
 	claims := validClaims()
 	claims["iss"] = "https://project-ref.supabase.co/auth/v1"
 	claims["aud"] = "authenticated"
+	claims["tenant"] = "production"
+	claims["azp"] = "mobile-app"
 	verifyPreset(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "supabase-key", claims))
 
 	secret := []byte("0123456789abcdef0123456789abcdef")
@@ -100,7 +112,10 @@ func TestPresetCommonPreservesExplicitZeroClockSkew(t *testing.T) {
 func TestClerkPresetValidatesSessionAndAuthorizedParty(t *testing.T) {
 	key := mustRSAKey(t)
 	verifier, err := NewClerkVerifier(ClerkPreset{
-		PresetCommon:      PresetCommon{Now: func() time.Time { return verifierTestNow }},
+		PresetCommon: PresetCommon{
+			Now: func() time.Time { return verifierTestNow }, SubjectClaim: "uid",
+			RequiredClaims: []string{"tenant"},
+		},
 		Issuer:            "https://clerk.example.test",
 		Audiences:         []string{"latchway-app"},
 		AuthorizedParties: []string{"https://app.example.test"},
@@ -114,8 +129,13 @@ func TestClerkPresetValidatesSessionAndAuthorizedParty(t *testing.T) {
 	claims["iss"] = "https://clerk.example.test"
 	claims["aud"] = "latchway-app"
 	claims["sid"] = "sess_123"
+	claims["uid"] = "clerk-user"
+	claims["tenant"] = "production"
 	claims["azp"] = "https://app.example.test"
-	verifyPreset(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "clerk-key", claims))
+	principal := verifyPreset(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "clerk-key", claims))
+	if principal.Subject != "clerk-user" {
+		t.Fatalf("Clerk subject = %q", principal.Subject)
+	}
 	claims["azp"] = "https://attacker.example.test"
 	assertVerifyError(t, verifier, signToken(t, jwt.SigningMethodRS256, key, "clerk-key", claims), ErrCredentialInvalid)
 }

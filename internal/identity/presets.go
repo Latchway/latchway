@@ -15,13 +15,16 @@ var firebaseProjectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]
 
 // PresetCommon contains provider-independent verifier controls.
 type PresetCommon struct {
-	ProviderID       string
-	Mapper           ClaimMapper
-	Client           *http.Client
-	Now              func() time.Time
-	ClockSkew        time.Duration
-	ClockSkewSet     bool
-	MaxTokenLifetime time.Duration
+	ProviderID        string
+	Mapper            ClaimMapper
+	SubjectClaim      string
+	RequiredClaims    []string
+	AuthorizedParties []string
+	Client            *http.Client
+	Now               func() time.Time
+	ClockSkew         time.Duration
+	ClockSkewSet      bool
+	MaxTokenLifetime  time.Duration
 }
 
 // FirebasePreset configures Firebase Authentication ID-token verification.
@@ -47,7 +50,9 @@ func NewFirebaseVerifier(config FirebasePreset) (*JWTVerifier, error) {
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: "https://securetoken.google.com/" + config.ProjectID,
 		Audiences: []string{config.ProjectID}, AllowedAlgorithms: []string{"RS256"},
-		RequiredClaims: []string{"auth_time"}, Mapper: config.Mapper, Keys: keys,
+		AuthorizedParties: config.AuthorizedParties, SubjectClaim: config.SubjectClaim,
+		RequiredClaims: mergeRequiredClaims([]string{"auth_time"}, config.RequiredClaims),
+		Mapper:         config.Mapper, Keys: keys,
 		ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
@@ -96,7 +101,9 @@ func NewSupabaseVerifier(config SupabasePreset) (*JWTVerifier, error) {
 	}
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: audiences, AllowedAlgorithms: algorithms,
-		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
+		AuthorizedParties: config.AuthorizedParties, SubjectClaim: config.SubjectClaim,
+		RequiredClaims: config.RequiredClaims, Mapper: config.Mapper, Keys: keys,
+		ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
@@ -126,7 +133,9 @@ func NewSupabaseHS256Verifier(config SupabasePreset, secret []byte, acknowledgeR
 	}
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: audiences, AllowedAlgorithms: []string{"HS256"},
-		Mapper: config.Mapper, Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
+		AuthorizedParties: config.AuthorizedParties, SubjectClaim: config.SubjectClaim,
+		RequiredClaims: config.RequiredClaims, Mapper: config.Mapper, Keys: keys,
+		ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
 }
@@ -173,10 +182,35 @@ func NewClerkVerifier(config ClerkPreset) (*JWTVerifier, error) {
 	}
 	return NewJWTVerifier(VerifierConfig{
 		ProviderID: providerID, Issuer: issuer, Audiences: config.Audiences, AllowedAlgorithms: []string{"RS256"},
-		AuthorizedParties: config.AuthorizedParties, RequiredClaims: []string{"sid"}, Mapper: config.Mapper,
-		Keys: keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
+		AuthorizedParties: firstNonEmptyStrings(config.AuthorizedParties, config.PresetCommon.AuthorizedParties),
+		SubjectClaim:      config.SubjectClaim,
+		RequiredClaims:    mergeRequiredClaims([]string{"sid"}, config.RequiredClaims),
+		Mapper:            config.Mapper,
+		Keys:              keys, ClockSkew: config.ClockSkew, ClockSkewSet: config.ClockSkewSet,
 		MaxTokenLifetime: config.MaxTokenLifetime, Now: config.Now,
 	})
+}
+
+func mergeRequiredClaims(mandatory, configured []string) []string {
+	result := make([]string, 0, len(mandatory)+len(configured))
+	seen := make(map[string]struct{}, len(mandatory)+len(configured))
+	for _, claims := range [][]string{mandatory, configured} {
+		for _, claim := range claims {
+			if _, exists := seen[claim]; exists {
+				continue
+			}
+			seen[claim] = struct{}{}
+			result = append(result, claim)
+		}
+	}
+	return result
+}
+
+func firstNonEmptyStrings(preferred, fallback []string) []string {
+	if len(preferred) != 0 {
+		return preferred
+	}
+	return fallback
 }
 
 // NewStaticPublicKeyVerifier binds a generic verifier to a configured public
