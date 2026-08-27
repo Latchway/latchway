@@ -107,6 +107,595 @@ func TestWithHeaderDispatchRetainsCredentialUntilExactBodyClose(t *testing.T) {
 	}
 }
 
+func TestDispatchWithBeforeRoundTripOrdersHookImmediatelyBeforeTransport(t *testing.T) {
+	t.Parallel()
+
+	events := make([]string, 0, 2)
+	hookCalls := 0
+	transportCalls := 0
+	target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		transportCalls++
+		if got := strings.Join(events, ","); got != "before" {
+			t.Fatalf("events before RoundTrip = %q, want before", got)
+		}
+		events = append(events, "round-trip")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Request:    request,
+		}, nil
+	}))
+	prepared := testPreparedRequest(t, context.Background(), target)
+
+	response, err := target.DispatchWithBeforeRoundTrip(context.Background(), prepared, func() error {
+		hookCalls++
+		events = append(events, "before")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DispatchWithBeforeRoundTrip() error = %v", err)
+	}
+	if err := response.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if hookCalls != 1 || transportCalls != 1 {
+		t.Fatalf("hook calls=%d transport calls=%d, want one each", hookCalls, transportCalls)
+	}
+	if got := strings.Join(events, ","); got != "before,round-trip" {
+		t.Fatalf("events = %q, want before,round-trip", got)
+	}
+}
+
+func TestCredentialDispatchWithBeforeRoundTripOrdersCredentialHookTransportAndConsumer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		headerName string
+		wantValue  string
+		dispatch   func(*Target, PreparedRequest, func() error, func(*DispatchedResponse) error) error
+	}{
+		{
+			name:       "bearer",
+			headerName: "Authorization",
+			wantValue:  "Bearer server-secret",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(context.Background(), prepared, []byte("server-secret"), before, consume)
+			},
+		},
+		{
+			name:       "fixed header",
+			headerName: "X-Provider-Key",
+			wantValue:  "server secret",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "X-Provider-Key", []byte("server secret"), before, consume)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			events := make([]string, 0, 3)
+			hookCalls := 0
+			body := &credentialObservingBody{headerName: test.headerName}
+			var outbound *http.Request
+			target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				outbound = request
+				body.request = request
+				if got := strings.Join(events, ","); got != "before" {
+					t.Fatalf("events before RoundTrip = %q, want before", got)
+				}
+				if got := request.Header.Get(test.headerName); got != test.wantValue {
+					t.Fatalf("credential during RoundTrip = %q, want %q", got, test.wantValue)
+				}
+				events = append(events, "round-trip")
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+
+			err := test.dispatch(target, prepared, func() error {
+				hookCalls++
+				events = append(events, "before")
+				return nil
+			}, func(dispatched *DispatchedResponse) error {
+				if got := dispatched.Request.Header.Get(test.headerName); got != "" {
+					t.Fatalf("consumer-visible request retained credential = %q", got)
+				}
+				events = append(events, "consume")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("credential dispatch error = %v", err)
+			}
+			if hookCalls != 1 {
+				t.Fatalf("hook calls = %d, want one", hookCalls)
+			}
+			if got := strings.Join(events, ","); got != "before,round-trip,consume" {
+				t.Fatalf("events = %q, want before,round-trip,consume", got)
+			}
+			if got := body.credentialAtClose; got != test.wantValue {
+				t.Fatalf("credential during Body.Close = %q, want %q", got, test.wantValue)
+			}
+			if got := outbound.Header.Get(test.headerName); got != "" {
+				t.Fatalf("transport request retained credential after scope = %q", got)
+			}
+		})
+	}
+}
+
+func TestSuccessfulBeforeRoundTripTransfersRequestBodyOwnershipAcrossAuthenticationModes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		dispatch func(*Target, PreparedRequest, func() error, func(*DispatchedResponse) error) error
+	}{
+		{
+			name: "none",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, _ func(*DispatchedResponse) error) error {
+				response, err := target.DispatchWithBeforeRoundTrip(context.Background(), prepared, before)
+				if response != nil {
+					_ = response.Close()
+				}
+				return err
+			},
+		},
+		{
+			name: "bearer",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(context.Background(), prepared, []byte("server-secret"), before, consume)
+			},
+		},
+		{
+			name: "fixed header",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "X-Provider-Key", []byte("server secret"), before, consume)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			requestBody := &trackingRequestBody{}
+			target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if err := request.Body.Close(); err != nil {
+					t.Fatalf("transport request Body.Close() error = %v", err)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+			prepared.request.Body = requestBody
+			err := test.dispatch(target, prepared, func() error { return nil }, func(*DispatchedResponse) error { return nil })
+			if err != nil {
+				t.Fatalf("dispatch error = %v", err)
+			}
+			if requestBody.closeCalls.Load() != 1 {
+				t.Fatalf("request body close calls = %d, want transport's one close", requestBody.closeCalls.Load())
+			}
+		})
+	}
+}
+
+func TestBeforeRoundTripRejectsInvalidPreparedRequestWithoutHook(t *testing.T) {
+	t.Parallel()
+
+	var hookCalls atomic.Int32
+	var transportCalls atomic.Int32
+	target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		transportCalls.Add(1)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}")), Request: request}, nil
+	}))
+	claimed := testPreparedRequest(t, context.Background(), target)
+	response, err := target.Dispatch(context.Background(), claimed)
+	if err != nil {
+		t.Fatalf("initial Dispatch() error = %v", err)
+	}
+	_ = response.Close()
+	if _, err := target.DispatchWithBeforeRoundTrip(context.Background(), claimed, func() error {
+		hookCalls.Add(1)
+		return nil
+	}); err == nil {
+		t.Fatal("claimed prepared request was accepted")
+	}
+
+	invalid := testPreparedRequest(t, context.Background(), target)
+	invalid.request.Header.Set("Authorization", "client-secret")
+	if _, err := target.DispatchWithBeforeRoundTrip(context.Background(), invalid, func() error {
+		hookCalls.Add(1)
+		return nil
+	}); err == nil {
+		t.Fatal("invalid prepared request was accepted")
+	}
+	if hookCalls.Load() != 0 {
+		t.Fatalf("hook calls = %d, want zero", hookCalls.Load())
+	}
+	if transportCalls.Load() != 1 {
+		t.Fatalf("transport calls = %d, want only the initial dispatch", transportCalls.Load())
+	}
+}
+
+func TestCredentialBeforeRoundTripRejectsMalformedConfigurationWithoutHookOrTransport(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		dispatch func(*Target, PreparedRequest, func() error) error
+	}{
+		{
+			name: "malformed bearer credential",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(context.Background(), prepared, []byte("secret\nvalue"), before, func(*DispatchedResponse) error { return nil })
+			},
+		},
+		{
+			name: "forbidden fixed header",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "Content-Type", []byte("secret"), before, func(*DispatchedResponse) error { return nil })
+			},
+		},
+		{
+			name: "malformed fixed credential",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "X-Provider-Key", []byte("secret\nvalue"), before, func(*DispatchedResponse) error { return nil })
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var hookCalls atomic.Int32
+			var transportCalls atomic.Int32
+			target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalls.Add(1)
+				return nil, errors.New("transport must not run")
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+			err := test.dispatch(target, prepared, func() error {
+				hookCalls.Add(1)
+				return nil
+			})
+			if err == nil {
+				t.Fatal("malformed credential configuration was accepted")
+			}
+			if hookCalls.Load() != 0 || transportCalls.Load() != 0 {
+				t.Fatalf("hook calls=%d transport calls=%d, want zero each", hookCalls.Load(), transportCalls.Load())
+			}
+		})
+	}
+}
+
+func TestBeforeRoundTripErrorPreventsEveryAuthenticationModeTransport(t *testing.T) {
+	t.Parallel()
+
+	hookFailure := errors.New("quota ownership unavailable")
+	tests := []struct {
+		name     string
+		dispatch func(*Target, PreparedRequest, func() error, func(*DispatchedResponse) error) error
+	}{
+		{
+			name: "none",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, _ func(*DispatchedResponse) error) error {
+				response, err := target.DispatchWithBeforeRoundTrip(context.Background(), prepared, before)
+				if response != nil {
+					_ = response.Close()
+				}
+				return err
+			},
+		},
+		{
+			name: "bearer",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(context.Background(), prepared, []byte("server-secret"), before, consume)
+			},
+		},
+		{
+			name: "fixed header",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "X-Provider-Key", []byte("server secret"), before, consume)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var hookCalls atomic.Int32
+			var transportCalls atomic.Int32
+			var consumeCalls atomic.Int32
+			target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalls.Add(1)
+				return nil, errors.New("transport must not run")
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+			requestBody := &trackingRequestBody{}
+			prepared.request.Body = requestBody
+			err := test.dispatch(target, prepared, func() error {
+				hookCalls.Add(1)
+				return hookFailure
+			}, func(*DispatchedResponse) error {
+				consumeCalls.Add(1)
+				return nil
+			})
+			if !errors.Is(err, hookFailure) {
+				t.Fatalf("dispatch error = %v, want wrapped hook failure", err)
+			}
+			if hookCalls.Load() != 1 || transportCalls.Load() != 0 || consumeCalls.Load() != 0 {
+				t.Fatalf("hook calls=%d transport calls=%d consume calls=%d, want 1,0,0", hookCalls.Load(), transportCalls.Load(), consumeCalls.Load())
+			}
+			if requestBody.closeCalls.Load() != 1 {
+				t.Fatalf("request body close calls = %d, want one", requestBody.closeCalls.Load())
+			}
+		})
+	}
+}
+
+func TestCanceledContextPreventsBeforeRoundTripAndEveryAuthenticationModeTransport(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		dispatch func(context.Context, *Target, PreparedRequest, func() error, func(*DispatchedResponse) error) error
+	}{
+		{
+			name: "none",
+			dispatch: func(ctx context.Context, target *Target, prepared PreparedRequest, before func() error, _ func(*DispatchedResponse) error) error {
+				response, err := target.DispatchWithBeforeRoundTrip(ctx, prepared, before)
+				if response != nil {
+					_ = response.Close()
+				}
+				return err
+			},
+		},
+		{
+			name: "bearer",
+			dispatch: func(ctx context.Context, target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(ctx, prepared, []byte("server-secret"), before, consume)
+			},
+		},
+		{
+			name: "fixed header",
+			dispatch: func(ctx context.Context, target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(ctx, prepared, "X-Provider-Key", []byte("server secret"), before, consume)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var hookCalls atomic.Int32
+			var transportCalls atomic.Int32
+			var consumeCalls atomic.Int32
+			target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalls.Add(1)
+				return nil, errors.New("transport must not run")
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+			requestBody := &trackingRequestBody{}
+			prepared.request.Body = requestBody
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := test.dispatch(ctx, target, prepared, func() error {
+				hookCalls.Add(1)
+				return nil
+			}, func(*DispatchedResponse) error {
+				consumeCalls.Add(1)
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("dispatch error = %v, want context canceled", err)
+			}
+			if hookCalls.Load() != 0 || transportCalls.Load() != 0 || consumeCalls.Load() != 0 {
+				t.Fatalf("hook calls=%d transport calls=%d consume calls=%d, want zero each", hookCalls.Load(), transportCalls.Load(), consumeCalls.Load())
+			}
+			if requestBody.closeCalls.Load() != 1 {
+				t.Fatalf("request body close calls = %d, want one", requestBody.closeCalls.Load())
+			}
+		})
+	}
+}
+
+func TestBeforeRoundTripPanicClosesRequestBodyAcrossEveryAuthenticationMode(t *testing.T) {
+	t.Parallel()
+
+	panicValue := &struct{ message string }{message: "quota panic"}
+	tests := []struct {
+		name     string
+		dispatch func(*Target, PreparedRequest, func() error, func(*DispatchedResponse) error) error
+	}{
+		{
+			name: "none",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, _ func(*DispatchedResponse) error) error {
+				response, err := target.DispatchWithBeforeRoundTrip(context.Background(), prepared, before)
+				if response != nil {
+					_ = response.Close()
+				}
+				return err
+			},
+		},
+		{
+			name: "bearer",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithBearerDispatchWithBeforeRoundTrip(context.Background(), prepared, []byte("server-secret"), before, consume)
+			},
+		},
+		{
+			name: "fixed header",
+			dispatch: func(target *Target, prepared PreparedRequest, before func() error, consume func(*DispatchedResponse) error) error {
+				return target.WithHeaderDispatchWithBeforeRoundTrip(context.Background(), prepared, "X-Provider-Key", []byte("server secret"), before, consume)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var hookCalls atomic.Int32
+			var transportCalls atomic.Int32
+			var consumeCalls atomic.Int32
+			target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalls.Add(1)
+				return nil, errors.New("transport must not run")
+			}))
+			prepared := testPreparedRequest(t, context.Background(), target)
+			requestBody := &trackingRequestBody{}
+			prepared.request.Body = requestBody
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_ = test.dispatch(target, prepared, func() error {
+					hookCalls.Add(1)
+					panic(panicValue)
+				}, func(*DispatchedResponse) error {
+					consumeCalls.Add(1)
+					return nil
+				})
+			}()
+			if recovered != panicValue {
+				t.Fatalf("recovered panic = %#v, want original panic", recovered)
+			}
+			if hookCalls.Load() != 1 || transportCalls.Load() != 0 || consumeCalls.Load() != 0 {
+				t.Fatalf("hook calls=%d transport calls=%d consume calls=%d, want 1,0,0", hookCalls.Load(), transportCalls.Load(), consumeCalls.Load())
+			}
+			if requestBody.closeCalls.Load() != 1 {
+				t.Fatalf("request body close calls = %d, want one", requestBody.closeCalls.Load())
+			}
+		})
+	}
+}
+
+func TestCredentialScopeSurvivesBodyCloseAndCleansOnEveryPreRoundTripExit(t *testing.T) {
+	t.Parallel()
+
+	hookFailure := errors.New("before-round-trip failure")
+	panicValue := &struct{ message string }{message: "before-round-trip panic"}
+	authenticationModes := []struct {
+		name       string
+		headerName string
+		wantValue  string
+		credential credentialScope
+	}{
+		{
+			name:       "bearer",
+			headerName: "Authorization",
+			wantValue:  "Bearer server-secret",
+			credential: func(headers http.Header, operation func() error) error {
+				return withBearerCredential(headers, []byte("server-secret"), operation)
+			},
+		},
+		{
+			name:       "fixed header",
+			headerName: "X-Provider-Key",
+			wantValue:  "server secret",
+			credential: func(headers http.Header, operation func() error) error {
+				return withHeaderCredential(headers, "X-Provider-Key", []byte("server secret"), operation)
+			},
+		},
+	}
+	scenarios := []struct {
+		name          string
+		context       func() context.Context
+		before        func() error
+		wantError     error
+		wantPanic     any
+		wantHookCalls int32
+	}{
+		{
+			name: "canceled context",
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			before:    func() error { return nil },
+			wantError: context.Canceled,
+		},
+		{
+			name:          "hook error",
+			context:       context.Background,
+			before:        func() error { return hookFailure },
+			wantError:     hookFailure,
+			wantHookCalls: 1,
+		},
+		{
+			name:    "hook panic",
+			context: context.Background,
+			before: func() error {
+				panic(panicValue)
+			},
+			wantPanic:     panicValue,
+			wantHookCalls: 1,
+		},
+	}
+
+	for _, authentication := range authenticationModes {
+		for _, scenario := range scenarios {
+			t.Run(authentication.name+"/"+scenario.name, func(t *testing.T) {
+				t.Parallel()
+
+				var scopedHeaders http.Header
+				var credentialAtBodyClose string
+				var hookCalls atomic.Int32
+				var transportCalls atomic.Int32
+				var consumeCalls atomic.Int32
+				target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+					transportCalls.Add(1)
+					return nil, errors.New("transport must not run")
+				}))
+				prepared := testPreparedRequest(t, context.Background(), target)
+				requestBody := &trackingRequestBody{onClose: func() {
+					credentialAtBodyClose = scopedHeaders.Get(authentication.headerName)
+				}}
+				prepared.request.Body = requestBody
+				captureScope := func(headers http.Header, operation func() error) error {
+					scopedHeaders = headers
+					return authentication.credential(headers, operation)
+				}
+				var dispatchErr error
+				var recovered any
+				func() {
+					defer func() { recovered = recover() }()
+					dispatchErr = target.withCredentialDispatch(scenario.context(), prepared, func() error {
+						hookCalls.Add(1)
+						return scenario.before()
+					}, func(*DispatchedResponse) error {
+						consumeCalls.Add(1)
+						return nil
+					}, captureScope)
+				}()
+				if recovered != scenario.wantPanic {
+					t.Fatalf("recovered panic = %#v, want %#v", recovered, scenario.wantPanic)
+				}
+				if scenario.wantPanic == nil && !errors.Is(dispatchErr, scenario.wantError) {
+					t.Fatalf("dispatch error = %v, want %v", dispatchErr, scenario.wantError)
+				}
+				if hookCalls.Load() != scenario.wantHookCalls || transportCalls.Load() != 0 || consumeCalls.Load() != 0 {
+					t.Fatalf("hook calls=%d transport calls=%d consume calls=%d, want %d,0,0", hookCalls.Load(), transportCalls.Load(), consumeCalls.Load(), scenario.wantHookCalls)
+				}
+				if requestBody.closeCalls.Load() != 1 {
+					t.Fatalf("request body close calls = %d, want one", requestBody.closeCalls.Load())
+				}
+				if credentialAtBodyClose != authentication.wantValue {
+					t.Fatalf("credential during request Body.Close = %q, want %q", credentialAtBodyClose, authentication.wantValue)
+				}
+				if got := scopedHeaders.Get(authentication.headerName); got != "" {
+					t.Fatalf("credential survived pre-RoundTrip exit = %q", got)
+				}
+			})
+		}
+	}
+}
+
 func TestCredentialScopesDeleteHeadersWhenOperationPanics(t *testing.T) {
 	t.Parallel()
 
@@ -345,6 +934,21 @@ type credentialObservingBody struct {
 	headerName        string
 	credentialAtClose string
 	closeCalls        atomic.Int32
+}
+
+type trackingRequestBody struct {
+	closeCalls atomic.Int32
+	onClose    func()
+}
+
+func (*trackingRequestBody) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (body *trackingRequestBody) Close() error {
+	body.closeCalls.Add(1)
+	if body.onClose != nil {
+		body.onClose()
+	}
+	return nil
 }
 
 func (body *credentialObservingBody) Read([]byte) (int, error) { return 0, io.EOF }

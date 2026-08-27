@@ -38,6 +38,29 @@ func (response *DispatchedResponse) Close() error {
 // Dispatch sends a prepared request without authentication. The caller owns
 // the returned response and must close it.
 func (target *Target) Dispatch(ctx context.Context, prepared PreparedRequest) (*DispatchedResponse, error) {
+	return target.dispatch(ctx, prepared, nil)
+}
+
+// DispatchWithBeforeRoundTrip sends a prepared request without authentication
+// after beforeRoundTrip succeeds. The callback runs exactly once after the
+// prepared request is claimed and revalidated, immediately before
+// http.Client.Do. The caller owns the returned response and must close it.
+func (target *Target) DispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	prepared PreparedRequest,
+	beforeRoundTrip func() error,
+) (*DispatchedResponse, error) {
+	if beforeRoundTrip == nil {
+		return nil, errors.New("invalid before-round-trip callback")
+	}
+	return target.dispatch(ctx, prepared, beforeRoundTrip)
+}
+
+func (target *Target) dispatch(
+	ctx context.Context,
+	prepared PreparedRequest,
+	beforeRoundTrip func() error,
+) (*DispatchedResponse, error) {
 	outbound, cancelRoundTrip, err := target.outboundRequest(ctx, prepared)
 	if err != nil {
 		return nil, err
@@ -49,7 +72,7 @@ func (target *Target) Dispatch(ctx context.Context, prepared PreparedRequest) (*
 		}
 	}()
 
-	dispatched, err := target.roundTrip(outbound, outbound.Clone(outbound.Context()), cancelRoundTrip)
+	dispatched, err := target.roundTrip(outbound, outbound.Clone(outbound.Context()), cancelRoundTrip, beforeRoundTrip)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +90,26 @@ func (target *Target) WithBearerDispatch(
 	credential []byte,
 	consume func(*DispatchedResponse) error,
 ) error {
-	return target.withCredentialDispatch(ctx, prepared, consume, func(headers http.Header, operation func() error) error {
+	return target.withCredentialDispatch(ctx, prepared, nil, consume, func(headers http.Header, operation func() error) error {
+		return withBearerCredential(headers, credential, operation)
+	})
+}
+
+// WithBearerDispatchWithBeforeRoundTrip is WithBearerDispatch with an
+// additional callback that runs exactly once after the bearer credential is
+// validated and injected, immediately before http.Client.Do. A callback error
+// prevents the RoundTrip and the credential is still removed.
+func (target *Target) WithBearerDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	prepared PreparedRequest,
+	credential []byte,
+	beforeRoundTrip func() error,
+	consume func(*DispatchedResponse) error,
+) error {
+	if beforeRoundTrip == nil {
+		return errors.New("invalid before-round-trip callback")
+	}
+	return target.withCredentialDispatch(ctx, prepared, beforeRoundTrip, consume, func(headers http.Header, operation func() error) error {
 		return withBearerCredential(headers, credential, operation)
 	})
 }
@@ -80,7 +122,27 @@ func (target *Target) WithHeaderDispatch(
 	credential []byte,
 	consume func(*DispatchedResponse) error,
 ) error {
-	return target.withCredentialDispatch(ctx, prepared, consume, func(headers http.Header, operation func() error) error {
+	return target.withCredentialDispatch(ctx, prepared, nil, consume, func(headers http.Header, operation func() error) error {
+		return withHeaderCredential(headers, name, credential, operation)
+	})
+}
+
+// WithHeaderDispatchWithBeforeRoundTrip is WithHeaderDispatch with an
+// additional callback that runs exactly once after the fixed-header credential
+// is validated and injected, immediately before http.Client.Do. A callback
+// error prevents the RoundTrip and the credential is still removed.
+func (target *Target) WithHeaderDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	prepared PreparedRequest,
+	name string,
+	credential []byte,
+	beforeRoundTrip func() error,
+	consume func(*DispatchedResponse) error,
+) error {
+	if beforeRoundTrip == nil {
+		return errors.New("invalid before-round-trip callback")
+	}
+	return target.withCredentialDispatch(ctx, prepared, beforeRoundTrip, consume, func(headers http.Header, operation func() error) error {
 		return withHeaderCredential(headers, name, credential, operation)
 	})
 }
@@ -90,6 +152,7 @@ type credentialScope func(http.Header, func() error) error
 func (target *Target) withCredentialDispatch(
 	ctx context.Context,
 	prepared PreparedRequest,
+	beforeRoundTrip func() error,
 	consume func(*DispatchedResponse) error,
 	credential credentialScope,
 ) error {
@@ -104,7 +167,7 @@ func (target *Target) withCredentialDispatch(
 	responseRequest := outbound.Clone(outbound.Context())
 
 	return credential(outbound.Header, func() (resultErr error) {
-		dispatched, err := target.roundTrip(outbound, responseRequest, cancelRoundTrip)
+		dispatched, err := target.roundTrip(outbound, responseRequest, cancelRoundTrip, beforeRoundTrip)
 		if err != nil {
 			return err
 		}
@@ -142,7 +205,25 @@ func (target *Target) roundTrip(
 	outbound *http.Request,
 	responseRequest *http.Request,
 	cancelRoundTrip context.CancelFunc,
+	beforeRoundTrip func() error,
 ) (*DispatchedResponse, error) {
+	clientOwnsRequestBody := false
+	defer func() {
+		if !clientOwnsRequestBody && !nilInterface(outbound.Body) {
+			_ = outbound.Body.Close()
+		}
+	}()
+	if err := outbound.Context().Err(); err != nil {
+		cancelRoundTrip()
+		return nil, fmt.Errorf("upstream dispatch context: %w", err)
+	}
+	if beforeRoundTrip != nil {
+		if err := beforeRoundTrip(); err != nil {
+			cancelRoundTrip()
+			return nil, fmt.Errorf("before upstream round trip: %w", err)
+		}
+	}
+	clientOwnsRequestBody = true
 	response, err := target.client.Do(outbound)
 	if err != nil {
 		cancelRoundTrip()
