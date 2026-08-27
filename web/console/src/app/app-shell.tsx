@@ -30,9 +30,6 @@ function NavigationLink({ children, description, to }: NavigationLinkProps) {
 }
 
 function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
-  if (mode === "setup-required") {
-    return "Initial setup";
-  }
   if (mode === "configured") {
     return userLabel ?? "Console ready";
   }
@@ -46,6 +43,7 @@ export function AppShell() {
   const session = useConsoleSession();
   const { liveness, readiness } = useSystemHealth();
   const mode = session.data?.mode ?? "unknown";
+  const needsAccess = mode !== "configured";
   const overallState = overallHealthState(liveness.data, readiness.data);
   const healthLabel =
     overallState === "available"
@@ -80,18 +78,18 @@ export function AppShell() {
         </div>
 
         <nav className="primary-nav" aria-label="Primary navigation">
-          <p className="nav-group-label">
-            {mode === "setup-required" ? "Start here" : "Workspace"}
-          </p>
+          <p className="nav-group-label">{needsAccess ? "Access" : "Workspace"}</p>
           <NavigationLink
             description={
-              mode === "setup-required"
-                ? "Secure the first owner"
-                : "Gateway operating posture"
+              mode === "signed-out"
+                ? "Sign in or create the first owner"
+                : mode === "unknown"
+                  ? "Confirm the administrator session"
+                  : "Gateway operating posture"
             }
             to="/"
           >
-            {mode === "setup-required" ? "Initial setup" : "Overview"}
+            {needsAccess ? "Console access" : "Overview"}
           </NavigationLink>
 
           <p className="nav-group-label nav-group-label--spaced">Operations</p>
@@ -104,7 +102,7 @@ export function AppShell() {
           <p className="sidebar-footer__eyebrow">Console state</p>
           <p className="sidebar-footer__value">
             <span
-              className={`status-dot status-dot--${mode === "setup-required" ? "warm" : "cool"}`}
+              className={`status-dot status-dot--${mode === "signed-out" ? "warm" : "cool"}`}
               aria-hidden="true"
             />
             {modeLabel(mode, session.data?.userLabel)}

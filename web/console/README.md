@@ -18,6 +18,17 @@ Vite proxies are intentionally not configured. Development requests use the
 same origin, so run the console behind the Latchway development server or a
 local reverse proxy when exercising real endpoints.
 
+## Administrator access
+
+An unauthenticated session check renders sign-in and first-owner setup on the
+same page. The console posts only to the canonical same-origin authentication
+endpoints and then invalidates and refetches `/admin/v1/auth/session` after a
+successful response. Passwords and the one-time bootstrap token remain in
+uncontrolled password inputs: they are never placed in React state, query
+caches, Web Storage, IndexedDB, URLs, or logs, and are cleared after each failed
+attempt. Error UI accepts only validated RFC 9457 problem fields and never
+renders an unstructured response body.
+
 ## Validation
 
 ```bash

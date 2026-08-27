@@ -1,40 +1,20 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { z } from "zod";
 
-export const adminSessionEndpoint = "/admin/v1/auth/session";
+import {
+  AdminSessionSchema,
+  adminAuthEndpoints,
+  type AdminSession
+} from "./auth";
 
-export type ConsoleMode =
-  | "configured"
-  | "setup-required"
-  | "signed-out"
-  | "unknown";
+export const adminSessionEndpoint = adminAuthEndpoints.session;
+
+export type ConsoleMode = "configured" | "signed-out" | "unknown";
 
 export interface ConsoleSessionState {
   mode: ConsoleMode;
+  session?: AdminSession;
   userLabel?: string;
 }
-
-const UserSchema = z
-  .object({
-    display_name: z.string().optional(),
-    email: z.string().optional(),
-    name: z.string().optional()
-  })
-  .passthrough();
-
-const SessionSchema = z
-  .object({
-    authenticated: z.boolean().optional(),
-    setup_required: z.boolean().optional(),
-    user: UserSchema.optional()
-  })
-  .passthrough();
-
-const ProblemSchema = z
-  .object({
-    setup_required: z.boolean().optional()
-  })
-  .passthrough();
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
@@ -52,6 +32,16 @@ async function parseJSON(response: Response): Promise<unknown> {
   }
 }
 
+export function consoleStateFromAdminSession(
+  session: AdminSession
+): ConsoleSessionState {
+  return {
+    mode: "configured",
+    session,
+    userLabel: session.administrator.email
+  };
+}
+
 export async function fetchConsoleSession(
   signal?: AbortSignal,
   fetcher: typeof fetch = globalThis.fetch
@@ -62,31 +52,21 @@ export async function fetchConsoleSession(
       credentials: "same-origin",
       headers: { Accept: "application/json" },
       method: "GET",
+      redirect: "error",
+      referrerPolicy: "same-origin",
       signal
     });
     const payload = await parseJSON(response);
 
     if (response.ok) {
-      const parsed = SessionSchema.safeParse(payload);
+      const parsed = AdminSessionSchema.safeParse(payload);
       if (!parsed.success) {
         return { mode: "unknown" };
       }
-      if (parsed.data.setup_required) {
-        return { mode: "setup-required" };
-      }
-      const user = parsed.data.user;
-      const userLabel = user?.display_name ?? user?.name ?? user?.email;
-      return {
-        mode: parsed.data.authenticated === false ? "signed-out" : "configured",
-        ...(userLabel ? { userLabel } : {})
-      };
+      return consoleStateFromAdminSession(parsed.data);
     }
 
-    const problem = ProblemSchema.safeParse(payload);
-    if (problem.success && problem.data.setup_required) {
-      return { mode: "setup-required" };
-    }
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return { mode: "signed-out" };
     }
     return { mode: "unknown" };

@@ -1,15 +1,64 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "./router";
+
+const adminSession = {
+  administrator: {
+    email: "owner@example.test",
+    enabled: true,
+    id: "adm_0123456789abcdef"
+  },
+  capabilities: ["secrets.manage"],
+  expires_at: "2026-08-28T10:30:00Z",
+  memberships: [
+    { organization_id: "org_0123456789abcdef", role: "owner" }
+  ],
+  organization_id: "org_0123456789abcdef"
+};
 
 function requestURL(input: RequestInfo | URL): string {
   if (typeof input === "string") {
     return input;
   }
   return input instanceof URL ? input.toString() : input.url;
+}
+
+function signedOutResponse() {
+  return new Response(
+    JSON.stringify({
+      code: "authentication_required",
+      detail: "An administrator session is required.",
+      request_id: "request_test_1234",
+      retryable: false,
+      status: 401,
+      title: "Authentication required",
+      type: "https://latchway.dev/problems/authentication_required"
+    }),
+    {
+      headers: { "Content-Type": "application/problem+json" },
+      status: 401
+    }
+  );
+}
+
+function healthResponse(url: string): Response | undefined {
+  if (url === "/healthz") {
+    return new Response("ok", { status: 200 });
+  }
+  if (url === "/readyz") {
+    return new Response(
+      JSON.stringify({
+        checks: { database: true, signing_key: true },
+        status: "ready"
+      }),
+      { headers: { "Content-Type": "application/json" }, status: 200 }
+    );
+  }
+  return undefined;
 }
 
 function renderConsole(initialEntry = "/") {
@@ -29,65 +78,226 @@ function renderConsole(initialEntry = "/") {
   );
 }
 
-function installFetch(mode: "configured" | "setup-required") {
+function installConfiguredFetch() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = requestURL(input);
     if (url === "/admin/v1/auth/session") {
-      if (mode === "setup-required") {
-        return new Response(
-          JSON.stringify({ authenticated: false, setup_required: true }),
-          { headers: { "Content-Type": "application/json" }, status: 200 }
-        );
-      }
-      return new Response(
-        JSON.stringify({
-          authenticated: true,
-          setup_required: false,
-          user: { display_name: "Gateway owner" }
-        }),
-        { headers: { "Content-Type": "application/json" }, status: 200 }
-      );
+      return new Response(JSON.stringify(adminSession), {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      });
     }
-    if (url === "/healthz") {
-      return new Response("ok", { status: 200 });
-    }
-    if (url === "/readyz") {
-      return new Response(
-        JSON.stringify({
-          checks: { database: true, signing_key: true },
-          status: "ready"
-        }),
-        { headers: { "Content-Type": "application/json" }, status: 200 }
-      );
-    }
-    return new Response("not found", { status: 404 });
+    return healthResponse(url) ?? new Response("not found", { status: 404 });
   });
-
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
 describe("AppShell", () => {
-  it("switches to first-run navigation when bootstrap is required", async () => {
-    installFetch("setup-required");
+  it("offers accessible sign-in and first-owner setup choices after a session 401", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") {
+        return signedOutResponse();
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
     renderConsole();
 
     expect(
-      await screen.findByRole("heading", {
-        name: "Create the trust boundary before traffic arrives."
-      })
+      await screen.findByRole("heading", { name: "Sign in to the control plane." })
     ).toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(navigation).getByRole("link", { name: /Initial setup/ })).toHaveAttribute(
+    expect(within(navigation).getByRole("link", { name: /Console access/ })).toHaveAttribute(
       "aria-current",
       "page"
     );
-    expect(within(navigation).queryByText("Overview")).not.toBeInTheDocument();
-    expect(screen.getByText("Requires the one-time bootstrap token")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Sign in" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "First-owner setup" })).not.toBeChecked();
+    expect(screen.getByLabelText("Email address")).toHaveAttribute(
+      "autocomplete",
+      "username"
+    );
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "autocomplete",
+      "current-password"
+    );
+  });
+
+  it("signs in, avoids browser storage, and refetches the session", async () => {
+    const user = userEvent.setup();
+    const storageSpy = vi.spyOn(Storage.prototype, "setItem");
+    let authenticated = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") {
+        return authenticated
+          ? new Response(JSON.stringify(adminSession), {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            })
+          : signedOutResponse();
+      }
+      if (url === "/admin/v1/auth/login" && init?.method === "POST") {
+        authenticated = true;
+        return new Response(JSON.stringify(adminSession), {
+          headers: { "Content-Type": "application/json" },
+          status: 200
+        });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    await screen.findByRole("heading", { name: "Sign in to the control plane." });
+    await user.type(screen.getByLabelText("Email address"), "owner@example.test");
+    await user.type(screen.getByLabelText("Password"), "test-only-login-password");
+    await user.click(screen.getByRole("button", { name: "Sign in securely" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "The gateway is ready for control-plane work."
+      })
+    ).toBeInTheDocument();
+    const loginCall = fetchMock.mock.calls.find(
+      ([input]) => requestURL(input) === "/admin/v1/auth/login"
+    );
+    expect(loginCall?.[1]).toEqual(
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: "owner@example.test",
+          password: "test-only-login-password"
+        }),
+        credentials: "same-origin",
+        method: "POST",
+        redirect: "error"
+      })
+    );
+    await waitFor(() => {
+      const sessionCalls = fetchMock.mock.calls.filter(
+        ([input]) => requestURL(input) === "/admin/v1/auth/session"
+      );
+      expect(sessionCalls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(storageSpy).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue("test-only-login-password")).not.toBeInTheDocument();
+  });
+
+  it("creates the first owner with the complete bootstrap payload", async () => {
+    const user = userEvent.setup();
+    let authenticated = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") {
+        return authenticated
+          ? new Response(JSON.stringify(adminSession), {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            })
+          : signedOutResponse();
+      }
+      if (url === "/admin/v1/auth/bootstrap" && init?.method === "POST") {
+        authenticated = true;
+        return new Response(JSON.stringify(adminSession), {
+          headers: { "Content-Type": "application/json" },
+          status: 201
+        });
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    await screen.findByRole("heading", { name: "Sign in to the control plane." });
+    await user.click(screen.getByRole("radio", { name: "First-owner setup" }));
+    expect(
+      screen.getByRole("heading", { name: "Set up the first owner" })
+    ).toBeInTheDocument();
+
+    await user.type(
+      screen.getByLabelText("One-time bootstrap token"),
+      "test-only-bootstrap-token-000000000000"
+    );
+    await user.type(screen.getByLabelText("Organization name"), "Example Organization");
+    await user.type(screen.getByLabelText("Organization slug"), "example-org");
+    await user.type(screen.getByLabelText("Owner display name"), "Example Owner");
+    await user.type(screen.getByLabelText("Owner email address"), "owner@example.test");
+    await user.type(screen.getByLabelText("Owner password"), "test-only-owner-password");
+    await user.click(screen.getByRole("button", { name: "Create first owner" }));
+
+    await screen.findByRole("heading", {
+      name: "The gateway is ready for control-plane work."
+    });
+    const bootstrapCall = fetchMock.mock.calls.find(
+      ([input]) => requestURL(input) === "/admin/v1/auth/bootstrap"
+    );
+    expect(bootstrapCall?.[1]).toEqual(
+      expect.objectContaining({
+        body: JSON.stringify({
+          bootstrap_token: "test-only-bootstrap-token-000000000000",
+          display_name: "Example Owner",
+          email: "owner@example.test",
+          organization_name: "Example Organization",
+          organization_slug: "example-org",
+          password: "test-only-owner-password"
+        }),
+        credentials: "same-origin",
+        method: "POST"
+      })
+    );
+    expect(
+      screen.queryByDisplayValue("test-only-bootstrap-token-000000000000")
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders validated problem details without exposing extra response fields", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") {
+        return signedOutResponse();
+      }
+      if (url === "/admin/v1/auth/login") {
+        return new Response(
+          JSON.stringify({
+            code: "authentication_required",
+            debug: "test-only-login-password",
+            detail: "The administrator credentials are invalid.",
+            request_id: "request_login_1234",
+            retryable: false,
+            status: 401,
+            title: "Authentication required",
+            type: "https://latchway.dev/problems/authentication_required"
+          }),
+          {
+            headers: { "Content-Type": "application/problem+json" },
+            status: 401
+          }
+        );
+      }
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole();
+
+    await screen.findByRole("heading", { name: "Sign in to the control plane." });
+    await user.type(screen.getByLabelText("Email address"), "owner@example.test");
+    await user.type(screen.getByLabelText("Password"), "test-only-login-password");
+    await user.click(screen.getByRole("button", { name: "Sign in securely" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Authentication required");
+    expect(alert).toHaveTextContent("The administrator credentials are invalid.");
+    expect(alert).toHaveTextContent("Code: authentication_required");
+    expect(alert).toHaveTextContent("Request: request_login_1234");
+    expect(alert).not.toHaveTextContent("test-only-login-password");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 
   it("renders live health details from the canonical endpoints", async () => {
-    const fetchMock = installFetch("configured");
+    const fetchMock = installConfiguredFetch();
     renderConsole("/system-health");
 
     expect(

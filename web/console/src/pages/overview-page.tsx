@@ -2,71 +2,79 @@ import { Link } from "@tanstack/react-router";
 
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { useConsoleSession } from "../api/session";
+import { AdminAccessPanel } from "../components/admin-access-panel";
 
-function FirstRunOverview() {
-  const { liveness, readiness } = useSystemHealth();
-  const processOnline = liveness.data?.state === "available";
-  const runtimeReady = readiness.data?.state === "available";
-
+function SignedOutOverview() {
   return (
-    <>
-      <section className="hero hero--setup" aria-labelledby="setup-heading">
-        <div className="hero__copy">
-          <p className="eyebrow">Secure bootstrap</p>
-          <h1 id="setup-heading">Create the trust boundary before traffic arrives.</h1>
-          <p className="hero__lede">
-            This installation has no administrative owner yet. Verify the runtime,
-            consume the one-time bootstrap token, then configure applications through
-            the canonical Admin API.
-          </p>
-          <Link className="primary-action" to="/system-health">
-            Review system health
-            <span aria-hidden="true">→</span>
-          </Link>
-        </div>
-        <div className="setup-sequence" aria-label="Initial setup sequence">
-          <div className={`setup-step ${processOnline ? "setup-step--complete" : ""}`}>
-            <span className="setup-step__number">01</span>
-            <span>
-              <strong>Verify process</strong>
-              <span>{processOnline ? "Liveness confirmed" : "Waiting for liveness"}</span>
-            </span>
+    <div className="access-page">
+      <section className="access-intro" aria-labelledby="access-heading">
+        <p className="eyebrow">Same-origin administration</p>
+        <h1 id="access-heading">Sign in to the control plane.</h1>
+        <p className="hero__lede">
+          Use an administrator account to operate this gateway. If this is a new
+          installation, the one-time bootstrap token can create its first organization
+          and owner.
+        </p>
+        <Link className="secondary-action access-intro__health" to="/system-health">
+          Review system health
+          <span aria-hidden="true">→</span>
+        </Link>
+
+        <dl className="access-safeguards">
+          <div>
+            <dt>Session boundary</dt>
+            <dd>Secure, same-site cookies remain scoped to this gateway.</dd>
           </div>
-          <div className={`setup-step ${runtimeReady ? "setup-step--complete" : ""}`}>
-            <span className="setup-step__number">02</span>
-            <span>
-              <strong>Verify dependencies</strong>
-              <span>{runtimeReady ? "Readiness confirmed" : "Review readiness checks"}</span>
-            </span>
+          <div>
+            <dt>Secret handling</dt>
+            <dd>Passwords and bootstrap tokens are sent once and never stored here.</dd>
           </div>
-          <div className="setup-step setup-step--current">
-            <span className="setup-step__number">03</span>
-            <span>
-              <strong>Create first owner</strong>
-              <span>Requires the one-time bootstrap token</span>
-            </span>
+          <div>
+            <dt>First-owner setup</dt>
+            <dd>The bootstrap path closes permanently after its successful use.</dd>
           </div>
-        </div>
+        </dl>
       </section>
 
-      <section className="principles-grid" aria-label="Bootstrap safeguards">
-        <article className="principle-card">
-          <span className="principle-card__index">A</span>
-          <h2>Single use by design</h2>
-          <p>The bootstrap path closes permanently after the first owner is created.</p>
-        </article>
-        <article className="principle-card">
-          <span className="principle-card__index">B</span>
-          <h2>Same control plane</h2>
-          <p>The console and CLI will use the same audited administrative API.</p>
-        </article>
-        <article className="principle-card">
-          <span className="principle-card__index">C</span>
-          <h2>No provider keys here</h2>
-          <p>Credentials are created as write-only secrets and are never returned.</p>
-        </article>
-      </section>
-    </>
+      <AdminAccessPanel />
+    </div>
+  );
+}
+
+function SessionUnavailableOverview({
+  isRefreshing,
+  retry
+}: {
+  isRefreshing: boolean;
+  retry: () => void;
+}) {
+  return (
+    <section className="empty-state" aria-labelledby="session-unavailable-heading">
+      <p className="eyebrow">Administrator session</p>
+      <h1 id="session-unavailable-heading">The console cannot confirm your session.</h1>
+      <p>
+        Check same-origin routing and gateway availability. Credentials are not needed
+        until the session endpoint responds.
+      </p>
+      <button
+        className="primary-action"
+        disabled={isRefreshing}
+        onClick={retry}
+        type="button"
+      >
+        {isRefreshing ? "Checking session…" : "Try session check again"}
+      </button>
+    </section>
+  );
+}
+
+function SessionCheckingOverview() {
+  return (
+    <section className="empty-state" aria-labelledby="session-checking-heading" role="status">
+      <p className="eyebrow">Administrator session</p>
+      <h1 id="session-checking-heading">Confirming your console access.</h1>
+      <p>The gateway is checking for a secure administrator session.</p>
+    </section>
   );
 }
 
@@ -144,8 +152,19 @@ function OperatingOverview() {
 export function OverviewPage() {
   const session = useConsoleSession();
 
-  if (session.data?.mode === "setup-required") {
-    return <FirstRunOverview />;
+  if (session.isPending && !session.data) {
+    return <SessionCheckingOverview />;
+  }
+  if (session.data?.mode === "signed-out") {
+    return <SignedOutOverview />;
+  }
+  if (session.data?.mode !== "configured") {
+    return (
+      <SessionUnavailableOverview
+        isRefreshing={session.isFetching}
+        retry={() => void session.refetch()}
+      />
+    );
   }
 
   return <OperatingOverview />;
