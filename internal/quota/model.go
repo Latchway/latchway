@@ -2,9 +2,10 @@
 //
 // The bounded implementation in this package supports hard calendar
 // logical-request and output-token rules plus hard per-request output-token
-// enforcement metadata. One request may resolve to multiple rules, which are
-// reserved and finalized atomically. The package does not accept client
-// supplied counters, bucket keys, rule hashes, usage totals, or timestamps.
+// enforcement metadata plus immutable configured-price attribution. One
+// request may resolve to multiple rules, which are reserved and finalized
+// atomically. The package does not accept client supplied counters, bucket
+// keys, rule hashes, usage totals, costs, or timestamps.
 package quota
 
 import (
@@ -28,12 +29,16 @@ import (
 const (
 	LogicalRequestsMetric  = "logical_requests"
 	OutputTokensMetric     = "output_tokens"
+	CostNanoUSDMetric      = "cost_nano_usd"
 	CalendarAlgorithm      = "calendar"
 	PerRequestAlgorithm    = "per_request"
 	maximumRulesPerRequest = 128
 
 	ProviderReportedProvenance = "provider_reported"
 	UnknownUsageProvenance     = "unknown"
+	USDCurrency                = "USD"
+	CalculatedCostConfidence   = "calculated"
+	UnknownCostConfidence      = "unknown"
 
 	AttemptSucceeded = "succeeded"
 	AttemptFailed    = "failed"
@@ -95,6 +100,15 @@ type Rule struct {
 	Hard              bool
 }
 
+// PricingSelection is the trusted configured catalog selected for one
+// request. Its zero value means that no configured price applies. Price
+// revision is deliberately not caller-selectable: the store derives it from
+// ReserveInput.ConfigRevisionID.
+type PricingSelection struct {
+	CatalogID string
+	Currency  string
+}
+
 // ReserveInput contains only canonical durable identities and server-selected
 // policy values. ClientRequestID is correlation-only: it is persisted and
 // compared on replay, but never serves as a lookup, authorization, bucket,
@@ -118,6 +132,7 @@ type ReserveInput struct {
 	UpstreamKey     string
 	ModelKey        string
 	PhysicalModel   string
+	Pricing         PricingSelection
 
 	Rules []Rule
 }
@@ -132,6 +147,15 @@ type Usage struct {
 	Provenance   string
 }
 
+// Cost is a trusted calculated charge in integer nano-USD. Unknown cost has a
+// zero amount and either empty or unknown confidence; the store canonicalizes
+// it according to whether the attempt has a configured pricing selection.
+type Cost struct {
+	NanoUSD    int64
+	Known      bool
+	Confidence string
+}
+
 // Outcome is the trusted terminal result of an upstream attempt. HTTPStatus
 // zero means no status was received. FailureCode must be a stable safe code for
 // every non-success outcome.
@@ -140,6 +164,7 @@ type Outcome struct {
 	HTTPStatus  int
 	FailureCode string
 	Usage       Usage
+	Cost        Cost
 }
 
 // Reservation is an opaque, immutable handle returned only after the reserve
@@ -155,8 +180,18 @@ type Reservation struct {
 	upstreamKey      string
 	modelKey         string
 	physicalModel    string
+	pricing          selectedPricing
 	windowResetAt    time.Time
 	expiresAt        time.Time
+}
+
+// selectedPricing is copied into every opaque reservation and persisted on
+// the attempt. source is the configured catalog identity, while revision is
+// always the exact configuration revision that produced the decision.
+type selectedPricing struct {
+	source   string
+	currency string
+	revision string
 }
 
 // reservationEntry is sorted by bucketID. resetAt is derived from the trusted
@@ -248,6 +283,11 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 			(len(input.ClientRequestID) < 8 || len(input.ClientRequestID) > 128 ||
 				!clientRequestPattern.MatchString(input.ClientRequestID))) ||
 		len(input.Rules) < 1 || len(input.Rules) > maximumRulesPerRequest {
+		return preparedRequest{}, ErrInvalidInput
+	}
+	if input.Pricing.CatalogID == "" && input.Pricing.Currency == "" {
+		// The all-zero selection is the only unpriced representation.
+	} else if !identifierPattern.MatchString(input.Pricing.CatalogID) || input.Pricing.Currency != USDCurrency {
 		return preparedRequest{}, ErrInvalidInput
 	}
 
@@ -423,6 +463,12 @@ func requestFingerprint(prepared preparedRequest) string {
 			)
 		}
 	}
+	// Preserve the byte-for-byte historical unpriced serialization. A priced
+	// decision appends only its catalog identity; currency is fixed to USD and
+	// revision is already bound by ConfigRevisionID above.
+	if prepared.Pricing.CatalogID != "" {
+		parts = append(parts, prepared.Pricing.CatalogID)
+	}
 	return canonicalDigest(requestDigestDomain, parts)
 }
 
@@ -435,12 +481,13 @@ func (outcome Outcome) validate() error {
 		if outcome.FailureCode != "" || outcome.HTTPStatus < 200 || outcome.HTTPStatus > 299 {
 			return ErrInvalidInput
 		}
-		return outcome.Usage.validate()
-	}
-	if !failureCodePattern.MatchString(outcome.FailureCode) {
+	} else if !failureCodePattern.MatchString(outcome.FailureCode) {
 		return ErrInvalidInput
 	}
-	return outcome.Usage.validate()
+	if outcome.Usage.validate() != nil || outcome.Cost.validate() != nil || outcome.Cost.Known && !outcome.Usage.Known {
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func (usage Usage) validate() error {
@@ -466,6 +513,37 @@ func (usage Usage) normalized() Usage {
 	return usage
 }
 
+func (cost Cost) validate() error {
+	if !cost.Known {
+		if cost.NanoUSD != 0 || cost.Confidence != "" && cost.Confidence != UnknownCostConfidence {
+			return ErrInvalidInput
+		}
+		return nil
+	}
+	if cost.NanoUSD < 0 || cost.Confidence != CalculatedCostConfidence {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func normalizeOutcomeForPricing(outcome Outcome, pricing selectedPricing) (Outcome, error) {
+	if outcome.validate() != nil || pricing.validate() != nil {
+		return Outcome{}, ErrInvalidInput
+	}
+	outcome.Usage = outcome.Usage.normalized()
+	if !pricing.present() {
+		if outcome.Cost.Known {
+			return Outcome{}, ErrInvalidInput
+		}
+		outcome.Cost = Cost{}
+		return outcome, nil
+	}
+	if !outcome.Cost.Known {
+		outcome.Cost = Cost{Confidence: UnknownCostConfidence}
+	}
+	return outcome, nil
+}
+
 func validFailureCode(value string) bool {
 	return failureCodePattern.MatchString(value)
 }
@@ -475,6 +553,31 @@ func validPhysicalModel(value string) bool {
 		return false
 	}
 	return strings.IndexFunc(value, unicode.IsControl) == -1
+}
+
+func pricingForRequest(prepared preparedRequest) selectedPricing {
+	if prepared.Pricing.CatalogID == "" {
+		return selectedPricing{}
+	}
+	return selectedPricing{
+		source: prepared.Pricing.CatalogID, currency: USDCurrency,
+		revision: prepared.ConfigRevisionID,
+	}
+}
+
+func (pricing selectedPricing) present() bool {
+	return pricing.source != "" || pricing.currency != "" || pricing.revision != ""
+}
+
+func (pricing selectedPricing) validate() error {
+	if !pricing.present() {
+		return nil
+	}
+	if !identifierPattern.MatchString(pricing.source) || pricing.currency != USDCurrency ||
+		id.Validate(pricing.revision, id.ConfigRevision) != nil {
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func (reservation Reservation) validate() error {
@@ -487,6 +590,7 @@ func (reservation Reservation) validate() error {
 		!identifierPattern.MatchString(reservation.upstreamKey) ||
 		!identifierPattern.MatchString(reservation.modelKey) ||
 		!validPhysicalModel(reservation.physicalModel) ||
+		reservation.pricing.validate() != nil ||
 		reservation.expiresAt.IsZero() || len(reservation.entries) > maximumRulesPerRequest {
 		return ErrInvalidInput
 	}

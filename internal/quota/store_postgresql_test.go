@@ -1795,6 +1795,281 @@ func TestStorePostgreSQLOutputTokenQuota(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLConfiguredPricing(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+	knownUsage := Usage{
+		InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+		Known: true, Provenance: ProviderReportedProvenance,
+	}
+
+	t.Run("known success persists immutable selection and exact cost replay", func(t *testing.T) {
+		input := fixture.pricedInput(t, "pricing-known", 100, "standard-usd")
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve priced request: %v", err)
+		}
+		replay, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil || replay.ID() != reservation.ID() || replay.pricing != reservation.pricing {
+			t.Fatalf("reserve priced replay = %#v, %v", replay, err)
+		}
+		changed := cloneReserveInput(input)
+		changed.Pricing.CatalogID = "enterprise-usd"
+		if _, err := fixture.store.Reserve(fixture.ctx, changed); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("changed catalog replay = %v, want ErrInvalidInput", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin priced attempt owner=%t: %v", owner, err)
+		}
+		assertAttemptPricing(t, fixture, attempt.ID(), nil, UnknownCostConfidence, "standard-usd")
+		wrong := reservation
+		wrong.pricing.source = "enterprise-usd"
+		if _, _, err := fixture.store.BeginAttempt(fixture.ctx, wrong); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("changed opaque pricing selection = %v, want ErrInvalidState", err)
+		}
+		outcome := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+			Cost: Cost{NanoUSD: 123_456, Known: true, Confidence: CalculatedCostConfidence},
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle known priced request: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle exact known priced replay: %v", err)
+		}
+		conflicting := outcome
+		conflicting.Cost.NanoUSD++
+		if err := fixture.store.Settle(fixture.ctx, attempt, conflicting); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("conflicting priced settlement = %v, want ErrFinalized", err)
+		}
+		amount := int64(123_456)
+		assertAttemptPricing(t, fixture, attempt.ID(), &amount, CalculatedCostConfidence, "standard-usd")
+		assertConfiguredCostUsage(t, fixture, input.LogicalRequestID.String(), attempt.ID(), 123_456, "standard-usd")
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 5 {
+			t.Fatalf("priced known usage rows = %d, want logical + provider three + cost", got)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM usage_records
+			WHERE logical_request_id = $1 AND metric <> 'cost_nano_usd'
+			  AND (cost_nano_usd IS NOT NULL OR currency IS NOT NULL
+			       OR price_revision IS NOT NULL OR pricing_source IS NOT NULL)
+		`, input.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("non-cost usage rows with pricing metadata = %d, want 0", got)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE usage_records
+			SET pricing_source = 'tampered-usd'
+			WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'
+		`, input.LogicalRequestID.String()); err != nil {
+			t.Fatalf("tamper terminal cost usage: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("tampered cost usage replay = %v, want ErrFinalized", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE usage_records
+			SET pricing_source = 'standard-usd'
+			WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'
+		`, input.LogicalRequestID.String()); err != nil {
+			t.Fatalf("restore terminal cost usage: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE upstream_attempts
+			SET billed_cost_nano_usd = billed_cost_nano_usd + 1
+			WHERE upstream_attempt_id = $1
+		`, attempt.ID()); err != nil {
+			t.Fatalf("tamper terminal attempt cost: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("tampered attempt cost replay = %v, want ErrFinalized", err)
+		}
+	})
+
+	t.Run("explicit known zero cost creates a durable cost row", func(t *testing.T) {
+		input := fixture.pricedInput(t, "pricing-zero", 100, "zero-usd")
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve zero priced request: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin zero priced attempt owner=%t: %v", owner, err)
+		}
+		outcome := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+			Cost: Cost{Known: true, Confidence: CalculatedCostConfidence},
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle zero priced request: %v", err)
+		}
+		zero := int64(0)
+		assertAttemptPricing(t, fixture, attempt.ID(), &zero, CalculatedCostConfidence, "zero-usd")
+		assertConfiguredCostUsage(t, fixture, input.LogicalRequestID.String(), attempt.ID(), 0, "zero-usd")
+	})
+
+	t.Run("failed attempt retains known calculated cost", func(t *testing.T) {
+		input := fixture.pricedInput(t, "pricing-failed-known", 100, "failure-usd")
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve failed priced request: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin failed priced attempt owner=%t: %v", owner, err)
+		}
+		outcome := Outcome{
+			Status: AttemptFailed, HTTPStatus: 502, FailureCode: "upstream_protocol_error",
+			Usage: knownUsage,
+			Cost:  Cost{NanoUSD: 77, Known: true, Confidence: CalculatedCostConfidence},
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle failed known price: %v", err)
+		}
+		amount := int64(77)
+		assertAttemptPricing(t, fixture, attempt.ID(), &amount, CalculatedCostConfidence, "failure-usd")
+		assertConfiguredCostUsage(t, fixture, input.LogicalRequestID.String(), attempt.ID(), 77, "failure-usd")
+	})
+
+	t.Run("unknown cost preserves selection without manufacturing zero", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			feature   string
+			catalog   string
+			outcome   Outcome
+			usageRows int64
+		}{
+			{
+				name: "successful known usage", feature: "pricing-unknown-success", catalog: "overflow-usd",
+				outcome:   Outcome{Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage},
+				usageRows: 4,
+			},
+			{
+				name: "failed unknown usage", feature: "pricing-unknown-failure", catalog: "unknown-usd",
+				outcome:   Outcome{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "upstream_unavailable"},
+				usageRows: 1,
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				input := fixture.pricedInput(t, test.feature, 100, test.catalog)
+				reservation, err := fixture.store.Reserve(fixture.ctx, input)
+				if err != nil {
+					t.Fatalf("reserve unknown price: %v", err)
+				}
+				attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+				if err != nil || !owner {
+					t.Fatalf("begin unknown price owner=%t: %v", owner, err)
+				}
+				if err := fixture.store.Settle(fixture.ctx, attempt, test.outcome); err != nil {
+					t.Fatalf("settle unknown price: %v", err)
+				}
+				if err := fixture.store.Settle(fixture.ctx, attempt, test.outcome); err != nil {
+					t.Fatalf("settle exact unknown price replay: %v", err)
+				}
+				assertAttemptPricing(t, fixture, attempt.ID(), nil, UnknownCostConfidence, test.catalog)
+				if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != test.usageRows {
+					t.Fatalf("unknown price usage rows = %d, want %d", got, test.usageRows)
+				}
+				if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'`, input.LogicalRequestID.String()); got != 0 {
+					t.Fatalf("unknown price cost rows = %d, want 0", got)
+				}
+			})
+		}
+	})
+
+	t.Run("expiry recovers priced attempt as unknown", func(t *testing.T) {
+		input := fixture.pricedInput(t, "pricing-expiry", 100, "expiry-usd")
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve priced expiry: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin priced expiry owner=%t: %v", owner, err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()); err != nil {
+			t.Fatalf("backdate priced expiry: %v", err)
+		}
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 1)
+		if err != nil || processed != 1 {
+			t.Fatalf("expire priced attempt processed=%d err=%v", processed, err)
+		}
+		assertAttemptPricing(t, fixture, attempt.ID(), nil, UnknownCostConfidence, "expiry-usd")
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'`, input.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("expired priced cost rows = %d, want 0", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("expired priced usage rows = %d, want logical request only", got)
+		}
+	})
+
+	t.Run("predispatch paths and unpriced attempts create no cost metadata", func(t *testing.T) {
+		releasedInput := fixture.pricedInput(t, "pricing-release", 100, "release-usd")
+		released, err := fixture.store.Reserve(fixture.ctx, releasedInput)
+		if err != nil {
+			t.Fatalf("reserve priced release: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, released, "transport_setup_failed"); err != nil {
+			t.Fatalf("release priced request: %v", err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1`, releasedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("released priced attempts = %d, want 0", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, releasedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("released priced usage rows = %d, want 0", got)
+		}
+
+		seedInput := fixture.pricedInput(t, "pricing-denial", 1, "denial-usd")
+		seed, err := fixture.store.Reserve(fixture.ctx, seedInput)
+		if err != nil {
+			t.Fatalf("reserve priced denial seed: %v", err)
+		}
+		deniedInput := fixture.pricedInput(t, "pricing-denial", 1, "denial-usd")
+		if _, err := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("priced denial = %v, want ErrExceeded", err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied priced attempts = %d, want 0", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied priced usage rows = %d, want 0", got)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, seed, "pricing_denial_done"); err != nil {
+			t.Fatalf("release priced denial seed: %v", err)
+		}
+
+		unpricedInput := fixture.input(t, "pricing-unpriced", 100)
+		unpricedReservation, err := fixture.store.Reserve(fixture.ctx, unpricedInput)
+		if err != nil {
+			t.Fatalf("reserve unpriced request: %v", err)
+		}
+		unpricedAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, unpricedReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin unpriced attempt owner=%t: %v", owner, err)
+		}
+		invalidCost := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+			Cost: Cost{NanoUSD: 1, Known: true, Confidence: CalculatedCostConfidence},
+		}
+		if err := fixture.store.Settle(fixture.ctx, unpricedAttempt, invalidCost); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("known unpriced cost = %v, want ErrInvalidInput", err)
+		}
+		outcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage}
+		if err := fixture.store.Settle(fixture.ctx, unpricedAttempt, outcome); err != nil {
+			t.Fatalf("settle unpriced request: %v", err)
+		}
+		assertAttemptUnpriced(t, fixture, unpricedAttempt.ID())
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, unpricedInput.LogicalRequestID.String()); got != 4 {
+			t.Fatalf("unpriced usage rows = %d, want historical 4", got)
+		}
+	})
+}
+
 func newQuotaPostgreSQLFixture(t *testing.T) quotaPostgreSQLFixture {
 	t.Helper()
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
@@ -1929,6 +2204,18 @@ func (fixture quotaPostgreSQLFixture) input(t *testing.T, feature string, maximu
 	}
 }
 
+func (fixture quotaPostgreSQLFixture) pricedInput(
+	t *testing.T,
+	feature string,
+	maximum int64,
+	catalogID string,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, maximum)
+	input.Pricing = PricingSelection{CatalogID: catalogID, Currency: USDCurrency}
+	return input
+}
+
 func (fixture quotaPostgreSQLFixture) multiRuleInput(
 	t *testing.T,
 	feature string,
@@ -2056,6 +2343,84 @@ func (fixture quotaPostgreSQLFixture) count(t *testing.T, statement string, argu
 		t.Fatalf("count rows: %v", err)
 	}
 	return count
+}
+
+func assertAttemptPricing(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	attemptID string,
+	wantBilled *int64,
+	wantConfidence string,
+	wantSource string,
+) {
+	t.Helper()
+	var billed *int64
+	var currency, revision, source, confidence *string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT billed_cost_nano_usd, currency, price_revision,
+		       pricing_source, cost_confidence
+		FROM upstream_attempts
+		WHERE upstream_attempt_id = $1
+	`, attemptID).Scan(&billed, &currency, &revision, &source, &confidence); err != nil {
+		t.Fatalf("read attempt pricing: %v", err)
+	}
+	if !optionalInt64Matches(billed, wantBilled) || currency == nil || *currency != USDCurrency ||
+		revision == nil || *revision != quotaTestConfigRevisionID ||
+		source == nil || *source != wantSource || confidence == nil || *confidence != wantConfidence {
+		t.Fatalf("attempt pricing billed=%v currency=%v revision=%v source=%v confidence=%v",
+			billed, currency, revision, source, confidence)
+	}
+}
+
+func assertAttemptUnpriced(t *testing.T, fixture quotaPostgreSQLFixture, attemptID string) {
+	t.Helper()
+	if got := fixture.count(t, `
+		SELECT count(*) FROM upstream_attempts
+		WHERE upstream_attempt_id = $1
+		  AND billed_cost_nano_usd IS NULL AND currency IS NULL
+		  AND price_revision IS NULL AND pricing_source IS NULL
+		  AND cost_confidence IS NULL
+	`, attemptID); got != 1 {
+		t.Fatalf("unpriced attempt with null price fields = %d, want 1", got)
+	}
+	if got := fixture.count(t, `
+		SELECT count(*) FROM usage_records AS usage
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		WHERE attempt.upstream_attempt_id = $1 AND usage.metric = 'cost_nano_usd'
+	`, attemptID); got != 0 {
+		t.Fatalf("unpriced cost usage rows = %d, want 0", got)
+	}
+}
+
+func assertConfiguredCostUsage(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	logicalRequestID string,
+	attemptID string,
+	wantAmount int64,
+	wantSource string,
+) {
+	t.Helper()
+	var units, cost int64
+	var currency, revision, source, confidence, provenance, storedAttemptID string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT units, cost_nano_usd, currency, price_revision, pricing_source,
+		       confidence, provenance_key, upstream_attempt_id
+		FROM usage_records
+		WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'
+	`, logicalRequestID).Scan(
+		&units, &cost, &currency, &revision, &source,
+		&confidence, &provenance, &storedAttemptID,
+	); err != nil {
+		t.Fatalf("read configured cost usage: %v", err)
+	}
+	if units != wantAmount || cost != wantAmount || currency != USDCurrency ||
+		revision != quotaTestConfigRevisionID || source != wantSource ||
+		confidence != CalculatedCostConfidence ||
+		provenance != configuredCostProvenanceKey(attemptID) || storedAttemptID != attemptID {
+		t.Fatalf("configured cost usage=%d/%d/%s/%s/%s/%s/%s/%s",
+			units, cost, currency, revision, source, confidence, provenance, storedAttemptID)
+	}
 }
 
 func waitForQuotaReservationLock(t *testing.T, fixture quotaPostgreSQLFixture) {

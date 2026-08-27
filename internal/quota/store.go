@@ -315,6 +315,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		reservationID: identifiers.reservation, entries: entries,
 		routeKey: prepared.RouteKey, upstreamKey: prepared.UpstreamKey,
 		modelKey: prepared.ModelKey, physicalModel: prepared.PhysicalModel,
+		pricing:       pricingForRequest(prepared),
 		windowResetAt: maximumResetAt(entries), expiresAt: expiresAt,
 	}, nil
 }
@@ -551,8 +552,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID:    reservationID, entries: entries, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, windowResetAt: maximumResetAt(entries),
-		expiresAt: expiresAt,
+		physicalModel: prepared.PhysicalModel, pricing: pricingForRequest(prepared),
+		windowResetAt: maximumResetAt(entries),
+		expiresAt:     expiresAt,
 	}, nil
 }
 
@@ -620,7 +622,8 @@ func loadExistingEntrylessReservation(
 		environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID: existing.reservationID, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, expiresAt: existing.expiresAt,
+		physicalModel: prepared.PhysicalModel, pricing: pricingForRequest(prepared),
+		expiresAt: existing.expiresAt,
 	}, nil
 }
 
@@ -874,7 +877,8 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	}
 	if found {
 		if existing.routeKey != reservation.routeKey || existing.upstreamKey != reservation.upstreamKey ||
-			existing.physicalModel == nil || *existing.physicalModel != reservation.physicalModel {
+			existing.physicalModel == nil || *existing.physicalModel != reservation.physicalModel ||
+			!attemptPricingMatchesReservation(existing, reservation) {
 			return Attempt{}, false, ErrInvalidState
 		}
 		return Attempt{reservation: reservation, attemptID: existing.id, number: 1}, false, nil
@@ -911,12 +915,18 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		INSERT INTO upstream_attempts (
 			upstream_attempt_id, organization_id, application_id, environment_id,
 			logical_request_id, attempt_number, route_key, upstream_key,
-			physical_model, status, started_at
-		) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, 'started', $9)
+			physical_model, status, started_at, currency, price_revision,
+			pricing_source, cost_confidence
+		) VALUES (
+			$1, $2, $3, $4, $5, 1, $6, $7, $8, 'started', $9,
+			$10, $11, $12, $13
+		)
 	`, attemptID, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID,
 		reservation.routeKey, reservation.upstreamKey, reservation.physicalModel,
-		now); err != nil {
+		now, nullableString(reservation.pricing.currency),
+		nullableString(reservation.pricing.revision), nullableString(reservation.pricing.source),
+		nullableString(initialCostConfidence(reservation.pricing))); err != nil {
 		return Attempt{}, false, mapWriteError("insert upstream attempt", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -950,6 +960,9 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 	}
 	if !found || stored.id != attempt.attemptID {
 		return ErrNotFound
+	}
+	if !attemptPricingMatchesReservation(stored, reservation.Reservation) {
+		return ErrInvalidState
 	}
 	if stored.firstByteAt != nil {
 		return nil
@@ -998,7 +1011,6 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || attempt.validate() != nil || outcome.validate() != nil {
 		return ErrInvalidInput
 	}
-	outcome.Usage = outcome.Usage.normalized()
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return persistenceFailure("begin quota settlement", err)
@@ -1019,6 +1031,10 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if !found || storedAttempt.id != attempt.attemptID {
 		return ErrNotFound
 	}
+	outcome, err = normalizeOutcomeForPricing(outcome, reservation.pricing)
+	if err != nil {
+		return err
+	}
 	if reservation.status == "settled" {
 		matches, matchErr := terminalSettlementMatches(ctx, tx, reservation, storedAttempt, outcome)
 		if matchErr != nil {
@@ -1028,6 +1044,9 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 			return nil
 		}
 		return ErrFinalized
+	}
+	if !attemptPricingMatchesReservation(storedAttempt, reservation.Reservation) {
+		return ErrInvalidState
 	}
 	if reservation.status != "pending" {
 		return ErrFinalized
@@ -1044,7 +1063,9 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
-	usageIDs, err := store.newSettlementUsageIDs(outcome.Usage, hasOutputReservation)
+	usageIDs, err := store.newSettlementUsageIDs(
+		outcome.Usage, hasOutputReservation, outcome.Cost, reservation.pricing,
+	)
 	if err != nil {
 		return err
 	}
@@ -1183,17 +1204,31 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var usageIDs settlementUsageIDs
+	var recoveredOutcome Outcome
 	if attemptExists {
 		if storedAttempt.status != "started" ||
 			(logical.status != "dispatched" && logical.status != "streaming") {
 			return false, ErrInvalidState
+		}
+		pricing, pricingErr := storedAttempt.selectedPricing()
+		if pricingErr != nil {
+			return false, pricingErr
+		}
+		lockedReservation.pricing = pricing
+		recoveredOutcome, err = normalizeOutcomeForPricing(Outcome{
+			Status: AttemptTimedOut, FailureCode: expiryFailureCode,
+			Usage: Usage{Provenance: UnknownUsageProvenance},
+		}, pricing)
+		if err != nil {
+			return false, err
 		}
 		_, hasOutputReservation, outputErr := lockedOutputReservationUnits(entries)
 		if outputErr != nil {
 			return false, outputErr
 		}
 		generatedUsageIDs, idErr := store.newSettlementUsageIDs(
-			Usage{Provenance: UnknownUsageProvenance}, hasOutputReservation,
+			recoveredOutcome.Usage, hasOutputReservation, recoveredOutcome.Cost,
+			lockedReservation.pricing,
 		)
 		if idErr != nil {
 			return false, idErr
@@ -1207,11 +1242,7 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if attemptExists {
-		outcome := Outcome{
-			Status: AttemptTimedOut, FailureCode: expiryFailureCode,
-			Usage: Usage{Provenance: UnknownUsageProvenance},
-		}
-		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, outcome, usageIDs, now); err != nil {
+		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, recoveredOutcome, usageIDs, now); err != nil {
 			return false, err
 		}
 	} else {
@@ -1256,6 +1287,7 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 	result.Reservation.upstreamKey = expected.upstreamKey
 	result.Reservation.modelKey = expected.modelKey
 	result.Reservation.physicalModel = expected.physicalModel
+	result.Reservation.pricing = expected.pricing
 	result.Reservation.windowResetAt = expected.windowResetAt
 	return result, nil
 }
@@ -1285,16 +1317,81 @@ func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (l
 }
 
 type storedAttempt struct {
-	id            string
-	number        int32
-	routeKey      string
-	upstreamKey   string
-	physicalModel *string
-	status        string
-	firstByteAt   *time.Time
-	completedAt   *time.Time
-	httpStatus    *int32
-	failureCode   *string
+	id             string
+	number         int32
+	routeKey       string
+	upstreamKey    string
+	physicalModel  *string
+	status         string
+	firstByteAt    *time.Time
+	completedAt    *time.Time
+	httpStatus     *int32
+	failureCode    *string
+	billedCost     *int64
+	currency       *string
+	priceRevision  *string
+	pricingSource  *string
+	costConfidence *string
+}
+
+func initialCostConfidence(pricing selectedPricing) string {
+	if !pricing.present() {
+		return ""
+	}
+	return UnknownCostConfidence
+}
+
+func settlementCostValues(pricing selectedPricing, cost Cost) (billed any, confidence any) {
+	if !pricing.present() {
+		return nil, nil
+	}
+	if cost.Known {
+		return cost.NanoUSD, CalculatedCostConfidence
+	}
+	return nil, UnknownCostConfidence
+}
+
+func (attempt storedAttempt) selectedPricing() (selectedPricing, error) {
+	selectionAbsent := attempt.currency == nil && attempt.priceRevision == nil && attempt.pricingSource == nil
+	if selectionAbsent {
+		if attempt.billedCost != nil || attempt.costConfidence != nil {
+			return selectedPricing{}, ErrInvalidState
+		}
+		return selectedPricing{}, nil
+	}
+	if attempt.currency == nil || attempt.priceRevision == nil || attempt.pricingSource == nil {
+		return selectedPricing{}, ErrInvalidState
+	}
+	pricing := selectedPricing{
+		source: *attempt.pricingSource, currency: *attempt.currency,
+		revision: *attempt.priceRevision,
+	}
+	if pricing.validate() != nil || attempt.costConfidence == nil {
+		return selectedPricing{}, ErrInvalidState
+	}
+	switch *attempt.costConfidence {
+	case UnknownCostConfidence:
+		if attempt.billedCost != nil {
+			return selectedPricing{}, ErrInvalidState
+		}
+	case CalculatedCostConfidence:
+		if attempt.billedCost == nil || *attempt.billedCost < 0 {
+			return selectedPricing{}, ErrInvalidState
+		}
+	default:
+		return selectedPricing{}, ErrInvalidState
+	}
+	return pricing, nil
+}
+
+func (attempt storedAttempt) validatePricing() error {
+	_, err := attempt.selectedPricing()
+	return err
+}
+
+func attemptPricingMatchesReservation(attempt storedAttempt, reservation Reservation) bool {
+	pricing, err := attempt.selectedPricing()
+	return err == nil && pricing == reservation.pricing
 }
 
 func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID string, number int32) (storedAttempt, bool, error) {
@@ -1302,7 +1399,8 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 	err := tx.QueryRow(ctx, `
 		SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
 		       physical_model, status, first_byte_at, completed_at,
-		       http_status, failure_code
+		       http_status, failure_code, billed_cost_nano_usd, currency,
+		       price_revision, pricing_source, cost_confidence
 		FROM upstream_attempts
 		WHERE logical_request_id = $1 AND attempt_number = $2
 		FOR UPDATE
@@ -1310,6 +1408,8 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 		&result.id, &result.number, &result.routeKey, &result.upstreamKey,
 		&result.physicalModel, &result.status, &result.firstByteAt,
 		&result.completedAt, &result.httpStatus, &result.failureCode,
+		&result.billedCost, &result.currency, &result.priceRevision,
+		&result.pricingSource, &result.costConfidence,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return storedAttempt{}, false, nil
@@ -1317,7 +1417,7 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 	if err != nil {
 		return storedAttempt{}, false, persistenceFailure("lock upstream attempt", err)
 	}
-	if id.Validate(result.id, id.UpstreamAttempt) != nil || result.number != number {
+	if id.Validate(result.id, id.UpstreamAttempt) != nil || result.number != number || result.validatePricing() != nil {
 		return storedAttempt{}, false, ErrInvalidState
 	}
 	return result, true, nil
@@ -1327,7 +1427,8 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 	rows, err := tx.Query(ctx, `
 		SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
 		       physical_model, status, first_byte_at, completed_at,
-		       http_status, failure_code
+		       http_status, failure_code, billed_cost_nano_usd, currency,
+		       price_revision, pricing_source, cost_confidence
 		FROM upstream_attempts
 		WHERE logical_request_id = $1
 		ORDER BY attempt_number
@@ -1348,10 +1449,12 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 		&result.id, &result.number, &result.routeKey, &result.upstreamKey,
 		&result.physicalModel, &result.status, &result.firstByteAt,
 		&result.completedAt, &result.httpStatus, &result.failureCode,
+		&result.billedCost, &result.currency, &result.priceRevision,
+		&result.pricingSource, &result.costConfidence,
 	); err != nil {
 		return storedAttempt{}, false, persistenceFailure("scan recovered upstream attempt", err)
 	}
-	if rows.Next() || result.number != 1 || id.Validate(result.id, id.UpstreamAttempt) != nil {
+	if rows.Next() || result.number != 1 || id.Validate(result.id, id.UpstreamAttempt) != nil || result.validatePricing() != nil {
 		return storedAttempt{}, false, ErrInvalidState
 	}
 	if err := rows.Err(); err != nil {
@@ -1445,9 +1548,15 @@ type settlementUsageIDs struct {
 	providerOutput string
 	providerTotal  string
 	unknownOutput  string
+	cost           string
 }
 
-func (store *Store) newSettlementUsageIDs(usage Usage, hasOutputReservation bool) (settlementUsageIDs, error) {
+func (store *Store) newSettlementUsageIDs(
+	usage Usage,
+	hasOutputReservation bool,
+	cost Cost,
+	pricing selectedPricing,
+) (settlementUsageIDs, error) {
 	result := settlementUsageIDs{}
 	generate := func(destination *string) error {
 		value, err := store.newID(id.UsageRecord)
@@ -1470,6 +1579,16 @@ func (store *Store) newSettlementUsageIDs(usage Usage, hasOutputReservation bool
 		}
 	} else if hasOutputReservation {
 		if err := generate(&result.unknownOutput); err != nil {
+			return settlementUsageIDs{}, err
+		}
+	}
+	// Preserve all historical usage-ID generation sequences. A configured,
+	// known cost appends exactly one new identifier after existing records.
+	if cost.Known {
+		if !usage.Known || !pricing.present() || pricing.validate() != nil {
+			return settlementUsageIDs{}, ErrInvalidState
+		}
+		if err := generate(&result.cost); err != nil {
 			return settlementUsageIDs{}, err
 		}
 	}
@@ -1514,14 +1633,32 @@ func insertSettlementUsage(
 	reservation lockedReservation,
 	attempt storedAttempt,
 	entries []lockedEntry,
-	usage Usage,
+	outcome Outcome,
 	identifiers settlementUsageIDs,
 	now time.Time,
 ) error {
 	if id.Validate(identifiers.logical, id.UsageRecord) != nil {
 		return ErrInvalidState
 	}
-	insert := func(usageID string, attemptID any, metric string, units int64, confidence, provenanceKey string) error {
+	pricing, err := attempt.selectedPricing()
+	if err != nil || pricing != reservation.pricing {
+		return ErrInvalidState
+	}
+	type priceFields struct {
+		cost     any
+		currency any
+		revision any
+		source   any
+	}
+	insert := func(
+		usageID string,
+		attemptID any,
+		metric string,
+		units int64,
+		price priceFields,
+		confidence string,
+		provenanceKey string,
+	) error {
 		if id.Validate(usageID, id.UsageRecord) != nil || units < 0 {
 			return ErrInvalidState
 		}
@@ -1529,54 +1666,78 @@ func insertSettlementUsage(
 			INSERT INTO usage_records (
 				usage_record_id, organization_id, application_id, environment_id,
 				logical_request_id, upstream_attempt_id, metric, units,
+				cost_nano_usd, currency, price_revision, pricing_source,
 				confidence, provenance_key, recorded_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8,
+				$9, $10, $11, $12, $13, $14, $15
+			)
 		`, usageID, reservation.organizationID, reservation.applicationID,
 			reservation.environmentID, reservation.logicalRequestID, attemptID,
-			metric, units, confidence, provenanceKey, now); err != nil {
+			metric, units, price.cost, price.currency, price.revision, price.source,
+			confidence, provenanceKey, now); err != nil {
 			return mapWriteError("insert quota usage", err)
 		}
 		return nil
 	}
 	if err := insert(
-		identifiers.logical, nil, LogicalRequestsMetric, 1, "calculated",
+		identifiers.logical, nil, LogicalRequestsMetric, 1, priceFields{}, "calculated",
 		logicalUsageProvenanceKey(reservation.logicalRequestID),
 	); err != nil {
 		return err
 	}
-	if usage.Known {
+	if outcome.Usage.Known {
 		records := []struct {
 			id     string
 			metric string
 			units  int64
 		}{
-			{id: identifiers.providerInput, metric: "input_tokens", units: usage.InputTokens},
-			{id: identifiers.providerOutput, metric: OutputTokensMetric, units: usage.OutputTokens},
-			{id: identifiers.providerTotal, metric: "total_tokens", units: usage.TotalTokens},
+			{id: identifiers.providerInput, metric: "input_tokens", units: outcome.Usage.InputTokens},
+			{id: identifiers.providerOutput, metric: OutputTokensMetric, units: outcome.Usage.OutputTokens},
+			{id: identifiers.providerTotal, metric: "total_tokens", units: outcome.Usage.TotalTokens},
 		}
 		for _, record := range records {
 			if err := insert(
-				record.id, attempt.id, record.metric, record.units, "reported",
+				record.id, attempt.id, record.metric, record.units, priceFields{}, "reported",
 				providerUsageProvenanceKey(attempt.id, record.metric),
 			); err != nil {
 				return err
 			}
 		}
-		return nil
+	} else {
+		outputUnits, hasOutputReservation, outputErr := lockedOutputReservationUnits(entries)
+		if outputErr != nil {
+			return outputErr
+		}
+		if hasOutputReservation {
+			if err := insert(
+				identifiers.unknownOutput, attempt.id, OutputTokensMetric, outputUnits,
+				priceFields{}, UnknownCostConfidence,
+				unknownOutputUsageProvenanceKey(reservation.reservationID),
+			); err != nil {
+				return err
+			}
+		} else if identifiers.unknownOutput != "" {
+			return ErrInvalidState
+		}
 	}
-	outputUnits, hasOutputReservation, err := lockedOutputReservationUnits(entries)
-	if err != nil {
-		return err
-	}
-	if !hasOutputReservation {
-		if identifiers.unknownOutput != "" {
+	if !outcome.Cost.Known {
+		if identifiers.cost != "" {
 			return ErrInvalidState
 		}
 		return nil
 	}
+	if !pricing.present() || !outcome.Usage.Known {
+		return ErrInvalidState
+	}
+	amount := outcome.Cost.NanoUSD
 	return insert(
-		identifiers.unknownOutput, attempt.id, OutputTokensMetric, outputUnits, "unknown",
-		unknownOutputUsageProvenanceKey(reservation.reservationID),
+		identifiers.cost, attempt.id, CostNanoUSDMetric, amount,
+		priceFields{
+			cost: amount, currency: pricing.currency,
+			revision: pricing.revision, source: pricing.source,
+		},
+		CalculatedCostConfidence, configuredCostProvenanceKey(attempt.id),
 	)
 }
 
@@ -1592,6 +1753,10 @@ func unknownOutputUsageProvenanceKey(reservationID string) string {
 	return "quota-reservation:" + reservationID + ":unknown-output"
 }
 
+func configuredCostProvenanceKey(attemptID string) string {
+	return "configured_flat_rate:" + attemptID
+}
+
 func terminalSettlementMatches(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -1599,7 +1764,7 @@ func terminalSettlementMatches(
 	attempt storedAttempt,
 	outcome Outcome,
 ) (bool, error) {
-	if !terminalAttemptMatches(attempt, outcome) {
+	if !terminalAttemptMatches(attempt, outcome, reservation.pricing) {
 		return false, nil
 	}
 	outputUnits, hasOutputReservation, err := reservationOutputReservationUnits(reservation.entries)
@@ -1607,10 +1772,14 @@ func terminalSettlementMatches(
 		return false, err
 	}
 	type expectedUsage struct {
-		attemptID  *string
-		metric     string
-		units      int64
-		confidence string
+		attemptID     *string
+		metric        string
+		units         int64
+		costNanoUSD   *int64
+		currency      *string
+		priceRevision *string
+		pricingSource *string
+		confidence    string
 	}
 	expected := map[string]expectedUsage{
 		logicalUsageProvenanceKey(reservation.logicalRequestID): {
@@ -1637,8 +1806,21 @@ func terminalSettlementMatches(
 			attemptID: &attemptID, metric: OutputTokensMetric, units: outputUnits, confidence: "unknown",
 		}
 	}
+	if outcome.Cost.Known {
+		attemptID := attempt.id
+		amount := outcome.Cost.NanoUSD
+		currency := reservation.pricing.currency
+		revision := reservation.pricing.revision
+		source := reservation.pricing.source
+		expected[configuredCostProvenanceKey(attempt.id)] = expectedUsage{
+			attemptID: &attemptID, metric: CostNanoUSDMetric, units: amount,
+			costNanoUSD: &amount, currency: &currency, priceRevision: &revision,
+			pricingSource: &source, confidence: CalculatedCostConfidence,
+		}
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT usage_record_id, upstream_attempt_id, metric, units,
+		       cost_nano_usd, currency, price_revision, pricing_source,
 		       confidence, provenance_key
 		FROM usage_records
 		WHERE environment_id = $1 AND logical_request_id = $2
@@ -1652,14 +1834,23 @@ func terminalSettlementMatches(
 	for rows.Next() {
 		var usageID, metric, confidence, provenanceKey string
 		var attemptID *string
+		var costNanoUSD *int64
+		var currency, priceRevision, pricingSource *string
 		var units int64
-		if err := rows.Scan(&usageID, &attemptID, &metric, &units, &confidence, &provenanceKey); err != nil {
+		if err := rows.Scan(
+			&usageID, &attemptID, &metric, &units, &costNanoUSD, &currency,
+			&priceRevision, &pricingSource, &confidence, &provenanceKey,
+		); err != nil {
 			return false, persistenceFailure("scan terminal quota usage", err)
 		}
 		want, ok := expected[provenanceKey]
 		if !ok || id.Validate(usageID, id.UsageRecord) != nil ||
 			(attemptID == nil) != (want.attemptID == nil) || metric != want.metric ||
-			units != want.units || confidence != want.confidence {
+			units != want.units || confidence != want.confidence ||
+			!optionalInt64Matches(costNanoUSD, want.costNanoUSD) ||
+			!optionalStringMatches(currency, want.currency) ||
+			!optionalStringMatches(priceRevision, want.priceRevision) ||
+			!optionalStringMatches(pricingSource, want.pricingSource) {
 			return false, nil
 		}
 		if attemptID != nil && *attemptID != *want.attemptID {
@@ -1687,9 +1878,11 @@ func settleLocked(
 	usageIDs settlementUsageIDs,
 	now time.Time,
 ) error {
+	normalized, normalizeErr := normalizeOutcomeForPricing(outcome, reservation.pricing)
 	if reservation.status != "pending" || attempt.status != "started" ||
 		(logical.status != "dispatched" && logical.status != "streaming") ||
-		len(entries) > maximumRulesPerRequest {
+		len(entries) > maximumRulesPerRequest || normalizeErr != nil || normalized != outcome ||
+		!attemptPricingMatchesReservation(attempt, reservation.Reservation) {
 		return ErrInvalidState
 	}
 	settledUnits := make([]int64, len(entries))
@@ -1755,18 +1948,29 @@ func settleLocked(
 	}
 	var command pgconn.CommandTag
 	var err error
-	if err := insertSettlementUsage(ctx, tx, reservation, attempt, entries, outcome.Usage, usageIDs, now); err != nil {
+	if err := insertSettlementUsage(ctx, tx, reservation, attempt, entries, outcome, usageIDs, now); err != nil {
 		return err
 	}
+	billedCost, settledCostConfidence := settlementCostValues(reservation.pricing, outcome.Cost)
 	command, err = tx.Exec(ctx, `
 		UPDATE upstream_attempts
 		SET status = $2,
 		    completed_at = GREATEST(started_at, COALESCE(first_byte_at, started_at), $3),
 		    http_status = $4,
-		    failure_code = $5
+		    failure_code = $5,
+		    billed_cost_nano_usd = $6,
+		    cost_confidence = $7
 		WHERE upstream_attempt_id = $1 AND status = 'started'
+		  AND currency IS NOT DISTINCT FROM $8
+		  AND price_revision IS NOT DISTINCT FROM $9
+		  AND pricing_source IS NOT DISTINCT FROM $10
+		  AND billed_cost_nano_usd IS NULL
+		  AND cost_confidence IS NOT DISTINCT FROM $11
 	`, attempt.id, outcome.Status, now, nullableInt(outcome.HTTPStatus),
-		nullableString(outcome.FailureCode))
+		nullableString(outcome.FailureCode), billedCost, settledCostConfidence,
+		nullableString(reservation.pricing.currency), nullableString(reservation.pricing.revision),
+		nullableString(reservation.pricing.source),
+		nullableString(initialCostConfidence(reservation.pricing)))
 	if err != nil {
 		return persistenceFailure("complete upstream attempt", err)
 	}
@@ -1875,7 +2079,24 @@ func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation
 	return nil
 }
 
-func terminalAttemptMatches(stored storedAttempt, outcome Outcome) bool {
+func terminalAttemptMatches(stored storedAttempt, outcome Outcome, pricing selectedPricing) bool {
+	storedPricing, err := stored.selectedPricing()
+	if err != nil || storedPricing != pricing {
+		return false
+	}
+	if !pricing.present() {
+		if stored.billedCost != nil || stored.costConfidence != nil || outcome.Cost != (Cost{}) {
+			return false
+		}
+	} else if outcome.Cost.Known {
+		if stored.billedCost == nil || *stored.billedCost != outcome.Cost.NanoUSD ||
+			stored.costConfidence == nil || *stored.costConfidence != CalculatedCostConfidence {
+			return false
+		}
+	} else if stored.billedCost != nil || stored.costConfidence == nil ||
+		*stored.costConfidence != UnknownCostConfidence {
+		return false
+	}
 	if stored.status != outcome.Status {
 		return false
 	}
@@ -1887,6 +2108,14 @@ func terminalAttemptMatches(stored storedAttempt, outcome Outcome) bool {
 		return false
 	}
 	return stored.failureCode == nil || *stored.failureCode == outcome.FailureCode
+}
+
+func optionalInt64Matches(left, right *int64) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func optionalStringMatches(left, right *string) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
 func transactionTime(ctx context.Context, tx pgx.Tx) (time.Time, error) {

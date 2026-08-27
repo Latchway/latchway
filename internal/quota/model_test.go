@@ -121,6 +121,47 @@ func TestLegacyLogicalOnlyFingerprintSerializationIsUnchanged(t *testing.T) {
 	}
 }
 
+func TestConfiguredPricingFingerprintAppendsOnlyCatalogIdentity(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	unpriced, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare unpriced request: %v", err)
+	}
+	input.Pricing = PricingSelection{CatalogID: "standard-usd", Currency: USDCurrency}
+	priced, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare priced request: %v", err)
+	}
+	rule := priced.rules[0]
+	parts := []string{
+		priced.LogicalRequestID.String(), priced.OrganizationID,
+		priced.ApplicationID, priced.EnvironmentID, priced.ApplicationUserID,
+		priced.InstallationID, priced.SessionGrantID, priced.ConfigRevisionID,
+		priced.FeatureKey, priced.Protocol, priced.ClientRequestID,
+		priced.LimitPlanKey, priced.RouteKey, priced.UpstreamKey,
+		priced.ModelKey, priced.PhysicalModel,
+		rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10),
+		"standard-usd",
+	}
+	want := canonicalDigest(requestDigestDomain, parts)
+	if got := requestFingerprint(priced); got != want {
+		t.Fatalf("priced fingerprint = %q, want catalog-appended serialization %q", got, want)
+	}
+	if requestFingerprint(priced) == requestFingerprint(unpriced) {
+		t.Fatal("configured catalog was omitted from trusted fingerprint")
+	}
+	otherInput := cloneReserveInput(input)
+	otherInput.Pricing.CatalogID = "enterprise-usd"
+	other, err := prepareRequest(otherInput)
+	if err != nil {
+		t.Fatalf("prepare alternate catalog: %v", err)
+	}
+	if requestFingerprint(other) == requestFingerprint(priced) {
+		t.Fatal("distinct configured catalogs produced the same trusted fingerprint")
+	}
+}
+
 func TestPrepareRequestSupportsBoundedOutputTokenShapes(t *testing.T) {
 	t.Parallel()
 	input := validReserveInput(t)
@@ -208,6 +249,50 @@ func TestReserveIdentifierGenerationPreservesLegacyOrderAndSupportsZeroEntries(t
 	if !slices.Equal(calls, []id.Prefix{id.QuotaReservation}) ||
 		len(entryless.buckets) != 0 || len(entryless.entries) != 0 || entryless.reservation == "" {
 		t.Fatalf("entryless generation calls=%v IDs=%#v", calls, entryless)
+	}
+}
+
+func TestSettlementUsageIdentifierGenerationAddsOnlyKnownPricedCost(t *testing.T) {
+	t.Parallel()
+	var calls int
+	store := &Store{newID: func(prefix id.Prefix) (string, error) {
+		if prefix != id.UsageRecord {
+			t.Fatalf("settlement requested %s identifier", prefix)
+		}
+		calls++
+		return id.New(prefix)
+	}}
+	usage := Usage{
+		InputTokens: 1, OutputTokens: 2, TotalTokens: 3,
+		Known: true, Provenance: ProviderReportedProvenance,
+	}
+	if _, err := store.newSettlementUsageIDs(usage, false, Cost{}, selectedPricing{}); err != nil {
+		t.Fatalf("generate legacy usage identifiers: %v", err)
+	}
+	if calls != 4 {
+		t.Fatalf("legacy usage identifier calls = %d, want 4", calls)
+	}
+	pricing := selectedPricing{
+		source: "standard-usd", currency: USDCurrency,
+		revision: validReserveInput(t).ConfigRevisionID,
+	}
+	calls = 0
+	identifiers, err := store.newSettlementUsageIDs(
+		usage, false,
+		Cost{NanoUSD: 7, Known: true, Confidence: CalculatedCostConfidence}, pricing,
+	)
+	if err != nil {
+		t.Fatalf("generate priced usage identifiers: %v", err)
+	}
+	if calls != 5 || identifiers.cost == "" {
+		t.Fatalf("priced usage identifier calls = %d IDs=%#v, want 5 with cost", calls, identifiers)
+	}
+	calls = 0
+	if _, err := store.newSettlementUsageIDs(usage, false, Cost{}, pricing); err != nil {
+		t.Fatalf("generate unknown priced usage identifiers: %v", err)
+	}
+	if calls != 4 {
+		t.Fatalf("unknown priced identifier calls = %d, want historical 4", calls)
 	}
 }
 
@@ -430,6 +515,14 @@ func TestPrepareRequestRejectsUnsupportedAndAmbiguousRules(t *testing.T) {
 		{name: "upstream", mutate: func(input *ReserveInput) { input.UpstreamKey = "UPSTREAM" }},
 		{name: "model", mutate: func(input *ReserveInput) { input.ModelKey = "" }},
 		{name: "physical model", mutate: func(input *ReserveInput) { input.PhysicalModel = "model\nsecret" }},
+		{name: "pricing source only", mutate: func(input *ReserveInput) { input.Pricing.CatalogID = "standard-usd" }},
+		{name: "pricing currency only", mutate: func(input *ReserveInput) { input.Pricing.Currency = USDCurrency }},
+		{name: "pricing currency", mutate: func(input *ReserveInput) {
+			input.Pricing = PricingSelection{CatalogID: "standard-usd", Currency: "EUR"}
+		}},
+		{name: "pricing catalog", mutate: func(input *ReserveInput) {
+			input.Pricing = PricingSelection{CatalogID: "Not Canonical", Currency: USDCurrency}
+		}},
 		{name: "no rules", mutate: func(input *ReserveInput) { input.Rules = nil }},
 		{name: "ambiguous rules", mutate: func(input *ReserveInput) { input.Rules = append(input.Rules, input.Rules[0]) }},
 		{name: "metric", mutate: func(input *ReserveInput) { input.Rules[0].Metric = "total_tokens" }},
@@ -463,6 +556,13 @@ func TestOutcomeValidation(t *testing.T) {
 		{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "upstream_unavailable"},
 		{Status: AttemptCancelled, FailureCode: "client_cancelled"},
 		{Status: AttemptTimedOut, FailureCode: "upstream_timeout"},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 1, OutputTokens: 0, TotalTokens: 1,
+			Known: true, Provenance: ProviderReportedProvenance,
+		}, Cost: Cost{NanoUSD: 0, Known: true, Confidence: CalculatedCostConfidence}},
+		{Status: AttemptFailed, FailureCode: "calculation_overflow", Usage: Usage{
+			InputTokens: 1, TotalTokens: 1, Known: true, Provenance: ProviderReportedProvenance,
+		}, Cost: Cost{Confidence: UnknownCostConfidence}},
 	} {
 		if err := outcome.validate(); err != nil {
 			t.Fatalf("valid outcome %#v: %v", outcome, err)
@@ -489,10 +589,54 @@ func TestOutcomeValidation(t *testing.T) {
 		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
 			OutputTokens: 1, Known: false, Provenance: UnknownUsageProvenance,
 		}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 1, TotalTokens: 1, Known: true, Provenance: ProviderReportedProvenance,
+		}, Cost: Cost{NanoUSD: -1, Known: true, Confidence: CalculatedCostConfidence}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 1, TotalTokens: 1, Known: true, Provenance: ProviderReportedProvenance,
+		}, Cost: Cost{NanoUSD: 1, Known: true}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 1, TotalTokens: 1, Known: true, Provenance: ProviderReportedProvenance,
+		}, Cost: Cost{NanoUSD: 1, Confidence: UnknownCostConfidence}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{
+			NanoUSD: 1, Known: true, Confidence: CalculatedCostConfidence,
+		}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{Confidence: "estimated"}},
 	} {
 		if err := outcome.validate(); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid outcome %#v returned %v", outcome, err)
 		}
+	}
+}
+
+func TestOutcomePricingNormalizationIsContextBound(t *testing.T) {
+	t.Parallel()
+	knownUsage := Usage{
+		InputTokens: 2, OutputTokens: 3, TotalTokens: 5,
+		Known: true, Provenance: ProviderReportedProvenance,
+	}
+	priced := selectedPricing{
+		source: "standard-usd", currency: USDCurrency,
+		revision: validReserveInput(t).ConfigRevisionID,
+	}
+	unknown, err := normalizeOutcomeForPricing(Outcome{
+		Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+	}, priced)
+	if err != nil || unknown.Cost != (Cost{Confidence: UnknownCostConfidence}) {
+		t.Fatalf("normalize priced unknown cost = %#v, %v", unknown, err)
+	}
+	legacy, err := normalizeOutcomeForPricing(Outcome{
+		Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+		Cost: Cost{Confidence: UnknownCostConfidence},
+	}, selectedPricing{})
+	if err != nil || legacy.Cost != (Cost{}) {
+		t.Fatalf("normalize unpriced unknown cost = %#v, %v", legacy, err)
+	}
+	if _, err := normalizeOutcomeForPricing(Outcome{
+		Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
+		Cost: Cost{NanoUSD: 1, Known: true, Confidence: CalculatedCostConfidence},
+	}, selectedPricing{}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("known unpriced cost returned %v", err)
 	}
 }
 
