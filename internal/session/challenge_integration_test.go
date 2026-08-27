@@ -31,7 +31,7 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 	pool, ctx := isolatedSessionPool(t)
 	fixture := createChallengeFixture(t, ctx, pool)
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
-	activateChallengeTestRevision(t, ctx, pool, fixture, now)
+	policyRevisionID := activateChallengeTestRevision(t, ctx, pool, fixture, now)
 	configurationStore, err := configuration.NewStore(pool)
 	if err != nil {
 		t.Fatalf("construct configuration store: %v", err)
@@ -43,13 +43,14 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 		t.Fatalf("construct challenge store: %v", err)
 	}
 	_, jwk, jkt := newChallengeKey(t)
-	input := ChallengeInput{
+	challengeRequestURI := mustSessionURL(t, "https://gateway.example.test/client/v1/session-challenges")
+	input := withChallengeProof(ChallengeInput{
 		OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
-		EnvironmentID: fixture.environmentID, EnvironmentSlug: "development",
+		EnvironmentID: fixture.environmentID, ConfigurationRevisionID: policyRevisionID, EnvironmentSlug: "development",
 		ApplicationUserID: fixture.applicationUserID, IdentityProvider: "firebase",
 		IdentityVerifiedAt: now, IdentityExpiresAt: now.Add(time.Hour),
 		Platform: "ios", DPoPJKT: jkt, DPoPPublicJWK: jwk,
-	}
+	}, challengeRequestURI, now, "challenge-store-initial")
 
 	challenge, err := store.Create(ctx, input)
 	if err != nil {
@@ -65,19 +66,35 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 	if loaded.ID != challenge.ID || loaded.Nonce != challenge.Nonce || loaded.Binding != challenge.Binding || loaded.BindingHash != challenge.BindingHash || loaded.DPoPPublicJWK != jwk {
 		t.Fatalf("loaded challenge differs: got=%#v want=%#v", loaded, challenge)
 	}
+	if loaded.ConfigurationRevisionID != challenge.ConfigurationRevisionID || loaded.Attestation != challenge.Attestation || loaded.Attestation.Provider != "debug" || loaded.Attestation.MinimumTrustLevel != "debug" {
+		t.Fatalf("loaded immutable challenge policy differs: got=%#v want=%#v", loaded.Attestation, challenge.Attestation)
+	}
 
 	var storedNonce string
-	var nonceHash []byte
+	var nonceHash, proofJTIHash, proofURIHash []byte
 	if err := pool.QueryRow(ctx, `
-		SELECT challenge_nonce, nonce_hash
+		SELECT challenge_nonce, nonce_hash, challenge_dpop_proof_jti_hash,
+		       challenge_dpop_http_uri_hash
 		FROM session_challenges
 		WHERE session_challenge_id = $1
-	`, challenge.ID).Scan(&storedNonce, &nonceHash); err != nil {
+	`, challenge.ID).Scan(&storedNonce, &nonceHash, &proofJTIHash, &proofURIHash); err != nil {
 		t.Fatalf("read persisted nonce binding: %v", err)
 	}
 	expectedNonceHash := sha256.Sum256(mustDecodeChallengeNonce(t, challenge.Nonce))
 	if storedNonce != challenge.Nonce || len(nonceHash) != sha256.Size || string(nonceHash) != string(expectedNonceHash[:]) || string(nonceHash) == challenge.Nonce {
 		t.Fatal("challenge nonce persistence did not preserve both public binding and digest")
+	}
+	expectedProofJTIHash := sha256.Sum256([]byte(input.DPoPProofJTI))
+	normalizedChallengeURI, err := dpop.NormalizeHTU(challengeRequestURI)
+	if err != nil {
+		t.Fatalf("normalize challenge request URI: %v", err)
+	}
+	expectedProofURIHash := sha256.Sum256([]byte(normalizedChallengeURI))
+	if string(proofJTIHash) != string(expectedProofJTIHash[:]) || string(proofURIHash) != string(expectedProofURIHash[:]) || strings.Contains(string(proofJTIHash), input.DPoPProofJTI) || strings.Contains(string(proofURIHash), normalizedChallengeURI) {
+		t.Fatal("challenge DPoP request binding was not persisted exclusively as digests")
+	}
+	if _, err := store.Create(ctx, input); !errors.Is(err, ErrDPoPReplayed) {
+		t.Fatalf("challenge DPoP proof replay should fail across challenge IDs: %v", err)
 	}
 
 	missingUser := input
@@ -112,12 +129,30 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 	if _, err := store.Get(ctx, challenge.ID); err != nil {
 		t.Fatalf("restored challenge should load: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE session_challenges
+		SET attestation_provider = 'app_attest'
+		WHERE session_challenge_id = $1
+	`, challenge.ID); err != nil {
+		t.Fatalf("tamper persisted attestation provider: %v", err)
+	}
+	if _, err := store.Get(ctx, challenge.ID); !errors.Is(err, ErrChallengeInvalid) {
+		t.Fatalf("tampered challenge policy should fail: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE session_challenges
+		SET attestation_provider = 'debug'
+		WHERE session_challenge_id = $1
+	`, challenge.ID); err != nil {
+		t.Fatalf("restore persisted attestation provider: %v", err)
+	}
 
 	assertSingleChallengeConsumption(t, ctx, pool, challenge, now.Add(time.Minute))
 	if _, err := store.Get(ctx, challenge.ID); !errors.Is(err, ErrChallengeConsumed) {
 		t.Fatalf("consumed challenge should fail: %v", err)
 	}
 
+	input = withChallengeProof(input, challengeRequestURI, now, "challenge-store-expiring")
 	expiring, err := store.Create(ctx, input)
 	if err != nil {
 		t.Fatalf("create expiring challenge: %v", err)
@@ -129,6 +164,17 @@ func TestChallengeStorePostgreSQL(t *testing.T) {
 	deleted, err := store.DeleteExpired(ctx, now, 100)
 	if err != nil {
 		t.Fatalf("delete expired challenges: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("challenge replay digests were removed before the replay window: deleted=%d", deleted)
+	}
+	if _, err := store.Create(ctx, input); !errors.Is(err, ErrDPoPReplayed) {
+		t.Fatalf("expired challenge proof became reusable during replay retention: %v", err)
+	}
+	now = time.Unix(challenge.Binding.IssuedAt, 0).UTC().Add(defaultReplayLifetime + time.Second)
+	deleted, err = store.DeleteExpired(ctx, now, 100)
+	if err != nil {
+		t.Fatalf("delete replay-safe expired challenges: %v", err)
 	}
 	if deleted != 2 {
 		t.Fatalf("deleted challenge count=%d want=2", deleted)
@@ -155,15 +201,16 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 		t.Fatalf("construct challenge store: %v", err)
 	}
 	dpopKey, jwk, jkt := newChallengeKey(t)
+	challengeRequestURI := mustSessionURL(t, "https://gateway.example.test/client/v1/session-challenges")
 	exchangeURI := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions")
 	refreshURI := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions/refresh")
-	challengeInput := ChallengeInput{
+	challengeInput := withChallengeProof(ChallengeInput{
 		OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
-		EnvironmentID: fixture.environmentID, EnvironmentSlug: "development",
+		EnvironmentID: fixture.environmentID, ConfigurationRevisionID: policyRevisionID, EnvironmentSlug: "development",
 		ApplicationUserID: fixture.applicationUserID, IdentityProvider: "firebase",
 		IdentityVerifiedAt: now, IdentityExpiresAt: now.Add(time.Hour),
 		Platform: "ios", DPoPJKT: jkt, DPoPPublicJWK: jwk,
-	}
+	}, challengeRequestURI, now, "initial-exchange-challenge")
 	challenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create exchange challenge: %v", err)
@@ -199,7 +246,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	exchangeInput := ExchangeInput{
 		ChallengeID: challenge.ID, Attestation: attestationResult,
 		DPoPProof:  signedSessionDPoP(t, dpopKey, "POST", exchangeURI, now, "initial-exchange"),
-		HTTPMethod: "POST", RequestURI: exchangeURI, KeyStorage: "secure_enclave", AppVersion: "1.2.3",
+		HTTPMethod: "POST", RequestURI: exchangeURI, KeyStorage: "unknown", AppVersion: strings.Repeat("界", 128),
 	}
 	issued, err := sessionStore.Exchange(ctx, exchangeInput)
 	if err != nil {
@@ -224,7 +271,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if principal.InstallationID != issued.Installation.ID || principal.SessionGrantID != issued.GrantID || principal.ApplicationUserID != fixture.applicationUserID || principal.PolicyRevisionID != policyRevisionID {
 		t.Fatalf("unexpected exchanged principal: %#v", principal)
 	}
-	if !issued.Access.ExpiresAt.Equal(now.Add(15*time.Minute)) || !issued.RefreshExpiresAt.Equal(now.Add(30*24*time.Hour)) {
+	if !issued.Access.ExpiresAt.Equal(now.Add(10*time.Minute)) || !issued.RefreshExpiresAt.Equal(now.Add(30*24*time.Hour)) {
 		t.Fatalf("default active policy was not authoritative: access=%s refresh=%s", issued.Access.ExpiresAt, issued.RefreshExpiresAt)
 	}
 	authorized, err := sessionStore.Authorize(ctx, principal)
@@ -255,7 +302,8 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if binding.DPoPJKT != jkt || binding.SessionGrantID != issued.GrantID || binding.Status != "active" || binding.IdentityProvider != "firebase" || binding.DPoPPublicJWK != jwk {
 		t.Fatalf("unexpected initial refresh binding: %#v", binding)
 	}
-	now = challenge.ExpiresAt.Add(time.Second)
+	operationNow := challenge.ExpiresAt.Add(time.Second)
+	now = time.Unix(challenge.Binding.IssuedAt, 0).UTC().Add(defaultReplayLifetime + time.Second)
 	deleted, err := challengeStore.DeleteExpired(ctx, now, 10)
 	if err != nil || deleted != 1 {
 		t.Fatalf("prune exchanged challenge: deleted=%d err=%v", deleted, err)
@@ -264,7 +312,9 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attestation_events WHERE session_challenge_id = $1`, challenge.ID).Scan(&retainedAttestationEvents); err != nil || retainedAttestationEvents != 1 {
 		t.Fatalf("attestation audit event should survive challenge cleanup: count=%d err=%v", retainedAttestationEvents, err)
 	}
+	now = operationNow
 
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "invalid-attestation-challenge")
 	invalidChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create invalid-attestation challenge: %v", err)
@@ -369,6 +419,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 		t.Fatalf("reuse-revoked access grant should fail authorization: %v", err)
 	}
 
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "old-policy-challenge")
 	policyChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create policy-snapshot challenge: %v", err)
@@ -380,9 +431,20 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 		DPoPProof:   signedSessionDPoP(t, dpopKey, "POST", exchangeURI, now, "active-policy"),
 		HTTPMethod:  "POST", RequestURI: exchangeURI, KeyStorage: "secure_enclave", AppVersion: "1.2.3",
 	}
+	if _, err := sessionStore.Exchange(ctx, policyExchange); !errors.Is(err, ErrSessionScope) {
+		t.Fatalf("challenge from superseded configuration revision should fail closed: %v", err)
+	}
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "active-policy-challenge")
+	challengeInput.ConfigurationRevisionID = nextPolicyRevisionID
+	policyChallenge, err = challengeStore.Create(ctx, challengeInput)
+	if err != nil {
+		t.Fatalf("create challenge against new active policy: %v", err)
+	}
+	policyExchange.ChallengeID = policyChallenge.ID
+	policyExchange.Attestation = verifiedDebugAttestation(t, policyChallenge.Binding, now, "active-policy")
 	policySession, err := sessionStore.Exchange(ctx, policyExchange)
 	if err != nil {
-		t.Fatalf("exchange against new active policy: %v", err)
+		t.Fatalf("exchange challenge from new active policy: %v", err)
 	}
 	policyPrincipal, err := verifier.Verify(ctx, policySession.Access.Token)
 	if err != nil {
@@ -396,6 +458,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	futureInput := challengeInput
 	futureInput.IdentityVerifiedAt = now.Add(20 * time.Second)
 	futureInput.IdentityExpiresAt = now.Add(time.Hour)
+	futureInput = withChallengeProof(futureInput, challengeRequestURI, now, "future-within-skew-challenge")
 	futureChallenge, err := challengeStore.Create(ctx, futureInput)
 	if err != nil {
 		t.Fatalf("create future-within-skew challenge: %v", err)
@@ -442,6 +505,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if command.RowsAffected() != 1 {
 		t.Fatalf("altered installation trust rows=%d want=1", command.RowsAffected())
 	}
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "trust-transition-challenge")
 	trustChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create trust-transition challenge: %v", err)
@@ -512,6 +576,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 
 	expiredIdentityInput := challengeInput
 	expiredIdentityInput.IdentityExpiresAt = now.Add(time.Second)
+	expiredIdentityInput = withChallengeProof(expiredIdentityInput, challengeRequestURI, now, "expired-identity-challenge")
 	expiredIdentityChallenge, err := challengeStore.Create(ctx, expiredIdentityInput)
 	if err != nil {
 		t.Fatalf("create identity-expiry exchange challenge: %v", err)
@@ -530,6 +595,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 		t.Fatalf("identity-expired exchange should not consume challenge: %v", err)
 	}
 
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "refresh-freshness-challenge")
 	freshnessChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create refresh-freshness challenge: %v", err)
@@ -578,6 +644,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 
 	challengeInput.IdentityVerifiedAt = now
 	challengeInput.IdentityExpiresAt = now.Add(time.Hour)
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "installation-revocation-challenge")
 	revocationChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create installation-revocation session challenge: %v", err)
@@ -603,6 +670,7 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	if _, err := sessionStore.Authorize(ctx, revocationPrincipal); !errors.Is(err, ErrInstallationRevoked) {
 		t.Fatalf("revoked installation should fail authorization: %v", err)
 	}
+	challengeInput = withChallengeProof(challengeInput, challengeRequestURI, now, "revoked-installation-challenge")
 	revokedChallenge, err := challengeStore.Create(ctx, challengeInput)
 	if err != nil {
 		t.Fatalf("create revoked-installation challenge: %v", err)
@@ -621,11 +689,95 @@ func TestSessionExchangePostgreSQL(t *testing.T) {
 	}
 }
 
+func TestSessionExchangeAttestationPolicyPostgreSQL(t *testing.T) {
+	tests := []struct {
+		name             string
+		provider         string
+		mode             string
+		minimumTrust     string
+		maximumAge       string
+		exchangeAdvance  time.Duration
+		challengeFailure bool
+	}{
+		{name: "provider mismatch", provider: "app_attest", mode: "required", minimumTrust: "app_verified", maximumAge: "10m"},
+		{name: "insufficient trust", provider: "debug", mode: "required", minimumTrust: "strong_device_verified", maximumAge: "10m"},
+		{name: "maximum age exceeded", provider: "debug", mode: "required", minimumTrust: "debug", maximumAge: "1m", exchangeAdvance: 2 * time.Minute},
+		{name: "preferred is ineligible", provider: "debug", mode: "preferred", minimumTrust: "debug", maximumAge: "10m", challengeFailure: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pool, ctx := isolatedSessionPool(t)
+			now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+			fixture := createChallengeFixture(t, ctx, pool)
+			policyRevisionID := activateChallengeTestRevisionWithPolicy(
+				t, ctx, pool, fixture, now,
+				test.provider, test.mode, test.minimumTrust, test.maximumAge,
+			)
+			configurationStore, err := configuration.NewStore(pool)
+			if err != nil {
+				t.Fatalf("construct policy-test configuration store: %v", err)
+			}
+			challengeStore, err := newChallengeStore(ChallengeStoreConfig{
+				Pool: pool, Configuration: configurationStore, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatalf("construct policy-test challenge store: %v", err)
+			}
+			dpopKey, jwk, jkt := newChallengeKey(t)
+			challengeURI := mustSessionURL(t, "https://gateway.example.test/client/v1/session-challenges")
+			challengeInput := withChallengeProof(ChallengeInput{
+				OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
+				EnvironmentID: fixture.environmentID, ConfigurationRevisionID: policyRevisionID, EnvironmentSlug: "development",
+				ApplicationUserID: fixture.applicationUserID, IdentityProvider: "firebase",
+				IdentityVerifiedAt: now, IdentityExpiresAt: now.Add(time.Hour),
+				Platform: "ios", DPoPJKT: jkt, DPoPPublicJWK: jwk,
+			}, challengeURI, now, "policy-test-challenge-"+test.name)
+			challenge, err := challengeStore.Create(ctx, challengeInput)
+			if test.challengeFailure {
+				if !errors.Is(err, ErrSessionScope) {
+					t.Fatalf("ineligible challenge policy error=%v want=%v", err, ErrSessionScope)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create policy-test challenge: %v", err)
+			}
+			result := verifiedDebugAttestation(t, challenge.Binding, now, "policy-test-"+test.name)
+			now = now.Add(test.exchangeAdvance)
+			sessionStore, err := NewStore(StoreConfig{
+				Pool: pool, AccessTokens: unusedAccessIssuer{}, Configuration: configurationStore,
+				Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatalf("construct policy-test session store: %v", err)
+			}
+			exchangeURI := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions")
+			_, err = sessionStore.Exchange(ctx, ExchangeInput{
+				ChallengeID: challenge.ID, Attestation: result,
+				DPoPProof:  signedSessionDPoP(t, dpopKey, "POST", exchangeURI, now, "policy-test-exchange-"+test.name),
+				HTTPMethod: "POST", RequestURI: exchangeURI, KeyStorage: "software", AppVersion: "1.0.0",
+			})
+			if !errors.Is(err, ErrSessionInvalid) {
+				t.Fatalf("policy mismatch exchange error=%v want=%v", err, ErrSessionInvalid)
+			}
+			if _, err := challengeStore.Get(ctx, challenge.ID); err != nil {
+				t.Fatalf("rejected policy exchange consumed challenge: %v", err)
+			}
+		})
+	}
+}
+
+type unusedAccessIssuer struct{}
+
+func (unusedAccessIssuer) Prepare(context.Context) (PreparedAccessIssuer, error) {
+	return nil, errors.New("access issuer must not be reached for rejected attestation policy")
+}
+
 func TestSessionExchangeAndRotateWithSingleDatabaseConnection(t *testing.T) {
 	pool, ctx := isolatedSessionPoolWithMaxConnections(t, 1)
-	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 27, 12, 0, 0, 987654321, time.UTC)
 	fixture := createChallengeFixture(t, ctx, pool)
-	activateChallengeTestRevision(t, ctx, pool, fixture, now)
+	policyRevisionID := activateChallengeTestRevision(t, ctx, pool, fixture, now)
 	configurationStore, err := configuration.NewStore(pool)
 	if err != nil {
 		t.Fatalf("construct single-connection configuration store: %v", err)
@@ -637,12 +789,15 @@ func TestSessionExchangeAndRotateWithSingleDatabaseConnection(t *testing.T) {
 		t.Fatalf("construct single-connection challenge store: %v", err)
 	}
 	dpopKey, jwk, jkt := newChallengeKey(t)
+	challengeRequestURI := mustSessionURL(t, "https://gateway.example.test/client/v1/session-challenges")
 	challenge, err := challengeStore.Create(ctx, ChallengeInput{
 		OrganizationID: fixture.organizationID, ApplicationID: fixture.applicationID,
-		EnvironmentID: fixture.environmentID, EnvironmentSlug: "development",
+		EnvironmentID: fixture.environmentID, ConfigurationRevisionID: policyRevisionID, EnvironmentSlug: "development",
 		ApplicationUserID: fixture.applicationUserID, IdentityProvider: "firebase",
 		IdentityVerifiedAt: now, IdentityExpiresAt: now.Add(time.Hour),
 		Platform: "ios", DPoPJKT: jkt, DPoPPublicJWK: jwk,
+		DPoPProofJTI:   sessionProofJTI("single-connection-challenge", now),
+		DPoPHTTPMethod: "POST", DPoPRequestURI: challengeRequestURI,
 	})
 	if err != nil {
 		t.Fatalf("create single-connection challenge: %v", err)
@@ -684,13 +839,20 @@ func TestSessionExchangeAndRotateWithSingleDatabaseConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exchange must not require a nested pool connection: %v", err)
 	}
+	if issued.Access.ExpiresAt.Sub(issued.Access.IssuedAt) != 10*time.Minute || issued.RefreshExpiresAt.Sub(issued.Access.IssuedAt) != 30*24*time.Hour {
+		t.Fatalf("fractional exchange clock changed exact TTLs: access=%s refresh=%s", issued.Access.ExpiresAt.Sub(issued.Access.IssuedAt), issued.RefreshExpiresAt.Sub(issued.Access.IssuedAt))
+	}
 	refreshURI := mustSessionURL(t, "https://gateway.example.test/client/v1/sessions/refresh")
-	if _, err := sessionStore.Rotate(operationCtx, RotateInput{
+	rotated, err := sessionStore.Rotate(operationCtx, RotateInput{
 		RefreshToken: issued.Refresh,
 		DPoPProof:    signedSessionDPoP(t, dpopKey, "POST", refreshURI, now, "single-connection-refresh"),
 		HTTPMethod:   "POST", RequestURI: refreshURI,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("refresh must not require a nested pool connection: %v", err)
+	}
+	if rotated.Access.ExpiresAt.Sub(rotated.Access.IssuedAt) != 10*time.Minute || rotated.RefreshExpiresAt.Sub(rotated.Access.IssuedAt) != 30*24*time.Hour {
+		t.Fatalf("fractional refresh clock changed exact TTLs: access=%s refresh=%s", rotated.Access.ExpiresAt.Sub(rotated.Access.IssuedAt), rotated.RefreshExpiresAt.Sub(rotated.Access.IssuedAt))
 	}
 }
 
@@ -702,10 +864,32 @@ type challengeFixture struct {
 }
 
 func activateChallengeTestRevision(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, now time.Time) string {
+	return activateChallengeTestRevisionWithPolicy(t, ctx, pool, fixture, now, "debug", "required", "debug", "10m")
+}
+
+func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, now time.Time, provider, mode, minimumTrust, maximumAge string) string {
 	t.Helper()
 	adminUserID := mustSessionID(t, id.AdminUser)
 	adminMembershipID := mustSessionID(t, id.AdminMembership)
 	revisionID := mustSessionID(t, id.ConfigRevision)
+	selection := map[string]any{
+		"provider": provider, "mode": mode, "minimumTrustLevel": minimumTrust,
+	}
+	if provider == "debug" {
+		selection["secretRef"] = "secret/debug-attestation-public-keys"
+	}
+	compiledDocument, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"identityProviders": []any{map[string]any{"id": "firebase", "type": "firebase"}},
+			"attestationPolicies": []any{map[string]any{
+				"id": "native", "maxAge": maximumAge,
+				"platforms": map[string]any{"ios": selection},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode active session test revision: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO admin_users (admin_user_id, email, email_normalized, display_name)
 		VALUES ($1, 'session-owner@example.test', 'session-owner@example.test', 'Session Owner')
@@ -723,9 +907,11 @@ func activateChallengeTestRevision(t *testing.T, ctx context.Context, pool *pgxp
 			config_revision_id, organization_id, application_id, environment_id,
 			revision_number, etag, status, document, compiled_document,
 			validation_report, created_by_admin_user_id, validated_at, activated_at
-		) VALUES ($1, $2, $3, $4, 1, 'session-test-etag-0001', 'valid', '{}'::jsonb, '{}'::jsonb,
+		) VALUES (
+		    $1, $2, $3, $4, 1, 'session-test-etag-0001', 'valid', '{}'::jsonb,
+		    $7::jsonb,
 		          '{"valid":true,"checked_at":"2026-08-27T12:00:00Z","issues":[]}'::jsonb, $5, $6, $6)
-	`, revisionID, fixture.organizationID, fixture.applicationID, fixture.environmentID, adminUserID, now); err != nil {
+	`, revisionID, fixture.organizationID, fixture.applicationID, fixture.environmentID, adminUserID, now, compiledDocument); err != nil {
 		t.Fatalf("create active session test revision: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -757,7 +943,7 @@ func activateNextChallengeTestRevision(t *testing.T, ctx context.Context, pool *
 			validation_report, created_by_admin_user_id, validated_at, activated_at
 		) VALUES (
 			$1, $2, $3, $4, 2, 'session-test-etag-0002', 'valid', '{}'::jsonb,
-			'{"spec":{"session":{"accessTokenTtl":"7m","challengeTtl":"4m","refreshTokenTtl":"48h","maximumClockSkewSeconds":30}}}'::jsonb,
+			'{"spec":{"session":{"accessTokenTtl":"7m","challengeTtl":"4m","refreshTokenTtl":"48h","maximumClockSkewSeconds":30},"identityProviders":[{"id":"firebase","type":"firebase"}],"attestationPolicies":[{"id":"native","maxAge":"10m","platforms":{"ios":{"provider":"debug","mode":"required","minimumTrustLevel":"debug","secretRef":"secret/debug-attestation-public-keys"}}}]}}'::jsonb,
 			'{"valid":true,"checked_at":"2026-08-27T12:05:01Z","issues":[]}'::jsonb,
 			$5, $6, $6
 		)
@@ -863,6 +1049,13 @@ func newChallengeKey(t *testing.T) (*ecdsa.PrivateKey, dpop.PublicJWK, string) {
 func sessionProofJTI(label string, now time.Time) string {
 	digest := sha256.Sum256([]byte(label + "\x00" + now.UTC().Format(time.RFC3339Nano)))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func withChallengeProof(input ChallengeInput, target *url.URL, now time.Time, label string) ChallengeInput {
+	input.DPoPProofJTI = sessionProofJTI(label, now)
+	input.DPoPHTTPMethod = "POST"
+	input.DPoPRequestURI = target
+	return input
 }
 
 func signedSessionDPoP(t *testing.T, privateKey *ecdsa.PrivateKey, method string, target *url.URL, now time.Time, label string) DPoPProof {

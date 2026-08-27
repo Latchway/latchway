@@ -76,7 +76,7 @@ func (input RotateInput) validate() error {
 // DPoP-bound refresh token exactly once. Stale identity or attestation state
 // requires a complete new challenge exchange rather than timestamp injection.
 func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSession, error) {
-	now := store.now().UTC()
+	now := store.now().UTC().Truncate(time.Second)
 	if err := input.validate(); err != nil {
 		return IssuedSession{}, err
 	}

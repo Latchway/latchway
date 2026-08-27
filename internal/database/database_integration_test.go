@@ -322,6 +322,147 @@ func TestMigratorPostgreSQLUpgradeV4SessionsAndReplayScope(t *testing.T) {
 	}
 }
 
+func TestMigratorPostgreSQLUpgradeV5InvalidatesUnboundChallenges(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 5)
+
+	const (
+		organizationID  = "org_00000000000000000000000001"
+		applicationID   = "app_00000000000000000000000001"
+		environmentID   = "env_00000000000000000000000001"
+		applicationUser = "usr_00000000000000000000000001"
+		challengeID     = "chl_00000000000000000000000001"
+	)
+	anchor := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO organizations (organization_id, slug, display_name)
+		VALUES ($1, 'challenge-upgrade', 'Challenge Upgrade')
+	`, organizationID); err != nil {
+		t.Fatalf("create version 5 challenge organization: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO applications (application_id, organization_id, slug, display_name)
+		VALUES ($1, $2, 'challenge-upgrade-app', 'Challenge Upgrade App')
+	`, applicationID, organizationID); err != nil {
+		t.Fatalf("create version 5 challenge application: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO environments (
+			environment_id, organization_id, application_id, slug, display_name, kind
+		) VALUES ($1, $2, $3, 'development', 'Development', 'development')
+	`, environmentID, organizationID, applicationID); err != nil {
+		t.Fatalf("create version 5 challenge environment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO application_users (
+			application_user_id, organization_id, application_id
+		) VALUES ($1, $2, $3)
+	`, applicationUser, organizationID, applicationID); err != nil {
+		t.Fatalf("create version 5 challenge user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_challenges (
+			session_challenge_id, organization_id, application_id, environment_id,
+			application_user_id, identity_provider_key, platform, dpop_jkt,
+			dpop_public_jwk, nonce_hash, binding_hash, created_at, expires_at,
+			challenge_nonce, identity_verified_at, identity_expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, 'firebase', 'ios', $6, '{"kty":"EC"}'::jsonb,
+			$7, $8, $9, $10, $11, $9, $12
+		)
+	`, challengeID, organizationID, applicationID, environmentID, applicationUser,
+		strings.Repeat("j", 43), bytes.Repeat([]byte{0x31}, 32), bytes.Repeat([]byte{0x41}, 32),
+		anchor, anchor.Add(5*time.Minute), strings.Repeat("n", 43), anchor.Add(time.Hour)); err != nil {
+		t.Fatalf("insert version 5 unbound challenge: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_challenge_consumptions (
+			organization_id, application_id, environment_id,
+			session_challenge_id, consumed_at
+		) VALUES ($1, $2, $3, $4, $5)
+	`, organizationID, applicationID, environmentID, challengeID, anchor); err != nil {
+		t.Fatalf("consume version 5 unbound challenge: %v", err)
+	}
+
+	migrator := NewMigrator(pool)
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("upgrade populated version 5 schema: %v", err)
+	}
+	var challenges, consumptions int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_challenges`).Scan(&challenges); err != nil {
+		t.Fatalf("count upgraded challenges: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_challenge_consumptions`).Scan(&consumptions); err != nil {
+		t.Fatalf("count upgraded challenge consumptions: %v", err)
+	}
+	if challenges != 0 || consumptions != 0 {
+		t.Fatalf("unbound version 5 challenge state survived upgrade: challenges=%d consumptions=%d", challenges, consumptions)
+	}
+
+	requiredColumns := []string{
+		"config_revision_id",
+		"attestation_policy_id",
+		"attestation_provider",
+		"attestation_mode",
+		"attestation_minimum_trust_level",
+		"attestation_maximum_age_milliseconds",
+		"challenge_dpop_proof_jti_hash",
+		"challenge_dpop_http_method",
+		"challenge_dpop_http_uri_hash",
+	}
+	for _, column := range requiredColumns {
+		var nullable string
+		if err := pool.QueryRow(ctx, `
+			SELECT is_nullable
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'session_challenges'
+			  AND column_name = $1
+		`, column).Scan(&nullable); err != nil {
+			t.Fatalf("read upgraded challenge column %s: %v", column, err)
+		}
+		if nullable != "NO" {
+			t.Fatalf("upgraded challenge column %s nullability=%q want=NO", column, nullable)
+		}
+	}
+	for _, rawColumn := range []string{"challenge_dpop_proof_jti", "challenge_dpop_http_uri"} {
+		var count int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'session_challenges'
+			  AND column_name = $1
+		`, rawColumn).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("raw challenge DPoP column %s exists: count=%d err=%v", rawColumn, count, err)
+		}
+	}
+	var appVersionCheck string
+	if err := pool.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'installations'::regclass
+		  AND conname = 'installations_app_version_length_check'
+	`).Scan(&appVersionCheck); err != nil {
+		t.Fatalf("read upgraded application-version check: %v", err)
+	}
+	if !strings.Contains(appVersionCheck, "char_length(app_version) <= 128") {
+		t.Fatalf("application-version check does not match locked contract: %s", appVersionCheck)
+	}
+	var keyStorageCheck string
+	if err := pool.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'installations'::regclass
+		  AND conname = 'installations_key_storage_check'
+	`).Scan(&keyStorageCheck); err != nil {
+		t.Fatalf("read upgraded key-storage check: %v", err)
+	}
+	if !strings.Contains(keyStorageCheck, "'unknown'::text") {
+		t.Fatalf("key-storage check lacks conservative unknown value: %s", keyStorageCheck)
+	}
+}
+
 func newPostgreSQLIntegrationPool(t *testing.T) (context.Context, *pgxpool.Pool) {
 	t.Helper()
 
@@ -369,6 +510,10 @@ func newPostgreSQLIntegrationPool(t *testing.T) (context.Context, *pgxpool.Pool)
 }
 
 func applyMigrationsThroughV4(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	applyMigrationsThrough(t, ctx, pool, 4)
+}
+
+func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Pool, maximumVersion int64) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE schema_migrations (
@@ -388,7 +533,11 @@ func applyMigrationsThroughV4(t *testing.T, ctx context.Context, pool *pgxpool.P
 		{version: 2, name: "000002_domain_foundation.sql"},
 		{version: 3, name: "000003_admin_token_name_length.sql"},
 		{version: 4, name: "000004_configuration_revisions.sql"},
+		{version: 5, name: "000005_session_challenge_binding.sql"},
 	} {
+		if migrationFile.version > maximumVersion {
+			break
+		}
 		contents, err := migrations.Files.ReadFile(migrationFile.name)
 		if err != nil {
 			t.Fatalf("read migration %s: %v", migrationFile.name, err)

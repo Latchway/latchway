@@ -165,7 +165,7 @@
         },
         {
           "if": { "properties": { "type": { "const": "clerk" } }, "required": ["type"] },
-          "then": { "required": ["issuer"] }
+          "then": { "required": ["issuer", "audiences"] }
         },
         {
           "if": {
@@ -183,6 +183,19 @@
         },
         {
           "if": {
+            "required": ["symmetricSecretRef"]
+          },
+          "then": {
+            "required": ["type", "allowedAlgorithms", "acknowledgeSymmetricRisk"],
+            "properties": {
+              "type": { "const": "custom_jwt" },
+              "allowedAlgorithms": { "const": ["HS256"] },
+              "acknowledgeSymmetricRisk": { "const": true }
+            }
+          }
+        },
+        {
+          "if": {
             "properties": {
               "allowedAlgorithms": { "contains": { "const": "HS256" } }
             },
@@ -190,7 +203,11 @@
           },
           "then": {
             "required": ["symmetricSecretRef", "acknowledgeSymmetricRisk"],
-            "properties": { "acknowledgeSymmetricRisk": { "const": true } }
+            "properties": {
+              "type": { "const": "custom_jwt" },
+              "allowedAlgorithms": { "const": ["HS256"] },
+              "acknowledgeSymmetricRisk": { "const": true }
+            }
           }
         }
       ]

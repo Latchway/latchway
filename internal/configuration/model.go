@@ -122,7 +122,7 @@ type PlanChange struct {
 }
 
 const (
-	defaultAccessTokenTTL  = 15 * time.Minute
+	defaultAccessTokenTTL  = 10 * time.Minute
 	defaultChallengeTTL    = 5 * time.Minute
 	defaultRefreshTokenTTL = 30 * 24 * time.Hour
 	defaultClockSkew       = 60 * time.Second
@@ -193,10 +193,11 @@ type AttestationPolicy struct {
 }
 
 func (policy AttestationPolicy) clone() AttestationPolicy {
-	policy.Platforms = make(map[string]PlatformAttestation, len(policy.Platforms))
+	platforms := make(map[string]PlatformAttestation, len(policy.Platforms))
 	for platform, selection := range policy.Platforms {
-		policy.Platforms[platform] = selection.clone()
+		platforms[platform] = selection.clone()
 	}
+	policy.Platforms = platforms
 	return policy
 }
 
@@ -247,6 +248,30 @@ func (snapshot ActiveSnapshot) SelectAttestation(policyID, platform string) (Pla
 	}
 	selection, ok := policy.Platforms[platform]
 	return selection.clone(), ok
+}
+
+// RequiredAttestationForPlatform returns the only required attestation policy
+// configured for a platform. Challenge creation has no policy identifier on
+// the client wire request, so zero or multiple eligible policies are
+// deliberately ambiguous and fail closed. Preferred and disabled selections
+// are not eligible for the initial sealed-session exchange.
+func (snapshot ActiveSnapshot) RequiredAttestationForPlatform(platform string) (AttestationPolicy, PlatformAttestation, bool) {
+	var matchedPolicy AttestationPolicy
+	var matchedSelection PlatformAttestation
+	found := false
+	for _, policy := range snapshot.attestations {
+		selection, ok := policy.Platforms[platform]
+		if !ok || selection.Mode != "required" {
+			continue
+		}
+		if found {
+			return AttestationPolicy{}, PlatformAttestation{}, false
+		}
+		matchedPolicy = policy.clone()
+		matchedSelection = selection.clone()
+		found = true
+	}
+	return matchedPolicy, matchedSelection, found
 }
 
 func cloneStringMap(input map[string]string) map[string]string {

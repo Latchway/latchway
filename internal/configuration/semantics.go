@@ -84,8 +84,18 @@ func (validator *Validator) identityIssues(providers map[string]map[string]any) 
 		base := "/spec/identityProviders/" + pointerToken(providerID)
 		providerType := stringValue(provider, "type")
 		algorithms := stringArray(provider, "allowedAlgorithms")
-		if slices.Contains(algorithms, "HS256") && providerType != "custom_jwt" {
+		symmetricSecret := stringValue(provider, "symmetricSecretRef")
+		acknowledgeSymmetricRisk, _ := provider["acknowledgeSymmetricRisk"].(bool)
+		hasHS256 := slices.Contains(algorithms, "HS256")
+		hs256Only := len(algorithms) == 1 && algorithms[0] == "HS256"
+		if hasHS256 && providerType != "custom_jwt" {
 			issues = append(issues, errorIssue("symmetric_provider_not_explicit", base+"/allowedAlgorithms", "HS256 is permitted only for an explicitly configured custom JWT provider."))
+		}
+		if symmetricSecret != "" && (providerType != "custom_jwt" || !hs256Only || !acknowledgeSymmetricRisk) {
+			issues = append(issues, errorIssue("symmetric_identity_source_invalid", base+"/symmetricSecretRef", "A symmetric identity key is allowed only for an acknowledged custom JWT provider using exactly HS256."))
+		}
+		if hasHS256 && (providerType != "custom_jwt" || symmetricSecret == "" || !hs256Only || !acknowledgeSymmetricRisk) {
+			issues = append(issues, errorIssue("hs256_identity_configuration_invalid", base+"/allowedAlgorithms", "HS256 requires an acknowledged custom JWT provider with one symmetric secret source and no asymmetric algorithms."))
 		}
 		if mappings, ok := provider["claimMappings"].(map[string]any); ok {
 			for _, claim := range sortedObjectKeys(mappings) {
@@ -120,6 +130,9 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			allowDangerous, _ := selection["dangerousAllowInProduction"].(bool)
 			if environmentKind == "production" && provider == "debug" && mode != "disabled" && !allowDangerous {
 				issues = append(issues, errorIssue("debug_attestation_forbidden", selectionPath+"/provider", "Debug attestation in production requires explicit dangerous acknowledgement."))
+			}
+			if provider == "debug" && mode != "disabled" && stringValue(selection, "secretRef") == "" {
+				issues = append(issues, errorIssue("debug_attestation_secret_required", selectionPath+"/secretRef", "Enabled debug attestation requires a server-side public-key secret reference."))
 			}
 			if mode == "required" && stringValue(selection, "minimumTrustLevel") == "none" {
 				issues = append(issues, errorIssue("attestation_trust_too_weak", selectionPath+"/minimumTrustLevel", "Required attestation must require a verified trust level."))

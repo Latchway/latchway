@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,7 +33,7 @@ var (
 	ErrAttestationRefreshNeeded = errors.New("fresh application attestation is required")
 )
 
-var keyStoragePattern = regexp.MustCompile(`^(secure_enclave|keychain|strongbox|tee|software|webcrypto|memory)$`)
+var keyStoragePattern = regexp.MustCompile(`^(unknown|secure_enclave|keychain|strongbox|tee|software|webcrypto|memory)$`)
 
 // PreparedAccessIssuer signs with key material resolved before a session
 // transaction begins and therefore performs no database work.
@@ -141,18 +142,19 @@ type ExchangeInput struct {
 }
 
 func (input ExchangeInput) validate() error {
-	if id.Validate(input.ChallengeID, id.SessionChallenge) != nil || input.DPoPProof.value == "" || input.HTTPMethod == "" || input.RequestURI == nil || !keyStoragePattern.MatchString(input.KeyStorage) || len(input.AppVersion) < 1 || len(input.AppVersion) > 100 || strings.TrimSpace(input.AppVersion) != input.AppVersion {
+	appVersionLength := utf8.RuneCountInString(input.AppVersion)
+	if id.Validate(input.ChallengeID, id.SessionChallenge) != nil || input.DPoPProof.value == "" || input.HTTPMethod == "" || input.RequestURI == nil || !keyStoragePattern.MatchString(input.KeyStorage) || !utf8.ValidString(input.AppVersion) || appVersionLength < 1 || appVersionLength > 128 || strings.TrimSpace(input.AppVersion) != input.AppVersion {
 		return ErrSessionInvalid
 	}
 	return nil
 }
 
 func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSession, error) {
-	now := store.now().UTC()
+	now := store.now().UTC().Truncate(time.Second)
 	if err := input.validate(); err != nil {
 		return IssuedSession{}, err
 	}
-	challengeStore := &ChallengeStore{pool: store.pool, now: store.now}
+	challengeStore := &ChallengeStore{pool: store.pool, configuration: store.configuration, now: store.now}
 	challenge, err := challengeStore.Get(ctx, input.ChallengeID)
 	if err != nil {
 		return IssuedSession{}, err
@@ -168,8 +170,14 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 	if err != nil {
 		return IssuedSession{}, ErrSessionScope
 	}
+	if !challengeMatchesSnapshot(challenge, snapshot) {
+		return IssuedSession{}, ErrSessionScope
+	}
 	verifiedAttestation, err := input.Attestation.ValidatedSnapshot(challenge.BindingHash, now)
 	if err != nil {
+		return IssuedSession{}, ErrSessionInvalid
+	}
+	if !challengeAttestationAllows(challenge.Attestation, verifiedAttestation, now) {
 		return IssuedSession{}, ErrSessionInvalid
 	}
 	if !replayMethodPattern.MatchString(input.HTTPMethod) {
@@ -288,6 +296,49 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 		RefreshExpiresAt: refreshExpiresAt, GrantID: grantID, Installation: installation,
 		Trust: Trust{Provider: input.attestation.Provider, Level: input.attestation.TrustLevel, VerifiedAt: input.attestation.VerifiedAt, ExpiresAt: input.attestation.ExpiresAt},
 	}, nil
+}
+
+func challengeAttestationAllows(policy ChallengeAttestationPolicy, result attestation.Result, now time.Time) bool {
+	if !validAttestationProvider(policy.Provider) ||
+		policy.Mode != "required" ||
+		!trustLevelPattern.MatchString(policy.MinimumTrustLevel) ||
+		policy.MaximumAge < time.Minute || policy.MaximumAge > 30*24*time.Hour ||
+		result.Provider != policy.Provider || now.IsZero() ||
+		now.After(result.VerifiedAt.Add(policy.MaximumAge)) {
+		return false
+	}
+	return trustSatisfies(result.TrustLevel, policy.MinimumTrustLevel)
+}
+
+// trustSatisfies keeps debug evidence outside the production assurance order.
+// The remaining values form the explicit order documented by the trust model;
+// unknown values fail closed instead of receiving a default rank.
+func trustSatisfies(actual, minimum string) bool {
+	if actual == "debug" || minimum == "debug" {
+		return actual == minimum
+	}
+	actualRank, actualOK := trustRank(actual)
+	minimumRank, minimumOK := trustRank(minimum)
+	return actualOK && minimumOK && actualRank >= minimumRank
+}
+
+func trustRank(level string) (int, bool) {
+	switch level {
+	case "none":
+		return 0, true
+	case "identity_only":
+		return 1, true
+	case "web_risk_verified":
+		return 2, true
+	case "app_verified":
+		return 3, true
+	case "device_verified":
+		return 4, true
+	case "strong_device_verified":
+		return 5, true
+	default:
+		return 0, false
+	}
 }
 
 func upsertInstallation(ctx context.Context, tx pgx.Tx, candidate string, input ExchangeInput, encodedJWK []byte, now time.Time) (Installation, bool, error) {
@@ -409,7 +460,9 @@ func insertSessionGrant(ctx context.Context, tx pgx.Tx, grantID, installationID 
 		JOIN application_users u
 		  ON u.organization_id = c.organization_id AND u.application_id = c.application_id
 		 AND u.application_user_id = c.application_user_id AND u.status = 'active'
-		WHERE c.session_challenge_id = $13 AND c.binding_hash = $14
+		WHERE c.session_challenge_id = $13
+		  AND c.binding_hash = $14
+		  AND c.config_revision_id = $4
 	`, grantID, installationID, access.JTIHash[:], input.policyRevisionID, input.attestation.TrustLevel,
 		notAfter(input.challenge.IdentityVerifiedAt, issuedAt), input.challenge.IdentityExpiresAt,
 		notAfter(input.attestation.VerifiedAt, issuedAt),

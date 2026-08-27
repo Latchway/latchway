@@ -454,6 +454,18 @@ type SessionChallenge struct {
 	IdentityVerifiedAt pgtype.Timestamptz `db:"identity_verified_at" json:"identity_verified_at"`
 	// Expiry of the already-verified external identity credential; the credential itself is never persisted.
 	IdentityExpiresAt pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
+	// Exact immutable active configuration revision used to issue the challenge.
+	ConfigRevisionID                  string `db:"config_revision_id" json:"config_revision_id"`
+	AttestationPolicyID               string `db:"attestation_policy_id" json:"attestation_policy_id"`
+	AttestationProvider               string `db:"attestation_provider" json:"attestation_provider"`
+	AttestationMode                   string `db:"attestation_mode" json:"attestation_mode"`
+	AttestationMinimumTrustLevel      string `db:"attestation_minimum_trust_level" json:"attestation_minimum_trust_level"`
+	AttestationMaximumAgeMilliseconds int64  `db:"attestation_maximum_age_milliseconds" json:"attestation_maximum_age_milliseconds"`
+	// SHA-256 digest of the validated challenge-request DPoP jti; raw jti values are never persisted.
+	ChallengeDpopProofJtiHash []byte `db:"challenge_dpop_proof_jti_hash" json:"challenge_dpop_proof_jti_hash"`
+	ChallengeDpopHttpMethod   string `db:"challenge_dpop_http_method" json:"challenge_dpop_http_method"`
+	// SHA-256 digest of the normalized challenge-request URI; raw request URIs are never persisted.
+	ChallengeDpopHttpUriHash []byte `db:"challenge_dpop_http_uri_hash" json:"challenge_dpop_http_uri_hash"`
 }
 
 type SessionChallengeConsumption struct {

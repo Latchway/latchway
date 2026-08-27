@@ -301,7 +301,7 @@ func applyDefaults(root map[string]any) {
 		}
 	}
 	session := ensureObject(spec, "session")
-	setDefault(session, "accessTokenTtl", "15m")
+	setDefault(session, "accessTokenTtl", "10m")
 	setDefault(session, "challengeTtl", "5m")
 	setDefault(session, "refreshTokenTtl", "30d")
 	setDefault(session, "maximumClockSkewSeconds", json.Number("60"))

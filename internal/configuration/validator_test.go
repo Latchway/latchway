@@ -31,7 +31,7 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	}
 	spec := objectValue(value.(map[string]any), "spec")
 	session := objectValue(spec, "session")
-	if stringValue(session, "challengeTtl") != "5m" || stringValue(session, "accessTokenTtl") != "15m" || stringValue(session, "refreshTokenTtl") != "30d" {
+	if stringValue(session, "challengeTtl") != "5m" || stringValue(session, "accessTokenTtl") != "10m" || stringValue(session, "refreshTokenTtl") != "30d" {
 		t.Fatalf("compiled session defaults = %#v", session)
 	}
 	model := objectArray(spec, "models")[0]
@@ -78,6 +78,123 @@ func TestValidatorRejectsSchemaReferencesAndBadPolicy(t *testing.T) {
 	}
 }
 
+func TestValidatorRequiresClerkAudience(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	spec["identityProviders"] = []any{map[string]any{
+		"id": "clerk", "type": "clerk", "issuer": "https://clerk.example.test",
+	}}
+	encoded, _ := json.Marshal(document)
+	issues := validator.SchemaIssues(encoded)
+	if !hasIssue(issues, "schema_required") && !hasIssue(issues, "schema_allof") {
+		t.Fatalf("Clerk provider without audiences was not rejected: %+v", issues)
+	}
+
+	objectArray(spec, "identityProviders")[0]["audiences"] = []any{"latchway-client"}
+	encoded, _ = json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("Clerk provider with issuer and audience was rejected: %+v", report.Issues)
+	}
+}
+
+func TestValidatorRequiresDebugAttestationKeySecret(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	selection := objectValue(
+		objectValue(objectArray(objectValue(document, "spec"), "attestationPolicies")[0], "platforms"),
+		"ios",
+	)
+	selection["provider"] = "debug"
+	selection["minimumTrustLevel"] = "debug"
+	selection["dangerousAllowInProduction"] = true
+	encoded, _ := json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "debug_attestation_secret_required") {
+		t.Fatalf("enabled debug attestation without a key secret was not rejected: %+v", report.Issues)
+	}
+
+	selection["secretRef"] = "secret/present"
+	encoded, _ = json.Marshal(document)
+	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("debug attestation with explicit server-side key secret was rejected: %+v", report.Issues)
+	}
+}
+
+func TestValidatorRestrictsSymmetricIdentityKeysToExplicitHS256(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	validProvider := map[string]any{
+		"id":                       "custom",
+		"type":                     "custom_jwt",
+		"issuer":                   "https://issuer.example.test",
+		"audiences":                []any{"latchway-client"},
+		"allowedAlgorithms":        []any{"HS256"},
+		"symmetricSecretRef":       "secret/present",
+		"acknowledgeSymmetricRisk": true,
+	}
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "generic OIDC symmetric", mutate: func(provider map[string]any) { provider["type"] = "generic_oidc" }},
+		{name: "asymmetric algorithm with symmetric source", mutate: func(provider map[string]any) { provider["allowedAlgorithms"] = []any{"RS256"} }},
+		{name: "mixed algorithms", mutate: func(provider map[string]any) { provider["allowedAlgorithms"] = []any{"HS256", "RS256"} }},
+		{name: "risk not acknowledged", mutate: func(provider map[string]any) { provider["acknowledgeSymmetricRisk"] = false }},
+		{name: "HS256 with asymmetric source", mutate: func(provider map[string]any) {
+			delete(provider, "symmetricSecretRef")
+			provider["staticPublicKeySecretRef"] = "secret/present"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			provider := deepClone(validProvider).(map[string]any)
+			test.mutate(provider)
+			objectValue(document, "spec")["identityProviders"] = []any{provider}
+			encoded, _ := json.Marshal(document)
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil {
+				t.Fatalf("unsafe symmetric identity configuration compiled: %+v", report.Issues)
+			}
+		})
+	}
+
+	document := configurationObject(t)
+	objectValue(document, "spec")["identityProviders"] = []any{deepClone(validProvider)}
+	encoded, _ := json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("explicit custom JWT HS256 configuration was rejected: %+v", report.Issues)
+	}
+
+	semanticIssues := validator.identityIssues(map[string]map[string]any{
+		"custom": {
+			"id": "custom", "type": "custom_jwt", "allowedAlgorithms": []any{"RS256"},
+			"symmetricSecretRef": "secret/present", "acknowledgeSymmetricRisk": true,
+		},
+	})
+	if !hasIssue(semanticIssues, "symmetric_identity_source_invalid") {
+		t.Fatalf("semantic defense did not reject asymmetric use of a symmetric source: %+v", semanticIssues)
+	}
+}
+
 func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	t.Parallel()
 
@@ -95,7 +212,7 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := snapshot.SessionPolicy()
-	if session.ChallengeTTL != 5*time.Minute || session.AccessTokenTTL != 15*time.Minute || session.RefreshTokenTTL != 30*24*time.Hour || session.MaximumClockSkew != time.Minute {
+	if session.ChallengeTTL != 5*time.Minute || session.AccessTokenTTL != 10*time.Minute || session.RefreshTokenTTL != 30*24*time.Hour || session.MaximumClockSkew != time.Minute {
 		t.Fatalf("session policy = %+v", session)
 	}
 	provider, ok := snapshot.IdentityProvider("firebase")
@@ -118,6 +235,32 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	selected, ok := snapshot.SelectAttestation("native", "ios")
 	if !ok || selected.Provider != "app_attest" {
 		t.Fatalf("attestation selection was mutable: %+v", selected)
+	}
+	requiredPolicy, requiredSelection, ok := snapshot.RequiredAttestationForPlatform("ios")
+	if !ok || requiredPolicy.ID != "native" || requiredSelection.Provider != "app_attest" || requiredSelection.Mode != "required" {
+		t.Fatalf("required platform attestation selection = policy=%+v selection=%+v ok=%t", requiredPolicy, requiredSelection, ok)
+	}
+	requiredSelection.ApplicationIdentifiers = append(requiredSelection.ApplicationIdentifiers, "changed")
+	requiredPolicy.Platforms["ios"] = requiredSelection
+	requiredAgain, selectionAgain, ok := snapshot.RequiredAttestationForPlatform("ios")
+	if !ok || requiredAgain.ID != "native" || selectionAgain.Provider != "app_attest" || len(selectionAgain.ApplicationIdentifiers) != 0 {
+		t.Fatalf("required platform selection was mutable: policy=%+v selection=%+v", requiredAgain, selectionAgain)
+	}
+	if _, _, ok := snapshot.RequiredAttestationForPlatform("node"); ok {
+		t.Fatal("platform without one required attestation policy was accepted")
+	}
+	ambiguous := snapshot
+	ambiguous.attestations = map[string]AttestationPolicy{
+		"native": snapshot.attestations["native"].clone(),
+		"second": {
+			ID: "second", MaxAge: time.Hour,
+			Platforms: map[string]PlatformAttestation{
+				"ios": {Provider: "app_attest", Mode: "required", MinimumTrustLevel: "app_verified"},
+			},
+		},
+	}
+	if _, _, ok := ambiguous.RequiredAttestationForPlatform("ios"); ok {
+		t.Fatal("multiple required attestation policies were treated as unambiguous")
 	}
 	compiledCopy := snapshot.CompiledJSON()
 	compiledCopy[0] = '['

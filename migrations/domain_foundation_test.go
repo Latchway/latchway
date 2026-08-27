@@ -130,3 +130,47 @@ func TestSessionBindingMigrationSeparatesAuditAndEphemeralRetention(t *testing.T
 		}
 	}
 }
+
+func TestSessionChallengePolicyMigrationFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	contents, err := Files.ReadFile("000006_session_challenge_policy.sql")
+	if err != nil {
+		t.Fatalf("read challenge policy migration: %v", err)
+	}
+	sql := strings.ToLower(string(contents))
+	for _, required := range []string{
+		"delete from session_challenge_consumptions",
+		"delete from session_challenges",
+		"add column config_revision_id",
+		"add column attestation_policy_id",
+		"add column attestation_provider",
+		"add column attestation_mode",
+		"add column attestation_minimum_trust_level",
+		"add column attestation_maximum_age_milliseconds",
+		"add column challenge_dpop_proof_jti_hash",
+		"add column challenge_dpop_http_uri_hash",
+		"session_challenges_config_revision_fkey",
+		"session_challenges_dpop_proof_unique",
+		"unique (\n            environment_id,\n            dpop_jkt,\n            challenge_dpop_proof_jti_hash",
+		"installations_app_version_length_check",
+		"char_length(app_version) between 1 and 128",
+		"installations_key_storage_check",
+		"'unknown'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("challenge policy migration is missing %q", required)
+		}
+	}
+	if strings.Index(sql, "delete from session_challenge_consumptions") > strings.Index(sql, "delete from session_challenges") {
+		t.Error("challenge consumptions must be invalidated before their parent challenges")
+	}
+	for _, forbidden := range []string{
+		"add column challenge_dpop_proof_jti text",
+		"add column challenge_dpop_http_uri text",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("challenge policy migration persists raw DPoP material via %q", forbidden)
+		}
+	}
+}
