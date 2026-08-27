@@ -566,10 +566,10 @@ components:
       additionalProperties: false
       required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, installation, trust]
       properties:
-        access_token: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
+        access_token: { type: string, minLength: 64, maxLength: 16384, x-sensitive: true }
         token_type: { type: string, const: DPoP }
         expires_in: { type: integer, minimum: 60, maximum: 3600 }
-        refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        refresh_token: { type: string, minLength: 32, maxLength: 2048, x-sensitive: true }
         refresh_expires_in: { type: integer, minimum: 300, maximum: 31536000 }
         installation:
           $ref: '#/components/schemas/InstallationSummary'
