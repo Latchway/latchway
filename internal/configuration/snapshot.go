@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 type compiledSnapshotDocument struct {
@@ -14,17 +15,19 @@ type compiledSnapshotDocument struct {
 			RefreshTokenTTL         string `json:"refreshTokenTtl"`
 			MaximumClockSkewSeconds *int   `json:"maximumClockSkewSeconds"`
 		} `json:"session"`
-		IdentityProviders []IdentityProvider `json:"identityProviders"`
-		AttestationPolicy []struct {
-			ID        string                         `json:"id"`
-			MaxAge    string                         `json:"maxAge"`
-			Platforms map[string]PlatformAttestation `json:"platforms"`
-		} `json:"attestationPolicies"`
-		Upstreams  []compiledUpstream  `json:"upstreams"`
-		Models     []compiledModel     `json:"models"`
-		LimitPlans []compiledLimitPlan `json:"limitPlans"`
-		Features   []compiledFeature   `json:"features"`
+		IdentityProviders []IdentityProvider          `json:"identityProviders"`
+		AttestationPolicy []compiledAttestationPolicy `json:"attestationPolicies"`
+		Upstreams         []compiledUpstream          `json:"upstreams"`
+		Models            []compiledModel             `json:"models"`
+		LimitPlans        []compiledLimitPlan         `json:"limitPlans"`
+		Features          []compiledFeature           `json:"features"`
 	} `json:"spec"`
+}
+
+type compiledAttestationPolicy struct {
+	ID        string                         `json:"id"`
+	MaxAge    string                         `json:"maxAge"`
+	Platforms map[string]PlatformAttestation `json:"platforms"`
 }
 
 func newActiveSnapshot(revisionID, environmentID string, document, compiled json.RawMessage) (ActiveSnapshot, error) {
@@ -54,27 +57,101 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 		}
 		snapshot.identities[provider.ID] = provider.clone()
 	}
+	if len(parsed.Spec.AttestationPolicy) == 0 || len(parsed.Spec.AttestationPolicy) > 32 {
+		return ActiveSnapshot{}, errorsCorruptSnapshot("attestation policy set")
+	}
+	requiredPolicyByPlatform := make(map[string]string)
 	for _, rawPolicy := range parsed.Spec.AttestationPolicy {
-		if rawPolicy.ID == "" {
-			return ActiveSnapshot{}, errorsCorruptSnapshot("attestation policy ID")
+		policy, policyErr := runtimeAttestationPolicy(rawPolicy)
+		if policyErr != nil || !insertUnique(snapshot.attestations, policy.ID, policy) {
+			return ActiveSnapshot{}, errorsCorruptSnapshot("attestation policy")
 		}
-		maxAge := defaultAttestationAge
-		if rawPolicy.MaxAge != "" {
-			maxAge, err = parseConfigDuration(rawPolicy.MaxAge)
-			if err != nil {
-				return ActiveSnapshot{}, errorsCorruptSnapshot("attestation maximum age")
+		for platform, selection := range policy.Platforms {
+			if selection.Mode != "required" {
+				continue
 			}
+			if _, exists := requiredPolicyByPlatform[platform]; exists {
+				return ActiveSnapshot{}, errorsCorruptSnapshot("ambiguous required attestation policy")
+			}
+			requiredPolicyByPlatform[platform] = policy.ID
 		}
-		policy := AttestationPolicy{ID: rawPolicy.ID, MaxAge: maxAge, Platforms: make(map[string]PlatformAttestation, len(rawPolicy.Platforms))}
-		for platform, selection := range rawPolicy.Platforms {
-			policy.Platforms[platform] = selection.clone()
-		}
-		snapshot.attestations[policy.ID] = policy
 	}
 	if err := snapshot.loadRuntimeConfiguration(parsed.Spec.Upstreams, parsed.Spec.Models, parsed.Spec.LimitPlans, parsed.Spec.Features); err != nil {
 		return ActiveSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func runtimeAttestationPolicy(raw compiledAttestationPolicy) (AttestationPolicy, error) {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || raw.MaxAge == "" || len(raw.Platforms) == 0 || len(raw.Platforms) > 6 {
+		return AttestationPolicy{}, ErrInvalid
+	}
+	maxAge, err := parseConfigDuration(raw.MaxAge)
+	if err != nil || maxAge < time.Minute || maxAge > 30*24*time.Hour {
+		return AttestationPolicy{}, ErrInvalid
+	}
+	policy := AttestationPolicy{ID: raw.ID, MaxAge: maxAge, Platforms: make(map[string]PlatformAttestation, len(raw.Platforms))}
+	for platform, selection := range raw.Platforms {
+		if !runtimeAttestationSelection(platform, selection) {
+			return AttestationPolicy{}, ErrInvalid
+		}
+		policy.Platforms[platform] = selection.clone()
+	}
+	return policy, nil
+}
+
+func runtimeAttestationSelection(platform string, selection PlatformAttestation) bool {
+	if !runtimeAttestationPlatform(platform) ||
+		!providerAllowedOnPlatform(selection.Provider, platform) ||
+		!runtimeAttestationMode(selection.Mode) ||
+		!runtimeAttestationTrust(selection.MinimumTrustLevel) ||
+		(selection.Mode == "required" && selection.MinimumTrustLevel == "none") ||
+		(selection.SecretRef != "" && !runtimeSecretRefPattern.MatchString(selection.SecretRef)) ||
+		(selection.Provider == "debug" && selection.Mode != "disabled" && selection.SecretRef == "") ||
+		(selection.Mode != "disabled" && (len(selection.ApplicationIdentifiers) != 0 || len(selection.AllowedOrigins) != 0)) {
+		return false
+	}
+	return runtimeAttestationStrings(selection.ApplicationIdentifiers, 256, false) &&
+		runtimeAttestationStrings(selection.AllowedOrigins, 0, true)
+}
+
+func runtimeAttestationPlatform(platform string) bool {
+	switch platform {
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeAttestationMode(mode string) bool {
+	return mode == "disabled" || mode == "preferred" || mode == "required"
+}
+
+func runtimeAttestationTrust(level string) bool {
+	switch level {
+	case "none", "identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeAttestationStrings(values []string, maximumLength int, origins bool) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value == "" || (maximumLength > 0 && utf8.RuneCountInString(value) > maximumLength) {
+			return false
+		}
+		if origins && !canonicalIdentityHTTPSOrigin(value) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
 }
 
 func compiledSessionPolicy(document compiledSnapshotDocument) (SessionPolicy, error) {

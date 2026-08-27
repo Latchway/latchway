@@ -201,7 +201,7 @@ func findExternalIdentity(ctx context.Context, tx pgx.Tx, scope UserScope, princ
 	if err != nil {
 		return storedUser{}, false, fmt.Errorf("read external identity: %w", err)
 	}
-	claims, err := decodeNormalizedClaims(claimsJSON)
+	claims, err := DecodeNormalizedClaims(claimsJSON)
 	if err != nil {
 		return storedUser{}, false, fmt.Errorf("stored normalized claims are invalid: %w", err)
 	}
@@ -268,7 +268,11 @@ func (store *UserStore) SetBlocked(ctx context.Context, scope UserScope, userID 
 	return nil
 }
 
-func decodeNormalizedClaims(encoded []byte) (map[string]any, error) {
+// DecodeNormalizedClaims decodes and validates the bounded, explicitly
+// configured claim projection stored for an application user. The returned
+// map owns all of its mutable children, so callers cannot retain aliases into
+// a database driver buffer or a previously decoded authorization context.
+func DecodeNormalizedClaims(encoded []byte) (map[string]any, error) {
 	value, err := jsonsafe.Decode(encoded)
 	if err != nil {
 		return nil, err

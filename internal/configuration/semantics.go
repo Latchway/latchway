@@ -254,6 +254,16 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			if mode == "required" && stringValue(selection, "minimumTrustLevel") == "none" {
 				issues = append(issues, errorIssue("attestation_trust_too_weak", selectionPath+"/minimumTrustLevel", "Required attestation must require a verified trust level."))
 			}
+			// The current verifier set does not bind either value into durable
+			// attestation evidence. Reject enabled constraints at validation time so
+			// an activated policy cannot place every client into a permanent
+			// request-time step-up loop.
+			if mode != "disabled" && len(stringArray(selection, "applicationIdentifiers")) != 0 {
+				issues = append(issues, errorIssue("attestation_application_identifiers_unsupported", selectionPath+"/applicationIdentifiers", "Application identifier constraints are not supported until the selected verifier binds them into durable attestation evidence."))
+			}
+			if mode != "disabled" && len(stringArray(selection, "allowedOrigins")) != 0 {
+				issues = append(issues, errorIssue("attestation_allowed_origins_unsupported", selectionPath+"/allowedOrigins", "Allowed-origin constraints are not supported until the selected verifier binds them into durable attestation evidence."))
+			}
 		}
 	}
 	return issues
@@ -326,7 +336,8 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 
 func validateUpstreamURL(raw, path string) (*url.URL, []Issue) {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil ||
+		parsed.Opaque != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 		return nil, []Issue{errorIssue("upstream_url_invalid", path, "The upstream URL must be an absolute HTTP(S) URL without credentials, query, or fragment.")}
 	}
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))

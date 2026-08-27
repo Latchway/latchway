@@ -316,8 +316,11 @@ func currentRefreshPolicyError(snapshot configuration.ActiveSnapshot, binding Re
 	if binding.AttestedAt.IsZero() || !binding.AttestationExpiresAt.After(now) {
 		return ErrAttestationRefreshNeeded
 	}
-	if now.IsZero() || !binding.AttestedAt.Add(policy.MaxAge).After(now) {
+	if now.IsZero() {
 		return ErrAttestationStepUpRequired
+	}
+	if !binding.AttestedAt.Add(policy.MaxAge).After(now) {
+		return ErrAttestationRefreshNeeded
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/latchway/latchway/internal/configuration"
 )
@@ -12,7 +13,7 @@ func FuzzResolve(f *testing.F) {
 	f.Add("assistant", "free", true, uint16(10), uint16(1), byte(1))
 	f.Add("missing", "blocked", false, uint16(0), uint16(0), byte(2))
 
-	resolver, err := NewResolver()
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -26,7 +27,9 @@ func FuzzResolve(f *testing.F) {
 		}
 		snapshot.features["assistant"] = feature
 		input := policyInput(plan)
-		input.Principal["authenticated"] = authenticated
+		if !authenticated {
+			input.authorization.accessExpiresAt = policyTestNow
+		}
 
 		decision, resolveErr := resolver.Resolve(context.Background(), snapshot, featureID, input)
 		if resolveErr != nil {

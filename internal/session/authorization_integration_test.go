@@ -50,6 +50,13 @@ func TestAccessAuthorizationAndRevocationPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare rotated revocation family: %v", err)
 	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE application_users
+		SET normalized_claims = '{"plan":"premium","roles":["member","tester"]}'::jsonb
+		WHERE application_user_id = $1
+	`, fixture.principal.ApplicationUserID); err != nil {
+		t.Fatalf("set durable authorization claims: %v", err)
+	}
 
 	baselineReplays := countAccessRevocationRows(t, fixture.ctx, fixture.pool, "dpop_replay_entries", "TRUE")
 	assertInstallationActive := func() {
@@ -166,6 +173,42 @@ func TestAccessAuthorizationAndRevocationPostgreSQL(t *testing.T) {
 	authorized, err := fixture.store.AuthorizeAccess(fixture.ctx, authorizedInput)
 	if err != nil || authorized.SessionGrantID != fixture.issued.GrantID || authorized.InstallationID != fixture.issued.Installation.ID {
 		t.Fatalf("authorize proof-bound access=%#v err=%v", authorized, err)
+	}
+	if authorized.InstallationPlatform != "ios" || authorized.EnvironmentKind != "development" ||
+		!authorized.AttestedAt.Equal(fixture.issued.Trust.VerifiedAt) || authorized.NormalizedClaims["plan"] != "premium" {
+		t.Fatalf("authorization omitted durable policy context: %#v", authorized)
+	}
+	authorized.NormalizedClaims["plan"] = "forged"
+	authorized.NormalizedClaims["roles"].([]any)[0] = "owner"
+	freshAuthorization, err := fixture.store.AuthorizeAccess(fixture.ctx, validInput("access-authorize-claims-copy"))
+	if err != nil {
+		t.Fatalf("authorize fresh claims snapshot: %v", err)
+	}
+	roles, ok := freshAuthorization.NormalizedClaims["roles"].([]any)
+	if !ok || freshAuthorization.NormalizedClaims["plan"] != "premium" || roles[0] != "member" {
+		t.Fatalf("caller mutation reached durable claims: %#v", freshAuthorization.NormalizedClaims)
+	}
+
+	invalidClaimsInput := validInput("access-authorize-invalid-claims")
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE application_users
+		SET normalized_claims = '{"plan":{"untrusted":"premium"}}'::jsonb
+		WHERE application_user_id = $1
+	`, fixture.principal.ApplicationUserID); err != nil {
+		t.Fatalf("corrupt durable claims fixture: %v", err)
+	}
+	if _, err := fixture.store.AuthorizeAccess(fixture.ctx, invalidClaimsInput); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("invalid durable claims error=%v, want session invalid", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE application_users
+		SET normalized_claims = '{"plan":"premium","roles":["member","tester"]}'::jsonb
+		WHERE application_user_id = $1
+	`, fixture.principal.ApplicationUserID); err != nil {
+		t.Fatalf("restore durable claims fixture: %v", err)
+	}
+	if _, err := fixture.store.AuthorizeAccess(fixture.ctx, invalidClaimsInput); err != nil {
+		t.Fatalf("invalid claims rejection consumed DPoP proof: %v", err)
 	}
 	if err := fixture.store.RevokeCurrentInstallation(fixture.ctx, authorizedInput); !errors.Is(err, ErrDPoPReplayed) {
 		t.Fatalf("accepted proof replay error=%v, want dpop replay", err)

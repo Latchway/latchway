@@ -27,6 +27,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/identity"
+	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/secrets"
 )
 
@@ -150,7 +151,16 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct client HTTP API: %v", err)
 	}
-	handler := api.Handler()
+	clientHandler := api.Handler()
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestContext, contextErr := requestidentity.NewContext(request.Context())
+		if contextErr != nil {
+			t.Errorf("generate logical request identity: %v", contextErr)
+			http.Error(writer, "request identity unavailable", http.StatusInternalServerError)
+			return
+		}
+		clientHandler.ServeHTTP(writer, request.WithContext(requestContext))
+	})
 
 	identityClaims := jwt.MapClaims{
 		"iss": clientHTTPIdentityIssuer, "aud": clientHTTPIdentityAudience,

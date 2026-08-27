@@ -323,6 +323,14 @@ func trustSatisfies(actual, minimum string) bool {
 	return actualOK && minimumOK && actualRank >= minimumRank
 }
 
+// TrustSatisfies applies the canonical attestation assurance ordering. Debug
+// evidence remains deliberately incomparable with non-debug trust, and every
+// unknown value fails closed. Feature-policy enforcement uses this function so
+// challenge, refresh and request-time decisions cannot drift apart.
+func TrustSatisfies(actual, minimum string) bool {
+	return trustSatisfies(actual, minimum)
+}
+
 func trustRank(level string) (int, bool) {
 	switch level {
 	case "none":

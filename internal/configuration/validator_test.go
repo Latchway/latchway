@@ -503,6 +503,70 @@ func TestValidatorRequiresUnambiguousPlatformAttestationAndSupportsDebugNode(t *
 	}
 }
 
+func TestValidatorRejectsUnverifiableEnabledAttestationApplicationConstraints(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		mode  string
+		field string
+		value []any
+		code  string
+	}{
+		{
+			name: "required application identifier", mode: "required",
+			field: "applicationIdentifiers", value: []any{"TEAMID.com.example.app"},
+			code: "attestation_application_identifiers_unsupported",
+		},
+		{
+			name: "preferred web origin", mode: "preferred",
+			field: "allowedOrigins", value: []any{"https://app.example.test"},
+			code: "attestation_allowed_origins_unsupported",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			selection := objectValue(
+				objectValue(objectArray(objectValue(document, "spec"), "attestationPolicies")[0], "platforms"),
+				"ios",
+			)
+			selection["mode"] = test.mode
+			selection[test.field] = test.value
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("unverifiable enabled constraint compiled: %+v", report.Issues)
+			}
+		})
+	}
+
+	// Constraints on a disabled selection are inert and therefore do not add an
+	// attestation requirement to the sealed-session baseline.
+	disabled := configurationObject(t)
+	disabledSelection := objectValue(
+		objectValue(objectArray(objectValue(disabled, "spec"), "attestationPolicies")[0], "platforms"),
+		"ios",
+	)
+	disabledSelection["mode"] = "disabled"
+	disabledSelection["applicationIdentifiers"] = []any{"TEAMID.com.example.app"}
+	disabledJSON, err := json.Marshal(disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(disabledJSON, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("inert disabled constraint was rejected: %+v", report.Issues)
+	}
+}
+
 func withProviderField(provider map[string]any, field string, value any) map[string]any {
 	result := deepClone(provider).(map[string]any)
 	result[field] = value

@@ -121,13 +121,13 @@ func TestRefreshUsesCurrentActivePolicyPostgreSQL(t *testing.T) {
 			name:                "maximum age tightened",
 			identityProviders:   refreshIdentityProviders("firebase"),
 			attestationPolicies: refreshAttestationPolicies(refreshDebugPolicy("native", "1m", "debug")),
-			wantErr:             ErrAttestationStepUpRequired,
+			wantErr:             ErrAttestationRefreshNeeded,
 		},
 		{
 			name:                "maximum age boundary reached",
 			identityProviders:   refreshIdentityProviders("firebase"),
 			attestationPolicies: refreshAttestationPolicies(refreshDebugPolicy("native", "2m", "debug")),
-			wantErr:             ErrAttestationStepUpRequired,
+			wantErr:             ErrAttestationRefreshNeeded,
 		},
 		{
 			name:              "provider changed",
@@ -152,7 +152,10 @@ func TestRefreshUsesCurrentActivePolicyPostgreSQL(t *testing.T) {
 				refreshDebugPolicy("native-a", "10m", "debug"),
 				refreshDebugPolicy("native-b", "10m", "debug"),
 			),
-			wantErr: ErrAttestationStepUpRequired,
+			// Ambiguity is corrupt active configuration, not a client-remediable
+			// attestation mismatch. Refresh currently maps snapshot load failure to
+			// the stable session-scope error.
+			wantErr: ErrSessionScope,
 		},
 		{
 			name:                "identity provider removed",

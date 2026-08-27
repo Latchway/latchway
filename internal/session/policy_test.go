@@ -35,6 +35,9 @@ func TestTrustSatisfiesFailsClosed(t *testing.T) {
 		if got := trustSatisfies(test.actual, test.minimum); got != test.want {
 			t.Errorf("trustSatisfies(%q, %q)=%t want=%t", test.actual, test.minimum, got, test.want)
 		}
+		if got := TrustSatisfies(test.actual, test.minimum); got != test.want {
+			t.Errorf("TrustSatisfies(%q, %q)=%t want=%t", test.actual, test.minimum, got, test.want)
+		}
 	}
 }
 

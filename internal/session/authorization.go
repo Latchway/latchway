@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/identity"
 )
 
 const clientInstallationRevocationReason = "client_installation_revoked"
@@ -21,17 +23,23 @@ type Authorization struct {
 	OrganizationID       string
 	ApplicationID        string
 	EnvironmentID        string
+	EnvironmentKind      string
 	ApplicationUserID    string
 	InstallationID       string
+	InstallationPlatform string
 	SessionGrantID       string
 	PolicyRevisionID     string
 	IdentityProvider     string
 	DPoPJKT              string
 	TrustLevel           string
 	AttestationProvider  string
+	NormalizedClaims     map[string]any
 	IdentityExpiresAt    time.Time
+	AttestedAt           time.Time
 	AttestationExpiresAt time.Time
 	AccessExpiresAt      time.Time
+
+	seal [sha256.Size]byte
 }
 
 type authorizationState struct {
@@ -66,7 +74,7 @@ type authorizationQuerier interface {
 
 func loadAuthorizationState(ctx context.Context, query authorizationQuerier, principal AccessPrincipal, lockClause string) (authorizationState, error) {
 	var result authorizationState
-	var storedJTIHash []byte
+	var storedJTIHash, normalizedClaimsJSON []byte
 	var grantExpiresAt, identityExpiresAt, attestedAt, attestationExpiresAt *time.Time
 	statement := `
 		SELECT g.organization_id, g.application_id, g.environment_id, g.application_user_id,
@@ -74,8 +82,8 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		       g.trust_level, g.identity_provider_key, g.access_token_jti_hash,
 		       g.expires_at, g.identity_expires_at,
 		       g.attested_at, g.attestation_provider, g.attestation_expires_at,
-		       g.revoked_at IS NOT NULL, i.status, i.trust_level,
-		       u.status, a.status, e.status, o.status
+		       g.revoked_at IS NOT NULL, i.status, i.trust_level, i.platform,
+		       u.status, u.normalized_claims, a.status, e.status, e.kind, o.status
 		FROM session_grants g
 		JOIN installations i
 		  ON i.organization_id = g.organization_id AND i.application_id = g.application_id
@@ -95,8 +103,8 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		&result.InstallationID, &result.SessionGrantID, &result.PolicyRevisionID, &result.DPoPJKT,
 		&result.TrustLevel, &result.IdentityProvider, &storedJTIHash, &grantExpiresAt, &identityExpiresAt,
 		&attestedAt, &result.AttestationProvider, &attestationExpiresAt,
-		&result.grantRevoked, &result.installationStatus, &result.installationTrust,
-		&result.userStatus, &result.applicationStatus, &result.environmentStatus,
+		&result.grantRevoked, &result.installationStatus, &result.installationTrust, &result.InstallationPlatform,
+		&result.userStatus, &normalizedClaimsJSON, &result.applicationStatus, &result.environmentStatus, &result.EnvironmentKind,
 		&result.organizationStatus,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -109,9 +117,15 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		return authorizationState{}, ErrSessionInvalid
 	}
 	result.IdentityExpiresAt = identityExpiresAt.UTC()
+	result.AttestedAt = attestedAt.UTC()
 	result.AttestationExpiresAt = attestationExpiresAt.UTC()
 	result.AccessExpiresAt = grantExpiresAt.UTC()
-	if validateAuthorizationIDs(result.Authorization) != nil || !sessionIdentifierPattern.MatchString(result.IdentityProvider) || !sessionIdentifierPattern.MatchString(result.AttestationProvider) || !trustLevelPattern.MatchString(result.TrustLevel) || !validThumbprint(result.DPoPJKT) {
+	claims, err := identity.DecodeNormalizedClaims(normalizedClaimsJSON)
+	if err != nil {
+		return authorizationState{}, ErrSessionInvalid
+	}
+	result.NormalizedClaims = claims
+	if validateAuthorizationValues(result.Authorization) != nil {
 		return authorizationState{}, ErrSessionInvalid
 	}
 	if subtle.ConstantTimeCompare(storedJTIHash, principal.JTIHash[:]) != 1 ||
@@ -122,6 +136,11 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		result.IdentityProvider != principal.IdentityProvider || !result.AccessExpiresAt.Equal(principal.ExpiresAt) {
 		return authorizationState{}, ErrSessionInvalid
 	}
+	sealed, err := sealAuthorization(result.Authorization)
+	if err != nil {
+		return authorizationState{}, ErrSessionInvalid
+	}
+	result.Authorization = sealed
 	return result, nil
 }
 
@@ -140,6 +159,9 @@ func authorizationStateError(state authorizationState, now time.Time, allowRevok
 	}
 	if !state.AccessExpiresAt.After(now) || !state.IdentityExpiresAt.After(now) {
 		return ErrTokenExpired
+	}
+	if state.AttestedAt.After(now) {
+		return ErrSessionInvalid
 	}
 	if !state.AttestationExpiresAt.After(now) {
 		return ErrAttestationRefreshNeeded
@@ -362,4 +384,129 @@ func validateAuthorizationIDs(result Authorization) error {
 		return ErrSessionInvalid
 	}
 	return nil
+}
+
+// ValidatedSnapshot verifies that the authorization was loaded by this
+// package from durable session state, has not been changed by its caller, and
+// is still current at now. The returned normalized claims are a defensive deep
+// copy suitable for building a server-owned policy activation.
+func (authorization Authorization) ValidatedSnapshot(now time.Time) (Authorization, error) {
+	if now.IsZero() {
+		return Authorization{}, ErrSessionInvalid
+	}
+	normalized, err := normalizedAuthorization(authorization)
+	if err != nil {
+		return Authorization{}, err
+	}
+	digest, err := authorizationSealDigest(normalized)
+	if err != nil || subtle.ConstantTimeCompare(authorization.seal[:], digest[:]) != 1 {
+		return Authorization{}, ErrSessionInvalid
+	}
+	if !normalized.AccessExpiresAt.After(now) || !normalized.IdentityExpiresAt.After(now) {
+		return Authorization{}, ErrTokenExpired
+	}
+	if normalized.AttestedAt.After(now) {
+		return Authorization{}, ErrSessionInvalid
+	}
+	if !normalized.AttestationExpiresAt.After(now) {
+		return Authorization{}, ErrAttestationRefreshNeeded
+	}
+	normalized.seal = digest
+	return normalized, nil
+}
+
+func sealAuthorization(authorization Authorization) (Authorization, error) {
+	normalized, err := normalizedAuthorization(authorization)
+	if err != nil {
+		return Authorization{}, err
+	}
+	digest, err := authorizationSealDigest(normalized)
+	if err != nil {
+		return Authorization{}, err
+	}
+	normalized.seal = digest
+	return normalized, nil
+}
+
+func normalizedAuthorization(authorization Authorization) (Authorization, error) {
+	if validateAuthorizationValues(authorization) != nil {
+		return Authorization{}, ErrSessionInvalid
+	}
+	encodedClaims, err := json.Marshal(authorization.NormalizedClaims)
+	if err != nil {
+		return Authorization{}, ErrSessionInvalid
+	}
+	claims, err := identity.DecodeNormalizedClaims(encodedClaims)
+	if err != nil {
+		return Authorization{}, ErrSessionInvalid
+	}
+	authorization.NormalizedClaims = claims
+	authorization.IdentityExpiresAt = authorization.IdentityExpiresAt.UTC()
+	authorization.AttestedAt = authorization.AttestedAt.UTC()
+	authorization.AttestationExpiresAt = authorization.AttestationExpiresAt.UTC()
+	authorization.AccessExpiresAt = authorization.AccessExpiresAt.UTC()
+	authorization.seal = [sha256.Size]byte{}
+	return authorization, nil
+}
+
+func validateAuthorizationValues(authorization Authorization) error {
+	if validateAuthorizationIDs(authorization) != nil ||
+		!sessionIdentifierPattern.MatchString(authorization.IdentityProvider) ||
+		!validAttestationProvider(authorization.AttestationProvider) ||
+		!trustLevelPattern.MatchString(authorization.TrustLevel) ||
+		!platformPattern.MatchString(authorization.InstallationPlatform) ||
+		!validEnvironmentKind(authorization.EnvironmentKind) ||
+		!validThumbprint(authorization.DPoPJKT) ||
+		authorization.IdentityExpiresAt.IsZero() || authorization.AttestedAt.IsZero() ||
+		authorization.AttestationExpiresAt.IsZero() || authorization.AccessExpiresAt.IsZero() ||
+		!authorization.AttestationExpiresAt.After(authorization.AttestedAt) ||
+		!authorization.AccessExpiresAt.After(authorization.AttestedAt) ||
+		authorization.NormalizedClaims == nil {
+		return ErrSessionInvalid
+	}
+	return nil
+}
+
+func validEnvironmentKind(kind string) bool {
+	return kind == "development" || kind == "staging" || kind == "production"
+}
+
+type authorizationSealPayload struct {
+	OrganizationID       string         `json:"organization_id"`
+	ApplicationID        string         `json:"application_id"`
+	EnvironmentID        string         `json:"environment_id"`
+	EnvironmentKind      string         `json:"environment_kind"`
+	ApplicationUserID    string         `json:"application_user_id"`
+	InstallationID       string         `json:"installation_id"`
+	InstallationPlatform string         `json:"installation_platform"`
+	SessionGrantID       string         `json:"session_grant_id"`
+	PolicyRevisionID     string         `json:"policy_revision_id"`
+	IdentityProvider     string         `json:"identity_provider"`
+	DPoPJKT              string         `json:"dpop_jkt"`
+	TrustLevel           string         `json:"trust_level"`
+	AttestationProvider  string         `json:"attestation_provider"`
+	NormalizedClaims     map[string]any `json:"normalized_claims"`
+	IdentityExpiresAt    time.Time      `json:"identity_expires_at"`
+	AttestedAt           time.Time      `json:"attested_at"`
+	AttestationExpiresAt time.Time      `json:"attestation_expires_at"`
+	AccessExpiresAt      time.Time      `json:"access_expires_at"`
+}
+
+func authorizationSealDigest(authorization Authorization) ([sha256.Size]byte, error) {
+	payload := authorizationSealPayload{
+		OrganizationID: authorization.OrganizationID, ApplicationID: authorization.ApplicationID,
+		EnvironmentID: authorization.EnvironmentID, EnvironmentKind: authorization.EnvironmentKind,
+		ApplicationUserID: authorization.ApplicationUserID, InstallationID: authorization.InstallationID,
+		InstallationPlatform: authorization.InstallationPlatform, SessionGrantID: authorization.SessionGrantID,
+		PolicyRevisionID: authorization.PolicyRevisionID, IdentityProvider: authorization.IdentityProvider,
+		DPoPJKT: authorization.DPoPJKT, TrustLevel: authorization.TrustLevel,
+		AttestationProvider: authorization.AttestationProvider, NormalizedClaims: authorization.NormalizedClaims,
+		IdentityExpiresAt: authorization.IdentityExpiresAt, AttestedAt: authorization.AttestedAt,
+		AttestationExpiresAt: authorization.AttestationExpiresAt, AccessExpiresAt: authorization.AccessExpiresAt,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return [sha256.Size]byte{}, ErrSessionInvalid
+	}
+	return sha256.Sum256(encoded), nil
 }
