@@ -148,7 +148,36 @@ func TestSigningKeysAndAccessTokensPostgreSQL(t *testing.T) {
 		t.Fatalf("expired token should fail: %v", err)
 	}
 
+	wrongEnvelope, err := secrets.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x62}, 32)))
+	if err != nil {
+		t.Fatalf("construct wrong envelope: %v", err)
+	}
+	wrongManager, err := NewSigningKeyManager(SigningKeyManagerConfig{
+		Pool: pool, Envelope: wrongEnvelope, Now: func() time.Time { return now },
+		KeyLifetime: 48 * time.Hour, RotationLead: 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("construct wrong manager: %v", err)
+	}
+
 	now = time.Date(2026, 8, 28, 13, 0, 0, 0, time.UTC)
+	if _, err := wrongManager.Active(ctx); !errors.Is(err, ErrSigningKeyUnavailable) {
+		t.Fatalf("wrong master key rotated a near-expiry signing key: %v", err)
+	}
+	var unchangedActiveID, unchangedMasterKeyID string
+	var unchangedTotal int
+	if err := pool.QueryRow(ctx, `
+		SELECT gateway_signing_key_id, master_key_identifier,
+		       (SELECT count(*) FROM gateway_signing_keys)
+		FROM gateway_signing_keys
+		WHERE status = 'active'
+	`).Scan(&unchangedActiveID, &unchangedMasterKeyID, &unchangedTotal); err != nil {
+		t.Fatalf("read signing-key state after rejected rotation: %v", err)
+	}
+	if unchangedActiveID != firstKeyID || unchangedMasterKeyID != envelope.KeyID() || unchangedTotal != 1 {
+		t.Fatal("rejected wrong-key rotation changed persisted signing-key state")
+	}
+
 	rotated, err := manager.Active(ctx)
 	if err != nil {
 		t.Fatalf("rotate signing key: %v", err)
@@ -165,19 +194,91 @@ func TestSigningKeysAndAccessTokensPostgreSQL(t *testing.T) {
 		t.Fatalf("rotation states active=%d retiring=%d err=%v", active, retiring, err)
 	}
 
-	wrongEnvelope, err := secrets.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x62}, 32)))
-	if err != nil {
-		t.Fatalf("construct wrong envelope: %v", err)
-	}
-	wrongManager, err := NewSigningKeyManager(SigningKeyManagerConfig{
-		Pool: pool, Envelope: wrongEnvelope, Now: func() time.Time { return now },
-		KeyLifetime: 48 * time.Hour, RotationLead: 24 * time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("construct wrong manager: %v", err)
-	}
 	if _, err := wrongManager.Active(ctx); !errors.Is(err, ErrSigningKeyUnavailable) {
 		t.Fatalf("wrong master key should fail closed: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE gateway_signing_keys
+		SET master_key_identifier = $1
+		WHERE status = 'retiring'
+	`, wrongEnvelope.KeyID()); err != nil {
+		t.Fatalf("create historical signing-key mismatch fixture: %v", err)
+	}
+	if _, err := manager.Active(ctx); !errors.Is(err, ErrSigningKeyUnavailable) {
+		t.Fatalf("historical signing-key master-key mismatch was accepted: %v", err)
+	}
+}
+
+func TestSigningKeyConcurrentFreshStartChoosesOneMasterKeyPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSessionPool(t)
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	providers := make([]*secrets.EnvironmentMasterKey, 2)
+	managers := make([]*SigningKeyManager, 2)
+	for index, fill := range []byte{0x71, 0x72} {
+		provider, err := secrets.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32)))
+		if err != nil {
+			t.Fatalf("construct envelope provider %d: %v", index, err)
+		}
+		manager, err := NewSigningKeyManager(SigningKeyManagerConfig{
+			Pool: pool, Envelope: provider, Now: func() time.Time { return now },
+			KeyLifetime: 48 * time.Hour, RotationLead: 24 * time.Hour,
+		})
+		if err != nil {
+			t.Fatalf("construct signing-key manager %d: %v", index, err)
+		}
+		providers[index] = provider
+		managers[index] = manager
+	}
+
+	type activeResult struct {
+		index int
+		key   signingKey
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan activeResult, len(managers))
+	for index, manager := range managers {
+		go func() {
+			<-start
+			key, err := manager.Active(ctx)
+			results <- activeResult{index: index, key: key, err: err}
+		}()
+	}
+	close(start)
+
+	winner := -1
+	for range managers {
+		result := <-results
+		switch {
+		case result.err == nil && result.key.KeyID() != "":
+			if winner != -1 {
+				t.Fatal("different master keys both initialized a fresh signing-key table")
+			}
+			winner = result.index
+		case errors.Is(result.err, ErrSigningKeyUnavailable) && result.key.KeyID() == "":
+		default:
+			t.Fatalf("unexpected concurrent initialization result: key=%q err=%v", result.key.KeyID(), result.err)
+		}
+	}
+	if winner == -1 {
+		t.Fatal("neither master key initialized the fresh signing-key table")
+	}
+
+	var storedMasterKeyID string
+	var signingKeyCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT master_key_identifier, (SELECT count(*) FROM gateway_signing_keys)
+		FROM gateway_signing_keys
+		WHERE status = 'active'
+	`).Scan(&storedMasterKeyID, &signingKeyCount); err != nil {
+		t.Fatalf("read initialized signing-key state: %v", err)
+	}
+	if storedMasterKeyID != providers[winner].KeyID() || signingKeyCount != 1 {
+		t.Fatal("fresh signing-key initialization did not persist exactly the winning master-key marker")
+	}
+	loser := 1 - winner
+	if _, err := managers[loser].Active(ctx); !errors.Is(err, ErrSigningKeyUnavailable) {
+		t.Fatalf("losing master key did not remain rejected: %v", err)
 	}
 }
 

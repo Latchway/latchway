@@ -2,10 +2,12 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,30 @@ import (
 )
 
 var secretIntegrationSchemaPattern = regexp.MustCompile(`^latchway_secret_test_[0-9]+$`)
+
+func TestMasterKeyConsistencyPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSecretPool(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	provider := testEnvironmentMasterKey(t, 0xa1)
+	wrongProvider := testEnvironmentMasterKey(t, 0xa2)
+
+	if err := CheckMasterKeyConsistency(ctx, pool, provider); err != nil {
+		t.Fatalf("check empty secret store: %v", err)
+	}
+	scope, adminUserID := insertSecretTenant(t, ctx, pool, now.Add(-time.Hour))
+	insertEncryptedSecret(t, ctx, pool, provider, scope, adminUserID, "startup-key", 1,
+		[]byte("startup-consistency-fixture"), now.Add(-time.Minute), "", provider.KeyID())
+	if err := CheckMasterKeyConsistency(ctx, pool, provider); err != nil {
+		t.Fatalf("check matching persisted secret: %v", err)
+	}
+	err := CheckMasterKeyConsistency(ctx, pool, wrongProvider)
+	if !errors.Is(err, ErrMasterKeyMismatch) {
+		t.Fatalf("changed master key error = %v", err)
+	}
+	if strings.Contains(err.Error(), provider.KeyID()) || strings.Contains(err.Error(), wrongProvider.KeyID()) {
+		t.Fatalf("changed master-key error exposed key metadata: %v", err)
+	}
+}
 
 func TestStorePostgreSQLActiveRotationAndIsolation(t *testing.T) {
 	pool, ctx := isolatedSecretPool(t)

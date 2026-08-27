@@ -27,10 +27,22 @@ See [`docs/architecture/overview.md`](docs/architecture/overview.md), [`docs/thr
 Repository rules are in [`AGENTS.md`](AGENTS.md). The reproducible foundation can be exercised with:
 
 ```sh
+if [ ! -e .env ]; then
+  umask 077
+  cp .env.example .env
+  printf 'LATCHWAY_MASTER_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+fi
 docker compose up -d --build
 curl --fail http://127.0.0.1:8080/healthz
 curl --fail http://127.0.0.1:8080/readyz
 ```
+
+Generate the local master key only once and keep the untracked `.env` with its
+database volume. Changing or losing it makes existing encrypted secrets and
+gateway signing keys intentionally unusable, and Latchway fails startup before
+deriving user lookup values or serving traffic. Production deployments must
+supply an independently generated 32-byte key through their secret-management
+environment; Compose has no built-in master-key fallback.
 
 This proves the container, embedded console, PostgreSQL connection, and migrations; it does not prove the identity, attestation, DPoP, policy, proxy, quota, or SDK flows. The first functional vertical slice tracked in the master plan must add debug attestation, custom JWT verification, a DPoP session, an OpenAI Chat proxy, request limits, and a JavaScript fetch client.
 

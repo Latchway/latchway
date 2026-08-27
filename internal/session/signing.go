@@ -147,6 +147,9 @@ func (manager *SigningKeyManager) Active(ctx context.Context) (signingKey, error
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", signingKeyAdvisoryLock); err != nil {
 		return signingKey{}, fmt.Errorf("lock signing-key rotation: %w", err)
 	}
+	if err := manager.verifyMasterKeyConsistency(ctx, tx); err != nil {
+		return signingKey{}, err
+	}
 	record, found, err := loadActiveSigningRecord(ctx, tx)
 	if err != nil {
 		return signingKey{}, err
@@ -174,6 +177,27 @@ func (manager *SigningKeyManager) Active(ctx context.Context) (signingKey, error
 		return signingKey{}, fmt.Errorf("commit signing-key rotation: %w", err)
 	}
 	return created, nil
+}
+
+// verifyMasterKeyConsistency runs under the signing-key rotation advisory lock.
+// Checking every historical record prevents a changed master key from being
+// hidden by rotation and serializes the first marker written to a fresh
+// database across concurrently starting replicas.
+func (manager *SigningKeyManager) verifyMasterKeyConsistency(ctx context.Context, tx pgx.Tx) error {
+	var mismatch bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM gateway_signing_keys
+			WHERE master_key_identifier <> $1
+		)
+	`, manager.envelope.KeyID()).Scan(&mismatch); err != nil {
+		return errors.New("verify gateway signing-key master-key consistency")
+	}
+	if mismatch {
+		return ErrSigningKeyUnavailable
+	}
+	return nil
 }
 
 // PublicJWKS returns only currently usable public members. No encrypted or
