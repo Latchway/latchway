@@ -4,21 +4,21 @@ The authoritative execution contract defines twenty sequential phases. Work shou
 
 | Phase | Objective | Current state | Gate summary |
 | --- | --- | --- | --- |
-| 0 | Audit all repositories and classify existing work | Evidence drafted; clean-tree gate pending | Baseline complete and trees clean |
-| 1 | Governance, protocol contracts, threat model, ADRs | Core sources validated; review, commit and cross-repository locks pending | Schemas validate and all repositories can identify contract `0.1.0` |
-| 2 | Go, PostgreSQL, CLI, dashboard and image foundation | Runnable foundation and Compose gate pass; checklist completion pending | Compose starts; `/healthz` and `/readyz` pass |
-| 3 | Database and one-time administrative bootstrap | Database/domain groundwork in progress; schema version 2 | Exactly one owner can bootstrap; all mutations audited |
+| 0 | Audit all repositories and classify existing work | Complete; governance baselines committed | Baseline complete and trees clean |
+| 1 | Governance, protocol contracts, threat model, ADRs | Draft contract locked across all repositories and reproducibly validated | Schemas validate and all repositories identify contract `0.1.0` |
+| 2 | Go, PostgreSQL, CLI, dashboard and image foundation | Runnable foundation and prior Compose gate pass; current-image rebuild remains | Compose starts; `/healthz` and `/readyz` pass |
+| 3 | Database and one-time administrative bootstrap | Canonical Admin API, CLI and embedded owner setup/login committed; schema version 3 | Exactly one owner can bootstrap; all mutations audited |
 | 4 | Immutable configuration revisions | Not started | Concurrency-safe activation, validation, diff and rollback |
-| 5 | Identity verification and normalized principals | Not started | Strict JWT presets and adversarial identity tests pass |
-| 6 | RFC 9449 DPoP and session vertical slice | Not started | Challenge, exchange, protected request, refresh and replay tests pass |
-| 7 | First end-to-end proxy | Not started | Authenticated debug-attested request streams through mock upstream |
+| 5 | Identity verification and normalized principals | Standalone verifier/JWKS/privacy/user-store implementation and adversarial gates pass; active-config wiring pending | Strict JWT presets and adversarial identity tests pass |
+| 6 | RFC 9449 DPoP and session vertical slice | P-256 proof/JWK primitives implemented; challenge, tokens, replay and refresh pending | Challenge, exchange, protected request, refresh and replay tests pass |
+| 7 | First end-to-end proxy | OpenAI Chat adapter and deterministic mock upstream implemented; authenticated composition pending | Authenticated debug-attested request streams through mock upstream |
 | 8 | Quota, pricing and usage settlement | Not started | Contention cannot overspend; reservations recover |
 | 9 | Protocol adapters and routing | Not started | OpenAI, Anthropic and restricted opaque routes conform |
-| 10 | Apple App Attest and Swift SDK | Not started | Fixtures and physical-device validation pass |
-| 11 | Play Integrity and Android SDK | Not started | Fixtures and Play-distributed validation pass |
-| 12 | Browser/Node JavaScript SDK | Not started | Browser and Node conformance pass |
-| 13 | React Native bridge SDK | Not started | Native dependency and example-app conformance pass |
-| 14 | Complete Admin API, CLI and dashboard | Not started | All control planes use one API and audit every mutation |
+| 10 | Apple App Attest and Swift SDK | Implementation and local generic-build validation in progress; physical proof externally blocked | Fixtures and physical-device validation pass |
+| 11 | Play Integrity and Android SDK | SDK committed; static/JVM tests pass; Android SDK licenses and Play-track proof remain | Fixtures and Play-distributed validation pass |
+| 12 | Browser/Node JavaScript SDK | Core SDK committed; local browser/Node/package gates pass | Browser and Node conformance pass |
+| 13 | React Native bridge SDK | Implementation in progress | Native dependency and example-app conformance pass |
+| 14 | Complete Admin API, CLI and dashboard | Bootstrap/auth/tenant/API-token slice committed; remaining resources/views pending | All control planes use one API and audit every mutation |
 | 15 | Observability and PostgreSQL jobs | Not started | Metrics, traces, health and crash recovery pass |
 | 16 | Deployment assets | Not started | Compose and documented cloud smoke tests pass |
 | 17 | Cross-repository conformance | Not started | Shared vectors and real proxied requests pass for every SDK |
@@ -27,11 +27,11 @@ The authoritative execution contract defines twenty sequential phases. Work shou
 
 ## Immediate execution sequence
 
-1. Review and commit the validated `0.1.0` contract bundle sources.
-2. Propagate exact `contract.lock` files to each SDK repository without generating public SDK APIs.
-3. Close the remaining Phase 2 checklist items while preserving the passing single-image Compose gate.
-4. Complete the Phase 3 bootstrap/audit invariants on the schema-version-2 domain foundation.
-5. Deliver the first security-relevant vertical slice through Phase 7 before broadening providers.
+1. Complete and commit local iOS and React Native SDK gates without claiming externally blocked device evidence.
+2. Implement immutable configuration revisions, conflict-safe activation, validation, rollback, and compiled snapshots.
+3. Connect identity and RFC 9449 primitives through challenge, attestation, access/refresh session, replay, and revocation persistence.
+4. Deliver the first authenticated debug-attested proxy request through the deterministic mock upstream.
+5. Add quota reserve/execute/settle and then broaden providers, protocols, control-plane resources, and deployment proof.
 6. Update `STATUS.md` after each material change and keep `COMPLETION_REPORT.md` evidence-only.
 
 ## Release slices
