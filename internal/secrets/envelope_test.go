@@ -3,6 +3,9 @@ package secrets
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +81,111 @@ func TestEnvironmentMasterKeyRejectsInvalidLength(t *testing.T) {
 
 	if _, err := NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(make([]byte, 16))); err == nil {
 		t.Fatal("short master key accepted")
+	}
+}
+
+func TestIdentitySubjectHMACKeyIsDeterministicSeparatedAndCleared(t *testing.T) {
+	t.Parallel()
+
+	rawMasterKey := bytes.Repeat([]byte{0x93}, 32)
+	encoded := base64.StdEncoding.EncodeToString(rawMasterKey)
+	first, err := NewEnvironmentMasterKey(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewEnvironmentMasterKey(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var firstRetained, secondRetained []byte
+	var firstCopy, secondCopy []byte
+	if err := first.UseIdentitySubjectHMACKey(func(key []byte) error {
+		firstRetained = key
+		firstCopy = append([]byte(nil), key...)
+		return nil
+	}); err != nil {
+		t.Fatalf("derive first identity key: %v", err)
+	}
+	if err := second.UseIdentitySubjectHMACKey(func(key []byte) error {
+		secondRetained = key
+		secondCopy = append([]byte(nil), key...)
+		return nil
+	}); err != nil {
+		t.Fatalf("derive second identity key: %v", err)
+	}
+	if len(firstCopy) != 32 || !bytes.Equal(firstCopy, secondCopy) {
+		t.Fatalf("identity derivation is not deterministic: first=%x second=%x", firstCopy, secondCopy)
+	}
+	if bytes.Equal(firstCopy, rawMasterKey) || bytes.Equal(firstCopy, first.derivationRoot[:]) {
+		t.Fatal("identity key was not separated from the raw or root derivation key")
+	}
+	var otherDomain []byte
+	if err := first.useDerivedKey("latchway/test/other-domain/v1", func(key []byte) error {
+		otherDomain = append([]byte(nil), key...)
+		return nil
+	}); err != nil {
+		t.Fatalf("derive other-domain key: %v", err)
+	}
+	if bytes.Equal(firstCopy, otherDomain) {
+		t.Fatal("distinct derivation domains produced the same key")
+	}
+	if !allZero(firstRetained) || !allZero(secondRetained) {
+		t.Fatal("callback-scoped derived-key buffers were retained")
+	}
+	clear(firstCopy)
+	clear(secondCopy)
+	clear(otherDomain)
+	clear(rawMasterKey)
+}
+
+func TestIdentitySubjectHMACKeyFailsClosedAndClearsOnErrorOrPanic(t *testing.T) {
+	t.Parallel()
+
+	provider, err := NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xa3}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.UseIdentitySubjectHMACKey(nil); err != ErrDerivedKeyUnavailable {
+		t.Fatalf("nil callback error = %v", err)
+	}
+
+	var retained []byte
+	err = provider.UseIdentitySubjectHMACKey(func(key []byte) error {
+		retained = key
+		return errors.New("derived key was " + base64.StdEncoding.EncodeToString(key))
+	})
+	if err != ErrDerivedKeyUnavailable || strings.Contains(err.Error(), base64.StdEncoding.EncodeToString(retained)) || !allZero(retained) {
+		t.Fatalf("callback error was not fail-closed and cleared: err=%v key=%x", err, retained)
+	}
+
+	retained = nil
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("derived-key callback panic was swallowed")
+			}
+		}()
+		_ = provider.UseIdentitySubjectHMACKey(func(key []byte) error {
+			retained = key
+			panic("test panic")
+		})
+	}()
+	if !allZero(retained) {
+		t.Fatalf("panic path retained derived-key bytes: %x", retained)
+	}
+
+	for _, format := range []string{"%#v", "%+v", "%v", "%s", "%q", "%x"} {
+		if got := fmt.Sprintf(format, provider); got != "[REDACTED]" {
+			t.Fatalf("provider pointer format %q = %q", format, got)
+		}
+		if got := fmt.Sprintf(format, *provider); got != "[REDACTED]" {
+			t.Fatalf("provider value format %q = %q", format, got)
+		}
+	}
+	for _, formatted := range []string{fmt.Sprintf("%p", provider), fmt.Sprintf("%p", *provider)} {
+		if strings.Contains(formatted, provider.KeyID()) || strings.Contains(formatted, base64.StdEncoding.EncodeToString(provider.derivationRoot[:])) {
+			t.Fatalf("provider pointer formatting exposed key metadata: %q", formatted)
+		}
 	}
 }

@@ -5,6 +5,7 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -19,7 +20,11 @@ const (
 	MasterKeyEnvironment = "LATCHWAY_MASTER_KEY"
 	formatVersion        = 1
 	algorithm            = "AES-256-GCM"
+	derivationRootDomain = "latchway/key-derivation-root/v1"
+	identityHMACDomain   = "latchway/identity/external-subject-hmac/v1"
 )
+
+var ErrDerivedKeyUnavailable = errors.New("derived key is unavailable")
 
 // AssociatedData binds ciphertext to one immutable secret version and tenant.
 type AssociatedData struct {
@@ -48,9 +53,14 @@ type Provider interface {
 
 // EnvironmentMasterKey uses a process-provided 32-byte AES key.
 type EnvironmentMasterKey struct {
-	aead   cipher.AEAD
-	keyID  string
-	random io.Reader
+	*environmentMasterKeyMaterial
+}
+
+type environmentMasterKeyMaterial struct {
+	aead           cipher.AEAD
+	keyID          string
+	random         io.Reader
+	derivationRoot [sha256.Size]byte
 }
 
 // NewEnvironmentMasterKey parses an unpadded or padded base64 32-byte key.
@@ -59,6 +69,7 @@ func NewEnvironmentMasterKey(encoded string) (*EnvironmentMasterKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(key)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.New("initialize master-key cipher")
@@ -68,11 +79,16 @@ func NewEnvironmentMasterKey(encoded string) (*EnvironmentMasterKey, error) {
 		return nil, errors.New("initialize master-key AEAD")
 	}
 	digest := sha256.Sum256(key)
-	return &EnvironmentMasterKey{
-		aead:   aead,
-		keyID:  "env_" + base64.RawURLEncoding.EncodeToString(digest[:12]),
-		random: rand.Reader,
-	}, nil
+	root := deriveDomainKey(key, derivationRootDomain)
+	var derivationRoot [sha256.Size]byte
+	copy(derivationRoot[:], root)
+	clear(root)
+	return &EnvironmentMasterKey{environmentMasterKeyMaterial: &environmentMasterKeyMaterial{
+		aead:           aead,
+		keyID:          "env_" + base64.RawURLEncoding.EncodeToString(digest[:12]),
+		random:         rand.Reader,
+		derivationRoot: derivationRoot,
+	}}, nil
 }
 
 // NewEnvironmentMasterKeyFromEnv loads the key without retaining its encoded
@@ -86,10 +102,50 @@ func NewEnvironmentMasterKeyFromEnv() (*EnvironmentMasterKey, error) {
 }
 
 // KeyID returns a non-secret identifier used to select the decryption key.
-func (p *EnvironmentMasterKey) KeyID() string { return p.keyID }
+func (p *EnvironmentMasterKey) KeyID() string {
+	if p == nil || p.environmentMasterKeyMaterial == nil {
+		return ""
+	}
+	return p.keyID
+}
+
+// Format prevents diagnostic formatting from traversing the AEAD's expanded
+// key material.
+func (EnvironmentMasterKey) Format(state fmt.State, _ rune) {
+	_, _ = io.WriteString(state, "[REDACTED]")
+}
+
+// UseIdentitySubjectHMACKey supplies a deterministic, domain-separated
+// 32-byte key for identity subject pseudonymization. The temporary callback
+// buffer is cleared immediately afterward; the raw environment master key is
+// neither returned nor retained for derivation.
+func (p *EnvironmentMasterKey) UseIdentitySubjectHMACKey(consume func([]byte) error) error {
+	return p.useDerivedKey(identityHMACDomain, consume)
+}
+
+func (p *EnvironmentMasterKey) useDerivedKey(domain string, consume func([]byte) error) error {
+	if p == nil || p.environmentMasterKeyMaterial == nil || domain == "" || consume == nil {
+		return ErrDerivedKeyUnavailable
+	}
+	derived := deriveDomainKey(p.derivationRoot[:], domain)
+	defer clear(derived)
+	if err := consume(derived); err != nil {
+		return ErrDerivedKeyUnavailable
+	}
+	return nil
+}
+
+func deriveDomainKey(key []byte, domain string) []byte {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(domain))
+	return mac.Sum(nil)
+}
 
 // Encrypt seals a plaintext value with tenant- and version-bound data.
 func (p *EnvironmentMasterKey) Encrypt(plaintext []byte, associatedData AssociatedData) (Envelope, error) {
+	if p == nil || p.environmentMasterKeyMaterial == nil {
+		return Envelope{}, errors.New("secret encryption provider is unavailable")
+	}
 	encodedAAD, err := associatedData.bytes()
 	if err != nil {
 		return Envelope{}, err
@@ -110,6 +166,9 @@ func (p *EnvironmentMasterKey) Encrypt(plaintext []byte, associatedData Associat
 
 // Decrypt authenticates metadata before returning a fresh plaintext buffer.
 func (p *EnvironmentMasterKey) Decrypt(envelope Envelope, associatedData AssociatedData) ([]byte, error) {
+	if p == nil || p.environmentMasterKeyMaterial == nil {
+		return nil, errors.New("secret decryption provider is unavailable")
+	}
 	if envelope.FormatVersion != formatVersion || envelope.Algorithm != algorithm || envelope.KeyID != p.keyID {
 		return nil, errors.New("unsupported secret envelope")
 	}
