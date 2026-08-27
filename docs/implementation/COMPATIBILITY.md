@@ -7,13 +7,13 @@
 | Contract version | `0.1.0` |
 | Wire protocol version | `1` |
 | Status | Draft and unreleased; no compatibility promise |
-| Latest passing core implementation | `ab688f5221d681ea1cdd42397ec14a85208d6d4b` |
+| Latest passing core implementation | `925dc94a05374cf233b2836f9429d6ffa71dcf02` |
 | Synchronized bundle baseline core | `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
 | Deterministic bundle SHA-256 | `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12` |
 | Minimum released server | None |
 | Previous wire version supported | None; version 1 is the initial draft |
 
-At the latest passing core commit, the server also composes a local authenticated OpenAI Chat vertical with policy, one-rule request-count reservation, protected upstream dispatch, usage settlement, replay rejection, and distinct `api`/`worker`/`all` process responsibilities. This is debug/mock evidence; the full quota/pricing engine, native attestation, complete control plane, operations, deployment, and release gates are not implemented.
+At the latest passing core commit, the server also composes a local authenticated OpenAI Chat vertical with policy, atomic multi-rule request-count reservation, protected upstream dispatch, usage settlement, exact quota-store reservation replay, DPoP replay rejection, atomic denial, and distinct `api`/`worker`/`all` process responsibilities. This is debug/mock evidence; the full quota/pricing engine, native attestation, complete control plane, operations, deployment, and release gates are not implemented.
 
 All four SDK repositories still pin the synchronized baseline core and bundle hash above, not the latest passing implementation. That synchronization proves only that the repositories identify the same draft contract artifact. It does not prove behavioral compatibility. A fresh lock decision, shared vectors, current-core live server conformance, published dependency resolution where applicable, and the externally blocked device gates must pass before compatibility is reported.
 
@@ -44,7 +44,7 @@ The optional `X-Latchway-Request-ID` is a client correlation hint, not an author
 
 | Component | Intended package | Current implementation evidence | Synchronized lock commit | Remaining compatibility evidence |
 | --- | --- | --- | --- | --- |
-| Server and CLI | `github.com/latchway/latchway` | Latest local authenticated proxy evidence at `ab688f5221d681ea1cdd42397ec14a85208d6d4b`; earlier full race/PostgreSQL/fuzz/contracts/bundle/`make check` and local non-root OCI evidence at `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` | Source of truth | Full quota/pricing, native attestation, live canary/SDK conformance, operations, current Compose/registry image proof, and release gates |
+| Server and CLI | `github.com/latchway/latchway` | Latest local authenticated multi-rule proxy evidence at `925dc94a05374cf233b2836f9429d6ffa71dcf02`; earlier full race/fuzz/contracts/bundle/`make check` and local non-root OCI evidence at `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` | Source of truth | Full quota/pricing, native attestation, live canary/SDK conformance, operations, current Compose/registry image proof, and release gates |
 | JavaScript | `@latchway/client` | Local browser/Node/package gates pass at `273925d73a5a959f95664b1b1d838505dcce5f6c` | `8df68931730bad05ef110fe53e09d857b5bd61f8` | Live current-core conformance and publication evidence |
 | Swift | `Latchway` | Local Swift package, fixture, and conformance-source gates pass at `2972f99c59b652722a586510a9c943ac57a69a5c` | `fd670a04004787901bb19b3ab762f4d2dc050a07` | Live current-core conformance, published dependency proof, and physical App Attest validation |
 | Android | `dev.latchway:latchway-*` | Local static tests and independent Kotlin/JVM compatibility gates pass at `0042a916580d14295bd944104aae6deb2ac136c5` | `cd96781426831f464fc1e5350094aab91ca11dd2` | Configured Android SDK/`ANDROID_HOME`, user-accepted licenses, official Gradle gates, live current-core conformance, publication, and Play-distributed validation |

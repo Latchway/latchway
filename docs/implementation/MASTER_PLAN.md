@@ -12,7 +12,7 @@ The authoritative execution contract defines twenty sequential phases. Work shou
 | 5 | Identity verification and normalized principals | Strict verifier/JWKS/privacy/user store is wired into active configuration and session exchange | Local identity, rotation, mapping, policy, and adversarial gates pass |
 | 6 | RFC 9449 DPoP and session vertical slice | Local debug-attested challenge/exchange, access/refresh issuance, replay, JWKS, protected authorization, reuse detection, and current-installation revocation committed | Full local Phase 6 and public protected-revoke gates pass; production native trust is outside this phase evidence |
 | 7 | First end-to-end proxy | Local authenticated debug-attested OpenAI Chat vertical passes through deterministic mock upstream; local-verifier CLI and live canary remain | Local authenticated request, relay, settlement and replay-without-redispatch gate passes |
-| 8 | Quota, pricing and usage settlement | One hard UTC-calendar request-count rule has durable reserve/execute/settle, contention and bounded recovery; full engine remains | Multi-rule/token/concurrency/cost gates remain open |
+| 8 | Quota, pricing and usage settlement | One to 128 hard UTC-calendar request-count rules have atomic durable reserve/execute/settle, deterministic ordering, contention, bounded recovery, capability-gated activation, and authenticated PostgreSQL proof; full engine remains | Token/per-request/concurrency/cost gates remain open |
 | 9 | Protocol adapters and routing | Initial OpenAI Chat adapter exists; routing, fallback, Anthropic, and restricted opaque routes remain | OpenAI, Anthropic and restricted opaque routes conform |
 | 10 | Apple App Attest and Swift SDK | Swift SDK, local fixture sources, and synchronized-baseline lock committed; latest-core conformance, server trust-root verification and physical proof remain | Fixtures and physical-device validation pass |
 | 11 | Play Integrity and Android SDK | Android SDK and synchronized-baseline lock committed with local static/JVM gates; latest-core conformance, server verification, Android SDK/`ANDROID_HOME`, license-bound build, and Play-track proof remain | Fixtures and Play-distributed validation pass |
@@ -27,8 +27,8 @@ The authoritative execution contract defines twenty sequential phases. Work shou
 
 ## Immediate execution sequence
 
-1. Expand the proven request-count reservation into atomic deterministic multi-rule calendar enforcement and capability-gate unsupported plan shapes.
-2. Add token/output reservation, usage settlement, integer nano-USD pricing/provenance, concurrency leases and quota snapshots, then broaden routing and protocol adapters.
+1. Add hard output-token per-request clamps and calendar reservations at the exact applied maximum, including provider-usage settlement and conservative unknown-usage accounting.
+2. Add integer nano-USD pricing/provenance, token buckets, concurrency leases and quota snapshots, then broaden routing and protocol adapters.
 3. Add production App Attest and Play Integrity server verification and run the cross-repository conformance matrix at the synchronized locks without claiming externally blocked physical evidence early.
 4. Complete control-plane resources, observability/jobs, deployment smoke tests, and operational recovery gates.
 5. Finish load/soak/upgrade/security hardening and produce signed, published release artifacts only after every release gate passes.
