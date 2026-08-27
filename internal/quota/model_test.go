@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,159 @@ func TestRequestFingerprintBindsOpaqueLogicalIdentityAndTrustedDecision(t *testi
 	}
 	if requestFingerprint(logicalPrepared) == fingerprint {
 		t.Fatal("opaque logical request identity was omitted from fingerprint")
+	}
+}
+
+func TestLegacyLogicalOnlyFingerprintSerializationIsUnchanged(t *testing.T) {
+	t.Parallel()
+	prepared, err := prepareRequest(validReserveInput(t))
+	if err != nil {
+		t.Fatalf("prepare legacy request: %v", err)
+	}
+	rule := prepared.rules[0]
+	legacyParts := []string{
+		prepared.LogicalRequestID.String(), prepared.OrganizationID,
+		prepared.ApplicationID, prepared.EnvironmentID, prepared.ApplicationUserID,
+		prepared.InstallationID, prepared.SessionGrantID, prepared.ConfigRevisionID,
+		prepared.FeatureKey, prepared.Protocol, prepared.ClientRequestID,
+		prepared.LimitPlanKey, prepared.RouteKey, prepared.UpstreamKey,
+		prepared.ModelKey, prepared.PhysicalModel,
+		rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10),
+	}
+	if got, want := requestFingerprint(prepared), canonicalDigest(requestDigestDomain, legacyParts); got != want {
+		t.Fatalf("legacy fingerprint = %q, want historical serialization %q", got, want)
+	}
+}
+
+func TestPrepareRequestSupportsBoundedOutputTokenShapes(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = []Rule{
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: "1d", Maximum: 20, Hard: true,
+		},
+		{
+			Metric: OutputTokensMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"feature", "user"}, Window: "1mo", Maximum: 10_000,
+			ReservedUnits: 64, Hard: true,
+		},
+		{
+			Metric: OutputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user"}, PerRequestMaximum: 128,
+			ReservedUnits: 64, Hard: true,
+		},
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare mixed output rules: %v", err)
+	}
+	plans, err := plannedBucketsAt(prepared, time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("plan mixed output rules: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("stateful plans = %d, want 2", len(plans))
+	}
+	unitsByMetric := map[string]int64{}
+	for _, plan := range plans {
+		unitsByMetric[plan.rule.Metric] = plan.reservedUnits
+	}
+	if unitsByMetric[LogicalRequestsMetric] != 1 || unitsByMetric[OutputTokensMetric] != 64 {
+		t.Fatalf("planned units = %#v, want logical=1 output=64", unitsByMetric)
+	}
+
+	reversed := cloneReserveInput(input)
+	slices.Reverse(reversed.Rules)
+	reordered, err := prepareRequest(reversed)
+	if err != nil {
+		t.Fatalf("prepare reversed output rules: %v", err)
+	}
+	if requestFingerprint(reordered) != requestFingerprint(prepared) {
+		t.Fatal("output-rule order changed the trusted fingerprint")
+	}
+
+	perRequestOnly := cloneReserveInput(input)
+	perRequestOnly.Rules = []Rule{input.Rules[2]}
+	metadata, err := prepareRequest(perRequestOnly)
+	if err != nil {
+		t.Fatalf("prepare per-request-only rule: %v", err)
+	}
+	metadataPlans, err := plannedBucketsAt(metadata, time.Now().UTC())
+	if err != nil || len(metadataPlans) != 0 {
+		t.Fatalf("per-request-only plans = %#v, %v; want zero", metadataPlans, err)
+	}
+}
+
+func TestReserveIdentifierGenerationPreservesLegacyOrderAndSupportsZeroEntries(t *testing.T) {
+	t.Parallel()
+	var calls []id.Prefix
+	store := &Store{newID: func(prefix id.Prefix) (string, error) {
+		calls = append(calls, prefix)
+		value, err := id.New(prefix)
+		if err != nil {
+			return "", err
+		}
+		return value, nil
+	}}
+	legacy, err := store.newReserveIDs(1)
+	if err != nil {
+		t.Fatalf("generate legacy reserve IDs: %v", err)
+	}
+	wantLegacyOrder := []id.Prefix{id.QuotaBucket, id.QuotaReservation, id.QuotaEntry}
+	if !slices.Equal(calls, wantLegacyOrder) || len(legacy.buckets) != 1 || len(legacy.entries) != 1 || legacy.reservation == "" {
+		t.Fatalf("legacy generation calls=%v IDs=%#v", calls, legacy)
+	}
+	calls = nil
+	entryless, err := store.newReserveIDs(0)
+	if err != nil {
+		t.Fatalf("generate entryless reserve IDs: %v", err)
+	}
+	if !slices.Equal(calls, []id.Prefix{id.QuotaReservation}) ||
+		len(entryless.buckets) != 0 || len(entryless.entries) != 0 || entryless.reservation == "" {
+		t.Fatalf("entryless generation calls=%v IDs=%#v", calls, entryless)
+	}
+}
+
+func TestPrepareRequestRejectsUnsafeOutputReservations(t *testing.T) {
+	t.Parallel()
+	base := validReserveInput(t)
+	base.Rules = []Rule{
+		{
+			Metric: OutputTokensMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: "1d", Maximum: 1_000,
+			ReservedUnits: 64, Hard: true,
+		},
+		{
+			Metric: OutputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user"}, PerRequestMaximum: 128,
+			ReservedUnits: 64, Hard: true,
+		},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*ReserveInput)
+	}{
+		{name: "missing calendar units", mutate: func(input *ReserveInput) { input.Rules[0].ReservedUnits = 0 }},
+		{name: "mismatched trusted cap", mutate: func(input *ReserveInput) { input.Rules[1].ReservedUnits = 63 }},
+		{name: "per request cap exceeded", mutate: func(input *ReserveInput) { input.Rules[1].ReservedUnits = 129; input.Rules[0].ReservedUnits = 129 }},
+		{name: "calendar per request maximum", mutate: func(input *ReserveInput) { input.Rules[0].PerRequestMaximum = 128 }},
+		{name: "per request window", mutate: func(input *ReserveInput) { input.Rules[1].Window = "1d" }},
+		{name: "per request calendar maximum", mutate: func(input *ReserveInput) { input.Rules[1].Maximum = 1000 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := cloneReserveInput(base)
+			test.mutate(&input)
+			if _, err := prepareRequest(input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("unsafe output reservation returned %v", err)
+			}
+		})
+	}
+	logical := validReserveInput(t)
+	logical.Rules[0].ReservedUnits = 1
+	if _, err := prepareRequest(logical); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("caller-supplied logical units returned %v", err)
 	}
 }
 
@@ -302,6 +456,10 @@ func TestOutcomeValidation(t *testing.T) {
 	t.Parallel()
 	for _, outcome := range []Outcome{
 		{Status: AttemptSucceeded, HTTPStatus: 200},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+			Known: true, Provenance: ProviderReportedProvenance,
+		}},
 		{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "upstream_unavailable"},
 		{Status: AttemptCancelled, FailureCode: "client_cancelled"},
 		{Status: AttemptTimedOut, FailureCode: "upstream_timeout"},
@@ -320,6 +478,17 @@ func TestOutcomeValidation(t *testing.T) {
 		{Status: AttemptFailed},
 		{Status: AttemptFailed, HTTPStatus: 99, FailureCode: "failed"},
 		{Status: AttemptTimedOut, FailureCode: "Bad Code"},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: -1, TotalTokens: 1, Known: true,
+			Provenance: ProviderReportedProvenance,
+		}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 1, OutputTokens: 1, TotalTokens: 2, Known: true,
+			Provenance: "estimated",
+		}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			OutputTokens: 1, Known: false, Provenance: UnknownUsageProvenance,
+		}},
 	} {
 		if err := outcome.validate(); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid outcome %#v returned %v", outcome, err)

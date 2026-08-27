@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -1424,6 +1425,376 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLOutputTokenQuota(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+
+	t.Run("known success settles actual output and releases the remainder", func(t *testing.T) {
+		input := fixture.outputInput(t, "output-known", 1_000, 64)
+		input.Rules = append(input.Rules, Rule{
+			Metric: OutputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 128,
+			ReservedUnits: 64, Hard: true,
+		})
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve known output: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin known output owner=%t: %v", owner, err)
+		}
+		outcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+			Known: true, Provenance: ProviderReportedProvenance,
+		}}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle known output: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle exact known output replay: %v", err)
+		}
+		conflicting := outcome
+		conflicting.Usage.OutputTokens = 8
+		conflicting.Usage.TotalTokens = 19
+		if err := fixture.store.Settle(fixture.ctx, attempt, conflicting); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("conflicting known settlement replay = %v, want ErrFinalized", err)
+		}
+
+		var reservedUnits, settledUnits, releasedUnits, bucketUsed, bucketReserved int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT entry.reserved_units, entry.settled_units, entry.released_units,
+			       bucket.used_units, bucket.reserved_units
+			FROM quota_reservation_entries AS entry
+			JOIN quota_buckets AS bucket USING (quota_bucket_id)
+			WHERE entry.quota_reservation_id = $1 AND bucket.metric = 'output_tokens'
+		`, reservation.ID()).Scan(
+			&reservedUnits, &settledUnits, &releasedUnits, &bucketUsed, &bucketReserved,
+		); err != nil {
+			t.Fatalf("read known output settlement: %v", err)
+		}
+		if reservedUnits != 64 || settledUnits != 7 || releasedUnits != 57 ||
+			bucketUsed != 7 || bucketReserved != 0 {
+			t.Fatalf("known output entry=%d/%d/%d bucket=%d/%d, want 64/7/57 and 7/0",
+				reservedUnits, settledUnits, releasedUnits, bucketUsed, bucketReserved)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservation_entries WHERE quota_reservation_id = $1`, reservation.ID()); got != 2 {
+			t.Fatalf("stateful entries = %d, want logical + output only", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 4 {
+			t.Fatalf("known usage rows = %d, want logical + three provider rows", got)
+		}
+		var reportedOutput int64
+		var confidence, provenance string
+		var usageAttemptID string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT units, confidence, provenance_key, upstream_attempt_id
+			FROM usage_records
+			WHERE logical_request_id = $1 AND metric = 'output_tokens'
+		`, input.LogicalRequestID.String()).Scan(
+			&reportedOutput, &confidence, &provenance, &usageAttemptID,
+		); err != nil {
+			t.Fatalf("read provider output usage: %v", err)
+		}
+		if reportedOutput != 7 || confidence != "reported" ||
+			provenance != providerUsageProvenanceKey(attempt.ID(), OutputTokensMetric) ||
+			usageAttemptID != attempt.ID() {
+			t.Fatalf("provider output usage=%d/%s/%s/%s", reportedOutput, confidence, provenance, usageAttemptID)
+		}
+	})
+
+	t.Run("unknown failure and expiry conservatively charge full output", func(t *testing.T) {
+		unknownInput := fixture.outputInput(t, "output-unknown", 500, 32)
+		unknownReservation, err := fixture.store.Reserve(fixture.ctx, unknownInput)
+		if err != nil {
+			t.Fatalf("reserve unknown output: %v", err)
+		}
+		unknownAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, unknownReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin unknown output owner=%t: %v", owner, err)
+		}
+		unknownOutcome := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200,
+			Usage: Usage{Provenance: UnknownUsageProvenance},
+		}
+		if err := fixture.store.Settle(fixture.ctx, unknownAttempt, unknownOutcome); err != nil {
+			t.Fatalf("settle unknown output: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, unknownAttempt, unknownOutcome); err != nil {
+			t.Fatalf("settle exact unknown output replay: %v", err)
+		}
+		conflictingUnknown := unknownOutcome
+		conflictingUnknown.Usage = Usage{Known: true, Provenance: ProviderReportedProvenance}
+		if err := fixture.store.Settle(fixture.ctx, unknownAttempt, conflictingUnknown); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("conflicting unknown provenance replay = %v, want ErrFinalized", err)
+		}
+		assertOutputEntryState(t, fixture, unknownReservation.ID(), 32, 32, 0, 32, 0)
+		assertOutputUsage(t, fixture, unknownInput.LogicalRequestID.String(), unknownAttempt.ID(), 32, "unknown")
+
+		failureInput := fixture.outputInput(t, "output-failure", 500, 32)
+		failureReservation, err := fixture.store.Reserve(fixture.ctx, failureInput)
+		if err != nil {
+			t.Fatalf("reserve failed output: %v", err)
+		}
+		failureAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, failureReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin failed output owner=%t: %v", owner, err)
+		}
+		failureOutcome := Outcome{
+			Status: AttemptFailed, HTTPStatus: 502, FailureCode: "upstream_protocol_error",
+			Usage: Usage{
+				InputTokens: 11, OutputTokens: 70, TotalTokens: 81,
+				Known: true, Provenance: ProviderReportedProvenance,
+			},
+		}
+		if err := fixture.store.Settle(fixture.ctx, failureAttempt, failureOutcome); err != nil {
+			t.Fatalf("settle failed over-cap output: %v", err)
+		}
+		assertOutputEntryState(t, fixture, failureReservation.ID(), 32, 32, 0, 32, 0)
+		assertOutputUsage(t, fixture, failureInput.LogicalRequestID.String(), failureAttempt.ID(), 70, "reported")
+
+		expiredInput := fixture.outputInput(t, "output-expired", 500, 48)
+		expiredReservation, err := fixture.store.Reserve(fixture.ctx, expiredInput)
+		if err != nil {
+			t.Fatalf("reserve dispatched expiry: %v", err)
+		}
+		expiredAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, expiredReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin dispatched expiry owner=%t: %v", owner, err)
+		}
+		undispatchedInput := fixture.outputInput(t, "output-expired-undispatched", 500, 48)
+		undispatchedReservation, err := fixture.store.Reserve(fixture.ctx, undispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve undispatched expiry: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = ANY($1::text[])
+		`, []string{expiredReservation.ID(), undispatchedReservation.ID()}); err != nil {
+			t.Fatalf("backdate output expiries: %v", err)
+		}
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 10)
+		if err != nil || processed != 2 {
+			t.Fatalf("expire output reservations processed=%d err=%v, want 2 nil", processed, err)
+		}
+		assertOutputEntryState(t, fixture, expiredReservation.ID(), 48, 48, 0, 48, 0)
+		assertOutputUsage(t, fixture, expiredInput.LogicalRequestID.String(), expiredAttempt.ID(), 48, "unknown")
+		assertOutputEntryState(t, fixture, undispatchedReservation.ID(), 48, 0, 48, 0, 0)
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, undispatchedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("undispatched expiry usage rows = %d, want 0", got)
+		}
+	})
+
+	t.Run("pre-dispatch release returns every output unit", func(t *testing.T) {
+		input := fixture.outputInput(t, "output-release", 500, 64)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve output release: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "transport_setup_failed"); err != nil {
+			t.Fatalf("release output before dispatch: %v", err)
+		}
+		assertOutputEntryState(t, fixture, reservation.ID(), 64, 0, 64, 0, 0)
+	})
+
+	t.Run("per-request-only decision has a zero-entry idempotent lifecycle", func(t *testing.T) {
+		input := fixture.perRequestOutputInput(t, "output-per-request", 128, 64)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve per-request-only: %v", err)
+		}
+		replay, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil || replay.ID() != reservation.ID() {
+			t.Fatalf("replay per-request-only = %#v, %v", replay, err)
+		}
+		if len(reservation.entries) != 0 || !reservation.ResetAt().IsZero() {
+			t.Fatalf("entryless reservation entries=%d reset=%s", len(reservation.entries), reservation.ResetAt())
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservation_entries WHERE quota_reservation_id = $1`, reservation.ID()); got != 0 {
+			t.Fatalf("per-request-only entries = %d, want 0", got)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin per-request-only owner=%t: %v", owner, err)
+		}
+		outcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
+			InputTokens: 3, OutputTokens: 5, TotalTokens: 8,
+			Known: true, Provenance: ProviderReportedProvenance,
+		}}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle per-request-only: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle per-request-only replay: %v", err)
+		}
+		conflicting := outcome
+		conflicting.Usage.OutputTokens = 6
+		conflicting.Usage.TotalTokens = 9
+		if err := fixture.store.Settle(fixture.ctx, attempt, conflicting); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("conflicting entryless settlement = %v, want ErrFinalized", err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 4 {
+			t.Fatalf("entryless known usage rows = %d, want 4", got)
+		}
+
+		expiredInput := fixture.perRequestOutputInput(t, "output-per-request-expired", 128, 64)
+		expiredReservation, err := fixture.store.Reserve(fixture.ctx, expiredInput)
+		if err != nil {
+			t.Fatalf("reserve entryless expiry: %v", err)
+		}
+		expiredAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, expiredReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin entryless expiry owner=%t: %v", owner, err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = $1
+		`, expiredReservation.ID()); err != nil {
+			t.Fatalf("backdate entryless expiry: %v", err)
+		}
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 1)
+		if err != nil || processed != 1 {
+			t.Fatalf("expire entryless attempt processed=%d err=%v", processed, err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, expiredInput.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("expired entryless usage rows = %d, want logical request only", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1 AND metric = 'output_tokens'`, expiredInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("expired entryless output usage rows = %d, want 0 without recoverable persisted cap", got)
+		}
+		var attemptStatus string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT status FROM upstream_attempts WHERE upstream_attempt_id = $1
+		`, expiredAttempt.ID()).Scan(&attemptStatus); err != nil {
+			t.Fatalf("read expired entryless attempt: %v", err)
+		}
+		if attemptStatus != AttemptTimedOut {
+			t.Fatalf("expired entryless attempt status=%s, want %s", attemptStatus, AttemptTimedOut)
+		}
+	})
+
+	t.Run("mixed denial never partially reserves logical or variable output units", func(t *testing.T) {
+		seedInput := fixture.outputInput(t, "output-atomic", 100, 80)
+		seed, err := fixture.store.Reserve(fixture.ctx, seedInput)
+		if err != nil {
+			t.Fatalf("reserve output atomic seed: %v", err)
+		}
+		deniedInput := fixture.outputInput(t, "output-atomic", 100, 30)
+		if _, err := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("mixed output denial = %v, want ErrExceeded", err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied mixed reservation rows = %d, want 0", got)
+		}
+		for _, entry := range seed.entries {
+			var used, reserved int64
+			if err := fixture.pool.QueryRow(fixture.ctx, `
+				SELECT used_units, reserved_units FROM quota_buckets WHERE quota_bucket_id = $1
+			`, entry.bucketID).Scan(&used, &reserved); err != nil {
+				t.Fatalf("read mixed atomic bucket: %v", err)
+			}
+			wantReserved := int64(1)
+			if entry.metric == OutputTokensMetric {
+				wantReserved = 80
+			}
+			if used != 0 || reserved != wantReserved {
+				t.Fatalf("mixed denial changed %s bucket to %d/%d, want 0/%d", entry.metric, used, reserved, wantReserved)
+			}
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, seed, "output_atomic_done"); err != nil {
+			t.Fatalf("release output atomic seed: %v", err)
+		}
+	})
+
+	t.Run("variable-unit contention never overspends", func(t *testing.T) {
+		const callers = 10
+		const units = 17
+		const maximum = 100
+		start := make(chan struct{})
+		reservations := make(chan Reservation, callers)
+		failures := make(chan error, callers)
+		var wait sync.WaitGroup
+		for caller := range callers {
+			input := fixture.outputInput(t, "output-contention", maximum, units)
+			if caller%2 != 0 {
+				slices.Reverse(input.Rules)
+			}
+			wait.Add(1)
+			go func(input ReserveInput) {
+				defer wait.Done()
+				<-start
+				reservation, reserveErr := fixture.store.Reserve(fixture.ctx, input)
+				if reserveErr != nil {
+					failures <- reserveErr
+					return
+				}
+				reservations <- reservation
+			}(input)
+		}
+		close(start)
+		wait.Wait()
+		close(reservations)
+		close(failures)
+		accepted := make([]Reservation, 0, maximum/units)
+		for reservation := range reservations {
+			accepted = append(accepted, reservation)
+		}
+		denied := 0
+		for reserveErr := range failures {
+			if !errors.Is(reserveErr, ErrExceeded) {
+				t.Errorf("variable contention error = %v", reserveErr)
+			}
+			denied++
+		}
+		if len(accepted) != maximum/units || denied != callers-maximum/units {
+			t.Fatalf("variable contention accepted=%d denied=%d, want %d/%d",
+				len(accepted), denied, maximum/units, callers-maximum/units)
+		}
+		if len(accepted) != 0 {
+			var outputEntry reservationEntry
+			for _, entry := range accepted[0].entries {
+				if entry.metric == OutputTokensMetric {
+					outputEntry = entry
+				}
+			}
+			var used, reserved int64
+			if err := fixture.pool.QueryRow(fixture.ctx, `
+				SELECT used_units, reserved_units FROM quota_buckets WHERE quota_bucket_id = $1
+			`, outputEntry.bucketID).Scan(&used, &reserved); err != nil {
+				t.Fatalf("read variable contention bucket: %v", err)
+			}
+			if used != 0 || reserved != int64(len(accepted))*units || reserved > maximum {
+				t.Fatalf("variable contention bucket used=%d reserved=%d max=%d", used, reserved, maximum)
+			}
+		}
+		for _, reservation := range accepted {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "output_contention_done"); err != nil {
+				t.Fatalf("release variable contention reservation: %v", err)
+			}
+		}
+	})
+
+	t.Run("maximum integer reservation denies without overflow", func(t *testing.T) {
+		seedInput := fixture.outputInput(t, "output-overflow", math.MaxInt64, math.MaxInt64)
+		seed, err := fixture.store.Reserve(fixture.ctx, seedInput)
+		if err != nil {
+			t.Fatalf("reserve maximum integer output: %v", err)
+		}
+		deniedInput := fixture.outputInput(t, "output-overflow", math.MaxInt64, 1)
+		if _, err := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("overflow-edge denial = %v, want ErrExceeded", err)
+		}
+		assertOutputEntryState(t, fixture, seed.ID(), math.MaxInt64, 0, 0, 0, math.MaxInt64)
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, seed, "output_overflow_done"); err != nil {
+			t.Fatalf("release maximum integer output: %v", err)
+		}
+		assertOutputEntryState(t, fixture, seed.ID(), math.MaxInt64, 0, math.MaxInt64, 0, 0)
+	})
+}
+
 func newQuotaPostgreSQLFixture(t *testing.T) quotaPostgreSQLFixture {
 	t.Helper()
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
@@ -1580,6 +1951,102 @@ func (fixture quotaPostgreSQLFixture) multiRuleInput(
 		},
 	}
 	return input
+}
+
+func (fixture quotaPostgreSQLFixture) outputInput(
+	t *testing.T,
+	feature string,
+	maximum int64,
+	reservedUnits int64,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, 10_000)
+	input.Rules = append(input.Rules, Rule{
+		Metric: OutputTokensMetric, Algorithm: CalendarAlgorithm,
+		Scope: []string{"user", "feature"}, Window: "1d",
+		Maximum: maximum, ReservedUnits: reservedUnits, Hard: true,
+	})
+	return input
+}
+
+func (fixture quotaPostgreSQLFixture) perRequestOutputInput(
+	t *testing.T,
+	feature string,
+	perRequestMaximum int64,
+	reservedUnits int64,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, 1)
+	input.Rules = []Rule{{
+		Metric: OutputTokensMetric, Algorithm: PerRequestAlgorithm,
+		Scope: []string{"user", "feature"}, PerRequestMaximum: perRequestMaximum,
+		ReservedUnits: reservedUnits, Hard: true,
+	}}
+	return input
+}
+
+func assertOutputEntryState(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	reservationID string,
+	wantReserved int64,
+	wantSettled int64,
+	wantReleased int64,
+	wantBucketUsed int64,
+	wantBucketReserved int64,
+) {
+	t.Helper()
+	var reserved, settled, released, bucketUsed, bucketReserved int64
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT entry.reserved_units, entry.settled_units, entry.released_units,
+		       bucket.used_units, bucket.reserved_units
+		FROM quota_reservation_entries AS entry
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		WHERE entry.quota_reservation_id = $1 AND bucket.metric = 'output_tokens'
+	`, reservationID).Scan(&reserved, &settled, &released, &bucketUsed, &bucketReserved); err != nil {
+		t.Fatalf("read output entry state: %v", err)
+	}
+	if reserved != wantReserved || settled != wantSettled || released != wantReleased ||
+		bucketUsed != wantBucketUsed || bucketReserved != wantBucketReserved {
+		t.Fatalf("output state entry=%d/%d/%d bucket=%d/%d, want %d/%d/%d and %d/%d",
+			reserved, settled, released, bucketUsed, bucketReserved,
+			wantReserved, wantSettled, wantReleased, wantBucketUsed, wantBucketReserved)
+	}
+}
+
+func assertOutputUsage(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	logicalRequestID string,
+	attemptID string,
+	wantUnits int64,
+	wantConfidence string,
+) {
+	t.Helper()
+	var units int64
+	var confidence, provenance, storedAttemptID string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT units, confidence, provenance_key, upstream_attempt_id
+		FROM usage_records
+		WHERE logical_request_id = $1 AND metric = 'output_tokens'
+	`, logicalRequestID).Scan(&units, &confidence, &provenance, &storedAttemptID); err != nil {
+		t.Fatalf("read output usage: %v", err)
+	}
+	wantProvenance := providerUsageProvenanceKey(attemptID, OutputTokensMetric)
+	if wantConfidence == "unknown" {
+		var reservationID string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT quota_reservation_id FROM quota_reservations WHERE logical_request_id = $1
+		`, logicalRequestID).Scan(&reservationID); err != nil {
+			t.Fatalf("read output usage reservation: %v", err)
+		}
+		wantProvenance = unknownOutputUsageProvenanceKey(reservationID)
+	}
+	if units != wantUnits || confidence != wantConfidence || provenance != wantProvenance || storedAttemptID != attemptID {
+		t.Fatalf("output usage=%d/%s/%s/%s, want %d/%s/%s/%s",
+			units, confidence, provenance, storedAttemptID,
+			wantUnits, wantConfidence, wantProvenance, attemptID)
+	}
 }
 
 func (fixture quotaPostgreSQLFixture) count(t *testing.T, statement string, arguments ...any) int64 {

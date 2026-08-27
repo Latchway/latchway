@@ -64,7 +64,7 @@ type reserveIDs struct {
 }
 
 func (store *Store) newReserveIDs(ruleCount int) (reserveIDs, error) {
-	if ruleCount < 1 || ruleCount > maximumRulesPerRequest {
+	if ruleCount < 0 || ruleCount > maximumRulesPerRequest {
 		return reserveIDs{}, ErrInvalidInput
 	}
 	result := reserveIDs{
@@ -97,17 +97,19 @@ func (store *Store) newReserveIDs(ruleCount int) (reserveIDs, error) {
 }
 
 type plannedBucket struct {
-	rule     preparedRule
-	period   calendarPeriod
-	bucketID string
-	entryID  string
-	locked   lockedBucket
+	rule          preparedRule
+	period        calendarPeriod
+	reservedUnits int64
+	bucketID      string
+	entryID       string
+	locked        lockedBucket
 }
 
-// Reserve records one logical request and atomically reserves one
-// logical-request unit in every applicable bucket. Quota denial is committed
-// as a denied logical request but changes no bucket counters and creates
-// neither a reservation nor an upstream attempt.
+// Reserve records one logical request and atomically reserves the trusted
+// units in every applicable calendar bucket. Per-request-only decisions still
+// create the durable logical-request and reservation lifecycle with no bucket
+// entries. Quota denial is committed as a denied logical request but changes
+// no bucket counters and creates neither a reservation nor an upstream attempt.
 func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservation, error) {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil {
 		return Reservation{}, ErrInvalidInput
@@ -207,12 +209,13 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		plan := &plans[index]
 		bucket := plan.locked
 		if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
+			plan.reservedUnits <= 0 ||
 			bucket.used > math.MaxInt64-bucket.reserved {
 			return Reservation{}, ErrInvalidState
 		}
 		occupancy := bucket.used + bucket.reserved
 		occupancies[index] = occupancy
-		if plan.rule.Maximum < occupancy || plan.rule.Maximum-occupancy < 1 {
+		if plan.rule.Maximum < occupancy || plan.rule.Maximum-occupancy < plan.reservedUnits {
 			exceeded = append(exceeded, index)
 		}
 	}
@@ -260,15 +263,17 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		command, err = tx.Exec(ctx, `
 			UPDATE quota_buckets
 			SET hard_maximum = $2,
-			    reserved_units = reserved_units + 1,
+			    reserved_units = reserved_units + $3::bigint,
 			    version = version + 1,
-			    updated_at = GREATEST(updated_at, $3)
+			    updated_at = GREATEST(updated_at, $4)
 			WHERE quota_bucket_id = $1
-			  AND used_units = $4
-			  AND reserved_units = $5
-			  AND $2 > used_units
-			  AND reserved_units < $2 - used_units
-		`, bucket.id, plan.rule.Maximum, decisionAt, bucket.used, bucket.reserved)
+			  AND used_units = $5
+			  AND reserved_units = $6
+			  AND $3::bigint > 0
+			  AND $2 >= used_units
+			  AND $3::bigint <= $2 - used_units - reserved_units
+		`, bucket.id, plan.rule.Maximum, plan.reservedUnits, decisionAt,
+			bucket.used, bucket.reserved)
 		if err != nil {
 			return Reservation{}, persistenceFailure("reserve quota bucket", err)
 		}
@@ -293,9 +298,10 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 				quota_reservation_entry_id, organization_id, application_id,
 				environment_id, quota_reservation_id, quota_bucket_id,
 				reserved_units, settled_units, released_units
-			) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, 0)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 0)
 		`, plan.entryID, prepared.OrganizationID, prepared.ApplicationID,
-			prepared.EnvironmentID, identifiers.reservation, plan.locked.id); err != nil {
+			prepared.EnvironmentID, identifiers.reservation, plan.locked.id,
+			plan.reservedUnits); err != nil {
 			return Reservation{}, mapWriteError("insert quota reservation entry", err)
 		}
 	}
@@ -385,7 +391,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 
 	if logical.status == "denied" {
-		if reservationErr == nil {
+		if reservationErr == nil || len(plans) == 0 {
 			return Reservation{}, ErrInvalidState
 		}
 		if logical.failureCode == nil || *logical.failureCode != "quota_exceeded" {
@@ -398,11 +404,13 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		for index := range plans {
 			bucket := plans[index].locked
 			if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
+				plans[index].reservedUnits <= 0 ||
 				bucket.used > math.MaxInt64-bucket.reserved {
 				return Reservation{}, ErrInvalidState
 			}
 			occupancy := bucket.used + bucket.reserved
-			if plans[index].rule.Maximum < occupancy || plans[index].rule.Maximum-occupancy < 1 {
+			if plans[index].rule.Maximum < occupancy ||
+				plans[index].rule.Maximum-occupancy < plans[index].reservedUnits {
 				exceeded = append(exceeded, index)
 			}
 		}
@@ -416,6 +424,10 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 	if reservationErr != nil {
 		return Reservation{}, ErrInvalidState
+	}
+
+	if len(plans) == 0 {
+		return loadExistingEntrylessReservation(ctx, tx, prepared, fingerprint, logical.status, lockedReservationID)
 	}
 
 	type existingReservation struct {
@@ -503,7 +515,8 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			id.Validate(existing.entryID, id.QuotaEntry) != nil ||
 			id.Validate(existing.bucketID, id.QuotaBucket) != nil ||
 			!existingReservationStateMatches(logical.status, existing.status,
-				existing.reservedUnits, existing.settledUnits, existing.releasedUnits) {
+				plan.rule.Metric, plan.reservedUnits, existing.reservedUnits,
+				existing.settledUnits, existing.releasedUnits) {
 			return Reservation{}, ErrInvalidState
 		}
 		if reservationID == "" {
@@ -516,7 +529,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		}
 		matchedPlans[planIndex] = true
 		entries = append(entries, reservationEntry{
-			bucketID: existing.bucketID, entryID: existing.entryID, resetAt: plan.period.end,
+			bucketID: existing.bucketID, entryID: existing.entryID,
+			metric: plan.rule.Metric, reservedUnits: plan.reservedUnits,
+			resetAt: plan.period.end,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -541,8 +556,87 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}, nil
 }
 
-func existingReservationStateMatches(logicalStatus, reservationStatus string, reserved, settled, released int64) bool {
-	if reserved != 1 {
+func loadExistingEntrylessReservation(
+	ctx context.Context,
+	tx pgx.Tx,
+	prepared preparedRequest,
+	fingerprint string,
+	logicalStatus string,
+	lockedReservationID string,
+) (Reservation, error) {
+	type existingReservation struct {
+		organizationID, applicationID, environmentID string
+		logicalRequestID, reservationID, idempotency string
+		status                                       string
+		expiresAt                                    time.Time
+		entryCount                                   int64
+	}
+	var existing existingReservation
+	err := tx.QueryRow(ctx, `
+		SELECT reservation.organization_id, reservation.application_id,
+		       reservation.environment_id, reservation.logical_request_id,
+		       reservation.quota_reservation_id, reservation.idempotency_key,
+		       reservation.status, reservation.expires_at,
+		       (SELECT count(*)
+		          FROM quota_reservation_entries AS entry
+		         WHERE entry.environment_id = reservation.environment_id
+		           AND entry.quota_reservation_id = reservation.quota_reservation_id)
+		FROM quota_reservations AS reservation
+		WHERE reservation.logical_request_id = $1
+		  AND reservation.quota_reservation_id = $2
+	`, prepared.LogicalRequestID.String(), lockedReservationID).Scan(
+		&existing.organizationID, &existing.applicationID, &existing.environmentID,
+		&existing.logicalRequestID, &existing.reservationID, &existing.idempotency,
+		&existing.status, &existing.expiresAt, &existing.entryCount,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Reservation{}, ErrInvalidState
+	}
+	if err != nil {
+		return Reservation{}, persistenceFailure("load existing entryless quota reservation", err)
+	}
+	if existing.organizationID != prepared.OrganizationID ||
+		existing.applicationID != prepared.ApplicationID ||
+		existing.environmentID != prepared.EnvironmentID ||
+		existing.logicalRequestID != prepared.LogicalRequestID.String() ||
+		existing.reservationID != lockedReservationID || existing.idempotency != fingerprint {
+		return Reservation{}, ErrInvalidInput
+	}
+	validLifecycle := false
+	switch existing.status {
+	case "pending":
+		validLifecycle = logicalStatus == "reserved" || logicalStatus == "dispatched" || logicalStatus == "streaming"
+	case "settled":
+		validLifecycle = logicalStatus == "succeeded" || logicalStatus == "failed" || logicalStatus == "cancelled"
+	case "released", "expired":
+		validLifecycle = logicalStatus == "failed"
+	}
+	if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
+		existing.entryCount != 0 || !validLifecycle {
+		return Reservation{}, ErrInvalidState
+	}
+	return Reservation{
+		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
+		environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
+		reservationID: existing.reservationID, routeKey: prepared.RouteKey,
+		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
+		physicalModel: prepared.PhysicalModel, expiresAt: existing.expiresAt,
+	}, nil
+}
+
+func existingReservationStateMatches(
+	logicalStatus string,
+	reservationStatus string,
+	metric string,
+	expected int64,
+	reserved int64,
+	settled int64,
+	released int64,
+) bool {
+	if expected <= 0 || reserved != expected || settled < 0 || released < 0 ||
+		settled > reserved || released > reserved-settled ||
+		(metric != LogicalRequestsMetric && metric != OutputTokensMetric) ||
+		(metric == LogicalRequestsMetric && reserved != 1) {
 		return false
 	}
 	switch reservationStatus {
@@ -550,10 +644,15 @@ func existingReservationStateMatches(logicalStatus, reservationStatus string, re
 		return settled == 0 && released == 0 &&
 			(logicalStatus == "reserved" || logicalStatus == "dispatched" || logicalStatus == "streaming")
 	case "settled":
-		return settled == 1 && released == 0 &&
-			(logicalStatus == "succeeded" || logicalStatus == "failed" || logicalStatus == "cancelled")
+		if logicalStatus != "succeeded" && logicalStatus != "failed" && logicalStatus != "cancelled" {
+			return false
+		}
+		if metric == LogicalRequestsMetric || logicalStatus != "succeeded" {
+			return settled == reserved && released == 0
+		}
+		return settled+released == reserved
 	case "released", "expired":
-		return settled == 0 && released == 1 && logicalStatus == "failed"
+		return settled == 0 && released == reserved && logicalStatus == "failed"
 	default:
 		return false
 	}
@@ -579,13 +678,24 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 	if len(prepared.rules) < 1 || len(prepared.rules) > maximumRulesPerRequest {
 		return nil, ErrInvalidInput
 	}
-	plans := make([]plannedBucket, len(prepared.rules))
+	plans := make([]plannedBucket, 0, len(prepared.rules))
 	for index := range prepared.rules {
-		period, err := calendarWindow(at, prepared.rules[index].Window)
+		rule := prepared.rules[index]
+		if !rule.stateful {
+			continue
+		}
+		period, err := calendarWindow(at, rule.Window)
 		if err != nil {
 			return nil, err
 		}
-		plans[index] = plannedBucket{rule: prepared.rules[index], period: period}
+		reservedUnits := rule.ReservedUnits
+		if rule.Metric == LogicalRequestsMetric {
+			reservedUnits = 1
+		}
+		if reservedUnits <= 0 {
+			return nil, ErrInvalidInput
+		}
+		plans = append(plans, plannedBucket{rule: rule, period: period, reservedUnits: reservedUnits})
 	}
 	return plans, nil
 }
@@ -598,7 +708,7 @@ func plannedBucketIdentity(ruleKey, scopeKey string) string {
 // locking, then acquires every row lock in quota_bucket_id order. All reserve,
 // settle, release, replay, and recovery paths use that same global order.
 func lockPlannedBuckets(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plans []plannedBucket) error {
-	if len(plans) < 1 || len(plans) > maximumRulesPerRequest {
+	if len(plans) > maximumRulesPerRequest {
 		return ErrInvalidInput
 	}
 	for index := range plans {
@@ -693,9 +803,11 @@ func reservationEntries(plans []plannedBucket) []reservationEntry {
 	entries := make([]reservationEntry, len(plans))
 	for index := range plans {
 		entries[index] = reservationEntry{
-			bucketID: plans[index].locked.id,
-			entryID:  plans[index].entryID,
-			resetAt:  plans[index].period.end,
+			bucketID:      plans[index].locked.id,
+			entryID:       plans[index].entryID,
+			metric:        plans[index].rule.Metric,
+			reservedUnits: plans[index].reservedUnits,
+			resetAt:       plans[index].period.end,
 		}
 	}
 	return entries
@@ -886,6 +998,7 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || attempt.validate() != nil || outcome.validate() != nil {
 		return ErrInvalidInput
 	}
+	outcome.Usage = outcome.Usage.normalized()
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return persistenceFailure("begin quota settlement", err)
@@ -907,7 +1020,11 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		return ErrNotFound
 	}
 	if reservation.status == "settled" {
-		if terminalAttemptMatches(storedAttempt, outcome) {
+		matches, matchErr := terminalSettlementMatches(ctx, tx, reservation, storedAttempt, outcome)
+		if matchErr != nil {
+			return matchErr
+		}
+		if matches {
 			return nil
 		}
 		return ErrFinalized
@@ -923,15 +1040,19 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
-	usageID, err := store.newID(id.UsageRecord)
+	_, hasOutputReservation, err := lockedOutputReservationUnits(entries)
 	if err != nil {
-		return fmt.Errorf("generate usage-record identifier: %w", err)
+		return err
+	}
+	usageIDs, err := store.newSettlementUsageIDs(outcome.Usage, hasOutputReservation)
+	if err != nil {
+		return err
 	}
 	now, err := statementTime(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entries, outcome, usageID, now); err != nil {
+	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entries, outcome, usageIDs, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1061,17 +1182,23 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var usageID string
+	var usageIDs settlementUsageIDs
 	if attemptExists {
 		if storedAttempt.status != "started" ||
 			(logical.status != "dispatched" && logical.status != "streaming") {
 			return false, ErrInvalidState
 		}
-		generatedUsageID, idErr := store.newID(id.UsageRecord)
-		if idErr != nil {
-			return false, fmt.Errorf("generate recovered usage-record identifier: %w", idErr)
+		_, hasOutputReservation, outputErr := lockedOutputReservationUnits(entries)
+		if outputErr != nil {
+			return false, outputErr
 		}
-		usageID = generatedUsageID
+		generatedUsageIDs, idErr := store.newSettlementUsageIDs(
+			Usage{Provenance: UnknownUsageProvenance}, hasOutputReservation,
+		)
+		if idErr != nil {
+			return false, idErr
+		}
+		usageIDs = generatedUsageIDs
 	} else if logical.status != "reserved" {
 		return false, ErrInvalidState
 	}
@@ -1080,8 +1207,11 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if attemptExists {
-		outcome := Outcome{Status: AttemptTimedOut, FailureCode: expiryFailureCode}
-		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, outcome, usageID, now); err != nil {
+		outcome := Outcome{
+			Status: AttemptTimedOut, FailureCode: expiryFailureCode,
+			Usage: Usage{Provenance: UnknownUsageProvenance},
+		}
+		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, outcome, usageIDs, now); err != nil {
 			return false, err
 		}
 	} else {
@@ -1233,6 +1363,7 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 type lockedEntry struct {
 	id             string
 	bucketID       string
+	metric         string
 	reservedUnits  int64
 	settledUnits   int64
 	releasedUnits  int64
@@ -1244,6 +1375,7 @@ type lockedEntry struct {
 func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
+		       bucket.metric,
 		       entry.reserved_units, entry.settled_units, entry.released_units,
 		       bucket.used_units, bucket.reserved_units, bucket.hard_maximum
 		FROM quota_reservation_entries AS entry
@@ -1269,13 +1401,14 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		}
 		var entry lockedEntry
 		if err := rows.Scan(
-			&entry.id, &entry.bucketID, &entry.reservedUnits,
+			&entry.id, &entry.bucketID, &entry.metric, &entry.reservedUnits,
 			&entry.settledUnits, &entry.releasedUnits, &entry.bucketUsed,
 			&entry.bucketReserved, &entry.hardMaximum,
 		); err != nil {
 			return nil, persistenceFailure("scan quota reservation entry", err)
 		}
 		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
+			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
 			(len(entries) > 0 && entries[len(entries)-1].bucketID >= entry.bucketID) {
 			return nil, ErrInvalidState
 		}
@@ -1285,6 +1418,9 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		return nil, persistenceFailure("iterate quota reservation entries", err)
 	}
 	if len(entries) == 0 {
+		if len(reservation.entries) == 0 {
+			return entries, nil
+		}
 		return nil, ErrInvalidState
 	}
 	if len(reservation.entries) != 0 {
@@ -1293,7 +1429,9 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		}
 		for index := range entries {
 			if entries[index].id != reservation.entries[index].entryID ||
-				entries[index].bucketID != reservation.entries[index].bucketID {
+				entries[index].bucketID != reservation.entries[index].bucketID ||
+				entries[index].metric != reservation.entries[index].metric ||
+				entries[index].reservedUnits != reservation.entries[index].reservedUnits {
 				return nil, ErrInvalidState
 			}
 		}
@@ -1301,34 +1439,301 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 	return entries, nil
 }
 
-func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, attempt storedAttempt, entries []lockedEntry, outcome Outcome, usageID string, now time.Time) error {
-	if reservation.status != "pending" || attempt.status != "started" ||
-		(logical.status != "dispatched" && logical.status != "streaming") ||
-		len(entries) < 1 || len(entries) > maximumRulesPerRequest {
+type settlementUsageIDs struct {
+	logical        string
+	providerInput  string
+	providerOutput string
+	providerTotal  string
+	unknownOutput  string
+}
+
+func (store *Store) newSettlementUsageIDs(usage Usage, hasOutputReservation bool) (settlementUsageIDs, error) {
+	result := settlementUsageIDs{}
+	generate := func(destination *string) error {
+		value, err := store.newID(id.UsageRecord)
+		if err != nil {
+			return fmt.Errorf("generate usage-record identifier: %w", err)
+		}
+		*destination = value
+		return nil
+	}
+	if err := generate(&result.logical); err != nil {
+		return settlementUsageIDs{}, err
+	}
+	if usage.Known {
+		for _, destination := range []*string{
+			&result.providerInput, &result.providerOutput, &result.providerTotal,
+		} {
+			if err := generate(destination); err != nil {
+				return settlementUsageIDs{}, err
+			}
+		}
+	} else if hasOutputReservation {
+		if err := generate(&result.unknownOutput); err != nil {
+			return settlementUsageIDs{}, err
+		}
+	}
+	return result, nil
+}
+
+func lockedOutputReservationUnits(entries []lockedEntry) (int64, bool, error) {
+	var units int64
+	found := false
+	for _, entry := range entries {
+		if entry.metric != OutputTokensMetric {
+			continue
+		}
+		if entry.reservedUnits <= 0 || found && entry.reservedUnits != units {
+			return 0, false, ErrInvalidState
+		}
+		units = entry.reservedUnits
+		found = true
+	}
+	return units, found, nil
+}
+
+func reservationOutputReservationUnits(entries []reservationEntry) (int64, bool, error) {
+	var units int64
+	found := false
+	for _, entry := range entries {
+		if entry.metric != OutputTokensMetric {
+			continue
+		}
+		if entry.reservedUnits <= 0 || found && entry.reservedUnits != units {
+			return 0, false, ErrInvalidState
+		}
+		units = entry.reservedUnits
+		found = true
+	}
+	return units, found, nil
+}
+
+func insertSettlementUsage(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	attempt storedAttempt,
+	entries []lockedEntry,
+	usage Usage,
+	identifiers settlementUsageIDs,
+	now time.Time,
+) error {
+	if id.Validate(identifiers.logical, id.UsageRecord) != nil {
 		return ErrInvalidState
 	}
-	for _, entry := range entries {
-		if entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
-			entry.bucketReserved < 1 || entry.hardMaximum == nil || entry.bucketUsed < 0 ||
-			entry.bucketUsed >= *entry.hardMaximum {
+	insert := func(usageID string, attemptID any, metric string, units int64, confidence, provenanceKey string) error {
+		if id.Validate(usageID, id.UsageRecord) != nil || units < 0 {
 			return ErrInvalidState
 		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO usage_records (
+				usage_record_id, organization_id, application_id, environment_id,
+				logical_request_id, upstream_attempt_id, metric, units,
+				confidence, provenance_key, recorded_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`, usageID, reservation.organizationID, reservation.applicationID,
+			reservation.environmentID, reservation.logicalRequestID, attemptID,
+			metric, units, confidence, provenanceKey, now); err != nil {
+			return mapWriteError("insert quota usage", err)
+		}
+		return nil
+	}
+	if err := insert(
+		identifiers.logical, nil, LogicalRequestsMetric, 1, "calculated",
+		logicalUsageProvenanceKey(reservation.logicalRequestID),
+	); err != nil {
+		return err
+	}
+	if usage.Known {
+		records := []struct {
+			id     string
+			metric string
+			units  int64
+		}{
+			{id: identifiers.providerInput, metric: "input_tokens", units: usage.InputTokens},
+			{id: identifiers.providerOutput, metric: OutputTokensMetric, units: usage.OutputTokens},
+			{id: identifiers.providerTotal, metric: "total_tokens", units: usage.TotalTokens},
+		}
+		for _, record := range records {
+			if err := insert(
+				record.id, attempt.id, record.metric, record.units, "reported",
+				providerUsageProvenanceKey(attempt.id, record.metric),
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	outputUnits, hasOutputReservation, err := lockedOutputReservationUnits(entries)
+	if err != nil {
+		return err
+	}
+	if !hasOutputReservation {
+		if identifiers.unknownOutput != "" {
+			return ErrInvalidState
+		}
+		return nil
+	}
+	return insert(
+		identifiers.unknownOutput, attempt.id, OutputTokensMetric, outputUnits, "unknown",
+		unknownOutputUsageProvenanceKey(reservation.reservationID),
+	)
+}
+
+func logicalUsageProvenanceKey(logicalRequestID string) string {
+	return "logical-request:" + logicalRequestID
+}
+
+func providerUsageProvenanceKey(attemptID, metric string) string {
+	return ProviderReportedProvenance + ":" + attemptID + ":" + metric
+}
+
+func unknownOutputUsageProvenanceKey(reservationID string) string {
+	return "quota-reservation:" + reservationID + ":unknown-output"
+}
+
+func terminalSettlementMatches(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	attempt storedAttempt,
+	outcome Outcome,
+) (bool, error) {
+	if !terminalAttemptMatches(attempt, outcome) {
+		return false, nil
+	}
+	outputUnits, hasOutputReservation, err := reservationOutputReservationUnits(reservation.entries)
+	if err != nil {
+		return false, err
+	}
+	type expectedUsage struct {
+		attemptID  *string
+		metric     string
+		units      int64
+		confidence string
+	}
+	expected := map[string]expectedUsage{
+		logicalUsageProvenanceKey(reservation.logicalRequestID): {
+			metric: LogicalRequestsMetric, units: 1, confidence: "calculated",
+		},
+	}
+	if outcome.Usage.Known {
+		attemptID := attempt.id
+		for _, record := range []struct {
+			metric string
+			units  int64
+		}{
+			{metric: "input_tokens", units: outcome.Usage.InputTokens},
+			{metric: OutputTokensMetric, units: outcome.Usage.OutputTokens},
+			{metric: "total_tokens", units: outcome.Usage.TotalTokens},
+		} {
+			expected[providerUsageProvenanceKey(attempt.id, record.metric)] = expectedUsage{
+				attemptID: &attemptID, metric: record.metric, units: record.units, confidence: "reported",
+			}
+		}
+	} else if hasOutputReservation {
+		attemptID := attempt.id
+		expected[unknownOutputUsageProvenanceKey(reservation.reservationID)] = expectedUsage{
+			attemptID: &attemptID, metric: OutputTokensMetric, units: outputUnits, confidence: "unknown",
+		}
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT usage_record_id, upstream_attempt_id, metric, units,
+		       confidence, provenance_key
+		FROM usage_records
+		WHERE environment_id = $1 AND logical_request_id = $2
+		ORDER BY provenance_key COLLATE "C"
+	`, reservation.environmentID, reservation.logicalRequestID)
+	if err != nil {
+		return false, persistenceFailure("load terminal quota usage", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var usageID, metric, confidence, provenanceKey string
+		var attemptID *string
+		var units int64
+		if err := rows.Scan(&usageID, &attemptID, &metric, &units, &confidence, &provenanceKey); err != nil {
+			return false, persistenceFailure("scan terminal quota usage", err)
+		}
+		want, ok := expected[provenanceKey]
+		if !ok || id.Validate(usageID, id.UsageRecord) != nil ||
+			(attemptID == nil) != (want.attemptID == nil) || metric != want.metric ||
+			units != want.units || confidence != want.confidence {
+			return false, nil
+		}
+		if attemptID != nil && *attemptID != *want.attemptID {
+			return false, nil
+		}
+		if _, duplicate := seen[provenanceKey]; duplicate {
+			return false, nil
+		}
+		seen[provenanceKey] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return false, persistenceFailure("iterate terminal quota usage", err)
+	}
+	return len(seen) == len(expected), nil
+}
+
+func settleLocked(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	logical lockedLogical,
+	attempt storedAttempt,
+	entries []lockedEntry,
+	outcome Outcome,
+	usageIDs settlementUsageIDs,
+	now time.Time,
+) error {
+	if reservation.status != "pending" || attempt.status != "started" ||
+		(logical.status != "dispatched" && logical.status != "streaming") ||
+		len(entries) > maximumRulesPerRequest {
+		return ErrInvalidState
+	}
+	settledUnits := make([]int64, len(entries))
+	releasedUnits := make([]int64, len(entries))
+	for _, entry := range entries {
+		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+			entry.bucketReserved < entry.reservedUnits || entry.hardMaximum == nil ||
+			entry.bucketUsed < 0 || entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric ||
+			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) {
+			return ErrInvalidState
+		}
+	}
+	for index, entry := range entries {
+		settled := entry.reservedUnits
+		if entry.metric == OutputTokensMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
+			settled = outcome.Usage.OutputTokens
+			if settled > entry.reservedUnits {
+				return ErrInvalidInput
+			}
+		}
+		if settled < 0 || entry.bucketUsed > *entry.hardMaximum ||
+			settled > *entry.hardMaximum-entry.bucketUsed {
+			return ErrInvalidState
+		}
+		settledUnits[index] = settled
+		releasedUnits[index] = entry.reservedUnits - settled
 	}
 	if attempt.firstByteAt != nil && attempt.firstByteAt.After(now) {
 		now = attempt.firstByteAt.UTC()
 	}
-	for _, entry := range entries {
+	for index, entry := range entries {
 		command, err := tx.Exec(ctx, `
 			UPDATE quota_buckets
-			SET used_units = used_units + 1,
-			    reserved_units = reserved_units - 1,
+			SET used_units = used_units + $2::bigint,
+			    reserved_units = reserved_units - $3::bigint,
 			    version = version + 1,
-			    updated_at = GREATEST(updated_at, $2)
+			    updated_at = GREATEST(updated_at, $4)
 			WHERE quota_bucket_id = $1
-			  AND reserved_units >= 1
+			  AND $2::bigint >= 0 AND $3::bigint > 0
+			  AND reserved_units >= $3::bigint
 			  AND hard_maximum IS NOT NULL
-			  AND used_units < hard_maximum
-		`, entry.bucketID, now)
+			  AND used_units <= hard_maximum
+			  AND $2::bigint <= hard_maximum - used_units
+		`, entry.bucketID, settledUnits[index], entry.reservedUnits, now)
 		if err != nil {
 			return persistenceFailure("settle quota bucket", err)
 		}
@@ -1337,10 +1742,10 @@ func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation,
 		}
 		command, err = tx.Exec(ctx, `
 			UPDATE quota_reservation_entries
-			SET settled_units = 1, released_units = 0
+			SET settled_units = $2, released_units = $3
 			WHERE quota_reservation_entry_id = $1
-			  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
-		`, entry.id)
+			  AND reserved_units = $4 AND settled_units = 0 AND released_units = 0
+		`, entry.id, settledUnits[index], releasedUnits[index], entry.reservedUnits)
 		if err != nil {
 			return persistenceFailure("settle quota reservation entry", err)
 		}
@@ -1350,17 +1755,8 @@ func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation,
 	}
 	var command pgconn.CommandTag
 	var err error
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO usage_records (
-			usage_record_id, organization_id, application_id, environment_id,
-			logical_request_id, upstream_attempt_id, metric, units,
-			confidence, provenance_key, recorded_at
-		) VALUES ($1, $2, $3, $4, $5, NULL, 'logical_requests', 1,
-		          'calculated', $6, $7)
-	`, usageID, reservation.organizationID, reservation.applicationID,
-		reservation.environmentID, reservation.logicalRequestID,
-		"logical-request:"+reservation.logicalRequestID, now); err != nil {
-		return mapWriteError("insert logical-request usage", err)
+	if err := insertSettlementUsage(ctx, tx, reservation, attempt, entries, outcome.Usage, usageIDs, now); err != nil {
+		return err
 	}
 	command, err = tx.Exec(ctx, `
 		UPDATE upstream_attempts
@@ -1413,23 +1809,25 @@ func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation,
 
 func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, entries []lockedEntry, reservationStatus, failureCode string, now time.Time) error {
 	if reservation.status != "pending" || logical.status != "reserved" ||
-		len(entries) < 1 || len(entries) > maximumRulesPerRequest {
+		len(entries) > maximumRulesPerRequest {
 		return ErrInvalidState
 	}
 	for _, entry := range entries {
-		if entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
-			entry.bucketReserved < 1 {
+		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+			entry.bucketReserved < entry.reservedUnits ||
+			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
+			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) {
 			return ErrInvalidState
 		}
 	}
 	for _, entry := range entries {
 		command, err := tx.Exec(ctx, `
 			UPDATE quota_buckets
-			SET reserved_units = reserved_units - 1,
+			SET reserved_units = reserved_units - $2::bigint,
 			    version = version + 1,
-			    updated_at = GREATEST(updated_at, $2)
-			WHERE quota_bucket_id = $1 AND reserved_units >= 1
-		`, entry.bucketID, now)
+			    updated_at = GREATEST(updated_at, $3)
+			WHERE quota_bucket_id = $1 AND $2::bigint > 0 AND reserved_units >= $2::bigint
+		`, entry.bucketID, entry.reservedUnits, now)
 		if err != nil {
 			return persistenceFailure("release quota bucket", err)
 		}
@@ -1438,10 +1836,10 @@ func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation
 		}
 		command, err = tx.Exec(ctx, `
 			UPDATE quota_reservation_entries
-			SET settled_units = 0, released_units = 1
+			SET settled_units = 0, released_units = $2
 			WHERE quota_reservation_entry_id = $1
-			  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
-		`, entry.id)
+			  AND reserved_units = $2 AND settled_units = 0 AND released_units = 0
+		`, entry.id, entry.reservedUnits)
 		if err != nil {
 			return persistenceFailure("release quota reservation entry", err)
 		}

@@ -1,10 +1,10 @@
 // Package quota owns durable quota reservations and request accounting.
 //
-// The bounded implementation in this package deliberately supports only hard
-// calendar logical-request rules. One request may resolve to multiple rules,
-// which are reserved and finalized atomically. The package does not accept
-// client supplied counters, bucket keys, rule hashes, usage totals, or
-// timestamps.
+// The bounded implementation in this package supports hard calendar
+// logical-request and output-token rules plus hard per-request output-token
+// enforcement metadata. One request may resolve to multiple rules, which are
+// reserved and finalized atomically. The package does not accept client
+// supplied counters, bucket keys, rule hashes, usage totals, or timestamps.
 package quota
 
 import (
@@ -27,8 +27,13 @@ import (
 
 const (
 	LogicalRequestsMetric  = "logical_requests"
+	OutputTokensMetric     = "output_tokens"
 	CalendarAlgorithm      = "calendar"
+	PerRequestAlgorithm    = "per_request"
 	maximumRulesPerRequest = 128
+
+	ProviderReportedProvenance = "provider_reported"
+	UnknownUsageProvenance     = "unknown"
 
 	AttemptSucceeded = "succeeded"
 	AttemptFailed    = "failed"
@@ -74,15 +79,20 @@ const (
 	requestDigestDomain = "latchway/quota-request/v1\x00"
 )
 
-// Rule is a server-resolved limit rule. Reserve rejects every shape except a
-// hard logical_requests calendar rule with a non-empty unambiguous scope.
+// Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
+// output cap applied to the provider request. It is zero for logical-request
+// rules, whose one unit is derived by the store. PerRequestMaximum is populated
+// only for output_tokens/per_request metadata, which is fingerprinted but does
+// not create a durable bucket.
 type Rule struct {
-	Metric    string
-	Algorithm string
-	Scope     []string
-	Window    string
-	Maximum   int64
-	Hard      bool
+	Metric            string
+	Algorithm         string
+	Scope             []string
+	Window            string
+	Maximum           int64
+	PerRequestMaximum int64
+	ReservedUnits     int64
+	Hard              bool
 }
 
 // ReserveInput contains only canonical durable identities and server-selected
@@ -112,6 +122,16 @@ type ReserveInput struct {
 	Rules []Rule
 }
 
+// Usage is normalized provider usage. Known measurements must carry the
+// provider_reported provenance; unknown usage contains no measurements.
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
+	TotalTokens  int64
+	Known        bool
+	Provenance   string
+}
+
 // Outcome is the trusted terminal result of an upstream attempt. HTTPStatus
 // zero means no status was received. FailureCode must be a stable safe code for
 // every non-success outcome.
@@ -119,6 +139,7 @@ type Outcome struct {
 	Status      string
 	HTTPStatus  int
 	FailureCode string
+	Usage       Usage
 }
 
 // Reservation is an opaque, immutable handle returned only after the reserve
@@ -141,9 +162,11 @@ type Reservation struct {
 // reservationEntry is sorted by bucketID. resetAt is derived from the trusted
 // rule window and is never loaded from or supplied to PostgreSQL.
 type reservationEntry struct {
-	bucketID string
-	entryID  string
-	resetAt  time.Time
+	bucketID      string
+	entryID       string
+	metric        string
+	reservedUnits int64
+	resetAt       time.Time
 }
 
 func (reservation Reservation) LogicalRequestID() string { return reservation.logicalRequestID }
@@ -194,6 +217,7 @@ type preparedRule struct {
 	scopeType       string
 	ruleKey         string
 	scopeKey        string
+	stateful        bool
 }
 
 func prepareRequest(input ReserveInput) (preparedRequest, error) {
@@ -239,13 +263,45 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		"model":        input.ModelKey,
 	}
 	preparedRules := make([]preparedRule, 0, len(input.Rules))
+	var outputReservation int64
 	for _, rule := range input.Rules {
 		dimensions, err := canonicalScopeDimensions(rule.Scope)
-		if err != nil || rule.Metric != LogicalRequestsMetric ||
-			rule.Algorithm != CalendarAlgorithm || !rule.Hard || rule.Maximum <= 0 {
+		if err != nil || !rule.Hard {
 			return preparedRequest{}, ErrInvalidInput
 		}
-		if _, err := parseCalendarSpec(rule.Window); err != nil {
+		stateful := false
+		switch {
+		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == CalendarAlgorithm:
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 {
+				return preparedRequest{}, ErrInvalidInput
+			}
+			stateful = true
+		case rule.Metric == OutputTokensMetric && rule.Algorithm == CalendarAlgorithm:
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits <= 0 {
+				return preparedRequest{}, ErrInvalidInput
+			}
+			stateful = true
+		case rule.Metric == OutputTokensMetric && rule.Algorithm == PerRequestAlgorithm:
+			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
+				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.PerRequestMaximum {
+				return preparedRequest{}, ErrInvalidInput
+			}
+		default:
+			return preparedRequest{}, ErrInvalidInput
+		}
+		if rule.Metric == OutputTokensMetric {
+			if outputReservation == 0 {
+				outputReservation = rule.ReservedUnits
+			} else if outputReservation != rule.ReservedUnits {
+				return preparedRequest{}, ErrInvalidInput
+			}
+		}
+		if stateful {
+			if _, err := parseCalendarSpec(rule.Window); err != nil {
+				return preparedRequest{}, ErrInvalidInput
+			}
+		}
+		if !stateful && rule.Window != "" {
 			return preparedRequest{}, ErrInvalidInput
 		}
 		ruleParts := []string{rule.Metric, rule.Algorithm, rule.Window}
@@ -262,12 +318,14 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 			Rule: Rule{
 				Metric: rule.Metric, Algorithm: rule.Algorithm,
 				Scope: append([]string(nil), dimensions...), Window: rule.Window,
-				Maximum: rule.Maximum, Hard: rule.Hard,
+				Maximum: rule.Maximum, PerRequestMaximum: rule.PerRequestMaximum,
+				ReservedUnits: rule.ReservedUnits, Hard: rule.Hard,
 			},
 			scopeDimensions: dimensions,
 			scopeType:       scopeType,
 			ruleKey:         canonicalDigest(ruleDigestDomain, ruleParts),
 			scopeKey:        canonicalDigest(scopeDigestDomain, scopeParts),
+			stateful:        stateful,
 		})
 	}
 	sort.Slice(preparedRules, func(left, right int) bool {
@@ -355,6 +413,15 @@ func requestFingerprint(prepared preparedRequest) string {
 	}
 	for _, rule := range prepared.rules {
 		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))
+		// Preserve the exact historical logical_requests/calendar serialization.
+		// New output-token shapes bind both their configured per-request maximum
+		// and the exact cap applied to this provider request.
+		if rule.Metric == OutputTokensMetric {
+			parts = append(parts,
+				strconv.FormatInt(rule.PerRequestMaximum, 10),
+				strconv.FormatInt(rule.ReservedUnits, 10),
+			)
+		}
 	}
 	return canonicalDigest(requestDigestDomain, parts)
 }
@@ -368,12 +435,35 @@ func (outcome Outcome) validate() error {
 		if outcome.FailureCode != "" || outcome.HTTPStatus < 200 || outcome.HTTPStatus > 299 {
 			return ErrInvalidInput
 		}
-		return nil
+		return outcome.Usage.validate()
 	}
 	if !failureCodePattern.MatchString(outcome.FailureCode) {
 		return ErrInvalidInput
 	}
+	return outcome.Usage.validate()
+}
+
+func (usage Usage) validate() error {
+	if !usage.Known {
+		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.TotalTokens != 0 ||
+			(usage.Provenance != "" && usage.Provenance != UnknownUsageProvenance) {
+			return ErrInvalidInput
+		}
+		return nil
+	}
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 ||
+		usage.TotalTokens < usage.InputTokens || usage.TotalTokens < usage.OutputTokens ||
+		usage.Provenance != ProviderReportedProvenance {
+		return ErrInvalidInput
+	}
 	return nil
+}
+
+func (usage Usage) normalized() Usage {
+	if !usage.Known {
+		return Usage{Provenance: UnknownUsageProvenance}
+	}
+	return usage
 }
 
 func validFailureCode(value string) bool {
@@ -397,8 +487,16 @@ func (reservation Reservation) validate() error {
 		!identifierPattern.MatchString(reservation.upstreamKey) ||
 		!identifierPattern.MatchString(reservation.modelKey) ||
 		!validPhysicalModel(reservation.physicalModel) ||
-		reservation.windowResetAt.IsZero() || reservation.expiresAt.IsZero() ||
-		len(reservation.entries) < 1 || len(reservation.entries) > maximumRulesPerRequest {
+		reservation.expiresAt.IsZero() || len(reservation.entries) > maximumRulesPerRequest {
+		return ErrInvalidInput
+	}
+	if len(reservation.entries) == 0 {
+		if !reservation.windowResetAt.IsZero() {
+			return ErrInvalidInput
+		}
+		return nil
+	}
+	if reservation.windowResetAt.IsZero() {
 		return ErrInvalidInput
 	}
 	var maximumReset time.Time
@@ -406,6 +504,9 @@ func (reservation Reservation) validate() error {
 	for index, entry := range reservation.entries {
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			id.Validate(entry.entryID, id.QuotaEntry) != nil || entry.resetAt.IsZero() ||
+			(entry.metric != LogicalRequestsMetric && entry.metric != OutputTokensMetric) ||
+			entry.reservedUnits <= 0 ||
+			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) ||
 			(index > 0 && reservation.entries[index-1].bucketID >= entry.bucketID) {
 			return ErrInvalidInput
 		}
