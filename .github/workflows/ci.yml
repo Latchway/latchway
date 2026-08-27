@@ -55,6 +55,8 @@ jobs:
           cache-dependency-path: go.sum
       - name: Check formatting
         run: make fmt
+      - name: Verify sqlc output
+        run: make check-generated
       - name: Vet
         run: go vet ./...
       - name: Unit and PostgreSQL integration tests
