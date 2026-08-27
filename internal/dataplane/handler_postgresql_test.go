@@ -22,8 +22,10 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,8 +59,10 @@ const (
 	dataPlaneE2EConfiguredUpstream  = "https://api.example.test/v1"
 	dataPlaneE2EProviderSecret      = "fixture-provider-credential-value-01"
 	dataPlaneE2EPromptMarker        = "prompt-marker-dataplane-e2e-01"
+	dataPlaneE2EStreamPromptMarker  = "prompt-marker-dataplane-e2e-stream-01"
 	dataPlaneE2EProviderModel       = "configured-chat-model"
 	dataPlaneE2EClientRequestID     = "client-request-dataplane-e2e-01"
+	dataPlaneE2EStreamRequestID     = "client-request-dataplane-e2e-stream-01"
 	dataPlaneE2EDebugAttestationKey = "dataplane-debug-key-01"
 	dataPlaneE2EUntrustedHost       = "untrusted-inbound.example.test"
 )
@@ -286,7 +290,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		"messages":              []any{map[string]any{"role": "user", "content": dataPlaneE2EPromptMarker}},
 		"max_completion_tokens": 9999,
 	}
-	chatResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, accessProof, chatBody)
+	chatResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, accessProof,
+		dataPlaneE2EClientRequestID, chatBody)
 	if chatResponse.Code != http.StatusOK {
 		providerRequests, captureErr := capture.snapshot()
 		var logicalStatus, attemptStatus, failureCode string
@@ -337,51 +342,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if len(providerRequests) != 1 {
 		t.Fatalf("provider dispatches = %d, want 1", len(providerRequests))
 	}
-	providerRequest := providerRequests[0]
-	if providerRequest.method != http.MethodPost || providerRequest.path != "/v1/chat/completions" ||
-		providerRequest.host != privateTargetAuthority || providerRequest.host == dataPlaneE2EUntrustedHost {
-		t.Fatalf("provider route authority was not target-bound: method=%s path=%s host_matches_target=%t retained_untrusted_host=%t",
-			providerRequest.method, providerRequest.path, providerRequest.host == privateTargetAuthority,
-			providerRequest.host == dataPlaneE2EUntrustedHost)
-	}
-	if providerRequest.authorization != "Bearer "+dataPlaneE2EProviderSecret ||
-		providerRequest.staticTenant != "tenant-e2e" {
-		t.Fatal("server-held provider credential or static header was not applied")
-	}
-	for _, forbidden := range []string{
-		"DPoP", "Cookie", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host",
-		"X-Forwarded-Proto", "X-Latchway-Feature", "X-Latchway-Protocol-Version",
-		"X-Latchway-Request-ID", "X-Latchway-SDK", "X-Latchway-SDK-Version",
-		mockupstream.ScenarioHeader, "X-Untrusted-Provider-Header",
-	} {
-		if values := providerRequest.headers.Values(forbidden); len(values) != 0 {
-			t.Fatalf("provider request retained forbidden client header %q", forbidden)
-		}
-	}
-	var providerBody map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(providerRequest.body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&providerBody); err != nil {
-		t.Fatalf("decode rewritten provider request: %v", err)
-	}
-	if providerBody["model"] != dataPlaneE2EProviderModel {
-		t.Fatalf("physical model = %#v, want %q", providerBody["model"], dataPlaneE2EProviderModel)
-	}
-	limit, ok := providerBody["max_completion_tokens"].(json.Number)
-	if !ok || limit.String() != "64" {
-		t.Fatalf("provider output clamp = %#v, want 64", providerBody["max_completion_tokens"])
-	}
-	if _, exists := providerBody["max_tokens"]; exists {
-		t.Fatal("provider request retained an ambiguous legacy output limit")
-	}
-	messages, ok := providerBody["messages"].([]any)
-	if !ok || len(messages) != 1 {
-		t.Fatalf("provider messages = %#v, want exactly one message", providerBody["messages"])
-	}
-	message, ok := messages[0].(map[string]any)
-	if !ok || len(message) != 2 || message["role"] != "user" || message["content"] != dataPlaneE2EPromptMarker {
-		t.Fatalf("provider message did not preserve the exact client prompt: %#v", messages[0])
-	}
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[0], privateTargetAuthority,
+		dataPlaneE2EPromptMarker, false)
 
 	observations := mock.Observations()
 	if len(observations) != 1 || observations[0].Method != http.MethodPost ||
@@ -389,11 +351,12 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		observations[0].RequestBytes == 0 || !observations[0].ResponseStarted {
 		t.Fatalf("mock-upstream observations = %+v", observations)
 	}
-	assertDataPlaneE2EPersistence(t, ctx, pool)
+	firstLogicalID := assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 1)
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EProviderSecret, dataPlaneE2EPromptMarker, "Deterministic mock response.")
 
-	replayResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, accessProof, chatBody)
+	replayResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, accessProof,
+		dataPlaneE2EClientRequestID, chatBody)
 	assertDataPlaneE2EProblem(t, replayResponse, http.StatusUnauthorized, "dpop_replayed")
 	if targets.acquisitions.Load() != 1 || targets.releases.Load() != 1 || len(mock.Observations()) != 1 {
 		t.Fatalf("replayed DPoP proof reached dispatch: acquisitions=%d releases=%d observations=%d",
@@ -406,6 +369,57 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if logicalRequests != 1 {
 		t.Fatalf("logical requests after proof replay = %d, want 1", logicalRequests)
 	}
+
+	streamProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-chat-stream", grant.AccessToken)
+	streamBody := map[string]any{
+		"model":                 "untrusted-client-stream-model",
+		"messages":              []any{map[string]any{"role": "user", "content": dataPlaneE2EStreamPromptMarker}},
+		"max_completion_tokens": 9999,
+		"stream":                true,
+	}
+	streamResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, streamProof,
+		dataPlaneE2EStreamRequestID, streamBody)
+	assertDataPlaneE2EChatStream(t, streamResponse)
+
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil {
+		t.Fatalf("capture streaming provider request: %v", captureErr)
+	}
+	if len(providerRequests) != 2 {
+		t.Fatalf("provider dispatches after stream = %d, want 2", len(providerRequests))
+	}
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[1], privateTargetAuthority,
+		dataPlaneE2EStreamPromptMarker, true)
+	if targets.acquisitions.Load() != 2 || targets.releases.Load() != 2 {
+		t.Fatalf("streaming target acquisitions/releases = %d/%d, want 2/2",
+			targets.acquisitions.Load(), targets.releases.Load())
+	}
+	observations = mock.Observations()
+	if len(observations) != 2 || observations[1].Method != http.MethodPost ||
+		observations[1].Path != "/v1/chat/completions" || observations[1].StatusCode != http.StatusOK ||
+		observations[1].RequestBytes == 0 || !observations[1].ResponseStarted || observations[1].Canceled {
+		t.Fatalf("streaming mock-upstream observations = %+v", observations)
+	}
+	secondLogicalID := assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EStreamRequestID, 2)
+	if firstLogicalID == secondLogicalID {
+		t.Fatalf("streaming request reused non-streaming logical request identity %q", firstLogicalID)
+	}
+	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 2)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM logical_requests`).Scan(&logicalRequests); err != nil {
+		t.Fatalf("count logical requests after stream: %v", err)
+	}
+	if logicalRequests != 2 {
+		t.Fatalf("logical requests after stream = %d, want 2", logicalRequests)
+	}
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
+		dataPlaneE2EProviderSecret,
+		dataPlaneE2EPromptMarker,
+		dataPlaneE2EStreamPromptMarker,
+		"Deterministic mock response.",
+		"Deterministic ",
+		"mock response.",
+	)
 }
 
 type dataPlaneE2ETenant struct {
@@ -712,7 +726,7 @@ func setDataPlaneE2EProtectedHeaders(request *http.Request, proof string) {
 	request.Header.Set("DPoP", proof)
 }
 
-func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof string, body any) *dataPlaneE2EResponseRecorder {
+func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof, clientRequestID string, body any) *dataPlaneE2EResponseRecorder {
 	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -723,7 +737,7 @@ func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof
 	setDataPlaneE2EProtectedHeaders(request, proof)
 	request.Header.Set("Authorization", "DPoP "+accessToken)
 	request.Header.Set("X-Latchway-Feature", "assistant")
-	request.Header.Set("X-Latchway-Request-ID", dataPlaneE2EClientRequestID)
+	request.Header.Set("X-Latchway-Request-ID", clientRequestID)
 	request.Header.Set("Cookie", "client-cookie=must-not-cross")
 	request.Header.Set("X-Forwarded-For", "203.0.113.10")
 	request.Header.Set(mockupstream.ScenarioHeader, string(mockupstream.ScenarioHTTP500))
@@ -731,6 +745,146 @@ func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof
 	response := &dataPlaneE2EResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func assertDataPlaneE2EProviderChatRequest(
+	t *testing.T,
+	request dataPlaneE2EProviderRequest,
+	targetAuthority, prompt string,
+	wantStream bool,
+) {
+	t.Helper()
+	if request.method != http.MethodPost || request.path != "/v1/chat/completions" ||
+		request.host != targetAuthority || request.host == dataPlaneE2EUntrustedHost {
+		t.Fatalf("provider route authority was not target-bound: method=%s path=%s host_matches_target=%t retained_untrusted_host=%t",
+			request.method, request.path, request.host == targetAuthority, request.host == dataPlaneE2EUntrustedHost)
+	}
+	if request.authorization != "Bearer "+dataPlaneE2EProviderSecret || request.staticTenant != "tenant-e2e" {
+		t.Fatal("server-held provider credential or static header was not applied")
+	}
+	for _, forbidden := range []string{
+		"DPoP", "Cookie", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host",
+		"X-Forwarded-Proto", "X-Latchway-Feature", "X-Latchway-Protocol-Version",
+		"X-Latchway-Request-ID", "X-Latchway-SDK", "X-Latchway-SDK-Version",
+		mockupstream.ScenarioHeader, "X-Untrusted-Provider-Header",
+	} {
+		if values := request.headers.Values(forbidden); len(values) != 0 {
+			t.Fatalf("provider request retained forbidden client header %q", forbidden)
+		}
+	}
+
+	var body map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(request.body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&body); err != nil {
+		t.Fatalf("decode rewritten provider request: %v", err)
+	}
+	if err := requireDataPlaneE2EJSONEOF(decoder); err != nil {
+		t.Fatalf("rewritten provider request was not one exact JSON value: %v", err)
+	}
+	if body["model"] != dataPlaneE2EProviderModel {
+		t.Fatalf("physical model = %#v, want %q", body["model"], dataPlaneE2EProviderModel)
+	}
+	limit, ok := body["max_completion_tokens"].(json.Number)
+	if !ok || limit.String() != "64" {
+		t.Fatalf("provider output clamp = %#v, want 64", body["max_completion_tokens"])
+	}
+	if _, exists := body["max_tokens"]; exists {
+		t.Fatal("provider request retained an ambiguous legacy output limit")
+	}
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("provider messages = %#v, want exactly one message", body["messages"])
+	}
+	message, ok := messages[0].(map[string]any)
+	if !ok || len(message) != 2 || message["role"] != "user" || message["content"] != prompt {
+		t.Fatalf("provider message did not preserve the exact client prompt: %#v", messages[0])
+	}
+	stream, hasStream := body["stream"]
+	options, hasOptions := body["stream_options"]
+	if !wantStream {
+		if hasStream || hasOptions || len(body) != 3 {
+			t.Fatalf("non-streaming provider request retained streaming fields: stream=%#v options=%#v fields=%d",
+				stream, options, len(body))
+		}
+		return
+	}
+	if !hasStream || stream != true || !hasOptions || len(body) != 5 {
+		t.Fatalf("streaming provider request fields = stream:%#v options:%#v count:%d", stream, options, len(body))
+	}
+	streamOptions, ok := options.(map[string]any)
+	if !ok || len(streamOptions) != 1 || streamOptions["include_usage"] != true {
+		t.Fatalf("streaming provider request did not require final usage: %#v", options)
+	}
+}
+
+func assertDataPlaneE2EChatStream(t *testing.T, response *dataPlaneE2EResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" ||
+		response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("streaming response status/content-type/cache = %d/%q/%q",
+			response.Code, response.Header().Get("Content-Type"), response.Header().Get("Cache-Control"))
+	}
+	frames := strings.Split(response.Body.String(), "\n\n")
+	if len(frames) != 6 || frames[len(frames)-1] != "" {
+		t.Fatalf("streaming response frames = %d, want exactly five complete SSE events", len(frames)-1)
+	}
+	if frames[4] != "data: [DONE]" {
+		t.Fatalf("final streaming event = %q, want exact [DONE] sentinel", frames[4])
+	}
+
+	base := func(delta map[string]any, finishReason any) map[string]any {
+		return map[string]any{
+			"choices": []any{map[string]any{
+				"delta": delta, "finish_reason": finishReason, "index": json.Number("0"),
+			}},
+			"created": json.Number("1787820000"),
+			"id":      "chatcmpl_mock_0001",
+			"model":   "latchway-mock-model",
+			"object":  "chat.completion.chunk",
+		}
+	}
+	expected := []map[string]any{
+		base(map[string]any{"role": "assistant"}, nil),
+		base(map[string]any{"content": "Deterministic "}, nil),
+		base(map[string]any{"content": "mock response."}, nil),
+		base(map[string]any{}, "stop"),
+	}
+	expected[3]["usage"] = map[string]any{
+		"completion_tokens":        json.Number("7"),
+		"prompt_tokens":            json.Number("11"),
+		"total_tokens":             json.Number("18"),
+		"x_latchway_cost_nano_usd": json.Number("123456"),
+	}
+	for index, want := range expected {
+		if !strings.HasPrefix(frames[index], "data: ") || strings.Contains(frames[index], "\n") {
+			t.Fatalf("streaming event %d has invalid SSE framing: %q", index, frames[index])
+		}
+		var got map[string]any
+		decoder := json.NewDecoder(strings.NewReader(strings.TrimPrefix(frames[index], "data: ")))
+		decoder.UseNumber()
+		if err := decoder.Decode(&got); err != nil {
+			t.Fatalf("decode streaming event %d: %v", index, err)
+		}
+		if err := requireDataPlaneE2EJSONEOF(decoder); err != nil {
+			t.Fatalf("streaming event %d was not one exact JSON value: %v", index, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("streaming event %d = %#v, want %#v", index, got, want)
+		}
+	}
+}
+
+func requireDataPlaneE2EJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err == nil {
+		return errors.New("multiple JSON values")
+	}
+	return err
 }
 
 // RelayResponse applies real net/http write deadlines. ResponseRecorder does
@@ -885,7 +1039,13 @@ func (lease *dataPlaneE2EPrivateTargetLease) Release() {
 	}
 }
 
-func assertDataPlaneE2EPersistence(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func assertDataPlaneE2EPersistence(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID string,
+	expectedUsed int64,
+) string {
 	t.Helper()
 	var logicalID, logicalStatus, reservationStatus, attemptStatus, physicalModel, metric string
 	var httpStatus int
@@ -904,7 +1064,7 @@ func assertDataPlaneE2EPersistence(t *testing.T, ctx context.Context, pool *pgxp
 		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
 		JOIN quota_buckets AS bucket USING (quota_bucket_id)
 		WHERE request.client_request_id = $1
-	`, dataPlaneE2EClientRequestID).Scan(
+	`, clientRequestID).Scan(
 		&logicalID, &logicalStatus, &reservationStatus, &attemptStatus, &httpStatus,
 		&physicalModel, &firstByte, &metric, &units, &usageIsRequestScoped, &used, &reserved,
 	)
@@ -914,11 +1074,12 @@ func assertDataPlaneE2EPersistence(t *testing.T, ctx context.Context, pool *pgxp
 	if id.Validate(logicalID, id.LogicalRequest) != nil || logicalStatus != "succeeded" ||
 		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
 		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel || !firstByte ||
-		metric != quota.LogicalRequestsMetric || units != 1 || !usageIsRequestScoped || used != 1 || reserved != 0 {
+		metric != quota.LogicalRequestsMetric || units != 1 || !usageIsRequestScoped || used != expectedUsed || reserved != 0 {
 		t.Fatalf("persisted lifecycle request=%q/%s reservation=%s attempt=%s/%d/%s first_byte=%t usage=%s/%d/request_scoped=%t bucket=%d/%d",
 			logicalID, logicalStatus, reservationStatus, attemptStatus, httpStatus,
 			physicalModel, firstByte, metric, units, usageIsRequestScoped, used, reserved)
 	}
+	return logicalID
 }
 
 func assertDataPlaneE2EMarkersNotPersisted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, markers ...string) {
