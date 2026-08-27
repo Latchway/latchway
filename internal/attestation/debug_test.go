@@ -39,6 +39,80 @@ func TestDebugVerifierAcceptsBoundSignedEvidence(t *testing.T) {
 	}
 }
 
+func TestVerifiedResultSealRejectsMutationAndWrongBinding(t *testing.T) {
+	publicKey, privateKey := deterministicDebugKey()
+	binding := testBinding()
+	bindingHash, err := binding.Hash()
+	if err != nil {
+		t.Fatalf("hash binding: %v", err)
+	}
+	newVerifiedResult := func(t *testing.T) Result {
+		t.Helper()
+		verifier := mustDebugVerifier(t, DebugConfig{
+			Enabled: true, EnvironmentKind: "development",
+			PublicKeys: map[string]ed25519.PublicKey{"fixture-key-01": publicKey},
+			Now:        func() time.Time { return debugTestNow },
+		})
+		evidence := signedDebugEvidence(t, binding, privateKey, "fixture-key-01", debugTestNow.Add(5*time.Minute))
+		result, verifyErr := verifier.Verify(context.Background(), evidence, binding)
+		if verifyErr != nil {
+			t.Fatalf("verify debug evidence: %v", verifyErr)
+		}
+		return result
+	}
+
+	result := newVerifiedResult(t)
+	snapshot, err := result.ValidatedSnapshot(bindingHash, debugTestNow)
+	if err != nil {
+		t.Fatalf("validate sealed result: %v", err)
+	}
+	if snapshot.Provider != result.Provider || snapshot.NormalizedSignals["deterministic_test_evidence"] != true {
+		t.Fatalf("unexpected validated snapshot: %#v", snapshot)
+	}
+	snapshot.NormalizedSignals["deterministic_test_evidence"] = false
+	if _, err := snapshot.ValidatedSnapshot(bindingHash, debugTestNow); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mutated snapshot should fail its seal: %v", err)
+	}
+	if _, err := result.ValidatedSnapshot(bindingHash, debugTestNow); err != nil {
+		t.Fatalf("mutating defensive snapshot changed original result: %v", err)
+	}
+	wrongBindingHash := sha256.Sum256([]byte("different-authoritative-binding"))
+	if _, err := result.ValidatedSnapshot(wrongBindingHash, debugTestNow); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("result accepted for a different binding: %v", err)
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*Result)
+	}{
+		{name: "provider", mutate: func(result *Result) { result.Provider = "play_integrity" }},
+		{name: "trust level", mutate: func(result *Result) { result.TrustLevel = "device_verified" }},
+		{name: "verified time", mutate: func(result *Result) { result.VerifiedAt = result.VerifiedAt.Add(time.Second) }},
+		{name: "expiry", mutate: func(result *Result) { result.ExpiresAt = result.ExpiresAt.Add(time.Second) }},
+		{name: "signals", mutate: func(result *Result) { result.NormalizedSignals["deterministic_test_evidence"] = false }},
+		{name: "evidence hash", mutate: func(result *Result) { result.EvidenceHash[0] ^= 0xff }},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			mutated := newVerifiedResult(t)
+			mutation.mutate(&mutated)
+			if _, err := mutated.ValidatedSnapshot(bindingHash, debugTestNow); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("mutated result passed seal validation: %v", err)
+			}
+		})
+	}
+
+	unsealed := Result{
+		Provider: "debug", TrustLevel: "debug", VerifiedAt: debugTestNow,
+		ExpiresAt:         debugTestNow.Add(5 * time.Minute),
+		NormalizedSignals: map[string]any{"deterministic_test_evidence": true},
+		EvidenceHash:      sha256.Sum256([]byte("caller-created-result")),
+	}
+	if _, err := unsealed.ValidatedSnapshot(bindingHash, debugTestNow); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("caller-created unsealed result was accepted: %v", err)
+	}
+}
+
 func TestDebugVerifierRejectsTamperingExpiryAndUnknownShape(t *testing.T) {
 	publicKey, privateKey := deterministicDebugKey()
 	verifier := mustDebugVerifier(t, DebugConfig{

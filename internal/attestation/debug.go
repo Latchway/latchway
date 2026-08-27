@@ -110,15 +110,11 @@ func (verifier *DebugVerifier) Verify(_ context.Context, evidence Evidence, bind
 	if err != nil {
 		return Result{}, ErrInvalid
 	}
-	result := Result{
-		Provider: "debug", TrustLevel: "debug", VerifiedAt: now, ExpiresAt: expiresAt,
-		NormalizedSignals: map[string]any{"deterministic_test_evidence": true},
-		EvidenceHash:      sha256.Sum256(encodedEvidence),
-	}
-	if err := result.validate(); err != nil {
-		return Result{}, err
-	}
-	return result, nil
+	return newResult(
+		"debug", "debug", now, expiresAt,
+		map[string]any{"deterministic_test_evidence": true},
+		sha256.Sum256(encodedEvidence), expectedHash,
+	)
 }
 
 // DebugSigningMessage is exported for conformance fixtures. Production code

@@ -3,8 +3,10 @@
 package attestation
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,17 +65,79 @@ type Result struct {
 	ExpiresAt         time.Time
 	NormalizedSignals map[string]any
 	EvidenceHash      [sha256.Size]byte
+
+	bindingHash [sha256.Size]byte
+	seal        [sha256.Size]byte
 }
 
 func (result Result) validate() error {
-	if !providerPattern.MatchString(result.Provider) || !trustLevelPattern.MatchString(result.TrustLevel) || result.VerifiedAt.IsZero() || !result.ExpiresAt.After(result.VerifiedAt) || result.NormalizedSignals == nil {
+	if !providerPattern.MatchString(result.Provider) || !trustLevelPattern.MatchString(result.TrustLevel) || result.VerifiedAt.IsZero() || !result.ExpiresAt.After(result.VerifiedAt) || result.NormalizedSignals == nil || result.EvidenceHash == ([sha256.Size]byte{}) || result.bindingHash == ([sha256.Size]byte{}) {
 		return ErrInvalid
 	}
 	encoded, err := json.Marshal(result.NormalizedSignals)
 	if err != nil || len(encoded) > 16<<10 {
 		return ErrInvalid
 	}
+	expectedSeal, err := resultSeal(result)
+	if err != nil || subtle.ConstantTimeCompare(result.seal[:], expectedSeal[:]) != 1 {
+		return ErrInvalid
+	}
 	return nil
+}
+
+func newResult(provider, trustLevel string, verifiedAt, expiresAt time.Time, signals map[string]any, evidenceHash, bindingHash [sha256.Size]byte) (Result, error) {
+	result := Result{
+		Provider: provider, TrustLevel: trustLevel, VerifiedAt: verifiedAt.UTC(), ExpiresAt: expiresAt.UTC(),
+		NormalizedSignals: signals, EvidenceHash: evidenceHash, bindingHash: bindingHash,
+	}
+	seal, err := resultSeal(result)
+	if err != nil {
+		return Result{}, ErrInvalid
+	}
+	result.seal = seal
+	if err := result.validate(); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+// ValidatedSnapshot verifies that this result was created by an attestation
+// verifier for the exact authoritative binding, then returns a deep copy that
+// cannot be changed through a caller-owned signals map.
+func (result Result) ValidatedSnapshot(expectedBindingHash [sha256.Size]byte, now time.Time) (Result, error) {
+	if err := result.validate(); err != nil || now.IsZero() || result.VerifiedAt.After(now.Add(time.Minute)) || !result.ExpiresAt.After(now) || subtle.ConstantTimeCompare(result.bindingHash[:], expectedBindingHash[:]) != 1 {
+		return Result{}, ErrInvalid
+	}
+	encoded, err := json.Marshal(result.NormalizedSignals)
+	if err != nil {
+		return Result{}, ErrInvalid
+	}
+	value, err := jsonsafe.Decode(encoded)
+	if err != nil {
+		return Result{}, ErrInvalid
+	}
+	signals, ok := value.(map[string]any)
+	if !ok {
+		return Result{}, ErrInvalid
+	}
+	return newResult(result.Provider, result.TrustLevel, result.VerifiedAt, result.ExpiresAt, signals, result.EvidenceHash, result.bindingHash)
+}
+
+func resultSeal(result Result) ([sha256.Size]byte, error) {
+	encodedSignals, err := json.Marshal(result.NormalizedSignals)
+	if err != nil || len(encodedSignals) > 16<<10 {
+		return [sha256.Size]byte{}, ErrInvalid
+	}
+	var payload bytes.Buffer
+	for _, value := range []string{result.Provider, result.TrustLevel, result.VerifiedAt.UTC().Format(time.RFC3339Nano), result.ExpiresAt.UTC().Format(time.RFC3339Nano)} {
+		payload.WriteString(value)
+		payload.WriteByte(0)
+	}
+	payload.Write(encodedSignals)
+	payload.WriteByte(0)
+	payload.Write(result.EvidenceHash[:])
+	payload.Write(result.bindingHash[:])
+	return sha256.Sum256(payload.Bytes()), nil
 }
 
 var trustLevelPattern = regexp.MustCompile(`^(none|identity_only|web_risk_verified|app_verified|device_verified|strong_device_verified|debug)$`)
