@@ -90,8 +90,105 @@ func TestMigratorPostgreSQLQuotaIdentityUpgradeFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repaired quota migration status: %v", err)
 	}
-	if current != 8 || available != 8 {
+	if current != 9 || available != 9 {
 		t.Fatalf("schema versions after repaired upgrade current=%d available=%d", current, available)
+	}
+}
+
+func TestMigratorPostgreSQLLogicalRequestFingerprintUpgrade(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 8)
+	seedQuotaMigrationTenant(t, ctx, pool)
+	seedQuotaMigrationRequestDependencies(t, ctx, pool)
+
+	const legacyRequestID = "req_00000000000000000000000001"
+	if err := insertQuotaMigrationLogicalRequest(ctx, pool, legacyRequestID, "chat"); err != nil {
+		t.Fatalf("insert legacy logical request: %v", err)
+	}
+
+	migrator := NewMigrator(pool)
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("apply logical request fingerprint migration: %v", err)
+	}
+
+	var legacyFingerprint *string
+	if err := pool.QueryRow(ctx, `
+		SELECT trusted_decision_fingerprint
+		FROM logical_requests
+		WHERE logical_request_id = $1
+	`, legacyRequestID).Scan(&legacyFingerprint); err != nil {
+		t.Fatalf("read legacy fingerprint: %v", err)
+	}
+	if legacyFingerprint != nil {
+		t.Fatalf("legacy fingerprint = %q, want NULL", *legacyFingerprint)
+	}
+	var constraintValidated bool
+	if err := pool.QueryRow(ctx, `
+		SELECT convalidated
+		FROM pg_constraint
+		WHERE conrelid = 'logical_requests'::regclass
+		  AND conname = 'logical_requests_trusted_decision_fingerprint_check'
+	`).Scan(&constraintValidated); err != nil {
+		t.Fatalf("read fingerprint constraint validation state: %v", err)
+	}
+	if constraintValidated {
+		t.Fatal("fingerprint constraint performed eager legacy-table validation")
+	}
+
+	const validFingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if _, err := pool.Exec(ctx, `
+		UPDATE logical_requests
+		SET trusted_decision_fingerprint = $2
+		WHERE logical_request_id = $1
+	`, legacyRequestID, validFingerprint); err != nil {
+		t.Fatalf("store bounded fingerprint: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO logical_requests (
+			logical_request_id, organization_id, application_id, environment_id,
+			application_user_id, installation_id, session_grant_id,
+			config_revision_id, feature_key, protocol,
+			trusted_decision_fingerprint, status
+		) VALUES (
+			'req_00000000000000000000000002', $1, $2, $3,
+			'usr_00000000000000000000000001',
+			'ins_00000000000000000000000001',
+			'sgr_00000000000000000000000001',
+			'rev_00000000000000000000000001',
+			'chat', 'openai_chat', $4, 'reserved'
+		)
+	`, quotaMigrationOrganizationID, quotaMigrationApplicationID,
+		quotaMigrationEnvironmentID, strings.Repeat("x", 42)); err == nil {
+		t.Fatal("invalid fingerprint passed NOT VALID constraint on insert")
+	} else {
+		expectPostgreSQLConstraintError(
+			t,
+			err,
+			"23514",
+			"logical_requests_trusted_decision_fingerprint_check",
+		)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE logical_requests
+		SET trusted_decision_fingerprint = $2
+		WHERE logical_request_id = $1
+	`, legacyRequestID, strings.Repeat("x", 42)); err == nil {
+		t.Fatal("short trusted decision fingerprint passed schema constraint")
+	} else {
+		expectPostgreSQLConstraintError(
+			t,
+			err,
+			"23514",
+			"logical_requests_trusted_decision_fingerprint_check",
+		)
+	}
+
+	current, available, err := migrator.Status(ctx)
+	if err != nil {
+		t.Fatalf("read fingerprint migration status: %v", err)
+	}
+	if current != 9 || available != 9 {
+		t.Fatalf("fingerprint schema versions current=%d available=%d", current, available)
 	}
 }
 
