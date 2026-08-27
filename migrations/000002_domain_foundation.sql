@@ -384,7 +384,7 @@ CREATE TABLE external_identities (
     application_user_id text NOT NULL,
     provider_key text NOT NULL
         CHECK (provider_key = lower(provider_key) AND provider_key ~ '^[a-z][a-z0-9_-]{1,63}$'),
-    issuer text NOT NULL CHECK (char_length(issuer) BETWEEN 1 AND 2048),
+    issuer_hash bytea NOT NULL CHECK (octet_length(issuer_hash) = 32),
     subject_hmac bytea NOT NULL CHECK (octet_length(subject_hmac) = 32),
     selected_claims jsonb NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(selected_claims) = 'object'),
@@ -393,7 +393,7 @@ CREATE TABLE external_identities (
     FOREIGN KEY (organization_id, application_id, application_user_id)
         REFERENCES application_users (organization_id, application_id, application_user_id),
     CHECK (last_verified_at >= created_at),
-    UNIQUE (application_id, provider_key, issuer, subject_hmac),
+    UNIQUE (application_id, provider_key, issuer_hash, subject_hmac),
     UNIQUE (organization_id, application_id, external_identity_id)
 );
 
@@ -435,14 +435,15 @@ CREATE TABLE installations (
     application_id text NOT NULL,
     environment_id text NOT NULL,
     application_user_id text NOT NULL,
-    platform text NOT NULL CHECK (platform IN ('ios', 'android', 'web', 'node', 'react_native')),
+    platform text NOT NULL CHECK (platform IN ('ios', 'android', 'web', 'node', 'react_native_ios', 'react_native_android')),
     dpop_jkt text NOT NULL CHECK (char_length(dpop_jkt) = 43),
     dpop_public_jwk jsonb NOT NULL CHECK (jsonb_typeof(dpop_public_jwk) = 'object'),
     key_storage text NOT NULL
         CHECK (key_storage IN ('secure_enclave', 'keychain', 'strongbox', 'tee', 'software', 'webcrypto', 'memory')),
     trust_level text NOT NULL
         CHECK (trust_level IN (
-            'unverified',
+            'none',
+            'identity_only',
             'web_risk_verified',
             'app_verified',
             'device_verified',
@@ -518,7 +519,7 @@ CREATE TABLE session_challenges (
     application_user_id text NOT NULL,
     identity_provider_key text NOT NULL
         CHECK (identity_provider_key = lower(identity_provider_key)),
-    platform text NOT NULL CHECK (platform IN ('ios', 'android', 'web', 'node', 'react_native')),
+    platform text NOT NULL CHECK (platform IN ('ios', 'android', 'web', 'node', 'react_native_ios', 'react_native_android')),
     dpop_jkt text NOT NULL CHECK (char_length(dpop_jkt) = 43),
     dpop_public_jwk jsonb NOT NULL CHECK (jsonb_typeof(dpop_public_jwk) = 'object'),
     nonce_hash bytea NOT NULL CHECK (octet_length(nonce_hash) = 32),
@@ -565,7 +566,8 @@ CREATE TABLE attestation_events (
     outcome text NOT NULL CHECK (outcome IN ('accepted', 'rejected', 'error')),
     trust_level text
         CHECK (trust_level IS NULL OR trust_level IN (
-            'unverified',
+            'none',
+            'identity_only',
             'web_risk_verified',
             'app_verified',
             'device_verified',
@@ -604,7 +606,8 @@ CREATE TABLE session_grants (
         CHECK (policy_revision_id ~ '^rev_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$'),
     trust_level text NOT NULL
         CHECK (trust_level IN (
-            'unverified',
+            'none',
+            'identity_only',
             'web_risk_verified',
             'app_verified',
             'device_verified',

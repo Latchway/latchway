@@ -229,7 +229,7 @@ type ExternalIdentity struct {
 	ApplicationID      string             `db:"application_id" json:"application_id"`
 	ApplicationUserID  string             `db:"application_user_id" json:"application_user_id"`
 	ProviderKey        string             `db:"provider_key" json:"provider_key"`
-	Issuer             string             `db:"issuer" json:"issuer"`
+	IssuerHash         []byte             `db:"issuer_hash" json:"issuer_hash"`
 	SubjectHmac        []byte             `db:"subject_hmac" json:"subject_hmac"`
 	SelectedClaims     []byte             `db:"selected_claims" json:"selected_claims"`
 	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
