@@ -302,7 +302,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		LimitPlanKey: decision.LimitPlan.ID, RouteKey: decision.Route.ID,
 		UpstreamKey: decision.Upstream.ID, ModelKey: decision.Model.ID,
 		PhysicalModel: decision.Model.UpstreamModel, Pricing: selectedPricing.quotaSelection,
-		Rules: validated.rules,
+		Streaming: metadata.Streaming, Rules: validated.rules,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -695,6 +695,9 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0
 	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm:
 		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0
+	case (limit.Metric == quota.ConcurrentRequestsMetric || limit.Metric == quota.ConcurrentStreamsMetric) &&
+		limit.Algorithm == quota.ConcurrencyAlgorithm:
+		return limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0
 	default:
 		return false
 	}
@@ -873,6 +876,8 @@ func errorCode(err error, now time.Time) (string, int) {
 		errors.Is(err, errUnsupportedLimitPlan), errors.Is(err, errTargetConfiguration),
 		errors.Is(err, quota.ErrInvalidInput):
 		return "configuration_invalid", 0
+	case errors.Is(err, quota.ErrConcurrencyExceeded):
+		return "concurrency_exceeded", 0
 	case errors.As(err, &exceeded):
 		delay := exceeded.RetryAt().Sub(now.UTC())
 		seconds := int((delay + time.Second - 1) / time.Second)
@@ -917,7 +922,7 @@ func writeProblem(writer http.ResponseWriter, requestID, code, feature string, r
 
 func problemIncludesFeature(code string) bool {
 	switch code {
-	case "feature_not_found", "feature_not_allowed", "quota_exceeded", "route_not_found",
+	case "feature_not_found", "feature_not_allowed", "quota_exceeded", "concurrency_exceeded", "route_not_found",
 		"pricing_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_protocol_error":
 		return true
 	default:
@@ -953,6 +958,8 @@ func safeProblemDetail(code string) string {
 		return "The current principal is not allowed to use this feature."
 	case "quota_exceeded":
 		return "The configured logical request quota has been reached."
+	case "concurrency_exceeded":
+		return "The configured concurrency limit has been reached."
 	case "route_not_found":
 		return "No configured upstream route is available."
 	case "pricing_unavailable":

@@ -64,7 +64,8 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	if fixture.quotas.reserveInput.LogicalRequestID.String() == "" ||
 		fixture.quotas.reserveInput.ClientRequestID != "client-request-123" ||
 		fixture.quotas.reserveInput.PhysicalModel != "provider-model" ||
-		fixture.quotas.reserveInput.Pricing != (quota.PricingSelection{}) {
+		fixture.quotas.reserveInput.Pricing != (quota.PricingSelection{}) ||
+		fixture.quotas.reserveInput.Streaming {
 		t.Fatalf("quota input = %#v", fixture.quotas.reserveInput)
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
@@ -686,6 +687,51 @@ func TestHandlerTranslatesMultipleCanonicalLimitRulesBeforeReservation(t *testin
 	}
 }
 
+func TestHandlerTranslatesConcurrencyRulesAndPropagatesStreaming(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{
+		{
+			Metric: quota.ConcurrentRequestsMetric, Algorithm: quota.ConcurrencyAlgorithm,
+			Scope: []string{"feature", "environment"}, Maximum: 3, Hard: true,
+		},
+		{
+			Metric: quota.ConcurrentStreamsMetric, Algorithm: quota.ConcurrencyAlgorithm,
+			Scope: []string{"user", "environment"}, Maximum: 1, Hard: true,
+		},
+	}
+	fixture.target.response.Response.Header.Set("Content-Type", "text/event-stream")
+	handler := fixture.handler(t)
+	request := fixture.request(t)
+	body := `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"stream":true}`
+	request.Body = io.NopCloser(strings.NewReader(body))
+	request.ContentLength = int64(len(body))
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		!fixture.quotas.reserveInput.Streaming || len(fixture.quotas.reserveInput.Rules) != 2 {
+		t.Fatalf("concurrency status/reserve/streaming/rules = %d/%d/%t/%#v",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Streaming,
+			fixture.quotas.reserveInput.Rules)
+	}
+	requestsRule, streamsRule := fixture.quotas.reserveInput.Rules[0], fixture.quotas.reserveInput.Rules[1]
+	if requestsRule.Metric != quota.ConcurrentRequestsMetric ||
+		requestsRule.Algorithm != quota.ConcurrencyAlgorithm || requestsRule.Window != "" ||
+		requestsRule.Maximum != 3 || requestsRule.PerRequestMaximum != 0 ||
+		requestsRule.ReservedUnits != 0 || !requestsRule.Hard ||
+		!slices.Equal(requestsRule.Scope, []string{"environment", "feature"}) {
+		t.Fatalf("translated concurrent-request rule = %#v", requestsRule)
+	}
+	if streamsRule.Metric != quota.ConcurrentStreamsMetric ||
+		streamsRule.Algorithm != quota.ConcurrencyAlgorithm || streamsRule.Window != "" ||
+		streamsRule.Maximum != 1 || streamsRule.PerRequestMaximum != 0 ||
+		streamsRule.ReservedUnits != 0 || !streamsRule.Hard ||
+		!slices.Equal(streamsRule.Scope, []string{"environment", "user"}) {
+		t.Fatalf("translated concurrent-stream rule = %#v", streamsRule)
+	}
+}
+
 func TestHandlerAppliesSmallestPerRequestCapAndReservesExactWrittenMaximum(t *testing.T) {
 	perRequestLimits := []configuration.Limit{
 		{
@@ -794,6 +840,46 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 		}},
 		{name: "future metric", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Metric = "input_tokens" }},
 		{name: "future algorithm", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Algorithm = "token_bucket" }},
+		{name: "concurrent metric with calendar algorithm", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentRequestsMetric
+		}},
+		{name: "logical metric with concurrency algorithm", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+		}},
+		{name: "hard cost concurrency", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.CostNanoUSDMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+		}},
+		{name: "concurrency window", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentStreamsMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+		}},
+		{name: "concurrency zero maximum", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentStreamsMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].Maximum = 0
+		}},
+		{name: "concurrency per-request field", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentStreamsMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].PerRequestMaximum = 1
+		}},
+		{name: "concurrency capacity field", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentRequestsMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].Capacity = 1
+		}},
+		{name: "concurrency refill field", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.ConcurrentRequestsMetric
+			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].RefillPerSecond = "1"
+		}},
 		{name: "soft", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Hard = false }},
 		{name: "empty scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = nil }},
 		{name: "duplicate scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = []string{"user", "user"} }},
@@ -1179,6 +1265,51 @@ func TestPricingUnavailableUsesStableRetryableFeatureProblem(t *testing.T) {
 	}
 	if document.Code != "pricing_unavailable" || document.Feature != "assistant" || !document.Retryable {
 		t.Fatalf("pricing problem = %+v", document)
+	}
+}
+
+func TestHandlerMapsConcurrencyDenialBeforeDispatch(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{{
+		Metric: quota.ConcurrentRequestsMetric, Algorithm: quota.ConcurrencyAlgorithm,
+		Scope: []string{"environment", "feature"}, Maximum: 1, Hard: true,
+	}}
+	fixture.quotas.reserveErr = fmt.Errorf("durable concurrency decision: %w", quota.ErrConcurrencyExceeded)
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "concurrency_exceeded", http.StatusTooManyRequests)
+	if response.Header().Get("Retry-After") != "" {
+		t.Fatalf("concurrency denial Retry-After = %q, want absent", response.Header().Get("Retry-After"))
+	}
+	var document struct {
+		Code       string  `json:"code"`
+		Detail     string  `json:"detail"`
+		Feature    string  `json:"feature"`
+		Retryable  bool    `json:"retryable"`
+		RetryAfter *string `json:"retry_after"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatalf("decode concurrency problem: %v", err)
+	}
+	if document.Code != "concurrency_exceeded" ||
+		document.Detail != "The configured concurrency limit has been reached." ||
+		document.Feature != "assistant" || !document.Retryable || document.RetryAfter != nil {
+		t.Fatalf("concurrency problem = %+v", document)
+	}
+	code, retryAfter := errorCode(quota.ErrConcurrencyExceeded, fixture.now)
+	if code != "concurrency_exceeded" || retryAfter != 0 || !problemIncludesFeature(code) ||
+		safeProblemDetail(code) != "The configured concurrency limit has been reached." {
+		t.Fatalf("concurrency mapping = %q retry=%d feature=%t detail=%q",
+			code, retryAfter, problemIncludesFeature(code), safeProblemDetail(code))
+	}
+	if fixture.quotas.reserveCalls != 1 || fixture.quotas.beginCalls != 0 ||
+		fixture.targets.calls != 0 || fixture.target.dispatchCalls != 0 {
+		t.Fatalf("concurrency denial reached post-reservation lifecycle: reserve/begin/target/dispatch=%d/%d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.quotas.beginCalls,
+			fixture.targets.calls, fixture.target.dispatchCalls)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,22 +53,32 @@ import (
 )
 
 const (
-	dataPlaneE2EOrigin              = "https://gateway.example.test"
-	dataPlaneE2EAudience            = "latchway-data-plane"
-	dataPlaneE2EIdentityIssuer      = "https://identity.example.test"
-	dataPlaneE2EIdentityAudience    = "latchway-client"
-	dataPlaneE2EConfiguredUpstream  = "https://api.example.test/v1"
-	dataPlaneE2EProviderSecret      = "fixture-provider-credential-value-01"
-	dataPlaneE2EPromptMarker        = "prompt-marker-dataplane-e2e-01"
-	dataPlaneE2EStreamPromptMarker  = "prompt-marker-dataplane-e2e-stream-01"
-	dataPlaneE2EProviderModel       = "configured-chat-model"
-	dataPlaneE2EPricingCatalog      = "configured_flat_rate"
-	dataPlaneE2ECalculatedCost      = int64(65_236)
-	dataPlaneE2EClientRequestID     = "client-request-dataplane-e2e-01"
-	dataPlaneE2EStreamRequestID     = "client-request-dataplane-e2e-stream-01"
-	dataPlaneE2EDeniedRequestID     = "client-request-dataplane-e2e-denied-01"
-	dataPlaneE2EDebugAttestationKey = "dataplane-debug-key-01"
-	dataPlaneE2EUntrustedHost       = "untrusted-inbound.example.test"
+	dataPlaneE2EOrigin                        = "https://gateway.example.test"
+	dataPlaneE2EAudience                      = "latchway-data-plane"
+	dataPlaneE2EIdentityIssuer                = "https://identity.example.test"
+	dataPlaneE2EIdentityAudience              = "latchway-client"
+	dataPlaneE2EConfiguredUpstream            = "https://api.example.test/v1"
+	dataPlaneE2EProviderSecret                = "fixture-provider-credential-value-01"
+	dataPlaneE2EPromptMarker                  = "prompt-marker-dataplane-e2e-01"
+	dataPlaneE2EStreamPromptMarker            = "prompt-marker-dataplane-e2e-stream-01"
+	dataPlaneE2EConcurrencyFeature            = "stream_guard"
+	dataPlaneE2EConcurrencyPlan               = "stream_guard"
+	dataPlaneE2EConcurrencyHold               = "prompt-marker-dataplane-e2e-concurrency-hold-01"
+	dataPlaneE2EConcurrencyDenied             = "prompt-marker-dataplane-e2e-concurrency-denied-01"
+	dataPlaneE2EConcurrencyNonStream          = "prompt-marker-dataplane-e2e-concurrency-nonstream-01"
+	dataPlaneE2EConcurrencyReuse              = "prompt-marker-dataplane-e2e-concurrency-reuse-01"
+	dataPlaneE2EConcurrencyHoldRequestID      = "client-request-dataplane-e2e-concurrency-hold-01"
+	dataPlaneE2EConcurrencyDeniedRequestID    = "client-request-dataplane-e2e-concurrency-denied-01"
+	dataPlaneE2EConcurrencyNonStreamRequestID = "client-request-dataplane-e2e-concurrency-nonstream-01"
+	dataPlaneE2EConcurrencyReuseRequestID     = "client-request-dataplane-e2e-concurrency-reuse-01"
+	dataPlaneE2EProviderModel                 = "configured-chat-model"
+	dataPlaneE2EPricingCatalog                = "configured_flat_rate"
+	dataPlaneE2ECalculatedCost                = int64(65_236)
+	dataPlaneE2EClientRequestID               = "client-request-dataplane-e2e-01"
+	dataPlaneE2EStreamRequestID               = "client-request-dataplane-e2e-stream-01"
+	dataPlaneE2EDeniedRequestID               = "client-request-dataplane-e2e-denied-01"
+	dataPlaneE2EDebugAttestationKey           = "dataplane-debug-key-01"
+	dataPlaneE2EUntrustedHost                 = "untrusted-inbound.example.test"
 )
 
 var dataPlaneE2ESchemaPattern = regexp.MustCompile(`^latchway_dataplane_e2e_test_[0-9]+$`)
@@ -86,8 +97,12 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct mock upstream: %v", err)
 	}
-	capture := &dataPlaneE2EProviderCapture{next: mock}
+	capture := &dataPlaneE2EProviderCapture{
+		next: mock, blockPrompt: dataPlaneE2EConcurrencyHold,
+		blockStarted: make(chan struct{}), blockRelease: make(chan struct{}),
+	}
 	privateBaseURL := startDataPlaneE2EPrivateServer(t, capture) + "/v1"
+	t.Cleanup(capture.releaseBlock)
 	privateTargetAuthority := mustDataPlaneE2EURL(t, privateBaseURL).Host
 
 	envelope, err := secrets.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x6d}, 32)))
@@ -165,6 +180,17 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	}
 	if !ok || !reflect.DeepEqual(limitPlan, wantLimitPlan) {
 		t.Fatalf("active multi-rule limit plan = %+v ok=%t", limitPlan, ok)
+	}
+	concurrencyPlan, ok := snapshot.LimitPlan(dataPlaneE2EConcurrencyPlan)
+	wantConcurrencyPlan := configuration.LimitPlan{
+		ID: dataPlaneE2EConcurrencyPlan,
+		Limits: []configuration.Limit{{
+			Metric: quota.ConcurrentStreamsMetric, Algorithm: quota.ConcurrencyAlgorithm,
+			Scope: []string{"environment", "feature"}, Maximum: 1, Hard: true,
+		}},
+	}
+	if !ok || !reflect.DeepEqual(concurrencyPlan, wantConcurrencyPlan) {
+		t.Fatalf("active concurrency limit plan = %+v ok=%t", concurrencyPlan, ok)
 	}
 	pricingCatalog, ok := snapshot.PricingCatalog(dataPlaneE2EPricingCatalog)
 	pricingEntry, entryOK := snapshot.PricingEntry(dataPlaneE2EPricingCatalog, "fast")
@@ -510,6 +536,132 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		"Deterministic ",
 		"mock response.",
 	)
+
+	concurrencyBody := func(prompt string, streaming bool) map[string]any {
+		body := map[string]any{
+			"model":                 "untrusted-client-concurrency-model",
+			"messages":              []any{map[string]any{"role": "user", "content": prompt}},
+			"max_completion_tokens": 9999,
+		}
+		if streaming {
+			body["stream"] = true
+		}
+		return body
+	}
+	holdProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-concurrency-hold", grant.AccessToken)
+	holdRequest, holdResponse := newDataPlaneE2EChatRequest(
+		t, grant.AccessToken, holdProof, dataPlaneE2EConcurrencyFeature,
+		dataPlaneE2EConcurrencyHoldRequestID, concurrencyBody(dataPlaneE2EConcurrencyHold, true),
+	)
+	holdDone := make(chan struct{})
+	go func() {
+		protectedHandler.ServeHTTP(holdResponse, holdRequest)
+		close(holdDone)
+	}()
+	select {
+	case <-capture.blockStarted:
+	case <-holdDone:
+		t.Fatalf("held streaming dispatch completed before provider release: status=%d body=%s",
+			holdResponse.Code, holdResponse.Body.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("held streaming dispatch did not reach the provider")
+	}
+	if targets.acquisitions.Load() != 3 || targets.releases.Load() != 2 ||
+		len(mock.Observations()) != 2 {
+		t.Fatalf("held stream dispatch state acquisitions/releases/observations=%d/%d/%d, want 3/2/2",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EConcurrencyState(t, ctx, pool, 1, 1, 0)
+
+	concurrencyDeniedProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-concurrency-denied", grant.AccessToken)
+	concurrencyDeniedResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, concurrencyDeniedProof,
+		dataPlaneE2EConcurrencyFeature, dataPlaneE2EConcurrencyDeniedRequestID,
+		concurrencyBody(dataPlaneE2EConcurrencyDenied, true),
+	)
+	assertDataPlaneE2EConcurrencyProblem(t, concurrencyDeniedResponse, dataPlaneE2EConcurrencyFeature)
+	if replayingQuotaStore.concurrencyDenialReplays.Load() != 1 {
+		t.Fatalf("exact durable concurrency-denial replays = %d, want 1",
+			replayingQuotaStore.concurrencyDenialReplays.Load())
+	}
+	if targets.acquisitions.Load() != 3 || targets.releases.Load() != 2 ||
+		len(mock.Observations()) != 2 {
+		t.Fatalf("concurrency denial reached dispatch acquisitions/releases/observations=%d/%d/%d",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EConcurrencyDenialPersistence(
+		t, ctx, pool, dataPlaneE2EConcurrencyDeniedRequestID,
+	)
+	assertDataPlaneE2EConcurrencyState(t, ctx, pool, 1, 1, 0)
+
+	nonStreamProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-concurrency-nonstream", grant.AccessToken)
+	nonStreamResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, nonStreamProof,
+		dataPlaneE2EConcurrencyFeature, dataPlaneE2EConcurrencyNonStreamRequestID,
+		concurrencyBody(dataPlaneE2EConcurrencyNonStream, false),
+	)
+	if nonStreamResponse.Code != http.StatusOK {
+		t.Fatalf("non-stream request under an occupied stream limit = %d, body=%s",
+			nonStreamResponse.Code, nonStreamResponse.Body.String())
+	}
+	if targets.acquisitions.Load() != 4 || targets.releases.Load() != 3 ||
+		len(mock.Observations()) != 3 {
+		t.Fatalf("non-stream bypass acquisitions/releases/observations=%d/%d/%d, want 4/3/3",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EConcurrencyState(t, ctx, pool, 1, 1, 0)
+	assertDataPlaneE2EEntrylessReservation(
+		t, ctx, pool, dataPlaneE2EConcurrencyNonStreamRequestID, revisionID,
+	)
+
+	capture.releaseBlock()
+	select {
+	case <-holdDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("held streaming dispatch did not complete after provider release")
+	}
+	assertDataPlaneE2EChatStream(t, holdResponse)
+	assertDataPlaneE2EConcurrencyState(t, ctx, pool, 0, 1, 1)
+
+	reuseProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-concurrency-reuse", grant.AccessToken)
+	reuseResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, reuseProof,
+		dataPlaneE2EConcurrencyFeature, dataPlaneE2EConcurrencyReuseRequestID,
+		concurrencyBody(dataPlaneE2EConcurrencyReuse, true),
+	)
+	assertDataPlaneE2EChatStream(t, reuseResponse)
+	if targets.acquisitions.Load() != 5 || targets.releases.Load() != 5 ||
+		len(mock.Observations()) != 5 {
+		t.Fatalf("immediate concurrency reuse acquisitions/releases/observations=%d/%d/%d, want 5/5/5",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EConcurrencyState(t, ctx, pool, 0, 2, 2)
+	assertDataPlaneE2EConcurrencyTerminalLifecycle(t, ctx, pool, revisionID)
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 7, reservations: 5, reservationEntries: 8,
+		buckets: 4, attempts: 5, usageRecords: 25, deniedRequests: 2,
+	})
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 5 {
+		t.Fatalf("provider capture after concurrency proof = requests:%d err:%v, want five dispatches",
+			len(providerRequests), captureErr)
+	}
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[2], privateTargetAuthority,
+		dataPlaneE2EConcurrencyHold, true)
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[3], privateTargetAuthority,
+		dataPlaneE2EConcurrencyNonStream, false)
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[4], privateTargetAuthority,
+		dataPlaneE2EConcurrencyReuse, true)
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
+		dataPlaneE2EConcurrencyHold,
+		dataPlaneE2EConcurrencyDenied,
+		dataPlaneE2EConcurrencyNonStream,
+		dataPlaneE2EConcurrencyReuse,
+	)
 }
 
 type dataPlaneE2ETenant struct {
@@ -660,7 +812,7 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 				"id": "primary", "type": "openai_compatible", "baseUrl": dataPlaneE2EConfiguredUpstream,
 				"authentication": map[string]any{"type": "bearer", "secretRef": "secret/provider-credential"},
 				"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
-				"timeouts":       map[string]any{"connect": "2s", "firstByte": "2s", "idle": "2s", "total": "10s"},
+				"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
 			}},
 			"models": []any{map[string]any{
 				"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
@@ -674,35 +826,54 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
 				}},
 			}},
-			"limitPlans": []any{map[string]any{
-				"id": "free", "limits": []any{
-					map[string]any{
-						"metric": "logical_requests", "algorithm": "calendar",
-						"scope": []any{"feature", "user"}, "window": "1d", "maximum": 2, "hard": true,
-					},
-					map[string]any{
-						"metric": "logical_requests", "algorithm": "calendar",
-						"scope": []any{"environment"}, "window": "1mo", "maximum": 3, "hard": true,
-					},
-					map[string]any{
-						"metric": "output_tokens", "algorithm": "calendar",
-						"scope": []any{"model", "user"}, "window": "1d", "maximum": 256, "hard": true,
-					},
-					map[string]any{
-						"metric": "output_tokens", "algorithm": "per_request",
-						"scope": []any{"model", "user"}, "perRequestMaximum": 64, "hard": true,
+			"limitPlans": []any{
+				map[string]any{
+					"id": "free", "limits": []any{
+						map[string]any{
+							"metric": "logical_requests", "algorithm": "calendar",
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": 2, "hard": true,
+						},
+						map[string]any{
+							"metric": "logical_requests", "algorithm": "calendar",
+							"scope": []any{"environment"}, "window": "1mo", "maximum": 3, "hard": true,
+						},
+						map[string]any{
+							"metric": "output_tokens", "algorithm": "calendar",
+							"scope": []any{"model", "user"}, "window": "1d", "maximum": 256, "hard": true,
+						},
+						map[string]any{
+							"metric": "output_tokens", "algorithm": "per_request",
+							"scope": []any{"model", "user"}, "perRequestMaximum": 64, "hard": true,
+						},
 					},
 				},
-			}},
-			"features": []any{map[string]any{
-				"id": "assistant", "protocol": "openai_chat", "attestationPolicy": "native",
-				"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
-				"limitPlan": map[string]any{"expression": "'free'"},
-				"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
-				"routes": []any{map[string]any{
-					"id": "primary", "when": "true", "model": "fast", "priority": 10,
-				}},
-			}},
+				map[string]any{
+					"id": dataPlaneE2EConcurrencyPlan, "limits": []any{map[string]any{
+						"metric": quota.ConcurrentStreamsMetric, "algorithm": quota.ConcurrencyAlgorithm,
+						"scope": []any{"feature", "environment"}, "maximum": 1, "hard": true,
+					}},
+				},
+			},
+			"features": []any{
+				map[string]any{
+					"id": "assistant", "protocol": "openai_chat", "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'free'"},
+					"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
+					"routes": []any{map[string]any{
+						"id": "primary", "when": "true", "model": "fast", "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2EConcurrencyFeature, "protocol": "openai_chat", "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2EConcurrencyPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
+					"routes": []any{map[string]any{
+						"id": "primary", "when": "true", "model": "fast", "priority": 10,
+					}},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -856,6 +1027,24 @@ func setDataPlaneE2EProtectedHeaders(request *http.Request, proof string) {
 
 func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof, clientRequestID string, body any) *dataPlaneE2EResponseRecorder {
 	t.Helper()
+	request, response := newDataPlaneE2EChatRequest(
+		t, accessToken, proof, "assistant", clientRequestID, body,
+	)
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func postDataPlaneE2EFeatureChat(t *testing.T, handler http.Handler, accessToken, proof, feature, clientRequestID string, body any) *dataPlaneE2EResponseRecorder {
+	t.Helper()
+	request, response := newDataPlaneE2EChatRequest(
+		t, accessToken, proof, feature, clientRequestID, body,
+	)
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func newDataPlaneE2EChatRequest(t *testing.T, accessToken, proof, feature, clientRequestID string, body any) (*http.Request, *dataPlaneE2EResponseRecorder) {
+	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("encode chat request: %v", err)
@@ -864,15 +1053,14 @@ func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof
 	request.Header.Set("Content-Type", "application/json")
 	setDataPlaneE2EProtectedHeaders(request, proof)
 	request.Header.Set("Authorization", "DPoP "+accessToken)
-	request.Header.Set("X-Latchway-Feature", "assistant")
+	request.Header.Set("X-Latchway-Feature", feature)
 	request.Header.Set("X-Latchway-Request-ID", clientRequestID)
 	request.Header.Set("Cookie", "client-cookie=must-not-cross")
 	request.Header.Set("X-Forwarded-For", "203.0.113.10")
 	request.Header.Set(mockupstream.ScenarioHeader, string(mockupstream.ScenarioHTTP500))
 	request.Header.Set("X-Untrusted-Provider-Header", "must-not-cross")
 	response := &dataPlaneE2EResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
-	handler.ServeHTTP(response, request)
-	return response
+	return request, response
 }
 
 func assertDataPlaneE2EProviderChatRequest(
@@ -1030,8 +1218,10 @@ func (*dataPlaneE2EResponseRecorder) SetWriteDeadline(time.Time) error { return 
 // normally so the test can exercise settlement and atomic denial as well.
 type dataPlaneE2EReplayingQuotaStore struct {
 	*quota.Store
-	replayAttempted   atomic.Bool
-	successfulReplays atomic.Int64
+	replayAttempted            atomic.Bool
+	successfulReplays          atomic.Int64
+	concurrencyReplayAttempted atomic.Bool
+	concurrencyDenialReplays   atomic.Int64
 }
 
 func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
@@ -1039,7 +1229,22 @@ func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
 	input quota.ReserveInput,
 ) (quota.Reservation, error) {
 	reservation, err := store.Store.Reserve(ctx, input)
-	if err != nil || !store.replayAttempted.CompareAndSwap(false, true) {
+	if err != nil {
+		if !errors.Is(err, quota.ErrConcurrencyExceeded) ||
+			!store.concurrencyReplayAttempted.CompareAndSwap(false, true) {
+			return reservation, err
+		}
+		_, replayErr := store.Store.Reserve(ctx, input)
+		if !errors.Is(replayErr, quota.ErrConcurrencyExceeded) {
+			return quota.Reservation{}, fmt.Errorf(
+				"replay exact durable concurrency denial: got %v, want %w",
+				replayErr, quota.ErrConcurrencyExceeded,
+			)
+		}
+		store.concurrencyDenialReplays.Add(1)
+		return reservation, err
+	}
+	if !store.replayAttempted.CompareAndSwap(false, true) {
 		return reservation, err
 	}
 	replayed, err := store.Store.Reserve(ctx, input)
@@ -1080,10 +1285,15 @@ type dataPlaneE2EProviderRequest struct {
 }
 
 type dataPlaneE2EProviderCapture struct {
-	next     http.Handler
-	mu       sync.Mutex
-	requests []dataPlaneE2EProviderRequest
-	err      error
+	next         http.Handler
+	blockPrompt  string
+	blockStarted chan struct{}
+	blockRelease chan struct{}
+	blockOnce    sync.Once
+	releaseOnce  sync.Once
+	mu           sync.Mutex
+	requests     []dataPlaneE2EProviderRequest
+	err          error
 }
 
 func (capture *dataPlaneE2EProviderCapture) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -1103,7 +1313,20 @@ func (capture *dataPlaneE2EProviderCapture) ServeHTTP(writer http.ResponseWriter
 		staticTenant: request.Header.Get("X-Provider-Tenant"),
 	})
 	capture.mu.Unlock()
+	if capture.blockPrompt != "" && bytes.Contains(body, []byte(capture.blockPrompt)) {
+		capture.blockOnce.Do(func() {
+			close(capture.blockStarted)
+			<-capture.blockRelease
+		})
+	}
 	capture.next.ServeHTTP(writer, request)
+}
+
+func (capture *dataPlaneE2EProviderCapture) releaseBlock() {
+	if capture == nil || capture.blockRelease == nil {
+		return
+	}
+	capture.releaseOnce.Do(func() { close(capture.blockRelease) })
 }
 
 func (capture *dataPlaneE2EProviderCapture) snapshot() ([]dataPlaneE2EProviderRequest, error) {
@@ -1595,6 +1818,278 @@ func assertDataPlaneE2EDenialPersistence(t *testing.T, ctx context.Context, pool
 		failureCode != "quota_exceeded" || reservations != 0 || attempts != 0 || usageRecords != 0 {
 		t.Fatalf("denied data-plane lifecycle = request:%q status:%q failure:%q reservations:%d attempts:%d usage:%d",
 			logicalID, status, failureCode, reservations, attempts, usageRecords)
+	}
+}
+
+func assertDataPlaneE2EConcurrencyProblem(t *testing.T, response *dataPlaneE2EResponseRecorder, feature string) {
+	t.Helper()
+	var document struct {
+		Code       string  `json:"code"`
+		Detail     string  `json:"detail"`
+		Feature    string  `json:"feature"`
+		Retryable  bool    `json:"retryable"`
+		RetryAfter *string `json:"retry_after"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+		t.Fatalf("decode concurrency problem: %v", err)
+	}
+	if response.Code != http.StatusTooManyRequests || document.Code != "concurrency_exceeded" ||
+		document.Detail != "The configured concurrency limit has been reached." ||
+		document.Feature != feature || !document.Retryable || document.RetryAfter != nil ||
+		response.Header().Get("Retry-After") != "" {
+		t.Fatalf("concurrency problem status/header/document = %d/%q/%+v",
+			response.Code, response.Header().Get("Retry-After"), document)
+	}
+}
+
+func assertDataPlaneE2EConcurrencyDenialPersistence(t *testing.T, ctx context.Context, pool *pgxpool.Pool, clientRequestID string) {
+	t.Helper()
+	var logicalID, status, failureCode string
+	var reservations, attempts, usageRecords, leases int64
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, request.failure_code,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM concurrency_leases AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &status, &failureCode, &reservations, &attempts, &usageRecords, &leases,
+	)
+	if err != nil {
+		t.Fatalf("read concurrency-denied request: %v", err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil || status != "denied" ||
+		failureCode != "concurrency_exceeded" || reservations != 0 || attempts != 0 ||
+		usageRecords != 0 || leases != 0 {
+		t.Fatalf("concurrency-denied lifecycle = request:%q status:%q failure:%q reservations:%d attempts:%d usage:%d leases:%d",
+			logicalID, status, failureCode, reservations, attempts, usageRecords, leases)
+	}
+}
+
+func assertDataPlaneE2EConcurrencyState(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	wantActive, wantLeases, wantReleased int64,
+) {
+	t.Helper()
+	var bucketCount int64
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM quota_buckets WHERE metric = $1
+	`, quota.ConcurrentStreamsMetric).Scan(&bucketCount); err != nil {
+		t.Fatalf("count concurrency buckets: %v", err)
+	}
+	if bucketCount != 1 {
+		t.Fatalf("concurrency buckets = %d, want 1", bucketCount)
+	}
+	var bucketID, plan, metric, scopeType, algorithm, windowKey string
+	var scope []string
+	var maximum, used, reserved, version int64
+	if err := pool.QueryRow(ctx, `
+		SELECT quota_bucket_id, limit_plan_key, metric, scope_type, scope_dimensions,
+		       algorithm, window_key, hard_maximum, used_units, reserved_units, version
+		FROM quota_buckets
+		WHERE metric = $1
+	`, quota.ConcurrentStreamsMetric).Scan(
+		&bucketID, &plan, &metric, &scopeType, &scope,
+		&algorithm, &windowKey, &maximum, &used, &reserved, &version,
+	); err != nil {
+		t.Fatalf("read concurrency bucket: %v", err)
+	}
+	if id.Validate(bucketID, id.QuotaBucket) != nil || plan != dataPlaneE2EConcurrencyPlan ||
+		metric != quota.ConcurrentStreamsMetric || scopeType != "composite" ||
+		!reflect.DeepEqual(scope, []string{"environment", "feature"}) ||
+		algorithm != quota.ConcurrencyAlgorithm || windowKey != "active" || maximum != 1 ||
+		used != 0 || reserved != wantActive || used+reserved > maximum ||
+		version != wantLeases+wantReleased {
+		t.Fatalf("concurrency bucket = id:%q plan:%q metric:%q scope:%q/%v algorithm:%q window:%q maximum:%d occupancy:%d/%d version:%d",
+			bucketID, plan, metric, scopeType, scope, algorithm, windowKey,
+			maximum, used, reserved, version)
+	}
+	var leases, active, released int64
+	var validTimes bool
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE lease.released_at IS NULL),
+		       count(*) FILTER (WHERE lease.released_at IS NOT NULL),
+		       bool_and(lease.expires_at > lease.acquired_at AND
+		                (lease.released_at IS NULL OR lease.released_at >= lease.acquired_at))
+		FROM concurrency_leases AS lease
+		WHERE lease.quota_bucket_id = $1
+	`, bucketID).Scan(&leases, &active, &released, &validTimes); err != nil {
+		t.Fatalf("read concurrency leases: %v", err)
+	}
+	if leases != wantLeases || active != wantActive || released != wantReleased || !validTimes {
+		t.Fatalf("concurrency leases total/active/released/valid=%d/%d/%d/%t, want %d/%d/%d/true",
+			leases, active, released, validTimes, wantLeases, wantActive, wantReleased)
+	}
+	var concurrencyUsage int64
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM usage_records WHERE metric IN ($1, $2)
+	`, quota.ConcurrentRequestsMetric, quota.ConcurrentStreamsMetric).Scan(&concurrencyUsage); err != nil {
+		t.Fatalf("count concurrency usage records: %v", err)
+	}
+	if concurrencyUsage != 0 {
+		t.Fatalf("concurrency usage records = %d, want 0", concurrencyUsage)
+	}
+}
+
+func assertDataPlaneE2EEntrylessReservation(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, priceRevision string,
+) {
+	t.Helper()
+	assertDataPlaneE2EConcurrencySuccess(
+		t, ctx, pool, clientRequestID, priceRevision, false,
+	)
+}
+
+func assertDataPlaneE2EConcurrencyTerminalLifecycle(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	priceRevision string,
+) {
+	t.Helper()
+	for _, clientRequestID := range []string{
+		dataPlaneE2EConcurrencyHoldRequestID,
+		dataPlaneE2EConcurrencyReuseRequestID,
+	} {
+		assertDataPlaneE2EConcurrencySuccess(
+			t, ctx, pool, clientRequestID, priceRevision, true,
+		)
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT request.client_request_id
+		FROM concurrency_leases AS lease
+		JOIN logical_requests AS request USING (logical_request_id)
+		ORDER BY request.client_request_id COLLATE "C"
+	`)
+	if err != nil {
+		t.Fatalf("read concurrency lease request identities: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var clientRequestID string
+		if err := rows.Scan(&clientRequestID); err != nil {
+			t.Fatalf("scan concurrency lease request identity: %v", err)
+		}
+		got = append(got, clientRequestID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate concurrency lease request identities: %v", err)
+	}
+	want := []string{
+		dataPlaneE2EConcurrencyHoldRequestID,
+		dataPlaneE2EConcurrencyReuseRequestID,
+	}
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("concurrency lease requests = %v, want %v", got, want)
+	}
+}
+
+func assertDataPlaneE2EConcurrencySuccess(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, priceRevision string,
+	wantConcurrencyEntry bool,
+) {
+	t.Helper()
+	var logicalID, logicalStatus, reservationStatus, attemptStatus, physicalModel string
+	var currency, persistedPriceRevision, pricingSource, costConfidence string
+	var httpStatus int
+	var billedCost, entries, leases, releasedLeases, usageRecords int64
+	var firstByte bool
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, reservation.status,
+		       attempt.status, attempt.http_status, attempt.physical_model,
+		       attempt.billed_cost_nano_usd, attempt.currency,
+		       attempt.price_revision, attempt.pricing_source, attempt.cost_confidence,
+		       attempt.first_byte_at IS NOT NULL,
+		       (SELECT count(*) FROM quota_reservation_entries AS counted
+		        WHERE counted.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*) FROM concurrency_leases AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM concurrency_leases AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id
+		          AND counted.released_at IS NOT NULL),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &logicalStatus, &reservationStatus,
+		&attemptStatus, &httpStatus, &physicalModel,
+		&billedCost, &currency, &persistedPriceRevision, &pricingSource, &costConfidence,
+		&firstByte, &entries, &leases, &releasedLeases, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read concurrency success %q: %v", clientRequestID, err)
+	}
+	wantEntries := int64(0)
+	if wantConcurrencyEntry {
+		wantEntries = 1
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil || logicalStatus != "succeeded" ||
+		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
+		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel ||
+		billedCost != dataPlaneE2ECalculatedCost || currency != quota.USDCurrency ||
+		persistedPriceRevision != priceRevision || pricingSource != dataPlaneE2EPricingCatalog ||
+		costConfidence != quota.CalculatedCostConfidence || !firstByte ||
+		entries != wantEntries || leases != wantEntries || releasedLeases != wantEntries ||
+		usageRecords != 5 {
+		t.Fatalf("concurrency success %q = logical:%q/%s reservation:%s attempt:%s/%d/%s price:%d/%s/%s/%s/%s first_byte:%t entries/leases/released:%d/%d/%d usage:%d",
+			clientRequestID, logicalID, logicalStatus, reservationStatus,
+			attemptStatus, httpStatus, physicalModel, billedCost, currency,
+			persistedPriceRevision, pricingSource, costConfidence, firstByte,
+			entries, leases, releasedLeases, usageRecords)
+	}
+	if !wantConcurrencyEntry {
+		return
+	}
+	var metric, algorithm, windowKey string
+	var entryReserved, entrySettled, entryReleased, bucketUsed, bucketReserved int64
+	var leaseReleased bool
+	if err := pool.QueryRow(ctx, `
+		SELECT bucket.metric, bucket.algorithm, bucket.window_key,
+		       entry.reserved_units, entry.settled_units, entry.released_units,
+		       bucket.used_units, bucket.reserved_units,
+		       lease.released_at IS NOT NULL
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		JOIN concurrency_leases AS lease
+		  ON lease.logical_request_id = request.logical_request_id
+		 AND lease.quota_bucket_id = bucket.quota_bucket_id
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&metric, &algorithm, &windowKey,
+		&entryReserved, &entrySettled, &entryReleased,
+		&bucketUsed, &bucketReserved, &leaseReleased,
+	); err != nil {
+		t.Fatalf("read terminal concurrency entry %q: %v", clientRequestID, err)
+	}
+	if metric != quota.ConcurrentStreamsMetric || algorithm != quota.ConcurrencyAlgorithm ||
+		windowKey != "active" || entryReserved != 1 || entrySettled != 0 || entryReleased != 1 ||
+		bucketUsed != 0 || bucketReserved != 0 || !leaseReleased {
+		t.Fatalf("terminal concurrency entry %q = metric:%q algorithm:%q window:%q entry:%d/%d/%d bucket:%d/%d released:%t",
+			clientRequestID, metric, algorithm, windowKey,
+			entryReserved, entrySettled, entryReleased,
+			bucketUsed, bucketReserved, leaseReleased)
 	}
 }
 
