@@ -63,7 +63,9 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 		fixture.quotas.reserveInput.PhysicalModel != "provider-model" {
 		t.Fatalf("quota input = %#v", fixture.quotas.reserveInput)
 	}
-	if fixture.quotas.settleOutcome != (quota.Outcome{Status: quota.AttemptSucceeded, HTTPStatus: http.StatusOK}) {
+	if fixture.quotas.settleOutcome != (quota.Outcome{
+		Status: quota.AttemptSucceeded, HTTPStatus: http.StatusOK, Usage: unknownQuotaUsage(),
+	}) {
 		t.Fatalf("settlement = %#v", fixture.quotas.settleOutcome)
 	}
 	if fixture.target.preparePath != providerChatPath || fixture.target.dispatchCalls != 1 ||
@@ -133,7 +135,7 @@ func TestHandlerClassifiesDispatchDeadlineAsTimeout(t *testing.T) {
 		t.Fatalf("dispatch timeout release/settle = %d/%d", fixture.quotas.releaseCalls, fixture.quotas.settleCalls)
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
-		Status: quota.AttemptTimedOut, FailureCode: "upstream_timeout",
+		Status: quota.AttemptTimedOut, FailureCode: "upstream_timeout", Usage: unknownQuotaUsage(),
 	}) {
 		t.Fatalf("dispatch timeout settlement = %#v", fixture.quotas.settleOutcome)
 	}
@@ -157,6 +159,7 @@ func TestHandlerClassifiesGenericRelayFailureAsUpstreamUnavailable(t *testing.T)
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
 		Status: quota.AttemptFailed, HTTPStatus: http.StatusOK, FailureCode: "upstream_unavailable",
+		Usage: unknownQuotaUsage(),
 	}) {
 		t.Fatalf("relay failure settlement = %#v", fixture.quotas.settleOutcome)
 	}
@@ -461,6 +464,7 @@ func TestStreamingProviderJSONErrorIsNotRelayedAndSettlesUnavailable(t *testing.
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
 		Status: quota.AttemptFailed, HTTPStatus: http.StatusTooManyRequests, FailureCode: "upstream_non_success",
+		Usage: unknownQuotaUsage(),
 	}) {
 		t.Fatalf("provider error settlement = %#v", fixture.quotas.settleOutcome)
 	}
@@ -517,6 +521,7 @@ func TestProductionRelayTruncatedProviderBodySettlesUnavailable(t *testing.T) {
 	}
 	if fixture.quotas.settleOutcome != (quota.Outcome{
 		Status: quota.AttemptFailed, HTTPStatus: http.StatusOK, FailureCode: "upstream_unavailable",
+		Usage: unknownQuotaUsage(),
 	}) {
 		t.Fatalf("truncated response settlement = %#v", fixture.quotas.settleOutcome)
 	}
@@ -677,6 +682,98 @@ func TestHandlerTranslatesMultipleCanonicalLimitRulesBeforeReservation(t *testin
 	}
 }
 
+func TestHandlerAppliesSmallestPerRequestCapAndReservesExactWrittenMaximum(t *testing.T) {
+	perRequestLimits := []configuration.Limit{
+		{
+			Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"model", "environment"}, PerRequestMaximum: 96, Hard: true,
+		},
+		{
+			Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 40, Hard: true,
+		},
+	}
+	for _, reverse := range []bool{false, true} {
+		name := "configured order"
+		if reverse {
+			name = "reversed order"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			limits := append([]configuration.Limit(nil), perRequestLimits...)
+			if reverse {
+				slices.Reverse(limits)
+			}
+			fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, configuration.Limit{
+				Metric: quota.OutputTokensMetric, Algorithm: quota.CalendarAlgorithm,
+				Scope: []string{"feature", "environment"}, Window: "1mo", Maximum: 10_000, Hard: true,
+			})
+			fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, limits...)
+			handler := fixture.handler(t)
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, fixture.request(t))
+
+			if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 {
+				t.Fatalf("response/reserve = %d/%d", response.Code, fixture.quotas.reserveCalls)
+			}
+			if !strings.Contains(fixture.target.preparedBody, `"max_completion_tokens":40`) {
+				t.Fatalf("provider request did not use effective default/cap 40: %s", fixture.target.preparedBody)
+			}
+			if len(fixture.quotas.reserveInput.Rules) != 4 {
+				t.Fatalf("reserved rules = %#v", fixture.quotas.reserveInput.Rules)
+			}
+			for _, rule := range fixture.quotas.reserveInput.Rules {
+				if rule.Metric == quota.LogicalRequestsMetric {
+					if rule.ReservedUnits != 0 {
+						t.Fatalf("logical rule reserved units = %d, want store-derived unit", rule.ReservedUnits)
+					}
+					continue
+				}
+				if rule.Metric != quota.OutputTokensMetric || rule.ReservedUnits != 40 {
+					t.Fatalf("output rule = %#v, want exact applied reservation 40", rule)
+				}
+			}
+		})
+	}
+}
+
+func TestHandlerRunsDurableLifecycleForPerRequestOnlyPlan(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{{
+		Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+		Scope: []string{"user", "environment"}, PerRequestMaximum: 64, Hard: true,
+	}}
+	handler := fixture.handler(t)
+	request := fixture.request(t)
+	body := `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`
+	request.Body = io.NopCloser(strings.NewReader(body))
+	request.ContentLength = int64(len(body))
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		fixture.quotas.beginCalls != 1 || fixture.quotas.settleCalls != 1 || fixture.quotas.releaseCalls != 0 {
+		t.Fatalf("per-request lifecycle status/reserve/begin/settle/release = %d/%d/%d/%d/%d",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.beginCalls,
+			fixture.quotas.settleCalls, fixture.quotas.releaseCalls)
+	}
+	if len(fixture.quotas.reserveInput.Rules) != 1 {
+		t.Fatalf("per-request rules = %#v", fixture.quotas.reserveInput.Rules)
+	}
+	rule := fixture.quotas.reserveInput.Rules[0]
+	if rule.Metric != quota.OutputTokensMetric || rule.Algorithm != quota.PerRequestAlgorithm ||
+		rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 64 || rule.ReservedUnits != 20 ||
+		!slices.Equal(rule.Scope, []string{"environment", "user"}) {
+		t.Fatalf("per-request rule = %#v", rule)
+	}
+	if !strings.Contains(fixture.target.preparedBody, `"max_tokens":20`) ||
+		strings.Contains(fixture.target.preparedBody, "max_completion_tokens") {
+		t.Fatalf("provider request did not retain the exact legacy limit: %s", fixture.target.preparedBody)
+	}
+}
+
 func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -702,6 +799,34 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 		{name: "overflowing window", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "9223372036854775808d" }},
 		{name: "zero maximum", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Maximum = 0 }},
 		{name: "per request field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].PerRequestMaximum = 1 }},
+		{name: "logical per request algorithm", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Algorithm = quota.PerRequestAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].Maximum = 0
+			plan.Limits[0].PerRequestMaximum = 1
+		}},
+		{name: "output calendar with per request maximum", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.OutputTokensMetric
+			plan.Limits[0].PerRequestMaximum = 1
+		}},
+		{name: "output per request with window", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.OutputTokensMetric
+			plan.Limits[0].Algorithm = quota.PerRequestAlgorithm
+			plan.Limits[0].Maximum = 0
+			plan.Limits[0].PerRequestMaximum = 1
+		}},
+		{name: "output per request with maximum", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.OutputTokensMetric
+			plan.Limits[0].Algorithm = quota.PerRequestAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].PerRequestMaximum = 1
+		}},
+		{name: "output per request without maximum", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Metric = quota.OutputTokensMetric
+			plan.Limits[0].Algorithm = quota.PerRequestAlgorithm
+			plan.Limits[0].Window = ""
+			plan.Limits[0].Maximum = 0
+		}},
 		{name: "capacity field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Capacity = 1 }},
 		{name: "refill field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].RefillPerSecond = "1" }},
 		{name: "duplicate immutable identity", mutate: func(plan *configuration.LimitPlan) {
@@ -710,6 +835,18 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 			duplicate.Scope = []string{"user", "environment"}
 			duplicate.Maximum++
 			plan.Limits = append(plan.Limits, duplicate)
+		}},
+		{name: "duplicate output per request identity", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits = []configuration.Limit{
+				{
+					Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+					Scope: []string{"user", "environment"}, PerRequestMaximum: 50, Hard: true,
+				},
+				{
+					Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+					Scope: []string{"environment", "user"}, PerRequestMaximum: 40, Hard: true,
+				},
+			}
 		}},
 	}
 	for _, test := range tests {
@@ -742,6 +879,100 @@ func TestHandlerTreatsUncommittedSuccessfulRelayAsProtocolFailure(t *testing.T) 
 		fixture.quotas.settleOutcome.HTTPStatus != http.StatusOK ||
 		fixture.quotas.settleOutcome.FailureCode != "upstream_protocol_error" {
 		t.Fatalf("uncommitted relay settlement = %#v", fixture.quotas.settleOutcome)
+	}
+}
+
+func TestQuotaOutcomeCarriesNormalizedUsageThroughSuccessUnknownAndFailure(t *testing.T) {
+	t.Parallel()
+
+	reported := protocol.Usage{
+		InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+		Known: true, Provenance: quota.ProviderReportedProvenance,
+	}
+	tests := []struct {
+		name       string
+		relay      upstream.RelayOutcome
+		execution  error
+		wantStatus string
+		wantCode   string
+		wantUsage  quota.Usage
+	}{
+		{
+			name: "known successful usage", relay: upstream.RelayOutcome{StatusCode: http.StatusOK, Usage: reported},
+			wantStatus: quota.AttemptSucceeded,
+			wantUsage: quota.Usage{
+				InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+				Known: true, Provenance: quota.ProviderReportedProvenance,
+			},
+		},
+		{
+			name: "unknown successful usage", relay: upstream.RelayOutcome{StatusCode: http.StatusOK},
+			wantStatus: quota.AttemptSucceeded, wantUsage: unknownQuotaUsage(),
+		},
+		{
+			name: "known usage retained on failure", relay: upstream.RelayOutcome{StatusCode: http.StatusOK, Usage: reported},
+			execution: errors.New("private body failure"), wantStatus: quota.AttemptFailed,
+			wantCode: "upstream_unavailable",
+			wantUsage: quota.Usage{
+				InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+				Known: true, Provenance: quota.ProviderReportedProvenance,
+			},
+		},
+		{
+			name: "unknown usage retained on failure", relay: upstream.RelayOutcome{StatusCode: http.StatusBadGateway},
+			execution: upstream.ErrUpstreamNonSuccess, wantStatus: quota.AttemptFailed,
+			wantCode: "upstream_non_success", wantUsage: unknownQuotaUsage(),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			outcome := quotaOutcome(test.relay, test.execution)
+			if outcome.Status != test.wantStatus || outcome.HTTPStatus != test.relay.StatusCode ||
+				outcome.FailureCode != test.wantCode || outcome.Usage != test.wantUsage {
+				t.Fatalf("quota outcome = %#v, want status=%s code=%s usage=%#v",
+					outcome, test.wantStatus, test.wantCode, test.wantUsage)
+			}
+		})
+	}
+}
+
+func TestHandlerClassifiesProviderUsageAboveAppliedMaximumWithoutRewritingClientResponse(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{{
+		Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+		Scope: []string{"environment", "user"}, PerRequestMaximum: 8, Hard: true,
+	}}
+	fixture.relayer.outcome = upstream.RelayOutcome{
+		StatusCode: http.StatusOK, BodyBytes: 11, ClientStarted: true,
+		Usage: protocol.Usage{
+			InputTokens: 2, OutputTokens: 9, TotalTokens: 11,
+			Known: true, Provenance: quota.ProviderReportedProvenance,
+		},
+	}
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` {
+		t.Fatalf("already-relayed client response = (%d, %q)", response.Code, response.Body.String())
+	}
+	if fixture.quotas.settleCalls != 1 || fixture.quotas.settleOutcome.Status != quota.AttemptFailed ||
+		fixture.quotas.settleOutcome.HTTPStatus != http.StatusOK ||
+		fixture.quotas.settleOutcome.FailureCode != "upstream_protocol_error" {
+		t.Fatalf("over-reported settlement classification = %#v", fixture.quotas.settleOutcome)
+	}
+	wantUsage := quota.Usage{
+		InputTokens: 2, OutputTokens: 9, TotalTokens: 11,
+		Known: true, Provenance: quota.ProviderReportedProvenance,
+	}
+	if fixture.quotas.settleOutcome.Usage != wantUsage {
+		t.Fatalf("over-reported measured usage = %#v, want %#v", fixture.quotas.settleOutcome.Usage, wantUsage)
+	}
+	if len(fixture.quotas.reserveInput.Rules) != 1 || fixture.quotas.reserveInput.Rules[0].ReservedUnits != 8 {
+		t.Fatalf("over-reported request reservation = %#v, want conservative full cap 8",
+			fixture.quotas.reserveInput.Rules)
 	}
 }
 
@@ -895,6 +1126,10 @@ func testDispatchedResponse() *upstream.DispatchedResponse {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)),
 	}}
+}
+
+func unknownQuotaUsage() quota.Usage {
+	return quota.Usage{Known: false, Provenance: quota.UnknownUsageProvenance}
 }
 
 func assertProblemCode(t *testing.T, response *httptest.ResponseRecorder, code string, status int) {

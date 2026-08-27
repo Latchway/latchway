@@ -104,29 +104,29 @@ func inspectRequestObject(object map[string]any, raw []byte) (protocol.RequestMe
 	}, nil
 }
 
-func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decision protocol.FeatureDecision) error {
+func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decision protocol.FeatureDecision) (int64, error) {
 	if ctx == nil {
-		return requestMalformed("request context is required")
+		return 0, requestMalformed("request context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	if !safeIdentifierValue(decision.PhysicalModel, 256) {
-		return errors.New("valid physical model is required")
+		return 0, errors.New("valid physical model is required")
 	}
 	if decision.DefaultOutputTokens <= 0 || decision.MaximumOutputTokens <= 0 || decision.DefaultOutputTokens > decision.MaximumOutputTokens {
-		return errors.New("valid output-token bounds are required")
+		return 0, errors.New("valid output-token bounds are required")
 	}
 	object, raw, err := a.readRequest(request)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := inspectRequestObject(object, raw); err != nil {
-		return err
+		return 0, err
 	}
 	requested, outputLimitField, err := requestedOutputLimit(object)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	effective := requested
 	if effective == 0 {
@@ -144,7 +144,7 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 		}
 		optionsObject, ok := streamOptions.(map[string]any)
 		if !ok {
-			return requestMalformed("stream_options must be an object")
+			return 0, requestMalformed("stream_options must be an object")
 		}
 		optionsObject["include_usage"] = true
 		object["stream_options"] = optionsObject
@@ -154,10 +154,10 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	object[outputLimitField] = effective
 	rewritten, err := json.Marshal(object)
 	if err != nil {
-		return fmt.Errorf("encode rewritten chat request: %w", err)
+		return 0, fmt.Errorf("encode rewritten chat request: %w", err)
 	}
 	if int64(len(rewritten)) > a.maximumBodyBytes() {
-		return errors.New("rewritten chat request exceeds configured limit")
+		return 0, errors.New("rewritten chat request exceeds configured limit")
 	}
 	request.Body = io.NopCloser(bytes.NewReader(rewritten))
 	request.ContentLength = int64(len(rewritten))
@@ -171,7 +171,7 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 		mode = responseModeSSE
 	}
 	*request = *request.WithContext(context.WithValue(request.Context(), responseModeContextKey{}, mode))
-	return nil
+	return effective, nil
 }
 
 func (a Adapter) ObserveResponse(ctx context.Context, response *http.Response) (protocol.ResponseObserver, error) {

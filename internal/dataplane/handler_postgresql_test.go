@@ -140,17 +140,28 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			snapshot.PolicyRevision(), snapshot.PolicyEnvironment(), revisionID, tenant.environmentID)
 	}
 	limitPlan, ok := snapshot.LimitPlan("free")
-	if !ok || len(limitPlan.Limits) != 2 ||
-		limitPlan.Limits[0].Metric != quota.LogicalRequestsMetric ||
-		limitPlan.Limits[0].Algorithm != quota.CalendarAlgorithm ||
-		limitPlan.Limits[0].Window != "1d" || limitPlan.Limits[0].Maximum != 2 ||
-		!limitPlan.Limits[0].Hard ||
-		!reflect.DeepEqual(limitPlan.Limits[0].Scope, []string{"user", "feature"}) ||
-		limitPlan.Limits[1].Metric != quota.LogicalRequestsMetric ||
-		limitPlan.Limits[1].Algorithm != quota.CalendarAlgorithm ||
-		limitPlan.Limits[1].Window != "1mo" || limitPlan.Limits[1].Maximum != 3 ||
-		!limitPlan.Limits[1].Hard ||
-		!reflect.DeepEqual(limitPlan.Limits[1].Scope, []string{"environment"}) {
+	wantLimitPlan := configuration.LimitPlan{
+		ID: "free",
+		Limits: []configuration.Limit{
+			{
+				Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
+				Scope: []string{"user", "feature"}, Window: "1d", Maximum: 2, Hard: true,
+			},
+			{
+				Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
+				Scope: []string{"environment"}, Window: "1mo", Maximum: 3, Hard: true,
+			},
+			{
+				Metric: quota.OutputTokensMetric, Algorithm: quota.CalendarAlgorithm,
+				Scope: []string{"user", "model"}, Window: "1d", Maximum: 256, Hard: true,
+			},
+			{
+				Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+				Scope: []string{"user", "model"}, PerRequestMaximum: 64, Hard: true,
+			},
+		},
+	}
+	if !ok || !reflect.DeepEqual(limitPlan, wantLimitPlan) {
 		t.Fatalf("active multi-rule limit plan = %+v ok=%t", limitPlan, ok)
 	}
 
@@ -376,8 +387,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	firstQuotaState := readDataPlaneE2EQuotaBuckets(t, ctx, pool)
 	assertDataPlaneE2EQuotaBuckets(t, firstQuotaState, 1)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 1, reservations: 1, reservationEntries: 2,
-		buckets: 2, attempts: 1, usageRecords: 1,
+		logicalRequests: 1, reservations: 1, reservationEntries: 3,
+		buckets: 3, attempts: 1, usageRecords: 4,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EProviderSecret, dataPlaneE2EPromptMarker, "Deterministic mock response.")
@@ -398,8 +409,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			firstQuotaState, replayQuotaState)
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 1, reservations: 1, reservationEntries: 2,
-		buckets: 2, attempts: 1, usageRecords: 1,
+		logicalRequests: 1, reservations: 1, reservationEntries: 3,
+		buckets: 3, attempts: 1, usageRecords: 4,
 	})
 
 	streamProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
@@ -440,9 +451,10 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	assertDataPlaneE2EPersistence(t, ctx, pool, dataPlaneE2EClientRequestID, 2)
 	quotaStateBeforeDenial := readDataPlaneE2EQuotaBuckets(t, ctx, pool)
 	assertDataPlaneE2EQuotaBuckets(t, quotaStateBeforeDenial, 2)
+	assertDataPlaneE2EOnlyDailyRequestLimitExhausted(t, quotaStateBeforeDenial)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 2, reservations: 2, reservationEntries: 4,
-		buckets: 2, attempts: 2, usageRecords: 2,
+		logicalRequests: 2, reservations: 2, reservationEntries: 6,
+		buckets: 3, attempts: 2, usageRecords: 8,
 	})
 
 	deniedProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
@@ -470,8 +482,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	assertDataPlaneE2EQuotaBuckets(t, quotaStateAfterDenial, 2)
 	assertDataPlaneE2EDenialPersistence(t, ctx, pool, dataPlaneE2EDeniedRequestID)
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 3, reservations: 2, reservationEntries: 4,
-		buckets: 2, attempts: 2, usageRecords: 2, deniedRequests: 1,
+		logicalRequests: 3, reservations: 2, reservationEntries: 6,
+		buckets: 3, attempts: 2, usageRecords: 8, deniedRequests: 1,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2EProviderSecret,
@@ -646,6 +658,14 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					map[string]any{
 						"metric": "logical_requests", "algorithm": "calendar",
 						"scope": []any{"environment"}, "window": "1mo", "maximum": 3, "hard": true,
+					},
+					map[string]any{
+						"metric": "output_tokens", "algorithm": "calendar",
+						"scope": []any{"model", "user"}, "window": "1d", "maximum": 256, "hard": true,
+					},
+					map[string]any{
+						"metric": "output_tokens", "algorithm": "per_request",
+						"scope": []any{"model", "user"}, "perRequestMaximum": 64, "hard": true,
 					},
 				},
 			}},
@@ -1159,18 +1179,18 @@ func assertDataPlaneE2EPersistence(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	clientRequestID string,
-	expectedUsed int64,
+	expectedSuccessfulRequests int64,
 ) string {
 	t.Helper()
-	var logicalID, logicalStatus, reservationStatus, attemptStatus, physicalModel, metric string
+	var logicalID, logicalStatus, reservationStatus, attemptID, attemptStatus, physicalModel string
 	var httpStatus int
-	var firstByte, usageIsRequestScoped bool
-	var units, reservations, attempts, usageRecords int64
+	var firstByte bool
+	var reservations, attempts, usageRecords int64
 	err := pool.QueryRow(ctx, `
 		SELECT request.logical_request_id, request.status, reservation.status,
-		       attempt.status, attempt.http_status, attempt.physical_model,
+		       attempt.upstream_attempt_id, attempt.status,
+		       attempt.http_status, attempt.physical_model,
 		       attempt.first_byte_at IS NOT NULL,
-		       usage.metric, usage.units, usage.upstream_attempt_id IS NULL,
 		       (SELECT count(*) FROM quota_reservations AS counted
 		        WHERE counted.logical_request_id = request.logical_request_id),
 		       (SELECT count(*) FROM upstream_attempts AS counted
@@ -1180,26 +1200,26 @@ func assertDataPlaneE2EPersistence(
 		FROM logical_requests AS request
 		JOIN quota_reservations AS reservation USING (logical_request_id)
 		JOIN upstream_attempts AS attempt USING (logical_request_id)
-		JOIN usage_records AS usage USING (logical_request_id)
 		WHERE request.client_request_id = $1
 	`, clientRequestID).Scan(
-		&logicalID, &logicalStatus, &reservationStatus, &attemptStatus, &httpStatus,
-		&physicalModel, &firstByte, &metric, &units, &usageIsRequestScoped,
+		&logicalID, &logicalStatus, &reservationStatus, &attemptID,
+		&attemptStatus, &httpStatus, &physicalModel, &firstByte,
 		&reservations, &attempts, &usageRecords,
 	)
 	if err != nil {
 		t.Fatalf("read persisted data-plane lifecycle: %v", err)
 	}
-	if id.Validate(logicalID, id.LogicalRequest) != nil || logicalStatus != "succeeded" ||
+	if id.Validate(logicalID, id.LogicalRequest) != nil || id.Validate(attemptID, id.UpstreamAttempt) != nil ||
+		logicalStatus != "succeeded" ||
 		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
 		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel || !firstByte ||
-		metric != quota.LogicalRequestsMetric || units != 1 || !usageIsRequestScoped ||
-		reservations != 1 || attempts != 1 || usageRecords != 1 {
-		t.Fatalf("persisted lifecycle request=%q/%s reservation=%s/count=%d attempt=%s/%d/%s/count=%d first_byte=%t usage=%s/%d/request_scoped=%t/count=%d",
+		reservations != 1 || attempts != 1 || usageRecords != 4 {
+		t.Fatalf("persisted lifecycle request=%q/%s reservation=%s/count=%d attempt=%q/%s/%d/%s/count=%d first_byte=%t usage_count=%d",
 			logicalID, logicalStatus, reservationStatus, reservations,
-			attemptStatus, httpStatus, physicalModel, attempts,
-			firstByte, metric, units, usageIsRequestScoped, usageRecords)
+			attemptID, attemptStatus, httpStatus, physicalModel, attempts,
+			firstByte, usageRecords)
 	}
+	assertDataPlaneE2EUsage(t, ctx, pool, logicalID, attemptID)
 
 	rows, err := pool.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, bucket.quota_bucket_id,
@@ -1231,12 +1251,14 @@ func assertDataPlaneE2EPersistence(
 		); err != nil {
 			t.Fatalf("scan persisted data-plane quota entry: %v", err)
 		}
-		window, maximum, expectedScopeType, ok := dataPlaneE2EExpectedLimit(scopeDimensions)
+		expected, ok := dataPlaneE2EExpectedLimit(bucketMetric, scopeDimensions, expectedSuccessfulRequests)
 		if id.Validate(entryID, id.QuotaEntry) != nil || id.Validate(bucketID, id.QuotaBucket) != nil ||
-			limitPlanKey != "free" || bucketMetric != quota.LogicalRequestsMetric ||
-			algorithm != quota.CalendarAlgorithm || scopeType != expectedScopeType || !ok ||
-			!strings.HasPrefix(windowKey, "utc:v1:"+window+":") || hardMaximum != maximum ||
-			used != expectedUsed || reserved != 0 || entryReserved != 1 || settled != 1 || released != 0 {
+			limitPlanKey != "free" || algorithm != quota.CalendarAlgorithm || !ok ||
+			scopeType != expected.scopeType ||
+			!strings.HasPrefix(windowKey, "utc:v1:"+expected.window+":") ||
+			hardMaximum != expected.maximum || used != expected.used || reserved != 0 ||
+			entryReserved != expected.entryReserved || settled != expected.entrySettled ||
+			released != expected.entryReleased {
 			t.Fatalf("persisted quota entry=%q bucket=%q plan=%q metric=%q scope=%q/%v algorithm=%q window=%q maximum=%d occupancy=%d/%d entry=%d/%d/%d",
 				entryID, bucketID, limitPlanKey, bucketMetric, scopeType, scopeDimensions,
 				algorithm, windowKey, hardMaximum, used, reserved, entryReserved, settled, released)
@@ -1250,10 +1272,94 @@ func assertDataPlaneE2EPersistence(
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate persisted data-plane quota entries: %v", err)
 	}
-	if entryCount != 2 {
-		t.Fatalf("persisted quota entries = %d, want exactly 2", entryCount)
+	if entryCount != 3 {
+		t.Fatalf("persisted quota entries = %d, want two logical calendars plus one output calendar", entryCount)
 	}
 	return logicalID
+}
+
+func assertDataPlaneE2EUsage(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	logicalID, attemptID string,
+) {
+	t.Helper()
+	type expectedUsage struct {
+		units         int64
+		confidence    string
+		provenance    string
+		attemptScoped bool
+	}
+	expected := map[string]expectedUsage{
+		quota.LogicalRequestsMetric: {
+			units: 1, confidence: "calculated",
+			provenance: "logical-request:" + logicalID,
+		},
+		"input_tokens": {
+			units: 11, confidence: "reported",
+			provenance:    quota.ProviderReportedProvenance + ":" + attemptID + ":input_tokens",
+			attemptScoped: true,
+		},
+		quota.OutputTokensMetric: {
+			units: 7, confidence: "reported",
+			provenance:    quota.ProviderReportedProvenance + ":" + attemptID + ":" + quota.OutputTokensMetric,
+			attemptScoped: true,
+		},
+		"total_tokens": {
+			units: 18, confidence: "reported",
+			provenance:    quota.ProviderReportedProvenance + ":" + attemptID + ":total_tokens",
+			attemptScoped: true,
+		},
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT usage_record_id, upstream_attempt_id, metric, units,
+		       confidence, provenance_key
+		FROM usage_records
+		WHERE logical_request_id = $1
+		ORDER BY provenance_key COLLATE "C"
+	`, logicalID)
+	if err != nil {
+		t.Fatalf("read persisted data-plane usage: %v", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var usageID, metric, confidence, provenance string
+		var usageAttemptID *string
+		var units int64
+		if err := rows.Scan(&usageID, &usageAttemptID, &metric, &units, &confidence, &provenance); err != nil {
+			t.Fatalf("scan persisted data-plane usage: %v", err)
+		}
+		want, ok := expected[metric]
+		attemptMatches := (!want.attemptScoped && usageAttemptID == nil) ||
+			(want.attemptScoped && usageAttemptID != nil && *usageAttemptID == attemptID)
+		if id.Validate(usageID, id.UsageRecord) != nil || !ok || !attemptMatches ||
+			units != want.units || confidence != want.confidence || provenance != want.provenance {
+			t.Fatalf("persisted usage id=%q attempt=%v metric=%q units=%d confidence=%q provenance=%q",
+				usageID, usageAttemptID, metric, units, confidence, provenance)
+		}
+		if _, duplicate := seen[metric]; duplicate {
+			t.Fatalf("persisted usage repeated metric %q", metric)
+		}
+		seen[metric] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate persisted data-plane usage: %v", err)
+	}
+	if len(seen) != len(expected) {
+		t.Fatalf("persisted usage metrics = %v, want logical/input/output/total", seen)
+	}
+}
+
+type dataPlaneE2EExpectedQuotaState struct {
+	window        string
+	maximum       int64
+	scopeType     string
+	used          int64
+	entryReserved int64
+	entrySettled  int64
+	entryReleased int64
 }
 
 type dataPlaneE2EQuotaBucketState struct {
@@ -1283,7 +1389,7 @@ func readDataPlaneE2EQuotaBuckets(t *testing.T, ctx context.Context, pool *pgxpo
 		t.Fatalf("read durable quota buckets: %v", err)
 	}
 	defer rows.Close()
-	result := make([]dataPlaneE2EQuotaBucketState, 0, 2)
+	result := make([]dataPlaneE2EQuotaBucketState, 0, 3)
 	for rows.Next() {
 		var state dataPlaneE2EQuotaBucketState
 		if err := rows.Scan(
@@ -1302,37 +1408,75 @@ func readDataPlaneE2EQuotaBuckets(t *testing.T, ctx context.Context, pool *pgxpo
 	return result
 }
 
-func assertDataPlaneE2EQuotaBuckets(t *testing.T, states []dataPlaneE2EQuotaBucketState, expectedUsed int64) {
+func assertDataPlaneE2EQuotaBuckets(t *testing.T, states []dataPlaneE2EQuotaBucketState, expectedSuccessfulRequests int64) {
 	t.Helper()
-	if len(states) != 2 {
-		t.Fatalf("durable quota buckets = %d, want exactly 2: %+v", len(states), states)
+	if len(states) != 3 {
+		t.Fatalf("durable quota buckets = %d, want two logical calendars plus one output calendar: %+v", len(states), states)
 	}
-	seenScopes := make(map[string]struct{}, 2)
+	seenRules := make(map[string]struct{}, 3)
 	for _, state := range states {
-		window, maximum, scopeType, ok := dataPlaneE2EExpectedLimit(state.scopeDimensions)
+		expected, ok := dataPlaneE2EExpectedLimit(state.metric, state.scopeDimensions, expectedSuccessfulRequests)
 		if id.Validate(state.bucketID, id.QuotaBucket) != nil || state.limitPlanKey != "free" ||
-			state.metric != quota.LogicalRequestsMetric || state.algorithm != quota.CalendarAlgorithm ||
-			!ok || state.scopeType != scopeType ||
-			!strings.HasPrefix(state.windowKey, "utc:v1:"+window+":") || state.hardMaximum != maximum ||
-			state.used != expectedUsed || state.reserved != 0 || state.version != expectedUsed*2 {
+			state.algorithm != quota.CalendarAlgorithm || !ok || state.scopeType != expected.scopeType ||
+			!strings.HasPrefix(state.windowKey, "utc:v1:"+expected.window+":") ||
+			state.hardMaximum != expected.maximum || state.used != expected.used || state.reserved != 0 ||
+			state.version != expectedSuccessfulRequests*2 {
 			t.Fatalf("durable quota bucket violated multi-rule state: %+v", state)
 		}
-		scopeKey := strings.Join(state.scopeDimensions, "\x00")
-		if _, duplicate := seenScopes[scopeKey]; duplicate {
-			t.Fatalf("durable quota buckets repeated scope %v", state.scopeDimensions)
+		ruleKey := state.metric + "\x00" + strings.Join(state.scopeDimensions, "\x00")
+		if _, duplicate := seenRules[ruleKey]; duplicate {
+			t.Fatalf("durable quota buckets repeated rule %q/%v", state.metric, state.scopeDimensions)
 		}
-		seenScopes[scopeKey] = struct{}{}
+		seenRules[ruleKey] = struct{}{}
 	}
 }
 
-func dataPlaneE2EExpectedLimit(scope []string) (window string, maximum int64, scopeType string, ok bool) {
+func dataPlaneE2EExpectedLimit(
+	metric string,
+	scope []string,
+	expectedSuccessfulRequests int64,
+) (dataPlaneE2EExpectedQuotaState, bool) {
 	switch {
-	case reflect.DeepEqual(scope, []string{"user", "feature"}):
-		return "1d", 2, "composite", true
-	case reflect.DeepEqual(scope, []string{"environment"}):
-		return "1mo", 3, "environment", true
+	case metric == quota.LogicalRequestsMetric && reflect.DeepEqual(scope, []string{"user", "feature"}):
+		return dataPlaneE2EExpectedQuotaState{
+			window: "1d", maximum: 2, scopeType: "composite", used: expectedSuccessfulRequests,
+			entryReserved: 1, entrySettled: 1,
+		}, true
+	case metric == quota.LogicalRequestsMetric && reflect.DeepEqual(scope, []string{"environment"}):
+		return dataPlaneE2EExpectedQuotaState{
+			window: "1mo", maximum: 3, scopeType: "environment", used: expectedSuccessfulRequests,
+			entryReserved: 1, entrySettled: 1,
+		}, true
+	case metric == quota.OutputTokensMetric && reflect.DeepEqual(scope, []string{"user", "model"}):
+		return dataPlaneE2EExpectedQuotaState{
+			window: "1d", maximum: 256, scopeType: "composite", used: expectedSuccessfulRequests * 7,
+			entryReserved: 64, entrySettled: 7, entryReleased: 57,
+		}, true
 	default:
-		return "", 0, "", false
+		return dataPlaneE2EExpectedQuotaState{}, false
+	}
+}
+
+func assertDataPlaneE2EOnlyDailyRequestLimitExhausted(t *testing.T, states []dataPlaneE2EQuotaBucketState) {
+	t.Helper()
+	dailyExhausted := false
+	for _, state := range states {
+		requestedUnits := int64(1)
+		if state.metric == quota.OutputTokensMetric {
+			requestedUnits = 64
+		}
+		wouldExceed := state.hardMaximum-state.used-state.reserved < requestedUnits
+		isDailyRequestLimit := state.metric == quota.LogicalRequestsMetric &&
+			reflect.DeepEqual(state.scopeDimensions, []string{"user", "feature"})
+		if wouldExceed != isDailyRequestLimit {
+			t.Fatalf("next reservation eligibility for metric=%q scope=%v occupancy=%d/%d requested=%d would_exceed=%t",
+				state.metric, state.scopeDimensions, state.used+state.reserved,
+				state.hardMaximum, requestedUnits, wouldExceed)
+		}
+		dailyExhausted = dailyExhausted || isDailyRequestLimit
+	}
+	if !dailyExhausted {
+		t.Fatal("daily logical-request limit was not present before atomic denial")
 	}
 }
 

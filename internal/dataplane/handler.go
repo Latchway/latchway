@@ -261,18 +261,28 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	rules, err := validateDecision(declaration.feature, decision)
+	validated, err := validateDecision(declaration.feature, decision)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if err := handler.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
+	appliedOutputMaximum, err := handler.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
 		PhysicalModel:       decision.Model.UpstreamModel,
-		DefaultOutputTokens: decision.Feature.Output.DefaultMaximumTokens,
-		MaximumOutputTokens: decision.Feature.Output.AbsoluteMaximumTokens,
-	}); err != nil {
+		DefaultOutputTokens: validated.defaultOutputTokens,
+		MaximumOutputTokens: validated.maximumOutputTokens,
+	})
+	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
+	}
+	if appliedOutputMaximum <= 0 || appliedOutputMaximum > validated.maximumOutputTokens {
+		handler.writeMappedError(writer, requestID, declaration.feature, errInvalidConfiguration)
+		return
+	}
+	for index := range validated.rules {
+		if validated.rules[index].Metric == quota.OutputTokensMetric {
+			validated.rules[index].ReservedUnits = appliedOutputMaximum
+		}
 	}
 
 	reservation, err := handler.quotas.Reserve(request.Context(), quota.ReserveInput{
@@ -284,7 +294,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		Protocol: decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
 		LimitPlanKey: decision.LimitPlan.ID, RouteKey: decision.Route.ID,
 		UpstreamKey: decision.Upstream.ID, ModelKey: decision.Model.ID,
-		PhysicalModel: decision.Model.UpstreamModel, Rules: rules,
+		PhysicalModel: decision.Model.UpstreamModel, Rules: validated.rules,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -312,6 +322,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	if result.err == nil && !result.relay.ClientStarted {
 		result.err = errDispatchNotConsumed
+	}
+	if result.relay.Usage.Known && result.relay.Usage.OutputTokens > appliedOutputMaximum {
+		result.err = fmt.Errorf(
+			"%w: provider-reported output tokens exceed the applied request maximum",
+			errUpstreamProtocol,
+		)
 	}
 
 	settlementErr := handler.settleAttempt(result.attempt, result.relay, result.err)
@@ -502,7 +518,13 @@ func (handler *Handler) consumeResponse(
 	return outcome, nil
 }
 
-func validateDecision(featureID string, decision policy.Decision) ([]quota.Rule, error) {
+type validatedDecision struct {
+	rules               []quota.Rule
+	defaultOutputTokens int64
+	maximumOutputTokens int64
+}
+
+func validateDecision(featureID string, decision policy.Decision) (validatedDecision, error) {
 	feature := decision.Feature
 	if feature.ID != featureID || feature.Protocol != openaichat.ID || feature.Output == nil ||
 		feature.OpaqueHTTP != nil || feature.Output.DefaultMaximumTokens <= 0 ||
@@ -516,31 +538,52 @@ func validateDecision(featureID string, decision policy.Decision) ([]quota.Rule,
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
 		!validTargetTimeouts(decision.Upstream.Timeouts) || decision.LimitPlan.ID == "" ||
 		len(decision.LimitPlan.Limits) == 0 || len(decision.LimitPlan.Limits) > maximumDecisionLimitRules {
-		return nil, policy.ErrConfiguration
+		return validatedDecision{}, policy.ErrConfiguration
 	}
 	rules := make([]quota.Rule, 0, len(decision.LimitPlan.Limits))
 	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(decision.LimitPlan.Limits))
+	effectiveMaximum := feature.Output.AbsoluteMaximumTokens
 	for _, limit := range decision.LimitPlan.Limits {
 		scope, ok := canonicalDecisionScope(limit.Scope)
-		if limit.Metric != quota.LogicalRequestsMetric || limit.Algorithm != quota.CalendarAlgorithm ||
-			!limit.Hard || !ok || !validDecisionWindow(limit.Window) || limit.Maximum <= 0 ||
-			limit.PerRequestMaximum != 0 || limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
-			return nil, errUnsupportedLimitPlan
+		if !limit.Hard || !ok || limit.Capacity != 0 || limit.RefillPerSecond.String() != "" ||
+			!supportedDecisionLimit(limit) {
+			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		identity := decisionLimitIdentity{
 			metric: limit.Metric, algorithm: limit.Algorithm,
 			window: limit.Window, scope: strings.Join(scope, "\x00"),
 		}
 		if _, duplicate := seenIdentities[identity]; duplicate {
-			return nil, errUnsupportedLimitPlan
+			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		seenIdentities[identity] = struct{}{}
 		rules = append(rules, quota.Rule{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: scope,
-			Window: limit.Window, Maximum: limit.Maximum, Hard: limit.Hard,
+			Window: limit.Window, Maximum: limit.Maximum,
+			PerRequestMaximum: limit.PerRequestMaximum, Hard: limit.Hard,
 		})
+		if limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm &&
+			limit.PerRequestMaximum < effectiveMaximum {
+			effectiveMaximum = limit.PerRequestMaximum
+		}
 	}
-	return rules, nil
+	effectiveDefault := min(feature.Output.DefaultMaximumTokens, effectiveMaximum)
+	return validatedDecision{
+		rules: rules, defaultOutputTokens: effectiveDefault, maximumOutputTokens: effectiveMaximum,
+	}, nil
+}
+
+func supportedDecisionLimit(limit configuration.Limit) bool {
+	switch {
+	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
+		return validDecisionWindow(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0
+	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.CalendarAlgorithm:
+		return validDecisionWindow(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0
+	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm:
+		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0
+	default:
+		return false
+	}
 }
 
 type decisionLimitIdentity struct {
@@ -600,8 +643,16 @@ func quotaOutcome(relay upstream.RelayOutcome, executionErr error) quota.Outcome
 	if httpStatus < 100 || httpStatus > 599 {
 		httpStatus = 0
 	}
+	usage := quota.Usage{
+		InputTokens: relay.Usage.InputTokens, OutputTokens: relay.Usage.OutputTokens,
+		TotalTokens: relay.Usage.TotalTokens, Known: relay.Usage.Known,
+		Provenance: relay.Usage.Provenance,
+	}
+	if !usage.Known && usage.Provenance == "" {
+		usage.Provenance = quota.UnknownUsageProvenance
+	}
 	if executionErr == nil && httpStatus >= http.StatusOK && httpStatus < http.StatusMultipleChoices {
-		return quota.Outcome{Status: quota.AttemptSucceeded, HTTPStatus: httpStatus}
+		return quota.Outcome{Status: quota.AttemptSucceeded, HTTPStatus: httpStatus, Usage: usage}
 	}
 	status := quota.AttemptFailed
 	code := failureCode(executionErr)
@@ -613,7 +664,7 @@ func quotaOutcome(relay upstream.RelayOutcome, executionErr error) quota.Outcome
 		status = quota.AttemptTimedOut
 		code = "upstream_timeout"
 	}
-	return quota.Outcome{Status: status, HTTPStatus: httpStatus, FailureCode: code}
+	return quota.Outcome{Status: status, HTTPStatus: httpStatus, FailureCode: code, Usage: usage}
 }
 
 func failureCode(err error) string {

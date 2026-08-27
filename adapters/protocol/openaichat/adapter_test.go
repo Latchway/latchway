@@ -3,6 +3,7 @@ package openaichat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -30,12 +31,16 @@ func TestInspectAndApplyFeature(t *testing.T) {
 	if !metadata.Streaming || metadata.RequestedOutputLimit != 2000 || metadata.ClientModel != "client-model" {
 		t.Fatalf("unexpected metadata: %+v", metadata)
 	}
-	if err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+	applied, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 		PhysicalModel:       "server-model",
 		DefaultOutputTokens: 400,
 		MaximumOutputTokens: 800,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if applied != 800 {
+		t.Fatalf("applied output maximum = %d, want 800", applied)
 	}
 	rewritten, _ := io.ReadAll(request.Body)
 	value, err := jsonsafe.Decode(rewritten)
@@ -97,10 +102,14 @@ func TestNullableOptionsUseDefaultsAndOneOutboundLimit(t *testing.T) {
 			if metadata.Streaming != test.streaming || metadata.RequestedOutputLimit != 0 {
 				t.Fatalf("metadata = %+v", metadata)
 			}
-			if err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+			applied, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 				PhysicalModel: "physical", DefaultOutputTokens: 32, MaximumOutputTokens: 64,
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatalf("ApplyFeature() error = %v", err)
+			}
+			if applied != 32 {
+				t.Fatalf("applied output maximum = %d, want 32", applied)
 			}
 			rewritten, err := io.ReadAll(request.Body)
 			if err != nil {
@@ -331,7 +340,7 @@ func rewrittenRequestForResponseMode(t *testing.T, streaming bool) *http.Request
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+	if _, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 		PhysicalModel: "physical", DefaultOutputTokens: 32, MaximumOutputTokens: 64,
 	}); err != nil {
 		t.Fatalf("ApplyFeature() error = %v", err)
@@ -365,10 +374,14 @@ func TestApplyFeatureUsesLegacyLimitWhenRequested(t *testing.T) {
 		`{"model":"client","messages":[{"role":"user","content":"hello"}],"max_tokens":200}`,
 	))
 	request.Header.Set("Content-Type", "application/json")
-	if err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+	applied, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 		PhysicalModel: "physical", DefaultOutputTokens: 50, MaximumOutputTokens: 100,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if applied != 100 {
+		t.Fatalf("applied output maximum = %d, want 100", applied)
 	}
 	rewritten, err := io.ReadAll(request.Body)
 	if err != nil {
@@ -387,6 +400,58 @@ func TestApplyFeatureUsesLegacyLimitWhenRequested(t *testing.T) {
 	}
 }
 
+func TestApplyFeatureReturnsExactWrittenOutputMaximum(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		field     string
+		requested string
+		want      int64
+	}{
+		{name: "missing uses default", field: "max_completion_tokens", want: 50},
+		{name: "modern request below cap", field: "max_completion_tokens", requested: `,"max_completion_tokens":40`, want: 40},
+		{name: "modern request above cap", field: "max_completion_tokens", requested: `,"max_completion_tokens":200`, want: 100},
+		{name: "legacy request below cap", field: "max_tokens", requested: `,"max_tokens":30`, want: 30},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"model":"client","messages":[{"role":"user","content":"hello"}]` + test.requested + `}`
+			request, err := http.NewRequest(
+				http.MethodPost,
+				"https://gateway.example/v1/chat/completions",
+				strings.NewReader(body),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			applied, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+				PhysicalModel: "physical", DefaultOutputTokens: 50, MaximumOutputTokens: 100,
+			})
+			if err != nil {
+				t.Fatalf("ApplyFeature() error = %v", err)
+			}
+			if applied != test.want {
+				t.Fatalf("applied output maximum = %d, want %d", applied, test.want)
+			}
+			rewritten, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := jsonsafe.Decode(rewritten)
+			if err != nil {
+				t.Fatal(err)
+			}
+			object := value.(map[string]any)
+			written, ok := object[test.field].(interface{ String() string })
+			if !ok || written.String() != fmt.Sprint(test.want) {
+				t.Fatalf("rewritten request = %s, want %s=%d", rewritten, test.field, test.want)
+			}
+		})
+	}
+}
+
 func TestApplyFeatureClassifiesServerRewriteExpansionAsInternal(t *testing.T) {
 	t.Parallel()
 
@@ -397,7 +462,7 @@ func TestApplyFeatureClassifiesServerRewriteExpansionAsInternal(t *testing.T) {
 	if _, err := adapter.InspectRequest(context.Background(), request); err != nil {
 		t.Fatalf("boundary request did not inspect: %v", err)
 	}
-	err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+	_, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 		PhysicalModel: "physical-model-that-expands-the-request", DefaultOutputTokens: 50, MaximumOutputTokens: 100,
 	})
 	if err == nil || protocol.IsCode(err, "request_invalid") {

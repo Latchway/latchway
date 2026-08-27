@@ -36,7 +36,7 @@ func FuzzInspectAndRewrite(f *testing.F) {
 		if _, err := adapter.InspectRequest(context.Background(), request); err != nil {
 			return
 		}
-		if err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+		if _, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
 			PhysicalModel: "server-model", DefaultOutputTokens: 64, MaximumOutputTokens: 128,
 		}); err != nil {
 			t.Fatalf("valid inspected request could not be rewritten: %v", err)
