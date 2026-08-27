@@ -732,6 +732,86 @@ func TestHandlerTranslatesConcurrencyRulesAndPropagatesStreaming(t *testing.T) {
 	}
 }
 
+func TestHandlerTranslatesLogicalRequestTokenBucketBeforeReservation(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{
+		{
+			Metric: quota.LogicalRequestsMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"feature", "user", "environment"}, Capacity: 20,
+			RefillPerSecond: configuration.RefillRate{Numerator: 333_333, Denominator: 1_000_000},
+			Hard:            true,
+		},
+		{
+			Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
+			Scope: []string{"feature", "application"}, Window: "1mo", Maximum: 100, Hard: true,
+		},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		len(fixture.quotas.reserveInput.Rules) != 2 {
+		t.Fatalf("token-bucket status/reserve/rules = %d/%d/%#v",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules)
+	}
+	tokenRule := fixture.quotas.reserveInput.Rules[0]
+	if tokenRule.Metric != quota.LogicalRequestsMetric ||
+		tokenRule.Algorithm != quota.TokenBucketAlgorithm ||
+		!slices.Equal(tokenRule.Scope, []string{"environment", "user", "feature"}) ||
+		tokenRule.Window != "" || tokenRule.Maximum != 0 || tokenRule.PerRequestMaximum != 0 ||
+		tokenRule.ReservedUnits != 0 || tokenRule.Capacity != 20 ||
+		tokenRule.RefillNumerator != 333_333 || tokenRule.RefillDenominator != 1_000_000 ||
+		!tokenRule.Hard {
+		t.Fatalf("translated logical-request token bucket = %#v", tokenRule)
+	}
+	calendarRule := fixture.quotas.reserveInput.Rules[1]
+	if calendarRule.Metric != quota.LogicalRequestsMetric ||
+		calendarRule.Algorithm != quota.CalendarAlgorithm ||
+		!slices.Equal(calendarRule.Scope, []string{"application", "feature"}) ||
+		calendarRule.Window != "1mo" || calendarRule.Maximum != 100 ||
+		calendarRule.PerRequestMaximum != 0 || calendarRule.ReservedUnits != 0 ||
+		calendarRule.Capacity != 0 || calendarRule.RefillNumerator != 0 ||
+		calendarRule.RefillDenominator != 0 || !calendarRule.Hard {
+		t.Fatalf("translated calendar rule alongside token bucket = %#v", calendarRule)
+	}
+}
+
+func TestHandlerTranslatesMaximumLogicalRequestTokenBucketBoundary(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	maximumRate := configuration.RefillRate{
+		Numerator:   maximumDecisionTokenBucketRefillPerSecond,
+		Denominator: 1,
+	}
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{
+		{
+			Metric: quota.LogicalRequestsMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"feature", "user"}, Capacity: maximumDecisionTokenBucketCapacity,
+			RefillPerSecond: maximumRate, Hard: true,
+		},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		len(fixture.quotas.reserveInput.Rules) != 1 {
+		t.Fatalf("maximum token-bucket status/reserve/rules = %d/%d/%#v",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules)
+	}
+	rule := fixture.quotas.reserveInput.Rules[0]
+	if rule.Metric != quota.LogicalRequestsMetric || rule.Algorithm != quota.TokenBucketAlgorithm ||
+		!slices.Equal(rule.Scope, []string{"user", "feature"}) || rule.Window != "" ||
+		rule.Maximum != 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 ||
+		rule.Capacity != maximumDecisionTokenBucketCapacity ||
+		rule.RefillNumerator != maximumRate.Numerator ||
+		rule.RefillDenominator != maximumRate.Denominator || !rule.Hard {
+		t.Fatalf("translated maximum logical-request token bucket = %#v", rule)
+	}
+}
+
 func TestHandlerAppliesSmallestPerRequestCapAndReservesExactWrittenMaximum(t *testing.T) {
 	perRequestLimits := []configuration.Limit{
 		{
@@ -825,6 +905,14 @@ func TestHandlerRunsDurableLifecycleForPerRequestOnlyPlan(t *testing.T) {
 }
 
 func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *testing.T) {
+	tokenLimit := func(metric string) configuration.Limit {
+		return configuration.Limit{
+			Metric: metric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"feature", "user"}, Capacity: 10,
+			RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 2},
+			Hard:            true,
+		}
+	}
 	tests := []struct {
 		name   string
 		mutate func(*configuration.LimitPlan)
@@ -839,7 +927,95 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 			}
 		}},
 		{name: "future metric", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Metric = "input_tokens" }},
-		{name: "future algorithm", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Algorithm = "token_bucket" }},
+		{name: "token bucket with calendar fields", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].Algorithm = quota.TokenBucketAlgorithm
+		}},
+		{name: "output token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits = []configuration.Limit{tokenLimit(quota.OutputTokensMetric)}
+		}},
+		{name: "input token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits = []configuration.Limit{tokenLimit("input_tokens")}
+		}},
+		{name: "total token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits = []configuration.Limit{tokenLimit("total_tokens")}
+		}},
+		{name: "cost token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits = []configuration.Limit{tokenLimit(quota.CostNanoUSDMetric)}
+		}},
+		{name: "token bucket zero capacity", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.Capacity = 0
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket capacity above precision bound", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.Capacity = maximumDecisionTokenBucketCapacity + 1
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket missing refill", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket zero numerator", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 0, Denominator: 1}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket zero denominator", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 1, Denominator: 0}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket unreduced refill", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 2, Denominator: 4}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket unrepresentable denominator", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 1, Denominator: 3}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket refill above precision bound", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{
+				Numerator: maximumDecisionTokenBucketRefillPerSecond + 1, Denominator: 1,
+			}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket fractional refill above precision bound", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{
+				Numerator: 1_000_000_000_001, Denominator: 1_000_000,
+			}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket refill overflow", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: math.MaxInt64, Denominator: 1}
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket window", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.Window = "1m"
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket maximum", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.Maximum = 1
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "token bucket per request maximum", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.PerRequestMaximum = 1
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "soft token bucket", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.LogicalRequestsMetric)
+			limit.Hard = false
+			plan.Limits = []configuration.Limit{limit}
+		}},
 		{name: "concurrent metric with calendar algorithm", mutate: func(plan *configuration.LimitPlan) {
 			plan.Limits[0].Metric = quota.ConcurrentRequestsMetric
 		}},
@@ -878,7 +1054,7 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 			plan.Limits[0].Metric = quota.ConcurrentRequestsMetric
 			plan.Limits[0].Algorithm = quota.ConcurrencyAlgorithm
 			plan.Limits[0].Window = ""
-			plan.Limits[0].RefillPerSecond = "1"
+			plan.Limits[0].RefillPerSecond = configuration.RefillRate{Numerator: 1, Denominator: 1}
 		}},
 		{name: "soft", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Hard = false }},
 		{name: "empty scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = nil }},
@@ -917,8 +1093,23 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 			plan.Limits[0].Window = ""
 			plan.Limits[0].Maximum = 0
 		}},
+		{name: "output per request with capacity", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0] = configuration.Limit{
+				Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+				Scope: []string{"user"}, PerRequestMaximum: 1, Capacity: 1, Hard: true,
+			}
+		}},
+		{name: "output per request with refill", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0] = configuration.Limit{
+				Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+				Scope: []string{"user"}, PerRequestMaximum: 1,
+				RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 1}, Hard: true,
+			}
+		}},
 		{name: "capacity field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Capacity = 1 }},
-		{name: "refill field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].RefillPerSecond = "1" }},
+		{name: "refill field", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0].RefillPerSecond = configuration.RefillRate{Numerator: 1, Denominator: 1}
+		}},
 		{name: "duplicate immutable identity", mutate: func(plan *configuration.LimitPlan) {
 			duplicate := plan.Limits[0]
 			duplicate.Scope = append([]string(nil), duplicate.Scope...)
@@ -937,6 +1128,14 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 					Scope: []string{"environment", "user"}, PerRequestMaximum: 40, Hard: true,
 				},
 			}
+		}},
+		{name: "duplicate token bucket identity", mutate: func(plan *configuration.LimitPlan) {
+			first := tokenLimit(quota.LogicalRequestsMetric)
+			second := tokenLimit(quota.LogicalRequestsMetric)
+			second.Scope = []string{"user", "feature"}
+			second.Capacity = 20
+			second.RefillPerSecond = configuration.RefillRate{Numerator: 3, Denominator: 4}
+			plan.Limits = []configuration.Limit{first, second}
 		}},
 	}
 	for _, test := range tests {

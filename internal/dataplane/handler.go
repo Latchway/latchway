@@ -38,6 +38,10 @@ const (
 	defaultClientWriteTimeout  = 30 * time.Second
 	defaultPersistenceTimeout  = 5 * time.Second
 	maximumDecisionLimitRules  = 128
+	// These bounds mirror quota's exact fixed-point envelope so detached policy
+	// values fail closed before reaching durable reservation state.
+	maximumDecisionTokenBucketCapacity        = int64(9_223_372)
+	maximumDecisionTokenBucketRefillPerSecond = int64(1_000_000)
 )
 
 var (
@@ -659,8 +663,7 @@ func validateDecision(featureID string, decision policy.Decision) (validatedDeci
 	effectiveMaximum := feature.Output.AbsoluteMaximumTokens
 	for _, limit := range decision.LimitPlan.Limits {
 		scope, ok := canonicalDecisionScope(limit.Scope)
-		if !limit.Hard || !ok || limit.Capacity != 0 || limit.RefillPerSecond.String() != "" ||
-			!supportedDecisionLimit(limit) {
+		if !limit.Hard || !ok || !supportedDecisionLimit(limit) {
 			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		identity := decisionLimitIdentity{
@@ -674,7 +677,9 @@ func validateDecision(featureID string, decision policy.Decision) (validatedDeci
 		rules = append(rules, quota.Rule{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: scope,
 			Window: limit.Window, Maximum: limit.Maximum,
-			PerRequestMaximum: limit.PerRequestMaximum, Hard: limit.Hard,
+			PerRequestMaximum: limit.PerRequestMaximum, Capacity: limit.Capacity,
+			RefillNumerator:   limit.RefillPerSecond.Numerator,
+			RefillDenominator: limit.RefillPerSecond.Denominator, Hard: limit.Hard,
 		})
 		if limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm &&
 			limit.PerRequestMaximum < effectiveMaximum {
@@ -688,19 +693,35 @@ func validateDecision(featureID string, decision policy.Decision) (validatedDeci
 }
 
 func supportedDecisionLimit(limit configuration.Limit) bool {
+	noRefill := limit.RefillPerSecond == (configuration.RefillRate{})
 	switch {
 	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
-		return validDecisionWindow(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0
+		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
+	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.TokenBucketAlgorithm:
+		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
+			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
+			validDecisionTokenBucketRefill(limit.RefillPerSecond)
 	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.CalendarAlgorithm:
-		return validDecisionWindow(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0
+		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm:
-		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0
+		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&
+			limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.ConcurrentRequestsMetric || limit.Metric == quota.ConcurrentStreamsMetric) &&
 		limit.Algorithm == quota.ConcurrencyAlgorithm:
-		return limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0
+		return limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 &&
+			limit.Capacity == 0 && noRefill
 	default:
 		return false
 	}
+}
+
+func validDecisionTokenBucketRefill(rate configuration.RefillRate) bool {
+	// Valid denominators divide one million, so this exact rational comparison
+	// cannot overflow: maximum * denominator is at most one trillion.
+	return rate.Valid() &&
+		rate.Numerator <= maximumDecisionTokenBucketRefillPerSecond*rate.Denominator
 }
 
 type decisionLimitIdentity struct {

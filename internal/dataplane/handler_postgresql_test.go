@@ -53,32 +53,42 @@ import (
 )
 
 const (
-	dataPlaneE2EOrigin                        = "https://gateway.example.test"
-	dataPlaneE2EAudience                      = "latchway-data-plane"
-	dataPlaneE2EIdentityIssuer                = "https://identity.example.test"
-	dataPlaneE2EIdentityAudience              = "latchway-client"
-	dataPlaneE2EConfiguredUpstream            = "https://api.example.test/v1"
-	dataPlaneE2EProviderSecret                = "fixture-provider-credential-value-01"
-	dataPlaneE2EPromptMarker                  = "prompt-marker-dataplane-e2e-01"
-	dataPlaneE2EStreamPromptMarker            = "prompt-marker-dataplane-e2e-stream-01"
-	dataPlaneE2EConcurrencyFeature            = "stream_guard"
-	dataPlaneE2EConcurrencyPlan               = "stream_guard"
-	dataPlaneE2EConcurrencyHold               = "prompt-marker-dataplane-e2e-concurrency-hold-01"
-	dataPlaneE2EConcurrencyDenied             = "prompt-marker-dataplane-e2e-concurrency-denied-01"
-	dataPlaneE2EConcurrencyNonStream          = "prompt-marker-dataplane-e2e-concurrency-nonstream-01"
-	dataPlaneE2EConcurrencyReuse              = "prompt-marker-dataplane-e2e-concurrency-reuse-01"
-	dataPlaneE2EConcurrencyHoldRequestID      = "client-request-dataplane-e2e-concurrency-hold-01"
-	dataPlaneE2EConcurrencyDeniedRequestID    = "client-request-dataplane-e2e-concurrency-denied-01"
-	dataPlaneE2EConcurrencyNonStreamRequestID = "client-request-dataplane-e2e-concurrency-nonstream-01"
-	dataPlaneE2EConcurrencyReuseRequestID     = "client-request-dataplane-e2e-concurrency-reuse-01"
-	dataPlaneE2EProviderModel                 = "configured-chat-model"
-	dataPlaneE2EPricingCatalog                = "configured_flat_rate"
-	dataPlaneE2ECalculatedCost                = int64(65_236)
-	dataPlaneE2EClientRequestID               = "client-request-dataplane-e2e-01"
-	dataPlaneE2EStreamRequestID               = "client-request-dataplane-e2e-stream-01"
-	dataPlaneE2EDeniedRequestID               = "client-request-dataplane-e2e-denied-01"
-	dataPlaneE2EDebugAttestationKey           = "dataplane-debug-key-01"
-	dataPlaneE2EUntrustedHost                 = "untrusted-inbound.example.test"
+	dataPlaneE2EOrigin                              = "https://gateway.example.test"
+	dataPlaneE2EAudience                            = "latchway-data-plane"
+	dataPlaneE2EIdentityIssuer                      = "https://identity.example.test"
+	dataPlaneE2EIdentityAudience                    = "latchway-client"
+	dataPlaneE2EConfiguredUpstream                  = "https://api.example.test/v1"
+	dataPlaneE2EProviderSecret                      = "fixture-provider-credential-value-01"
+	dataPlaneE2EPromptMarker                        = "prompt-marker-dataplane-e2e-01"
+	dataPlaneE2EStreamPromptMarker                  = "prompt-marker-dataplane-e2e-stream-01"
+	dataPlaneE2EConcurrencyFeature                  = "stream_guard"
+	dataPlaneE2EConcurrencyPlan                     = "stream_guard"
+	dataPlaneE2EConcurrencyHold                     = "prompt-marker-dataplane-e2e-concurrency-hold-01"
+	dataPlaneE2EConcurrencyDenied                   = "prompt-marker-dataplane-e2e-concurrency-denied-01"
+	dataPlaneE2EConcurrencyNonStream                = "prompt-marker-dataplane-e2e-concurrency-nonstream-01"
+	dataPlaneE2EConcurrencyReuse                    = "prompt-marker-dataplane-e2e-concurrency-reuse-01"
+	dataPlaneE2EConcurrencyHoldRequestID            = "client-request-dataplane-e2e-concurrency-hold-01"
+	dataPlaneE2EConcurrencyDeniedRequestID          = "client-request-dataplane-e2e-concurrency-denied-01"
+	dataPlaneE2EConcurrencyNonStreamRequestID       = "client-request-dataplane-e2e-concurrency-nonstream-01"
+	dataPlaneE2EConcurrencyReuseRequestID           = "client-request-dataplane-e2e-concurrency-reuse-01"
+	dataPlaneE2ETokenBucketFeature                  = "request_pacer"
+	dataPlaneE2ETokenBucketPlan                     = "request_pacer"
+	dataPlaneE2ETokenBucketFirst                    = "prompt-marker-dataplane-e2e-token-first-01"
+	dataPlaneE2ETokenBucketDenied                   = "prompt-marker-dataplane-e2e-token-denied-01"
+	dataPlaneE2ETokenBucketThird                    = "prompt-marker-dataplane-e2e-token-third-01"
+	dataPlaneE2ETokenBucketFirstRequestID           = "client-request-dataplane-e2e-token-first-01"
+	dataPlaneE2ETokenBucketDeniedRequestID          = "client-request-dataplane-e2e-token-denied-01"
+	dataPlaneE2ETokenBucketThirdRequestID           = "client-request-dataplane-e2e-token-third-01"
+	dataPlaneE2ETokenBalanceScale             int64 = 1_000_000_000_000
+	dataPlaneE2ETokenRefillInterval                 = 100 * time.Second
+	dataPlaneE2EProviderModel                       = "configured-chat-model"
+	dataPlaneE2EPricingCatalog                      = "configured_flat_rate"
+	dataPlaneE2ECalculatedCost                      = int64(65_236)
+	dataPlaneE2EClientRequestID                     = "client-request-dataplane-e2e-01"
+	dataPlaneE2EStreamRequestID                     = "client-request-dataplane-e2e-stream-01"
+	dataPlaneE2EDeniedRequestID                     = "client-request-dataplane-e2e-denied-01"
+	dataPlaneE2EDebugAttestationKey                 = "dataplane-debug-key-01"
+	dataPlaneE2EUntrustedHost                       = "untrusted-inbound.example.test"
 )
 
 var dataPlaneE2ESchemaPattern = regexp.MustCompile(`^latchway_dataplane_e2e_test_[0-9]+$`)
@@ -191,6 +201,18 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	}
 	if !ok || !reflect.DeepEqual(concurrencyPlan, wantConcurrencyPlan) {
 		t.Fatalf("active concurrency limit plan = %+v ok=%t", concurrencyPlan, ok)
+	}
+	tokenBucketPlan, ok := snapshot.LimitPlan(dataPlaneE2ETokenBucketPlan)
+	wantTokenBucketPlan := configuration.LimitPlan{
+		ID: dataPlaneE2ETokenBucketPlan,
+		Limits: []configuration.Limit{{
+			Metric: quota.LogicalRequestsMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 1,
+			RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 100}, Hard: true,
+		}},
+	}
+	if !ok || !reflect.DeepEqual(tokenBucketPlan, wantTokenBucketPlan) {
+		t.Fatalf("active token-bucket limit plan = %+v ok=%t", tokenBucketPlan, ok)
 	}
 	pricingCatalog, ok := snapshot.PricingCatalog(dataPlaneE2EPricingCatalog)
 	pricingEntry, entryOK := snapshot.PricingEntry(dataPlaneE2EPricingCatalog, "fast")
@@ -662,6 +684,117 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		dataPlaneE2EConcurrencyNonStream,
 		dataPlaneE2EConcurrencyReuse,
 	)
+
+	tokenFirstProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-token-first", grant.AccessToken)
+	tokenDeniedProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-token-denied", grant.AccessToken)
+	tokenThirdProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-token-third", grant.AccessToken)
+	tokenFirstResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, tokenFirstProof,
+		dataPlaneE2ETokenBucketFeature, dataPlaneE2ETokenBucketFirstRequestID,
+		concurrencyBody(dataPlaneE2ETokenBucketFirst, false),
+	)
+	if tokenFirstResponse.Code != http.StatusOK {
+		t.Fatalf("first token-bucket request = %d, body=%s",
+			tokenFirstResponse.Code, tokenFirstResponse.Body.String())
+	}
+	// Keep the denial immediately adjacent to the first settlement. The real
+	// PostgreSQL clock remains authoritative, and a 0.01/s bucket needs one
+	// hundred full seconds before another whole logical-request token exists.
+	tokenDeniedResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, tokenDeniedProof,
+		dataPlaneE2ETokenBucketFeature, dataPlaneE2ETokenBucketDeniedRequestID,
+		concurrencyBody(dataPlaneE2ETokenBucketDenied, false),
+	)
+	assertDataPlaneE2EProblem(t, tokenDeniedResponse, http.StatusTooManyRequests, "quota_exceeded")
+	if retryAfter, err := strconv.Atoi(tokenDeniedResponse.Header().Get("Retry-After")); err != nil || retryAfter < 1 {
+		t.Fatalf("token-bucket Retry-After = %q, want positive seconds",
+			tokenDeniedResponse.Header().Get("Retry-After"))
+	}
+	if replayingQuotaStore.tokenDenialReplays.Load() != 1 {
+		t.Fatalf("exact durable token-bucket denial replays = %d, want 1",
+			replayingQuotaStore.tokenDenialReplays.Load())
+	}
+	if targets.acquisitions.Load() != 6 || targets.releases.Load() != 6 ||
+		len(mock.Observations()) != 6 {
+		t.Fatalf("token-bucket denial reached dispatch acquisitions/releases/observations=%d/%d/%d, want 6/6/6",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 6 {
+		t.Fatalf("provider capture after token-bucket denial = requests:%d err:%v, want six dispatches",
+			len(providerRequests), captureErr)
+	}
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[5], privateTargetAuthority,
+		dataPlaneE2ETokenBucketFirst, false)
+	assertDataPlaneE2ETokenBucketSuccess(
+		t, ctx, pool, dataPlaneE2ETokenBucketFirstRequestID, revisionID,
+	)
+	assertDataPlaneE2EDenialPersistence(t, ctx, pool, dataPlaneE2ETokenBucketDeniedRequestID)
+	tokenStateAfterDenial := readDataPlaneE2ETokenBucketState(t, ctx, pool)
+	assertDataPlaneE2ETokenBucketMetadata(t, tokenStateAfterDenial)
+	if tokenStateAfterDenial.available < 0 ||
+		tokenStateAfterDenial.available >= dataPlaneE2ETokenBalanceScale ||
+		tokenStateAfterDenial.version != 2 {
+		t.Fatalf("depleted token-bucket state after denial = %+v", tokenStateAfterDenial)
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 9, reservations: 6, reservationEntries: 9,
+		buckets: 5, attempts: 6, usageRecords: 30, deniedRequests: 3,
+	})
+
+	backdatedTokenState := backdateDataPlaneE2ETokenBucket(t, ctx, pool, tokenStateAfterDenial)
+	if !backdatedTokenState.refilledAt.Equal(tokenStateAfterDenial.refilledAt.Add(-dataPlaneE2ETokenRefillInterval)) {
+		t.Fatalf("token-bucket refill cursor = %s, want exactly 100 seconds before %s",
+			backdatedTokenState.refilledAt, tokenStateAfterDenial.refilledAt)
+	}
+	tokenThirdResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, tokenThirdProof,
+		dataPlaneE2ETokenBucketFeature, dataPlaneE2ETokenBucketThirdRequestID,
+		concurrencyBody(dataPlaneE2ETokenBucketThird, false),
+	)
+	if tokenThirdResponse.Code != http.StatusOK {
+		t.Fatalf("refilled token-bucket request = %d, body=%s",
+			tokenThirdResponse.Code, tokenThirdResponse.Body.String())
+	}
+	if targets.acquisitions.Load() != 7 || targets.releases.Load() != 7 ||
+		len(mock.Observations()) != 7 {
+		t.Fatalf("refilled token-bucket dispatch acquisitions/releases/observations=%d/%d/%d, want 7/7/7",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2ETokenBucketSuccess(
+		t, ctx, pool, dataPlaneE2ETokenBucketThirdRequestID, revisionID,
+	)
+	finalTokenState := readDataPlaneE2ETokenBucketState(t, ctx, pool)
+	assertDataPlaneE2ETokenBucketMetadata(t, finalTokenState)
+	if finalTokenState.available != 0 || finalTokenState.version != 3 ||
+		finalTokenState.refilledAt.Before(tokenStateAfterDenial.refilledAt) {
+		t.Fatalf("token-bucket final balance/version/cursor = %d/%d/%s, want 0/3/not before %s",
+			finalTokenState.available, finalTokenState.version, finalTokenState.refilledAt,
+			tokenStateAfterDenial.refilledAt)
+	}
+	if replayingQuotaStore.tokenResetChecks.Load() != 2 {
+		t.Fatalf("token-only zero-reset reservations = %d, want 2",
+			replayingQuotaStore.tokenResetChecks.Load())
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 10, reservations: 7, reservationEntries: 10,
+		buckets: 5, attempts: 7, usageRecords: 35, deniedRequests: 3,
+	})
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 7 {
+		t.Fatalf("provider capture after token-bucket refill = requests:%d err:%v, want seven dispatches",
+			len(providerRequests), captureErr)
+	}
+	assertDataPlaneE2EProviderChatRequest(t, providerRequests[6], privateTargetAuthority,
+		dataPlaneE2ETokenBucketThird, false)
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
+		dataPlaneE2ETokenBucketFirst,
+		dataPlaneE2ETokenBucketDenied,
+		dataPlaneE2ETokenBucketThird,
+	)
 }
 
 type dataPlaneE2ETenant struct {
@@ -853,6 +986,13 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 						"scope": []any{"feature", "environment"}, "maximum": 1, "hard": true,
 					}},
 				},
+				map[string]any{
+					"id": dataPlaneE2ETokenBucketPlan, "limits": []any{map[string]any{
+						"metric": quota.LogicalRequestsMetric, "algorithm": quota.TokenBucketAlgorithm,
+						"scope": []any{"feature", "user"}, "capacity": 1,
+						"refillPerSecond": json.Number("0.01"), "hard": true,
+					}},
+				},
 			},
 			"features": []any{
 				map[string]any{
@@ -868,6 +1008,15 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"id": dataPlaneE2EConcurrencyFeature, "protocol": "openai_chat", "attestationPolicy": "native",
 					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
 					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2EConcurrencyPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
+					"routes": []any{map[string]any{
+						"id": "primary", "when": "true", "model": "fast", "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2ETokenBucketFeature, "protocol": "openai_chat", "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2ETokenBucketPlan + "'"},
 					"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
 					"routes": []any{map[string]any{
 						"id": "primary", "when": "true", "model": "fast", "priority": 10,
@@ -1212,16 +1361,19 @@ type dataPlaneE2EResponseRecorder struct {
 
 func (*dataPlaneE2EResponseRecorder) SetWriteDeadline(time.Time) error { return nil }
 
-// dataPlaneE2EReplayingQuotaStore proves that the exact multi-rule reservation
-// produced by the handler is idempotent in the real PostgreSQL store. It
-// replays only the first accepted reservation; later requests use the delegate
-// normally so the test can exercise settlement and atomic denial as well.
+// dataPlaneE2EReplayingQuotaStore proves that exact accepted and denied
+// decisions produced by the handler are idempotent in the real PostgreSQL
+// store. Replay gates keep each proof isolated while later requests exercise
+// settlement, atomic denial, and token refill normally.
 type dataPlaneE2EReplayingQuotaStore struct {
 	*quota.Store
 	replayAttempted            atomic.Bool
 	successfulReplays          atomic.Int64
 	concurrencyReplayAttempted atomic.Bool
 	concurrencyDenialReplays   atomic.Int64
+	tokenDenialReplayAttempted atomic.Bool
+	tokenDenialReplays         atomic.Int64
+	tokenResetChecks           atomic.Int64
 }
 
 func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
@@ -1230,6 +1382,26 @@ func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
 ) (quota.Reservation, error) {
 	reservation, err := store.Store.Reserve(ctx, input)
 	if err != nil {
+		if errors.Is(err, quota.ErrExceeded) &&
+			input.FeatureKey == dataPlaneE2ETokenBucketFeature &&
+			store.tokenDenialReplayAttempted.CompareAndSwap(false, true) {
+			var denial *quota.ExceededError
+			if !errors.As(err, &denial) {
+				return quota.Reservation{}, fmt.Errorf("token-bucket denial type: %w", err)
+			}
+			_, replayErr := store.Store.Reserve(ctx, input)
+			var replayDenial *quota.ExceededError
+			if !errors.Is(replayErr, quota.ErrExceeded) || !errors.As(replayErr, &replayDenial) ||
+				replayDenial.LogicalRequestID() != denial.LogicalRequestID() ||
+				replayDenial.Maximum() != 1 || replayDenial.Reserved() != 0 {
+				return quota.Reservation{}, fmt.Errorf(
+					"replay exact durable token-bucket denial: got %v, want matching %w",
+					replayErr, quota.ErrExceeded,
+				)
+			}
+			store.tokenDenialReplays.Add(1)
+			return reservation, err
+		}
 		if !errors.Is(err, quota.ErrConcurrencyExceeded) ||
 			!store.concurrencyReplayAttempted.CompareAndSwap(false, true) {
 			return reservation, err
@@ -1243,6 +1415,15 @@ func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
 		}
 		store.concurrencyDenialReplays.Add(1)
 		return reservation, err
+	}
+	if input.FeatureKey == dataPlaneE2ETokenBucketFeature {
+		if !reservation.ResetAt().IsZero() {
+			return quota.Reservation{}, fmt.Errorf(
+				"token-only reservation reset = %s, want zero", reservation.ResetAt(),
+			)
+		}
+		store.tokenResetChecks.Add(1)
+		return reservation, nil
 	}
 	if !store.replayAttempted.CompareAndSwap(false, true) {
 		return reservation, err
@@ -1536,6 +1717,93 @@ func assertDataPlaneE2EPersistence(
 	return logicalID
 }
 
+func assertDataPlaneE2ETokenBucketSuccess(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, priceRevision string,
+) {
+	t.Helper()
+	var logicalID, logicalStatus, featureKey, configRevision string
+	var reservationStatus, attemptID, attemptStatus, physicalModel string
+	var currency, persistedPriceRevision, pricingSource, costConfidence string
+	var billedCost, reservations, entries, attempts, usageRecords int64
+	var httpStatus int
+	var firstByte bool
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, request.feature_key,
+		       request.config_revision_id, reservation.status,
+		       attempt.upstream_attempt_id, attempt.status, attempt.http_status,
+		       attempt.physical_model, attempt.billed_cost_nano_usd,
+		       attempt.currency, attempt.price_revision, attempt.pricing_source,
+		       attempt.cost_confidence, attempt.first_byte_at IS NOT NULL,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM quota_reservation_entries AS counted
+		        WHERE counted.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &logicalStatus, &featureKey, &configRevision,
+		&reservationStatus, &attemptID, &attemptStatus, &httpStatus,
+		&physicalModel, &billedCost, &currency, &persistedPriceRevision,
+		&pricingSource, &costConfidence, &firstByte,
+		&reservations, &entries, &attempts, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read token-bucket success %q: %v", clientRequestID, err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil ||
+		id.Validate(attemptID, id.UpstreamAttempt) != nil ||
+		logicalStatus != "succeeded" || featureKey != dataPlaneE2ETokenBucketFeature ||
+		configRevision != priceRevision || reservationStatus != "settled" ||
+		attemptStatus != quota.AttemptSucceeded || httpStatus != http.StatusOK ||
+		physicalModel != dataPlaneE2EProviderModel || billedCost != dataPlaneE2ECalculatedCost ||
+		currency != quota.USDCurrency || persistedPriceRevision != priceRevision ||
+		pricingSource != dataPlaneE2EPricingCatalog || costConfidence != quota.CalculatedCostConfidence ||
+		!firstByte || reservations != 1 || entries != 1 || attempts != 1 || usageRecords != 5 {
+		t.Fatalf("token-bucket success %q = logical:%q/%s feature/revision:%s/%s reservation:%s/count:%d entries:%d attempt:%q/%s/%d/%s/count:%d price:%d/%s/%s/%s/%s first_byte:%t usage:%d",
+			clientRequestID, logicalID, logicalStatus, featureKey, configRevision,
+			reservationStatus, reservations, entries, attemptID, attemptStatus,
+			httpStatus, physicalModel, attempts, billedCost, currency,
+			persistedPriceRevision, pricingSource, costConfidence, firstByte, usageRecords)
+	}
+	assertDataPlaneE2EUsage(t, ctx, pool, logicalID, attemptID, priceRevision)
+
+	var entryID, bucketID, planKey, metric, algorithm, windowKey string
+	var entryReserved, entrySettled, entryReleased int64
+	if err := pool.QueryRow(ctx, `
+		SELECT entry.quota_reservation_entry_id, bucket.quota_bucket_id,
+		       bucket.limit_plan_key, bucket.metric, bucket.algorithm,
+		       bucket.window_key, entry.reserved_units,
+		       entry.settled_units, entry.released_units
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&entryID, &bucketID, &planKey, &metric, &algorithm, &windowKey,
+		&entryReserved, &entrySettled, &entryReleased,
+	); err != nil {
+		t.Fatalf("read token-bucket entry %q: %v", clientRequestID, err)
+	}
+	if id.Validate(entryID, id.QuotaEntry) != nil || id.Validate(bucketID, id.QuotaBucket) != nil ||
+		planKey != dataPlaneE2ETokenBucketPlan || metric != quota.LogicalRequestsMetric ||
+		algorithm != quota.TokenBucketAlgorithm || windowKey != "rolling" ||
+		entryReserved != 1 || entrySettled != 1 || entryReleased != 0 {
+		t.Fatalf("token-bucket entry %q = entry:%q bucket:%q plan:%q metric:%q algorithm:%q window:%q units:%d/%d/%d",
+			clientRequestID, entryID, bucketID, planKey, metric, algorithm,
+			windowKey, entryReserved, entrySettled, entryReleased)
+	}
+}
+
 func assertDataPlaneE2EUsage(
 	t *testing.T,
 	ctx context.Context,
@@ -1656,6 +1924,105 @@ type dataPlaneE2EQuotaBucketState struct {
 	used            int64
 	reserved        int64
 	version         int64
+}
+
+type dataPlaneE2ETokenBucketState struct {
+	bucketID          string
+	limitPlanKey      string
+	metric            string
+	scopeType         string
+	scopeDimensions   []string
+	algorithm         string
+	windowKey         string
+	hardMaximum       int64
+	used              int64
+	reserved          int64
+	available         int64
+	refillNumerator   int64
+	refillDenominator int64
+	refilledAt        time.Time
+	version           int64
+	createdAt         time.Time
+	updatedAt         time.Time
+	bucketCount       int64
+}
+
+func readDataPlaneE2ETokenBucketState(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+) dataPlaneE2ETokenBucketState {
+	t.Helper()
+	var state dataPlaneE2ETokenBucketState
+	err := pool.QueryRow(ctx, `
+		SELECT quota_bucket_id, limit_plan_key, metric, scope_type,
+		       scope_dimensions, algorithm, window_key, hard_maximum,
+		       used_units, reserved_units, available_units,
+		       refill_numerator, refill_denominator, refilled_at,
+		       version, created_at, updated_at, count(*) OVER ()
+		FROM quota_buckets
+		WHERE limit_plan_key = $1 AND metric = $2 AND algorithm = $3
+		  AND window_key = 'rolling'
+	`, dataPlaneE2ETokenBucketPlan, quota.LogicalRequestsMetric,
+		quota.TokenBucketAlgorithm).Scan(
+		&state.bucketID, &state.limitPlanKey, &state.metric, &state.scopeType,
+		&state.scopeDimensions, &state.algorithm, &state.windowKey, &state.hardMaximum,
+		&state.used, &state.reserved, &state.available,
+		&state.refillNumerator, &state.refillDenominator, &state.refilledAt,
+		&state.version, &state.createdAt, &state.updatedAt, &state.bucketCount,
+	)
+	if err != nil {
+		t.Fatalf("read token-bucket state: %v", err)
+	}
+	state.scopeDimensions = append([]string(nil), state.scopeDimensions...)
+	return state
+}
+
+func assertDataPlaneE2ETokenBucketMetadata(t *testing.T, state dataPlaneE2ETokenBucketState) {
+	t.Helper()
+	if state.bucketCount != 1 || id.Validate(state.bucketID, id.QuotaBucket) != nil ||
+		state.limitPlanKey != dataPlaneE2ETokenBucketPlan ||
+		state.metric != quota.LogicalRequestsMetric || state.scopeType != "composite" ||
+		!reflect.DeepEqual(state.scopeDimensions, []string{"user", "feature"}) ||
+		state.algorithm != quota.TokenBucketAlgorithm || state.windowKey != "rolling" ||
+		state.hardMaximum != 1 || state.used != 0 || state.reserved != 0 ||
+		state.available < 0 || state.available > dataPlaneE2ETokenBalanceScale ||
+		state.refillNumerator != 1 || state.refillDenominator != 100 ||
+		state.refilledAt.IsZero() || state.version < 1 || state.createdAt.IsZero() ||
+		state.updatedAt.IsZero() || state.updatedAt.Before(state.createdAt) {
+		t.Fatalf("token-bucket metadata violated exact rolling state: %+v", state)
+	}
+}
+
+func backdateDataPlaneE2ETokenBucket(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	before dataPlaneE2ETokenBucketState,
+) dataPlaneE2ETokenBucketState {
+	t.Helper()
+	assertDataPlaneE2ETokenBucketMetadata(t, before)
+	command, err := pool.Exec(ctx, `
+		UPDATE quota_buckets
+		SET refilled_at = refilled_at - INTERVAL '100 seconds'
+		WHERE limit_plan_key = $1 AND metric = $2 AND algorithm = $3
+		  AND window_key = 'rolling'
+	`, dataPlaneE2ETokenBucketPlan, quota.LogicalRequestsMetric,
+		quota.TokenBucketAlgorithm)
+	if err != nil {
+		t.Fatalf("backdate token-bucket refill cursor: %v", err)
+	}
+	if command.RowsAffected() != 1 {
+		t.Fatalf("backdated token buckets = %d, want 1", command.RowsAffected())
+	}
+	after := readDataPlaneE2ETokenBucketState(t, ctx, pool)
+	want := before
+	want.refilledAt = before.refilledAt.Add(-dataPlaneE2ETokenRefillInterval)
+	if !reflect.DeepEqual(after, want) {
+		t.Fatalf("backdating changed more than the exact refill cursor: before=%+v after=%+v want=%+v",
+			before, after, want)
+	}
+	return after
 }
 
 func readDataPlaneE2EQuotaBuckets(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []dataPlaneE2EQuotaBucketState {
