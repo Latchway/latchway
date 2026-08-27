@@ -2,7 +2,7 @@
 
 ## Current phase
 
-The core repository has committed and locally validated the governance and draft-contract foundation, runnable Go/PostgreSQL/embedded-console foundation, one-time administrative bootstrap and tenant slice, immutable configuration revisions, identity verification, signed debug attestation, the Phase 6 RFC 9449 DPoP session slice, and the first authenticated OpenAI Chat proxy vertical. A real PostgreSQL-backed test now proves custom JWT verification, signed debug attestation, challenge/exchange, DPoP-bound authorization, immutable policy resolution, atomic reservation against two overlapping request-count rules, protected upstream dispatch, model rewrite, output clamp, response relay, usage settlement, exact quota-store reservation replay, DPoP replay rejection without a second dispatch, and atomic multi-rule denial without partial bucket consumption.
+The core repository has committed and locally validated the governance and draft-contract foundation, runnable Go/PostgreSQL/embedded-console foundation, one-time administrative bootstrap and tenant slice, immutable configuration revisions, identity verification, signed debug attestation, the Phase 6 RFC 9449 DPoP session slice, and the first authenticated OpenAI Chat proxy vertical. A real PostgreSQL-backed test now proves custom JWT verification, signed debug attestation, challenge/exchange, DPoP-bound authorization, immutable policy resolution, atomic mixed request-count/output-token reservation, protected upstream dispatch, model rewrite, an exact server-applied output clamp, response relay, provider-reported usage settlement, exact quota-store reservation replay, DPoP replay rejection without a second dispatch, and atomic daily request denial without output-bucket mutation.
 
 JavaScript, iOS, Android, and React Native source implementations are committed in their own repositories. Their contract locks identify the prior synchronized core/bundle baseline, not the newer proxy implementation commit. Lock synchronization is bookkeeping evidence, not a compatibility result; a fresh lock decision and live current-core conformance are still required.
 
@@ -10,7 +10,7 @@ This is a functional local debug/mock vertical, not a production-ready or releas
 
 ## Current objective
 
-Add bounded output-token enforcement: per-request clamps, calendar reservations at the exact server-applied output maximum, provider-usage settlement, and conservative unknown-usage accounting. Then add integer nano-USD pricing and concurrency leases. Keep unsupported configuration shapes from activating until their runtime capability exists.
+Add configured integer nano-USD pricing attribution and provenance without activating hard cost limits. Then add concurrency leases and token buckets. Keep unsupported configuration shapes from activating until their runtime capability exists.
 
 ## Last passing commit in each repository
 
@@ -18,7 +18,7 @@ The table names the current immutable evidence commit in each repository. For lo
 
 | Repository | Revision | Evidence |
 | --- | --- | --- |
-| `latchway` | `925dc94a05374cf233b2836f9429d6ffa71dcf02` | Full PostgreSQL-enabled normal Go suite; focused multi-rule quota and authenticated proxy normal/race gates; vet and contract validation; earlier full race/fuzz/deterministic-bundle/`make check` evidence remains recorded at `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
+| `latchway` | `a5a33f6358871c5e66113425ffcd4f3e8f2291d7` | Full PostgreSQL-enabled normal and race Go suites; full vet and contract validation; changed fuzz smokes; two deterministic bundle builds at the unchanged hash; zero public API-schema diff |
 | `latchway-js` | `8df68931730bad05ef110fe53e09d857b5bd61f8` | Baseline core/bundle lock synchronized; local source/package gates passed at parent implementation commit `273925d73a5a959f95664b1b1d838505dcce5f6c`; latest-core live conformance remains |
 | `latchway-ios-sdk` | `fd670a04004787901bb19b3ab762f4d2dc050a07` | Baseline core/bundle lock synchronized; local Swift/fixture gates passed at parent implementation commit `2972f99c59b652722a586510a9c943ac57a69a5c`; latest-core and physical App Attest proof are not claimed |
 | `latchway-android` | `cd96781426831f464fc1e5350094aab91ca11dd2` | Baseline core/bundle lock synchronized; local static/JVM gates passed at parent implementation commit `0042a916580d14295bd944104aae6deb2ac136c5`; official Android SDK/Gradle validation remains toolchain-blocked |
@@ -28,11 +28,11 @@ The table names the current immutable evidence commit in each repository. For lo
 
 Contract `0.1.0`; wire protocol `1`; status `draft`.
 
-Current validated core implementation revision: `925dc94a05374cf233b2836f9429d6ffa71dcf02`.
+Current validated core implementation revision: `a5a33f6358871c5e66113425ffcd4f3e8f2291d7`.
 
 Deterministic bundle SHA-256: `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12`.
 
-Two independent builds of the most recently reproduced bundle were byte-identical. That bundle is local validation evidence only and has not been published. Every SDK `contract.lock` still pins the synchronized baseline core revision `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` and bundle `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12`; no SDK lock or compatibility claim has been advanced to `925dc94a05374cf233b2836f9429d6ffa71dcf02`. Lock equality alone does not prove compatibility.
+Two independent builds of the most recently reproduced bundle were byte-identical. That bundle is local validation evidence only and has not been published. Every SDK `contract.lock` still pins the synchronized baseline core revision `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` and bundle `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12`; no SDK lock or compatibility claim has been advanced to `a5a33f6358871c5e66113425ffcd4f3e8f2291d7`. Lock equality alone does not prove compatibility.
 
 ## Database schema version
 
@@ -45,14 +45,14 @@ Two independent builds of the most recently reproduced bundle were byte-identica
 ## Passing evidence
 
 - `go test ./... -count=1` — the full normal Go suite passed.
-- `go test -race ./... -count=1` — the full Go suite passed under the race detector at the synchronized `0a03d936` baseline; focused changed-package race gates pass at the current implementation revision.
+- `go test -race ./... -count=1` — the full Go suite passed under the race detector at the current implementation revision.
 - The full PostgreSQL integration set passed against fresh schemas; the focused session revocation race gate and 20 repeated contention runs also passed.
 - `go vet ./...` — passed.
 - `python3 scripts/validate-contracts.py` — OpenAPI structure/references, registry parity, schemas/examples, attestation hashes, and DPoP signatures/semantics passed.
-- Two independent contract-bundle builds were byte-identical at SHA-256 `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12`.
-- All six security-sensitive fuzz targets passed their smoke gates: canonical attestation binding, DPoP validation, public-JWK parsing, HTU normalization, access-token preflight, and protected credential-header parsing.
-- The complete `make check` gate passed, including formatting, reproducible sqlc output, vet, Go tests, frozen console dependency installation, lint/typecheck/tests, build, and embedded-asset checks.
-- The PostgreSQL-backed authenticated Chat vertical passes repeatedly and under the race detector. It asserts exact prompt/answer relay, target-bound authority, credential/header isolation, model rewrite, token clamp, two-rule settlement, exact opaque reservation replay, first-byte/attempt state, absence of plaintext credential/body markers, proof replay without redispatch, and atomic denial without partial consumption.
+- Two independent contract-bundle builds were byte-identical at SHA-256 `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12`; the public API schema has zero diff from the preceding milestone.
+- The three changed OpenAI Chat adapter fuzz-target smokes and the active-snapshot compilation fuzz smoke passed at the current implementation revision. The six established security-sensitive fuzz-target smoke gates remain recorded at the synchronized `0a03d936` baseline: canonical attestation binding, DPoP validation, public-JWK parsing, HTU normalization, access-token preflight, and protected credential-header parsing.
+- The complete `make check` gate remains recorded at the synchronized `0a03d936` baseline, including formatting, reproducible sqlc output, vet, Go tests, frozen console dependency installation, lint/typecheck/tests, build, and embedded-asset checks.
+- The PostgreSQL-backed authenticated Chat vertical passes repeatedly and under the race detector. It asserts exact prompt/answer relay, target-bound authority, credential/header isolation, model rewrite, an applied output maximum of 64, and calendar output reservation of 64. Each successful request settles 7 provider-reported output tokens and releases 57; after two requests the shared output bucket records 14 used tokens, with four provenance-bearing usage rows per success. Exact opaque reservation replay leaves state unchanged, first-byte/attempt state and plaintext exclusions hold, DPoP proof replay does not redispatch, and atomic daily request denial does not mutate the non-exceeded output bucket.
 - `api`, `worker`, and `all` process roles now compose distinct responsibilities. The bounded worker immediately and periodically expires abandoned quota reservations and removes expired DPoP replay rows; focused normal/race/vet and shutdown-error propagation gates pass. This is an initial jobs slice, not Phase 15 completion.
 - A fresh local OCI build for `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` completed at image ID `sha256:c0dcae33d48658d41557fbf6a7886beec53a0c4a14f2322d77da179e303a32e0` and declares non-root runtime user `65532`; no registry digest or current Compose smoke is claimed.
 - The SDK lock-sync commits are clean and identify the synchronized baseline core revision and bundle. Earlier repository-specific local source gates remain recorded separately; the latest core, hardware attestation, published dependency resolution, and live conformance are not included in the lock-sync evidence.
@@ -69,12 +69,13 @@ Two independent builds of the most recently reproduced bundle were byte-identica
 - Protected installation revocation validates the access token and request-bound DPoP proof in one transactional boundary, consumes replay state atomically, and terminates the installation, active grants, refresh tokens, and accepted attestation keys. Adversarial, idempotency, clock-regression, race, and contention tests pass.
 - Runtime secret resolution and master-key consistency checks fail closed on missing, corrupt, or drifting key material; no development master-key fallback is used.
 - The authenticated OpenAI Chat path composes protected destinations, scoped credential injection, forbidden-header stripping, server-owned model selection, output clamps, request/attempt accounting, and deterministic response/usage relay. The conformance target uses an explicit test-only private-network exception and is not public-DNS/TLS evidence.
-- One to 128 hard UTC calendar `logical_requests` rules can reserve atomically across canonical trusted scopes using deterministic PostgreSQL lock ordering, idempotent lifecycle transitions, bounded expiry recovery, and contention tests. Other quota metrics and algorithms remain fail-closed.
+- One to 128 supported hard rules can compose atomically across canonical trusted scopes using deterministic PostgreSQL lock ordering and idempotent lifecycle transitions. Executable shapes are UTC-calendar `logical_requests`, UTC-calendar `output_tokens`, and `output_tokens` per request. Output reservations use the exact adapter-applied cap; known provider output settles to measured usage and releases the difference, while unknown post-dispatch outcomes, failures, and stateful reservation expiry conservatively charge the reserved output. Usage rows retain exact reported, calculated, or unknown provenance. Per-request-only policies use a durable entryless request/reservation/attempt lifecycle without creating capacity buckets. Unsupported metrics, algorithms, and soft limits remain fail-closed.
 
 ## Open blockers and unfinished gates
 
 - The local Phase 7 authenticated debug/mock gate passes. `latchway verify local`, a live OpenRouter canary, and production target/DNS/TLS deployment evidence remain open.
-- Only bounded hard calendar request-count rules are executable. Token buckets, per-request limits, concurrency leases, token/cost settlement, pricing provenance, quota snapshots, user overrides, and retry-cost accounting remain open.
+- Hard calendar request-count and calendar/per-request output-token rules are executable. Token buckets, concurrency leases, configured integer nano-USD pricing attribution, hard cost limits, input/total-token limits, quota snapshots, user overrides, and retry-cost accounting remain open.
+- Schema version 9 has one bounded recovery limitation: if a per-request-only entryless attempt expires, the worker cannot reconstruct the adapter-applied cap and therefore cannot add an unknown-output usage row. No durable capacity exists to recover or mutate for that rule shape; normal known settlement persists provider usage.
 - Apple App Attest, Play Integrity, and other native production attestation verification are not implemented in the server. The validated debug provider is test/development evidence only.
 - Complete Admin API/dashboard/CLI resources, telemetry, the remaining durable jobs, current-image deployment smoke tests, and operational recovery gates remain.
 - The refresh contract still advertises optional fresh identity and attestation inputs, while the server safely requires a new challenge for step-up because refresh has no fresh server binding. That mismatch requires an explicit contract/version decision before release; unsafe acceptance is not implemented.
@@ -88,4 +89,4 @@ None of the external credential blockers prevents fixture-based implementation, 
 
 ## Next executable task
 
-Implement hard output-token per-request clamps and calendar reservations at the exact server-applied maximum, then settle provider-reported output usage and conservatively charge unknown post-dispatch usage. Preserve atomic mixed-rule enforcement and durable logical-request accounting for per-request-only plans.
+Implement configured integer nano-USD pricing attribution and provenance without activating hard cost limits, then add concurrency leases and token buckets.
