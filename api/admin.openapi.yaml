@@ -202,7 +202,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateNamedResource' }
+            schema: { $ref: '#/components/schemas/CreateEnvironmentRequest' }
       responses:
         '201':
           description: Environment created without an active configuration.
@@ -966,10 +966,11 @@ components:
       properties:
         email: { type: string, format: email, maxLength: 320 }
         password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
     AdminSession:
       type: object
       additionalProperties: false
-      required: [administrator, memberships, capabilities, expires_at]
+      required: [administrator, organization_id, memberships, capabilities, expires_at]
       properties:
         administrator:
           type: object
@@ -979,6 +980,7 @@ components:
             id: { type: string, pattern: '^adm_[A-Za-z0-9_-]{16,128}$' }
             email: { type: string, format: email }
             enabled: { type: boolean }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
         memberships:
           type: array
           items:
@@ -992,7 +994,7 @@ components:
           type: array
           uniqueItems: true
           items: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
-        expires_at: { type: string, format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
     CreateNamedResource:
       type: object
       additionalProperties: false
@@ -1000,6 +1002,14 @@ components:
       properties:
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string, minLength: 1, maxLength: 256 }
+    CreateEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name, kind]
+      properties:
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string, minLength: 1, maxLength: 256 }
+        kind: { type: string, enum: [development, staging, production] }
     Organization:
       type: object
       additionalProperties: false
@@ -1044,12 +1054,13 @@ components:
     Environment:
       type: object
       additionalProperties: false
-      required: [id, application_id, slug, display_name, created_at]
+      required: [id, application_id, slug, display_name, kind, created_at]
       properties:
         id: { $ref: '#/components/schemas/EnvironmentID' }
         application_id: { $ref: '#/components/schemas/ApplicationID' }
         slug: { $ref: '#/components/schemas/Identifier' }
         display_name: { type: string }
+        kind: { type: string, enum: [development, staging, production] }
         active_revision_id: { $ref: '#/components/schemas/RevisionID' }
         created_at: { type: string, format: date-time }
     CreateConfigurationRevisionRequest:
