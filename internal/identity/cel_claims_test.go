@@ -92,7 +92,7 @@ func TestCELClaimMapperRejectsUnsafeEvaluationResults(t *testing.T) {
 		expression string
 		claims     map[string]any
 	}{
-		{name: "missing claim", expression: "claims.missing", claims: map[string]any{}},
+		{name: "missing claim in computed expression", expression: "claims.missing + '-value'", claims: map[string]any{}},
 		{name: "object result", expression: "claims.profile", claims: map[string]any{"profile": map[string]any{"plan": "pro"}}},
 		{name: "nested list", expression: "claims.values", claims: map[string]any{"values": []any{[]any{"nested"}}}},
 		{name: "oversized string", expression: "claims.value", claims: map[string]any{"value": strings.Repeat("x", 2049)}},
@@ -108,6 +108,25 @@ func TestCELClaimMapperRejectsUnsafeEvaluationResults(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestCELClaimMapperOmitsMissingDirectProjection(t *testing.T) {
+	t.Parallel()
+
+	mapper, err := NewCELClaimMapper(map[string]string{
+		"nested": "  claims.profile.plan  ",
+		"plan":   "claims.plan",
+	})
+	if err != nil {
+		t.Fatalf("construct mapper: %v", err)
+	}
+	result, err := mapper.Map(map[string]any{"profile": map[string]any{}})
+	if err != nil {
+		t.Fatalf("map optional projections: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("missing optional projections = %#v", result)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -21,8 +22,9 @@ const (
 )
 
 type compiledCELClaimMapping struct {
-	name    string
-	program cel.Program
+	name               string
+	optionalDirectPath string
+	program            cel.Program
 }
 
 // CELClaimMapper evaluates a bounded, precompiled CEL projection over verified
@@ -76,7 +78,9 @@ func NewCELClaimMapper(mappings map[string]string) (*CELClaimMapper, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: compile claim CEL program", ErrConfiguration)
 		}
-		compiled = append(compiled, compiledCELClaimMapping{name: name, program: program})
+		compiled = append(compiled, compiledCELClaimMapping{
+			name: name, optionalDirectPath: directCELClaimPath(expression), program: program,
+		})
 	}
 	return &CELClaimMapper{mappings: compiled}, nil
 }
@@ -93,6 +97,15 @@ func (mapper *CELClaimMapper) Map(claims map[string]any) (map[string]any, error)
 	}
 	result := make(map[string]any, len(mapper.mappings))
 	for _, mapping := range mapper.mappings {
+		// A direct claim projection preserves the optional semantics of the
+		// original path mapper. requiredClaims remains the explicit way to make
+		// an external claim mandatory; richer CEL expressions retain normal CEL
+		// error semantics and must handle absence deliberately.
+		if mapping.optionalDirectPath != "" {
+			if direct, ok := claimAtPath(claims, mapping.optionalDirectPath); !ok || direct == nil {
+				continue
+			}
+		}
 		value, _, evalErr := mapping.program.Eval(map[string]any{"claims": activationClaims})
 		if evalErr != nil || value == nil || types.IsError(value) || types.IsUnknown(value) {
 			return nil, fmt.Errorf("%w: claim mapping evaluation failed", ErrCredentialInvalid)
@@ -111,6 +124,18 @@ func (mapper *CELClaimMapper) Map(claims map[string]any) (map[string]any, error)
 		result[mapping.name] = normalized
 	}
 	return validateNormalizedClaims(result)
+}
+
+func directCELClaimPath(expression string) string {
+	expression = strings.TrimSpace(expression)
+	if !strings.HasPrefix(expression, "claims.") {
+		return ""
+	}
+	path := strings.TrimPrefix(expression, "claims.")
+	if !claimPathPattern.MatchString(path) {
+		return ""
+	}
+	return path
 }
 
 func supportedCELClaimType(output *cel.Type) bool {
