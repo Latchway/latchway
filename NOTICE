@@ -1,0 +1,10 @@
+Latchway
+Copyright 2026 Latchway contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+The repository also contains development-agent skill material derived from
+the samber/cc-skills-golang project under `.agents/skills`, `agent/skills`,
+and `.claude/skills`, with provenance locked in `skills-lock.json`. That
+material is not linked into or shipped as Latchway runtime code. Its files
+declare the MIT License and retain their upstream authorship metadata.
