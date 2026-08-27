@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1018,6 +1019,356 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("multi rule replay is order independent and release finalizes every entry", func(t *testing.T) {
+		input := fixture.multiRuleInput(t, "multi-replay", 4, "5h", 9)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve multi-rule request: %v", err)
+		}
+		if len(reservation.entries) != 2 || reservation.ResetAt().IsZero() {
+			t.Fatalf("multi-rule reservation entries=%d reset=%s", len(reservation.entries), reservation.ResetAt())
+		}
+
+		reversed := cloneReserveInput(input)
+		slices.Reverse(reversed.Rules)
+		for index := range reversed.Rules {
+			slices.Reverse(reversed.Rules[index].Scope)
+		}
+		replayed, err := fixture.store.Reserve(fixture.ctx, reversed)
+		if err != nil {
+			t.Fatalf("reserve reversed replay: %v", err)
+		}
+		if replayed.ID() != reservation.ID() || len(replayed.entries) != len(reservation.entries) ||
+			!replayed.ResetAt().Equal(reservation.ResetAt()) {
+			t.Fatalf("reversed replay = %#v, want reservation %s", replayed, reservation.ID())
+		}
+		for index := range reservation.entries {
+			if replayed.entries[index].bucketID != reservation.entries[index].bucketID ||
+				replayed.entries[index].entryID != reservation.entries[index].entryID ||
+				!replayed.entries[index].resetAt.Equal(reservation.entries[index].resetAt) {
+				t.Fatalf("replayed entry %d differs: %#v / %#v", index, replayed.entries[index], reservation.entries[index])
+			}
+		}
+		var entryCount, reservedTotal int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT count(*), sum(reserved_units)
+			FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&entryCount, &reservedTotal); err != nil {
+			t.Fatalf("read multi-rule entries: %v", err)
+		}
+		if entryCount != 2 || reservedTotal != 2 {
+			t.Fatalf("multi-rule entries count=%d reserved=%d, want 2/2", entryCount, reservedTotal)
+		}
+
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, replayed, "multi_replay_done"); err != nil {
+			t.Fatalf("release multi-rule replay: %v", err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "multi_replay_done"); err != nil {
+			t.Fatalf("release multi-rule idempotent replay: %v", err)
+		}
+		var releasedTotal int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT sum(released_units)
+			FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+		`, reservation.ID()).Scan(&releasedTotal); err != nil {
+			t.Fatalf("read released multi-rule entries: %v", err)
+		}
+		if releasedTotal != 2 {
+			t.Fatalf("released multi-rule entry units = %d, want 2", releasedTotal)
+		}
+		for _, entry := range reservation.entries {
+			var used, reserved int64
+			if err := fixture.pool.QueryRow(fixture.ctx, `
+				SELECT used_units, reserved_units FROM quota_buckets WHERE quota_bucket_id = $1
+			`, entry.bucketID).Scan(&used, &reserved); err != nil {
+				t.Fatalf("read released bucket %s: %v", entry.bucketID, err)
+			}
+			if used != 0 || reserved != 0 {
+				t.Fatalf("released bucket %s used=%d reserved=%d, want 0/0", entry.bucketID, used, reserved)
+			}
+		}
+	})
+
+	t.Run("bytewise bucket order is stable across reservation and replay", func(t *testing.T) {
+		const lowBucketID = "qbk_00000000000000000000000000"
+		const highBucketID = "qbk_7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		for _, bucketID := range []string{lowBucketID, highBucketID} {
+			if err := id.Validate(bucketID, id.QuotaBucket); err != nil {
+				t.Fatalf("fixed bucket ID %q is invalid: %v", bucketID, err)
+			}
+		}
+		bucketIDs := []string{highBucketID, lowBucketID}
+		bucketIndex := 0
+		orderedStore, err := NewStore(StoreConfig{
+			Pool: fixture.pool, ReservationTTL: time.Hour,
+			NewID: func(prefix id.Prefix) (string, error) {
+				if prefix != id.QuotaBucket {
+					return id.New(prefix)
+				}
+				if bucketIndex >= len(bucketIDs) {
+					return "", errors.New("unexpected extra bucket identifier")
+				}
+				value := bucketIDs[bucketIndex]
+				bucketIndex++
+				return value, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("new bytewise-order store: %v", err)
+		}
+		input := fixture.multiRuleInput(t, "bytewise-order", 3, "19h", 5)
+		prepared, err := prepareRequest(input)
+		if err != nil {
+			t.Fatalf("prepare bytewise-order request: %v", err)
+		}
+		reservation, err := orderedStore.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve divergent bucket identifiers: %v", err)
+		}
+		if len(reservation.entries) != 2 || reservation.entries[0].bucketID != lowBucketID ||
+			reservation.entries[1].bucketID != highBucketID || reservation.validate() != nil {
+			t.Fatalf("reservation entry order = %#v, want bytewise low/high", reservation.entries)
+		}
+
+		replayed, err := orderedStore.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("replay divergent bucket identifiers: %v", err)
+		}
+		if len(replayed.entries) != 2 || replayed.entries[0].bucketID != lowBucketID ||
+			replayed.entries[1].bucketID != highBucketID || replayed.validate() != nil {
+			t.Fatalf("replayed entry order = %#v, want bytewise low/high", replayed.entries)
+		}
+
+		rows, err := fixture.pool.Query(fixture.ctx, `
+			SELECT bucket.quota_bucket_id, bucket.rule_key
+			FROM quota_reservation_entries AS entry
+			JOIN quota_buckets AS bucket USING (quota_bucket_id)
+			WHERE entry.quota_reservation_id = $1
+			ORDER BY bucket.quota_bucket_id COLLATE "C"
+		`, reservation.ID())
+		if err != nil {
+			t.Fatalf("query explicit bytewise bucket order: %v", err)
+		}
+		defer rows.Close()
+		var gotBucketIDs, gotRuleKeys []string
+		for rows.Next() {
+			var bucketID, ruleKey string
+			if err := rows.Scan(&bucketID, &ruleKey); err != nil {
+				t.Fatalf("scan explicit bytewise bucket order: %v", err)
+			}
+			gotBucketIDs = append(gotBucketIDs, bucketID)
+			gotRuleKeys = append(gotRuleKeys, ruleKey)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate explicit bytewise bucket order: %v", err)
+		}
+		if !slices.Equal(gotBucketIDs, []string{lowBucketID, highBucketID}) ||
+			!slices.Equal(gotRuleKeys, []string{prepared.rules[1].ruleKey, prepared.rules[0].ruleKey}) {
+			t.Fatalf("database bytewise order ids=%v rules=%v", gotBucketIDs, gotRuleKeys)
+		}
+		if err := orderedStore.ReleaseBeforeDispatch(fixture.ctx, replayed, "bytewise_order_done"); err != nil {
+			t.Fatalf("release bytewise-order reservation: %v", err)
+		}
+	})
+
+	t.Run("multi rule denial never partially reserves an available bucket", func(t *testing.T) {
+		seedInput := fixture.multiRuleInput(t, "multi-atomic-denial", 1, "7h", 10)
+		seed, err := fixture.store.Reserve(fixture.ctx, seedInput)
+		if err != nil {
+			t.Fatalf("reserve atomic-denial seed: %v", err)
+		}
+		deniedInput := fixture.multiRuleInput(t, "multi-atomic-denial", 1, "7h", 10)
+		if _, err := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(err, ErrExceeded) {
+			t.Fatalf("multi-rule denial = %v, want ErrExceeded", err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1`, deniedInput.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("denied multi-rule reservations = %d, want 0", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservation_entries WHERE quota_reservation_id = $1`, seed.ID()); got != 2 {
+			t.Fatalf("seed multi-rule entries = %d, want 2", got)
+		}
+		for _, entry := range seed.entries {
+			var used, reserved int64
+			if err := fixture.pool.QueryRow(fixture.ctx, `
+				SELECT used_units, reserved_units FROM quota_buckets WHERE quota_bucket_id = $1
+			`, entry.bucketID).Scan(&used, &reserved); err != nil {
+				t.Fatalf("read atomic-denial bucket: %v", err)
+			}
+			if used != 0 || reserved != 1 {
+				t.Fatalf("denial partially changed bucket %s to used=%d reserved=%d", entry.bucketID, used, reserved)
+			}
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, seed, "multi_denial_done"); err != nil {
+			t.Fatalf("release atomic-denial seed: %v", err)
+		}
+	})
+
+	t.Run("overlapping multi rule contention enforces the tightest bucket", func(t *testing.T) {
+		const tightMaximum = 5
+		const looseMaximum = 8
+		const callers = 24
+		start := make(chan struct{})
+		reservations := make(chan Reservation, callers)
+		failures := make(chan error, callers)
+		var wait sync.WaitGroup
+		for caller := range callers {
+			input := fixture.multiRuleInput(t, "multi-contention", tightMaximum, "11h", looseMaximum)
+			if caller%2 != 0 {
+				slices.Reverse(input.Rules)
+			}
+			wait.Add(1)
+			go func(input ReserveInput) {
+				defer wait.Done()
+				<-start
+				reservation, reserveErr := fixture.store.Reserve(fixture.ctx, input)
+				if reserveErr != nil {
+					failures <- reserveErr
+					return
+				}
+				reservations <- reservation
+			}(input)
+		}
+		close(start)
+		wait.Wait()
+		close(reservations)
+		close(failures)
+
+		accepted := make([]Reservation, 0, tightMaximum)
+		for reservation := range reservations {
+			accepted = append(accepted, reservation)
+			if len(reservation.entries) != 2 {
+				t.Errorf("contended reservation entries = %d, want 2", len(reservation.entries))
+			}
+		}
+		denied := 0
+		for reserveErr := range failures {
+			if !errors.Is(reserveErr, ErrExceeded) {
+				t.Errorf("multi contention error = %v, want ErrExceeded", reserveErr)
+				continue
+			}
+			denied++
+		}
+		if len(accepted) != tightMaximum || denied != callers-tightMaximum {
+			t.Fatalf("multi contention accepted=%d denied=%d, want %d/%d", len(accepted), denied, tightMaximum, callers-tightMaximum)
+		}
+		if len(accepted) != 0 {
+			for _, entry := range accepted[0].entries {
+				var maximum, used, reserved int64
+				if err := fixture.pool.QueryRow(fixture.ctx, `
+					SELECT hard_maximum, used_units, reserved_units
+					FROM quota_buckets WHERE quota_bucket_id = $1
+				`, entry.bucketID).Scan(&maximum, &used, &reserved); err != nil {
+					t.Fatalf("read multi-contention bucket: %v", err)
+				}
+				if used != 0 || reserved != tightMaximum || (maximum != tightMaximum && maximum != looseMaximum) {
+					t.Fatalf("multi-contention bucket max=%d used=%d reserved=%d", maximum, used, reserved)
+				}
+			}
+		}
+		for _, reservation := range accepted {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "multi_contention_done"); err != nil {
+				t.Fatalf("release multi-contention reservation: %v", err)
+			}
+		}
+	})
+
+	t.Run("multi entry settlement and expiry recovery finalize every bucket", func(t *testing.T) {
+		settleInput := fixture.multiRuleInput(t, "multi-settle", 3, "13h", 4)
+		settleReservation, err := fixture.store.Reserve(fixture.ctx, settleInput)
+		if err != nil {
+			t.Fatalf("reserve multi-settle: %v", err)
+		}
+		settleAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, settleReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin multi-settle owner=%t: %v", owner, err)
+		}
+		settleOutcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 200}
+		if err := fixture.store.Settle(fixture.ctx, settleAttempt, settleOutcome); err != nil {
+			t.Fatalf("settle multi-entry reservation: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, settleAttempt, settleOutcome); err != nil {
+			t.Fatalf("settle multi-entry replay: %v", err)
+		}
+		var settledCount int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT count(*) FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1 AND settled_units = 1 AND released_units = 0
+		`, settleReservation.ID()).Scan(&settledCount); err != nil {
+			t.Fatalf("read settled multi entries: %v", err)
+		}
+		if settledCount != 2 || fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, settleInput.LogicalRequestID.String()) != 1 {
+			t.Fatalf("settled entries=%d or logical usage count != 1", settledCount)
+		}
+
+		recoveryInput := fixture.multiRuleInput(t, "multi-recovery", 4, "17h", 5)
+		dispatched, err := fixture.store.Reserve(fixture.ctx, recoveryInput)
+		if err != nil {
+			t.Fatalf("reserve dispatched multi-recovery: %v", err)
+		}
+		recoveredAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, dispatched)
+		if err != nil || !owner {
+			t.Fatalf("begin multi-recovery owner=%t: %v", owner, err)
+		}
+		undispatchedInput := fixture.multiRuleInput(t, "multi-recovery", 4, "17h", 5)
+		undispatched, err := fixture.store.Reserve(fixture.ctx, undispatchedInput)
+		if err != nil {
+			t.Fatalf("reserve undispatched multi-recovery: %v", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE quota_reservations
+			SET created_at = statement_timestamp() - interval '2 hours',
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE quota_reservation_id = ANY($1::text[])
+		`, []string{dispatched.ID(), undispatched.ID()}); err != nil {
+			t.Fatalf("expire multi-recovery reservations: %v", err)
+		}
+		processed, err := fixture.store.ExpirePendingBatch(fixture.ctx, 10)
+		if err != nil || processed != 2 {
+			t.Fatalf("recover multi entries processed=%d err=%v, want 2 nil", processed, err)
+		}
+		processed, err = fixture.store.ExpirePendingBatch(fixture.ctx, 10)
+		if err != nil || processed != 0 {
+			t.Fatalf("recover multi-entry replay processed=%d err=%v", processed, err)
+		}
+		var recoveredStatus, recoveredFailure string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT status, failure_code FROM upstream_attempts WHERE upstream_attempt_id = $1
+		`, recoveredAttempt.ID()).Scan(&recoveredStatus, &recoveredFailure); err != nil {
+			t.Fatalf("read recovered multi attempt: %v", err)
+		}
+		if recoveredStatus != AttemptTimedOut || recoveredFailure != expiryFailureCode {
+			t.Fatalf("recovered multi attempt status=%s failure=%s", recoveredStatus, recoveredFailure)
+		}
+		var recoveredSettled, recoveredReleased int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT
+				count(*) FILTER (WHERE quota_reservation_id = $1 AND settled_units = 1),
+				count(*) FILTER (WHERE quota_reservation_id = $2 AND released_units = 1)
+			FROM quota_reservation_entries
+			WHERE quota_reservation_id = ANY($3::text[])
+		`, dispatched.ID(), undispatched.ID(), []string{dispatched.ID(), undispatched.ID()}).Scan(
+			&recoveredSettled, &recoveredReleased,
+		); err != nil {
+			t.Fatalf("read recovered multi entries: %v", err)
+		}
+		if recoveredSettled != 2 || recoveredReleased != 2 {
+			t.Fatalf("recovered multi entries settled=%d released=%d, want 2/2", recoveredSettled, recoveredReleased)
+		}
+		for _, entry := range dispatched.entries {
+			var used, reserved int64
+			if err := fixture.pool.QueryRow(fixture.ctx, `
+				SELECT used_units, reserved_units FROM quota_buckets WHERE quota_bucket_id = $1
+			`, entry.bucketID).Scan(&used, &reserved); err != nil {
+				t.Fatalf("read recovered multi bucket: %v", err)
+			}
+			if used != 1 || reserved != 0 {
+				t.Fatalf("recovered multi bucket %s used=%d reserved=%d, want 1/0", entry.bucketID, used, reserved)
+			}
+		}
+	})
+
 	t.Run("cross tenant identities fail closed without a logical row", func(t *testing.T) {
 		input := fixture.input(t, "cross-tenant", 1)
 		input.OrganizationID = mustNewID(t, id.Organization)
@@ -1207,6 +1558,30 @@ func (fixture quotaPostgreSQLFixture) input(t *testing.T, feature string, maximu
 	}
 }
 
+func (fixture quotaPostgreSQLFixture) multiRuleInput(
+	t *testing.T,
+	feature string,
+	featureMaximum int64,
+	userWindow string,
+	userMaximum int64,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, featureMaximum)
+	input.Rules = []Rule{
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1d",
+			Maximum: featureMaximum, Hard: true,
+		},
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: userWindow,
+			Maximum: userMaximum, Hard: true,
+		},
+	}
+	return input
+}
+
 func (fixture quotaPostgreSQLFixture) count(t *testing.T, statement string, arguments ...any) int64 {
 	t.Helper()
 	var count int64
@@ -1272,7 +1647,7 @@ func mustPreparedScopeKey(t *testing.T, input ReserveInput) string {
 	if err != nil {
 		t.Fatalf("prepare quota input: %v", err)
 	}
-	return prepared.scopeKey
+	return prepared.rules[0].scopeKey
 }
 
 func mustNewID(t *testing.T, prefix id.Prefix) string {

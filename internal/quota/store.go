@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,29 +58,56 @@ func NewStore(config StoreConfig) (*Store, error) {
 }
 
 type reserveIDs struct {
-	bucket      string
 	reservation string
-	entry       string
+	buckets     []string
+	entries     []string
 }
 
-func (store *Store) newReserveIDs() (reserveIDs, error) {
-	values := []id.Prefix{id.QuotaBucket, id.QuotaReservation, id.QuotaEntry}
-	generated := make([]string, len(values))
-	for index := range values {
-		value, err := store.newID(values[index])
-		if err != nil {
-			return reserveIDs{}, fmt.Errorf("generate %s identifier: %w", values[index], err)
-		}
-		generated[index] = value
+func (store *Store) newReserveIDs(ruleCount int) (reserveIDs, error) {
+	if ruleCount < 1 || ruleCount > maximumRulesPerRequest {
+		return reserveIDs{}, ErrInvalidInput
 	}
-	return reserveIDs{
-		bucket: generated[0], reservation: generated[1], entry: generated[2],
-	}, nil
+	result := reserveIDs{
+		buckets: make([]string, ruleCount),
+		entries: make([]string, ruleCount),
+	}
+	// Keep the historical single-rule generation order: bucket, reservation,
+	// entry. Multiple bucket and entry identifiers are generated in canonical
+	// prepared-rule order.
+	for index := range result.buckets {
+		value, err := store.newID(id.QuotaBucket)
+		if err != nil {
+			return reserveIDs{}, fmt.Errorf("generate %s identifier: %w", id.QuotaBucket, err)
+		}
+		result.buckets[index] = value
+	}
+	reservationID, err := store.newID(id.QuotaReservation)
+	if err != nil {
+		return reserveIDs{}, fmt.Errorf("generate %s identifier: %w", id.QuotaReservation, err)
+	}
+	result.reservation = reservationID
+	for index := range result.entries {
+		value, err := store.newID(id.QuotaEntry)
+		if err != nil {
+			return reserveIDs{}, fmt.Errorf("generate %s identifier: %w", id.QuotaEntry, err)
+		}
+		result.entries[index] = value
+	}
+	return result, nil
 }
 
-// Reserve records one logical request and atomically reserves exactly one
-// logical-request unit. Quota denial is committed as a denied logical request
-// but creates neither a reservation nor an upstream attempt.
+type plannedBucket struct {
+	rule     preparedRule
+	period   calendarPeriod
+	bucketID string
+	entryID  string
+	locked   lockedBucket
+}
+
+// Reserve records one logical request and atomically reserves one
+// logical-request unit in every applicable bucket. Quota denial is committed
+// as a denied logical request but changes no bucket counters and creates
+// neither a reservation nor an upstream attempt.
 func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservation, error) {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil {
 		return Reservation{}, ErrInvalidInput
@@ -101,7 +129,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	if err != nil {
 		return Reservation{}, err
 	}
-	period, err := calendarWindow(requestedAt, prepared.rule.Window)
+	plans, err := plannedBucketsAt(prepared, requestedAt)
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -131,32 +159,34 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		return Reservation{}, ErrInvalidState
 	}
 
-	identifiers, err := store.newReserveIDs()
+	identifiers, err := store.newReserveIDs(len(plans))
 	if err != nil {
 		return Reservation{}, err
 	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO quota_buckets (
-			quota_bucket_id, organization_id, application_id, environment_id,
-			limit_plan_key, rule_key, metric, scope_type, scope_dimensions,
-			scope_key, algorithm, window_key, hard_maximum,
-			used_units, reserved_units, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10, $11, $12,
-			$13, 0, 0, $14, $14
-		)
-		ON CONFLICT ON CONSTRAINT quota_buckets_identity_key DO NOTHING
-	`, identifiers.bucket, prepared.OrganizationID, prepared.ApplicationID,
-		prepared.EnvironmentID, prepared.LimitPlanKey, prepared.ruleKey,
-		prepared.rule.Metric, prepared.scopeType, prepared.scopeDimensions,
-		prepared.scopeKey, prepared.rule.Algorithm, period.key,
-		prepared.rule.Maximum, requestedAt); err != nil {
-		return Reservation{}, mapWriteError("materialize quota bucket", err)
+	for index := range plans {
+		plans[index].bucketID = identifiers.buckets[index]
+		plans[index].entryID = identifiers.entries[index]
+		plan := &plans[index]
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO quota_buckets (
+				quota_bucket_id, organization_id, application_id, environment_id,
+				limit_plan_key, rule_key, metric, scope_type, scope_dimensions,
+				scope_key, algorithm, window_key, hard_maximum,
+				used_units, reserved_units, created_at, updated_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10, $11, $12,
+				$13, 0, 0, $14, $14
+			)
+			ON CONFLICT ON CONSTRAINT quota_buckets_identity_key DO NOTHING
+		`, plan.bucketID, prepared.OrganizationID, prepared.ApplicationID,
+			prepared.EnvironmentID, prepared.LimitPlanKey, plan.rule.ruleKey,
+			plan.rule.Metric, plan.rule.scopeType, plan.rule.scopeDimensions,
+			plan.rule.scopeKey, plan.rule.Algorithm, plan.period.key,
+			plan.rule.Maximum, requestedAt); err != nil {
+			return Reservation{}, mapWriteError("materialize quota bucket", err)
+		}
 	}
-
-	bucket, err := lockBucket(ctx, tx, prepared, period.key)
-	if err != nil {
+	if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
 		return Reservation{}, err
 	}
 	// The request stays attributed to the calendar window in which it arrived,
@@ -171,20 +201,34 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	if !expiresAt.After(decisionAt) {
 		return Reservation{}, ErrInvalidInput
 	}
-	if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
-		bucket.used > math.MaxInt64-bucket.reserved {
-		return Reservation{}, ErrInvalidState
+	exceeded := make([]int, 0, len(plans))
+	occupancies := make([]int64, len(plans))
+	for index := range plans {
+		plan := &plans[index]
+		bucket := plan.locked
+		if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
+			bucket.used > math.MaxInt64-bucket.reserved {
+			return Reservation{}, ErrInvalidState
+		}
+		occupancy := bucket.used + bucket.reserved
+		occupancies[index] = occupancy
+		if plan.rule.Maximum < occupancy || plan.rule.Maximum-occupancy < 1 {
+			exceeded = append(exceeded, index)
+		}
 	}
-	occupancy := bucket.used + bucket.reserved
-	if prepared.rule.Maximum < occupancy || prepared.rule.Maximum-occupancy < 1 {
-		if prepared.rule.Maximum >= occupancy && *bucket.hardMaximum != prepared.rule.Maximum {
+	if len(exceeded) != 0 {
+		for index := range plans {
+			plan := &plans[index]
+			if plan.rule.Maximum < occupancies[index] || *plan.locked.hardMaximum == plan.rule.Maximum {
+				continue
+			}
 			command, updateErr := tx.Exec(ctx, `
 				UPDATE quota_buckets
 				SET hard_maximum = $2,
 				    version = version + 1,
 				    updated_at = GREATEST(updated_at, $3)
 				WHERE quota_bucket_id = $1
-			`, bucket.id, prepared.rule.Maximum, decisionAt)
+			`, plan.locked.id, plan.rule.Maximum, decisionAt)
 			if updateErr != nil {
 				return Reservation{}, persistenceFailure("refresh denied quota maximum", updateErr)
 			}
@@ -207,29 +251,30 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		if err := tx.Commit(ctx); err != nil {
 			return Reservation{}, persistenceFailure("commit quota denial", err)
 		}
-		return Reservation{}, &ExceededError{
-			logicalRequestID: logicalRequestID, retryAt: period.end,
-			maximum: prepared.rule.Maximum, used: bucket.used, reserved: bucket.reserved,
-		}
+		return Reservation{}, exceededError(logicalRequestID, plans, exceeded)
 	}
 
-	command, err = tx.Exec(ctx, `
-		UPDATE quota_buckets
-		SET hard_maximum = $2,
-		    reserved_units = reserved_units + 1,
-		    version = version + 1,
-		    updated_at = GREATEST(updated_at, $3)
-		WHERE quota_bucket_id = $1
-		  AND used_units = $4
-		  AND reserved_units = $5
-		  AND $2 > used_units
-		  AND reserved_units < $2 - used_units
-	`, bucket.id, prepared.rule.Maximum, decisionAt, bucket.used, bucket.reserved)
-	if err != nil {
-		return Reservation{}, persistenceFailure("reserve quota bucket", err)
-	}
-	if command.RowsAffected() != 1 {
-		return Reservation{}, ErrInvalidState
+	for index := range plans {
+		plan := &plans[index]
+		bucket := plan.locked
+		command, err = tx.Exec(ctx, `
+			UPDATE quota_buckets
+			SET hard_maximum = $2,
+			    reserved_units = reserved_units + 1,
+			    version = version + 1,
+			    updated_at = GREATEST(updated_at, $3)
+			WHERE quota_bucket_id = $1
+			  AND used_units = $4
+			  AND reserved_units = $5
+			  AND $2 > used_units
+			  AND reserved_units < $2 - used_units
+		`, bucket.id, plan.rule.Maximum, decisionAt, bucket.used, bucket.reserved)
+		if err != nil {
+			return Reservation{}, persistenceFailure("reserve quota bucket", err)
+		}
+		if command.RowsAffected() != 1 {
+			return Reservation{}, ErrInvalidState
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -241,26 +286,30 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		prepared.EnvironmentID, logicalRequestID, fingerprint, decisionAt, expiresAt); err != nil {
 		return Reservation{}, mapWriteError("insert quota reservation", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO quota_reservation_entries (
-			quota_reservation_entry_id, organization_id, application_id,
-			environment_id, quota_reservation_id, quota_bucket_id,
-			reserved_units, settled_units, released_units
-		) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, 0)
-	`, identifiers.entry, prepared.OrganizationID, prepared.ApplicationID,
-		prepared.EnvironmentID, identifiers.reservation, bucket.id); err != nil {
-		return Reservation{}, mapWriteError("insert quota reservation entry", err)
+	for index := range plans {
+		plan := &plans[index]
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO quota_reservation_entries (
+				quota_reservation_entry_id, organization_id, application_id,
+				environment_id, quota_reservation_id, quota_bucket_id,
+				reserved_units, settled_units, released_units
+			) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, 0)
+		`, plan.entryID, prepared.OrganizationID, prepared.ApplicationID,
+			prepared.EnvironmentID, identifiers.reservation, plan.locked.id); err != nil {
+			return Reservation{}, mapWriteError("insert quota reservation entry", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Reservation{}, persistenceFailure("commit quota reservation", err)
 	}
+	entries := reservationEntries(plans)
 	return Reservation{
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 		environmentID: prepared.EnvironmentID, logicalRequestID: logicalRequestID,
-		reservationID: identifiers.reservation, bucketID: bucket.id, entryID: identifiers.entry,
+		reservationID: identifiers.reservation, entries: entries,
 		routeKey: prepared.RouteKey, upstreamKey: prepared.UpstreamKey,
 		modelKey: prepared.ModelKey, physicalModel: prepared.PhysicalModel,
-		windowResetAt: period.end, expiresAt: expiresAt,
+		windowResetAt: maximumResetAt(entries), expiresAt: expiresAt,
 	}, nil
 }
 
@@ -330,7 +379,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logical.fingerprint == nil || *logical.fingerprint != fingerprint {
 		return Reservation{}, ErrInvalidInput
 	}
-	period, err := calendarWindow(logical.requestedAt.UTC(), prepared.rule.Window)
+	plans, err := plannedBucketsAt(prepared, logical.requestedAt.UTC())
 	if err != nil {
 		return Reservation{}, ErrInvalidState
 	}
@@ -342,18 +391,28 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		if logical.failureCode == nil || *logical.failureCode != "quota_exceeded" {
 			return Reservation{}, ErrInvalidState
 		}
-		bucket, err := lockBucket(ctx, tx, prepared, period.key)
-		if err != nil {
+		if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
 			return Reservation{}, err
 		}
-		if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
-			bucket.used > math.MaxInt64-bucket.reserved {
-			return Reservation{}, ErrInvalidState
+		exceeded := make([]int, 0, len(plans))
+		for index := range plans {
+			bucket := plans[index].locked
+			if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
+				bucket.used > math.MaxInt64-bucket.reserved {
+				return Reservation{}, ErrInvalidState
+			}
+			occupancy := bucket.used + bucket.reserved
+			if plans[index].rule.Maximum < occupancy || plans[index].rule.Maximum-occupancy < 1 {
+				exceeded = append(exceeded, index)
+			}
 		}
-		return Reservation{}, &ExceededError{
-			logicalRequestID: prepared.LogicalRequestID.String(), retryAt: period.end,
-			maximum: prepared.rule.Maximum, used: bucket.used, reserved: bucket.reserved,
+		if len(exceeded) == 0 {
+			exceeded = make([]int, len(plans))
+			for index := range plans {
+				exceeded[index] = index
+			}
 		}
+		return Reservation{}, exceededError(prepared.LogicalRequestID.String(), plans, exceeded)
 	}
 	if reservationErr != nil {
 		return Reservation{}, ErrInvalidState
@@ -394,68 +453,91 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		 AND bucket.quota_bucket_id = entry.quota_bucket_id
 		WHERE reservation.logical_request_id = $1
 		  AND reservation.quota_reservation_id = $2
-		ORDER BY entry.quota_reservation_entry_id
+		ORDER BY bucket.quota_bucket_id COLLATE "C"
 	`, prepared.LogicalRequestID.String(), lockedReservationID)
 	if err != nil {
 		return Reservation{}, persistenceFailure("load existing quota reservation", err)
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return Reservation{}, persistenceFailure("read existing quota reservation", err)
+	planIndexes := make(map[string]int, len(plans))
+	for index := range plans {
+		planIndexes[plannedBucketIdentity(plans[index].rule.ruleKey, plans[index].rule.scopeKey)] = index
+	}
+	matchedPlans := make([]bool, len(plans))
+	entries := make([]reservationEntry, 0, len(plans))
+	var reservationID, reservationStatus string
+	var expiresAt time.Time
+	for rows.Next() {
+		var existing existingReservation
+		if err := rows.Scan(
+			&existing.organizationID, &existing.applicationID, &existing.environmentID,
+			&existing.logicalRequestID, &existing.reservationID, &existing.idempotency,
+			&existing.status, &existing.expiresAt, &existing.entryID, &existing.bucketID,
+			&existing.reservedUnits, &existing.settledUnits, &existing.releasedUnits,
+			&existing.bucketOrganizationID, &existing.bucketApplicationID,
+			&existing.limitPlanKey, &existing.ruleKey, &existing.metric,
+			&existing.scopeType, &existing.scopeDimensions, &existing.scopeKey,
+			&existing.algorithm, &existing.windowKey,
+		); err != nil {
+			return Reservation{}, persistenceFailure("scan existing quota reservation", err)
 		}
-		return Reservation{}, ErrInvalidState
-	}
-	var existing existingReservation
-	if err := rows.Scan(
-		&existing.organizationID, &existing.applicationID, &existing.environmentID,
-		&existing.logicalRequestID, &existing.reservationID, &existing.idempotency,
-		&existing.status, &existing.expiresAt, &existing.entryID, &existing.bucketID,
-		&existing.reservedUnits, &existing.settledUnits, &existing.releasedUnits,
-		&existing.bucketOrganizationID, &existing.bucketApplicationID,
-		&existing.limitPlanKey, &existing.ruleKey, &existing.metric,
-		&existing.scopeType, &existing.scopeDimensions, &existing.scopeKey,
-		&existing.algorithm, &existing.windowKey,
-	); err != nil {
-		return Reservation{}, persistenceFailure("scan existing quota reservation", err)
-	}
-	if rows.Next() {
-		return Reservation{}, ErrInvalidState
+		planIndex, ok := planIndexes[plannedBucketIdentity(existing.ruleKey, existing.scopeKey)]
+		if !ok || matchedPlans[planIndex] {
+			return Reservation{}, ErrInvalidInput
+		}
+		plan := plans[planIndex]
+		if existing.organizationID != prepared.OrganizationID ||
+			existing.applicationID != prepared.ApplicationID ||
+			existing.environmentID != prepared.EnvironmentID ||
+			existing.logicalRequestID != prepared.LogicalRequestID.String() ||
+			existing.idempotency != fingerprint ||
+			existing.bucketOrganizationID != prepared.OrganizationID ||
+			existing.bucketApplicationID != prepared.ApplicationID ||
+			existing.limitPlanKey != prepared.LimitPlanKey ||
+			existing.metric != plan.rule.Metric || existing.scopeType != plan.rule.scopeType ||
+			!slicesEqual(existing.scopeDimensions, plan.rule.scopeDimensions) ||
+			existing.algorithm != plan.rule.Algorithm || existing.windowKey != plan.period.key {
+			return Reservation{}, ErrInvalidInput
+		}
+		if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
+			id.Validate(existing.entryID, id.QuotaEntry) != nil ||
+			id.Validate(existing.bucketID, id.QuotaBucket) != nil ||
+			!existingReservationStateMatches(logical.status, existing.status,
+				existing.reservedUnits, existing.settledUnits, existing.releasedUnits) {
+			return Reservation{}, ErrInvalidState
+		}
+		if reservationID == "" {
+			reservationID = existing.reservationID
+			reservationStatus = existing.status
+			expiresAt = existing.expiresAt
+		} else if reservationID != existing.reservationID || reservationStatus != existing.status ||
+			!expiresAt.Equal(existing.expiresAt) {
+			return Reservation{}, ErrInvalidState
+		}
+		matchedPlans[planIndex] = true
+		entries = append(entries, reservationEntry{
+			bucketID: existing.bucketID, entryID: existing.entryID, resetAt: plan.period.end,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return Reservation{}, persistenceFailure("iterate existing quota reservation", err)
 	}
-	if existing.organizationID != prepared.OrganizationID ||
-		existing.applicationID != prepared.ApplicationID ||
-		existing.environmentID != prepared.EnvironmentID ||
-		existing.logicalRequestID != prepared.LogicalRequestID.String() ||
-		existing.idempotency != fingerprint ||
-		existing.bucketOrganizationID != prepared.OrganizationID ||
-		existing.bucketApplicationID != prepared.ApplicationID ||
-		existing.limitPlanKey != prepared.LimitPlanKey ||
-		existing.ruleKey != prepared.ruleKey || existing.metric != prepared.rule.Metric ||
-		existing.scopeType != prepared.scopeType ||
-		!slicesEqual(existing.scopeDimensions, prepared.scopeDimensions) ||
-		existing.scopeKey != prepared.scopeKey ||
-		existing.algorithm != prepared.rule.Algorithm || existing.windowKey != period.key {
-		return Reservation{}, ErrInvalidInput
-	}
-	if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
-		id.Validate(existing.entryID, id.QuotaEntry) != nil ||
-		id.Validate(existing.bucketID, id.QuotaBucket) != nil ||
-		!existingReservationStateMatches(logical.status, existing.status,
-			existing.reservedUnits, existing.settledUnits, existing.releasedUnits) {
+	if reservationID == "" || len(entries) != len(plans) {
 		return Reservation{}, ErrInvalidState
+	}
+	for _, matched := range matchedPlans {
+		if !matched {
+			return Reservation{}, ErrInvalidState
+		}
 	}
 	return Reservation{
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 		environmentID:    prepared.EnvironmentID,
 		logicalRequestID: prepared.LogicalRequestID.String(),
-		reservationID:    existing.reservationID, bucketID: existing.bucketID,
-		entryID: existing.entryID, routeKey: prepared.RouteKey,
+		reservationID:    reservationID, entries: entries, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, windowResetAt: period.end,
-		expiresAt: existing.expiresAt,
+		physicalModel: prepared.PhysicalModel, windowResetAt: maximumResetAt(entries),
+		expiresAt: expiresAt,
 	}, nil
 }
 
@@ -493,13 +575,58 @@ type lockedBucket struct {
 	scopeDimensions []string
 }
 
-func lockBucket(ctx context.Context, tx pgx.Tx, prepared preparedRequest, windowKey string) (lockedBucket, error) {
-	var result lockedBucket
-	var organizationID, applicationID string
+func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, error) {
+	if len(prepared.rules) < 1 || len(prepared.rules) > maximumRulesPerRequest {
+		return nil, ErrInvalidInput
+	}
+	plans := make([]plannedBucket, len(prepared.rules))
+	for index := range prepared.rules {
+		period, err := calendarWindow(at, prepared.rules[index].Window)
+		if err != nil {
+			return nil, err
+		}
+		plans[index] = plannedBucket{rule: prepared.rules[index], period: period}
+	}
+	return plans, nil
+}
+
+func plannedBucketIdentity(ruleKey, scopeKey string) string {
+	return ruleKey + "\x00" + scopeKey
+}
+
+// lockPlannedBuckets first resolves immutable bucket identifiers without
+// locking, then acquires every row lock in quota_bucket_id order. All reserve,
+// settle, release, replay, and recovery paths use that same global order.
+func lockPlannedBuckets(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plans []plannedBucket) error {
+	if len(plans) < 1 || len(plans) > maximumRulesPerRequest {
+		return ErrInvalidInput
+	}
+	for index := range plans {
+		plan := &plans[index]
+		bucketID, err := findBucketID(ctx, tx, prepared, *plan)
+		if err != nil {
+			return err
+		}
+		plan.bucketID = bucketID
+	}
+	sort.Slice(plans, func(left, right int) bool { return plans[left].bucketID < plans[right].bucketID })
+	for index := range plans {
+		if index > 0 && plans[index-1].bucketID == plans[index].bucketID {
+			return ErrInvalidState
+		}
+		bucket, err := lockBucket(ctx, tx, prepared, plans[index])
+		if err != nil {
+			return err
+		}
+		plans[index].locked = bucket
+	}
+	return nil
+}
+
+func findBucketID(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plan plannedBucket) (string, error) {
+	var bucketID string
 	err := tx.QueryRow(ctx, `
-		SELECT quota_bucket_id, organization_id, application_id,
-		       hard_maximum, used_units, reserved_units,
-		       scope_type, scope_dimensions
+		SELECT quota_bucket_id
 		FROM quota_buckets
 		WHERE environment_id = $1
 		  AND limit_plan_key = $2
@@ -508,10 +635,41 @@ func lockBucket(ctx context.Context, tx pgx.Tx, prepared preparedRequest, window
 		  AND algorithm = $5
 		  AND window_key = $6
 		  AND scope_key = $7
+	`, prepared.EnvironmentID, prepared.LimitPlanKey, plan.rule.ruleKey,
+		plan.rule.Metric, plan.rule.Algorithm, plan.period.key,
+		plan.rule.scopeKey).Scan(&bucketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrInvalidState
+	}
+	if err != nil {
+		return "", persistenceFailure("find quota bucket", err)
+	}
+	if id.Validate(bucketID, id.QuotaBucket) != nil {
+		return "", ErrInvalidState
+	}
+	return bucketID, nil
+}
+
+func lockBucket(ctx context.Context, tx pgx.Tx, prepared preparedRequest, plan plannedBucket) (lockedBucket, error) {
+	var result lockedBucket
+	var organizationID, applicationID string
+	err := tx.QueryRow(ctx, `
+		SELECT quota_bucket_id, organization_id, application_id,
+		       hard_maximum, used_units, reserved_units,
+		       scope_type, scope_dimensions
+		FROM quota_buckets
+		WHERE quota_bucket_id = $1
+		  AND environment_id = $2
+		  AND limit_plan_key = $3
+		  AND rule_key = $4
+		  AND metric = $5
+		  AND algorithm = $6
+		  AND window_key = $7
+		  AND scope_key = $8
 		FOR UPDATE
-	`, prepared.EnvironmentID, prepared.LimitPlanKey, prepared.ruleKey,
-		prepared.rule.Metric, prepared.rule.Algorithm, windowKey,
-		prepared.scopeKey).Scan(
+	`, plan.bucketID, prepared.EnvironmentID, prepared.LimitPlanKey, plan.rule.ruleKey,
+		plan.rule.Metric, plan.rule.Algorithm, plan.period.key,
+		plan.rule.scopeKey).Scan(
 		&result.id, &organizationID, &applicationID,
 		&result.hardMaximum, &result.used, &result.reserved,
 		&result.scopeType, &result.scopeDimensions,
@@ -523,11 +681,56 @@ func lockBucket(ctx context.Context, tx pgx.Tx, prepared preparedRequest, window
 		return lockedBucket{}, persistenceFailure("lock quota bucket", err)
 	}
 	if organizationID != prepared.OrganizationID || applicationID != prepared.ApplicationID ||
-		result.scopeType != prepared.scopeType || !slicesEqual(result.scopeDimensions, prepared.scopeDimensions) ||
+		result.id != plan.bucketID || result.scopeType != plan.rule.scopeType ||
+		!slicesEqual(result.scopeDimensions, plan.rule.scopeDimensions) ||
 		id.Validate(result.id, id.QuotaBucket) != nil {
 		return lockedBucket{}, ErrInvalidState
 	}
 	return result, nil
+}
+
+func reservationEntries(plans []plannedBucket) []reservationEntry {
+	entries := make([]reservationEntry, len(plans))
+	for index := range plans {
+		entries[index] = reservationEntry{
+			bucketID: plans[index].locked.id,
+			entryID:  plans[index].entryID,
+			resetAt:  plans[index].period.end,
+		}
+	}
+	return entries
+}
+
+func maximumResetAt(entries []reservationEntry) time.Time {
+	var maximum time.Time
+	for _, entry := range entries {
+		if entry.resetAt.After(maximum) {
+			maximum = entry.resetAt
+		}
+	}
+	return maximum
+}
+
+func exceededError(logicalRequestID string, plans []plannedBucket, exceeded []int) *ExceededError {
+	selected := exceeded[0]
+	for _, index := range exceeded[1:] {
+		candidate, current := plans[index], plans[selected]
+		if candidate.period.end.After(current.period.end) ||
+			(candidate.period.end.Equal(current.period.end) &&
+				(candidate.rule.ruleKey < current.rule.ruleKey ||
+					(candidate.rule.ruleKey == current.rule.ruleKey &&
+						candidate.rule.scopeKey < current.rule.scopeKey))) {
+			selected = index
+		}
+	}
+	plan := plans[selected]
+	return &ExceededError{
+		logicalRequestID: logicalRequestID,
+		retryAt:          plan.period.end,
+		maximum:          plan.rule.Maximum,
+		used:             plan.locked.used,
+		reserved:         plan.locked.reserved,
+	}
 }
 
 // BeginAttempt atomically marks the logical request dispatched and records the
@@ -716,7 +919,7 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		(logical.status != "dispatched" && logical.status != "streaming") {
 		return ErrInvalidState
 	}
-	entry, err := lockSingleEntry(ctx, tx, reservation)
+	entries, err := lockEntries(ctx, tx, reservation)
 	if err != nil {
 		return err
 	}
@@ -728,7 +931,7 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
-	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entry, outcome, usageID, now); err != nil {
+	if err := settleLocked(ctx, tx, reservation, logical, storedAttempt, entries, outcome, usageID, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -737,7 +940,7 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	return nil
 }
 
-// ReleaseBeforeDispatch returns the reserved unit only when the logical
+// ReleaseBeforeDispatch returns every reserved unit only when the logical
 // request has no upstream-attempt row. The logical-request lock serializes this
 // proof with BeginAttempt.
 func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reservation, failureCode string) error {
@@ -776,7 +979,7 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 	if logical.status != "reserved" {
 		return ErrInvalidState
 	}
-	entry, err := lockSingleEntry(ctx, tx, lockedReservation)
+	entries, err := lockEntries(ctx, tx, lockedReservation)
 	if err != nil {
 		return err
 	}
@@ -784,7 +987,7 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 	if err != nil {
 		return err
 	}
-	if err := releaseLocked(ctx, tx, lockedReservation, logical, entry, "released", failureCode, now); err != nil {
+	if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, "released", failureCode, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -854,7 +1057,7 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	entry, err := lockSingleEntry(ctx, tx, lockedReservation)
+	entries, err := lockEntries(ctx, tx, lockedReservation)
 	if err != nil {
 		return false, err
 	}
@@ -878,11 +1081,11 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	}
 	if attemptExists {
 		outcome := Outcome{Status: AttemptTimedOut, FailureCode: expiryFailureCode}
-		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entry, outcome, usageID, now); err != nil {
+		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, outcome, usageID, now); err != nil {
 			return false, err
 		}
 	} else {
-		if err := releaseLocked(ctx, tx, lockedReservation, logical, entry, "expired", expiryFailureCode, now); err != nil {
+		if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, "expired", expiryFailureCode, now); err != nil {
 			return false, err
 		}
 	}
@@ -918,8 +1121,7 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 	if err != nil {
 		return lockedReservation{}, persistenceFailure("lock quota reservation", err)
 	}
-	result.Reservation.bucketID = expected.bucketID
-	result.Reservation.entryID = expected.entryID
+	result.Reservation.entries = append([]reservationEntry(nil), expected.entries...)
 	result.Reservation.routeKey = expected.routeKey
 	result.Reservation.upstreamKey = expected.upstreamKey
 	result.Reservation.modelKey = expected.modelKey
@@ -1039,7 +1241,7 @@ type lockedEntry struct {
 	hardMaximum    *int64
 }
 
-func lockSingleEntry(ctx context.Context, tx pgx.Tx, reservation lockedReservation) (lockedEntry, error) {
+func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
 		       entry.reserved_units, entry.settled_units, entry.released_units,
@@ -1052,86 +1254,102 @@ func lockSingleEntry(ctx context.Context, tx pgx.Tx, reservation lockedReservati
 		 AND bucket.quota_bucket_id = entry.quota_bucket_id
 		WHERE entry.organization_id = $1 AND entry.application_id = $2
 		  AND entry.environment_id = $3 AND entry.quota_reservation_id = $4
-		ORDER BY bucket.quota_bucket_id
+		ORDER BY bucket.quota_bucket_id COLLATE "C"
 		FOR UPDATE OF entry, bucket
 	`, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.reservationID)
 	if err != nil {
-		return lockedEntry{}, persistenceFailure("lock quota reservation entries", err)
+		return nil, persistenceFailure("lock quota reservation entries", err)
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return lockedEntry{}, persistenceFailure("read quota reservation entries", err)
+	entries := make([]lockedEntry, 0, len(reservation.entries))
+	for rows.Next() {
+		if len(entries) == maximumRulesPerRequest {
+			return nil, ErrInvalidState
 		}
-		return lockedEntry{}, ErrInvalidState
-	}
-	var result lockedEntry
-	if err := rows.Scan(
-		&result.id, &result.bucketID, &result.reservedUnits,
-		&result.settledUnits, &result.releasedUnits, &result.bucketUsed,
-		&result.bucketReserved, &result.hardMaximum,
-	); err != nil {
-		return lockedEntry{}, persistenceFailure("scan quota reservation entry", err)
-	}
-	if rows.Next() {
-		return lockedEntry{}, ErrInvalidState
+		var entry lockedEntry
+		if err := rows.Scan(
+			&entry.id, &entry.bucketID, &entry.reservedUnits,
+			&entry.settledUnits, &entry.releasedUnits, &entry.bucketUsed,
+			&entry.bucketReserved, &entry.hardMaximum,
+		); err != nil {
+			return nil, persistenceFailure("scan quota reservation entry", err)
+		}
+		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
+			(len(entries) > 0 && entries[len(entries)-1].bucketID >= entry.bucketID) {
+			return nil, ErrInvalidState
+		}
+		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
-		return lockedEntry{}, persistenceFailure("iterate quota reservation entries", err)
+		return nil, persistenceFailure("iterate quota reservation entries", err)
 	}
-	if reservation.entryID != "" && result.id != reservation.entryID {
-		return lockedEntry{}, ErrInvalidState
+	if len(entries) == 0 {
+		return nil, ErrInvalidState
 	}
-	if reservation.bucketID != "" && result.bucketID != reservation.bucketID {
-		return lockedEntry{}, ErrInvalidState
+	if len(reservation.entries) != 0 {
+		if len(entries) != len(reservation.entries) {
+			return nil, ErrInvalidState
+		}
+		for index := range entries {
+			if entries[index].id != reservation.entries[index].entryID ||
+				entries[index].bucketID != reservation.entries[index].bucketID {
+				return nil, ErrInvalidState
+			}
+		}
 	}
-	if id.Validate(result.id, id.QuotaEntry) != nil || id.Validate(result.bucketID, id.QuotaBucket) != nil {
-		return lockedEntry{}, ErrInvalidState
-	}
-	return result, nil
+	return entries, nil
 }
 
-func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, attempt storedAttempt, entry lockedEntry, outcome Outcome, usageID string, now time.Time) error {
+func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, attempt storedAttempt, entries []lockedEntry, outcome Outcome, usageID string, now time.Time) error {
 	if reservation.status != "pending" || attempt.status != "started" ||
 		(logical.status != "dispatched" && logical.status != "streaming") ||
-		entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
-		entry.bucketReserved < 1 || entry.hardMaximum == nil || entry.bucketUsed < 0 ||
-		entry.bucketUsed >= *entry.hardMaximum {
+		len(entries) < 1 || len(entries) > maximumRulesPerRequest {
 		return ErrInvalidState
+	}
+	for _, entry := range entries {
+		if entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+			entry.bucketReserved < 1 || entry.hardMaximum == nil || entry.bucketUsed < 0 ||
+			entry.bucketUsed >= *entry.hardMaximum {
+			return ErrInvalidState
+		}
 	}
 	if attempt.firstByteAt != nil && attempt.firstByteAt.After(now) {
 		now = attempt.firstByteAt.UTC()
 	}
-	command, err := tx.Exec(ctx, `
-		UPDATE quota_buckets
-		SET used_units = used_units + 1,
-		    reserved_units = reserved_units - 1,
-		    version = version + 1,
-		    updated_at = GREATEST(updated_at, $2)
-		WHERE quota_bucket_id = $1
-		  AND reserved_units >= 1
-		  AND hard_maximum IS NOT NULL
-		  AND used_units < hard_maximum
-	`, entry.bucketID, now)
-	if err != nil {
-		return persistenceFailure("settle quota bucket", err)
+	for _, entry := range entries {
+		command, err := tx.Exec(ctx, `
+			UPDATE quota_buckets
+			SET used_units = used_units + 1,
+			    reserved_units = reserved_units - 1,
+			    version = version + 1,
+			    updated_at = GREATEST(updated_at, $2)
+			WHERE quota_bucket_id = $1
+			  AND reserved_units >= 1
+			  AND hard_maximum IS NOT NULL
+			  AND used_units < hard_maximum
+		`, entry.bucketID, now)
+		if err != nil {
+			return persistenceFailure("settle quota bucket", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidState
+		}
+		command, err = tx.Exec(ctx, `
+			UPDATE quota_reservation_entries
+			SET settled_units = 1, released_units = 0
+			WHERE quota_reservation_entry_id = $1
+			  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
+		`, entry.id)
+		if err != nil {
+			return persistenceFailure("settle quota reservation entry", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidState
+		}
 	}
-	if command.RowsAffected() != 1 {
-		return ErrInvalidState
-	}
-	command, err = tx.Exec(ctx, `
-		UPDATE quota_reservation_entries
-		SET settled_units = 1, released_units = 0
-		WHERE quota_reservation_entry_id = $1
-		  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
-	`, entry.id)
-	if err != nil {
-		return persistenceFailure("settle quota reservation entry", err)
-	}
-	if command.RowsAffected() != 1 {
-		return ErrInvalidState
-	}
+	var command pgconn.CommandTag
+	var err error
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO usage_records (
 			usage_record_id, organization_id, application_id, environment_id,
@@ -1193,37 +1411,46 @@ func settleLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation,
 	return nil
 }
 
-func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, entry lockedEntry, reservationStatus, failureCode string, now time.Time) error {
+func releaseLocked(ctx context.Context, tx pgx.Tx, reservation lockedReservation, logical lockedLogical, entries []lockedEntry, reservationStatus, failureCode string, now time.Time) error {
 	if reservation.status != "pending" || logical.status != "reserved" ||
-		entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
-		entry.bucketReserved < 1 {
+		len(entries) < 1 || len(entries) > maximumRulesPerRequest {
 		return ErrInvalidState
 	}
-	command, err := tx.Exec(ctx, `
-		UPDATE quota_buckets
-		SET reserved_units = reserved_units - 1,
-		    version = version + 1,
-		    updated_at = GREATEST(updated_at, $2)
-		WHERE quota_bucket_id = $1 AND reserved_units >= 1
-	`, entry.bucketID, now)
-	if err != nil {
-		return persistenceFailure("release quota bucket", err)
+	for _, entry := range entries {
+		if entry.reservedUnits != 1 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+			entry.bucketReserved < 1 {
+			return ErrInvalidState
+		}
 	}
-	if command.RowsAffected() != 1 {
-		return ErrInvalidState
+	for _, entry := range entries {
+		command, err := tx.Exec(ctx, `
+			UPDATE quota_buckets
+			SET reserved_units = reserved_units - 1,
+			    version = version + 1,
+			    updated_at = GREATEST(updated_at, $2)
+			WHERE quota_bucket_id = $1 AND reserved_units >= 1
+		`, entry.bucketID, now)
+		if err != nil {
+			return persistenceFailure("release quota bucket", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidState
+		}
+		command, err = tx.Exec(ctx, `
+			UPDATE quota_reservation_entries
+			SET settled_units = 0, released_units = 1
+			WHERE quota_reservation_entry_id = $1
+			  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
+		`, entry.id)
+		if err != nil {
+			return persistenceFailure("release quota reservation entry", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidState
+		}
 	}
-	command, err = tx.Exec(ctx, `
-		UPDATE quota_reservation_entries
-		SET settled_units = 0, released_units = 1
-		WHERE quota_reservation_entry_id = $1
-		  AND reserved_units = 1 AND settled_units = 0 AND released_units = 0
-	`, entry.id)
-	if err != nil {
-		return persistenceFailure("release quota reservation entry", err)
-	}
-	if command.RowsAffected() != 1 {
-		return ErrInvalidState
-	}
+	var command pgconn.CommandTag
+	var err error
 	command, err = tx.Exec(ctx, `
 		UPDATE logical_requests
 		SET status = 'failed', completed_at = GREATEST(requested_at, $2),

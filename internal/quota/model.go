@@ -1,8 +1,10 @@
 // Package quota owns durable quota reservations and request accounting.
 //
-// The bounded implementation in this package deliberately supports only one
-// hard calendar logical-request rule per request. It does not accept client
-// supplied counters, bucket keys, rule hashes, usage totals, or timestamps.
+// The bounded implementation in this package deliberately supports only hard
+// calendar logical-request rules. One request may resolve to multiple rules,
+// which are reserved and finalized atomically. The package does not accept
+// client supplied counters, bucket keys, rule hashes, usage totals, or
+// timestamps.
 package quota
 
 import (
@@ -12,6 +14,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +26,9 @@ import (
 )
 
 const (
-	LogicalRequestsMetric = "logical_requests"
-	CalendarAlgorithm     = "calendar"
+	LogicalRequestsMetric  = "logical_requests"
+	CalendarAlgorithm      = "calendar"
+	maximumRulesPerRequest = 128
 
 	AttemptSucceeded = "succeeded"
 	AttemptFailed    = "failed"
@@ -70,7 +74,7 @@ const (
 	requestDigestDomain = "latchway/quota-request/v1\x00"
 )
 
-// Rule is a server-resolved limit rule. Reserve rejects every shape except one
+// Rule is a server-resolved limit rule. Reserve rejects every shape except a
 // hard logical_requests calendar rule with a non-empty unambiguous scope.
 type Rule struct {
 	Metric    string
@@ -125,14 +129,21 @@ type Reservation struct {
 	environmentID    string
 	logicalRequestID string
 	reservationID    string
-	bucketID         string
-	entryID          string
+	entries          []reservationEntry
 	routeKey         string
 	upstreamKey      string
 	modelKey         string
 	physicalModel    string
 	windowResetAt    time.Time
 	expiresAt        time.Time
+}
+
+// reservationEntry is sorted by bucketID. resetAt is derived from the trusted
+// rule window and is never loaded from or supplied to PostgreSQL.
+type reservationEntry struct {
+	bucketID string
+	entryID  string
+	resetAt  time.Time
 }
 
 func (reservation Reservation) LogicalRequestID() string { return reservation.logicalRequestID }
@@ -174,7 +185,11 @@ func (denial *ExceededError) Reserved() int64    { return denial.reserved }
 
 type preparedRequest struct {
 	ReserveInput
-	rule            Rule
+	rules []preparedRule
+}
+
+type preparedRule struct {
+	Rule
 	scopeDimensions []string
 	scopeType       string
 	ruleKey         string
@@ -208,17 +223,7 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		(input.ClientRequestID != "" &&
 			(len(input.ClientRequestID) < 8 || len(input.ClientRequestID) > 128 ||
 				!clientRequestPattern.MatchString(input.ClientRequestID))) ||
-		len(input.Rules) != 1 {
-		return preparedRequest{}, ErrInvalidInput
-	}
-
-	rule := input.Rules[0]
-	dimensions, err := canonicalScopeDimensions(rule.Scope)
-	if err != nil || rule.Metric != LogicalRequestsMetric ||
-		rule.Algorithm != CalendarAlgorithm || !rule.Hard || rule.Maximum <= 0 {
-		return preparedRequest{}, ErrInvalidInput
-	}
-	if _, err := parseCalendarSpec(rule.Window); err != nil {
+		len(input.Rules) < 1 || len(input.Rules) > maximumRulesPerRequest {
 		return preparedRequest{}, ErrInvalidInput
 	}
 
@@ -233,30 +238,57 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		"upstream":     input.UpstreamKey,
 		"model":        input.ModelKey,
 	}
-	ruleParts := []string{rule.Metric, rule.Algorithm, rule.Window}
-	ruleParts = append(ruleParts, dimensions...)
-	scopeParts := make([]string, 0, len(dimensions)*2)
-	for _, dimension := range dimensions {
-		scopeParts = append(scopeParts, dimension, values[dimension])
+	preparedRules := make([]preparedRule, 0, len(input.Rules))
+	for _, rule := range input.Rules {
+		dimensions, err := canonicalScopeDimensions(rule.Scope)
+		if err != nil || rule.Metric != LogicalRequestsMetric ||
+			rule.Algorithm != CalendarAlgorithm || !rule.Hard || rule.Maximum <= 0 {
+			return preparedRequest{}, ErrInvalidInput
+		}
+		if _, err := parseCalendarSpec(rule.Window); err != nil {
+			return preparedRequest{}, ErrInvalidInput
+		}
+		ruleParts := []string{rule.Metric, rule.Algorithm, rule.Window}
+		ruleParts = append(ruleParts, dimensions...)
+		scopeParts := make([]string, 0, len(dimensions)*2)
+		for _, dimension := range dimensions {
+			scopeParts = append(scopeParts, dimension, values[dimension])
+		}
+		scopeType := dimensions[0]
+		if len(dimensions) > 1 {
+			scopeType = "composite"
+		}
+		preparedRules = append(preparedRules, preparedRule{
+			Rule: Rule{
+				Metric: rule.Metric, Algorithm: rule.Algorithm,
+				Scope: append([]string(nil), dimensions...), Window: rule.Window,
+				Maximum: rule.Maximum, Hard: rule.Hard,
+			},
+			scopeDimensions: dimensions,
+			scopeType:       scopeType,
+			ruleKey:         canonicalDigest(ruleDigestDomain, ruleParts),
+			scopeKey:        canonicalDigest(scopeDigestDomain, scopeParts),
+		})
 	}
-	scopeType := dimensions[0]
-	if len(dimensions) > 1 {
-		scopeType = "composite"
+	sort.Slice(preparedRules, func(left, right int) bool {
+		if preparedRules[left].ruleKey != preparedRules[right].ruleKey {
+			return preparedRules[left].ruleKey < preparedRules[right].ruleKey
+		}
+		return preparedRules[left].scopeKey < preparedRules[right].scopeKey
+	})
+	for index := 1; index < len(preparedRules); index++ {
+		if preparedRules[index-1].ruleKey == preparedRules[index].ruleKey &&
+			preparedRules[index-1].scopeKey == preparedRules[index].scopeKey {
+			return preparedRequest{}, ErrInvalidInput
+		}
 	}
 
-	prepared := preparedRequest{
-		ReserveInput:    input,
-		rule:            rule,
-		scopeDimensions: dimensions,
-		scopeType:       scopeType,
-		ruleKey:         canonicalDigest(ruleDigestDomain, ruleParts),
-		scopeKey:        canonicalDigest(scopeDigestDomain, scopeParts),
+	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
+	prepared.Rules = make([]Rule, len(preparedRules))
+	for index := range preparedRules {
+		prepared.Rules[index] = preparedRules[index].Rule
+		prepared.Rules[index].Scope = append([]string(nil), preparedRules[index].Scope...)
 	}
-	prepared.Rules = []Rule{{
-		Metric: rule.Metric, Algorithm: rule.Algorithm,
-		Scope: append([]string(nil), dimensions...), Window: rule.Window,
-		Maximum: rule.Maximum, Hard: rule.Hard,
-	}}
 	return prepared, nil
 }
 
@@ -320,9 +352,9 @@ func requestFingerprint(prepared preparedRequest) string {
 		prepared.UpstreamKey,
 		prepared.ModelKey,
 		prepared.PhysicalModel,
-		prepared.ruleKey,
-		prepared.scopeKey,
-		strconv.FormatInt(prepared.rule.Maximum, 10),
+	}
+	for _, rule := range prepared.rules {
+		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))
 	}
 	return canonicalDigest(requestDigestDomain, parts)
 }
@@ -361,13 +393,31 @@ func (reservation Reservation) validate() error {
 		id.Validate(reservation.environmentID, id.Environment) != nil ||
 		id.Validate(reservation.logicalRequestID, id.LogicalRequest) != nil ||
 		id.Validate(reservation.reservationID, id.QuotaReservation) != nil ||
-		id.Validate(reservation.bucketID, id.QuotaBucket) != nil ||
-		id.Validate(reservation.entryID, id.QuotaEntry) != nil ||
 		!identifierPattern.MatchString(reservation.routeKey) ||
 		!identifierPattern.MatchString(reservation.upstreamKey) ||
 		!identifierPattern.MatchString(reservation.modelKey) ||
 		!validPhysicalModel(reservation.physicalModel) ||
-		reservation.windowResetAt.IsZero() || reservation.expiresAt.IsZero() {
+		reservation.windowResetAt.IsZero() || reservation.expiresAt.IsZero() ||
+		len(reservation.entries) < 1 || len(reservation.entries) > maximumRulesPerRequest {
+		return ErrInvalidInput
+	}
+	var maximumReset time.Time
+	entryIDs := make(map[string]struct{}, len(reservation.entries))
+	for index, entry := range reservation.entries {
+		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
+			id.Validate(entry.entryID, id.QuotaEntry) != nil || entry.resetAt.IsZero() ||
+			(index > 0 && reservation.entries[index-1].bucketID >= entry.bucketID) {
+			return ErrInvalidInput
+		}
+		if _, duplicate := entryIDs[entry.entryID]; duplicate {
+			return ErrInvalidInput
+		}
+		entryIDs[entry.entryID] = struct{}{}
+		if entry.resetAt.After(maximumReset) {
+			maximumReset = entry.resetAt
+		}
+	}
+	if !reservation.windowResetAt.Equal(maximumReset) {
 		return ErrInvalidInput
 	}
 	return nil

@@ -3,8 +3,12 @@ package quota
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/requestidentity"
@@ -18,10 +22,11 @@ func TestPrepareRequestCanonicalizesTrustedBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare request: %v", err)
 	}
-	if got, want := strings.Join(prepared.scopeDimensions, ","), "environment,user,feature"; got != want {
+	preparedRule := prepared.rules[0]
+	if got, want := strings.Join(preparedRule.scopeDimensions, ","), "environment,user,feature"; got != want {
 		t.Fatalf("scope dimensions = %q, want %q", got, want)
 	}
-	if prepared.scopeType != "composite" || len(prepared.ruleKey) != 43 || len(prepared.scopeKey) != 43 || prepared.ruleKey == prepared.scopeKey {
+	if preparedRule.scopeType != "composite" || len(preparedRule.ruleKey) != 43 || len(preparedRule.scopeKey) != 43 || preparedRule.ruleKey == preparedRule.scopeKey {
 		t.Fatalf("unexpected bucket identity: %#v", prepared)
 	}
 
@@ -32,7 +37,7 @@ func TestPrepareRequestCanonicalizesTrustedBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare reordered request: %v", err)
 	}
-	if canonical.ruleKey != prepared.ruleKey || canonical.scopeKey != prepared.scopeKey {
+	if canonical.rules[0].ruleKey != preparedRule.ruleKey || canonical.rules[0].scopeKey != preparedRule.scopeKey {
 		t.Fatal("scope order changed a canonical digest")
 	}
 
@@ -43,7 +48,7 @@ func TestPrepareRequestCanonicalizesTrustedBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare changed maximum: %v", err)
 	}
-	if maximumPrepared.ruleKey != prepared.ruleKey || maximumPrepared.scopeKey != prepared.scopeKey {
+	if maximumPrepared.rules[0].ruleKey != preparedRule.ruleKey || maximumPrepared.rules[0].scopeKey != preparedRule.scopeKey {
 		t.Fatal("mutable maximum changed persistent quota identity")
 	}
 
@@ -53,7 +58,7 @@ func TestPrepareRequestCanonicalizesTrustedBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare changed feature: %v", err)
 	}
-	if featurePrepared.ruleKey != prepared.ruleKey || featurePrepared.scopeKey == prepared.scopeKey {
+	if featurePrepared.rules[0].ruleKey != preparedRule.ruleKey || featurePrepared.rules[0].scopeKey == preparedRule.scopeKey {
 		t.Fatal("server-owned scope value was omitted from scope identity")
 	}
 }
@@ -91,6 +96,160 @@ func TestRequestFingerprintBindsOpaqueLogicalIdentityAndTrustedDecision(t *testi
 	}
 	if requestFingerprint(logicalPrepared) == fingerprint {
 		t.Fatal("opaque logical request identity was omitted from fingerprint")
+	}
+}
+
+func TestPrepareRequestCanonicalizesMultipleRulesIndependentOfConfigurationOrder(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = []Rule{
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"feature", "user"}, Window: "1d", Maximum: 5, Hard: true,
+		},
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"organization"}, Window: "1mo", Maximum: 500, Hard: true,
+		},
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"installation", "environment"}, Window: "1h", Maximum: 20, Hard: true,
+		},
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare multi-rule request: %v", err)
+	}
+	if len(prepared.rules) != len(input.Rules) || len(prepared.Rules) != len(input.Rules) {
+		t.Fatalf("prepared rules = %d/%d, want %d", len(prepared.rules), len(prepared.Rules), len(input.Rules))
+	}
+	for index := 1; index < len(prepared.rules); index++ {
+		left, right := prepared.rules[index-1], prepared.rules[index]
+		if left.ruleKey > right.ruleKey || (left.ruleKey == right.ruleKey && left.scopeKey >= right.scopeKey) {
+			t.Fatalf("prepared rules are not in canonical identity order: %#v", prepared.rules)
+		}
+	}
+
+	reversed := cloneReserveInput(input)
+	slices.Reverse(reversed.Rules)
+	for index := range reversed.Rules {
+		slices.Reverse(reversed.Rules[index].Scope)
+	}
+	reordered, err := prepareRequest(reversed)
+	if err != nil {
+		t.Fatalf("prepare reversed multi-rule request: %v", err)
+	}
+	if requestFingerprint(reordered) != requestFingerprint(prepared) {
+		t.Fatal("configuration order changed the trusted request fingerprint")
+	}
+	for index := range prepared.rules {
+		if prepared.rules[index].ruleKey != reordered.rules[index].ruleKey ||
+			prepared.rules[index].scopeKey != reordered.rules[index].scopeKey ||
+			prepared.rules[index].Maximum != reordered.rules[index].Maximum {
+			t.Fatalf("canonical rule %d differs after reversal", index)
+		}
+	}
+
+	changed := cloneReserveInput(input)
+	changed.Rules[1].Maximum++
+	changedPrepared, err := prepareRequest(changed)
+	if err != nil {
+		t.Fatalf("prepare changed multi-rule maximum: %v", err)
+	}
+	if requestFingerprint(changedPrepared) == requestFingerprint(prepared) {
+		t.Fatal("one rule maximum was omitted from the trusted request fingerprint")
+	}
+}
+
+func TestPrepareRequestRejectsDuplicateImmutableBucketIdentity(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	duplicate := input.Rules[0]
+	duplicate.Scope = []string{"feature", "user"}
+	duplicate.Maximum++
+	input.Rules = append(input.Rules, duplicate)
+	if _, err := prepareRequest(input); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("duplicate immutable bucket identity returned %v", err)
+	}
+}
+
+func TestPrepareRequestSupportsBoundedRuleSet(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = make([]Rule, maximumRulesPerRequest)
+	for index := range input.Rules {
+		input.Rules[index] = Rule{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: fmt.Sprintf("%dm", index+1),
+			Maximum: int64(index + 1), Hard: true,
+		}
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare maximum bounded rule set: %v", err)
+	}
+	if len(prepared.rules) != maximumRulesPerRequest {
+		t.Fatalf("prepared rule count = %d, want %d", len(prepared.rules), maximumRulesPerRequest)
+	}
+
+	over := cloneReserveInput(input)
+	over.Rules = append(over.Rules, Rule{
+		Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+		Scope: []string{"user"}, Window: "129m", Maximum: 129, Hard: true,
+	})
+	if _, err := prepareRequest(over); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("over-limit rule set returned %v", err)
+	}
+}
+
+func TestExceededErrorTieBreaksByCanonicalRuleIdentity(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = []Rule{
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1d", Maximum: 3, Hard: true,
+		},
+		{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user"}, Window: "1d", Maximum: 7, Hard: true,
+		},
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare equal-reset rules: %v", err)
+	}
+	period, err := calendarWindow(time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC), "1d")
+	if err != nil {
+		t.Fatalf("build equal calendar window: %v", err)
+	}
+
+	const lowBucketID = "qbk_00000000000000000000000000"
+	const highBucketID = "qbk_7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+	makePlans := func(canonicalFirstBucketID, canonicalSecondBucketID string) []plannedBucket {
+		plans := []plannedBucket{
+			{
+				rule: prepared.rules[0], period: period, bucketID: canonicalFirstBucketID,
+				locked: lockedBucket{used: 11, reserved: 2},
+			},
+			{
+				rule: prepared.rules[1], period: period, bucketID: canonicalSecondBucketID,
+				locked: lockedBucket{used: 17, reserved: 5},
+			},
+		}
+		sort.Slice(plans, func(left, right int) bool { return plans[left].bucketID < plans[right].bucketID })
+		return plans
+	}
+
+	firstAllocation := makePlans(highBucketID, lowBucketID)
+	secondAllocation := makePlans(lowBucketID, highBucketID)
+	first := exceededError(input.LogicalRequestID.String(), firstAllocation, []int{0, 1})
+	second := exceededError(input.LogicalRequestID.String(), secondAllocation, []int{0, 1})
+	want := prepared.rules[0]
+	if first.Maximum() != want.Maximum || first.Used() != 11 || first.Reserved() != 2 ||
+		second.Maximum() != want.Maximum || second.Used() != 11 || second.Reserved() != 2 ||
+		!first.RetryAt().Equal(period.end) || !second.RetryAt().Equal(period.end) {
+		t.Fatalf("equal-reset denials changed with bucket allocation: first=%#v second=%#v", first, second)
 	}
 }
 
