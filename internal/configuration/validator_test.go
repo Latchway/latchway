@@ -53,20 +53,40 @@ func TestValidatorRequiresExplicitLimitScopeAtActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := configurationObject(t)
-	limit := objectArray(objectArray(objectValue(document, "spec"), "limitPlans")[0], "limits")[0]
-	delete(limit, "scope")
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name  string
+		limit map[string]any
+	}{
+		{
+			name: "logical request calendar",
+			limit: map[string]any{
+				"metric": "logical_requests", "window": "1d", "maximum": json.Number("5"),
+			},
+		},
+		{
+			name: "output token per request",
+			limit: map[string]any{
+				"metric": "output_tokens", "perRequestMaximum": json.Number("100"),
+			},
+		},
 	}
-	issues := validator.SchemaIssues(encoded)
-	if len(issues) != 0 {
-		t.Fatalf("missing scope must remain draft-schema-valid: %+v", issues)
-	}
-	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-	if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_capability_unsupported") {
-		t.Fatalf("missing scope activated: report=%+v compiled=%q", report, compiled)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			objectArray(objectValue(document, "spec"), "limitPlans")[0]["limits"] = []any{test.limit}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issues := validator.SchemaIssues(encoded)
+			if len(issues) != 0 {
+				t.Fatalf("missing scope must remain draft-schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_capability_unsupported") {
+				t.Fatalf("missing scope activated: report=%+v compiled=%q", report, compiled)
+			}
+		})
 	}
 }
 
@@ -96,9 +116,9 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			},
 		},
 		{
-			name: "per request",
+			name: "logical requests per request",
 			limit: map[string]any{
-				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"metric": "logical_requests", "algorithm": "per_request", "scope": []any{"user"},
 				"perRequestMaximum": json.Number("100"),
 			},
 		},
@@ -106,6 +126,20 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			name: "future metric",
 			limit: map[string]any{
 				"metric": "input_tokens", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("100"),
+			},
+		},
+		{
+			name: "total token metric",
+			limit: map[string]any{
+				"metric": "total_tokens", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("100"),
+			},
+		},
+		{
+			name: "cost metric",
+			limit: map[string]any{
+				"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
 				"window": "1d", "maximum": json.Number("100"),
 			},
 		},
@@ -140,11 +174,17 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_capability_unsupported") {
 				t.Fatalf("unsupported limit activated: report=%+v compiled=%q", report, compiled)
 			}
+			for _, issue := range report.Issues {
+				if issue.Code == "limit_capability_unsupported" &&
+					(!strings.Contains(issue.Message, "output_tokens calendar") || !strings.Contains(issue.Message, "output_tokens per_request")) {
+					t.Fatalf("stale capability wording: %q", issue.Message)
+				}
+			}
 		})
 	}
 }
 
-func TestValidatorCanonicalizesMultipleRulesAndRejectsDuplicateImmutableIdentity(t *testing.T) {
+func TestValidatorActivatesMixedBoundedRequestAndOutputTokenLimits(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -155,12 +195,17 @@ func TestValidatorCanonicalizesMultipleRulesAndRejectsDuplicateImmutableIdentity
 	plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
 	plan["limits"] = []any{
 		map[string]any{
+			"metric": "output_tokens", "algorithm": "per_request",
+			"scope":             []any{"model", "organization", "user"},
+			"perRequestMaximum": json.Number("4.096e3"),
+		},
+		map[string]any{
 			"metric": "logical_requests", "scope": []any{"feature", "user"},
 			"window": "1d", "maximum": json.Number("5"),
 		},
 		map[string]any{
-			"metric": "logical_requests", "scope": []any{"application"},
-			"window": "1d", "maximum": json.Number("100"),
+			"metric": "output_tokens", "scope": []any{"upstream", "route", "application"},
+			"window": "12mo", "maximum": json.Number("100000.0"),
 		},
 	}
 	encoded, err := json.Marshal(document)
@@ -176,32 +221,236 @@ func TestValidatorCanonicalizesMultipleRulesAndRejectsDuplicateImmutableIdentity
 		t.Fatal(err)
 	}
 	limits := objectArray(objectArray(objectValue(value.(map[string]any), "spec"), "limitPlans")[0], "limits")
-	if len(limits) != 2 || !slices.Equal(stringArray(limits[0], "scope"), []string{"user", "feature"}) {
+	if len(limits) != 3 ||
+		stringValue(limits[0], "algorithm") != "per_request" ||
+		!slices.Equal(stringArray(limits[0], "scope"), []string{"organization", "user", "model"}) ||
+		stringValue(limits[1], "algorithm") != "calendar" ||
+		!slices.Equal(stringArray(limits[1], "scope"), []string{"user", "feature"}) ||
+		stringValue(limits[2], "algorithm") != "calendar" ||
+		!slices.Equal(stringArray(limits[2], "scope"), []string{"application", "route", "upstream"}) {
 		t.Fatalf("compiled multi-rule limits = %#v", limits)
 	}
-
-	duplicate := configurationObject(t)
-	duplicatePlan := objectArray(objectValue(duplicate, "spec"), "limitPlans")[0]
-	duplicatePlan["limits"] = []any{
-		map[string]any{
-			"metric": "logical_requests", "scope": []any{"feature", "user"},
-			"window": "1d", "maximum": json.Number("5"),
-		},
-		map[string]any{
-			"metric": "logical_requests", "scope": []any{"user", "feature"},
-			"window": "1d", "maximum": json.Number("10"),
-		},
+	snapshot, err := newActiveSnapshot("rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled)
+	if err != nil {
+		t.Fatalf("newActiveSnapshot() error = %v", err)
 	}
-	duplicateJSON, err := json.Marshal(duplicate)
+	runtimePlan, ok := snapshot.LimitPlan("free")
+	if !ok || len(runtimePlan.Limits) != 3 ||
+		runtimePlan.Limits[0].Metric != "output_tokens" || runtimePlan.Limits[0].Algorithm != "per_request" || runtimePlan.Limits[0].PerRequestMaximum != 4096 ||
+		runtimePlan.Limits[1].Metric != "logical_requests" || runtimePlan.Limits[1].Maximum != 5 ||
+		runtimePlan.Limits[2].Metric != "output_tokens" || runtimePlan.Limits[2].Algorithm != "calendar" || runtimePlan.Limits[2].Window != "12mo" || runtimePlan.Limits[2].Maximum != 100000 {
+		t.Fatalf("runtime mixed plan = %+v ok=%t", runtimePlan, ok)
+	}
+	runtimePlan.Limits[0].Scope[0] = "changed"
+	runtimeAgain, _ := snapshot.LimitPlan("free")
+	if !slices.Equal(runtimeAgain.Limits[0].Scope, []string{"organization", "user", "model"}) {
+		t.Fatalf("runtime mixed plan aliased returned scope: %+v", runtimeAgain)
+	}
+}
+
+func TestValidatorActivatesOutputTokenPerRequestOnlyPlan(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issues := validator.SchemaIssues(duplicateJSON); len(issues) != 0 {
-		t.Fatalf("duplicate immutable identities should remain schema-valid: %+v", issues)
+	document := configurationObject(t)
+	plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
+	plan["limits"] = []any{
+		map[string]any{
+			"metric":            "output_tokens",
+			"scope":             []any{"model", "upstream", "route", "feature", "installation", "user", "environment", "application", "organization"},
+			"perRequestMaximum": json.Number("9223372036854775807"),
+		},
 	}
-	report, compiled = validator.Validate(duplicateJSON, testEnvironment(), time.Now())
-	if report.Valid || compiled != nil || !hasIssue(report.Issues, "duplicate_limit_rule") {
-		t.Fatalf("duplicate immutable identity activated: report=%+v compiled=%q", report, compiled)
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("per-request-only plan rejected: %+v", report.Issues)
+	}
+	snapshot, err := newActiveSnapshot("rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimePlan, ok := snapshot.LimitPlan("free")
+	if !ok || len(runtimePlan.Limits) != 1 || runtimePlan.Limits[0].Algorithm != "per_request" ||
+		runtimePlan.Limits[0].PerRequestMaximum != 9223372036854775807 ||
+		!slices.Equal(runtimePlan.Limits[0].Scope, executableLimitScopeOrder) {
+		t.Fatalf("per-request-only runtime plan = %+v ok=%t", runtimePlan, ok)
+	}
+}
+
+func TestValidatorRejectsExecutableLimitFieldShapeMismatches(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		limit map[string]any
+	}{
+		{
+			name: "calendar with per request maximum",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("100"), "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
+			name: "calendar missing maximum",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
+			name: "per request with window",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"window": "1d", "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
+			name: "per request with maximum",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"maximum": json.Number("100"), "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
+			name: "per request with token bucket fields",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"perRequestMaximum": json.Number("10"), "capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			objectArray(objectValue(document, "spec"), "limitPlans")[0]["limits"] = []any{test.limit}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+				t.Fatalf("field-shape mismatch must remain schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_algorithm_fields_invalid") || !hasIssue(report.Issues, "limit_capability_unsupported") {
+				t.Fatalf("field-shape mismatch activated: report=%+v compiled=%q", report, compiled)
+			}
+		})
+	}
+}
+
+func TestValidatorRejectsNonPositiveFractionalAndOutOfRangeLimitIntegers(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		limit map[string]any
+	}{
+		{
+			name: "negative integral decimal",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("-1.0"),
+			},
+		},
+		{
+			name: "fractional per request maximum",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"perRequestMaximum": json.Number("4096.5"),
+			},
+		},
+		{
+			name: "out of int64 range exponent",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"perRequestMaximum": json.Number("9.223372036854775808e18"),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			objectArray(objectValue(document, "spec"), "limitPlans")[0]["limits"] = []any{test.limit}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) == 0 {
+				t.Fatal("invalid integer value passed the public schema")
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil {
+				t.Fatalf("invalid integer value activated: report=%+v compiled=%q", report, compiled)
+			}
+		})
+	}
+}
+
+func TestValidatorRejectsDuplicateImmutableLimitIdentityByMetricAndAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		limits []any
+	}{
+		{
+			name: "logical request calendar",
+			limits: []any{
+				map[string]any{"metric": "logical_requests", "scope": []any{"feature", "user"}, "window": "1d", "maximum": json.Number("5")},
+				map[string]any{"metric": "logical_requests", "scope": []any{"user", "feature"}, "window": "1d", "maximum": json.Number("10")},
+			},
+		},
+		{
+			name: "output token calendar",
+			limits: []any{
+				map[string]any{"metric": "output_tokens", "scope": []any{"model", "user"}, "window": "1d", "maximum": json.Number("100")},
+				map[string]any{"metric": "output_tokens", "scope": []any{"user", "model"}, "window": "1d", "maximum": json.Number("200")},
+			},
+		},
+		{
+			name: "output token per request",
+			limits: []any{
+				map[string]any{"metric": "output_tokens", "scope": []any{"model", "user"}, "perRequestMaximum": json.Number("100")},
+				map[string]any{"metric": "output_tokens", "scope": []any{"user", "model"}, "perRequestMaximum": json.Number("200")},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			duplicate := configurationObject(t)
+			objectArray(objectValue(duplicate, "spec"), "limitPlans")[0]["limits"] = test.limits
+			duplicateJSON, err := json.Marshal(duplicate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issues := validator.SchemaIssues(duplicateJSON); len(issues) != 0 {
+				t.Fatalf("duplicate immutable identities should remain schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(duplicateJSON, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "duplicate_limit_rule") {
+				t.Fatalf("duplicate immutable identity activated: report=%+v compiled=%q", report, compiled)
+			}
+		})
 	}
 }
 

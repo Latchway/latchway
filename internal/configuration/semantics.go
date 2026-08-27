@@ -452,7 +452,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits with a supported window, positive maximum, and explicit nonempty scope.",
+					"This release can activate only hard logical_requests calendar limits, hard output_tokens calendar limits, or hard output_tokens per_request limits; calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
@@ -685,8 +685,7 @@ func integerField(parent map[string]any, key string) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	parsed, err := value.Int64()
-	return parsed, err == nil
+	return parseJSONInteger(value)
 }
 
 func numberArrayContains(parent map[string]any, key, expected string) bool {

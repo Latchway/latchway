@@ -45,10 +45,24 @@ type immutableLimitIdentity struct {
 }
 
 func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool) {
-	if limit.Metric != "logical_requests" || limit.Algorithm != "calendar" ||
-		!limit.Hard || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
-		limit.Capacity != 0 || limit.RefillPerSecond.String() != "" ||
-		!executableCalendarWindow(limit.Window) {
+	if !limit.Hard {
+		return Limit{}, immutableLimitIdentity{}, false
+	}
+	switch limit.Algorithm {
+	case "calendar":
+		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens") ||
+			limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
+			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" ||
+			!executableCalendarWindow(limit.Window) {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	case "per_request":
+		if limit.Metric != "output_tokens" || limit.Window != "" ||
+			limit.Maximum != 0 || limit.PerRequestMaximum <= 0 ||
+			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	default:
 		return Limit{}, immutableLimitIdentity{}, false
 	}
 	scope, ok := canonicalLimitScope(limit.Scope)

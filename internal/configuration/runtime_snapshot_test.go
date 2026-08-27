@@ -301,6 +301,93 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "output calendar with per request field",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["perRequestMaximum"] = json.Number("1")
+			},
+		},
+		{
+			name: "negative integral decimal calendar maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["maximum"] = json.Number("-1.0")
+			},
+		},
+		{
+			name: "fractional calendar maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["maximum"] = json.Number("5.5")
+			},
+		},
+		{
+			name: "quoted calendar maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["maximum"] = "100"
+			},
+		},
+		{
+			name: "out of int64 range per request maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["algorithm"] = "per_request"
+				delete(limit, "window")
+				delete(limit, "maximum")
+				limit["perRequestMaximum"] = json.Number("9.223372036854775808e18")
+			},
+		},
+		{
+			name: "quoted per request maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["algorithm"] = "per_request"
+				delete(limit, "window")
+				delete(limit, "maximum")
+				limit["perRequestMaximum"] = "4.096e3"
+			},
+		},
+		{
+			name: "output per request with explicit zero calendar maximum",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["algorithm"] = "per_request"
+				delete(limit, "window")
+				limit["maximum"] = json.Number("0")
+				limit["perRequestMaximum"] = json.Number("100")
+			},
+		},
+		{
+			name: "output per request with explicit null refill",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "output_tokens"
+				limit["algorithm"] = "per_request"
+				delete(limit, "window")
+				delete(limit, "maximum")
+				limit["perRequestMaximum"] = json.Number("100")
+				limit["refillPerSecond"] = nil
+			},
+		},
+		{
+			name: "logical requests per request",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["algorithm"] = "per_request"
+				delete(limit, "window")
+				delete(limit, "maximum")
+				limit["perRequestMaximum"] = json.Number("100")
+			},
+		},
+		{
 			name: "unsupported limit metric",
 			mutate: func(spec map[string]any) {
 				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
@@ -355,6 +442,35 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 				duplicate["scope"] = []any{"feature", "user"}
 				duplicate["maximum"] = json.Number("10")
 				plan["limits"] = append(limits, duplicate)
+			},
+		},
+		{
+			name: "duplicate output per request identity",
+			mutate: func(spec map[string]any) {
+				plan := objectArray(spec, "limitPlans")[0]
+				first := objectArray(plan, "limits")[0]
+				first["metric"] = "output_tokens"
+				first["algorithm"] = "per_request"
+				first["scope"] = []any{"model", "user"}
+				delete(first, "window")
+				delete(first, "maximum")
+				first["perRequestMaximum"] = json.Number("100")
+				duplicate := deepClone(first).(map[string]any)
+				duplicate["scope"] = []any{"user", "model"}
+				duplicate["perRequestMaximum"] = json.Number("200")
+				plan["limits"] = []any{first, duplicate}
+			},
+		},
+		{
+			name: "more than 128 executable limits",
+			mutate: func(spec map[string]any) {
+				plan := objectArray(spec, "limitPlans")[0]
+				first := objectArray(plan, "limits")[0]
+				limits := make([]any, maximumExecutableLimitRules+1)
+				for index := range limits {
+					limits[index] = deepClone(first)
+				}
+				plan["limits"] = limits
 			},
 		},
 		{

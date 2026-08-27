@@ -1,6 +1,8 @@
 package configuration
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"path"
@@ -51,8 +53,99 @@ type compiledModel struct {
 }
 
 type compiledLimitPlan struct {
-	ID     string  `json:"id"`
-	Limits []Limit `json:"limits"`
+	ID     string          `json:"id"`
+	Limits []compiledLimit `json:"limits"`
+}
+
+// compiledLimit retains field presence so the active-snapshot boundary can
+// independently enforce exact algorithm shapes. Relying only on zero values
+// would make an omitted field indistinguishable from a corrupt explicit zero
+// or null in compiled JSON.
+type compiledLimit struct {
+	Limit
+	hasWindow            bool
+	hasMaximum           bool
+	hasPerRequestMaximum bool
+	hasCapacity          bool
+	hasRefillPerSecond   bool
+}
+
+func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return err
+	}
+	for field := range fields {
+		switch field {
+		case "metric", "algorithm", "scope", "window", "maximum", "perRequestMaximum", "capacity", "refillPerSecond", "hard":
+		default:
+			return ErrInvalid
+		}
+	}
+	var decoded struct {
+		Metric    string   `json:"metric"`
+		Algorithm string   `json:"algorithm"`
+		Scope     []string `json:"scope"`
+		Window    string   `json:"window"`
+		Hard      bool     `json:"hard"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return err
+	}
+	_, limit.hasWindow = fields["window"]
+	_, limit.hasMaximum = fields["maximum"]
+	_, limit.hasPerRequestMaximum = fields["perRequestMaximum"]
+	_, limit.hasCapacity = fields["capacity"]
+	_, limit.hasRefillPerSecond = fields["refillPerSecond"]
+	maximum, ok := compiledLimitInteger(fields["maximum"], limit.hasMaximum)
+	if !ok {
+		return ErrInvalid
+	}
+	perRequestMaximum, ok := compiledLimitInteger(fields["perRequestMaximum"], limit.hasPerRequestMaximum)
+	if !ok {
+		return ErrInvalid
+	}
+	capacity, ok := compiledLimitInteger(fields["capacity"], limit.hasCapacity)
+	if !ok {
+		return ErrInvalid
+	}
+	limit.Limit = Limit{
+		Metric: decoded.Metric, Algorithm: decoded.Algorithm,
+		Scope: append([]string(nil), decoded.Scope...), Window: decoded.Window,
+		Maximum: maximum, PerRequestMaximum: perRequestMaximum,
+		Capacity: capacity,
+		Hard:     decoded.Hard,
+	}
+	return nil
+}
+
+func compiledLimitInteger(raw json.RawMessage, present bool) (int64, bool) {
+	if !present {
+		return 0, true
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || (trimmed[0] != '-' && !isASCIIDigit(trimmed[0])) {
+		return 0, false
+	}
+	return parseJSONInteger(json.Number(trimmed))
+}
+
+func (limit compiledLimit) normalizeExecutable() (Limit, immutableLimitIdentity, bool) {
+	switch limit.Algorithm {
+	case "calendar":
+		if !limit.hasWindow || !limit.hasMaximum || limit.hasPerRequestMaximum ||
+			limit.hasCapacity || limit.hasRefillPerSecond {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	case "per_request":
+		if !limit.hasPerRequestMaximum || limit.hasWindow || limit.hasMaximum ||
+			limit.hasCapacity || limit.hasRefillPerSecond {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	default:
+		return Limit{}, immutableLimitIdentity{}, false
+	}
+	return normalizeExecutableLimit(limit.Limit)
 }
 
 type compiledFeature struct {
@@ -264,7 +357,7 @@ func runtimeLimitPlan(raw compiledLimitPlan) (LimitPlan, error) {
 	plan := LimitPlan{ID: raw.ID, Limits: make([]Limit, 0, len(raw.Limits))}
 	seenIdentities := make(map[immutableLimitIdentity]struct{}, len(raw.Limits))
 	for _, rawLimit := range raw.Limits {
-		limit, identity, ok := normalizeExecutableLimit(rawLimit)
+		limit, identity, ok := rawLimit.normalizeExecutable()
 		if !ok {
 			return LimitPlan{}, ErrInvalid
 		}
