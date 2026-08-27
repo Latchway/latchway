@@ -1,0 +1,212 @@
+registry_version: 1
+contract_version: 0.1.0
+problem_media_type: application/problem+json
+fields:
+  required: [type, title, status, detail, code, request_id, retryable]
+  optional: [instance, retry_after, feature, supported_protocol_versions, errors]
+codes:
+  request_invalid:
+    status: 400
+    title: Invalid request
+    retryable: false
+    guidance: Correct the request using the field-level errors before retrying.
+  identity_token_missing:
+    status: 401
+    title: Identity token required
+    retryable: false
+    guidance: Obtain a current token from the configured application identity provider.
+  identity_token_invalid:
+    status: 401
+    title: Identity token invalid
+    retryable: false
+    guidance: Reauthenticate with the application identity provider.
+  identity_token_expired:
+    status: 401
+    title: Identity token expired
+    retryable: false
+    guidance: Refresh or reacquire the application identity token.
+  identity_reauthentication_required:
+    status: 401
+    title: Identity reauthentication required
+    retryable: false
+    guidance: Perform an interactive or provider-approved reauthentication.
+  attestation_required:
+    status: 401
+    title: Attestation required
+    retryable: false
+    guidance: Complete the configured platform attestation flow.
+  attestation_unsupported:
+    status: 400
+    title: Attestation unsupported
+    retryable: false
+    guidance: Use a supported platform/provider or contact the application operator.
+  attestation_invalid:
+    status: 401
+    title: Attestation invalid
+    retryable: false
+    guidance: Recreate platform evidence from the active challenge; do not reuse evidence.
+  attestation_stale:
+    status: 401
+    title: Attestation stale
+    retryable: false
+    guidance: Obtain fresh attestation evidence.
+  attestation_step_up_required:
+    status: 401
+    title: Stronger attestation required
+    retryable: false
+    guidance: Complete the stronger trust flow required by the feature policy.
+  dpop_missing:
+    status: 401
+    title: DPoP proof required
+    retryable: false
+    guidance: Sign this request with the installation key.
+  dpop_invalid:
+    status: 401
+    title: DPoP proof invalid
+    retryable: false
+    guidance: Recreate the proof for the exact method, URI and access token.
+  dpop_replayed:
+    status: 401
+    title: DPoP proof replayed
+    retryable: false
+    guidance: Never reuse a proof; create one with a new unique jti.
+  dpop_nonce_required:
+    status: 401
+    title: DPoP nonce required
+    retryable: true
+    guidance: Create one new proof with the DPoP-Nonce response value.
+  session_expired:
+    status: 401
+    title: Session expired
+    retryable: true
+    guidance: Refresh the Latchway session before creating a new application request.
+  session_revoked:
+    status: 401
+    title: Session revoked
+    retryable: false
+    guidance: Start a new session only after resolving the revocation reason.
+  refresh_token_reused:
+    status: 401
+    title: Refresh token reuse detected
+    retryable: false
+    guidance: Clear local session state and perform a new challenge exchange.
+  installation_revoked:
+    status: 403
+    title: Installation revoked
+    retryable: false
+    guidance: Contact the application operator or re-register when policy permits.
+  feature_not_found:
+    status: 404
+    title: Feature not found
+    retryable: false
+    guidance: Use a feature configured for this application environment.
+  feature_not_allowed:
+    status: 403
+    title: Feature not allowed
+    retryable: false
+    guidance: The verified principal or trust state does not meet feature policy.
+  model_not_allowed:
+    status: 403
+    title: Model not allowed
+    retryable: false
+    guidance: Do not select a physical model; use the configured application feature.
+  quota_exceeded:
+    status: 429
+    title: Quota exceeded
+    retryable: true
+    guidance: Wait until retry_after or request a different operator-assigned limit plan.
+  concurrency_exceeded:
+    status: 429
+    title: Concurrency limit exceeded
+    retryable: true
+    guidance: Wait for an active request or stream to finish.
+  output_limit_exceeded:
+    status: 400
+    title: Output limit exceeded
+    retryable: false
+    guidance: Reduce the requested output to the server-advertised feature limit.
+  pricing_unavailable:
+    status: 503
+    title: Pricing unavailable
+    retryable: true
+    guidance: Retry after pricing is restored or ask the operator to configure a catalog.
+  route_not_found:
+    status: 503
+    title: No route available
+    retryable: true
+    guidance: Retry only according to retry_after; the operator must restore routing.
+  upstream_unavailable:
+    status: 503
+    title: Upstream unavailable
+    retryable: true
+    guidance: Retry according to retry_after only when the request was not dispatched.
+  upstream_timeout:
+    status: 504
+    title: Upstream timeout
+    retryable: false
+    guidance: Do not automatically replay; the upstream may have received the request.
+  upstream_protocol_error:
+    status: 502
+    title: Upstream protocol error
+    retryable: false
+    guidance: Preserve the request ID and contact the operator; do not replay blindly.
+  configuration_invalid:
+    status: 422
+    title: Configuration invalid
+    retryable: false
+    guidance: Correct every reported schema, reference, policy, pricing or route error.
+  server_not_ready:
+    status: 503
+    title: Server not ready
+    retryable: true
+    guidance: Retry according to retry_after after dependencies become ready.
+  protocol_version_unsupported:
+    status: 426
+    title: Protocol version unsupported
+    retryable: false
+    guidance: Upgrade to one of supported_protocol_versions.
+  authentication_required:
+    status: 401
+    title: Administrator authentication required
+    retryable: false
+    guidance: Authenticate through the Admin API or supply a valid scoped API token.
+  permission_denied:
+    status: 403
+    title: Permission denied
+    retryable: false
+    guidance: Ask an owner to grant the required capability.
+  resource_not_found:
+    status: 404
+    title: Resource not found
+    retryable: false
+    guidance: Verify the tenant-scoped resource identifier.
+  conflict:
+    status: 409
+    title: Resource conflict
+    retryable: false
+    guidance: Refresh the resource state and resolve the conflicting operation.
+  etag_required:
+    status: 428
+    title: ETag required
+    retryable: false
+    guidance: Resubmit the mutation with the current If-Match value.
+  etag_mismatch:
+    status: 412
+    title: ETag mismatch
+    retryable: false
+    guidance: Fetch the latest revision, merge changes and resubmit with its ETag.
+  bootstrap_disabled:
+    status: 409
+    title: Bootstrap disabled
+    retryable: false
+    guidance: Sign in as an existing administrator; first-owner setup is permanently closed.
+  rate_limited:
+    status: 429
+    title: Rate limited
+    retryable: true
+    guidance: Retry after retry_after.
+  internal_error:
+    status: 500
+    title: Internal server error
+    retryable: false
+    guidance: Preserve the request ID for operator diagnosis; do not replay blindly.

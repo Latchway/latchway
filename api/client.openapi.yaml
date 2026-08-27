@@ -1,0 +1,745 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Latchway Client API
+  version: 0.1.0
+  summary: DPoP-bound client sessions and AI-compatible proxy routes.
+  description: |
+    Normative draft for wire protocol version 1. Identity, attestation and DPoP
+    establish a short-lived installation session. Protected AI requests name an
+    application feature; clients cannot select trusted users, routes, prices or
+    upstream credentials.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://gateway.example.test
+    description: Documentation-only origin; deployments advertise their own origin.
+tags:
+  - name: Discovery
+  - name: Sessions
+  - name: Installations
+  - name: Features
+  - name: Diagnostics
+  - name: AI proxy
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags: [Discovery]
+      operationId: getGatewayJwks
+      summary: Return public gateway session-signing keys.
+      security: []
+      responses:
+        '200':
+          description: JSON Web Key Set containing only public key members.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonWebKeySet'
+        default:
+          $ref: '#/components/responses/Problem'
+  /.well-known/latchway:
+    get:
+      tags: [Discovery]
+      operationId: getLatchwayDiscovery
+      summary: Discover protocol and SDK compatibility.
+      security: []
+      responses:
+        '200':
+          description: Deployment discovery metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryDocument'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/session-challenges:
+    post:
+      tags: [Sessions]
+      operationId: createSessionChallenge
+      summary: Verify application identity and create a one-time attestation challenge.
+      description: The DPoP proof omits `ath` because no access token exists yet.
+      security:
+        - DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionChallengeRequest'
+      responses:
+        '201':
+          description: One-time challenge bound to identity and the DPoP JWK thumbprint.
+          headers:
+            X-Latchway-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionChallenge'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '426':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/sessions:
+    post:
+      tags: [Sessions]
+      operationId: exchangeSessionChallenge
+      summary: Consume a challenge, verify attestation and issue a DPoP-bound session.
+      security:
+        - DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionExchangeRequest'
+      responses:
+        '201':
+          description: Access and one-time refresh credentials bound to the installation.
+          headers:
+            X-Latchway-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionGrant'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/sessions/refresh:
+    post:
+      tags: [Sessions]
+      operationId: refreshSession
+      summary: Rotate a refresh token and issue a new access token.
+      description: The DPoP proof is verified against the key bound to the stored refresh token.
+      security:
+        - DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionRefreshRequest'
+      responses:
+        '200':
+          description: Rotated session credentials. The previous refresh token is invalid.
+          headers:
+            X-Latchway-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionGrant'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/installations/current:
+    delete:
+      tags: [Installations]
+      operationId: revokeCurrentInstallation
+      summary: Revoke the current installation and all of its sessions.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '204':
+          description: Installation revoked. No response body is returned.
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/features/{feature}/quota:
+    get:
+      tags: [Features]
+      operationId: getFeatureQuota
+      summary: Return safe effective quota information for the current principal.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/FeaturePath'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '200':
+          description: Effective counters and reset/availability information; no policy internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaSnapshot'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /client/v1/diagnostics:
+    get:
+      tags: [Diagnostics]
+      operationId: getClientDiagnostics
+      summary: Return redacted session and capability diagnostics.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      responses:
+        '200':
+          description: Safe diagnostics without tokens, raw evidence, subjects or credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientDiagnostics'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/responses:
+    post:
+      tags: [AI proxy]
+      operationId: proxyOpenAIResponses
+      summary: Proxy an OpenAI Responses-compatible request selected by feature.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/FeatureHeader'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        $ref: '#/components/requestBodies/AIRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/AIResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/chat/completions:
+    post:
+      tags: [AI proxy]
+      operationId: proxyOpenAIChatCompletions
+      summary: Proxy an OpenAI Chat Completions-compatible request selected by feature.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/FeatureHeader'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        $ref: '#/components/requestBodies/AIRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/AIResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/embeddings:
+    post:
+      tags: [AI proxy]
+      operationId: proxyOpenAIEmbeddings
+      summary: Proxy an OpenAI Embeddings-compatible request selected by feature.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/FeatureHeader'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        $ref: '#/components/requestBodies/AIRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/AIJSONResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/messages:
+    post:
+      tags: [AI proxy]
+      operationId: proxyAnthropicMessages
+      summary: Proxy an Anthropic Messages-compatible request selected by feature.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/FeatureHeader'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        $ref: '#/components/requestBodies/AIRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/AIResponse'
+        default:
+          $ref: '#/components/responses/Problem'
+  /proxy/{route}/{remainingPath}:
+    post:
+      tags: [AI proxy]
+      operationId: proxyRestrictedOpaqueHttp
+      summary: Proxy a restricted opaque HTTP route to a configured destination.
+      description: |
+        `remainingPath` is interpreted only beneath the route's configured path
+        prefixes. Absolute URLs, alternate authorities and arbitrary destinations
+        are rejected. Deployments may use a router catch-all for additional segments.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/RoutePath'
+        - $ref: '#/components/parameters/RemainingPath'
+        - $ref: '#/components/parameters/FeatureHeader'
+        - $ref: '#/components/parameters/ProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/RequestID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FreeFormJSON' }
+          application/octet-stream:
+            schema: { type: string, contentEncoding: base64 }
+      responses:
+        '200':
+          description: Restricted upstream response after response-header filtering.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreeFormJSON' }
+            text/event-stream:
+              schema: { type: string }
+            application/octet-stream:
+              schema: { type: string, contentEncoding: base64 }
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    DPoPAccessToken:
+      type: http
+      scheme: DPoP
+      description: "Authorization uses `DPoP <access-token>` and the token contains `cnf.jkt`."
+    DPoPProof:
+      type: apiKey
+      in: header
+      name: DPoP
+      description: RFC 9449 compact proof JWT signed by the installation P-256 key.
+  parameters:
+    ProtocolVersion:
+      name: X-Latchway-Protocol-Version
+      in: header
+      required: true
+      schema: { type: integer, const: 1 }
+    SDK:
+      name: X-Latchway-SDK
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [ios, android, javascript, react-native]
+    SDKVersion:
+      name: X-Latchway-SDK-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
+    RequestID:
+      name: X-Latchway-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+    FeatureHeader:
+      name: X-Latchway-Feature
+      in: header
+      required: true
+      schema: { $ref: '#/components/schemas/FeatureID' }
+    FeaturePath:
+      name: feature
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/FeatureID' }
+    RoutePath:
+      name: route
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Identifier' }
+    RemainingPath:
+      name: remainingPath
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2048
+        pattern: '^(?!.*(?:^|/)\.\.(?:/|$))(?!https?:).+$'
+  headers:
+    RequestID:
+      description: Server-selected correlation identifier.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  requestBodies:
+    AIRequest:
+      required: true
+      description: Existing provider-compatible JSON. The server validates and rewrites protocol-owned fields.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FreeFormJSON'
+  responses:
+    Problem:
+      description: RFC 9457 problem with a stable Latchway code and safe detail.
+      headers:
+        X-Latchway-Request-ID:
+          $ref: '#/components/headers/RequestID'
+        Retry-After:
+          schema: { type: string }
+        DPoP-Nonce:
+          schema: { type: string, minLength: 16, maxLength: 512 }
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    AIResponse:
+      description: Provider-compatible JSON or incrementally forwarded SSE.
+      headers:
+        X-Latchway-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FreeFormJSON' }
+        text/event-stream:
+          schema:
+            type: string
+            description: Incremental SSE bytes; clients must not expect buffering by Latchway.
+    AIJSONResponse:
+      description: Provider-compatible JSON response.
+      headers:
+        X-Latchway-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FreeFormJSON' }
+  schemas:
+    Identifier:
+      type: string
+      pattern: '^[a-z][a-z0-9_-]{0,62}$'
+    FeatureID:
+      allOf:
+        - $ref: '#/components/schemas/Identifier'
+      description: Stable application-owned feature identifier, not a provider model.
+    Base64URL:
+      type: string
+      minLength: 1
+      pattern: '^[A-Za-z0-9_-]+$'
+    FreeFormJSON:
+      description: JSON value whose provider-specific shape is preserved subject to protocol validation.
+    SessionChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [application_id, environment, identity_provider, identity_token, platform, sdk_version]
+      properties:
+        application_id: { type: string, minLength: 1, maxLength: 128 }
+        environment: { $ref: '#/components/schemas/Identifier' }
+        identity_provider: { $ref: '#/components/schemas/Identifier' }
+        identity_token: { type: string, minLength: 16, maxLength: 65536, writeOnly: true }
+        platform:
+          type: string
+          enum: [ios, android, web, react_native_ios, react_native_android, node]
+        sdk_version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
+    SessionChallenge:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, challenge_nonce, binding_version, issued_at, expires_at, attestation]
+      properties:
+        challenge_id: { type: string, pattern: '^chl_[A-Za-z0-9_-]{16,128}$' }
+        challenge_nonce: { $ref: '#/components/schemas/Base64URL' }
+        binding_version: { type: integer, const: 1 }
+        issued_at: { type: integer, minimum: 0, description: Unix seconds used in the canonical binding. }
+        expires_at: { type: string, format: date-time }
+        attestation:
+          type: object
+          additionalProperties: false
+          required: [provider, mode]
+          properties:
+            provider:
+              type: string
+              enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
+            mode: { type: string, enum: [required, preferred] }
+            provider_options:
+              type: object
+              description: Safe public provider parameters; never secrets or expected verdict internals.
+              additionalProperties: true
+    SessionExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, attestation, installation]
+      properties:
+        challenge_id: { type: string, pattern: '^chl_[A-Za-z0-9_-]{16,128}$' }
+        attestation:
+          $ref: '#/components/schemas/AttestationEvidence'
+        installation:
+          type: object
+          additionalProperties: false
+          required: [app_version]
+          properties:
+            app_version: { type: string, minLength: 1, maxLength: 128 }
+            os_version: { type: string, minLength: 1, maxLength: 128 }
+            device_model: { type: string, minLength: 1, maxLength: 128 }
+    AttestationEvidence:
+      type: object
+      additionalProperties: false
+      required: [provider, evidence]
+      properties:
+        provider:
+          type: string
+          enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
+        evidence:
+          type: object
+          additionalProperties: true
+          writeOnly: true
+          description: Provider-specific evidence subject to strict server-side byte and shape limits.
+    SessionRefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        identity_token: { type: string, minLength: 16, maxLength: 65536, writeOnly: true }
+        attestation: { $ref: '#/components/schemas/AttestationEvidence' }
+    SessionGrant:
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, installation, trust]
+      properties:
+        access_token: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
+        token_type: { type: string, const: DPoP }
+        expires_in: { type: integer, minimum: 60, maximum: 3600 }
+        refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        refresh_expires_in: { type: integer, minimum: 300, maximum: 31536000 }
+        installation:
+          $ref: '#/components/schemas/InstallationSummary'
+        trust:
+          $ref: '#/components/schemas/TrustSummary'
+    InstallationSummary:
+      type: object
+      additionalProperties: false
+      required: [id, platform, dpop_jkt, status]
+      properties:
+        id: { type: string, pattern: '^ins_[A-Za-z0-9_-]{16,128}$' }
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        dpop_jkt: { $ref: '#/components/schemas/Base64URL' }
+        status: { type: string, enum: [active, revoked] }
+    TrustSummary:
+      type: object
+      additionalProperties: false
+      required: [provider, level, verified_at, expires_at]
+      properties:
+        provider: { type: string }
+        level:
+          type: string
+          enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+        verified_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    QuotaSnapshot:
+      type: object
+      additionalProperties: false
+      required: [feature, observed_at, limits]
+      properties:
+        feature: { $ref: '#/components/schemas/FeatureID' }
+        observed_at: { type: string, format: date-time }
+        limits:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [metric, hard]
+            properties:
+              metric: { type: string }
+              maximum: { type: integer, minimum: 0 }
+              used: { type: integer, minimum: 0 }
+              reserved: { type: integer, minimum: 0 }
+              remaining: { type: integer, minimum: 0 }
+              resets_at: { type: string, format: date-time }
+              hard: { type: boolean }
+    ClientDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [request_id, server_version, contract_version, protocol_version, installation, session, trust]
+      properties:
+        request_id: { type: string }
+        server_version: { type: string }
+        contract_version: { type: string, const: 0.1.0 }
+        protocol_version: { type: integer, const: 1 }
+        installation: { $ref: '#/components/schemas/InstallationSummary' }
+        session:
+          type: object
+          additionalProperties: false
+          required: [expires_at, refresh_available]
+          properties:
+            expires_at: { type: string, format: date-time }
+            refresh_available: { type: boolean }
+        trust: { $ref: '#/components/schemas/TrustSummary' }
+    DiscoveryDocument:
+      type: object
+      additionalProperties: false
+      required: [server_version, contract_version, supported_protocol_versions, session_endpoint, dpop_algorithms, maximum_clock_skew_seconds]
+      properties:
+        server_version: { type: string }
+        contract_version: { type: string, const: 0.1.0 }
+        supported_protocol_versions:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        session_endpoint: { type: string, format: uri-reference, const: /client/v1/sessions }
+        dpop_algorithms:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [ES256] }
+        maximum_clock_skew_seconds: { type: integer, minimum: 0, maximum: 300 }
+        minimum_sdk_versions:
+          type: object
+          additionalProperties: false
+          properties:
+            ios: { type: string }
+            android: { type: string }
+            javascript: { type: string }
+            react-native: { type: string }
+    JsonWebKeySet:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            required: [kty, kid, use, alg]
+            properties:
+              kty: { type: string }
+              kid: { type: string }
+              use: { type: string, const: sig }
+              alg: { type: string }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, code, request_id, retryable]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string, minLength: 1, maxLength: 256 }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string, minLength: 1, maxLength: 2048 }
+        instance: { type: string, format: uri-reference }
+        code:
+          type: string
+          enum:
+            - request_invalid
+            - identity_token_missing
+            - identity_token_invalid
+            - identity_token_expired
+            - identity_reauthentication_required
+            - attestation_required
+            - attestation_unsupported
+            - attestation_invalid
+            - attestation_stale
+            - attestation_step_up_required
+            - dpop_missing
+            - dpop_invalid
+            - dpop_replayed
+            - dpop_nonce_required
+            - session_expired
+            - session_revoked
+            - refresh_token_reused
+            - installation_revoked
+            - feature_not_found
+            - feature_not_allowed
+            - model_not_allowed
+            - quota_exceeded
+            - concurrency_exceeded
+            - output_limit_exceeded
+            - pricing_unavailable
+            - route_not_found
+            - upstream_unavailable
+            - upstream_timeout
+            - upstream_protocol_error
+            - configuration_invalid
+            - server_not_ready
+            - protocol_version_unsupported
+            - authentication_required
+            - permission_denied
+            - resource_not_found
+            - conflict
+            - etag_required
+            - etag_mismatch
+            - bootstrap_disabled
+            - rate_limited
+            - internal_error
+        request_id: { type: string, minLength: 8, maxLength: 128 }
+        retryable: { type: boolean }
+        retry_after: { type: string, format: date-time }
+        feature: { $ref: '#/components/schemas/FeatureID' }
+        supported_protocol_versions:
+          type: array
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        errors:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [path, message]
+            properties:
+              path: { type: string, maxLength: 512 }
+              message: { type: string, maxLength: 1024 }
