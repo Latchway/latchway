@@ -23,7 +23,7 @@ import (
 
 const maxAccessTokenBytes = 16 << 10
 
-var sessionIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
+var sessionIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type AccessToken struct {
 	value string

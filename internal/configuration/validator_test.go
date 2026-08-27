@@ -195,6 +195,204 @@ func TestValidatorRestrictsSymmetricIdentityKeysToExplicitHS256(t *testing.T) {
 	}
 }
 
+func TestValidatorEnforcesIdentityProviderKeySourceMatrix(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		provider map[string]any
+		valid    bool
+	}{
+		{name: "Firebase derived certificates", valid: true, provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production"}},
+		{name: "Firebase explicit fixed algorithm", valid: true, provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "allowedAlgorithms": []any{"RS256"}}},
+		{name: "Supabase derived JWKS", valid: true, provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co"}},
+		{name: "Supabase asymmetric algorithms", valid: true, provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co", "allowedAlgorithms": []any{"ES256", "RS256"}}},
+		{name: "Clerk derived JWKS", valid: true, provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}}},
+		{name: "Clerk explicit JWKS", valid: true, provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}, "jwksUrl": "https://clerk.example.test/keys"}},
+		{name: "Clerk static public key", valid: true, provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}, "staticPublicKeySecretRef": "secret/present"}},
+		{name: "generic OIDC JWKS", valid: true, provider: map[string]any{"id": "o", "type": "generic_oidc", "issuer": "https://oidc.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256", "ES256"}, "jwksUrl": "https://oidc.example.test/keys"}},
+		{name: "generic OIDC static public key", valid: true, provider: map[string]any{"id": "o", "type": "generic_oidc", "issuer": "https://oidc.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS512"}, "staticPublicKeySecretRef": "secret/present"}},
+		{name: "custom JWT JWKS", valid: true, provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"ES384"}, "jwksUrl": "https://jwt.example.test/keys"}},
+		{name: "custom JWT static public key", valid: true, provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}, "staticPublicKeySecretRef": "secret/present"}},
+		{name: "custom JWT symmetric key", valid: true, provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"HS256"}, "symmetricSecretRef": "secret/present", "acknowledgeSymmetricRisk": true}},
+		{name: "Firebase JWKS override", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "jwksUrl": "https://keys.example.test/jwks"}},
+		{name: "Firebase static override", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "staticPublicKeySecretRef": "secret/present"}},
+		{name: "Firebase algorithm override", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "allowedAlgorithms": []any{"ES256"}}},
+		{name: "Supabase JWKS override", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co", "jwksUrl": "https://keys.example.test/jwks"}},
+		{name: "Supabase static override", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co", "staticPublicKeySecretRef": "secret/present"}},
+		{name: "Supabase unsupported algorithm", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co", "allowedAlgorithms": []any{"RS384"}}},
+		{name: "Clerk symmetric source", provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"HS256"}, "symmetricSecretRef": "secret/present", "acknowledgeSymmetricRisk": true}},
+		{name: "Clerk ambiguous public sources", provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}, "jwksUrl": "https://clerk.example.test/keys", "staticPublicKeySecretRef": "secret/present"}},
+		{name: "Clerk unsupported algorithm", provider: map[string]any{"id": "c", "type": "clerk", "issuer": "https://clerk.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"ES256"}}},
+		{name: "generic OIDC missing key source", provider: map[string]any{"id": "o", "type": "generic_oidc", "issuer": "https://oidc.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}}},
+		{name: "generic OIDC symmetric source", provider: map[string]any{"id": "o", "type": "generic_oidc", "issuer": "https://oidc.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"HS256"}, "symmetricSecretRef": "secret/present", "acknowledgeSymmetricRisk": true}},
+		{name: "generic OIDC ambiguous public sources", provider: map[string]any{"id": "o", "type": "generic_oidc", "issuer": "https://oidc.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}, "jwksUrl": "https://oidc.example.test/keys", "staticPublicKeySecretRef": "secret/present"}},
+		{name: "custom JWT missing key source", provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}}},
+		{name: "custom JWT ambiguous public sources", provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}, "jwksUrl": "https://jwt.example.test/keys", "staticPublicKeySecretRef": "secret/present"}},
+		{name: "custom JWT HS256 JWKS", provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"HS256"}, "jwksUrl": "https://jwt.example.test/keys", "acknowledgeSymmetricRisk": true}},
+		{name: "custom JWT asymmetric symmetric-source mismatch", provider: map[string]any{"id": "j", "type": "custom_jwt", "issuer": "https://jwt.example.test", "audiences": []any{"client"}, "allowedAlgorithms": []any{"RS256"}, "symmetricSecretRef": "secret/present", "acknowledgeSymmetricRisk": true}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			document := configurationObject(t)
+			objectValue(document, "spec")["identityProviders"] = []any{deepClone(test.provider)}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid != test.valid || (len(compiled) != 0) != test.valid {
+				t.Fatalf("valid = %t, compiled = %t, issues = %+v", report.Valid, len(compiled) != 0, report.Issues)
+			}
+		})
+	}
+}
+
+func TestIdentitySemanticMatrixDefendsCompiledProviders(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		provider map[string]any
+		code     string
+	}{
+		{name: "preset source", provider: map[string]any{"id": "f", "type": "firebase", "jwksUrl": "https://keys.example.test/jwks"}, code: "preset_identity_key_source_invalid"},
+		{name: "preset algorithm", provider: map[string]any{"id": "s", "type": "supabase", "allowedAlgorithms": []any{"RS384"}}, code: "preset_identity_algorithm_invalid"},
+		{name: "ambiguous source", provider: map[string]any{"id": "c", "type": "clerk", "jwksUrl": "https://keys.example.test/jwks", "staticPublicKeySecretRef": "secret/present"}, code: "identity_key_source_ambiguous"},
+		{name: "generic source required", provider: map[string]any{"id": "o", "type": "generic_oidc", "allowedAlgorithms": []any{"RS256"}}, code: "identity_key_source_invalid"},
+		{name: "asymmetric source algorithm", provider: map[string]any{"id": "j", "type": "custom_jwt", "allowedAlgorithms": []any{"HS256"}, "jwksUrl": "https://keys.example.test/jwks"}, code: "identity_algorithm_source_mismatch"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			issues := validator.identityIssues(map[string]map[string]any{stringValue(test.provider, "id"): test.provider})
+			if !hasIssue(issues, test.code) {
+				t.Fatalf("missing %s in %+v", test.code, issues)
+			}
+		})
+	}
+}
+
+func TestValidatorAlignsIdentityRuntimeConstraints(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	validGeneric := map[string]any{
+		"id": "o", "type": "generic_oidc",
+		"issuer": "https://identity.example.test/tenant/", "audiences": []any{"client"},
+		"allowedAlgorithms": []any{"RS256"}, "jwksUrl": "https://identity.example.test/tenant/keys",
+		"subjectClaim": "profile.identity.subject", "requiredClaims": []any{"profile.roles.primary"},
+	}
+	tests := []struct {
+		name     string
+		provider map[string]any
+		valid    bool
+		code     string
+	}{
+		{name: "canonical segmented generic provider", provider: validGeneric, valid: true},
+		{name: "issuer query", provider: withProviderField(validGeneric, "issuer", "https://identity.example.test/tenant?key=value"), code: "identity_issuer_url_invalid"},
+		{name: "issuer credentials", provider: withProviderField(validGeneric, "issuer", "https://user@identity.example.test/tenant"), code: "identity_issuer_url_invalid"},
+		{name: "JWKS query", provider: withProviderField(validGeneric, "jwksUrl", "https://identity.example.test/keys?version=1"), code: "identity_jwks_url_invalid"},
+		{name: "JWKS fragment", provider: withProviderField(validGeneric, "jwksUrl", "https://identity.example.test/keys#current"), code: "identity_jwks_url_invalid"},
+		{name: "empty subject path segment", provider: withProviderField(validGeneric, "subjectClaim", "profile..subject")},
+		{name: "numeric subject path segment", provider: withProviderField(validGeneric, "subjectClaim", "profile.1subject")},
+		{name: "invalid required claim segment", provider: withProviderField(validGeneric, "requiredClaims", []any{"profile.-role"})},
+		{name: "valid Firebase project ID", valid: true, provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production"}},
+		{name: "valid explicit Firebase controls", valid: true, provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "issuer": "https://securetoken.google.com/habits-production", "audiences": []any{"habits-production"}}},
+		{name: "short Firebase project ID", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "short"}},
+		{name: "uppercase Firebase project ID", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "Habits-production"}},
+		{name: "trailing-hyphen Firebase project ID", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production-"}},
+		{name: "Firebase issuer mismatch", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "issuer": "https://securetoken.google.com/other-project"}, code: "firebase_issuer_override_invalid"},
+		{name: "Firebase audience mismatch", provider: map[string]any{"id": "f", "type": "firebase", "projectId": "habits-production", "audiences": []any{"other-project"}}, code: "firebase_audience_override_invalid"},
+		{name: "canonical Supabase origin", valid: true, provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co"}},
+		{name: "canonical Supabase origin trailing slash", valid: true, provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co/"}},
+		{name: "Supabase project path", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co/auth/v1"}, code: "supabase_project_url_invalid"},
+		{name: "Supabase project query", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://project.supabase.co?tenant=value"}, code: "supabase_project_url_invalid"},
+		{name: "Supabase project credentials", provider: map[string]any{"id": "s", "type": "supabase", "projectUrl": "https://user@project.supabase.co"}, code: "supabase_project_url_invalid"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			objectValue(document, "spec")["identityProviders"] = []any{deepClone(test.provider)}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid != test.valid || (len(compiled) != 0) != test.valid {
+				t.Fatalf("valid = %t, compiled = %t, issues = %+v", report.Valid, len(compiled) != 0, report.Issues)
+			}
+			if test.code != "" && !hasIssue(report.Issues, test.code) {
+				t.Fatalf("missing %s in %+v", test.code, report.Issues)
+			}
+		})
+	}
+}
+
+func TestValidatorRequiresUnambiguousPlatformAttestationAndSupportsDebugNode(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	policies := objectArray(spec, "attestationPolicies")
+	platforms := objectValue(policies[0], "platforms")
+	platforms["node"] = map[string]any{
+		"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
+		"secretRef": "secret/present", "dangerousAllowInProduction": true,
+	}
+	encoded, _ := json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("debug Node attestation was rejected: %+v", report.Issues)
+	}
+
+	invalidNode := deepClone(document).(map[string]any)
+	invalidNodePolicies := objectArray(objectValue(invalidNode, "spec"), "attestationPolicies")
+	objectValue(invalidNodePolicies[0], "platforms")["node"] = map[string]any{
+		"provider": "turnstile", "mode": "required", "minimumTrustLevel": "web_risk_verified",
+	}
+	encoded, _ = json.Marshal(invalidNode)
+	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "attestation_provider_platform_mismatch") {
+		t.Fatalf("non-debug Node attestation was accepted: %+v", report.Issues)
+	}
+
+	ambiguous := deepClone(document).(map[string]any)
+	ambiguousSpec := objectValue(ambiguous, "spec")
+	ambiguousPolicies := objectArray(ambiguousSpec, "attestationPolicies")
+	ambiguousSpec["attestationPolicies"] = append(ambiguousPolicies, map[string]any{
+		"id": "second", "platforms": map[string]any{
+			"ios": map[string]any{"provider": "app_attest", "mode": "required"},
+		},
+	})
+	encoded, _ = json.Marshal(ambiguous)
+	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "attestation_required_policy_ambiguous") {
+		t.Fatalf("ambiguous required platform policies were accepted: %+v", report.Issues)
+	}
+}
+
+func withProviderField(provider map[string]any, field string, value any) map[string]any {
+	result := deepClone(provider).(map[string]any)
+	result[field] = value
+	return result
+}
+
 func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	t.Parallel()
 

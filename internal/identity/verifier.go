@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	providerIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
+	providerIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	claimPathPattern  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,127}(\.[A-Za-z][A-Za-z0-9_-]{0,127})*$`)
 	allowedJWTAlgs    = map[string]struct{}{"RS256": {}, "RS384": {}, "RS512": {}, "ES256": {}, "ES384": {}, "HS256": {}}
 )

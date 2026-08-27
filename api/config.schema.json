@@ -120,7 +120,7 @@
         "type": {
           "enum": ["generic_oidc", "firebase", "supabase", "clerk", "custom_jwt"]
         },
-        "projectId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "projectId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$" },
         "projectUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
         "issuer": { "type": "string", "format": "uri", "pattern": "^https://" },
         "audiences": {
@@ -144,32 +144,93 @@
         "staticPublicKeySecretRef": { "$ref": "#/$defs/SecretRef" },
         "symmetricSecretRef": { "$ref": "#/$defs/SecretRef" },
         "acknowledgeSymmetricRisk": { "type": "boolean", "default": false },
-        "subjectClaim": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$", "default": "sub" },
+        "subjectClaim": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}(\\.[A-Za-z][A-Za-z0-9_-]{0,127})*$",
+          "default": "sub"
+        },
         "clockSkewSeconds": { "type": "integer", "minimum": 0, "maximum": 300, "default": 60 },
         "requiredClaims": {
           "type": "array",
           "uniqueItems": true,
           "maxItems": 32,
-          "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$" }
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}(\\.[A-Za-z][A-Za-z0-9_-]{0,127})*$"
+          }
         },
         "claimMappings": { "$ref": "#/$defs/ClaimMapping" }
       },
       "allOf": [
         {
           "if": { "properties": { "type": { "const": "firebase" } }, "required": ["type"] },
-          "then": { "required": ["projectId"] }
+          "then": {
+            "required": ["projectId"],
+            "properties": { "allowedAlgorithms": { "const": ["RS256"] } },
+            "not": {
+              "anyOf": [
+                { "required": ["jwksUrl"] },
+                { "required": ["staticPublicKeySecretRef"] },
+                { "required": ["symmetricSecretRef"] }
+              ]
+            }
+          }
         },
         {
           "if": { "properties": { "type": { "const": "supabase" } }, "required": ["type"] },
-          "then": { "required": ["projectUrl"] }
+          "then": {
+            "required": ["projectUrl"],
+            "properties": {
+              "allowedAlgorithms": {
+                "items": { "enum": ["RS256", "ES256"] }
+              }
+            },
+            "not": {
+              "anyOf": [
+                { "required": ["jwksUrl"] },
+                { "required": ["staticPublicKeySecretRef"] },
+                { "required": ["symmetricSecretRef"] }
+              ]
+            }
+          }
         },
         {
           "if": { "properties": { "type": { "const": "clerk" } }, "required": ["type"] },
-          "then": { "required": ["issuer", "audiences"] }
+          "then": {
+            "required": ["issuer", "audiences"],
+            "properties": { "allowedAlgorithms": { "const": ["RS256"] } },
+            "not": {
+              "anyOf": [
+                { "required": ["symmetricSecretRef"] },
+                { "required": ["jwksUrl", "staticPublicKeySecretRef"] }
+              ]
+            }
+          }
         },
         {
           "if": {
-            "properties": { "type": { "enum": ["generic_oidc", "custom_jwt"] } },
+            "properties": { "type": { "const": "generic_oidc" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["issuer", "audiences", "allowedAlgorithms"],
+            "oneOf": [
+              { "required": ["jwksUrl"] },
+              { "required": ["staticPublicKeySecretRef"] }
+            ],
+            "properties": {
+              "allowedAlgorithms": {
+                "items": { "enum": ["RS256", "RS384", "RS512", "ES256", "ES384"] }
+              }
+            },
+            "not": { "required": ["symmetricSecretRef"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "custom_jwt" } },
             "required": ["type"]
           },
           "then": {
@@ -228,7 +289,8 @@
             "android": { "$ref": "#/$defs/PlatformAttestation" },
             "web": { "$ref": "#/$defs/PlatformAttestation" },
             "react_native_ios": { "$ref": "#/$defs/PlatformAttestation" },
-            "react_native_android": { "$ref": "#/$defs/PlatformAttestation" }
+            "react_native_android": { "$ref": "#/$defs/PlatformAttestation" },
+            "node": { "$ref": "#/$defs/PlatformAttestation" }
           }
         }
       }

@@ -91,6 +91,32 @@ func TestAccessTokenVerifierHonorsExplicitZeroClockSkew(t *testing.T) {
 	}
 }
 
+func TestAccessIssueIdentityProviderMatchesLockedIdentifierBounds(t *testing.T) {
+	t.Parallel()
+
+	base := AccessIssueInput{
+		OrganizationID: mustTokenID(t, id.Organization), ApplicationID: mustTokenID(t, id.Application),
+		EnvironmentID: mustTokenID(t, id.Environment), ApplicationUserID: mustTokenID(t, id.ApplicationUser),
+		InstallationID: mustTokenID(t, id.Installation), SessionGrantID: mustTokenID(t, id.SessionGrant),
+		TrustLevel: "app_verified", PolicyRevisionID: mustTokenID(t, id.ConfigRevision),
+		DPoPJKT: base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	}
+	for _, providerID := range []string{"a", "a" + strings.Repeat("0", 62)} {
+		input := base
+		input.IdentityProvider = providerID
+		if err := input.validate(); err != nil {
+			t.Errorf("locked Identifier %q was rejected: %v", providerID, err)
+		}
+	}
+	for _, providerID := range []string{"", "A", "a.", "a" + strings.Repeat("0", 63)} {
+		input := base
+		input.IdentityProvider = providerID
+		if err := input.validate(); !errors.Is(err, ErrTokenInvalid) {
+			t.Errorf("out-of-contract identity provider %q error = %v", providerID, err)
+		}
+	}
+}
+
 func TestPreparedAccessIssuerFormattingIsRedacted(t *testing.T) {
 	t.Parallel()
 

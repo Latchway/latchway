@@ -14,7 +14,11 @@ import (
 	"cel.dev/cel-go/cel"
 )
 
-var constantIdentifierExpression = regexp.MustCompile(`^['"]([a-z][a-z0-9_-]{0,62})['"]$`)
+var (
+	constantIdentifierExpression = regexp.MustCompile(`^['"]([a-z][a-z0-9_-]{0,62})['"]$`)
+	firebaseProjectIDExpression  = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+	identityClaimPathExpression  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,127}(\.[A-Za-z][A-Za-z0-9_-]{0,127})*$`)
+)
 
 func (validator *Validator) semanticIssues(root map[string]any, environment EnvironmentDescriptor) []Issue {
 	issues := make([]Issue, 0)
@@ -84,10 +88,81 @@ func (validator *Validator) identityIssues(providers map[string]map[string]any) 
 		base := "/spec/identityProviders/" + pointerToken(providerID)
 		providerType := stringValue(provider, "type")
 		algorithms := stringArray(provider, "allowedAlgorithms")
+		jwksURL := stringValue(provider, "jwksUrl")
+		staticPublicKey := stringValue(provider, "staticPublicKeySecretRef")
 		symmetricSecret := stringValue(provider, "symmetricSecretRef")
+		if issuer := stringValue(provider, "issuer"); issuer != "" && !canonicalIdentityHTTPSURL(issuer) {
+			issues = append(issues, errorIssue("identity_issuer_url_invalid", base+"/issuer", "The identity issuer must be one canonical HTTPS URL without credentials, query parameters, or a fragment."))
+		}
+		if jwksURL != "" && !canonicalIdentityHTTPSURL(jwksURL) {
+			issues = append(issues, errorIssue("identity_jwks_url_invalid", base+"/jwksUrl", "The JWKS endpoint must be one canonical HTTPS URL without credentials, query parameters, or a fragment."))
+		}
+		if subjectClaim := stringValue(provider, "subjectClaim"); !identityClaimPathExpression.MatchString(subjectClaim) {
+			issues = append(issues, errorIssue("identity_subject_claim_invalid", base+"/subjectClaim", "The subject claim must be a segmented claim path."))
+		}
+		for index, requiredClaim := range stringArray(provider, "requiredClaims") {
+			if !identityClaimPathExpression.MatchString(requiredClaim) {
+				issues = append(issues, errorIssue("identity_required_claim_invalid", fmt.Sprintf("%s/requiredClaims/%d", base, index), "Each required claim must be a segmented claim path."))
+			}
+		}
 		acknowledgeSymmetricRisk, _ := provider["acknowledgeSymmetricRisk"].(bool)
 		hasHS256 := slices.Contains(algorithms, "HS256")
 		hs256Only := len(algorithms) == 1 && algorithms[0] == "HS256"
+		sourceCount := populatedCount(jwksURL, staticPublicKey, symmetricSecret)
+		if sourceCount > 1 {
+			issues = append(issues, errorIssue("identity_key_source_ambiguous", base, "An identity provider must select at most one verification-key source."))
+		}
+		switch providerType {
+		case "firebase":
+			projectID := stringValue(provider, "projectId")
+			if !firebaseProjectIDExpression.MatchString(projectID) {
+				issues = append(issues, errorIssue("firebase_project_id_invalid", base+"/projectId", "The Firebase project ID is invalid."))
+			}
+			expectedIssuer := "https://securetoken.google.com/" + projectID
+			if issuer := stringValue(provider, "issuer"); issuer != "" && issuer != expectedIssuer {
+				issues = append(issues, errorIssue("firebase_issuer_override_invalid", base+"/issuer", "A Firebase issuer override must equal the issuer derived from its project ID."))
+			}
+			if audiences := stringArray(provider, "audiences"); len(audiences) != 0 && (len(audiences) != 1 || audiences[0] != projectID) {
+				issues = append(issues, errorIssue("firebase_audience_override_invalid", base+"/audiences", "A Firebase audience override must equal its project ID."))
+			}
+			if sourceCount != 0 {
+				issues = append(issues, errorIssue("preset_identity_key_source_invalid", base, "Firebase uses its fixed public-certificate endpoint and cannot override the verification-key source."))
+			}
+			if len(algorithms) != 0 && !slices.Equal(algorithms, []string{"RS256"}) {
+				issues = append(issues, errorIssue("preset_identity_algorithm_invalid", base+"/allowedAlgorithms", "Firebase accepts only RS256."))
+			}
+		case "supabase":
+			if !canonicalIdentityHTTPSOrigin(stringValue(provider, "projectUrl")) {
+				issues = append(issues, errorIssue("supabase_project_url_invalid", base+"/projectUrl", "The Supabase project URL must be one canonical HTTPS origin."))
+			}
+			if sourceCount != 0 {
+				issues = append(issues, errorIssue("preset_identity_key_source_invalid", base, "Supabase derives its JWKS endpoint and cannot override the verification-key source."))
+			}
+			if len(algorithms) != 0 && !onlyIdentityAlgorithms(algorithms, "RS256", "ES256") {
+				issues = append(issues, errorIssue("preset_identity_algorithm_invalid", base+"/allowedAlgorithms", "Supabase accepts only RS256 and ES256."))
+			}
+		case "clerk":
+			if symmetricSecret != "" {
+				issues = append(issues, errorIssue("preset_identity_key_source_invalid", base+"/symmetricSecretRef", "Clerk accepts only its JWKS endpoint, an explicit JWKS URL, or one static public key."))
+			}
+			if len(algorithms) != 0 && !slices.Equal(algorithms, []string{"RS256"}) {
+				issues = append(issues, errorIssue("preset_identity_algorithm_invalid", base+"/allowedAlgorithms", "Clerk accepts only RS256."))
+			}
+		case "generic_oidc":
+			if symmetricSecret != "" || populatedCount(jwksURL, staticPublicKey) != 1 {
+				issues = append(issues, errorIssue("identity_key_source_invalid", base, "A generic OIDC provider requires exactly one JWKS URL or static public-key secret."))
+			}
+			if len(algorithms) == 0 || !onlyIdentityAlgorithms(algorithms, "RS256", "RS384", "RS512", "ES256", "ES384") {
+				issues = append(issues, errorIssue("identity_algorithm_source_mismatch", base+"/allowedAlgorithms", "A generic OIDC public-key source requires one or more asymmetric algorithms."))
+			}
+		case "custom_jwt":
+			if sourceCount != 1 {
+				issues = append(issues, errorIssue("identity_key_source_invalid", base, "A custom JWT provider requires exactly one JWKS URL, static public-key secret, or symmetric secret."))
+			}
+			if symmetricSecret == "" && (len(algorithms) == 0 || !onlyIdentityAlgorithms(algorithms, "RS256", "RS384", "RS512", "ES256", "ES384")) {
+				issues = append(issues, errorIssue("identity_algorithm_source_mismatch", base+"/allowedAlgorithms", "A JWKS or static public-key source requires one or more asymmetric algorithms."))
+			}
+		}
 		if hasHS256 && providerType != "custom_jwt" {
 			issues = append(issues, errorIssue("symmetric_provider_not_explicit", base+"/allowedAlgorithms", "HS256 is permitted only for an explicitly configured custom JWT provider."))
 		}
@@ -107,8 +182,43 @@ func (validator *Validator) identityIssues(providers map[string]map[string]any) 
 	return issues
 }
 
+func populatedCount(values ...string) int {
+	count := 0
+	for _, value := range values {
+		if value != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func onlyIdentityAlgorithms(values []string, allowed ...string) bool {
+	for _, value := range values {
+		if !slices.Contains(allowed, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalIdentityHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.String() == raw
+}
+
+func canonicalIdentityHTTPSOrigin(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.EscapedPath() != "" && parsed.EscapedPath() != "/") {
+		return false
+	}
+	parsed.Path = ""
+	parsed.RawPath = ""
+	return parsed.String() == strings.TrimSuffix(raw, "/")
+}
+
 func attestationSemanticIssues(policies map[string]map[string]any, environmentKind string) []Issue {
 	issues := make([]Issue, 0)
+	requiredPolicyByPlatform := make(map[string]string)
 	for _, policyID := range sortedMapKeys(policies) {
 		policy := policies[policyID]
 		base := "/spec/attestationPolicies/" + pointerToken(policyID)
@@ -124,6 +234,13 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			provider := stringValue(selection, "provider")
 			mode := stringValue(selection, "mode")
 			selectionPath := base + "/platforms/" + pointerToken(platform)
+			if mode == "required" {
+				if _, exists := requiredPolicyByPlatform[platform]; exists {
+					issues = append(issues, errorIssue("attestation_required_policy_ambiguous", selectionPath+"/mode", "A client platform may have only one required attestation policy."))
+				} else {
+					requiredPolicyByPlatform[platform] = policyID
+				}
+			}
 			if !providerAllowedOnPlatform(provider, platform) {
 				issues = append(issues, errorIssue("attestation_provider_platform_mismatch", selectionPath+"/provider", "The attestation provider is not valid for this platform."))
 			}
@@ -150,6 +267,8 @@ func providerAllowedOnPlatform(provider, platform string) bool {
 		return provider == "play_integrity" || provider == "firebase_app_check" || provider == "debug"
 	case "web":
 		return provider == "turnstile" || provider == "firebase_app_check" || provider == "debug"
+	case "node":
+		return provider == "debug"
 	default:
 		return false
 	}

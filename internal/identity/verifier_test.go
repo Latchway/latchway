@@ -247,6 +247,30 @@ func TestJWTVerifierConfigurationAndClaimMapperAreBounded(t *testing.T) {
 	}
 }
 
+func TestJWTVerifierProviderIDMatchesLockedIdentifierBounds(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	base := VerifierConfig{
+		Issuer: "https://issuer.example.test", Audiences: []string{"api"},
+		AllowedAlgorithms: []string{"RS256"}, Keys: mustStaticKeys(t, map[string]any{"key": &key.PublicKey}),
+	}
+	for _, providerID := range []string{"a", "a" + strings.Repeat("0", 62)} {
+		config := base
+		config.ProviderID = providerID
+		if _, err := NewJWTVerifier(config); err != nil {
+			t.Errorf("locked Identifier %q was rejected: %v", providerID, err)
+		}
+	}
+	for _, providerID := range []string{"", "A", "a.", "a" + strings.Repeat("0", 63)} {
+		config := base
+		config.ProviderID = providerID
+		if _, err := NewJWTVerifier(config); !errors.Is(err, ErrConfiguration) {
+			t.Errorf("out-of-contract provider ID %q error = %v", providerID, err)
+		}
+	}
+}
+
 func TestRawIdentityCredentialIsRedactedAndBounded(t *testing.T) {
 	const raw = "secret.identity.credential"
 	credential, err := NewRawIdentityCredential(raw)
