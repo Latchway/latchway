@@ -3,6 +3,8 @@ package configuration
 import (
 	"math/big"
 	"net/http"
+	"net/url"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -201,6 +203,7 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		canonical := http.CanonicalHeaderKey(name)
 		totalHeaderBytes += len(canonical) + len(value)
 		if !runtimeHeaderNamePattern.MatchString(name) || runtimeStaticHeaderForbidden(canonical) ||
+			(authentication.Type == "header" && canonical == http.CanonicalHeaderKey(authentication.HeaderName)) ||
 			!runtimeStaticHeaderValueValid(value) || totalHeaderBytes > 32<<10 {
 			return Upstream{}, ErrInvalid
 		}
@@ -407,7 +410,7 @@ func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
 	}
 	seenPrefixes := make(map[string]struct{}, len(policy.PathPrefixes))
 	for _, prefix := range policy.PathPrefixes {
-		if prefix == "" || len(prefix) > 512 || !strings.HasPrefix(prefix, "/") || strings.ContainsRune(prefix, '\x00') {
+		if !runtimeCanonicalUpstreamPath(prefix) {
 			return false
 		}
 		if _, duplicate := seenPrefixes[prefix]; duplicate {
@@ -429,13 +432,32 @@ func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
 	return true
 }
 
+func runtimeCanonicalUpstreamPath(value string) bool {
+	if value == "" || len(value) > 512 || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\%?#") {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x20 || value[index] >= 0x7f {
+			return false
+		}
+	}
+	if (&url.URL{Path: value}).EscapedPath() != value {
+		return false
+	}
+	canonical := path.Clean(value)
+	if strings.HasSuffix(value, "/") && canonical != "/" {
+		canonical += "/"
+	}
+	return canonical == value
+}
+
 func runtimeForwardHeaderForbidden(name string) bool {
 	canonical := http.CanonicalHeaderKey(name)
 	if strings.HasPrefix(strings.ToLower(canonical), "x-latchway-") {
 		return true
 	}
 	switch canonical {
-	case "Authorization", "Connection", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host", "Keep-Alive",
+	case "Accept-Encoding", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
@@ -451,7 +473,7 @@ func runtimeStaticHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Authorization", "Connection", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host",
+	case "Accept", "Accept-Encoding", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host",
 		"Keep-Alive", "Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
@@ -467,7 +489,7 @@ func runtimeCredentialHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Connection", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Forwarded", "Host", "Keep-Alive",
+	case "Accept", "Accept-Encoding", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return true

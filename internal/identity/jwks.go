@@ -58,6 +58,7 @@ type RemoteKeySource struct {
 	url                  string
 	format               RemoteKeyFormat
 	client               *http.Client
+	target               *upstream.Target
 	now                  func() time.Time
 	defaultTTL           time.Duration
 	maximumTTL           time.Duration
@@ -104,23 +105,25 @@ func NewRemoteKeySource(config RemoteKeySourceConfig) (*RemoteKeySource, error) 
 	}
 
 	client := config.Client
+	var target *upstream.Target
 	if client == nil {
-		target, targetErr := upstream.NewTarget(config.URL, upstream.DestinationPolicy{}, upstream.Timeouts{
+		target, err = upstream.NewTarget(config.URL, upstream.DestinationPolicy{}, upstream.Timeouts{
 			Connect: 5 * time.Second, TLSHandshake: 5 * time.Second, ResponseHeader: 10 * time.Second,
 		}, nil)
-		if targetErr != nil {
+		if err != nil {
 			return nil, fmt.Errorf("%w: protected remote key target", ErrConfiguration)
 		}
-		client = target.Client()
-	}
-	clientCopy := *client
-	clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	if clientCopy.Timeout == 0 {
-		clientCopy.Timeout = 15 * time.Second
+	} else {
+		clientCopy := *client
+		clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+		if clientCopy.Timeout == 0 {
+			clientCopy.Timeout = 15 * time.Second
+		}
+		client = &clientCopy
 	}
 
 	return &RemoteKeySource{
-		url: config.URL, format: config.Format, client: &clientCopy, now: config.Now,
+		url: config.URL, format: config.Format, client: client, target: target, now: config.Now,
 		defaultTTL: config.DefaultTTL, maximumTTL: config.MaximumTTL, staleGrace: config.StaleGrace,
 		forcedRefreshMinimum: config.ForcedRefreshMinimum, keys: make(map[string]staticKey),
 	}, nil
@@ -249,7 +252,13 @@ func (result remoteKeyFetchResult) staleGrace(configured time.Duration) time.Dur
 }
 
 func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.Time) (remoteKeyFetchResult, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source.url, nil)
+	requestContext := ctx
+	var cancel context.CancelFunc
+	if source.target != nil {
+		requestContext, cancel = context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+	}
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, source.url, nil)
 	if err != nil {
 		return remoteKeyFetchResult{}, errors.New("construct remote key request")
 	}
@@ -258,14 +267,36 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.
 	if etag != "" {
 		request.Header.Set("If-None-Match", etag)
 	}
-	response, err := source.client.Do(request)
+	var response *http.Response
+	var dispatched *upstream.DispatchedResponse
+	if source.target != nil {
+		prepared, prepareErr := upstream.PrepareBaseRequest(
+			request,
+			source.target,
+			[]string{"Accept", "User-Agent", "If-None-Match"},
+			nil,
+		)
+		if prepareErr != nil {
+			return remoteKeyFetchResult{}, errors.New("construct protected remote key request")
+		}
+		dispatched, err = source.target.Dispatch(requestContext, prepared)
+		if dispatched != nil {
+			response = dispatched.Response
+		}
+	} else {
+		response, err = source.client.Do(request)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return remoteKeyFetchResult{}, ctx.Err()
 		}
 		return remoteKeyFetchResult{}, transientKeyFetch(errors.New("remote key request failed"))
 	}
-	defer response.Body.Close()
+	if dispatched != nil {
+		defer dispatched.Close()
+	} else {
+		defer response.Body.Close()
+	}
 
 	ttl := cacheLifetime(response.Header, now, source.defaultTTL, source.maximumTTL)
 	noStore := cacheControlContains(response.Header, "no-store")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	upstreamtarget "github.com/latchway/latchway/internal/upstream"
 )
 
 var (
@@ -337,7 +338,8 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 func validateUpstreamURL(raw, path string) (*url.URL, []Issue) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil ||
-		parsed.Opaque != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		parsed.Opaque != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		upstreamtarget.ValidateBaseURL(raw) != nil {
 		return nil, []Issue{errorIssue("upstream_url_invalid", path, "The upstream URL must be an absolute HTTP(S) URL without credentials, query, or fragment.")}
 	}
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))

@@ -47,11 +47,8 @@ type Target struct {
 // NewTarget validates an origin and constructs a DNS-rebinding-resistant
 // transport. Redirects are disabled by the returned client.
 func NewTarget(rawBaseURL string, policy DestinationPolicy, timeouts Timeouts, resolver Resolver) (*Target, error) {
-	baseURL, err := url.Parse(rawBaseURL)
+	baseURL, err := parseBaseURL(rawBaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse upstream base URL: %w", err)
-	}
-	if err := validateBaseURL(baseURL); err != nil {
 		return nil, err
 	}
 	if resolver == nil {
@@ -100,41 +97,59 @@ func NewTarget(rawBaseURL string, policy DestinationPolicy, timeouts Timeouts, r
 	return &Target{baseURL: baseURL, transport: transport, client: client}, nil
 }
 
-// Client returns the redirect-disabled upstream client.
-func (t *Target) Client() *http.Client { return t.client }
+// ValidateBaseURL applies the exact URL rules used by NewTarget without
+// constructing a transport. Configuration activation uses this to ensure that
+// every accepted snapshot can be instantiated by the data plane.
+func ValidateBaseURL(rawBaseURL string) error {
+	_, err := parseBaseURL(rawBaseURL)
+	return err
+}
 
-// Transport returns the protected round tripper.
-func (t *Target) Transport() http.RoundTripper { return t.transport }
+func parseBaseURL(rawBaseURL string) (*url.URL, error) {
+	baseURL, err := url.Parse(rawBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse upstream base URL: %w", err)
+	}
+	if err := validateBaseURL(baseURL); err != nil {
+		return nil, err
+	}
+	return baseURL, nil
+}
 
 // CloseIdleConnections closes pooled upstream connections.
 func (t *Target) CloseIdleConnections() { t.transport.CloseIdleConnections() }
 
 // ResolveURL joins a server-selected path below the configured base path.
 func (t *Target) ResolveURL(requestPath string) (*url.URL, error) {
-	if requestPath == "" || !strings.HasPrefix(requestPath, "/") || strings.ContainsRune(requestPath, '\x00') {
-		return nil, errors.New("absolute upstream request path is required")
+	if !canonicalUpstreamPath(requestPath, false) {
+		return nil, errors.New("canonical absolute upstream request path is required")
 	}
 	resolved := *t.baseURL
-	basePath := strings.TrimSuffix(resolved.EscapedPath(), "/")
-	cleanRequestPath := path.Clean("/" + requestPath)
-	resolved.Path = path.Join(basePath, cleanRequestPath)
-	if strings.HasSuffix(requestPath, "/") && !strings.HasSuffix(resolved.Path, "/") {
-		resolved.Path += "/"
+	basePath := strings.TrimSuffix(resolved.Path, "/")
+	if basePath == "" {
+		resolved.Path = requestPath
+	} else {
+		resolved.Path = basePath + requestPath
+	}
+	if !canonicalUpstreamPath(resolved.Path, false) {
+		return nil, errors.New("resolved upstream path is not canonical")
 	}
 	resolved.RawPath = ""
 	resolved.RawQuery = ""
+	resolved.ForceQuery = false
 	resolved.Fragment = ""
 	return &resolved, nil
 }
 
 func validateBaseURL(baseURL *url.URL) error {
-	if baseURL == nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") {
+	if baseURL == nil || baseURL.Opaque != "" || (baseURL.Scheme != "http" && baseURL.Scheme != "https") {
 		return errors.New("upstream base URL must use HTTP or HTTPS")
 	}
 	if baseURL.Hostname() == "" || baseURL.User != nil {
 		return errors.New("upstream base URL must have a host and no userinfo")
 	}
-	if baseURL.RawQuery != "" || baseURL.Fragment != "" {
+	if baseURL.RawPath != "" || baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" ||
+		!canonicalUpstreamPath(baseURL.Path, true) {
 		return errors.New("upstream base URL cannot contain query or fragment")
 	}
 	if port := baseURL.Port(); port != "" {
@@ -144,6 +159,31 @@ func validateBaseURL(baseURL *url.URL) error {
 		}
 	}
 	return nil
+}
+
+// canonicalUpstreamPath deliberately accepts only an unescaped, normalized
+// ASCII path. This prevents a prefix check on one spelling from dispatching a
+// different path after dot-segment cleaning or percent-decoding.
+func canonicalUpstreamPath(value string, allowEmpty bool) bool {
+	if value == "" {
+		return allowEmpty
+	}
+	if len(value) > 2048 || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\%?#") {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x20 || value[index] >= 0x7f {
+			return false
+		}
+	}
+	if (&url.URL{Path: value}).EscapedPath() != value {
+		return false
+	}
+	canonical := path.Clean(value)
+	if strings.HasSuffix(value, "/") && canonical != "/" {
+		canonical += "/"
+	}
+	return canonical == value
 }
 
 type protectedDialer struct {

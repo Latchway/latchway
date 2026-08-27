@@ -56,7 +56,60 @@ func TestTargetResolveURLAndRedirectPolicy(t *testing.T) {
 		t.Fatalf("resolved URL = %q, want %q", got, want)
 	}
 	redirectRequest, _ := http.NewRequest(http.MethodGet, "https://other.example", nil)
-	if err := target.Client().CheckRedirect(redirectRequest, nil); err != http.ErrUseLastResponse {
+	if err := target.client.CheckRedirect(redirectRequest, nil); err != http.ErrUseLastResponse {
 		t.Fatalf("redirect policy error = %v", err)
+	}
+}
+
+func TestTargetRejectsNonCanonicalRequestPaths(t *testing.T) {
+	t.Parallel()
+
+	target, err := NewTarget("https://api.example/base", DestinationPolicy{}, Timeouts{}, staticResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, requestPath := range []string{
+		"",
+		"relative/path",
+		"/safe/../admin",
+		"/safe/./child",
+		"/safe//child",
+		"/safe/%2e%2e/admin",
+		"/safe/%2Fadmin",
+		`/safe\admin`,
+		"/safe?query=true",
+		"/safe#fragment",
+		"/safe path",
+		`/safe"path`,
+		"/safe{path}",
+		"/café",
+	} {
+		if resolved, err := target.ResolveURL(requestPath); err == nil {
+			t.Fatalf("non-canonical request path %q resolved to %q", requestPath, resolved)
+		}
+	}
+	resolved, err := target.ResolveURL("/safe/child/")
+	if err != nil || resolved.String() != "https://api.example/base/safe/child/" {
+		t.Fatalf("canonical trailing slash path: resolved=%v err=%v", resolved, err)
+	}
+}
+
+func TestTargetRejectsNonCanonicalBaseURLs(t *testing.T) {
+	t.Parallel()
+
+	for _, rawBaseURL := range []string{
+		"https://api.example/base/../admin",
+		"https://api.example/base/./child",
+		"https://api.example/base//child",
+		"https://api.example/base%2Fchild",
+		"https://api.example/base?",
+		"https://api.example/base?query=true",
+		"https://api.example/base#fragment",
+		"https://api.example/base path",
+		"https://user:secret@api.example/base",
+	} {
+		if target, err := NewTarget(rawBaseURL, DestinationPolicy{}, Timeouts{}, staticResolver{}); err == nil {
+			t.Fatalf("non-canonical base URL %q accepted: %#v", rawBaseURL, target)
+		}
 	}
 }
