@@ -87,6 +87,35 @@ func TestValidateRejectsBindingsAndPrivateJWK(t *testing.T) {
 	})
 }
 
+func TestValidateHonorsExplicitZeroClockSkew(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_787_820_000, 0)
+	target, _ := url.Parse("https://api.example.com/v1/sessions")
+	proof := signProof(t, privateKey, map[string]any{
+		"jti": "explicit-zero-skew-proof",
+		"htm": "POST",
+		"htu": target.String(),
+		"iat": now.Add(time.Second).Unix(),
+	})
+	if _, err := Validate(proof, Options{
+		Method: "POST", URI: target, Now: now,
+		ClockSkew: 0, ClockSkewSet: true,
+	}); !IsCode(err, "dpop_invalid") {
+		t.Fatalf("future proof accepted with explicit zero skew: %v", err)
+	}
+	if _, err := Validate(proof, Options{
+		Method: "POST", URI: target, Now: now,
+		ClockSkew: -time.Second, ClockSkewSet: true,
+	}); err == nil {
+		t.Fatal("negative clock-skew option was accepted")
+	}
+}
+
 func TestNormalizeHTU(t *testing.T) {
 	t.Parallel()
 

@@ -114,11 +114,12 @@ type ApplicationUser struct {
 }
 
 type AttestationEvent struct {
-	AttestationEventID string             `db:"attestation_event_id" json:"attestation_event_id"`
-	OrganizationID     string             `db:"organization_id" json:"organization_id"`
-	ApplicationID      string             `db:"application_id" json:"application_id"`
-	EnvironmentID      string             `db:"environment_id" json:"environment_id"`
-	InstallationID     *string            `db:"installation_id" json:"installation_id"`
+	AttestationEventID string  `db:"attestation_event_id" json:"attestation_event_id"`
+	OrganizationID     string  `db:"organization_id" json:"organization_id"`
+	ApplicationID      string  `db:"application_id" json:"application_id"`
+	EnvironmentID      string  `db:"environment_id" json:"environment_id"`
+	InstallationID     *string `db:"installation_id" json:"installation_id"`
+	// Immutable audit correlation ID. Challenges may be removed after their retention window.
 	SessionChallengeID *string            `db:"session_challenge_id" json:"session_challenge_id"`
 	Provider           string             `db:"provider" json:"provider"`
 	Outcome            string             `db:"outcome" json:"outcome"`
@@ -195,6 +196,11 @@ type ConfigRevision struct {
 	CreatedByAdminUserID string             `db:"created_by_admin_user_id" json:"created_by_admin_user_id"`
 	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	ValidatedAt          pgtype.Timestamptz `db:"validated_at" json:"validated_at"`
+	BaseConfigRevisionID *string            `db:"base_config_revision_id" json:"base_config_revision_id"`
+	Description          *string            `db:"description" json:"description"`
+	EditVersion          int64              `db:"edit_version" json:"edit_version"`
+	ValidationReport     []byte             `db:"validation_report" json:"validation_report"`
+	ActivatedAt          pgtype.Timestamptz `db:"activated_at" json:"activated_at"`
 }
 
 type DpopReplayEntry struct {
@@ -208,6 +214,7 @@ type DpopReplayEntry struct {
 	HttpUriHash       []byte             `db:"http_uri_hash" json:"http_uri_hash"`
 	ObservedAt        pgtype.Timestamptz `db:"observed_at" json:"observed_at"`
 	ExpiresAt         pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	InstallationID    string             `db:"installation_id" json:"installation_id"`
 }
 
 type Environment struct {
@@ -442,6 +449,11 @@ type SessionChallenge struct {
 	BindingHash         []byte             `db:"binding_hash" json:"binding_hash"`
 	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	ExpiresAt           pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	// Public random nonce returned with the challenge; never an identity or bearer credential.
+	ChallengeNonce     *string            `db:"challenge_nonce" json:"challenge_nonce"`
+	IdentityVerifiedAt pgtype.Timestamptz `db:"identity_verified_at" json:"identity_verified_at"`
+	// Expiry of the already-verified external identity credential; the credential itself is never persisted.
+	IdentityExpiresAt pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
 }
 
 type SessionChallengeConsumption struct {
@@ -469,6 +481,12 @@ type SessionGrant struct {
 	ExpiresAt          pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
 	RevokedAt          pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
 	RevokeReason       *string            `db:"revoke_reason" json:"revoke_reason"`
+	// Configured identity provider used for this grant; never a raw external subject or credential.
+	IdentityProviderKey *string `db:"identity_provider_key" json:"identity_provider_key"`
+	// Expiry of the external identity proof used for this grant; no raw identity credential is stored.
+	IdentityExpiresAt    pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
+	AttestationProvider  *string            `db:"attestation_provider" json:"attestation_provider"`
+	AttestationExpiresAt pgtype.Timestamptz `db:"attestation_expires_at" json:"attestation_expires_at"`
 }
 
 type UpstreamAttempt struct {

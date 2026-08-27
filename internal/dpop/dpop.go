@@ -90,6 +90,7 @@ type Options struct {
 	Now               time.Time
 	MaxAge            time.Duration
 	ClockSkew         time.Duration
+	ClockSkewSet      bool
 	RequireAccessHash bool
 }
 
@@ -203,8 +204,11 @@ func Validate(proof string, opts Options) (Result, error) {
 		maxAge = defaultMaxAge
 	}
 	skew := opts.ClockSkew
-	if skew <= 0 {
+	if !opts.ClockSkewSet && skew == 0 {
 		skew = defaultSkew
+	}
+	if skew < 0 || skew > 5*time.Minute {
+		return Result{}, errors.New("invalid DPoP clock-skew option")
 	}
 	issuedTime := time.Unix(issuedAt, 0)
 	if issuedTime.After(now.Add(skew)) || issuedTime.Before(now.Add(-maxAge-skew)) {

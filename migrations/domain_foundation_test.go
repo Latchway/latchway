@@ -99,3 +99,34 @@ func TestDomainFoundationMigrationUsesContractIDPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionBindingMigrationSeparatesAuditAndEphemeralRetention(t *testing.T) {
+	t.Parallel()
+
+	contents, err := Files.ReadFile("000005_session_challenge_binding.sql")
+	if err != nil {
+		t.Fatalf("read session binding migration: %v", err)
+	}
+	sql := strings.ToLower(string(contents))
+	for _, required := range []string{
+		"add column challenge_nonce",
+		"add column identity_provider_key",
+		"add column identity_expires_at",
+		"add column attestation_expires_at",
+		"set status = 'revoked'",
+		"revoke_reason = coalesce(revoke_reason, 'schema_upgrade_v5')",
+		"attested_at = null",
+		"add column installation_id",
+		"set installation_id = session_grant.installation_id",
+		"alter column installation_id set not null",
+		"dpop_replay_entries_installation_fkey",
+		"drop constraint dpop_replay_entries_session_grant_id_proof_jti_hash_key",
+		"unique (installation_id, proof_jti_hash)",
+		"constraint_entry.confrelid = 'session_challenges'::regclass",
+		"alter table attestation_events drop constraint",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("session binding migration is missing %q", required)
+		}
+	}
+}
