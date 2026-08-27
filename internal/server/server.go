@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,10 +30,21 @@ type Server struct {
 	logger     *slog.Logger
 }
 
+// Handlers contains the independently constructed HTTP surfaces exposed by
+// the process. Keeping them explicit prevents the admin console fallback from
+// accidentally handling public client API paths.
+type Handlers struct {
+	AdminAPI  http.Handler
+	ClientAPI http.Handler
+}
+
 // New builds a server whose readiness reflects PostgreSQL and schema state.
-func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, adminHandler http.Handler) (*Server, error) {
-	if adminHandler == nil {
+func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Handlers) (*Server, error) {
+	if handlers.AdminAPI == nil {
 		return nil, errors.New("admin API handler is nil")
+	}
+	if handlers.ClientAPI == nil {
+		return nil, errors.New("client API handler is nil")
 	}
 	consoleAssets, err := console.Assets()
 	if err != nil {
@@ -46,7 +59,14 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, adminHandle
 
 	router.Get("/healthz", healthHandler)
 	router.Get("/readyz", readinessHandler(pool))
-	router.Mount("/admin/v1", adminHandler)
+	router.Mount("/admin/v1", handlers.AdminAPI)
+	router.Handle("/client/v1", handlers.ClientAPI)
+	router.Handle("/client/v1/*", handlers.ClientAPI)
+	router.Handle("/v1", handlers.ClientAPI)
+	router.Handle("/v1/*", handlers.ClientAPI)
+	router.Handle("/proxy", handlers.ClientAPI)
+	router.Handle("/proxy/*", handlers.ClientAPI)
+	router.Handle("/.well-known/*", handlers.ClientAPI)
 	router.NotFound(newConsoleHandler(consoleAssets).ServeHTTP)
 
 	return &Server{
@@ -64,18 +84,36 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, adminHandle
 
 func latchwayRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID, err := id.New(id.LogicalRequest)
-		if err != nil {
-			const unavailableRequestID = "unavailable"
-			w.Header().Set("X-Latchway-Request-ID", unavailableRequestID)
-			problem.Write(w, unavailableRequestID, problem.Error{
-				Code: "server_not_ready", Detail: "The server could not initialize request processing.",
-			})
-			return
+		requestID := safeRequestIDHint(r.Header)
+		if requestID == "" {
+			var err error
+			requestID, err = id.New(id.LogicalRequest)
+			if err != nil {
+				const unavailableRequestID = "unavailable"
+				w.Header().Set("X-Latchway-Request-ID", unavailableRequestID)
+				problem.Write(w, unavailableRequestID, problem.Error{
+					Code: "server_not_ready", Detail: "The server could not initialize request processing.",
+				})
+				return
+			}
 		}
 		ctx := context.WithValue(r.Context(), middleware.RequestIDKey, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+var safeRequestIDHintPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+
+func safeRequestIDHint(header http.Header) string {
+	values := header.Values("X-Latchway-Request-ID")
+	if len(values) != 1 {
+		return ""
+	}
+	candidate := strings.TrimSpace(values[0])
+	if len(candidate) < 8 || len(candidate) > 128 || strings.ContainsAny(candidate, "\r\n\x00,") || !safeRequestIDHintPattern.MatchString(candidate) {
+		return ""
+	}
+	return candidate
 }
 
 // Run serves until context cancellation and then drains in-flight work.
