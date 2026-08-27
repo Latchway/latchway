@@ -174,3 +174,38 @@ func TestSessionChallengePolicyMigrationFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityProviderIdentifierMigrationLocksPersistedBounds(t *testing.T) {
+	t.Parallel()
+
+	contents, err := Files.ReadFile("000007_identity_provider_identifier_bounds.sql")
+	if err != nil {
+		t.Fatalf("read identity-provider identifier migration: %v", err)
+	}
+	sql := strings.ToLower(string(contents))
+	for _, required := range []string{
+		"from identity_provider_states",
+		"from external_identities",
+		"from session_challenges",
+		"from session_grants",
+		"using errcode = '23514'",
+		"drop constraint identity_provider_states_provider_key_check",
+		"drop constraint external_identities_provider_key_check",
+		"drop constraint session_challenges_identity_provider_key_check",
+		"drop constraint session_grants_identity_provider_key_check",
+		"identity_provider_states_provider_key_identifier_check",
+		"external_identities_provider_key_identifier_check",
+		"session_challenges_identity_provider_key_identifier_check",
+		"session_grants_identity_provider_key_identifier_check",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("identity-provider identifier migration is missing %q", required)
+		}
+	}
+	if strings.Count(sql, "^[a-z][a-z0-9_-]{0,62}$") != 8 {
+		t.Errorf("identity-provider identifier migration must apply the locked expression to four preflight checks and four constraints")
+	}
+	if strings.Index(sql, "raise exception") > strings.Index(sql, "drop constraint") {
+		t.Error("invalid persisted identifiers must be detected before replacing constraints")
+	}
+}

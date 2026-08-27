@@ -463,6 +463,284 @@ func TestMigratorPostgreSQLUpgradeV5InvalidatesUnboundChallenges(t *testing.T) {
 	}
 }
 
+func TestMigratorPostgreSQLAlignsIdentityProviderIdentifierBounds(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 6)
+
+	const (
+		organizationID          = "org_00000000000000000000000001"
+		applicationID           = "app_00000000000000000000000001"
+		environmentID           = "env_00000000000000000000000001"
+		adminUserID             = "adm_00000000000000000000000001"
+		membershipID            = "amb_00000000000000000000000001"
+		configRevisionID        = "rev_00000000000000000000000001"
+		applicationUserID       = "usr_00000000000000000000000001"
+		providerStateID         = "idp_00000000000000000000000001"
+		externalIdentityID      = "xid_00000000000000000000000001"
+		installationID          = "ins_00000000000000000000000001"
+		sessionChallengeID      = "chl_00000000000000000000000001"
+		sessionGrantID          = "sgr_00000000000000000000000001"
+		legacyProviderKey       = "aa"
+		identityProviderType    = "oidc"
+		identityProviderIssuer  = "https://identity.example.test"
+		identityProviderState   = "{}"
+		attestationPolicyID     = "a"
+		attestationProvider     = "debug"
+		attestationMode         = "required"
+		attestationMinimumTrust = "debug"
+	)
+	anchor := time.Now().UTC().Truncate(time.Microsecond)
+	dpopJKT := strings.Repeat("j", 43)
+	legacyMaximumKey := strings.Repeat("a", 64)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO organizations (organization_id, slug, display_name)
+		VALUES ($1, 'identifier-bounds', 'Identifier Bounds')
+	`, organizationID); err != nil {
+		t.Fatalf("create identifier-bounds organization: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO applications (application_id, organization_id, slug, display_name)
+		VALUES ($1, $2, 'identifier-bounds-app', 'Identifier Bounds App')
+	`, applicationID, organizationID); err != nil {
+		t.Fatalf("create identifier-bounds application: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO environments (
+			environment_id, organization_id, application_id, slug, display_name, kind
+		) VALUES ($1, $2, $3, 'development', 'Development', 'development')
+	`, environmentID, organizationID, applicationID); err != nil {
+		t.Fatalf("create identifier-bounds environment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_users (
+			admin_user_id, email, email_normalized, display_name
+		) VALUES ($1, 'bounds@example.test', 'bounds@example.test', 'Bounds Admin')
+	`, adminUserID); err != nil {
+		t.Fatalf("create identifier-bounds admin: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_memberships (
+			admin_membership_id, organization_id, admin_user_id, role
+		) VALUES ($1, $2, $3, 'owner')
+	`, membershipID, organizationID, adminUserID); err != nil {
+		t.Fatalf("create identifier-bounds membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO config_revisions (
+			config_revision_id, organization_id, application_id, environment_id,
+			revision_number, etag, status, document, created_by_admin_user_id
+		) VALUES ($1, $2, $3, $4, 1, 'identifier-etag-0001', 'draft', '{}'::jsonb, $5)
+	`, configRevisionID, organizationID, applicationID, environmentID, adminUserID); err != nil {
+		t.Fatalf("create identifier-bounds configuration revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO application_users (
+			application_user_id, organization_id, application_id
+		) VALUES ($1, $2, $3)
+	`, applicationUserID, organizationID, applicationID); err != nil {
+		t.Fatalf("create identifier-bounds application user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity_provider_states (
+			identity_provider_state_id, organization_id, application_id,
+			environment_id, provider_key, provider_type, issuer, state
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+	`, providerStateID, organizationID, applicationID, environmentID,
+		legacyMaximumKey, identityProviderType, identityProviderIssuer, identityProviderState); err != nil {
+		t.Fatalf("create legacy 64-character provider state: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO external_identities (
+			external_identity_id, organization_id, application_id,
+			application_user_id, provider_key, issuer_hash, subject_hmac
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, externalIdentityID, organizationID, applicationID, applicationUserID,
+		legacyProviderKey, bytes.Repeat([]byte{0x11}, 32), bytes.Repeat([]byte{0x12}, 32)); err != nil {
+		t.Fatalf("create legacy external identity: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO installations (
+			installation_id, organization_id, application_id, environment_id,
+			application_user_id, platform, dpop_jkt, dpop_public_jwk,
+			key_storage, trust_level
+		) VALUES (
+			$1, $2, $3, $4, $5, 'ios', $6, '{"kty":"EC"}'::jsonb,
+			'unknown', 'debug'
+		)
+	`, installationID, organizationID, applicationID, environmentID,
+		applicationUserID, dpopJKT); err != nil {
+		t.Fatalf("create identifier-bounds installation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_challenges (
+			session_challenge_id, organization_id, application_id, environment_id,
+			application_user_id, identity_provider_key, platform, dpop_jkt,
+			dpop_public_jwk, nonce_hash, binding_hash, created_at, expires_at,
+			challenge_nonce, identity_verified_at, identity_expires_at,
+			config_revision_id, attestation_policy_id, attestation_provider,
+			attestation_mode, attestation_minimum_trust_level,
+			attestation_maximum_age_milliseconds,
+			challenge_dpop_proof_jti_hash, challenge_dpop_http_method,
+			challenge_dpop_http_uri_hash
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, 'ios', $7, '{"kty":"EC"}'::jsonb,
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			60000, $20, 'POST', $21
+		)
+	`, sessionChallengeID, organizationID, applicationID, environmentID,
+		applicationUserID, legacyProviderKey, dpopJKT,
+		bytes.Repeat([]byte{0x21}, 32), bytes.Repeat([]byte{0x22}, 32),
+		anchor, anchor.Add(5*time.Minute), strings.Repeat("n", 43),
+		anchor.Add(-time.Minute), anchor.Add(time.Hour), configRevisionID,
+		attestationPolicyID, attestationProvider, attestationMode,
+		attestationMinimumTrust, bytes.Repeat([]byte{0x23}, 32),
+		bytes.Repeat([]byte{0x24}, 32)); err != nil {
+		t.Fatalf("create legacy session challenge: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_grants (
+			session_grant_id, organization_id, application_id, environment_id,
+			application_user_id, installation_id, access_token_jti_hash,
+			dpop_jkt, policy_revision_id, trust_level, identity_verified_at,
+			attested_at, issued_at, expires_at, identity_provider_key,
+			identity_expires_at, attestation_provider, attestation_expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, 'debug', $10, $11,
+			$12, $13, $14, $15, 'debug', $16
+		)
+	`, sessionGrantID, organizationID, applicationID, environmentID,
+		applicationUserID, installationID, bytes.Repeat([]byte{0x31}, 32),
+		dpopJKT, configRevisionID, anchor.Add(-time.Minute), anchor.Add(-30*time.Second),
+		anchor, anchor.Add(15*time.Minute), legacyProviderKey, anchor.Add(time.Hour),
+		anchor.Add(time.Hour)); err != nil {
+		t.Fatalf("create legacy session grant: %v", err)
+	}
+
+	migrator := NewMigrator(pool)
+	err := migrator.Up(ctx)
+	var constraintError *pgconn.PgError
+	if !errors.As(err, &constraintError) || constraintError.Code != "23514" {
+		t.Fatalf("migration with invalid legacy identifier error = %v, want check violation", err)
+	}
+	var migrationApplied bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 7)
+	`).Scan(&migrationApplied); err != nil {
+		t.Fatalf("read rejected identifier migration status: %v", err)
+	}
+	if migrationApplied {
+		t.Fatal("identifier migration was recorded after rejecting legacy data")
+	}
+	var oldConstraintPresent bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conrelid = 'identity_provider_states'::regclass
+			  AND conname = 'identity_provider_states_provider_key_check'
+		)
+	`).Scan(&oldConstraintPresent); err != nil {
+		t.Fatalf("read legacy provider-state constraint after rejection: %v", err)
+	}
+	if !oldConstraintPresent {
+		t.Fatal("legacy provider-state constraint was removed by rejected migration")
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE identity_provider_states SET provider_key = $1
+		WHERE identity_provider_state_id = $2
+	`, legacyProviderKey, providerStateID); err != nil {
+		t.Fatalf("repair legacy provider identifier: %v", err)
+	}
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("apply identifier bounds migration after repair: %v", err)
+	}
+
+	targets := []struct {
+		tableName     string
+		columnName    string
+		identifierKey string
+		identifier    string
+		oldConstraint string
+		newConstraint string
+	}{
+		{
+			tableName:     "identity_provider_states",
+			columnName:    "provider_key",
+			identifierKey: "identity_provider_state_id",
+			identifier:    providerStateID,
+			oldConstraint: "identity_provider_states_provider_key_check",
+			newConstraint: "identity_provider_states_provider_key_identifier_check",
+		},
+		{
+			tableName:     "external_identities",
+			columnName:    "provider_key",
+			identifierKey: "external_identity_id",
+			identifier:    externalIdentityID,
+			oldConstraint: "external_identities_provider_key_check",
+			newConstraint: "external_identities_provider_key_identifier_check",
+		},
+		{
+			tableName:     "session_challenges",
+			columnName:    "identity_provider_key",
+			identifierKey: "session_challenge_id",
+			identifier:    sessionChallengeID,
+			oldConstraint: "session_challenges_identity_provider_key_check",
+			newConstraint: "session_challenges_identity_provider_key_identifier_check",
+		},
+		{
+			tableName:     "session_grants",
+			columnName:    "identity_provider_key",
+			identifierKey: "session_grant_id",
+			identifier:    sessionGrantID,
+			oldConstraint: "session_grants_identity_provider_key_check",
+			newConstraint: "session_grants_identity_provider_key_identifier_check",
+		},
+	}
+	for _, target := range targets {
+		t.Run(target.tableName, func(t *testing.T) {
+			var oldCount int
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM pg_constraint
+				WHERE conrelid = $1::regclass AND conname = $2
+			`, target.tableName, target.oldConstraint).Scan(&oldCount); err != nil {
+				t.Fatalf("read legacy constraint: %v", err)
+			}
+			if oldCount != 0 {
+				t.Fatalf("legacy constraint %q still exists", target.oldConstraint)
+			}
+			var newDefinition string
+			if err := pool.QueryRow(ctx, `
+				SELECT pg_get_constraintdef(oid) FROM pg_constraint
+				WHERE conrelid = $1::regclass AND conname = $2
+			`, target.tableName, target.newConstraint).Scan(&newDefinition); err != nil {
+				t.Fatalf("read replacement constraint: %v", err)
+			}
+			if !strings.Contains(newDefinition, "{0,62}") {
+				t.Fatalf("replacement constraint has wrong bounds: %s", newDefinition)
+			}
+
+			updateSQL := fmt.Sprintf(
+				"UPDATE %s SET %s = $1 WHERE %s = $2",
+				target.tableName,
+				target.columnName,
+				target.identifierKey,
+			)
+			if _, err := pool.Exec(ctx, updateSQL, "a", target.identifier); err != nil {
+				t.Fatalf("one-character identifier rejected: %v", err)
+			}
+			if _, err := pool.Exec(ctx, updateSQL, strings.Repeat("a", 63), target.identifier); err != nil {
+				t.Fatalf("63-character identifier rejected: %v", err)
+			}
+			_, err := pool.Exec(ctx, updateSQL, strings.Repeat("a", 64), target.identifier)
+			constraintError = nil
+			if !errors.As(err, &constraintError) || constraintError.Code != "23514" ||
+				constraintError.ConstraintName != target.newConstraint {
+				t.Fatalf("64-character identifier error = %v, want %s check violation", err, target.newConstraint)
+			}
+		})
+	}
+}
+
 func newPostgreSQLIntegrationPool(t *testing.T) (context.Context, *pgxpool.Pool) {
 	t.Helper()
 
@@ -534,6 +812,7 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 3, name: "000003_admin_token_name_length.sql"},
 		{version: 4, name: "000004_configuration_revisions.sql"},
 		{version: 5, name: "000005_session_challenge_binding.sql"},
+		{version: 6, name: "000006_session_challenge_policy.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break
