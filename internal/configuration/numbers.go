@@ -5,11 +5,28 @@ import (
 	"math"
 )
 
+const (
+	refillDecimalScale = int64(1_000_000)
+	int64Max           = int64(math.MaxInt64)
+)
+
 // parseJSONInteger converts every JSON lexical form whose mathematical value
 // is an integer into int64 without passing through binary floating point. It
 // accepts forms such as 4096.0 and 4.096e3 while rejecting fractional values,
 // malformed numbers, and values outside the signed 64-bit range.
 func parseJSONInteger(number json.Number) (int64, bool) {
+	return parseJSONScaledInteger(number, 0)
+}
+
+// parseJSONScaledInteger multiplies a JSON number by 10^scale and returns the
+// exact int64 result without using binary floating point. Fractional source
+// digits are accepted only when the scaled mathematical value is integral.
+// The bounded lexical parser also rejects exponent bombs before allocating an
+// exponent-sized intermediate value.
+func parseJSONScaledInteger(number json.Number, scale int) (int64, bool) {
+	if scale < 0 || scale > 18 {
+		return 0, false
+	}
 	raw := number.String()
 	if raw == "" {
 		return 0, false
@@ -90,7 +107,7 @@ func parseJSONInteger(number json.Number) (int64, bool) {
 
 	// Any exponent whose magnitude exceeds the significand length plus the
 	// int64 decimal width must make a nonzero value fractional or overflowing.
-	exponentLimit := len(digits) + 19
+	exponentLimit := len(digits) + 19 + scale
 	exponent := 0
 	for _, digit := range raw[exponentStart:exponentEnd] {
 		value := int(digit - '0')
@@ -103,7 +120,7 @@ func parseJSONInteger(number json.Number) (int64, bool) {
 		exponent = -exponent
 	}
 
-	shift := exponent - (fractionEnd - fractionStart)
+	shift := exponent - (fractionEnd - fractionStart) + scale
 	if shift < 0 {
 		places := -shift
 		if places > len(digits) {
@@ -149,6 +166,36 @@ func parseJSONInteger(number json.Number) (int64, bool) {
 		return 0, false
 	}
 	return int64(magnitude), true
+}
+
+// parseJSONRefillRate accepts exactly the executable refill subset: a
+// positive JSON number whose value has at most six significant fractional
+// decimal places after exponent expansion and whose scaled value fits int64.
+// The result is reduced so equivalent JSON spellings have one runtime value.
+func parseJSONRefillRate(number json.Number) (RefillRate, bool) {
+	scaled, ok := parseJSONScaledInteger(number, 6)
+	if !ok || scaled <= 0 {
+		return RefillRate{}, false
+	}
+	divisor := greatestCommonDivisor(scaled, refillDecimalScale)
+	rate := RefillRate{
+		Numerator:   scaled / divisor,
+		Denominator: refillDecimalScale / divisor,
+	}
+	if !rate.Valid() {
+		return RefillRate{}, false
+	}
+	return rate, true
+}
+
+func greatestCommonDivisor(left, right int64) int64 {
+	if left <= 0 || right <= 0 {
+		return 0
+	}
+	for right != 0 {
+		left, right = right, left%right
+	}
+	return left
 }
 
 func isASCIIDigit(value byte) bool {

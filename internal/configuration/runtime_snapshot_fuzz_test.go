@@ -33,7 +33,7 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 		f.Fatalf("seed configuration rejected: %+v", report.Issues)
 	}
 	f.Add([]byte(compiled))
-	addConcurrencySeed := func(name string, limit map[string]any) {
+	addExecutableLimitSeed := func(name string, limit map[string]any) {
 		f.Helper()
 		value, err := jsonsafe.Decode(source)
 		if err != nil {
@@ -51,13 +51,17 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 		}
 		f.Add([]byte(candidateCompiled))
 	}
-	addConcurrencySeed("explicit request concurrency", map[string]any{
+	addExecutableLimitSeed("explicit request concurrency", map[string]any{
 		"metric": "concurrent_requests", "algorithm": "concurrency",
 		"scope": []any{"feature", "user"}, "maximum": json.Number("9223372036854775807.0"),
 	})
-	addConcurrencySeed("default stream concurrency", map[string]any{
+	addExecutableLimitSeed("default stream concurrency", map[string]any{
 		"metric": "concurrent_streams", "scope": []any{"model", "user"},
 		"maximum": json.Number("4.096e3"),
+	})
+	addExecutableLimitSeed("canonical logical request token bucket", map[string]any{
+		"metric": "logical_requests", "scope": []any{"feature", "user"},
+		"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
 	})
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"spec":{"features":[]}}`))

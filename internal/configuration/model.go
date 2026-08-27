@@ -5,6 +5,8 @@ package configuration
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -318,9 +320,50 @@ func (catalog PricingCatalog) Entry(modelID string) (PricingEntry, bool) {
 	return PricingEntry{}, false
 }
 
+// RefillRate is an exact, reduced positive rational number of quota units per
+// second. Its zero value means that no refill rate is configured. Runtime
+// configuration accepts only rates exactly representable at six decimal
+// places, so every valid denominator divides 1,000,000.
+//
+// The fields remain exported because the data plane must translate this
+// immutable value into the quota package without reparsing decimal text. Every
+// enforcement boundary still validates Valid before using a detached value.
+type RefillRate struct {
+	Numerator   int64
+	Denominator int64
+}
+
+// Valid reports whether rate is in the canonical executable representation.
+func (rate RefillRate) Valid() bool {
+	if rate.Numerator <= 0 || rate.Denominator <= 0 ||
+		refillDecimalScale%rate.Denominator != 0 ||
+		greatestCommonDivisor(rate.Numerator, rate.Denominator) != 1 {
+		return false
+	}
+	multiplier := refillDecimalScale / rate.Denominator
+	return multiplier > 0 && rate.Numerator <= int64Max/multiplier
+}
+
+// String returns the minimal non-exponent JSON decimal for a valid rate. The
+// empty string represents an invalid or absent rate.
+func (rate RefillRate) String() string {
+	if !rate.Valid() {
+		return ""
+	}
+	scaled := rate.Numerator * (refillDecimalScale / rate.Denominator)
+	whole := scaled / refillDecimalScale
+	fraction := scaled % refillDecimalScale
+	if fraction == 0 {
+		return strconv.FormatInt(whole, 10)
+	}
+	fractional := strconv.FormatInt(refillDecimalScale+fraction, 10)[1:]
+	fractional = strings.TrimRight(fractional, "0")
+	return strconv.FormatInt(whole, 10) + "." + fractional
+}
+
 // Limit is the normalized shape of one configured quota rule. Numeric fields
-// are retained as integers or decimal text so enforced budgets never depend on
-// binary floating-point arithmetic.
+// are retained as integers or exact rationals so enforced budgets never depend
+// on binary floating-point arithmetic.
 type Limit struct {
 	Metric            string
 	Algorithm         string
@@ -329,7 +372,7 @@ type Limit struct {
 	Maximum           int64
 	PerRequestMaximum int64
 	Capacity          int64
-	RefillPerSecond   json.Number
+	RefillPerSecond   RefillRate
 	Hard              bool
 }
 

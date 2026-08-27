@@ -7,7 +7,11 @@ import (
 	"strings"
 )
 
-const maximumExecutableLimitRules = 128
+const (
+	maximumExecutableLimitRules                       = 128
+	maximumExecutableTokenBucketCapacity        int64 = 9_223_372
+	maximumExecutableTokenBucketRefillPerSecond int64 = 1_000_000
+)
 
 var (
 	executableCalendarWindowPattern = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|mo)$`)
@@ -52,20 +56,27 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 	case "calendar":
 		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens") ||
 			limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
-			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" ||
+			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) ||
 			!executableCalendarWindow(limit.Window) {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	case "token_bucket":
+		if limit.Metric != "logical_requests" || limit.Window != "" ||
+			limit.Maximum != 0 || limit.PerRequestMaximum != 0 ||
+			limit.Capacity <= 0 || limit.Capacity > maximumExecutableTokenBucketCapacity ||
+			!executableTokenBucketRefillRate(limit.RefillPerSecond) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":
 		if limit.Metric != "output_tokens" || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum <= 0 ||
-			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
+			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "concurrency":
 		if (limit.Metric != "concurrent_requests" && limit.Metric != "concurrent_streams") ||
 			limit.Window != "" || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
-			limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
+			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	default:
@@ -80,6 +91,13 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 		metric: limit.Metric, algorithm: limit.Algorithm,
 		window: limit.Window, scope: strings.Join(scope, "\x00"),
 	}, true
+}
+
+func executableTokenBucketRefillRate(rate RefillRate) bool {
+	// Valid denominators divide one million, so this exact rational comparison
+	// cannot overflow: maximum * denominator is at most one trillion.
+	return rate.Valid() &&
+		rate.Numerator <= maximumExecutableTokenBucketRefillPerSecond*rate.Denominator
 }
 
 func canonicalLimitScope(input []string) ([]string, bool) {

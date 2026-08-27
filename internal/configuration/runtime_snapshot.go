@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/latchway/latchway/internal/jsonsafe"
 )
 
 var (
@@ -71,6 +73,14 @@ type compiledLimit struct {
 }
 
 func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
+	*limit = compiledLimit{}
+	decodedValue, err := jsonsafe.Decode(encoded)
+	if err != nil {
+		return ErrInvalid
+	}
+	if _, ok := decodedValue.(map[string]any); !ok {
+		return ErrInvalid
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		return err
@@ -109,12 +119,16 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 	if !ok {
 		return ErrInvalid
 	}
+	refillPerSecond, ok := compiledLimitRefillRate(fields["refillPerSecond"], limit.hasRefillPerSecond)
+	if !ok {
+		return ErrInvalid
+	}
 	limit.Limit = Limit{
 		Metric: decoded.Metric, Algorithm: decoded.Algorithm,
 		Scope: append([]string(nil), decoded.Scope...), Window: decoded.Window,
 		Maximum: maximum, PerRequestMaximum: perRequestMaximum,
-		Capacity: capacity,
-		Hard:     decoded.Hard,
+		Capacity: capacity, RefillPerSecond: refillPerSecond,
+		Hard: decoded.Hard,
 	}
 	return nil
 }
@@ -130,11 +144,31 @@ func compiledLimitInteger(raw json.RawMessage, present bool) (int64, bool) {
 	return parseJSONInteger(json.Number(trimmed))
 }
 
+func compiledLimitRefillRate(raw json.RawMessage, present bool) (RefillRate, bool) {
+	if !present {
+		return RefillRate{}, true
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !isASCIIDigit(trimmed[0]) {
+		return RefillRate{}, false
+	}
+	rate, ok := parseJSONRefillRate(json.Number(trimmed))
+	if !ok || string(trimmed) != rate.String() {
+		return RefillRate{}, false
+	}
+	return rate, true
+}
+
 func (limit compiledLimit) normalizeExecutable() (Limit, immutableLimitIdentity, bool) {
 	switch limit.Algorithm {
 	case "calendar":
 		if !limit.hasWindow || !limit.hasMaximum || limit.hasPerRequestMaximum ||
 			limit.hasCapacity || limit.hasRefillPerSecond {
+			return Limit{}, immutableLimitIdentity{}, false
+		}
+	case "token_bucket":
+		if !limit.hasCapacity || !limit.hasRefillPerSecond || limit.hasWindow ||
+			limit.hasMaximum || limit.hasPerRequestMaximum {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":

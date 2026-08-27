@@ -17,6 +17,15 @@ import (
 
 const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.1.0/environment-config.schema.json"
 
+const (
+	// Configuration numbers ultimately fit int64 or the six-decimal refill
+	// representation. These deliberately generous lexical bounds keep the JSON
+	// Schema library from constructing pathological big.Rat values before the
+	// field-specific exact parsers run.
+	maximumSchemaNumberBytes             = 256
+	maximumSchemaNumberExponentMagnitude = 1_024
+)
+
 var schemaCodePattern = regexp.MustCompile(`[^a-z0-9]+`)
 
 // Validator compiles the canonical schema and bounded CEL environment once.
@@ -79,6 +88,9 @@ func (validator *Validator) SchemaIssues(document json.RawMessage) []Issue {
 	if err != nil {
 		return []Issue{errorIssue("schema_json_invalid", "/", "The configuration must be one unambiguous JSON document.")}
 	}
+	if issue, unsafe := unsafeSchemaNumberIssue(value, ""); unsafe {
+		return []Issue{issue}
+	}
 	if _, ok := value.(map[string]any); !ok {
 		return []Issue{errorIssue("schema_type", "/", "The configuration must be a JSON object.")}
 	}
@@ -86,6 +98,67 @@ func (validator *Validator) SchemaIssues(document json.RawMessage) []Issue {
 		return schemaIssues(err)
 	}
 	return nil
+}
+
+func unsafeSchemaNumberIssue(value any, path string) (Issue, bool) {
+	switch typed := value.(type) {
+	case json.Number:
+		if schemaNumberLexicallySafe(typed) {
+			return Issue{}, false
+		}
+		if path == "" {
+			path = "/"
+		}
+		return errorIssue(
+			"schema_number_unsafe",
+			path,
+			"Configuration numbers must use a bounded decimal representation.",
+		), true
+	case map[string]any:
+		for _, key := range sortedObjectKeys(typed) {
+			if issue, unsafe := unsafeSchemaNumberIssue(typed[key], path+"/"+pointerToken(key)); unsafe {
+				return issue, true
+			}
+		}
+	case []any:
+		for index, element := range typed {
+			if issue, unsafe := unsafeSchemaNumberIssue(element, fmt.Sprintf("%s/%d", path, index)); unsafe {
+				return issue, true
+			}
+		}
+	}
+	return Issue{}, false
+}
+
+func schemaNumberLexicallySafe(number json.Number) bool {
+	raw := number.String()
+	if raw == "" || len(raw) > maximumSchemaNumberBytes {
+		return false
+	}
+	exponentMarker := strings.IndexAny(raw, "eE")
+	if exponentMarker < 0 {
+		return true
+	}
+	index := exponentMarker + 1
+	if index < len(raw) && (raw[index] == '+' || raw[index] == '-') {
+		index++
+	}
+	if index == len(raw) {
+		return false
+	}
+	exponent := 0
+	for ; index < len(raw); index++ {
+		digit := raw[index]
+		if digit < '0' || digit > '9' {
+			return false
+		}
+		value := int(digit - '0')
+		if exponent > (maximumSchemaNumberExponentMagnitude-value)/10 {
+			return false
+		}
+		exponent = exponent*10 + value
+	}
+	return true
 }
 
 // Validate performs schema, cross-reference, secret-reference, semantic, and
@@ -304,6 +377,11 @@ func applyDefaults(root map[string]any) {
 		for _, limit := range objectArray(plan, "limits") {
 			setDefault(limit, "algorithm", inferredLimitAlgorithm(limit))
 			setDefault(limit, "hard", true)
+			if raw, ok := limit["refillPerSecond"].(json.Number); ok {
+				if rate, valid := parseJSONRefillRate(raw); valid {
+					limit["refillPerSecond"] = json.Number(rate.String())
+				}
+			}
 			if scope, ok := canonicalLimitScope(stringArray(limit, "scope")); ok {
 				canonical := make([]any, len(scope))
 				for index := range scope {

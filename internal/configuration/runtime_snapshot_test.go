@@ -8,6 +8,68 @@ import (
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
 
+func TestCompiledLimitRefillRateRequiresCanonicalExactNumber(t *testing.T) {
+	t.Parallel()
+
+	rate, ok := compiledLimitRefillRate(json.RawMessage("0.333333"), true)
+	if !ok || rate != (RefillRate{Numerator: 333333, Denominator: 1_000_000}) {
+		t.Fatalf("canonical compiled refill = (%+v, %t)", rate, ok)
+	}
+	if absent, absentOK := compiledLimitRefillRate(nil, false); !absentOK || absent != (RefillRate{}) {
+		t.Fatalf("absent compiled refill = (%+v, %t)", absent, absentOK)
+	}
+
+	for _, raw := range []string{
+		"", "null", `"1"`, "{}", "[]", "1e", "1e0", "1.0", "0", "-1",
+		"0.0000001", "9223372036854.775808",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			if got, accepted := compiledLimitRefillRate(json.RawMessage(raw), true); accepted {
+				t.Fatalf("corrupt compiled refill %q accepted as %+v", raw, got)
+			}
+		})
+	}
+}
+
+func TestCompiledLimitRejectsDuplicateJSONMembers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "metric",
+			raw:  `{"metric":"logical_requests","metric":"logical_requests","algorithm":"token_bucket","scope":["user"],"capacity":10,"refillPerSecond":1,"hard":true}`,
+		},
+		{
+			name: "algorithm",
+			raw:  `{"metric":"logical_requests","algorithm":"calendar","algorithm":"token_bucket","scope":["user"],"capacity":10,"refillPerSecond":1,"hard":true}`,
+		},
+		{
+			name: "capacity",
+			raw:  `{"metric":"logical_requests","algorithm":"token_bucket","scope":["user"],"capacity":9,"capacity":10,"refillPerSecond":1,"hard":true}`,
+		},
+		{
+			name: "refill",
+			raw:  `{"metric":"logical_requests","algorithm":"token_bucket","scope":["user"],"capacity":10,"refillPerSecond":0.5,"refillPerSecond":1,"hard":true}`,
+		},
+		{
+			name: "scope",
+			raw:  `{"metric":"logical_requests","algorithm":"token_bucket","scope":["feature"],"scope":["user"],"capacity":10,"refillPerSecond":1,"hard":true}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var limit compiledLimit
+			if err := json.Unmarshal([]byte(test.raw), &limit); err == nil {
+				t.Fatalf("duplicate compiled %s member accepted as %+v", test.name, limit)
+			}
+		})
+	}
+}
+
 func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -19,6 +81,16 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 	report, compiled := validator.Validate(document, testEnvironment(), time.Now())
 	if !report.Valid {
 		t.Fatalf("configuration rejected: %+v", report.Issues)
+	}
+	asLogicalTokenBucket := func(spec map[string]any) map[string]any {
+		limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+		limit["metric"] = "logical_requests"
+		limit["algorithm"] = "token_bucket"
+		delete(limit, "window")
+		delete(limit, "maximum")
+		limit["capacity"] = json.Number("10")
+		limit["refillPerSecond"] = json.Number("1")
+		return limit
 	}
 	tests := []struct {
 		name   string
@@ -515,14 +587,111 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
-			name: "unsupported token bucket",
+			name: "token bucket missing capacity",
 			mutate: func(spec map[string]any) {
-				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
-				limit["algorithm"] = "token_bucket"
-				delete(limit, "window")
-				delete(limit, "maximum")
-				limit["capacity"] = json.Number("10")
-				limit["refillPerSecond"] = json.Number("1")
+				delete(asLogicalTokenBucket(spec), "capacity")
+			},
+		},
+		{
+			name: "token bucket null capacity",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["capacity"] = nil
+			},
+		},
+		{
+			name: "token bucket quoted capacity",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["capacity"] = "10"
+			},
+		},
+		{
+			name: "token bucket fractional capacity",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["capacity"] = json.Number("10.5")
+			},
+		},
+		{
+			name: "token bucket capacity above executable bound",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["capacity"] = json.Number("9223373")
+			},
+		},
+		{
+			name: "token bucket missing refill",
+			mutate: func(spec map[string]any) {
+				delete(asLogicalTokenBucket(spec), "refillPerSecond")
+			},
+		},
+		{
+			name: "token bucket null refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = nil
+			},
+		},
+		{
+			name: "token bucket quoted refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = "1"
+			},
+		},
+		{
+			name: "token bucket noncanonical exponent refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("1e0")
+			},
+		},
+		{
+			name: "token bucket noncanonical trailing-zero refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("1.0")
+			},
+		},
+		{
+			name: "token bucket zero refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("0")
+			},
+		},
+		{
+			name: "token bucket sub-micro refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("0.0000001")
+			},
+		},
+		{
+			name: "token bucket refill above executable bound",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("1000000.000001")
+			},
+		},
+		{
+			name: "token bucket overflowing scaled refill",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["refillPerSecond"] = json.Number("9223372036854.775808")
+			},
+		},
+		{
+			name: "token bucket with calendar field",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["window"] = "1d"
+			},
+		},
+		{
+			name: "token bucket with maximum field",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["maximum"] = json.Number("1")
+			},
+		},
+		{
+			name: "soft token bucket",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["hard"] = false
+			},
+		},
+		{
+			name: "unsupported output token bucket",
+			mutate: func(spec map[string]any) {
+				asLogicalTokenBucket(spec)["metric"] = "output_tokens"
 			},
 		},
 		{

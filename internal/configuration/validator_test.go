@@ -46,6 +46,51 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	}
 }
 
+func TestValidatorRejectsPathologicalNumberLexemesBeforeSchemaArithmetic(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "positive exponent bomb", raw: "1e1000001"},
+		{name: "negative exponent bomb", raw: "1e-1000001"},
+		{name: "oversized mantissa", raw: strings.Repeat("9", maximumSchemaNumberBytes+1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
+			plan["limits"] = []any{
+				map[string]any{
+					"metric": "logical_requests", "scope": []any{"user"},
+					"capacity": json.Number("10"), "refillPerSecond": json.Number(test.raw),
+				},
+			}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			issues := validator.SchemaIssues(encoded)
+			if len(issues) != 1 || issues[0].Code != "schema_number_unsafe" ||
+				issues[0].Path != "/spec/limitPlans/0/limits/0/refillPerSecond" ||
+				strings.Contains(issues[0].Message, test.raw) {
+				t.Fatalf("SchemaIssues(%s) = %+v", test.name, issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || len(report.Issues) != 1 ||
+				report.Issues[0].Code != "schema_number_unsafe" {
+				t.Fatalf("Validate(%s) = report %+v, compiled %q", test.name, report, compiled)
+			}
+		})
+	}
+}
+
 func TestValidatorRequiresExplicitLimitScopeAtActivation(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +118,13 @@ func TestValidatorRequiresExplicitLimitScopeAtActivation(t *testing.T) {
 			name: "concurrent stream",
 			limit: map[string]any{
 				"metric": "concurrent_streams", "maximum": json.Number("5"),
+			},
+		},
+		{
+			name: "logical request token bucket",
+			limit: map[string]any{
+				"metric": "logical_requests", "capacity": json.Number("10"),
+				"refillPerSecond": json.Number("1"),
 			},
 		},
 	}
@@ -108,10 +160,66 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 		limit map[string]any
 	}{
 		{
-			name: "token bucket",
+			name: "output token bucket",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "input token bucket",
+			limit: map[string]any{
+				"metric": "input_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "total token bucket",
+			limit: map[string]any{
+				"metric": "total_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "cost token bucket",
+			limit: map[string]any{
+				"metric": "cost_nano_usd", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "soft logical request token bucket",
 			limit: map[string]any{
 				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
-				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"), "hard": false,
+			},
+		},
+		{
+			name: "logical request token bucket excessive capacity",
+			limit: map[string]any{
+				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("9223373"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "logical request token bucket sub-micro refill",
+			limit: map[string]any{
+				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("0.0000001"),
+			},
+		},
+		{
+			name: "logical request token bucket excessive refill",
+			limit: map[string]any{
+				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1000000.000001"),
+			},
+		},
+		{
+			name: "logical request token bucket overflowing scaled refill",
+			limit: map[string]any{
+				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("9223372036854.775808"),
 			},
 		},
 		{
@@ -182,13 +290,70 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			}
 			for _, issue := range report.Issues {
 				if issue.Code == "limit_capability_unsupported" &&
-					(!strings.Contains(issue.Message, "output_tokens calendar") ||
+					(!strings.Contains(issue.Message, "logical_requests token_bucket") ||
+						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
+						!strings.Contains(issue.Message, "through 1000000") ||
+						!strings.Contains(issue.Message, "output_tokens calendar") ||
 						!strings.Contains(issue.Message, "output_tokens per_request") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)
 				}
 			}
 		})
+	}
+}
+
+func TestValidatorActivatesCanonicalLogicalRequestTokenBucket(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
+	plan["limits"] = []any{
+		map[string]any{
+			"metric": "logical_requests", "scope": []any{"feature", "user"},
+			"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
+		},
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("valid token bucket failed schema validation: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("valid token bucket rejected: report=%+v compiled=%s", report, compiled)
+	}
+	value, err := jsonsafe.Decode(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := objectArray(objectArray(objectValue(value.(map[string]any), "spec"), "limitPlans")[0], "limits")[0]
+	refill, ok := limit["refillPerSecond"].(json.Number)
+	if !ok || refill.String() != "1000000" || stringValue(limit, "algorithm") != "token_bucket" ||
+		limit["hard"] != true || !slices.Equal(stringArray(limit, "scope"), []string{"user", "feature"}) {
+		t.Fatalf("compiled token bucket = %#v", limit)
+	}
+	snapshot, err := newActiveSnapshot("rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled)
+	if err != nil {
+		t.Fatalf("newActiveSnapshot() error = %v", err)
+	}
+	runtimePlan, ok := snapshot.LimitPlan("free")
+	wantRate := RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1}
+	if !ok || len(runtimePlan.Limits) != 1 || runtimePlan.Limits[0].Metric != "logical_requests" ||
+		runtimePlan.Limits[0].Algorithm != "token_bucket" || runtimePlan.Limits[0].Capacity != maximumExecutableTokenBucketCapacity ||
+		runtimePlan.Limits[0].RefillPerSecond != wantRate || !runtimePlan.Limits[0].Hard {
+		t.Fatalf("runtime token bucket = %+v ok=%t", runtimePlan, ok)
+	}
+	runtimePlan.Limits[0].Scope[0] = "changed"
+	runtimeAgain, _ := snapshot.LimitPlan("free")
+	if !slices.Equal(runtimeAgain.Limits[0].Scope, []string{"user", "feature"}) || runtimeAgain.Limits[0].RefillPerSecond != wantRate {
+		t.Fatalf("runtime token bucket plan was not defensively copied: %+v", runtimeAgain)
 	}
 }
 
@@ -522,6 +687,19 @@ func TestValidatorRejectsDuplicateImmutableLimitIdentityByMetricAndAlgorithm(t *
 			limits: []any{
 				map[string]any{"metric": "logical_requests", "scope": []any{"feature", "user"}, "window": "1d", "maximum": json.Number("5")},
 				map[string]any{"metric": "logical_requests", "scope": []any{"user", "feature"}, "window": "1d", "maximum": json.Number("10")},
+			},
+		},
+		{
+			name: "logical request token bucket",
+			limits: []any{
+				map[string]any{
+					"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"feature", "user"},
+					"capacity": json.Number("10"), "refillPerSecond": json.Number("0.5"),
+				},
+				map[string]any{
+					"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user", "feature"},
+					"capacity": json.Number("20"), "refillPerSecond": json.Number("0.25"),
+				},
 			},
 		},
 		{

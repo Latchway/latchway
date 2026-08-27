@@ -1,7 +1,6 @@
 package configuration
 
 import (
-	"encoding/json"
 	"math"
 	"slices"
 	"testing"
@@ -42,7 +41,7 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 }
 
-func TestNormalizeExecutableLimitAcceptsBoundedRequestOutputTokenAndConcurrencyRules(t *testing.T) {
+func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenAndConcurrencyRules(t *testing.T) {
 	t.Parallel()
 
 	inputScope := []string{
@@ -81,6 +80,27 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestOutputTokenAndConcurrencyR
 	}
 	if changedMaximumIdentity != firstIdentity {
 		t.Fatalf("immutable identity changed with maximum/scope ordering: %#v != %#v", changedMaximumIdentity, firstIdentity)
+	}
+
+	tokenBucket, tokenBucketIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "logical_requests", Algorithm: "token_bucket", Scope: []string{"feature", "user"},
+		Capacity: maximumExecutableTokenBucketCapacity,
+		RefillPerSecond: RefillRate{
+			Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1,
+		},
+		Hard: true,
+	})
+	if !ok || tokenBucket.Capacity != maximumExecutableTokenBucketCapacity ||
+		tokenBucket.RefillPerSecond != (RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1}) ||
+		!slices.Equal(tokenBucket.Scope, []string{"user", "feature"}) {
+		t.Fatalf("logical-request token bucket = %+v ok=%t", tokenBucket, ok)
+	}
+	_, changedTokenBucketIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "logical_requests", Algorithm: "token_bucket", Scope: []string{"user", "feature"},
+		Capacity: 1, RefillPerSecond: RefillRate{Numerator: 333333, Denominator: 1_000_000}, Hard: true,
+	})
+	if !ok || changedTokenBucketIdentity != tokenBucketIdentity {
+		t.Fatalf("token-bucket capacity/rate changed immutable identity: %#v != %#v", changedTokenBucketIdentity, tokenBucketIdentity)
 	}
 
 	outputCalendar, outputCalendarIdentity, ok := normalizeExecutableLimit(Limit{
@@ -150,6 +170,10 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user"},
 		Maximum: 10, Hard: true,
 	}
+	tokenBucket := Limit{
+		Metric: "logical_requests", Algorithm: "token_bucket", Scope: []string{"user"},
+		Capacity: 10, RefillPerSecond: RefillRate{Numerator: 1, Denominator: 1}, Hard: true,
+	}
 	tests := []struct {
 		name  string
 		limit Limit
@@ -159,27 +183,40 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		{name: "cost calendar", limit: withLimitMetric(calendar, "cost_nano_usd")},
 		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
 		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
-		{name: "token bucket", limit: Limit{Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user"}, Capacity: 1, RefillPerSecond: json.Number("1"), Hard: true}},
+		{name: "output token bucket", limit: withLimitMetric(tokenBucket, "output_tokens")},
+		{name: "input token bucket", limit: withLimitMetric(tokenBucket, "input_tokens")},
+		{name: "total token bucket", limit: withLimitMetric(tokenBucket, "total_tokens")},
+		{name: "cost token bucket", limit: withLimitMetric(tokenBucket, "cost_nano_usd")},
+		{name: "soft token bucket", limit: withLimitHard(tokenBucket, false)},
+		{name: "token bucket zero capacity", limit: withLimitCapacity(tokenBucket, 0)},
+		{name: "token bucket excessive capacity", limit: withLimitCapacity(tokenBucket, maximumExecutableTokenBucketCapacity+1)},
+		{name: "token bucket missing refill", limit: withLimitRefill(tokenBucket, RefillRate{})},
+		{name: "token bucket noncanonical refill", limit: withLimitRefill(tokenBucket, RefillRate{Numerator: 2, Denominator: 2})},
+		{name: "token bucket excessive refill", limit: withLimitRefill(tokenBucket, RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond + 1, Denominator: 1})},
+		{name: "token bucket fractional excessive refill", limit: withLimitRefill(tokenBucket, RefillRate{Numerator: 1_000_000_000_001, Denominator: 1_000_000})},
+		{name: "token bucket calendar field", limit: withLimitWindow(tokenBucket, "1d")},
+		{name: "token bucket maximum field", limit: withLimitMaximum(tokenBucket, 1)},
+		{name: "token bucket per-request field", limit: withLimitPerRequestMaximum(tokenBucket, 1)},
 		{name: "logical request per request", limit: withLimitMetric(perRequest, "logical_requests")},
 		{name: "soft calendar", limit: withLimitHard(calendar, false)},
 		{name: "soft per request", limit: withLimitHard(perRequest, false)},
 		{name: "calendar zero maximum", limit: withLimitMaximum(calendar, 0)},
 		{name: "calendar per-request field", limit: withLimitPerRequestMaximum(calendar, 1)},
 		{name: "calendar capacity field", limit: withLimitCapacity(calendar, 1)},
-		{name: "calendar refill field", limit: withLimitRefill(calendar, json.Number("1"))},
+		{name: "calendar refill field", limit: withLimitRefill(calendar, RefillRate{Numerator: 1, Denominator: 1})},
 		{name: "calendar missing window", limit: withLimitWindow(calendar, "")},
 		{name: "calendar over window bound", limit: withLimitWindow(calendar, "367d")},
 		{name: "per request zero maximum", limit: withLimitPerRequestMaximum(perRequest, 0)},
 		{name: "per request window field", limit: withLimitWindow(perRequest, "1d")},
 		{name: "per request maximum field", limit: withLimitMaximum(perRequest, 1)},
 		{name: "per request capacity field", limit: withLimitCapacity(perRequest, 1)},
-		{name: "per request refill field", limit: withLimitRefill(perRequest, json.Number("1"))},
+		{name: "per request refill field", limit: withLimitRefill(perRequest, RefillRate{Numerator: 1, Denominator: 1})},
 		{name: "soft concurrency", limit: withLimitHard(concurrency, false)},
 		{name: "concurrency zero maximum", limit: withLimitMaximum(concurrency, 0)},
 		{name: "concurrency window field", limit: withLimitWindow(concurrency, "1d")},
 		{name: "concurrency per-request field", limit: withLimitPerRequestMaximum(concurrency, 1)},
 		{name: "concurrency capacity field", limit: withLimitCapacity(concurrency, 1)},
-		{name: "concurrency refill field", limit: withLimitRefill(concurrency, json.Number("1"))},
+		{name: "concurrency refill field", limit: withLimitRefill(concurrency, RefillRate{Numerator: 1, Denominator: 1})},
 		{name: "missing scope", limit: withLimitScope(calendar, nil)},
 		{name: "per request missing scope", limit: withLimitScope(perRequest, nil)},
 		{name: "concurrency missing scope", limit: withLimitScope(concurrency, nil)},
@@ -226,7 +263,7 @@ func withLimitCapacity(limit Limit, capacity int64) Limit {
 	return limit
 }
 
-func withLimitRefill(limit Limit, refill json.Number) Limit {
+func withLimitRefill(limit Limit, refill RefillRate) Limit {
 	limit.RefillPerSecond = refill
 	return limit
 }
