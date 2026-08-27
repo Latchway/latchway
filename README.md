@@ -34,4 +34,23 @@ curl --fail http://127.0.0.1:8080/readyz
 
 This proves the container, embedded console, PostgreSQL connection, and migrations; it does not prove the identity, attestation, DPoP, policy, proxy, quota, or SDK flows. The first functional vertical slice tracked in the master plan must add debug attestation, custom JWT verification, a DPoP session, an OpenAI Chat proxy, request limits, and a JavaScript fetch client.
 
+### First-owner bootstrap
+
+Set a freshly generated `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` of at least 32 bytes before the first server start. The embedded console can consume it, or the same canonical Admin API can be called through the CLI:
+
+```sh
+export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+export LATCHWAY_ADMIN_PASSWORD
+
+latchway --server http://127.0.0.1:8080 admin bootstrap \
+  --organization-slug example \
+  --organization-name "Example Organization" \
+  --email owner@example.com \
+  --display-name "Example Owner"
+
+unset LATCHWAY_ADMIN_BOOTSTRAP_TOKEN LATCHWAY_ADMIN_PASSWORD
+```
+
+Populate the two environment variables with a protected prompt or secret manager; the CLI deliberately has no secret-valued flags. Bootstrap creates the owner and secure browser session atomically, stores only hashes for credentials, and closes permanently after the first owner exists. Remote Admin API origins must use HTTPS.
+
 Security vulnerabilities must follow [`SECURITY.md`](SECURITY.md), not public issue discussion. Contributions require Developer Certificate of Origin sign-off as described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
