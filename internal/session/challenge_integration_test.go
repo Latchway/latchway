@@ -1016,6 +1016,7 @@ func sessionTestCompiledSpec(identityProviders, attestationPolicies []any) map[s
 		"limitPlans": []any{map[string]any{
 			"id": "free", "limits": []any{map[string]any{
 				"metric": "logical_requests", "algorithm": "calendar", "window": "1d", "maximum": 5, "hard": true,
+				"scope": []any{"user", "feature"},
 			}},
 		}},
 		"features": []any{map[string]any{

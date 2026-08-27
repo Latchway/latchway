@@ -304,6 +304,13 @@ func applyDefaults(root map[string]any) {
 		for _, limit := range objectArray(plan, "limits") {
 			setDefault(limit, "algorithm", inferredLimitAlgorithm(limit))
 			setDefault(limit, "hard", true)
+			if scope, ok := canonicalLimitScope(stringArray(limit, "scope")); ok {
+				canonical := make([]any, len(scope))
+				for index := range scope {
+					canonical[index] = scope[index]
+				}
+				limit["scope"] = canonical
+			}
 		}
 	}
 	for _, feature := range objectArray(spec, "features") {

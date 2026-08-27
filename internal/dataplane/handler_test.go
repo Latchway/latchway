@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -622,20 +623,109 @@ func TestValidSemVer(t *testing.T) {
 	}
 }
 
-func TestHandlerRejectsUnsupportedLimitPlanBeforeReservation(t *testing.T) {
+func TestValidDecisionWindowUsesDeterministicOneYearBounds(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{"1m", "527040m", "1h", "8784h", "1d", "366d", "1mo", "12mo"}
+	for _, window := range valid {
+		window := window
+		t.Run("valid_"+window, func(t *testing.T) {
+			t.Parallel()
+			if !validDecisionWindow(window) {
+				t.Fatalf("expected %q to be accepted", window)
+			}
+		})
+	}
+
+	invalid := []string{
+		"", "0d", "01d", "1w",
+		"527041m", "8785h", "367d", "13mo",
+		"9223372036854775808d",
+	}
+	for _, window := range invalid {
+		window := window
+		t.Run("invalid_"+window, func(t *testing.T) {
+			t.Parallel()
+			if validDecisionWindow(window) {
+				t.Fatalf("expected %q to be rejected", window)
+			}
+		})
+	}
+}
+
+func TestHandlerTranslatesMultipleCanonicalLimitRulesBeforeReservation(t *testing.T) {
 	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits[0].Scope = []string{"user", "environment"}
 	fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, configuration.Limit{
 		Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
-		Scope: []string{"environment"}, Window: "1d", Maximum: 1, Hard: true,
+		Scope: []string{"feature", "application"}, Window: "1mo", Maximum: 1, Hard: true,
 	})
 	handler := fixture.handler(t)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, fixture.request(t))
 
-	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
-	if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 {
-		t.Fatal("unsupported limit plan reached quota or target")
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 || len(fixture.quotas.reserveInput.Rules) != 2 {
+		t.Fatalf("multi-rule response/reserve/rules = %d/%d/%#v",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules)
+	}
+	first, second := fixture.quotas.reserveInput.Rules[0], fixture.quotas.reserveInput.Rules[1]
+	if !slices.Equal(first.Scope, []string{"environment", "user"}) ||
+		!slices.Equal(second.Scope, []string{"application", "feature"}) ||
+		first.Window != "1d" || first.Maximum != 100 || second.Window != "1mo" || second.Maximum != 1 {
+		t.Fatalf("translated canonical rules = %#v", fixture.quotas.reserveInput.Rules)
+	}
+}
+
+func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*configuration.LimitPlan)
+	}{
+		{name: "no rules", mutate: func(plan *configuration.LimitPlan) { plan.Limits = nil }},
+		{name: "too many rules", mutate: func(plan *configuration.LimitPlan) {
+			base := plan.Limits[0]
+			plan.Limits = make([]configuration.Limit, maximumDecisionLimitRules+1)
+			for index := range plan.Limits {
+				plan.Limits[index] = base
+				plan.Limits[index].Window = "1d"
+			}
+		}},
+		{name: "future metric", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Metric = "input_tokens" }},
+		{name: "future algorithm", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Algorithm = "token_bucket" }},
+		{name: "soft", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Hard = false }},
+		{name: "empty scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = nil }},
+		{name: "duplicate scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = []string{"user", "user"} }},
+		{name: "unknown scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = []string{"claim"} }},
+		{name: "unsupported window unit", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "1w" }},
+		{name: "window above executable bound", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "367d" }},
+		{name: "overflowing window", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "9223372036854775808d" }},
+		{name: "zero maximum", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Maximum = 0 }},
+		{name: "per request field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].PerRequestMaximum = 1 }},
+		{name: "capacity field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Capacity = 1 }},
+		{name: "refill field", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].RefillPerSecond = "1" }},
+		{name: "duplicate immutable identity", mutate: func(plan *configuration.LimitPlan) {
+			duplicate := plan.Limits[0]
+			duplicate.Scope = append([]string(nil), duplicate.Scope...)
+			duplicate.Scope = []string{"user", "environment"}
+			duplicate.Maximum++
+			plan.Limits = append(plan.Limits, duplicate)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			test.mutate(&fixture.decision.LimitPlan)
+			handler := fixture.handler(t)
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, fixture.request(t))
+
+			assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+			if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 {
+				t.Fatal("unsupported limit plan reached quota or target")
+			}
+		})
 	}
 }
 

@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -33,6 +36,7 @@ const (
 	maximumResponseBodyLimit   = int64(100 << 20)
 	defaultClientWriteTimeout  = 30 * time.Second
 	defaultPersistenceTimeout  = 5 * time.Second
+	maximumDecisionLimitRules  = 128
 )
 
 var (
@@ -44,7 +48,27 @@ var (
 	errUpstreamDispatch     = errors.New("upstream dispatch failed")
 	errUpstreamProtocol     = errors.New("upstream protocol observation failed")
 	errUpstreamRelay        = errors.New("upstream response relay failed")
+	decisionWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|mo)$`)
 )
+
+var decisionScopeOrder = []string{
+	"organization",
+	"application",
+	"environment",
+	"user",
+	"installation",
+	"feature",
+	"route",
+	"upstream",
+	"model",
+}
+
+var decisionWindowMaximum = map[string]int64{
+	"m":  366 * 24 * 60,
+	"h":  366 * 24,
+	"d":  366,
+	"mo": 12,
+}
 
 // Config contains only trusted server dependencies and runtime bounds.
 type Config struct {
@@ -491,19 +515,72 @@ func validateDecision(featureID string, decision policy.Decision) ([]quota.Rule,
 		decision.Upstream.ID == "" || decision.Upstream.Type != "openai_compatible" ||
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
 		!validTargetTimeouts(decision.Upstream.Timeouts) || decision.LimitPlan.ID == "" ||
-		len(decision.LimitPlan.Limits) != 1 {
+		len(decision.LimitPlan.Limits) == 0 || len(decision.LimitPlan.Limits) > maximumDecisionLimitRules {
 		return nil, policy.ErrConfiguration
 	}
-	limit := decision.LimitPlan.Limits[0]
-	if limit.Metric != quota.LogicalRequestsMetric || limit.Algorithm != quota.CalendarAlgorithm ||
-		!limit.Hard || len(limit.Scope) == 0 || limit.Window == "" || limit.Maximum <= 0 ||
-		limit.PerRequestMaximum != 0 || limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
-		return nil, errUnsupportedLimitPlan
+	rules := make([]quota.Rule, 0, len(decision.LimitPlan.Limits))
+	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(decision.LimitPlan.Limits))
+	for _, limit := range decision.LimitPlan.Limits {
+		scope, ok := canonicalDecisionScope(limit.Scope)
+		if limit.Metric != quota.LogicalRequestsMetric || limit.Algorithm != quota.CalendarAlgorithm ||
+			!limit.Hard || !ok || !validDecisionWindow(limit.Window) || limit.Maximum <= 0 ||
+			limit.PerRequestMaximum != 0 || limit.Capacity != 0 || limit.RefillPerSecond.String() != "" {
+			return nil, errUnsupportedLimitPlan
+		}
+		identity := decisionLimitIdentity{
+			metric: limit.Metric, algorithm: limit.Algorithm,
+			window: limit.Window, scope: strings.Join(scope, "\x00"),
+		}
+		if _, duplicate := seenIdentities[identity]; duplicate {
+			return nil, errUnsupportedLimitPlan
+		}
+		seenIdentities[identity] = struct{}{}
+		rules = append(rules, quota.Rule{
+			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: scope,
+			Window: limit.Window, Maximum: limit.Maximum, Hard: limit.Hard,
+		})
 	}
-	return []quota.Rule{{
-		Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: append([]string(nil), limit.Scope...),
-		Window: limit.Window, Maximum: limit.Maximum, Hard: limit.Hard,
-	}}, nil
+	return rules, nil
+}
+
+type decisionLimitIdentity struct {
+	metric    string
+	algorithm string
+	window    string
+	scope     string
+}
+
+func canonicalDecisionScope(input []string) ([]string, bool) {
+	if len(input) == 0 || len(input) > len(decisionScopeOrder) {
+		return nil, false
+	}
+	seen := make(map[string]struct{}, len(input))
+	for _, dimension := range input {
+		if !slices.Contains(decisionScopeOrder, dimension) {
+			return nil, false
+		}
+		if _, duplicate := seen[dimension]; duplicate {
+			return nil, false
+		}
+		seen[dimension] = struct{}{}
+	}
+	result := make([]string, 0, len(input))
+	for _, dimension := range decisionScopeOrder {
+		if _, ok := seen[dimension]; ok {
+			result = append(result, dimension)
+		}
+	}
+	return result, true
+}
+
+func validDecisionWindow(raw string) bool {
+	matches := decisionWindowPattern.FindStringSubmatch(raw)
+	if len(matches) != 3 {
+		return false
+	}
+	amount, err := strconv.ParseInt(matches[1], 10, 64)
+	maximum, ok := decisionWindowMaximum[matches[2]]
+	return err == nil && ok && amount > 0 && amount <= maximum
 }
 
 func (handler *Handler) releaseReservation(reservation quota.Reservation, failure string) error {

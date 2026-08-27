@@ -476,6 +476,7 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 			"limitPlans": []any{map[string]any{
 				"id": "free", "limits": []any{map[string]any{
 					"metric": "logical_requests", "window": "1d", "maximum": 5,
+					"scope": []any{"user", "feature"},
 				}},
 			}},
 			"features": []any{map[string]any{

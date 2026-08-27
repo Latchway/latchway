@@ -415,6 +415,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 	for _, planID := range sortedMapKeys(plans) {
 		plan := plans[planID]
 		base := "/spec/limitPlans/" + pointerToken(planID) + "/limits"
+		seenIdentities := make(map[immutableLimitIdentity]int)
 		for index, limit := range objectArray(plan, "limits") {
 			path := fmt.Sprintf("%s/%d", base, index)
 			algorithm := stringValue(limit, "algorithm")
@@ -435,6 +436,35 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 			if !valid {
 				issues = append(issues, errorIssue("limit_algorithm_fields_invalid", path, "Limit fields must match exactly one supported algorithm."))
 			}
+
+			maximum, _ := integerField(limit, "maximum")
+			perRequestMaximum, _ := integerField(limit, "perRequestMaximum")
+			capacity, _ := integerField(limit, "capacity")
+			refill, _ := limit["refillPerSecond"].(json.Number)
+			hard, _ := limit["hard"].(bool)
+			_, identity, executable := normalizeExecutableLimit(Limit{
+				Metric: metric, Algorithm: algorithm, Scope: stringArray(limit, "scope"),
+				Window: stringValue(limit, "window"), Maximum: maximum,
+				PerRequestMaximum: perRequestMaximum, Capacity: capacity,
+				RefillPerSecond: refill, Hard: hard,
+			})
+			if !executable {
+				issues = append(issues, errorIssue(
+					"limit_capability_unsupported",
+					path,
+					"This release can activate only hard logical_requests calendar limits with a supported window, positive maximum, and explicit nonempty scope.",
+				))
+				continue
+			}
+			if _, duplicate := seenIdentities[identity]; duplicate {
+				issues = append(issues, errorIssue(
+					"duplicate_limit_rule",
+					path,
+					"A limit plan cannot repeat the same immutable metric, algorithm, window, and canonical scope identity.",
+				))
+				continue
+			}
+			seenIdentities[identity] = index
 		}
 	}
 	return issues

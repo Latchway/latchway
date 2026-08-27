@@ -301,10 +301,60 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "unsupported limit metric",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["metric"] = "input_tokens"
+			},
+		},
+		{
+			name: "unsupported token bucket",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["algorithm"] = "token_bucket"
+				delete(limit, "window")
+				delete(limit, "maximum")
+				limit["capacity"] = json.Number("10")
+				limit["refillPerSecond"] = json.Number("1")
+			},
+		},
+		{
+			name: "soft limit",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["hard"] = false
+			},
+		},
+		{
+			name: "empty limit scope",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["scope"] = []any{}
+			},
+		},
+		{
+			name: "overflowing calendar window",
+			mutate: func(spec map[string]any) {
+				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
+				limit["window"] = "9223372036854775808d"
+			},
+		},
+		{
 			name: "duplicate limit scope",
 			mutate: func(spec map[string]any) {
 				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
 				limit["scope"] = []any{"user", "user"}
+			},
+		},
+		{
+			name: "duplicate immutable limit identity",
+			mutate: func(spec map[string]any) {
+				plan := objectArray(spec, "limitPlans")[0]
+				limits := plan["limits"].([]any)
+				duplicate := deepClone(limits[0]).(map[string]any)
+				duplicate["scope"] = []any{"feature", "user"}
+				duplicate["maximum"] = json.Number("10")
+				plan["limits"] = append(limits, duplicate)
 			},
 		},
 		{

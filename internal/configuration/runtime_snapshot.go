@@ -1,7 +1,6 @@
 package configuration
 
 import (
-	"math/big"
 	"net/http"
 	"net/url"
 	"path"
@@ -16,7 +15,6 @@ var (
 	runtimeIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	runtimeSecretRefPattern  = regexp.MustCompile(`^secret/[a-z][a-z0-9_-]{0,62}$`)
 	runtimeHeaderNamePattern = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
-	runtimeWindowPattern     = regexp.MustCompile(`^[1-9][0-9]*(m|h|d|mo)$`)
 )
 
 type compiledUpstream struct {
@@ -260,49 +258,23 @@ func runtimeModel(raw compiledModel) (Model, error) {
 }
 
 func runtimeLimitPlan(raw compiledLimitPlan) (LimitPlan, error) {
-	if !runtimeIdentifierPattern.MatchString(raw.ID) || len(raw.Limits) == 0 || len(raw.Limits) > 128 {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || len(raw.Limits) == 0 || len(raw.Limits) > maximumExecutableLimitRules {
 		return LimitPlan{}, ErrInvalid
 	}
-	plan := LimitPlan{ID: raw.ID, Limits: append([]Limit(nil), raw.Limits...)}
-	for index := range plan.Limits {
-		limit := &plan.Limits[index]
-		limit.Scope = append([]string(nil), limit.Scope...)
-		if !runtimeLimitValid(*limit) {
+	plan := LimitPlan{ID: raw.ID, Limits: make([]Limit, 0, len(raw.Limits))}
+	seenIdentities := make(map[immutableLimitIdentity]struct{}, len(raw.Limits))
+	for _, rawLimit := range raw.Limits {
+		limit, identity, ok := normalizeExecutableLimit(rawLimit)
+		if !ok {
 			return LimitPlan{}, ErrInvalid
 		}
+		if _, duplicate := seenIdentities[identity]; duplicate {
+			return LimitPlan{}, ErrInvalid
+		}
+		seenIdentities[identity] = struct{}{}
+		plan.Limits = append(plan.Limits, limit)
 	}
 	return plan, nil
-}
-
-func runtimeLimitValid(limit Limit) bool {
-	metrics := []string{"logical_requests", "input_tokens", "output_tokens", "total_tokens", "cost_nano_usd", "concurrent_requests", "concurrent_streams"}
-	if !slices.Contains(metrics, limit.Metric) || !slices.Contains([]string{"calendar", "token_bucket", "concurrency", "per_request"}, limit.Algorithm) {
-		return false
-	}
-	allowedScopes := []string{"organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model"}
-	seenScopes := make(map[string]struct{}, len(limit.Scope))
-	for _, scope := range limit.Scope {
-		if !slices.Contains(allowedScopes, scope) {
-			return false
-		}
-		if _, duplicate := seenScopes[scope]; duplicate {
-			return false
-		}
-		seenScopes[scope] = struct{}{}
-	}
-	switch limit.Algorithm {
-	case "calendar":
-		return runtimeWindowPattern.MatchString(limit.Window) && limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
-	case "token_bucket":
-		refill, ok := new(big.Rat).SetString(limit.RefillPerSecond.String())
-		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 && limit.Capacity > 0 && ok && refill.Sign() > 0
-	case "concurrency":
-		return (limit.Metric == "concurrent_requests" || limit.Metric == "concurrent_streams") && limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
-	case "per_request":
-		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 && limit.Capacity == 0 && limit.RefillPerSecond == ""
-	default:
-		return false
-	}
 }
 
 func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, error) {
