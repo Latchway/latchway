@@ -182,6 +182,7 @@ type compiledFeature struct {
 func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 	rawUpstreams []compiledUpstream,
 	rawModels []compiledModel,
+	rawPricing []compiledPricingCatalog,
 	rawPlans []compiledLimitPlan,
 	rawFeatures []compiledFeature,
 ) error {
@@ -198,6 +199,27 @@ func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 		}
 		if _, ok := snapshot.upstreams[model.UpstreamID]; !ok {
 			return errorsCorruptSnapshot("model upstream reference")
+		}
+	}
+	if len(rawPricing) > maximumPricingCatalogs {
+		return errorsCorruptSnapshot("pricing catalog set")
+	}
+	for _, raw := range rawPricing {
+		catalog, err := runtimePricingCatalog(raw, snapshot.models)
+		if err != nil || !insertUnique(snapshot.pricing, catalog.ID, catalog) {
+			return errorsCorruptSnapshot("pricing catalog")
+		}
+	}
+	for _, model := range snapshot.models {
+		if model.PricingRef == "" {
+			continue
+		}
+		catalog, ok := snapshot.pricing[model.PricingRef]
+		if !ok {
+			return errorsCorruptSnapshot("model pricing reference")
+		}
+		if _, ok := catalog.Entry(model.ID); !ok {
+			return errorsCorruptSnapshot("model pricing entry")
 		}
 	}
 	for _, raw := range rawPlans {

@@ -19,6 +19,7 @@ type compiledSnapshotDocument struct {
 		AttestationPolicy []compiledAttestationPolicy `json:"attestationPolicies"`
 		Upstreams         []compiledUpstream          `json:"upstreams"`
 		Models            []compiledModel             `json:"models"`
+		PricingCatalogs   []compiledPricingCatalog    `json:"pricingCatalogs"`
 		LimitPlans        []compiledLimitPlan         `json:"limitPlans"`
 		Features          []compiledFeature           `json:"features"`
 	} `json:"spec"`
@@ -48,6 +49,7 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 		attestations: make(map[string]AttestationPolicy, len(parsed.Spec.AttestationPolicy)),
 		upstreams:    make(map[string]Upstream, len(parsed.Spec.Upstreams)),
 		models:       make(map[string]Model, len(parsed.Spec.Models)),
+		pricing:      make(map[string]PricingCatalog, len(parsed.Spec.PricingCatalogs)),
 		limitPlans:   make(map[string]LimitPlan, len(parsed.Spec.LimitPlans)),
 		features:     make(map[string]Feature, len(parsed.Spec.Features)),
 	}
@@ -76,7 +78,7 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 			requiredPolicyByPlatform[platform] = policy.ID
 		}
 	}
-	if err := snapshot.loadRuntimeConfiguration(parsed.Spec.Upstreams, parsed.Spec.Models, parsed.Spec.LimitPlans, parsed.Spec.Features); err != nil {
+	if err := snapshot.loadRuntimeConfiguration(parsed.Spec.Upstreams, parsed.Spec.Models, parsed.Spec.PricingCatalogs, parsed.Spec.LimitPlans, parsed.Spec.Features); err != nil {
 		return ActiveSnapshot{}, err
 	}
 	return snapshot, nil

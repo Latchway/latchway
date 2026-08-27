@@ -19,7 +19,8 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 			"identityProviders":[{"id":"firebase","type":"firebase","projectId":"habits-production"}],
 			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required"}}}],
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
-			"models":[{"id":"fast","upstream":"primary","upstreamModel":"physical-fast"}],
+			"models":[{"id":"fast","upstream":"primary","upstreamModel":"physical-fast","pricingRef":"standard"}],
+			"pricingCatalogs":[{"id":"standard","currency":"USD","effectiveAt":"2026-08-27T12:34:56Z","entries":[{"model":"fast","inputNanoUsdPerMillion":1000.0,"outputNanoUsdPerMillion":2e3}]}],
 			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","scope":["user","feature"],"window":"1d","maximum":5}]}],
 			"features":[{"id":"assistant","protocol":"openai_chat","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"output":{"defaultMaximumTokens":100,"absoluteMaximumTokens":200},"routes":[{"id":"primary","when":"true","model":"fast","priority":1}]}]
 		}

@@ -255,6 +255,46 @@ func (model Model) clone() Model {
 	return model
 }
 
+// PricingEntry is the immutable integer-price schedule for one configured
+// model. Prices are nano-USD per one million tokens plus an optional fixed
+// request charge, so pricing never depends on binary floating point.
+type PricingEntry struct {
+	ModelID                 string
+	InputNanoUSDPerMillion  int64
+	OutputNanoUSDPerMillion int64
+	RequestNanoUSD          int64
+}
+
+// PricingCatalog is one versioned USD price schedule. A nil EffectiveAt means
+// the catalog is immediately effective; a non-nil value is the exact
+// configured instant. Snapshot compilation deliberately does not consult a
+// clock when preserving this policy.
+type PricingCatalog struct {
+	ID          string
+	Currency    string
+	EffectiveAt *time.Time
+	Entries     []PricingEntry
+}
+
+func (catalog PricingCatalog) clone() PricingCatalog {
+	if catalog.EffectiveAt != nil {
+		effectiveAt := *catalog.EffectiveAt
+		catalog.EffectiveAt = &effectiveAt
+	}
+	catalog.Entries = append([]PricingEntry(nil), catalog.Entries...)
+	return catalog
+}
+
+// Entry returns the price entry for a model from a detached catalog value.
+func (catalog PricingCatalog) Entry(modelID string) (PricingEntry, bool) {
+	for _, entry := range catalog.Entries {
+		if entry.ModelID == modelID {
+			return entry, true
+		}
+	}
+	return PricingEntry{}, false
+}
+
 // Limit is the normalized shape of one configured quota rule. Numeric fields
 // are retained as integers or decimal text so enforced budgets never depend on
 // binary floating-point arithmetic.
@@ -378,6 +418,7 @@ type ActiveSnapshot struct {
 	attestations map[string]AttestationPolicy
 	upstreams    map[string]Upstream
 	models       map[string]Model
+	pricing      map[string]PricingCatalog
 	limitPlans   map[string]LimitPlan
 	features     map[string]Feature
 }
@@ -423,6 +464,23 @@ func (snapshot ActiveSnapshot) Upstream(upstreamID string) (Upstream, bool) {
 func (snapshot ActiveSnapshot) Model(modelID string) (Model, bool) {
 	model, ok := snapshot.models[modelID]
 	return model.clone(), ok
+}
+
+// PricingCatalog returns a deep copy of one configured USD catalog.
+func (snapshot ActiveSnapshot) PricingCatalog(catalogID string) (PricingCatalog, bool) {
+	catalog, ok := snapshot.pricing[catalogID]
+	return catalog.clone(), ok
+}
+
+// PricingEntry returns a value copy of one model entry in a catalog. It does
+// not evaluate the catalog's EffectiveAt policy; time-sensitive callers must
+// resolve the catalog and compare that timestamp using their trusted clock.
+func (snapshot ActiveSnapshot) PricingEntry(catalogID, modelID string) (PricingEntry, bool) {
+	catalog, ok := snapshot.pricing[catalogID]
+	if !ok {
+		return PricingEntry{}, false
+	}
+	return catalog.Entry(modelID)
 }
 
 // LimitPlan returns a deep copy of one configured quota plan.
