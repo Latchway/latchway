@@ -303,7 +303,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	if appliedOutputMaximum <= 0 || appliedOutputMaximum > validated.maximumOutputTokens {
+	if !validAppliedOutputMaximum(endpoint.adapter.Capabilities(), validated, appliedOutputMaximum) {
 		handler.writeMappedError(writer, requestID, declaration.feature, errInvalidConfiguration)
 		return
 	}
@@ -634,7 +634,7 @@ func assignDecisionReservationUnits(
 	appliedOutputMaximum int64,
 	inputPreflight *protocol.TrustedInputPreflight,
 ) (hardCostReservation, error) {
-	if appliedOutputMaximum <= 0 {
+	if appliedOutputMaximum < 0 {
 		return hardCostReservation{}, policy.ErrConfiguration
 	}
 	hasCostRule := false
@@ -691,6 +691,19 @@ func assignDecisionReservationUnits(
 		}
 	}
 	return bound, nil
+}
+
+func validAppliedOutputMaximum(
+	capabilities protocol.Capabilities,
+	decision validatedDecision,
+	applied int64,
+) bool {
+	if capabilities.OutputTokenClamp {
+		return decision.defaultOutputTokens > 0 && decision.maximumOutputTokens > 0 &&
+			decision.defaultOutputTokens <= decision.maximumOutputTokens &&
+			applied > 0 && applied <= decision.maximumOutputTokens
+	}
+	return decision.defaultOutputTokens == 0 && decision.maximumOutputTokens == 0 && applied == 0
 }
 
 func trustedInputPreflightRequired(rules []quota.Rule, selected configuredPricing) bool {

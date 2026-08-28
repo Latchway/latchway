@@ -154,9 +154,11 @@ type Adapter interface {
 	ID() string
 	Match(*http.Request) bool
 	InspectRequest(context.Context, *http.Request) (RequestMetadata, error)
-	// ApplyFeature returns the exact positive output-token maximum written to
-	// the provider request. Callers use that value, not client metadata, for
-	// quota reservation and provider-usage consistency checks.
+	// ApplyFeature returns the exact non-negative output-token maximum written
+	// to the provider request. Generative adapters with OutputTokenClamp must
+	// return a positive value; non-generative adapters must return zero. Callers
+	// use that value, not client metadata, for quota reservation and
+	// provider-usage consistency checks.
 	ApplyFeature(context.Context, *http.Request, FeatureDecision) (int64, error)
 	ObserveResponse(context.Context, *http.Response) (ResponseObserver, error)
 	Capabilities() Capabilities
