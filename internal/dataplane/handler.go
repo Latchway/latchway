@@ -298,6 +298,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	replay, err := captureReplayableRequest(request)
+	if err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
 	plan, err := handler.policies.ResolvePlan(
 		request.Context(), snapshot, declaration.feature, authorization, logicalID, metadata,
 	)
@@ -315,7 +320,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	appliedOutputMaximum, err := endpoint.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
+	attemptRequest, err := replay.New(request.Context())
+	if err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
+	appliedOutputMaximum, err := endpoint.adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, protocol.FeatureDecision{
 		PhysicalModel:       decision.Model.UpstreamModel,
 		DefaultOutputTokens: validated.defaultOutputTokens,
 		MaximumOutputTokens: validated.maximumOutputTokens,
@@ -336,7 +346,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
 			return
 		}
-		preflight, preflightErr := preflighter.PreflightInput(request.Context(), request, profile)
+		preflight, preflightErr := preflighter.PreflightInput(attemptRequest.Context(), attemptRequest, profile)
 		if preflightErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, preflightErr)
 			return
@@ -345,7 +355,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			handler.writeMappedError(writer, requestID, declaration.feature, validateErr)
 			return
 		}
-		if integrityErr := verifyAndRebindPreflightBody(request, preflight); integrityErr != nil {
+		if integrityErr := verifyAndRebindPreflightBody(attemptRequest, preflight); integrityErr != nil {
 			handler.writeMappedError(writer, requestID, declaration.feature, integrityErr)
 			return
 		}
@@ -378,7 +388,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 
 	result := handler.executeReserved(
-		request.Context(), writer, request, endpoint, authorization, decision, reservation, inputPreflight,
+		attemptRequest.Context(), writer, attemptRequest, endpoint, authorization, decision, reservation, inputPreflight,
 	)
 	if !result.beginInvoked {
 		if result.err == nil {
