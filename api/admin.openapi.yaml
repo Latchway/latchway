@@ -673,7 +673,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                reason: { type: string, maxLength: 512 }
+                reason: { type: string, maxLength: 100 }
       responses:
         '200':
           description: Revoked installation.
@@ -716,6 +716,7 @@ paths:
       tags: [Usage]
       operationId: getUsageSummary
       summary: Aggregate logical requests, tokens and integer nano-USD cost.
+      description: The half-open `[start, end)` range is limited to 366 days.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/StartTime'
@@ -732,6 +733,7 @@ paths:
       tags: [Usage]
       operationId: getUsageTimeseries
       summary: Return bounded hourly or daily usage points.
+      description: The half-open `[start, end)` range may produce at most 10,000 UTC buckets.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/StartTime'
@@ -768,6 +770,10 @@ paths:
       tags: [Self-tests]
       operationId: startSelfTest
       summary: Start a bounded diagnostic or conformance test.
+      description: |
+        `local` runs durable PostgreSQL, schema and active-configuration checks.
+        `upstream` and `openrouter` are reserved for the credential-aware
+        dispatch runner and are rejected until that runner is configured.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -813,7 +819,7 @@ components:
     AdminCookie:
       type: apiKey
       in: cookie
-      name: latchway_admin_session
+      name: __Host-latchway_admin
     AdminToken:
       type: http
       scheme: bearer
@@ -1285,7 +1291,7 @@ components:
       additionalProperties: false
       required: [items, page]
       properties:
-        items: { type: array, items: { $ref: '#/components/schemas/ApplicationUser' } }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ApplicationUser' } }
         page: { $ref: '#/components/schemas/PageInfo' }
     Installation:
       type: object
@@ -1301,7 +1307,9 @@ components:
         trust_level:
           type: string
           enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
-        attestation_provider: { type: string }
+        attestation_provider:
+          type: string
+          enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
         trust_expires_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
@@ -1311,7 +1319,7 @@ components:
       additionalProperties: false
       required: [items, page]
       properties:
-        items: { type: array, items: { $ref: '#/components/schemas/Installation' } }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Installation' } }
         page: { $ref: '#/components/schemas/PageInfo' }
     UsageValues:
       type: object
@@ -1328,9 +1336,9 @@ components:
       additionalProperties: false
       required: [id, upstream, model, started_at, status, usage_provenance]
       properties:
-        id: { type: string, pattern: '^att_[A-Za-z0-9_-]{16,128}$' }
+        id: { type: string, pattern: '^atm_[A-Za-z0-9_-]{16,128}$' }
         upstream: { $ref: '#/components/schemas/Identifier' }
-        model: { type: string }
+        model: { type: string, maxLength: 512 }
         started_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
@@ -1346,18 +1354,20 @@ components:
         user_id: { $ref: '#/components/schemas/UserID' }
         installation_id: { $ref: '#/components/schemas/InstallationID' }
         feature: { $ref: '#/components/schemas/Identifier' }
-        protocol: { type: string }
+        protocol:
+          type: string
+          enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
         started_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
         usage: { $ref: '#/components/schemas/UsageValues' }
-        attempts: { type: array, items: { $ref: '#/components/schemas/UpstreamAttempt' } }
+        attempts: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/UpstreamAttempt' } }
     RequestPage:
       type: object
       additionalProperties: false
       required: [items, page]
       properties:
-        items: { type: array, items: { $ref: '#/components/schemas/LogicalRequest' } }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LogicalRequest' } }
         page: { $ref: '#/components/schemas/PageInfo' }
     UsageSummary:
       type: object
@@ -1367,7 +1377,7 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         values: { $ref: '#/components/schemas/UsageValues' }
-        provenance: { type: array, uniqueItems: true, items: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] } }
+        provenance: { type: array, maxItems: 5, uniqueItems: true, items: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] } }
     UsageTimeseries:
       type: object
       additionalProperties: false
@@ -1402,7 +1412,7 @@ components:
       additionalProperties: false
       required: [items, page]
       properties:
-        items: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/AuditEvent' } }
         page: { $ref: '#/components/schemas/PageInfo' }
     StartSelfTestRequest:
       type: object
@@ -1426,6 +1436,7 @@ components:
         completed_at: { type: string, format: date-time }
         checks:
           type: array
+          maxItems: 32
           items:
             type: object
             additionalProperties: false

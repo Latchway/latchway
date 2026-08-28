@@ -135,7 +135,10 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret manager: %w", err)
 	}
-	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager)
+	adminAPI, err := adminapi.New(
+		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
+		adminapi.WithRole(string(cfg.Role)),
+	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
 	}

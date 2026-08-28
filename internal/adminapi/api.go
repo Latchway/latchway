@@ -49,9 +49,28 @@ type API struct {
 	sessionLifetime time.Duration
 	logger          *slog.Logger
 	loginLimiter    *failureLimiter
+	operations      *operationalStore
+	role            string
 }
 
-func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger, manager secretManager) (*API, error) {
+// Option supplies process facts that are not persisted in PostgreSQL.
+type Option func(*API) error
+
+// WithRole records the process role exposed by the authenticated system-status
+// endpoint. The default remains "all" for embedded callers and tests.
+func WithRole(role string) Option {
+	return func(api *API) error {
+		switch role {
+		case "all", "api", "worker":
+			api.role = role
+			return nil
+		default:
+			return errors.New("admin API process role is invalid")
+		}
+	}
+}
+
+func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger, manager secretManager, options ...Option) (*API, error) {
 	if manager == nil {
 		return nil, errors.New("admin API secret manager is nil")
 	}
@@ -85,6 +104,18 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
+		operations: newOperationalStore(pool), role: "all",
+	}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("admin API option is nil")
+		}
+		if err := option(api); err != nil {
+			return nil, err
+		}
+	}
+	if api.operations == nil {
+		return nil, errors.New("admin API operational store is nil")
 	}
 	return api, nil
 }
@@ -138,8 +169,23 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/api-tokens", api.apiTokens)
 		protected.With(api.mutationProtection).Post("/api-tokens", api.createAPIToken)
 		protected.With(api.mutationProtection).Delete("/api-tokens/{tokenID}", api.revokeAPIToken)
+		protected.Get("/users", api.users)
+		protected.Get("/users/{userID}", api.user)
+		protected.With(api.mutationProtection).Post("/users/{userID}/block", api.blockUser)
+		protected.With(api.mutationProtection).Post("/users/{userID}/unblock", api.unblockUser)
 		protected.With(api.mutationProtection).Put("/users/{userID}/limit-override", api.replaceUserLimitOverride)
 		protected.With(api.mutationProtection).Delete("/users/{userID}/limit-override", api.clearUserLimitOverride)
+		protected.Get("/installations", api.installations)
+		protected.Get("/installations/{installationID}", api.installation)
+		protected.With(api.mutationProtection).Post("/installations/{installationID}/revoke", api.revokeInstallation)
+		protected.Get("/requests", api.requests)
+		protected.Get("/requests/{requestID}", api.request)
+		protected.Get("/usage/summary", api.usageSummary)
+		protected.Get("/usage/timeseries", api.usageTimeseries)
+		protected.Get("/audit-events", api.auditEvents)
+		protected.With(api.mutationProtection).Post("/self-tests", api.startSelfTest)
+		protected.Get("/self-tests/{selfTestID}", api.selfTest)
+		protected.Get("/system", api.systemStatus)
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The administrative endpoint was not found."})
@@ -1206,6 +1252,14 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.user_limit_override_replace", "admin_request"
 	case strings.HasSuffix(path, "/limit-override") && method == http.MethodDelete:
 		return "admin.user_limit_override_clear", "admin_request"
+	case strings.HasSuffix(path, "/block") && strings.Contains(path, "/users/"):
+		return "admin.user_block", "admin_request"
+	case strings.HasSuffix(path, "/unblock") && strings.Contains(path, "/users/"):
+		return "admin.user_unblock", "admin_request"
+	case strings.HasSuffix(path, "/revoke") && strings.Contains(path, "/installations/"):
+		return "admin.installation_revoke", "admin_request"
+	case strings.HasSuffix(path, "/self-tests") && method == http.MethodPost:
+		return "admin.self_test_run", "admin_request"
 	default:
 		return "admin.request_rejected", "admin_request"
 	}
