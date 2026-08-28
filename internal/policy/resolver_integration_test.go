@@ -201,6 +201,40 @@ func TestResolveFromDurableSealedAuthorizationPostgreSQL(t *testing.T) {
 	if decision.LimitPlan.ID != "premium" || decision.Route.ID != "premium-reasoning" || decision.Model.ID != "reasoning" {
 		t.Fatalf("durable normalized claims did not drive expected decision: %+v", decision)
 	}
+
+	overrideID := policyIntegrationID(t, id.UserOverride)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_overrides (
+			user_override_id, organization_id, application_id, environment_id,
+			application_user_id, override_document, reason,
+			created_by_admin_user_id, created_at
+		) VALUES ($1, $2, $3, $4, $5, '{"limit_plan":"free"}'::jsonb,
+		          'policy integration override', $6, transaction_timestamp())
+	`, overrideID, organizationID, applicationID, environmentID, userID, adminID); err != nil {
+		t.Fatalf("create durable user override: %v", err)
+	}
+	overriddenAuthorization, err := sessions.Authorize(ctx, principal)
+	if err != nil {
+		t.Fatalf("load overridden sealed authorization: %v", err)
+	}
+	overriddenInput, err := NewInput(
+		overriddenAuthorization, logicalID,
+		ProtocolRequestMetadata{Streaming: true}, EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil {
+		t.Fatalf("build overridden policy input: %v", err)
+	}
+	overriddenDecision, err := resolver.Resolve(requestContext, snapshot, "assistant", overriddenInput)
+	if err != nil {
+		t.Fatalf("resolve durable user override: %v", err)
+	}
+	if overriddenAuthorization.UserOverrideID != overrideID ||
+		overriddenAuthorization.LimitPlanOverride != "free" ||
+		overriddenDecision.LimitPlan.ID != "free" ||
+		overriddenDecision.Route.ID != "premium-reasoning" {
+		t.Fatalf("durable override did not replace only plan selection: authorization=%+v decision=%+v",
+			overriddenAuthorization, overriddenDecision)
+	}
 	if _, err := newInputAt(
 		authorization, logicalID, ProtocolRequestMetadata{Streaming: true}, EnvironmentFacts{Kind: "production"},
 		issued.ExpiresAt,

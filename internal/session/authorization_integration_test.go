@@ -19,6 +19,7 @@ import (
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/secrets"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 type accessRevocationFixture struct {
@@ -33,6 +34,174 @@ type accessRevocationFixture struct {
 	principal  AccessPrincipal
 	refreshURI *url.URL
 	revokeURI  *url.URL
+}
+
+func TestAccessAuthorizationLoadsActiveUserOverridePostgreSQL(t *testing.T) {
+	fixture := newAccessRevocationFixture(t)
+
+	var adminUserID string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT created_by_admin_user_id
+		FROM config_revisions
+		WHERE config_revision_id = $1
+	`, fixture.principal.PolicyRevisionID).Scan(&adminUserID); err != nil {
+		t.Fatalf("resolve override administrator: %v", err)
+	}
+	overrideID := mustSessionID(t, id.UserOverride)
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		INSERT INTO user_overrides (
+			user_override_id, organization_id, application_id, environment_id,
+			application_user_id, override_document, reason,
+			created_by_admin_user_id, created_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, '{"limit_plan":"premium"}'::jsonb,
+			'test override', $6, transaction_timestamp() - interval '1 minute',
+			transaction_timestamp() + interval '1 hour'
+		)
+	`, overrideID, fixture.principal.OrganizationID, fixture.principal.ApplicationID,
+		fixture.principal.EnvironmentID, fixture.principal.ApplicationUserID, adminUserID); err != nil {
+		t.Fatalf("insert active user override: %v", err)
+	}
+
+	input := func(label string) AccessRequestInput {
+		return AccessRequestInput{
+			AccessToken: fixture.issued.Access.Token, Principal: fixture.principal,
+			DPoPProof: signedSessionAccessDPoP(
+				t, fixture.key, "DELETE", fixture.revokeURI, fixture.now,
+				fixture.issued.Access.Token.Reveal(), label,
+			),
+			HTTPMethod: "DELETE", RequestURI: fixture.revokeURI,
+		}
+	}
+
+	active, err := fixture.store.AuthorizeAccess(fixture.ctx, input("override-active"))
+	if err != nil || active.UserOverrideID != overrideID || active.LimitPlanOverride != "premium" {
+		t.Fatalf("active override authorization = %#v, %v", active, err)
+	}
+
+	corruptInput := input("override-corrupt-reusable-proof")
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE user_overrides
+		SET override_document = '{"limit_plan":"Premium"}'::jsonb
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("corrupt active override: %v", err)
+	}
+	if _, err := fixture.store.AuthorizeAccess(fixture.ctx, corruptInput); !errors.Is(err, useroverride.ErrInvalid) {
+		t.Fatalf("corrupt active override error = %v", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE user_overrides
+		SET override_document = '{"limit_plan":"premium"}'::jsonb
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("restore active override: %v", err)
+	}
+	if _, err := fixture.store.AuthorizeAccess(fixture.ctx, corruptInput); err != nil {
+		t.Fatalf("corrupt override consumed DPoP proof: %v", err)
+	}
+
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE user_overrides
+		SET expires_at = transaction_timestamp()
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("expire active override: %v", err)
+	}
+	expired, err := fixture.store.AuthorizeAccess(fixture.ctx, input("override-expired"))
+	if err != nil || expired.UserOverrideID != "" || expired.LimitPlanOverride != "" {
+		t.Fatalf("expired override authorization = %#v, %v", expired, err)
+	}
+
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE user_overrides
+		SET expires_at = NULL, revoked_at = transaction_timestamp()
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("revoke active override: %v", err)
+	}
+	revoked, err := fixture.store.AuthorizeAccess(fixture.ctx, input("override-revoked"))
+	if err != nil || revoked.UserOverrideID != "" || revoked.LimitPlanOverride != "" {
+		t.Fatalf("revoked override authorization = %#v, %v", revoked, err)
+	}
+
+	writer, err := fixture.pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatalf("begin user-state writer: %v", err)
+	}
+	defer func() { _ = writer.Rollback(fixture.ctx) }()
+	if _, err := writer.Exec(fixture.ctx, `
+		SELECT 1
+		FROM application_users
+		WHERE organization_id = $1 AND application_id = $2
+		  AND application_user_id = $3
+		FOR UPDATE
+	`, fixture.principal.OrganizationID, fixture.principal.ApplicationID,
+		fixture.principal.ApplicationUserID); err != nil {
+		t.Fatalf("lock application user for coherent authorization: %v", err)
+	}
+	if _, err := writer.Exec(fixture.ctx, `
+		UPDATE application_users
+		SET normalized_claims = '{"generation":"after"}'::jsonb,
+		    updated_at = statement_timestamp()
+		WHERE organization_id = $1 AND application_id = $2
+		  AND application_user_id = $3
+	`, fixture.principal.OrganizationID, fixture.principal.ApplicationID,
+		fixture.principal.ApplicationUserID); err != nil {
+		t.Fatalf("stage next application-user state: %v", err)
+	}
+	if _, err := writer.Exec(fixture.ctx, `
+		UPDATE user_overrides
+		SET override_document = '{"limit_plan":"free"}'::jsonb,
+		    expires_at = statement_timestamp() + interval '1 hour', revoked_at = NULL
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("stage next override state: %v", err)
+	}
+	type authorizationResult struct {
+		authorization Authorization
+		err           error
+	}
+	resultChannel := make(chan authorizationResult, 1)
+	go func() {
+		authorization, authorizeErr := fixture.store.Authorize(fixture.ctx, fixture.principal)
+		resultChannel <- authorizationResult{authorization: authorization, err: authorizeErr}
+	}()
+	waitForSessionAuthorizationUserLock(t, fixture)
+	if err := writer.Commit(fixture.ctx); err != nil {
+		t.Fatalf("commit coherent user state: %v", err)
+	}
+	coherent := <-resultChannel
+	if coherent.err != nil || coherent.authorization.LimitPlanOverride != "free" ||
+		coherent.authorization.UserOverrideID != overrideID ||
+		coherent.authorization.NormalizedClaims["generation"] != "after" {
+		t.Fatalf("coherent authorization = %#v, %v", coherent.authorization, coherent.err)
+	}
+}
+
+func waitForSessionAuthorizationUserLock(t *testing.T, fixture accessRevocationFixture) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%session_authorization_user_lock%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect session authorization user lock: %v", err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("session authorization did not wait for the application-user lock")
 }
 
 func TestAccessAuthorizationAndRevocationPostgreSQL(t *testing.T) {

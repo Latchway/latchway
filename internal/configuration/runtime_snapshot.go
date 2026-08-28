@@ -283,12 +283,12 @@ func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 }
 
 // runtimeHardCostPricingValid independently rechecks the activation gate on
-// persisted compiled snapshots. Limit-plan selection can depend on trusted
-// runtime facts, so a dynamic selection is conservatively allowed to reach
-// any plan while a constant selection is scoped to its exact plan. Every model
-// routed by an applicable feature must carry conservative configured pricing.
+// persisted compiled snapshots. A server-owned user override can replace any
+// feature's limit-plan CEL result with any configured plan, so every feature
+// can reach a configured hard-cost plan even when its expression is constant.
+// Every routed model must therefore carry conservative configured pricing.
 // OpenAI Chat cannot preflight all billable input (for example, remote file
-// identifiers), therefore this bounded slice permits only a zero input rate.
+// identifiers), so this bounded slice permits only a zero input rate.
 func (snapshot ActiveSnapshot) runtimeHardCostPricingValid() bool {
 	for _, feature := range snapshot.features {
 		if !runtimeFeatureCanSelectCostLimit(feature, snapshot.limitPlans) {
@@ -312,11 +312,7 @@ func (snapshot ActiveSnapshot) runtimeHardCostPricingValid() bool {
 	return true
 }
 
-func runtimeFeatureCanSelectCostLimit(feature Feature, plans map[string]LimitPlan) bool {
-	if matches := constantIdentifierExpression.FindStringSubmatch(strings.TrimSpace(feature.LimitPlanExpression)); len(matches) == 2 {
-		plan, ok := plans[matches[1]]
-		return ok && runtimeLimitPlanHasCost(plan)
-	}
+func runtimeFeatureCanSelectCostLimit(_ Feature, plans map[string]LimitPlan) bool {
 	for _, plan := range plans {
 		if runtimeLimitPlanHasCost(plan) {
 			return true

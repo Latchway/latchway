@@ -47,6 +47,62 @@ func TestResolverSelectsAccessPlanAndPriorityRoute(t *testing.T) {
 	}
 }
 
+func TestResolverUserOverrideReplacesOnlyLimitPlanSelection(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := policySnapshot()
+
+	freePrincipal := policyInput("free")
+	freePrincipal.authorization.userOverrideID = "uov_00000000000000000000000000"
+	freePrincipal.authorization.limitPlanOverride = "premium"
+	decision, err := resolver.Resolve(context.Background(), snapshot, "assistant", freePrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.LimitPlan.ID != "premium" || decision.LimitPlan.Limits[0].Maximum != 500 ||
+		decision.Route.ID != "fallback-fast" {
+		t.Fatalf("free principal override decision = %+v", decision)
+	}
+
+	// The compiled feature cache is shared, but the effective override is not.
+	premiumPrincipal := policyInput("premium")
+	premiumPrincipal.authorization.userID = "usr_00000000000000000000000001"
+	premiumPrincipal.authorization.userOverrideID = "uov_00000000000000000000000001"
+	premiumPrincipal.authorization.limitPlanOverride = "free"
+	decision, err = resolver.Resolve(context.Background(), snapshot, "assistant", premiumPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.LimitPlan.ID != "free" || decision.LimitPlan.Limits[0].Maximum != 5 ||
+		decision.Route.ID != "premium-reasoning" {
+		t.Fatalf("premium principal override decision = %+v", decision)
+	}
+
+	decision.LimitPlan.Limits[0].Maximum = 1
+	again, err := resolver.Resolve(context.Background(), snapshot, "assistant", premiumPrincipal)
+	if err != nil || again.LimitPlan.Limits[0].Maximum != 5 {
+		t.Fatalf("caller mutation reached resolved override plan: %+v, %v", again, err)
+	}
+
+	blocked := policyInput("blocked")
+	blocked.authorization.userOverrideID = "uov_00000000000000000000000002"
+	blocked.authorization.limitPlanOverride = "premium"
+	if _, err := resolver.Resolve(context.Background(), snapshot, "assistant", blocked); !errors.Is(err, ErrFeatureNotAllowed) {
+		t.Fatalf("override bypassed access policy: %v", err)
+	}
+
+	missing := policyInput("free")
+	missing.authorization.userOverrideID = "uov_00000000000000000000000003"
+	missing.authorization.limitPlanOverride = "missing"
+	if _, err := resolver.Resolve(context.Background(), snapshot, "assistant", missing); !errors.Is(err, ErrLimitPlanNotFound) {
+		t.Fatalf("missing override plan error = %v", err)
+	}
+}
+
 func TestResolverWeightedSelectionIsStableAndDefensive(t *testing.T) {
 	t.Parallel()
 
@@ -651,6 +707,40 @@ func TestResolverResolveQuotaRejectsRequestDependentPolicy(t *testing.T) {
 				t.Fatalf("ResolveQuota() error = %v, want %v", resolveErr, test.want)
 			}
 		})
+	}
+}
+
+func TestResolverResolveQuotaOverrideStabilizesRequestDependentBasePlan(t *testing.T) {
+	t.Parallel()
+
+	resolver := quotaResolver(t, func() time.Time { return policyTestNow })
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.AccessExpression = "true"
+	feature.LimitPlanExpression = "request.streaming ? 'premium' : 'free'"
+	snapshot.features["assistant"] = feature
+	authorization := quotaAuthorization("premium")
+	authorization.UserOverrideID = "uov_00000000000000000000000000"
+	authorization.LimitPlanOverride = "free"
+
+	projection, err := resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.LimitPlan.ID != "free" || projection.LimitPlan.Limits[0].Maximum != 5 {
+		t.Fatalf("override quota projection = %+v", projection)
+	}
+
+	feature.AccessExpression = "!request.streaming"
+	snapshot.features["assistant"] = feature
+	if _, err := resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); !errors.Is(err, ErrConfiguration) {
+		t.Fatalf("override stabilized request-dependent access: %v", err)
 	}
 }
 

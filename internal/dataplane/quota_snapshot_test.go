@@ -65,6 +65,8 @@ func TestFeatureQuotaProviderAuthenticatesAndProjectsEffectiveRules(t *testing.T
 		captured.ApplicationUserID != fixture.authorization.ApplicationUserID ||
 		captured.InstallationID != fixture.authorization.InstallationID ||
 		captured.ConfigRevisionID != fixture.authorization.PolicyRevisionID ||
+		captured.UserOverrideID != fixture.authorization.UserOverrideID ||
+		captured.LimitPlanOverride != fixture.authorization.LimitPlanOverride ||
 		captured.FeatureKey != "assistant" || captured.LimitPlanKey != "starter" ||
 		captured.RouteKey != "" || captured.UpstreamKey != "" || captured.ModelKey != "" ||
 		len(captured.Rules) != 4 {
@@ -204,6 +206,7 @@ func newFeatureQuotaFixture(t *testing.T) *featureQuotaFixture {
 		ApplicationUserID: id.Must(id.ApplicationUser), InstallationID: id.Must(id.Installation),
 		InstallationPlatform: "ios", SessionGrantID: id.Must(id.SessionGrant),
 		PolicyRevisionID: id.Must(id.ConfigRevision),
+		UserOverrideID:   id.Must(id.UserOverride), LimitPlanOverride: "starter",
 	}
 	projection := policy.QuotaProjection{
 		Feature: configuration.Feature{

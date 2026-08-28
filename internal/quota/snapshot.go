@@ -2,12 +2,14 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 // SnapshotInput contains the exact active, server-resolved quota projection
@@ -22,6 +24,8 @@ type SnapshotInput struct {
 	ApplicationUserID string
 	InstallationID    string
 	ConfigRevisionID  string
+	UserOverrideID    string
+	LimitPlanOverride string
 
 	FeatureKey   string
 	LimitPlanKey string
@@ -91,6 +95,9 @@ func (store *Store) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err := verifySnapshotUserOverride(ctx, tx, prepared, observedAt); err != nil {
+		return Snapshot{}, err
+	}
 	plans, err := snapshotPlansAt(prepared.rules, observedAt)
 	if err != nil {
 		return Snapshot{}, err
@@ -118,6 +125,9 @@ func (store *Store) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot
 }
 
 func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
+	override := useroverride.Selection{
+		ID: input.UserOverrideID, LimitPlan: input.LimitPlanOverride,
+	}
 	if id.Validate(input.OrganizationID, id.Organization) != nil ||
 		id.Validate(input.ApplicationID, id.Application) != nil ||
 		id.Validate(input.EnvironmentID, id.Environment) != nil ||
@@ -125,7 +135,9 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 		id.Validate(input.InstallationID, id.Installation) != nil ||
 		id.Validate(input.ConfigRevisionID, id.ConfigRevision) != nil ||
 		!identifierPattern.MatchString(input.FeatureKey) ||
-		!identifierPattern.MatchString(input.LimitPlanKey) {
+		!identifierPattern.MatchString(input.LimitPlanKey) ||
+		override.Validate() != nil ||
+		(override.Present() && override.LimitPlan != input.LimitPlanKey) {
 		return preparedSnapshot{}, ErrInvalidInput
 	}
 
@@ -158,6 +170,57 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 	prepared := preparedSnapshot{SnapshotInput: input, rules: rules}
 	prepared.Rules = clonePreparedRules(rules)
 	return prepared, nil
+}
+
+// verifySnapshotUserOverride binds the selected limit plan to the exact
+// active override row (or its absence) at ObservedAt. Authorization seals this
+// selection before policy evaluation; revalidating it in the same repeatable-
+// read snapshot as the active revision and quota counters prevents a mutable
+// override transition from producing a mixed point-in-time projection.
+func verifySnapshotUserOverride(
+	ctx context.Context,
+	tx pgx.Tx,
+	prepared preparedSnapshot,
+	observedAt time.Time,
+) error {
+	expected := useroverride.Selection{
+		ID: prepared.UserOverrideID, LimitPlan: prepared.LimitPlanOverride,
+	}
+	if err := expected.Validate(); err != nil || observedAt.IsZero() {
+		return ErrInvalidInput
+	}
+
+	var actual useroverride.Selection
+	var document []byte
+	err := tx.QueryRow(ctx, `
+		SELECT user_override_id, override_document
+		FROM user_overrides
+		WHERE organization_id = $1
+		  AND application_id = $2
+		  AND environment_id = $3
+		  AND application_user_id = $4
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > $5)
+	`, prepared.OrganizationID, prepared.ApplicationID, prepared.EnvironmentID,
+		prepared.ApplicationUserID, observedAt).Scan(&actual.ID, &document)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if expected.Present() {
+			return ErrInvalidState
+		}
+		return nil
+	}
+	if err != nil {
+		return persistenceFailure("verify active quota snapshot user override", err)
+	}
+	decoded, err := useroverride.Decode(document)
+	if err != nil {
+		return ErrInvalidState
+	}
+	actual.LimitPlan = decoded.LimitPlan
+	if actual.Validate() != nil || !expected.Present() || actual != expected {
+		return ErrInvalidState
+	}
+	return nil
 }
 
 // snapshotTransactionTime establishes the transaction's MVCC snapshot while

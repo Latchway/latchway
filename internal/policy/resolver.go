@@ -23,6 +23,7 @@ import (
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 var (
@@ -63,6 +64,8 @@ type authorizationFacts struct {
 	applicationID        string
 	environmentID        string
 	policyRevisionID     string
+	userOverrideID       string
+	limitPlanOverride    string
 	userID               string
 	installationID       string
 	installationPlatform string
@@ -114,6 +117,7 @@ func inputFromAuthorization(authorization session.Authorization, logicalID reque
 		authorization: authorizationFacts{
 			organizationID: authorization.OrganizationID, applicationID: authorization.ApplicationID,
 			environmentID: authorization.EnvironmentID, policyRevisionID: authorization.PolicyRevisionID,
+			userOverrideID: authorization.UserOverrideID, limitPlanOverride: authorization.LimitPlanOverride,
 			userID: authorization.ApplicationUserID, installationID: authorization.InstallationID,
 			installationPlatform: authorization.InstallationPlatform, identityProvider: authorization.IdentityProvider,
 			trustLevel: authorization.TrustLevel, attestationProvider: authorization.AttestationProvider,
@@ -282,19 +286,13 @@ func (resolver *Resolver) Resolve(ctx context.Context, snapshot Snapshot, featur
 	if !allowed {
 		return Decision{}, ErrFeatureNotAllowed
 	}
-	planID, err := evaluateString(ctx, compiled.limitPlan, activation)
+	planID, err := selectLimitPlanID(ctx, compiled.limitPlan, activation, input.authorization.limitPlanOverride)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Decision{}, ctxErr
-		}
-		return Decision{}, ErrConfiguration
+		return Decision{}, err
 	}
-	if !policyIdentifierPattern.MatchString(planID) {
-		return Decision{}, ErrLimitPlanNotFound
-	}
-	plan, ok := snapshot.LimitPlan(planID)
-	if !ok {
-		return Decision{}, ErrLimitPlanNotFound
+	plan, err := resolveLimitPlan(snapshot, planID)
+	if err != nil {
+		return Decision{}, err
 	}
 	matched := make([]configuration.Route, 0, len(compiled.routes))
 	for _, route := range compiled.routes {
@@ -410,39 +408,34 @@ func (resolver *Resolver) ResolveQuota(
 		return QuotaProjection{}, ErrConfiguration
 	}
 
-	nonStreamingPlanID, err := evaluateString(ctx, compiled.limitPlan, nonStreamingActivation)
-	if err != nil {
-		if contextErr := ctx.Err(); contextErr != nil {
-			return QuotaProjection{}, contextErr
+	nonStreamingPlanID, streamingPlanID := nonStreaming.authorization.limitPlanOverride,
+		streaming.authorization.limitPlanOverride
+	if nonStreamingPlanID == "" {
+		nonStreamingPlanID, err = selectLimitPlanID(
+			ctx, compiled.limitPlan, nonStreamingActivation, "",
+		)
+		if err != nil {
+			return QuotaProjection{}, err
 		}
-		return QuotaProjection{}, ErrConfiguration
-	}
-	streamingPlanID, err := evaluateString(ctx, compiled.limitPlan, streamingActivation)
-	if err != nil {
-		if contextErr := ctx.Err(); contextErr != nil {
-			return QuotaProjection{}, contextErr
+		streamingPlanID, err = selectLimitPlanID(
+			ctx, compiled.limitPlan, streamingActivation, "",
+		)
+		if err != nil {
+			return QuotaProjection{}, err
 		}
-		return QuotaProjection{}, ErrConfiguration
-	}
-	if !policyIdentifierPattern.MatchString(nonStreamingPlanID) ||
-		!policyIdentifierPattern.MatchString(streamingPlanID) {
-		return QuotaProjection{}, ErrLimitPlanNotFound
 	}
 	if nonStreamingPlanID != streamingPlanID {
 		return QuotaProjection{}, ErrConfiguration
 	}
-	nonStreamingPlan, ok := snapshot.LimitPlan(nonStreamingPlanID)
-	if !ok {
-		return QuotaProjection{}, ErrLimitPlanNotFound
+	nonStreamingPlan, err := resolveLimitPlan(snapshot, nonStreamingPlanID)
+	if err != nil {
+		return QuotaProjection{}, err
 	}
-	streamingPlan, ok := snapshot.LimitPlan(streamingPlanID)
-	if !ok {
-		return QuotaProjection{}, ErrLimitPlanNotFound
+	streamingPlan, err := resolveLimitPlan(snapshot, streamingPlanID)
+	if err != nil {
+		return QuotaProjection{}, err
 	}
-	if nonStreamingPlan.ID != nonStreamingPlanID || streamingPlan.ID != streamingPlanID ||
-		len(nonStreamingPlan.Limits) == 0 || len(nonStreamingPlan.Limits) > 128 ||
-		len(streamingPlan.Limits) == 0 || len(streamingPlan.Limits) > 128 ||
-		!reflect.DeepEqual(nonStreamingPlan, streamingPlan) {
+	if !reflect.DeepEqual(nonStreamingPlan, streamingPlan) {
 		return QuotaProjection{}, ErrConfiguration
 	}
 	return QuotaProjection{
@@ -458,7 +451,49 @@ func validInput(input Input) bool {
 		id.Validate(input.authorization.userID, id.ApplicationUser) == nil &&
 		id.Validate(input.authorization.installationID, id.Installation) == nil &&
 		id.Validate(input.logicalRequestID, id.LogicalRequest) == nil &&
+		(useroverride.Selection{
+			ID: input.authorization.userOverrideID, LimitPlan: input.authorization.limitPlanOverride,
+		}).Validate() == nil &&
 		validEnvironmentKind(input.environment.Kind) && input.authorization.claims != nil
+}
+
+func selectLimitPlanID(
+	ctx context.Context,
+	program cel.Program,
+	activation map[string]any,
+	override string,
+) (string, error) {
+	if override != "" {
+		if !policyIdentifierPattern.MatchString(override) {
+			return "", ErrLimitPlanNotFound
+		}
+		return override, nil
+	}
+	planID, err := evaluateString(ctx, program, activation)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return "", contextErr
+		}
+		return "", ErrConfiguration
+	}
+	if !policyIdentifierPattern.MatchString(planID) {
+		return "", ErrLimitPlanNotFound
+	}
+	return planID, nil
+}
+
+func resolveLimitPlan(snapshot Snapshot, planID string) (configuration.LimitPlan, error) {
+	if !policyIdentifierPattern.MatchString(planID) {
+		return configuration.LimitPlan{}, ErrLimitPlanNotFound
+	}
+	plan, ok := snapshot.LimitPlan(planID)
+	if !ok {
+		return configuration.LimitPlan{}, ErrLimitPlanNotFound
+	}
+	if plan.ID != planID || len(plan.Limits) == 0 || len(plan.Limits) > 128 {
+		return configuration.LimitPlan{}, ErrConfiguration
+	}
+	return cloneLimitPlan(plan), nil
 }
 
 func enforceFeatureAttestation(snapshot Snapshot, feature configuration.Feature, authorization authorizationFacts, now time.Time) error {

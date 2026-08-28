@@ -103,7 +103,7 @@ const (
 	dataPlaneE2EOutputTokenRefillInterval              = 700 * time.Second
 	dataPlaneE2EProviderModel                          = "configured-chat-model"
 	dataPlaneE2EPricingCatalog                         = "configured_flat_rate"
-	dataPlaneE2ECalculatedCost                         = int64(65_236)
+	dataPlaneE2ECalculatedCost                         = int64(43_235)
 	dataPlaneE2EClientRequestID                        = "client-request-dataplane-e2e-01"
 	dataPlaneE2EStreamRequestID                        = "client-request-dataplane-e2e-stream-01"
 	dataPlaneE2EDeniedRequestID                        = "client-request-dataplane-e2e-denied-01"
@@ -263,7 +263,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if !ok || !entryOK || pricingCatalog.ID != dataPlaneE2EPricingCatalog ||
 		pricingCatalog.Currency != quota.USDCurrency || pricingCatalog.EffectiveAt == nil ||
 		!pricingCatalog.EffectiveAt.Before(now) || pricingEntry != (configuration.PricingEntry{
-		ModelID: "fast", InputNanoUSDPerMillion: 2_000_000_001,
+		ModelID: "fast", InputNanoUSDPerMillion: 0,
 		OutputNanoUSDPerMillion: 6_000_000_001, RequestNanoUSD: 1_234,
 	}) {
 		t.Fatalf("active configured pricing = catalog:%+v entry:%+v ok=%t/%t",
@@ -1326,8 +1326,11 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 				map[string]any{
 					"id": dataPlaneE2EPricingCatalog, "currency": quota.USDCurrency,
 					"effectiveAt": "2020-01-01T00:00:00Z",
+					// A user override can select the hard-cost plan for any feature
+					// in this environment. Every routed OpenAI Chat model must
+					// therefore have a conservatively preflightable zero input rate.
 					"entries": []any{map[string]any{
-						"model": "fast", "inputNanoUsdPerMillion": int64(2_000_000_001),
+						"model": "fast", "inputNanoUsdPerMillion": int64(0),
 						"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
 					}},
 				},

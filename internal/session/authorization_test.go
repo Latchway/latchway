@@ -16,7 +16,10 @@ func TestAuthorizationValidatedSnapshotProvenanceAndDeepCopy(t *testing.T) {
 		"roles": []any{"member", "tester"},
 		"score": json.Number("42"),
 	}
-	sealed, err := sealAuthorization(testAuthorization(now, claims))
+	authorization := testAuthorization(now, claims)
+	authorization.UserOverrideID = "uov_00000000000000000000000000"
+	authorization.LimitPlanOverride = "premium_override"
+	sealed, err := sealAuthorization(authorization)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +32,8 @@ func TestAuthorizationValidatedSnapshotProvenanceAndDeepCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.NormalizedClaims["plan"] != "premium" || first.InstallationPlatform != "ios" ||
+		first.UserOverrideID != authorization.UserOverrideID ||
+		first.LimitPlanOverride != authorization.LimitPlanOverride ||
 		first.EnvironmentKind != "production" || !first.AttestedAt.Equal(now.Add(-time.Minute)) {
 		t.Fatalf("unexpected validated authorization: %#v", first)
 	}
@@ -52,6 +57,15 @@ func TestAuthorizationValidatedSnapshotProvenanceAndDeepCopy(t *testing.T) {
 	if _, err := sealed.ValidatedSnapshot(now); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("tampered authorization error = %v, want session invalid", err)
 	}
+
+	sealed, err = sealAuthorization(authorization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed.LimitPlanOverride = "free"
+	if _, err := sealed.ValidatedSnapshot(now); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("tampered limit-plan override error = %v, want session invalid", err)
+	}
 }
 
 func TestAuthorizationValidatedSnapshotFailsClosed(t *testing.T) {
@@ -67,6 +81,12 @@ func TestAuthorizationValidatedSnapshotFailsClosed(t *testing.T) {
 		{name: "environment", mutate: func(value *Authorization) { value.EnvironmentKind = "preview" }, want: ErrSessionInvalid},
 		{name: "attested at", mutate: func(value *Authorization) { value.AttestedAt = time.Time{} }, want: ErrSessionInvalid},
 		{name: "claims", mutate: func(value *Authorization) { value.NormalizedClaims["plan"] = map[string]any{"raw": true} }, want: ErrSessionInvalid},
+		{name: "override ID only", mutate: func(value *Authorization) { value.UserOverrideID = "uov_00000000000000000000000000" }, want: ErrSessionInvalid},
+		{name: "override plan only", mutate: func(value *Authorization) { value.LimitPlanOverride = "premium" }, want: ErrSessionInvalid},
+		{name: "invalid override plan", mutate: func(value *Authorization) {
+			value.UserOverrideID = "uov_00000000000000000000000000"
+			value.LimitPlanOverride = "Premium"
+		}, want: ErrSessionInvalid},
 		{name: "access expired", mutate: func(value *Authorization) { value.AccessExpiresAt = now }, want: ErrTokenExpired},
 		{name: "identity expired", mutate: func(value *Authorization) { value.IdentityExpiresAt = now }, want: ErrTokenExpired},
 		{name: "attested in future", mutate: func(value *Authorization) { value.AttestedAt = now.Add(time.Minute) }, want: ErrSessionInvalid},

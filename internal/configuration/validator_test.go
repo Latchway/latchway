@@ -356,7 +356,7 @@ func TestValidatorActivatesBoundedHardCostCalendarWithZeroInputPricing(t *testin
 	}
 }
 
-func TestValidatorScopesHardCostPricingGateToApplicableFeatures(t *testing.T) {
+func TestValidatorIncludesOverrideReachablePlansInHardCostPricingGate(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -412,20 +412,19 @@ func TestValidatorScopesHardCostPricingGateToApplicableFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-	if !report.Valid || len(compiled) == 0 {
-		t.Fatalf("non-cost feature was incorrectly subjected to the hard-cost pricing gate: %+v", report.Issues)
+	if report.Valid || compiled != nil ||
+		!hasIssue(report.Issues, "input_pricing_unsupported_for_cost_limit") {
+		t.Fatalf("override-reachable cost plan bypassed conservative pricing: %+v", report.Issues)
 	}
 
-	objectValue(nonCostFeature, "limitPlan")["expression"] =
-		"principal.authenticated ? 'requests' : 'free'"
-	dynamic, err := json.Marshal(document)
+	objectArray(objectArray(spec, "pricingCatalogs")[0], "entries")[1]["inputNanoUsdPerMillion"] = json.Number("0")
+	safe, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dynamicReport, dynamicCompiled := validator.Validate(dynamic, testEnvironment(), time.Now())
-	if dynamicReport.Valid || dynamicCompiled != nil ||
-		!hasIssue(dynamicReport.Issues, "input_pricing_unsupported_for_cost_limit") {
-		t.Fatalf("dynamic plan selection bypassed conservative cost pricing gate: %+v", dynamicReport.Issues)
+	safeReport, safeCompiled := validator.Validate(safe, testEnvironment(), time.Now())
+	if !safeReport.Valid || len(safeCompiled) == 0 {
+		t.Fatalf("override-safe configured pricing was rejected: %+v", safeReport.Issues)
 	}
 }
 

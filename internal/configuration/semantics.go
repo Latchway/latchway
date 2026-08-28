@@ -566,14 +566,10 @@ func (validator *Validator) featureSemanticIssues(features, models, attestations
 	return issues
 }
 
-func rawFeatureCanSelectCostLimit(expression string, plans map[string]map[string]any) bool {
-	if matches := constantIdentifierExpression.FindStringSubmatch(strings.TrimSpace(expression)); len(matches) == 2 {
-		plan, ok := plans[matches[1]]
-		return ok && rawLimitPlanHasCost(plan)
-	}
-	// A dynamic CEL expression can select any configured plan. Requiring safe
-	// pricing for every route of that feature keeps activation conservative
-	// without penalizing unrelated features whose constant plan has no cost.
+func rawFeatureCanSelectCostLimit(_ string, plans map[string]map[string]any) bool {
+	// An active server-owned user override replaces the feature's limit-plan
+	// CEL result and can select any configured plan. Therefore even a constant
+	// expression cannot narrow hard-cost reachability at activation time.
 	for _, plan := range plans {
 		if rawLimitPlanHasCost(plan) {
 			return true

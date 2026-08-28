@@ -17,6 +17,7 @@ import (
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 // Store persists immutable configuration snapshots and the active pointer.
@@ -317,11 +318,15 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	// Recheck the persisted compiled artifact at activation time. This protects
 	// upgrades that add stricter runtime invariants from activating a revision
 	// whose older validation report can no longer be loaded safely.
-	if _, err := newActiveSnapshot(revision.ID, environment.EnvironmentID, revision.Document, revision.compiled); err != nil {
+	candidate, err := newActiveSnapshot(revision.ID, environment.EnvironmentID, revision.Document, revision.compiled)
+	if err != nil {
 		return Revision{}, ErrConfigurationInvalid
 	}
 	if revision.ActivatedAt != nil || revision.baseRevisionID != activeRevisionID || activeRevisionID == revision.ID {
 		return Revision{}, ErrConflict
+	}
+	if err := validateActiveUserOverrides(ctx, tx, environment, candidate); err != nil {
+		return Revision{}, err
 	}
 	now := store.now().UTC()
 	if _, err := tx.Exec(ctx, `
@@ -401,6 +406,13 @@ func (store *Store) Rollback(ctx context.Context, principal adminauth.Principal,
 	if target.EnvironmentID != environmentID || target.storedState != StateValid || target.ActivatedAt == nil ||
 		target.Validation == nil || !target.Validation.Valid || len(target.compiled) == 0 {
 		return Revision{}, ErrConfigurationInvalid
+	}
+	targetSnapshot, err := newActiveSnapshot(target.ID, environment.EnvironmentID, target.Document, target.compiled)
+	if err != nil {
+		return Revision{}, ErrConfigurationInvalid
+	}
+	if err := validateActiveUserOverrides(ctx, tx, environment, targetSnapshot); err != nil {
+		return Revision{}, err
 	}
 	now := store.now().UTC()
 	if _, err := tx.Exec(ctx, `
@@ -721,6 +733,44 @@ func nullableJSON(value json.RawMessage) any {
 
 func canWrite(principal adminauth.Principal) bool {
 	return principal.Allows(adminauth.ActivateConfiguration, adminauth.AuthorizationContext{})
+}
+
+// validateActiveUserOverrides rejects a candidate snapshot that would strand
+// an active user limit-plan override. Callers already hold the environment
+// lock. This query deliberately takes no user or override row locks, preserving
+// the application-user-before-environment mutation lock order.
+func validateActiveUserOverrides(ctx context.Context, query databaseQuery, environment EnvironmentDescriptor, snapshot ActiveSnapshot) error {
+	rows, err := query.Query(ctx, `
+		SELECT override_document
+		FROM user_overrides
+		WHERE organization_id = $1
+		  AND application_id = $2
+		  AND environment_id = $3
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > statement_timestamp())
+		ORDER BY user_override_id
+	`, environment.OrganizationID, environment.ApplicationID, environment.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("list active user overrides for configuration: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var encoded []byte
+		if err := rows.Scan(&encoded); err != nil {
+			return fmt.Errorf("scan active user override for configuration: %w", err)
+		}
+		document, err := useroverride.Decode(encoded)
+		if err != nil {
+			return ErrConfigurationInvalid
+		}
+		if _, ok := snapshot.LimitPlan(document.LimitPlan); !ok {
+			return ErrConfigurationInvalid
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate active user overrides for configuration: %w", err)
+	}
+	return nil
 }
 
 type auditField struct {

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/latchway/latchway/internal/id"
 )
 
 func TestPrepareSnapshotSharesCanonicalRuleAndScopeIdentity(t *testing.T) {
@@ -97,6 +99,41 @@ func TestPrepareSnapshotValidatesOptionalScopeValuesOnlyWhenReferenced(t *testin
 	input.Rules[0].Scope = []string{"route", "upstream", "model"}
 	if _, err := prepareSnapshot(input); err != nil {
 		t.Fatalf("valid optional scopes rejected: %v", err)
+	}
+}
+
+func TestPrepareSnapshotValidatesSealedUserOverrideSelection(t *testing.T) {
+	t.Parallel()
+	input := validSnapshotInput(t)
+	if _, err := prepareSnapshot(input); err != nil {
+		t.Fatalf("override absence rejected: %v", err)
+	}
+
+	overrideID := id.Must(id.UserOverride)
+	input.UserOverrideID = overrideID
+	input.LimitPlanOverride = input.LimitPlanKey
+	if _, err := prepareSnapshot(input); err != nil {
+		t.Fatalf("complete override selection rejected: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		edit func(*SnapshotInput)
+	}{
+		{name: "missing plan", edit: func(value *SnapshotInput) { value.LimitPlanOverride = "" }},
+		{name: "missing row ID", edit: func(value *SnapshotInput) { value.UserOverrideID = "" }},
+		{name: "invalid row ID", edit: func(value *SnapshotInput) { value.UserOverrideID = "uov_invalid" }},
+		{name: "invalid override plan", edit: func(value *SnapshotInput) { value.LimitPlanOverride = "Premium" }},
+		{name: "selected plan mismatch", edit: func(value *SnapshotInput) { value.LimitPlanKey = "other-plan" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			invalid := input
+			test.edit(&invalid)
+			if _, err := prepareSnapshot(invalid); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("invalid override selection accepted: %v", err)
+			}
+		})
 	}
 }
 

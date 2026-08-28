@@ -137,6 +137,80 @@ func TestActiveSnapshotRejectsCorruptHardCostPricingGate(t *testing.T) {
 	}
 }
 
+func TestActiveSnapshotIncludesOverrideReachablePlansInHardCostPricingGate(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentObject := configurationObject(t)
+	spec := objectValue(documentObject, "spec")
+	models := objectArray(spec, "models")
+	models[0]["pricingRef"] = "standard"
+	overrideModel := deepClone(models[0]).(map[string]any)
+	overrideModel["id"] = "override_model"
+	overrideModel["upstreamModel"] = "configured-override-model"
+	spec["models"] = append(models, overrideModel)
+	spec["pricingCatalogs"] = []any{map[string]any{
+		"id": "standard", "currency": "USD",
+		"entries": []any{
+			map[string]any{
+				"model": "fast", "inputNanoUsdPerMillion": json.Number("0"),
+				"outputNanoUsdPerMillion": json.Number("1"), "requestNanoUsd": json.Number("0"),
+			},
+			map[string]any{
+				"model": "override_model", "inputNanoUsdPerMillion": json.Number("0"),
+				"outputNanoUsdPerMillion": json.Number("1"), "requestNanoUsd": json.Number("0"),
+			},
+		},
+	}}
+	plans := objectArray(spec, "limitPlans")
+	plans[0]["limits"] = []any{map[string]any{
+		"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
+		"window": "1d", "maximum": json.Number("1000"), "hard": true,
+	}}
+	spec["limitPlans"] = append(plans, map[string]any{
+		"id": "requests",
+		"limits": []any{map[string]any{
+			"metric": "logical_requests", "algorithm": "calendar", "scope": []any{"user"},
+			"window": "1d", "maximum": json.Number("10"), "hard": true,
+		}},
+	})
+	features := objectArray(spec, "features")
+	overrideFeature := deepClone(features[0]).(map[string]any)
+	overrideFeature["id"] = "override_assistant"
+	objectValue(overrideFeature, "limitPlan")["expression"] = "'requests'"
+	overrideRoute := objectArray(overrideFeature, "routes")[0]
+	overrideRoute["id"] = "override"
+	overrideRoute["model"] = "override_model"
+	spec["features"] = append(features, overrideFeature)
+
+	document, err := json.Marshal(documentObject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(document, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("override-safe configuration rejected: %+v", report.Issues)
+	}
+	decoded, err := jsonsafe.Decode(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiledSpec := objectValue(decoded.(map[string]any), "spec")
+	objectArray(objectArray(compiledSpec, "pricingCatalogs")[0], "entries")[1]["inputNanoUsdPerMillion"] = json.Number("1")
+	corrupt, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newActiveSnapshot(
+		"rev_00000000000000000000000000", "env_00000000000000000000000000", document, corrupt,
+	); err == nil {
+		t.Fatal("override-reachable hard-cost plan bypassed runtime pricing gate")
+	}
+}
+
 func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 	t.Parallel()
 

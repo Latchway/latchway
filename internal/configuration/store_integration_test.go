@@ -203,6 +203,147 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	}
 }
 
+func TestStorePostgreSQLActiveUserOverridePlanGuards(t *testing.T) {
+	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("LATCHWAY_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := isolatedConfigurationPool(t, ctx, databaseURL)
+	principal, scope := seedConfigurationTenant(t, ctx, pool)
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	store.now = func() time.Time { return time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC) }
+
+	createValidated := func(baseRevisionID string, document json.RawMessage, description string) Revision {
+		t.Helper()
+		input := CreateInput{EnvironmentID: scope.EnvironmentID, Description: description}
+		if baseRevisionID == "" {
+			input.Document = document
+		} else {
+			input.BaseRevisionID = baseRevisionID
+		}
+		revision, createErr := store.CreateRevision(ctx, principal, input)
+		if createErr != nil {
+			t.Fatalf("CreateRevision(%s) error = %v", description, createErr)
+		}
+		if baseRevisionID != "" {
+			revision, createErr = store.ReplaceDraft(ctx, principal, revision.ID, revision.ETag, document)
+			if createErr != nil {
+				t.Fatalf("ReplaceDraft(%s) error = %v", description, createErr)
+			}
+		}
+		report, validationErr := store.ValidateRevision(ctx, principal, revision.ID)
+		if validationErr != nil || !report.Valid {
+			t.Fatalf("ValidateRevision(%s) report=%+v error=%v", description, report, validationErr)
+		}
+		return revision
+	}
+	activate := func(revision Revision) Revision {
+		t.Helper()
+		activated, activationErr := store.ActivateRevision(ctx, principal, revision.ID, revision.ETag)
+		if activationErr != nil {
+			t.Fatalf("ActivateRevision(%s) error = %v", revision.ID, activationErr)
+		}
+		return activated
+	}
+	assertActive := func(wantRevisionID string) Revision {
+		t.Helper()
+		active, activeErr := store.GetActiveRevision(ctx, principal, scope.EnvironmentID)
+		if activeErr != nil || active.ID != wantRevisionID {
+			t.Fatalf("active revision=%+v error=%v, want %s", active, activeErr, wantRevisionID)
+		}
+		return active
+	}
+
+	initial := activate(createValidated("", validConfigurationDocument(t), "initial without premium"))
+	premium := activate(createValidated(initial.ID, configurationDocumentWithPremiumPlan(t, "premium active"), "add premium"))
+
+	userID := mustConfigID(t, id.ApplicationUser)
+	overrideID := mustConfigID(t, id.UserOverride)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO application_users (application_user_id, organization_id, application_id)
+		VALUES ($1, $2, $3)
+	`, userID, scope.OrganizationID, scope.ApplicationID); err != nil {
+		t.Fatalf("insert application user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_overrides (
+			user_override_id, organization_id, application_id, environment_id,
+			application_user_id, override_document, reason,
+			created_by_admin_user_id, created_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, '{"limit_plan":"premium"}'::jsonb,
+			'configuration guard test', $6,
+			clock_timestamp() - interval '1 minute', clock_timestamp() + interval '1 hour'
+		)
+	`, overrideID, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, userID, principal.AdminUserID); err != nil {
+		t.Fatalf("insert active user override: %v", err)
+	}
+
+	removing := createValidated(premium.ID, validConfigurationDocument(t), "remove premium")
+	if _, err := store.ActivateRevision(ctx, principal, removing.ID, removing.ETag); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("ActivateRevision(removing active override plan) error = %v", err)
+	}
+	assertActive(premium.ID)
+
+	retaining := createValidated(premium.ID, configurationDocumentWithPremiumPlan(t, "premium retained"), "retain premium")
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_overrides
+		SET override_document = '{"limit_plan":"premium","unexpected":true}'::jsonb
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("corrupt active user override: %v", err)
+	}
+	if _, err := store.ActivateRevision(ctx, principal, retaining.ID, retaining.ETag); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("ActivateRevision(corrupt active override) error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_overrides
+		SET override_document = '{"limit_plan":"premium"}'::jsonb
+		WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("restore active user override: %v", err)
+	}
+	retaining = activate(retaining)
+
+	if _, err := store.Rollback(ctx, principal, scope.EnvironmentID, initial.ID, retaining.ETag); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("Rollback(to revision missing active override plan) error = %v", err)
+	}
+	assertActive(retaining.ID)
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_overrides SET revoked_at = clock_timestamp() WHERE user_override_id = $1
+	`, overrideID); err != nil {
+		t.Fatalf("revoke active user override: %v", err)
+	}
+	rolledBack, err := store.Rollback(ctx, principal, scope.EnvironmentID, initial.ID, retaining.ETag)
+	if err != nil || rolledBack.ID != initial.ID {
+		t.Fatalf("Rollback(with revoked override) revision=%+v error=%v", rolledBack, err)
+	}
+
+	expiredOverrideID := mustConfigID(t, id.UserOverride)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_overrides (
+			user_override_id, organization_id, application_id, environment_id,
+			application_user_id, override_document, reason,
+			created_by_admin_user_id, created_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, '{"limit_plan":"premium"}'::jsonb,
+			'expired configuration guard test', $6,
+			clock_timestamp() - interval '2 hours', clock_timestamp() - interval '1 hour'
+		)
+	`, expiredOverrideID, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, userID, principal.AdminUserID); err != nil {
+		t.Fatalf("insert expired user override: %v", err)
+	}
+	afterExpiry := createValidated(initial.ID, documentWithDescription(t, "expired override ignored"), "expired override ignored")
+	afterExpiry = activate(afterExpiry)
+	assertActive(afterExpiry.ID)
+}
+
 func isolatedConfigurationPool(t *testing.T, ctx context.Context, databaseURL string) *pgxpool.Pool {
 	t.Helper()
 	adminPool, err := pgxpool.New(ctx, databaseURL)
@@ -273,6 +414,29 @@ func documentWithDescription(t *testing.T, description string) json.RawMessage {
 	t.Helper()
 	document := configurationObject(t)
 	objectValue(document, "metadata")["description"] = description
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func configurationDocumentWithPremiumPlan(t *testing.T, description string) json.RawMessage {
+	t.Helper()
+	document := configurationObject(t)
+	objectValue(document, "metadata")["description"] = description
+	spec := objectValue(document, "spec")
+	plans, ok := spec["limitPlans"].([]any)
+	if !ok {
+		t.Fatal("configuration fixture has no limitPlans array")
+	}
+	spec["limitPlans"] = append(plans, map[string]any{
+		"id": "premium",
+		"limits": []any{map[string]any{
+			"metric": "logical_requests", "scope": []any{"user", "feature"},
+			"window": "1d", "maximum": 100,
+		}},
+	})
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)

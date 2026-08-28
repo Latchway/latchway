@@ -311,6 +311,96 @@ func TestStorePostgreSQLQuotaSnapshot(t *testing.T) {
 		}
 	})
 
+	t.Run("sealed user override selection is revalidated without mutation", func(t *testing.T) {
+		const overrideID = "uov_00000000000000000000000001"
+		selected := snapshotInputFromReserve(fixture.input(t, "snapshot-override", 4))
+		beforeBuckets := fixture.count(t, `SELECT count(*) FROM quota_buckets`)
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			INSERT INTO user_overrides (
+				user_override_id, organization_id, application_id, environment_id,
+				application_user_id, override_document, reason,
+				created_by_admin_user_id, created_at, expires_at
+			) VALUES (
+				$1, $2, $3, $4, $5, '{"limit_plan":"override-plan"}'::jsonb,
+				'quota snapshot test', 'adm_00000000000000000000000001',
+				statement_timestamp() - interval '2 hours',
+				statement_timestamp() + interval '1 hour'
+			)
+		`, overrideID, quotaTestOrganizationID, quotaTestApplicationID,
+			quotaTestEnvironmentID, quotaTestApplicationUserID); err != nil {
+			t.Fatalf("insert active snapshot override: %v", err)
+		}
+
+		if _, err := fixture.store.Snapshot(fixture.ctx, selected); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("sealed override absence with active row = %v, want invalid state", err)
+		}
+		selected.UserOverrideID = overrideID
+		selected.LimitPlanOverride = "override-plan"
+		selected.LimitPlanKey = "override-plan"
+		if _, err := fixture.store.Snapshot(fixture.ctx, selected); err != nil {
+			t.Fatalf("snapshot matching sealed override: %v", err)
+		}
+
+		wrong := selected
+		wrong.UserOverrideID = "uov_00000000000000000000000002"
+		if _, err := fixture.store.Snapshot(fixture.ctx, wrong); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("snapshot wrong override row = %v, want invalid state", err)
+		}
+		wrong = selected
+		wrong.LimitPlanOverride = "other-plan"
+		wrong.LimitPlanKey = "other-plan"
+		if _, err := fixture.store.Snapshot(fixture.ctx, wrong); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("snapshot wrong override plan = %v, want invalid state", err)
+		}
+
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE user_overrides
+			SET override_document = '{"limit_plan":"Override"}'::jsonb
+			WHERE user_override_id = $1
+		`, overrideID); err != nil {
+			t.Fatalf("corrupt snapshot override: %v", err)
+		}
+		if _, err := fixture.store.Snapshot(fixture.ctx, selected); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("corrupt snapshot override = %v, want invalid state", err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE user_overrides
+			SET override_document = '{"limit_plan":"override-plan"}'::jsonb,
+			    revoked_at = statement_timestamp()
+			WHERE user_override_id = $1
+		`, overrideID); err != nil {
+			t.Fatalf("revoke snapshot override: %v", err)
+		}
+		if _, err := fixture.store.Snapshot(fixture.ctx, selected); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("revoked expected override = %v, want invalid state", err)
+		}
+		withoutOverride := selected
+		withoutOverride.UserOverrideID = ""
+		withoutOverride.LimitPlanOverride = ""
+		withoutOverride.LimitPlanKey = "test-plan"
+		if _, err := fixture.store.Snapshot(fixture.ctx, withoutOverride); err != nil {
+			t.Fatalf("snapshot after override revocation: %v", err)
+		}
+
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE user_overrides
+			SET revoked_at = NULL,
+			    expires_at = statement_timestamp() - interval '1 hour'
+			WHERE user_override_id = $1
+		`, overrideID); err != nil {
+			t.Fatalf("expire snapshot override: %v", err)
+		}
+		if _, err := fixture.store.Snapshot(fixture.ctx, selected); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("expired expected override = %v, want invalid state", err)
+		}
+		if _, err := fixture.store.Snapshot(fixture.ctx, withoutOverride); err != nil {
+			t.Fatalf("snapshot after override expiry: %v", err)
+		}
+		if afterBuckets := fixture.count(t, `SELECT count(*) FROM quota_buckets`); afterBuckets != beforeBuckets {
+			t.Fatalf("override revalidation materialized buckets: before=%d after=%d", beforeBuckets, afterBuckets)
+		}
+	})
+
 	t.Run("corrupt durable token state fails closed", func(t *testing.T) {
 		reserveInput := fixture.tokenBucketInput(t, "snapshot-corrupt", 2, 1, 1)
 		reservation, err := fixture.store.Reserve(fixture.ctx, reserveInput)

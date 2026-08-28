@@ -15,6 +15,7 @@ import (
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/identity"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 const clientInstallationRevocationReason = "client_installation_revoked"
@@ -29,6 +30,8 @@ type Authorization struct {
 	InstallationPlatform string
 	SessionGrantID       string
 	PolicyRevisionID     string
+	UserOverrideID       string
+	LimitPlanOverride    string
 	IdentityProvider     string
 	DPoPJKT              string
 	TrustLevel           string
@@ -58,12 +61,28 @@ func (store *Store) Authorize(ctx context.Context, principal AccessPrincipal) (A
 	if err := validateAccessPrincipal(principal, now); err != nil {
 		return Authorization{}, err
 	}
-	state, err := loadAuthorizationState(ctx, store.pool, principal, "")
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Authorization{}, fmt.Errorf("begin session authorization: %w", err)
+	}
+	defer rollbackSigning(tx)
+	if err := lockAccessInstallation(ctx, tx, principal, false); err != nil {
+		return Authorization{}, err
+	}
+	if err := lockAccessApplicationUser(ctx, tx, principal); err != nil {
+		return Authorization{}, err
+	}
+	state, err := loadAuthorizationState(
+		ctx, tx, principal, " FOR SHARE OF g, u, a, e, o",
+	)
 	if err != nil {
 		return Authorization{}, err
 	}
 	if err := authorizationStateError(state, now, false); err != nil {
 		return Authorization{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Authorization{}, fmt.Errorf("commit session authorization: %w", err)
 	}
 	return state.Authorization, nil
 }
@@ -125,6 +144,12 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		return authorizationState{}, ErrSessionInvalid
 	}
 	result.NormalizedClaims = claims
+	override, err := loadActiveUserOverride(ctx, query, result.Authorization)
+	if err != nil {
+		return authorizationState{}, err
+	}
+	result.UserOverrideID = override.ID
+	result.LimitPlanOverride = override.LimitPlan
 	if validateAuthorizationValues(result.Authorization) != nil {
 		return authorizationState{}, ErrSessionInvalid
 	}
@@ -142,6 +167,49 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 	}
 	result.Authorization = sealed
 	return result, nil
+}
+
+// loadActiveUserOverride reads mutable server-owned policy only after the
+// caller has loaded and, on protected paths, share-locked the authoritative
+// application-user row. Override writers take the corresponding exclusive
+// user lock, so replacement and no-row insertion cannot race this selection.
+// A fresh database statement clock after that lock wait is the sole expiry
+// authority.
+func loadActiveUserOverride(
+	ctx context.Context,
+	query authorizationQuerier,
+	authorization Authorization,
+) (useroverride.Selection, error) {
+	var selection useroverride.Selection
+	var document []byte
+	err := query.QueryRow(ctx, `
+		SELECT user_override_id, override_document
+		FROM user_overrides
+		WHERE organization_id = $1
+		  AND application_id = $2
+		  AND environment_id = $3
+		  AND application_user_id = $4
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > statement_timestamp())
+	`, authorization.OrganizationID, authorization.ApplicationID,
+		authorization.EnvironmentID, authorization.ApplicationUserID).Scan(
+		&selection.ID, &document,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return useroverride.Selection{}, nil
+	}
+	if err != nil {
+		return useroverride.Selection{}, fmt.Errorf("load active user override: %w", err)
+	}
+	decoded, err := useroverride.Decode(document)
+	if err != nil {
+		return useroverride.Selection{}, fmt.Errorf("decode active user override: %w", err)
+	}
+	selection.LimitPlan = decoded.LimitPlan
+	if err := selection.Validate(); err != nil {
+		return useroverride.Selection{}, fmt.Errorf("validate active user override: %w", err)
+	}
+	return selection, nil
 }
 
 func authorizationStateError(state authorizationState, now time.Time, allowRevokedInstallation bool) error {
@@ -276,6 +344,9 @@ func (store *Store) authorizeAccess(ctx context.Context, input AccessRequestInpu
 	if err := lockAccessInstallation(ctx, tx, input.Principal, mutationLock); err != nil {
 		return authorizationState{}, err
 	}
+	if err := lockAccessApplicationUser(ctx, tx, input.Principal); err != nil {
+		return authorizationState{}, err
+	}
 	lockClause := " FOR SHARE OF g, u, a, e, o"
 	if mutationLock {
 		lockClause = " FOR UPDATE OF g FOR SHARE OF u, a, e, o"
@@ -304,6 +375,28 @@ func (store *Store) authorizeAccess(ctx context.Context, input AccessRequestInpu
 		return authorizationState{}, fmt.Errorf("commit access authorization: %w", err)
 	}
 	return state, nil
+}
+
+// lockAccessApplicationUser establishes a deterministic user-before-
+// environment lock order shared with administrative override replacement.
+// This keeps an override selection and its absence linearizable without
+// relying on the row-lock order chosen for the later joined state query.
+func lockAccessApplicationUser(ctx context.Context, tx pgx.Tx, principal AccessPrincipal) error {
+	var locked int
+	err := tx.QueryRow(ctx, `
+		/* session_authorization_user_lock */
+		SELECT 1
+		FROM application_users
+		WHERE organization_id = $1 AND application_id = $2 AND application_user_id = $3
+		FOR SHARE
+	`, principal.OrganizationID, principal.ApplicationID, principal.ApplicationUserID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSessionInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("lock access application user: %w", err)
+	}
+	return nil
 }
 
 func lockAccessInstallation(ctx context.Context, tx pgx.Tx, principal AccessPrincipal, exclusive bool) error {
@@ -457,6 +550,9 @@ func validateAuthorizationValues(authorization Authorization) error {
 		!platformPattern.MatchString(authorization.InstallationPlatform) ||
 		!validEnvironmentKind(authorization.EnvironmentKind) ||
 		!validThumbprint(authorization.DPoPJKT) ||
+		(useroverride.Selection{
+			ID: authorization.UserOverrideID, LimitPlan: authorization.LimitPlanOverride,
+		}).Validate() != nil ||
 		authorization.IdentityExpiresAt.IsZero() || authorization.AttestedAt.IsZero() ||
 		authorization.AttestationExpiresAt.IsZero() || authorization.AccessExpiresAt.IsZero() ||
 		!authorization.AttestationExpiresAt.After(authorization.AttestedAt) ||
@@ -481,6 +577,8 @@ type authorizationSealPayload struct {
 	InstallationPlatform string         `json:"installation_platform"`
 	SessionGrantID       string         `json:"session_grant_id"`
 	PolicyRevisionID     string         `json:"policy_revision_id"`
+	UserOverrideID       string         `json:"user_override_id,omitempty"`
+	LimitPlanOverride    string         `json:"limit_plan_override,omitempty"`
 	IdentityProvider     string         `json:"identity_provider"`
 	DPoPJKT              string         `json:"dpop_jkt"`
 	TrustLevel           string         `json:"trust_level"`
@@ -498,7 +596,8 @@ func authorizationSealDigest(authorization Authorization) ([sha256.Size]byte, er
 		EnvironmentID: authorization.EnvironmentID, EnvironmentKind: authorization.EnvironmentKind,
 		ApplicationUserID: authorization.ApplicationUserID, InstallationID: authorization.InstallationID,
 		InstallationPlatform: authorization.InstallationPlatform, SessionGrantID: authorization.SessionGrantID,
-		PolicyRevisionID: authorization.PolicyRevisionID, IdentityProvider: authorization.IdentityProvider,
+		PolicyRevisionID: authorization.PolicyRevisionID, UserOverrideID: authorization.UserOverrideID,
+		LimitPlanOverride: authorization.LimitPlanOverride, IdentityProvider: authorization.IdentityProvider,
 		DPoPJKT: authorization.DPoPJKT, TrustLevel: authorization.TrustLevel,
 		AttestationProvider: authorization.AttestationProvider, NormalizedClaims: authorization.NormalizedClaims,
 		IdentityExpiresAt: authorization.IdentityExpiresAt, AttestedAt: authorization.AttestedAt,

@@ -154,6 +154,8 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 		ApplicationUserID: authorization.ApplicationUserID,
 		InstallationID:    authorization.InstallationID,
 		ConfigRevisionID:  snapshot.PolicyRevision(),
+		UserOverrideID:    authorization.UserOverrideID,
+		LimitPlanOverride: authorization.LimitPlanOverride,
 		FeatureKey:        projection.Feature.ID,
 		LimitPlanKey:      projection.LimitPlan.ID,
 		Rules:             validated.rules,
