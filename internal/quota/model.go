@@ -288,6 +288,13 @@ type preparedRule struct {
 	stateful        bool
 }
 
+type rulePreparationMode uint8
+
+const (
+	reserveRulePreparation rulePreparationMode = iota
+	snapshotRulePreparation
+)
+
 func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	if id.Validate(input.LogicalRequestID.String(), id.LogicalRequest) != nil ||
 		id.Validate(input.OrganizationID, id.Organization) != nil ||
@@ -335,19 +342,47 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		"upstream":     input.UpstreamKey,
 		"model":        input.ModelKey,
 	}
-	preparedRules := make([]preparedRule, 0, len(input.Rules))
+	preparedRules, err := prepareRules(input.Rules, values, reserveRulePreparation)
+	if err != nil {
+		return preparedRequest{}, err
+	}
+
+	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
+	prepared.Rules = clonePreparedRules(preparedRules)
+	return prepared, nil
+}
+
+// prepareRules is the single canonical validation and identity path for both
+// reservations and read-only snapshots. Snapshot rules describe selected
+// policy rather than a provider reservation, so output shapes require a zero
+// ReservedUnits while retaining every other executable-policy invariant.
+func prepareRules(input []Rule, values map[string]string, mode rulePreparationMode) ([]preparedRule, error) {
+	if len(input) < 1 || len(input) > maximumRulesPerRequest ||
+		(mode != reserveRulePreparation && mode != snapshotRulePreparation) {
+		return nil, ErrInvalidInput
+	}
+	preparedRules := make([]preparedRule, 0, len(input))
 	var outputReservation int64
-	for _, rule := range input.Rules {
+	for _, rule := range input {
 		dimensions, err := canonicalScopeDimensions(rule.Scope)
 		if err != nil || !rule.Hard {
-			return preparedRequest{}, ErrInvalidInput
+			return nil, ErrInvalidInput
+		}
+		for _, dimension := range dimensions {
+			if values[dimension] == "" {
+				return nil, ErrInvalidInput
+			}
+		}
+		outputReserved := rule.ReservedUnits > 0
+		if mode == snapshotRulePreparation {
+			outputReserved = rule.ReservedUnits == 0
 		}
 		stateful := false
 		switch {
 		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == CalendarAlgorithm:
 			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits != 0 ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == LogicalRequestsMetric && rule.Algorithm == TokenBucketAlgorithm:
@@ -355,55 +390,55 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 				rule.ReservedUnits != 0 || validateTokenBucketPolicy(
 				rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
 			) != nil {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == TokenBucketAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
-				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.Capacity ||
+				!outputReserved || rule.ReservedUnits > rule.Capacity ||
 				validateTokenBucketPolicy(
 					rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
 				) != nil {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == CalendarAlgorithm:
-			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || rule.ReservedUnits <= 0 ||
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !outputReserved ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == PerRequestAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
-				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.PerRequestMaximum ||
+				!outputReserved || rule.ReservedUnits > rule.PerRequestMaximum ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 		case (rule.Metric == ConcurrentRequestsMetric || rule.Metric == ConcurrentStreamsMetric) &&
 			rule.Algorithm == ConcurrencyAlgorithm:
 			if rule.Window != "" || rule.Maximum <= 0 || rule.PerRequestMaximum != 0 ||
 				rule.ReservedUnits != 0 || rule.Capacity != 0 ||
 				rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 			stateful = true
 		default:
-			return preparedRequest{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
-		if rule.Metric == OutputTokensMetric {
+		if mode == reserveRulePreparation && rule.Metric == OutputTokensMetric {
 			if outputReservation == 0 {
 				outputReservation = rule.ReservedUnits
 			} else if outputReservation != rule.ReservedUnits {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 		}
 		if stateful && rule.Algorithm == CalendarAlgorithm {
 			if _, err := parseCalendarSpec(rule.Window); err != nil {
-				return preparedRequest{}, ErrInvalidInput
+				return nil, ErrInvalidInput
 			}
 		}
 		if !stateful && rule.Window != "" {
-			return preparedRequest{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
 		ruleParts := []string{rule.Metric, rule.Algorithm, rule.Window}
 		ruleParts = append(ruleParts, dimensions...)
@@ -440,17 +475,19 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	for index := 1; index < len(preparedRules); index++ {
 		if preparedRules[index-1].ruleKey == preparedRules[index].ruleKey &&
 			preparedRules[index-1].scopeKey == preparedRules[index].scopeKey {
-			return preparedRequest{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
 	}
+	return preparedRules, nil
+}
 
-	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
-	prepared.Rules = make([]Rule, len(preparedRules))
+func clonePreparedRules(preparedRules []preparedRule) []Rule {
+	rules := make([]Rule, len(preparedRules))
 	for index := range preparedRules {
-		prepared.Rules[index] = preparedRules[index].Rule
-		prepared.Rules[index].Scope = append([]string(nil), preparedRules[index].Scope...)
+		rules[index] = preparedRules[index].Rule
+		rules[index].Scope = append([]string(nil), preparedRules[index].Scope...)
 	}
-	return prepared, nil
+	return rules
 }
 
 func canonicalScopeDimensions(input []string) ([]string, error) {
