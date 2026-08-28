@@ -38,6 +38,9 @@
       "new_sqlite_classes": ["LatchwayContainer"]
     }
   ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "containers": [
     {
       "name": "latchway",

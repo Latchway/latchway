@@ -17,6 +17,33 @@ function chooseInstance(count: number): number {
   return value[0]! % count;
 }
 
+function pathClass(pathname: string): string {
+  if (pathname === PLATFORM_HEALTH_PATH) return "platform_health";
+  if (pathname === "/healthz") return "liveness";
+  if (pathname === "/readyz") return "readiness";
+  if (pathname.startsWith("/client/")) return "client_api";
+  if (pathname.startsWith("/admin/")) return "admin_api";
+  if (pathname.startsWith("/proxy/") || pathname.startsWith("/v1/")) {
+    return "data_plane";
+  }
+  return "other";
+}
+
+function methodClass(method: string): string {
+  switch (method) {
+    case "GET":
+    case "HEAD":
+    case "POST":
+    case "PUT":
+    case "PATCH":
+    case "DELETE":
+    case "OPTIONS":
+      return method;
+    default:
+      return "OTHER";
+  }
+}
+
 function unavailable(): Response {
   return new Response(
     JSON.stringify({
@@ -64,12 +91,30 @@ export default {
         JSON.stringify({
           level: "error",
           message: "Latchway container request failed",
-          path: url.pathname,
-          method: request.method,
+          path_class: pathClass(url.pathname),
+          method: methodClass(request.method),
           error_type: error instanceof Error ? error.name : "unknown",
         }),
       );
       return unavailable();
+    }
+  },
+
+  // One all-role instance must remain active even during a quiet traffic
+  // period so signing-key rotation, reservation recovery, retention, and
+  // shared JWKS refresh continue to run. The scheduled health request also
+  // renews the Container activity timer without exposing a public bypass.
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    const container = env.LATCHWAY_CONTAINER.getByName("instance-0");
+    const response = await container.fetch(
+      new Request("http://latchway-container/healthz", { method: "GET" }),
+    );
+    try {
+      if (!response.ok) {
+        throw new Error("scheduled Latchway container health check failed");
+      }
+    } finally {
+      await response.body?.cancel();
     }
   },
 } satisfies ExportedHandler<Env>;

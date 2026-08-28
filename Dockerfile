@@ -7,7 +7,13 @@ COPY web/console/package.json web/console/pnpm-lock.yaml web/console/.npmrc ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/console/ ./
-RUN pnpm check
+# Browser E2E runs in the pinned CI runner before an image is published.
+# Keep the image build self-contained and deterministic: Playwright's
+# `install --with-deps` is intentionally unsupported in this Alpine stage.
+RUN pnpm lint && \
+    pnpm typecheck && \
+    pnpm test && \
+    pnpm build
 
 FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS go-build
 RUN apk add --no-cache ca-certificates

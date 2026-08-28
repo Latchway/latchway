@@ -3,27 +3,42 @@ import type { StopParams } from "@cloudflare/containers";
 
 const CONTAINER_PORT = 8080;
 
+function requiredString(env: Env, name: keyof Env): string {
+  const value = Reflect.get(env, name);
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`missing required container setting: ${String(name)}`);
+  }
+  return value;
+}
+
 function runtimeEnvironment(env: Env): Record<string, string> {
   const values: Record<string, string> = {
     PORT: String(CONTAINER_PORT),
-    LATCHWAY_DATABASE_URL: env.LATCHWAY_DATABASE_URL,
-    LATCHWAY_MASTER_KEY: env.LATCHWAY_MASTER_KEY,
-    LATCHWAY_PUBLIC_ORIGIN: env.LATCHWAY_PUBLIC_ORIGIN,
-    LATCHWAY_ROLE: env.LATCHWAY_ROLE,
-    LATCHWAY_LOG_LEVEL: env.LATCHWAY_LOG_LEVEL,
-    LATCHWAY_MIGRATE_ON_START: env.LATCHWAY_MIGRATE_ON_START,
-    LATCHWAY_DB_MAX_CONNECTIONS: env.LATCHWAY_DB_MAX_CONNECTIONS,
-    LATCHWAY_SHUTDOWN_TIMEOUT: env.LATCHWAY_SHUTDOWN_TIMEOUT,
+    LATCHWAY_DATABASE_URL: requiredString(env, "LATCHWAY_DATABASE_URL"),
+    LATCHWAY_MASTER_KEY: requiredString(env, "LATCHWAY_MASTER_KEY"),
+    LATCHWAY_PUBLIC_ORIGIN: requiredString(env, "LATCHWAY_PUBLIC_ORIGIN"),
+    LATCHWAY_ROLE: requiredString(env, "LATCHWAY_ROLE"),
+    LATCHWAY_LOG_LEVEL: requiredString(env, "LATCHWAY_LOG_LEVEL"),
+    LATCHWAY_MIGRATE_ON_START: requiredString(
+      env,
+      "LATCHWAY_MIGRATE_ON_START",
+    ),
+    LATCHWAY_DB_MAX_CONNECTIONS: requiredString(
+      env,
+      "LATCHWAY_DB_MAX_CONNECTIONS",
+    ),
+    LATCHWAY_SHUTDOWN_TIMEOUT: requiredString(
+      env,
+      "LATCHWAY_SHUTDOWN_TIMEOUT",
+    ),
   };
 
   // The bootstrap token is deliberately removable after the first admin is
-  // created. A missing secret must not become the string "undefined".
-  if (
-    typeof env.LATCHWAY_ADMIN_BOOTSTRAP_TOKEN === "string" &&
-    env.LATCHWAY_ADMIN_BOOTSTRAP_TOKEN.length > 0
-  ) {
-    values.LATCHWAY_ADMIN_BOOTSTRAP_TOKEN =
-      env.LATCHWAY_ADMIN_BOOTSTRAP_TOKEN;
+  // created. Reflective access keeps the source valid after its optional
+  // declaration is removed from wrangler.jsonc and types are regenerated.
+  const bootstrapToken = Reflect.get(env, "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN");
+  if (typeof bootstrapToken === "string" && bootstrapToken.length > 0) {
+    values.LATCHWAY_ADMIN_BOOTSTRAP_TOKEN = bootstrapToken;
   }
   return values;
 }
@@ -55,5 +70,17 @@ export class LatchwayContainer extends Container<Env> {
         exit_code: params.exitCode,
       }),
     );
+  }
+
+  onError(error: unknown): never {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "Latchway container failed",
+        container_class: "LatchwayContainer",
+        error_type: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+    throw new Error("Latchway container failed");
   }
 }

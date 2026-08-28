@@ -5,10 +5,11 @@ and upstream logic in the standard Latchway OCI image. The Worker only selects
 one of four container-backed Durable Objects, starts it when necessary, and
 streams the HTTP request and response without buffering.
 
-Cloudflare Containers is still a beta platform. Treat this target as a
-production-candidate template until your own account has passed the smoke,
-streaming, failure, and restore gates. Containers run `linux/amd64`; the root
-Dockerfile is also published for `linux/arm64` on other platforms.
+Cloudflare Containers is generally available. This repository still treats
+the deployment as unverified until the exact release image passes the account's
+smoke, streaming, failure, and restore gates. Containers require
+`linux/amd64`; the root Dockerfile also publishes `linux/arm64` for other
+platforms.
 
 ## Prerequisites
 
@@ -18,8 +19,12 @@ Dockerfile is also published for `linux/arm64` on other platforms.
 - a publicly reachable PostgreSQL 15+ database with TLS enforced
 
 The four container instances are each limited to five PostgreSQL connections,
-for a maximum of 20 application connections. Leave capacity for migrations,
-administration, and database maintenance; adjust both values together.
+for a maximum of 20 application connections. A one-minute Cron Trigger sends a
+private health request to `instance-0`, keeping at least one `all`-role runtime
+active for signing-key rotation, reservation recovery, retention, usage
+rollups, and shared JWKS refresh even when user traffic is quiet. Leave
+capacity for migrations, administration, and database maintenance; adjust the
+instance count, pool size, and database ceiling together.
 
 ## Configure and validate
 
@@ -30,6 +35,24 @@ pnpm types:check
 pnpm check
 pnpm deploy:dry-run
 ```
+
+The checked-in configuration builds the repository Dockerfile so a source
+checkout can be reviewed and dry-run without a registry account. A production
+release must deploy the already verified `linux/amd64` release image, not
+rebuild mutable source. Cloudflare Containers can pull prebuilt images from
+Cloudflare Registry, Docker Hub, Amazon ECR, or Google Artifact Registry; GHCR
+is not a direct source. If the canonical release is only in GHCR, copy its
+verified amd64 manifest into Cloudflare Registry without rebuilding it, replace
+`containers[0].image` with the returned immutable registry reference, remove
+`image_build_context`, and retain both source and mirror digests in the
+deployment evidence. Do not use `latest` or a tag-only reference as release
+evidence.
+
+Cloudflare updates Worker code before it finishes the container rollout. Treat
+deployment as asynchronous: wait for the rollout, verify the platform and
+Latchway health endpoints, then exercise authenticated non-streaming and SSE
+requests against the exact deployed digest before recording the target as
+verified.
 
 Install secrets interactively. `LATCHWAY_PUBLIC_ORIGIN` must be the final HTTPS
 origin users will call, with no path, query, or fragment. Generate the master
@@ -58,12 +81,17 @@ migrations use a PostgreSQL advisory lock. Mature installations should run the
 explicit migration command, change it to `false`, and deploy by verified image
 digest.
 
-Deploy, create the first administrator, then remove the bootstrap token and
-its entry from `secrets.required` in the same change:
+Deploy and create the first administrator. Then delete the bootstrap secret,
+remove its optional declaration from `secrets.required`, regenerate types,
+re-run the checks, and deploy that source change:
 
 ```bash
 pnpm deploy
 wrangler secret delete LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+# edit wrangler.jsonc, then:
+pnpm types
+pnpm check
+pnpm deploy
 ```
 
 The platform-only health endpoint is
