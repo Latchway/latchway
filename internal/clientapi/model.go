@@ -149,11 +149,8 @@ type ExchangeInput struct {
 }
 
 type RefreshInput struct {
-	Metadata         RequestMetadata
-	RefreshToken     SensitiveString
-	IdentityToken    SensitiveString
-	HasIdentityToken bool
-	Attestation      *AttestationEvidence
+	Metadata     RequestMetadata
+	RefreshToken SensitiveString
 }
 
 // RevokeInstallationInput contains the DPoP access credential and the

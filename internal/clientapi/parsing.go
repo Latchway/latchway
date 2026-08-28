@@ -15,7 +15,7 @@ import (
 const (
 	maximumChallengeBodyBytes = 128 << 10
 	maximumExchangeBodyBytes  = 96 << 10
-	maximumRefreshBodyBytes   = 192 << 10
+	maximumRefreshBodyBytes   = 4 << 10
 	maximumEvidenceBytes      = 64 << 10
 	maximumEvidenceMembers    = 64
 	maximumDPoPBytes          = 16 << 10
@@ -250,34 +250,14 @@ func parseRefreshRequest(r *http.Request) (RefreshInput, *requestViolation) {
 	if violation != nil {
 		return RefreshInput{}, violation
 	}
-	if !hasExactFields(object, []string{"refresh_token"}, []string{"identity_token", "attestation"}) {
+	if !hasExactFields(object, []string{"refresh_token"}, nil) {
 		return RefreshInput{}, invalidAt("body", "The session refresh object has missing or unsupported fields.")
 	}
 	refreshToken, ok := boundedString(object["refresh_token"], 32, 2048)
 	if !ok {
 		return RefreshInput{}, invalidAt("body.refresh_token", "refresh_token must satisfy the protocol length limits.")
 	}
-	result := RefreshInput{RefreshToken: NewSensitiveString(refreshToken)}
-	if raw, exists := object["identity_token"]; exists {
-		identityToken, ok := boundedString(raw, 16, 65536)
-		if !ok {
-			return RefreshInput{}, invalidAt("body.identity_token", "identity_token must satisfy the protocol length limits.")
-		}
-		result.IdentityToken = NewSensitiveString(identityToken)
-		result.HasIdentityToken = true
-	}
-	if raw, exists := object["attestation"]; exists {
-		attestationValue, ok := raw.(map[string]any)
-		if !ok {
-			return RefreshInput{}, invalidAt("body.attestation", "attestation must be an object.")
-		}
-		attestation, violation := parseAttestation(attestationValue, "body.attestation")
-		if violation != nil {
-			return RefreshInput{}, violation
-		}
-		result.Attestation = &attestation
-	}
-	return result, nil
+	return RefreshInput{RefreshToken: NewSensitiveString(refreshToken)}, nil
 }
 
 func parseAttestation(object map[string]any, path string) (AttestationEvidence, *requestViolation) {

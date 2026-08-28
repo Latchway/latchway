@@ -327,9 +327,7 @@ func TestExchangeAndRefreshUseExactRequestAndResponseShapes(t *testing.T) {
 	assertGrantDocument(t, exchangeResponse)
 
 	refreshRequest := validClientRequest(http.MethodPost, refreshPath, `{
-		"refresh_token":"`+strings.Repeat("r", 48)+`",
-		"identity_token":"fresh-identity-token-123",
-		"attestation":{"provider":"debug","evidence":{"assertion":"opaque-refresh-evidence"}}
+		"refresh_token":"`+strings.Repeat("r", 48)+`"
 	}`, "ios", "1.2.3")
 	refreshResponse := httptest.NewRecorder()
 	handler.ServeHTTP(refreshResponse, refreshRequest)
@@ -342,31 +340,38 @@ func TestExchangeAndRefreshUseExactRequestAndResponseShapes(t *testing.T) {
 		t.Fatalf("refresh calls = %d", len(coordinator.refreshInputs))
 	}
 	refreshInput := coordinator.refreshInputs[0]
-	if refreshInput.Metadata.TargetURL.String() != "https://gateway.example.test"+refreshPath || refreshInput.RefreshToken.Reveal() != strings.Repeat("r", 48) || !refreshInput.HasIdentityToken || refreshInput.IdentityToken.Reveal() != "fresh-identity-token-123" || refreshInput.Attestation == nil || refreshInput.Attestation.Provider != "debug" {
+	if refreshInput.Metadata.TargetURL.String() != "https://gateway.example.test"+refreshPath || refreshInput.RefreshToken.Reveal() != strings.Repeat("r", 48) {
 		t.Fatalf("unexpected refresh input: %#v", refreshInput)
 	}
 	assertGrantDocument(t, refreshResponse)
 }
 
-func TestOptionalRefreshFeatureIsRejectedByCoordinatorWithoutFakeSuccess(t *testing.T) {
+func TestRefreshRejectsUnboundIdentityAndAttestationBeforeCoordinator(t *testing.T) {
 	t.Parallel()
 
-	coordinator := &fakeCoordinator{
-		refreshResult: validGrantResult("ios"),
-		refreshErr:    &DependencyError{Code: "attestation_unsupported"},
-	}
-	handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
-	request := validClientRequest(http.MethodPost, refreshPath, `{
-		"refresh_token":"`+strings.Repeat("sensitive-refresh-", 3)+`",
-		"attestation":{"provider":"app_attest","evidence":{"secret":"must-not-leak"}}
-	}`, "ios", "1.2.3")
-	response := httptest.NewRecorder()
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "identity token", body: `{"refresh_token":"` + strings.Repeat("sensitive-refresh-", 3) + `","identity_token":"must-not-leak-identity"}`},
+		{name: "attestation", body: `{"refresh_token":"` + strings.Repeat("sensitive-refresh-", 3) + `","attestation":{"provider":"app_attest","evidence":{"secret":"must-not-leak"}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			coordinator := &fakeCoordinator{refreshResult: validGrantResult("ios")}
+			handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+			request := validClientRequest(http.MethodPost, refreshPath, test.body, "ios", "1.2.3")
+			response := httptest.NewRecorder()
 
-	handler.ServeHTTP(response, request)
+			handler.ServeHTTP(response, request)
 
-	assertProblem(t, response, "attestation_unsupported", http.StatusBadRequest)
-	if strings.Contains(response.Body.String(), "must-not-leak") || strings.Contains(response.Body.String(), "sensitive-refresh") || strings.Contains(response.Body.String(), "access-token") {
-		t.Fatalf("failure response leaked or faked credentials: %s", response.Body.String())
+			assertProblem(t, response, "request_invalid", http.StatusBadRequest)
+			if len(coordinator.refreshInputs) != 0 {
+				t.Fatal("invalid refresh reached the coordinator")
+			}
+			if strings.Contains(response.Body.String(), "must-not-leak") || strings.Contains(response.Body.String(), "sensitive-refresh") || strings.Contains(response.Body.String(), "access-token") {
+				t.Fatalf("failure response leaked or faked credentials: %s", response.Body.String())
+			}
+		})
 	}
 }
 

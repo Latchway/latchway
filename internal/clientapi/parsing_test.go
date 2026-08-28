@@ -108,8 +108,8 @@ func TestExchangeAndRefreshRejectInvalidNestedShapesAndEndpointCaps(t *testing.T
 		{name: "exchange body cap", path: exchangePath, body: strings.Repeat(" ", maximumExchangeBodyBytes+1), response: http.StatusBadRequest},
 		{name: "refresh short token", path: refreshPath, body: `{"refresh_token":"short"}`, response: http.StatusBadRequest},
 		{name: "refresh unknown field", path: refreshPath, body: `{"refresh_token":"` + strings.Repeat("r", 48) + `","policy_revision":"client-owned"}`, response: http.StatusBadRequest},
-		{name: "refresh null identity token", path: refreshPath, body: `{"refresh_token":"` + strings.Repeat("r", 48) + `","identity_token":null}`, response: http.StatusBadRequest},
-		{name: "refresh invalid attestation provider", path: refreshPath, body: `{"refresh_token":"` + strings.Repeat("r", 48) + `","attestation":{"provider":"unknown","evidence":{}}}`, response: http.StatusBadRequest},
+		{name: "refresh identity token", path: refreshPath, body: `{"refresh_token":"` + strings.Repeat("r", 48) + `","identity_token":"fresh-identity-token"}`, response: http.StatusBadRequest},
+		{name: "refresh attestation", path: refreshPath, body: `{"refresh_token":"` + strings.Repeat("r", 48) + `","attestation":{"provider":"debug","evidence":{}}}`, response: http.StatusBadRequest},
 		{name: "refresh body cap", path: refreshPath, body: strings.Repeat(" ", maximumRefreshBodyBytes+1), response: http.StatusBadRequest},
 	}
 	for _, test := range tests {

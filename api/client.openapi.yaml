@@ -634,8 +634,6 @@ components:
       required: [refresh_token]
       properties:
         refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
-        identity_token: { type: string, minLength: 16, maxLength: 65536, writeOnly: true }
-        attestation: { $ref: '#/components/schemas/AttestationEvidence' }
     SessionGrant:
       type: object
       additionalProperties: false

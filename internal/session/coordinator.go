@@ -249,9 +249,6 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 }
 
 func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input clientapi.RefreshInput) (clientapi.GrantResult, error) {
-	if input.HasIdentityToken || input.Attestation != nil {
-		return clientapi.GrantResult{}, clientFailure("request_invalid")
-	}
 	refresh, err := NewRefreshToken(input.RefreshToken.Reveal())
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure("session_expired")

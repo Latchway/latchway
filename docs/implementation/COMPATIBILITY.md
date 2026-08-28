@@ -23,6 +23,17 @@ snapshot representations carry the new algorithm combinations. Unsupported
 protocols and accounting contexts remain fail-closed. This is local server
 capability evidence, not a published compatibility promise.
 
+The draft refresh schema is also corrected to match the server behavior that
+has existed throughout development: refresh accepts exactly `refresh_token`,
+with endpoint DPoP proof carried separately. The server never accepted the
+previously advertised optional identity or attestation fields, and refresh has
+no challenge to bind that evidence. Identity reauthentication and attestation
+renewal or step-up therefore require a new challenge and exchange. This is a
+pre-release interoperability and security correction under contract `0.5.0`;
+wire protocol `1` remains unchanged. ADR 0020 records the decision. Passing
+cross-SDK and live-server evidence is still required before compatibility is
+reported.
+
 ## Last consolidated immutable contract
 
 | Field | Value |

@@ -1,5 +1,17 @@
 # Implementation status
 
+## Local working-tree update — challenge-bound reauthentication (2026-08-29)
+
+The draft refresh contract now matches the server's fail-closed behavior:
+session refresh accepts exactly the rotating `refresh_token`, with the endpoint
+protected by a fresh DPoP proof. Optional identity and attestation refresh
+fields have been removed because refresh has no new server challenge to bind
+that evidence. Identity reauthentication, stale attestation, and attestation
+step-up clear the old SDK session and start a new challenge and exchange.
+ADR 0020 records why this pre-release correction remains contract `0.5.0` and
+wire protocol `1`. Focused server and JavaScript tests pass; complete cross-SDK
+and live-server conformance remains required before release.
+
 ## Local working-tree update — production input/total token quota shapes (2026-08-29)
 
 The trusted exact-model OpenAI Chat preflight now activates hard
@@ -155,7 +167,9 @@ Two independent builds of the current bundle were byte-identical. That bundle is
 - Schema version 9 has one bounded recovery limitation: if a per-request-only entryless attempt expires, the worker cannot reconstruct the adapter-applied cap and therefore cannot add an unknown-output usage row. No durable capacity exists to recover or mutate for that rule shape; normal known settlement persists provider usage.
 - Apple App Attest, Play Integrity, and other native production attestation verification are not implemented in the server. The validated debug provider is test/development evidence only.
 - The override Admin API and CLI slice is implemented, but broader Admin API/dashboard/CLI resources, telemetry, the remaining durable jobs, current-image deployment smoke tests, and operational recovery gates remain.
-- The refresh contract still advertises optional fresh identity and attestation inputs, while the server safely requires a new challenge for step-up because refresh has no fresh server binding. That mismatch requires an explicit contract/version decision before release; unsafe acceptance is not implemented.
+- Session refresh is intentionally credential-rotation-only. Identity
+  reauthentication and attestation renewal or step-up require a new bound
+  challenge and exchange as recorded in ADR 0020.
 - The cross-repository server conformance matrix must be rerun at the synchronized contract locks before compatibility can be reported.
 - Android core JVM tests and lint pass with the installed API 37 SDK. Any additional SDK components or license-bound tooling must be installed and accepted explicitly by the user; automation will not accept legal agreements on the user’s behalf.
 - React Native podspec syntax passes, but native-consumer validation still depends on synchronized publishable iOS/Android artifacts and the required consumer toolchains.
