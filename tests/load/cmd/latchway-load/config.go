@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,9 +38,10 @@ type environment struct {
 }
 
 type evidenceMetadata struct {
-	ImageDigest string `json:"image_digest"`
-	Deployment  string `json:"deployment"`
-	Operator    string `json:"operator"`
+	LocalDockerImageID  string `json:"local_docker_image_id,omitempty"`
+	ReleaseOCIReference string `json:"release_oci_reference,omitempty"`
+	Deployment          string `json:"deployment"`
+	Operator            string `json:"operator"`
 }
 
 type gatewayConfig struct {
@@ -223,18 +225,36 @@ func (cfg *config) validate(baseDir string) error {
 		return errors.New("request_timeout_seconds must be positive")
 	}
 	for key, value := range map[string]string{
-		"image_digest": cfg.Metadata.ImageDigest,
-		"deployment":   cfg.Metadata.Deployment,
-		"operator":     cfg.Metadata.Operator,
+		"deployment": cfg.Metadata.Deployment,
+		"operator":   cfg.Metadata.Operator,
 	} {
 		if placeholder(value) {
 			return fmt.Errorf("metadata.%s is required and cannot be a placeholder", key)
 		}
 	}
-	if !validImageDigest(cfg.Metadata.ImageDigest) {
-		return errors.New("metadata.image_digest must be an immutable OCI sha256 digest")
+	if err := cfg.Metadata.validateImageEvidence(); err != nil {
+		return err
 	}
 	return nil
+}
+
+func (metadata evidenceMetadata) validateImageEvidence() error {
+	if metadata.LocalDockerImageID != "" && metadata.ReleaseOCIReference != "" {
+		return errors.New("metadata must contain exactly one of local_docker_image_id or release_oci_reference")
+	}
+	if metadata.LocalDockerImageID != "" {
+		if placeholder(metadata.LocalDockerImageID) || !validLocalDockerImageID(metadata.LocalDockerImageID) {
+			return errors.New("metadata.local_docker_image_id must be one lowercase sha256 Docker image ID")
+		}
+		return nil
+	}
+	if metadata.ReleaseOCIReference != "" {
+		if placeholder(metadata.ReleaseOCIReference) || !validReleaseOCIReference(metadata.ReleaseOCIReference) {
+			return errors.New("metadata.release_oci_reference must be one fully qualified registry repository pinned by lowercase sha256 digest")
+		}
+		return nil
+	}
+	return errors.New("metadata must contain exactly one of local_docker_image_id or release_oci_reference")
 }
 
 func (request requestConfig) validate(name string) error {
@@ -291,13 +311,84 @@ func placeholder(value string) bool {
 	return trimmed == "" || strings.Contains(trimmed, "replace") || strings.ContainsAny(trimmed, "<>")
 }
 
-func validImageDigest(value string) bool {
-	parts := strings.Split(value, "@sha256:")
-	if len(parts) != 2 || parts[0] == "" || len(parts[1]) != 64 || strings.ToLower(parts[1]) != parts[1] {
+func validLocalDockerImageID(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false
 	}
-	_, err := hex.DecodeString(parts[1])
+	digest := strings.TrimPrefix(value, "sha256:")
+	if strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
 	return err == nil
+}
+
+func validReleaseOCIReference(value string) bool {
+	name, digest, found := strings.Cut(value, "@sha256:")
+	if !found || name == "" || len(name) > 255 || len(digest) != 64 || strings.ToLower(value) != value {
+		return false
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return false
+	}
+	registry, repository, found := strings.Cut(name, "/")
+	if !found || !validRegistryName(registry) || repository == "" {
+		return false
+	}
+	for _, component := range strings.Split(repository, "/") {
+		if !validRepositoryComponent(component) {
+			return false
+		}
+	}
+	return true
+}
+
+func validRegistryName(value string) bool {
+	host := value
+	if strings.Count(value, ":") > 1 {
+		return false
+	}
+	if parsedHost, port, found := strings.Cut(value, ":"); found {
+		if parsedHost == "" || port == "" || len(port) > 5 {
+			return false
+		}
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return false
+		}
+		host = parsedHost
+	}
+	if !strings.Contains(host, ".") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || !asciiLowerAlphaNumeric(label[0]) || !asciiLowerAlphaNumeric(label[len(label)-1]) {
+			return false
+		}
+		for index := 1; index < len(label)-1; index++ {
+			if !asciiLowerAlphaNumeric(label[index]) && label[index] != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validRepositoryComponent(value string) bool {
+	if value == "" || !asciiLowerAlphaNumeric(value[0]) || !asciiLowerAlphaNumeric(value[len(value)-1]) {
+		return false
+	}
+	for index := 1; index < len(value)-1; index++ {
+		character := value[index]
+		if !asciiLowerAlphaNumeric(character) && character != '.' && character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLowerAlphaNumeric(character byte) bool {
+	return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
 }
 
 func validCommitHash(value string) bool {

@@ -131,7 +131,7 @@
     "request_timeout_seconds": 120
   },
   "metadata": {
-    "image_digest": "replace-with-sha256-digest",
+    "release_oci_reference": "registry.example/latchway/latchway@sha256:<replace-with-64-lowercase-hex-characters>",
     "deployment": "replace-with-platform-and-revision",
     "operator": "replace-with-runner-identity"
   }

@@ -46,13 +46,13 @@ const (
 )
 
 type options struct {
-	gatewayURL       string
-	upstreamURL      string
-	outputDir        string
-	imageDigest      string
-	commit           string
-	bootstrapEnv     string
-	adminPasswordEnv string
+	gatewayURL         string
+	upstreamURL        string
+	outputDir          string
+	localDockerImageID string
+	commit             string
+	bootstrapEnv       string
+	adminPasswordEnv   string
 }
 
 type apiClient struct {
@@ -121,7 +121,7 @@ func main() {
 	flag.StringVar(&values.gatewayURL, "gateway-url", "http://127.0.0.1:8080", "isolated gateway origin")
 	flag.StringVar(&values.upstreamURL, "upstream-base-url", "", "fixture base URL visible from the gateway")
 	flag.StringVar(&values.outputDir, "output-dir", "", "empty private directory for generated session files")
-	flag.StringVar(&values.imageDigest, "image-digest", "", "immutable gateway image digest")
+	flag.StringVar(&values.localDockerImageID, "local-docker-image-id", "", "immutable local Docker gateway image ID")
 	flag.StringVar(&values.commit, "commit", "", "exact core commit represented by the image")
 	flag.StringVar(&values.bootstrapEnv, "bootstrap-token-env", "LATCHWAY_LOAD_BOOTSTRAP_TOKEN", "environment variable containing the isolated bootstrap token")
 	flag.StringVar(&values.adminPasswordEnv, "admin-password-env", "LATCHWAY_LOAD_ADMIN_PASSWORD", "environment variable containing the isolated owner password")
@@ -137,8 +137,8 @@ func main() {
 }
 
 func run(ctx context.Context, values options) error {
-	if values.upstreamURL == "" || values.outputDir == "" || !validDigest(values.imageDigest) || !validCommit(values.commit) {
-		return errors.New("-upstream-base-url, -output-dir, one sha256 image digest, and one 40-character commit are required")
+	if values.upstreamURL == "" || values.outputDir == "" || !validLocalDockerImageID(values.localDockerImageID) || !validCommit(values.commit) {
+		return errors.New("-upstream-base-url, -output-dir, one local sha256 Docker image ID, and one 40-character commit are required")
 	}
 	if !validEnvironmentName(values.bootstrapEnv) || !validEnvironmentName(values.adminPasswordEnv) {
 		return errors.New("secret environment variable names are invalid")
@@ -248,7 +248,7 @@ func run(ctx context.Context, values options) error {
 		"kind":                      "latchway_load_provision",
 		"created_at":                time.Now().UTC(),
 		"commit":                    values.commit,
-		"image_digest":              values.imageDigest,
+		"local_docker_image_id":     values.localDockerImageID,
 		"organization_id":           organizationID,
 		"application_id":            applicationID,
 		"environment_id":            environmentID,
@@ -773,9 +773,9 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 			"request_timeout_seconds":                    120,
 		},
 		"metadata": map[string]any{
-			"image_digest": values.imageDigest,
-			"deployment":   "isolated internal Docker network; gateway --cpus=2 --memory=2g --memory-swap=2g",
-			"operator":     "scripts/run-local-load-gates.sh",
+			"local_docker_image_id": values.localDockerImageID,
+			"deployment":            "isolated internal Docker network; gateway --cpus=2 --memory=2g --memory-swap=2g",
+			"operator":              "scripts/run-local-load-gates.sh",
 		},
 	}
 }
@@ -928,11 +928,15 @@ func writeExclusive(path string, contents []byte, mode os.FileMode) error {
 	return nil
 }
 
-func validDigest(value string) bool {
+func validLocalDockerImageID(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+sha256.Size*2 {
 		return false
 	}
-	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	digest := strings.TrimPrefix(value, "sha256:")
+	if strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
 	return err == nil
 }
 

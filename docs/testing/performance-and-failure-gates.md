@@ -12,13 +12,21 @@ The initial performance environment is exactly:
 - PostgreSQL on a measured low-latency network;
 - prompt and response body logging disabled;
 - a warm configuration cache;
-- the exact release-candidate OCI digest, not a mutable tag.
+- the exact release OCI reference (`registry/repository@sha256:<64 lowercase
+  hexadecimal characters>`), not a mutable tag.
 
 Record the PostgreSQL version and placement, host/container limits, image
-digest, core commit, deployment revision, and runner identity in the load
+identity, core commit, deployment revision, and runner identity in the load
 configuration. The harness records those declarations but cannot prove a
 cloud control plane applied them. Preserve platform resource descriptions as
 separate artifacts.
+
+Image identity has two deliberately separate evidence fields. A self-contained
+local run sets only `metadata.local_docker_image_id` to Docker's immutable
+`sha256:<64 lowercase hexadecimal characters>` image ID. Release and cloud
+runs set only `metadata.release_oci_reference` to a fully qualified registry
+repository plus digest. Exactly one field is required. A local Docker image ID
+is useful local evidence, but it is never registry or release evidence.
 
 The load report passes only when the complete six-gate suite runs. A selected
 single-gate run can exit successfully for iteration, but its JSON contains
@@ -81,12 +89,12 @@ mkdir -p /tmp/latchway-v1-load-evidence
 ```
 
 The evidence directory must be absolute, real, and empty. It receives the load
-JSON/JUnit report, a redacted provision summary, exact image/resource/network
-facts, and bounded gateway/fixture logs. Session tokens, the private DPoP JWK,
-database password, master key, bootstrap token, and owner password stay in the
-private disposable runtime directory and are removed with the exact generated
-containers/network. The launcher never targets an existing Compose project or
-database.
+JSON/JUnit report, a redacted provision summary, exact local Docker image
+IDs/resource/network facts, and bounded gateway/fixture logs. Session tokens,
+the private DPoP JWK, database password, master key, bootstrap token, and owner
+password stay in the private disposable runtime directory and are removed with
+the exact generated containers/network. The launcher never targets an existing
+Compose project or database.
 
 This is deliberately `debug-non-production` trust evidence. It proves the
 gateway load and quota behavior, not physical App Attest or Play Integrity.
@@ -125,6 +133,10 @@ Copy and edit
 [`tests/load/config/v1.example.json`](../../tests/load/config/v1.example.json).
 Its 128 MiB stream-growth and 5 MiB/min plateau-slope values are explicit
 example thresholds, not values invented by the product contract.
+The example uses `release_oci_reference`, because it is the form required for
+release and cloud evidence. Do not replace it with a bare `sha256:...` local
+image ID. The self-contained launcher generates its separate local-only config
+automatically.
 
 ## Run the load gates
 
@@ -206,7 +218,8 @@ release-blocking until supplied.
 
 For every live case:
 
-1. use the exact release image digest and an isolated database;
+1. use the exact release OCI reference pinned as
+   `registry/repository@sha256:<digest>` and an isolated database;
 2. capture a bounded before-state (quota snapshot plus relevant durable row
    identifiers, never prompt bodies or credentials);
 3. create the in-flight boundary using the deterministic fixture;

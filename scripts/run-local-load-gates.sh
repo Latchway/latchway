@@ -98,16 +98,16 @@ fi
 
 docker build --build-arg "COMMIT=$commit" --tag "$gateway_tag" "$run_dir/source"
 gateway_image_created=true
-gateway_digest=$(docker image inspect --format '{{.Id}}' "$gateway_tag")
-case "$gateway_digest" in
+gateway_image_id=$(docker image inspect --format '{{.Id}}' "$gateway_tag")
+case "$gateway_image_id" in
   sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "gateway build did not produce an immutable sha256 image ID" >&2; exit 1 ;;
 esac
 
 docker build --file "$run_dir/source/tests/load/Dockerfile" --tag "$tools_tag" "$run_dir/source"
 tools_image_created=true
-tools_digest=$(docker image inspect --format '{{.Id}}' "$tools_tag")
-case "$tools_digest" in
+tools_image_id=$(docker image inspect --format '{{.Id}}' "$tools_tag")
+case "$tools_image_id" in
   sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "load tools build did not produce an immutable sha256 image ID" >&2; exit 1 ;;
 esac
@@ -167,7 +167,7 @@ docker run --detach \
   --security-opt no-new-privileges:true \
   --pids-limit 1024 \
   --env LATCHWAY_LOAD_FIXTURE_CONTROL_TOKEN \
-  "$tools_digest" \
+  "$tools_image_id" \
   /tools/latchway-load-fixture \
   -listen "$fixture_ip:19090" \
   -stream-hold 150s \
@@ -205,13 +205,13 @@ docker run --detach \
   --env LATCHWAY_MIGRATE_ON_START \
   --env LATCHWAY_DB_MAX_CONNECTIONS \
   --env LATCHWAY_SHUTDOWN_TIMEOUT \
-  "$gateway_digest" >/dev/null
+  "$gateway_image_id" >/dev/null
 
 nano_cpus=$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$gateway")
 memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$gateway")
 memory_swap_bytes=$(docker inspect --format '{{.HostConfig.MemorySwap}}' "$gateway")
 observed_image=$(docker inspect --format '{{.Image}}' "$gateway")
-if [ "$nano_cpus" != 2000000000 ] || [ "$memory_bytes" != 2147483648 ] || [ "$memory_swap_bytes" != 2147483648 ] || [ "$observed_image" != "$gateway_digest" ]; then
+if [ "$nano_cpus" != 2000000000 ] || [ "$memory_bytes" != 2147483648 ] || [ "$memory_swap_bytes" != 2147483648 ] || [ "$observed_image" != "$gateway_image_id" ]; then
   echo "gateway resource or image identity does not match the required 2 CPU / 2 GiB candidate" >&2
   exit 1
 fi
@@ -223,8 +223,8 @@ printf '%s\n' \
   '  "kind": "latchway_local_load_environment",' \
   "  \"started_at\": \"$started_at\"," \
   "  \"commit\": \"$commit\"," \
-  "  \"gateway_image_digest\": \"$gateway_digest\"," \
-  "  \"load_tools_image_digest\": \"$tools_digest\"," \
+  "  \"gateway_local_docker_image_id\": \"$gateway_image_id\"," \
+  "  \"load_tools_local_docker_image_id\": \"$tools_image_id\"," \
   "  \"gateway_nano_cpus\": $nano_cpus," \
   "  \"gateway_memory_bytes\": $memory_bytes," \
   "  \"gateway_memory_swap_bytes\": $memory_swap_bytes," \
@@ -248,12 +248,12 @@ docker run --rm \
   --env LATCHWAY_LOAD_BOOTSTRAP_TOKEN \
   --env LATCHWAY_LOAD_ADMIN_PASSWORD \
   --volume "$run_dir/runtime:/evidence/runtime" \
-  "$tools_digest" \
+  "$tools_image_id" \
   /tools/latchway-load-provision \
   -gateway-url http://127.0.0.1:8080 \
   -upstream-base-url "http://$fixture_ip:19090/v1" \
   -output-dir /evidence/runtime \
-  -image-digest "$gateway_digest" \
+  -local-docker-image-id "$gateway_image_id" \
   -commit "$commit"
 
 cp "$run_dir/runtime/provision.json" "$evidence_dir/provision.json"
@@ -274,7 +274,7 @@ docker run --rm \
   --volume "$run_dir/runtime:/evidence/runtime:ro" \
   --volume "$evidence_dir:/evidence/output" \
   --workdir /src \
-  "$tools_digest" \
+  "$tools_image_id" \
   /tools/latchway-load \
   -acknowledge-load \
   -config /evidence/runtime/load-config.json \
