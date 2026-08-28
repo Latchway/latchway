@@ -532,6 +532,57 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 	return newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
 }
 
+// SimulationSnapshot returns the exact compiled policy for a tenant-scoped
+// valid draft or the currently active revision. Superseded and invalid
+// revisions are deliberately excluded so the simulator cannot imply that an
+// obsolete or non-executable document represents deployable behavior.
+func (store *Store) SimulationSnapshot(
+	ctx context.Context,
+	principal adminauth.Principal,
+	revisionID string,
+) (SimulationSnapshot, error) {
+	if !canWrite(principal) {
+		return SimulationSnapshot{}, ErrForbidden
+	}
+	if id.Validate(revisionID, id.ConfigRevision) != nil {
+		return SimulationSnapshot{}, ErrInvalid
+	}
+	revision, err := store.revision(ctx, store.pool, principal.OrganizationID, revisionID, false)
+	if err != nil {
+		return SimulationSnapshot{}, err
+	}
+	if revision.State != StateValid && revision.State != StateActive {
+		return SimulationSnapshot{}, ErrConfigurationInvalid
+	}
+	if len(revision.compiled) == 0 || revision.Validation == nil || !revision.Validation.Valid {
+		return SimulationSnapshot{}, ErrConfigurationInvalid
+	}
+	environment, _, err := store.environment(
+		ctx, store.pool, principal.OrganizationID, revision.EnvironmentID, false,
+	)
+	if err != nil {
+		return SimulationSnapshot{}, err
+	}
+	if environment.ApplicationID != revision.applicationID || environment.OrganizationID != revision.organizationID {
+		return SimulationSnapshot{}, ErrConfigurationInvalid
+	}
+	snapshot, err := newActiveSnapshot(
+		revision.ID, revision.EnvironmentID, revision.Document, revision.compiled,
+	)
+	if err != nil {
+		return SimulationSnapshot{}, ErrConfigurationInvalid
+	}
+	return SimulationSnapshot{
+		Snapshot: snapshot,
+		Scope: TenantScope{
+			OrganizationID: environment.OrganizationID,
+			ApplicationID:  environment.ApplicationID,
+			EnvironmentID:  environment.EnvironmentID,
+		},
+		EnvironmentKind: environment.EnvironmentKind,
+	}, nil
+}
+
 const revisionSelect = `
 	SELECT
 		revision.config_revision_id,

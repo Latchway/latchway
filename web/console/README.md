@@ -29,18 +29,33 @@ caches, Web Storage, IndexedDB, URLs, or logs, and are cleared after each failed
 attempt. Error UI accepts only validated RFC 9457 problem fields and never
 renders an unstructured response body.
 
+The secure, SameSite=Strict administrator cookie persists the browser session.
+A separate secure double-submit cookie lets a refreshed tab recover the CSRF
+token without making the administrator credential script-readable. Sign out
+revokes the server-side session and clears both cookies.
+
+Authenticated routes cover first-run setup, the complete schema-backed
+configuration document, users, installations, request attempts, usage, audit,
+the exact production route simulator, bounded self-tests, and build/schema
+status. Every mutation uses `/admin/v1/*`; browser code has no database client,
+connection string, or local policy evaluator.
+
 ## Validation
 
 ```bash
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm test:e2e
 pnpm build
 pnpm verify:reproducible
 ```
 
 Tests mock only the HTTP boundary and verify the exact canonical endpoint
-paths. Zod validates all server payloads before UI code consumes them.
+paths. Zod validates all server payloads before UI code consumes them. The
+Playwright gate proves first-run activation with a strong ETag, write-only
+credential clearing, user blocking, CSRF on every cookie mutation, absence of
+Web Storage credentials, and server-side logout in Chromium.
 
 ## Embedded build contract
 

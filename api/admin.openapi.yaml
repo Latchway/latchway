@@ -9,6 +9,9 @@ info:
     secrets, users, installations, usage, audit and self-tests. Cookie-authenticated
     mutations also require origin validation and `X-CSRF-Token`; scoped bearer API
     tokens are not subject to browser CSRF but receive the same capability checks.
+    Browser sessions receive the CSRF value in both the login/bootstrap response
+    header and a Secure, SameSite=Strict, non-HttpOnly `__Host-latchway_csrf`
+    cookie so a same-origin console reload can recover without persisting it.
     Every successful or rejected mutation produces a redaction-safe audit event.
   license:
     name: Apache-2.0
@@ -916,7 +919,7 @@ components:
       description: Strong entity tag for optimistic concurrency.
       schema: { type: string }
     CSRFToken:
-      description: Session-bound CSRF token returned out of band from the secure cookie.
+      description: Session-bound CSRF token returned in the response header and mirrored in the Secure, SameSite=Strict `__Host-latchway_csrf` cookie for same-origin console use.
       schema: { type: string, minLength: 32, maxLength: 512 }
     RequestID:
       description: Server-selected request identifier.
@@ -1186,9 +1189,47 @@ components:
       properties:
         allowed: { type: boolean }
         feature: { $ref: '#/components/schemas/Identifier' }
+        protocol:
+          type: string
+          enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
+        matched_access_expression: { type: string, maxLength: 4096 }
         limit_plan: { $ref: '#/components/schemas/Identifier' }
+        limits:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [metric, algorithm, scope, hard]
+            properties:
+              metric: { type: string }
+              algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
+              scope: { type: array, maxItems: 9, uniqueItems: true, items: { type: string } }
+              window: { type: string }
+              maximum: { type: integer, minimum: 0 }
+              per_request_maximum: { type: integer, minimum: 0 }
+              capacity: { type: integer, minimum: 0 }
+              refill_per_second: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+              hard: { type: boolean }
         route: { $ref: '#/components/schemas/Identifier' }
         model: { $ref: '#/components/schemas/Identifier' }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        physical_model: { type: string, maxLength: 512 }
+        fallback_sequence:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [route, upstream, model, physical_model, fallback_on]
+            properties:
+              route: { $ref: '#/components/schemas/Identifier' }
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              model: { $ref: '#/components/schemas/Identifier' }
+              physical_model: { type: string, maxLength: 512 }
+              fallback_on: { type: array, maxItems: 16, uniqueItems: true, items: { type: string } }
+        pricing_confidence: { type: string, enum: [configured, unknown] }
+        warnings: { type: array, maxItems: 16, items: { type: string, maxLength: 1024 } }
         explanation: { type: array, items: { type: string, maxLength: 1024 } }
     WriteSecretRequest:
       type: object

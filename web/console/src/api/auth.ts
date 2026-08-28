@@ -3,6 +3,7 @@ import { z } from "zod";
 export const adminAuthEndpoints = {
   bootstrap: "/admin/v1/auth/bootstrap",
   login: "/admin/v1/auth/login",
+  logout: "/admin/v1/auth/logout",
   session: "/admin/v1/auth/session"
 } as const;
 
@@ -79,6 +80,41 @@ export class AdminRequestError extends Error {
   }
 }
 
+const csrfTokenPattern = /^[A-Za-z0-9._~-]{32,512}$/;
+let rememberedCSRFToken: string | undefined;
+
+export function rememberAdminCSRFToken(response: Response): void {
+  const token = response.headers.get("X-CSRF-Token")?.trim();
+  if (token && csrfTokenPattern.test(token)) {
+    rememberedCSRFToken = token;
+  }
+}
+
+export function adminCSRFToken(): string | undefined {
+  if (rememberedCSRFToken) {
+    return rememberedCSRFToken;
+  }
+  if (typeof document === "undefined") {
+    return undefined;
+  }
+  for (const part of document.cookie.split(";")) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+    if (rawName !== "__Host-latchway_csrf") {
+      continue;
+    }
+    try {
+      const token = decodeURIComponent(rawValue.join("=")).trim();
+      if (csrfTokenPattern.test(token)) {
+        rememberedCSRFToken = token;
+        return token;
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -87,8 +123,38 @@ function safeText(value: string, limit: number): string {
   return value.trim().replaceAll(/\s+/g, " ").slice(0, limit);
 }
 
-async function parseJSON(response: Response): Promise<unknown> {
-  const text = await response.text();
+export async function parseAdminJSON(
+  response: Response,
+  maximumBytes = 2 * 1024 * 1024
+): Promise<unknown> {
+  if (!response.body) {
+    return undefined;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > maximumBytes) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const encoded = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    encoded.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+  } catch {
+    return undefined;
+  }
   if (!text.trim()) {
     return undefined;
   }
@@ -136,7 +202,7 @@ function fallbackProblem(status: number): AdminProblem {
   };
 }
 
-function responseProblem(response: Response, payload: unknown): AdminProblem {
+export function responseProblem(response: Response, payload: unknown): AdminProblem {
   const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
   const parsed = contentType.includes("application/problem+json")
     ? ProblemSchema.safeParse(payload)
@@ -190,10 +256,12 @@ async function submitCredentials(
     });
   }
 
-  const payload = await parseJSON(response);
+  const payload = await parseAdminJSON(response);
   if (!response.ok) {
     throw new AdminRequestError(responseProblem(response, payload));
   }
+
+  rememberAdminCSRFToken(response);
 
   const parsed = AdminSessionSchema.safeParse(payload);
   if (!parsed.success) {
@@ -222,6 +290,39 @@ export function loginAdministrator(
   fetcher?: typeof fetch
 ): Promise<AdminSession> {
   return submitCredentials(adminAuthEndpoints.login, input, signal, fetcher);
+}
+
+export async function logoutAdministrator(
+  signal?: AbortSignal,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<void> {
+  const csrf = adminCSRFToken();
+  if (!csrf) {
+    throw new AdminRequestError({
+      code: "csrf_token_required",
+      detail: "Refresh the administrator session before signing out.",
+      retryable: true,
+      status: 0,
+      title: "Session confirmation required"
+    });
+  }
+  const response = await fetcher(adminAuthEndpoints.logout, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json, application/problem+json",
+      "X-CSRF-Token": csrf
+    },
+    method: "POST",
+    redirect: "error",
+    referrerPolicy: "same-origin",
+    signal
+  });
+  if (response.status !== 204) {
+    const payload = await parseAdminJSON(response);
+    throw new AdminRequestError(responseProblem(response, payload));
+  }
+  rememberedCSRFToken = undefined;
 }
 
 export function problemFromError(error: unknown): AdminProblem {

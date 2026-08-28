@@ -113,7 +113,8 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 		t.Fatal("bootstrap response did not include a CSRF token")
 	}
 	cookies := bootstrap.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != adminCookieName || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteStrictMode {
+	if len(cookies) != 2 || cookies[0].Name != adminCookieName || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteStrictMode ||
+		cookies[1].Name != csrfCookieName || cookies[1].HttpOnly || !cookies[1].Secure || cookies[1].SameSite != http.SameSiteStrictMode || cookies[1].Value != csrf {
 		t.Fatalf("bootstrap cookie attributes are not secure: count=%d", len(cookies))
 	}
 

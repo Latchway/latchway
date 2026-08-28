@@ -88,6 +88,83 @@ type Input struct {
 	request          ProtocolRequestMetadata
 	environment      EnvironmentFacts
 	logicalRequestID string
+	unauthenticated  bool
+}
+
+// SimulationFacts is the bounded, server-owned input accepted by the
+// administrative route simulator. It deliberately requires canonical tenant
+// identifiers and the exact revision selected by the configuration store so a
+// caller cannot use simulation to bypass the production snapshot boundary.
+// Production data-plane callers continue to use NewInput and a sealed session
+// authorization.
+type SimulationFacts struct {
+	OrganizationID       string
+	ApplicationID        string
+	EnvironmentID        string
+	EnvironmentKind      string
+	PolicyRevisionID     string
+	ApplicationUserID    string
+	InstallationID       string
+	LogicalRequestID     string
+	InstallationPlatform string
+	IdentityProvider     string
+	TrustLevel           string
+	AttestationProvider  string
+	Authenticated        bool
+	NormalizedClaims     map[string]any
+	Streaming            bool
+	EvaluatedAt          time.Time
+}
+
+// NewSimulationInput constructs a synthetic policy activation exclusively for
+// authenticated control-plane explanation. It shares ResolvePlan, CEL,
+// attestation, weighted selection, and fallback ordering with production while
+// issuing no session and performing no upstream dispatch.
+func NewSimulationInput(facts SimulationFacts) (Input, error) {
+	evaluatedAt := facts.EvaluatedAt.UTC()
+	if evaluatedAt.IsZero() ||
+		id.Validate(facts.OrganizationID, id.Organization) != nil ||
+		id.Validate(facts.ApplicationID, id.Application) != nil ||
+		id.Validate(facts.EnvironmentID, id.Environment) != nil ||
+		id.Validate(facts.PolicyRevisionID, id.ConfigRevision) != nil ||
+		id.Validate(facts.ApplicationUserID, id.ApplicationUser) != nil ||
+		id.Validate(facts.InstallationID, id.Installation) != nil ||
+		id.Validate(facts.LogicalRequestID, id.LogicalRequest) != nil ||
+		!validEnvironmentKind(facts.EnvironmentKind) ||
+		!validPlatform(facts.InstallationPlatform) ||
+		!policyIdentifierPattern.MatchString(facts.IdentityProvider) ||
+		!validTrustLevel(facts.TrustLevel) ||
+		!validAttestationProvider(facts.AttestationProvider) ||
+		facts.NormalizedClaims == nil {
+		return Input{}, ErrInvalidInput
+	}
+
+	// Thirty days is only a synthetic evaluation horizon. The configured
+	// attestation policy's maxAge is still enforced from EvaluatedAt, and the
+	// result is never usable as a session authorization.
+	horizon := evaluatedAt.Add(30 * 24 * time.Hour)
+	input := Input{
+		authorization: authorizationFacts{
+			organizationID: facts.OrganizationID, applicationID: facts.ApplicationID,
+			environmentID: facts.EnvironmentID, policyRevisionID: facts.PolicyRevisionID,
+			userID: facts.ApplicationUserID, installationID: facts.InstallationID,
+			installationPlatform: facts.InstallationPlatform, identityProvider: facts.IdentityProvider,
+			trustLevel: facts.TrustLevel, attestationProvider: facts.AttestationProvider,
+			claims: cloneClaims(facts.NormalizedClaims), identityExpiresAt: horizon,
+			attestedAt: evaluatedAt, attestationExpiresAt: horizon, accessExpiresAt: horizon,
+		},
+		request:          ProtocolRequestMetadata{Streaming: facts.Streaming},
+		environment:      EnvironmentFacts{Kind: facts.EnvironmentKind},
+		logicalRequestID: facts.LogicalRequestID,
+		unauthenticated:  !facts.Authenticated,
+	}
+	if !validInput(input) {
+		return Input{}, ErrInvalidInput
+	}
+	if _, err := boundedActivation(input); err != nil {
+		return Input{}, err
+	}
+	return input, nil
 }
 
 // NewInput builds the only production policy boundary. Client request IDs and
@@ -917,7 +994,7 @@ func boundedActivation(input Input) (map[string]any, error) {
 	state := activationState{}
 	activation := make(map[string]any, 4)
 	principal := map[string]any{
-		"authenticated": true,
+		"authenticated": !input.unauthenticated,
 		"claims":        cloneClaims(input.authorization.claims),
 	}
 	installation := map[string]any{

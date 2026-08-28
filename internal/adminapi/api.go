@@ -25,12 +25,14 @@ import (
 	"github.com/latchway/latchway/internal/controlplane"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
 const (
 	adminCookieName = "__Host-latchway_admin"
+	csrfCookieName  = "__Host-latchway_csrf"
 	csrfHeader      = "X-CSRF-Token"
 	maxAdminBody    = 1 << 20
 )
@@ -50,6 +52,7 @@ type API struct {
 	logger          *slog.Logger
 	loginLimiter    *failureLimiter
 	operations      *operationalStore
+	policyResolver  *policy.Resolver
 	role            string
 }
 
@@ -86,6 +89,10 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, err
 	}
+	policyResolver, err := policy.NewResolver()
+	if err != nil {
+		return nil, err
+	}
 	overrides, err := useroverride.NewStore(pool)
 	if err != nil {
 		return nil, err
@@ -104,7 +111,7 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
-		operations: newOperationalStore(pool), role: "all",
+		operations: newOperationalStore(pool), policyResolver: policyResolver, role: "all",
 	}
 	for _, option := range options {
 		if option == nil {
@@ -116,6 +123,9 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	}
 	if api.operations == nil {
 		return nil, errors.New("admin API operational store is nil")
+	}
+	if api.policyResolver == nil {
+		return nil, errors.New("admin API policy resolver is nil")
 	}
 	return api, nil
 }
@@ -160,6 +170,7 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Patch("/config-revisions/{revisionID}", api.replaceDraftConfiguration)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/validate", api.validateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
+		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/simulate", api.simulateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
 		protected.Get("/secrets", api.secrets)
@@ -868,12 +879,14 @@ func (api *API) optionalOriginValid(r *http.Request) bool {
 
 func (api *API) setSession(w http.ResponseWriter, session adminauth.IssuedSession) {
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: session.Token.Reveal(), Path: "/", Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: session.CSRFToken.Reveal(), Path: "/", Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds()), Secure: true, SameSite: http.SameSiteStrictMode})
 	w.Header().Set(csrfHeader, session.CSRFToken.Reveal())
 	w.Header().Set("Cache-Control", "no-store")
 }
 
 func (api *API) clearSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: "", Path: "/", MaxAge: -1, Secure: true, SameSite: http.SameSiteStrictMode})
 }
 
 func (api *API) sessionDocument(view controlplane.AdminView, principal adminauth.Principal) map[string]any {

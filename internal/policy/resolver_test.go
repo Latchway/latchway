@@ -47,6 +47,57 @@ func TestResolverSelectsAccessPlanAndPriorityRoute(t *testing.T) {
 	}
 }
 
+func TestNewSimulationInputUsesTheProductionResolverBoundary(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := SimulationFacts{
+		OrganizationID: "org_00000000000000000000000000", ApplicationID: "app_00000000000000000000000000",
+		EnvironmentID: "env_00000000000000000000000000", EnvironmentKind: "production",
+		PolicyRevisionID:  "rev_00000000000000000000000000",
+		ApplicationUserID: "usr_00000000000000000000000000", InstallationID: "ins_00000000000000000000000000",
+		LogicalRequestID: "req_00000000000000000000000000", InstallationPlatform: "ios",
+		IdentityProvider: "simulator", TrustLevel: "app_verified", AttestationProvider: "app_attest",
+		Authenticated: true, NormalizedClaims: map[string]any{"plan": "premium"}, Streaming: true,
+		EvaluatedAt: policyTestNow,
+	}
+	input, err := NewSimulationInput(facts)
+	if err != nil {
+		t.Fatalf("NewSimulationInput() error = %v", err)
+	}
+	facts.NormalizedClaims["plan"] = "blocked"
+	plan, err := resolver.ResolvePlan(context.Background(), policySnapshot(), "assistant", input)
+	if err != nil {
+		t.Fatalf("ResolvePlan(simulation) error = %v", err)
+	}
+	if plan.LimitPlan.ID != "premium" || plan.Candidates[0].Route.ID != "premium-reasoning" {
+		t.Fatalf("simulation plan = %+v", plan)
+	}
+
+	facts.Authenticated = false
+	facts.NormalizedClaims = map[string]any{"plan": "premium"}
+	unauthenticated, err := NewSimulationInput(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.ResolvePlan(context.Background(), policySnapshot(), "assistant", unauthenticated); !errors.Is(err, ErrFeatureNotAllowed) {
+		t.Fatalf("unauthenticated simulation error = %v", err)
+	}
+
+	facts.EnvironmentID = "not-an-environment"
+	if _, err := NewSimulationInput(facts); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("invalid simulation scope error = %v", err)
+	}
+	facts.EnvironmentID = "env_00000000000000000000000000"
+	facts.NormalizedClaims = map[string]any{"oversized": strings.Repeat("x", maximumActivationBytes+1)}
+	if _, err := NewSimulationInput(facts); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized simulation claims error = %v", err)
+	}
+}
+
 func TestResolverUserOverrideReplacesOnlyLimitPlanSelection(t *testing.T) {
 	t.Parallel()
 

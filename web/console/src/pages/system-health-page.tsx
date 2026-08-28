@@ -1,5 +1,6 @@
 import { EndpointCard } from "../components/endpoint-card";
 import { overallHealthState, useSystemHealth } from "../api/health";
+import { SystemStatusPanel } from "../components/system-status-panel";
 
 export function SystemHealthPage() {
   const { liveness, readiness } = useSystemHealth();
@@ -66,6 +67,8 @@ export function SystemHealthPage() {
           title="Traffic readiness"
         />
       </div>
+
+      <SystemStatusPanel />
 
       <aside className="health-note" aria-labelledby="health-note-heading">
         <p className="health-note__index" aria-hidden="true">

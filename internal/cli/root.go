@@ -68,7 +68,12 @@ func newRootCommand(opts *options) *cobra.Command {
 		}
 		return nil
 	}
-	root.AddCommand(newServeCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newVersionCommand(opts), newAdminCommand(opts), newSecretCommand(opts))
+	root.AddCommand(
+		newServeCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newVersionCommand(opts),
+		newAdminCommand(opts), newSecretCommand(opts), newStatusCommand(opts), newConfigCommand(opts),
+		newUsersCommand(opts), newInstallationsCommand(opts), newRequestsCommand(opts),
+		newRoutesCommand(opts), newUsageCommand(opts), newAuditCommand(opts), newVerifyCommand(opts),
+	)
 	root.InitDefaultCompletionCmd()
 	return root
 }

@@ -11,10 +11,12 @@
   "scripts": {
     "dev": "vite",
     "build": "pnpm typecheck && vite build && node scripts/verify-dist.mjs",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e",
     "lint": "eslint . --max-warnings=0",
     "preview": "vite preview",
     "test": "vitest run",
+    "pretest:e2e": "playwright install --with-deps chromium",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
     "verify:dist": "node scripts/verify-dist.mjs",
@@ -29,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.56.0",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.6",

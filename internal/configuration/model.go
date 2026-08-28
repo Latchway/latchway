@@ -597,6 +597,16 @@ type ActiveSnapshot struct {
 	features        map[string]Feature
 }
 
+// SimulationSnapshot binds one validated administrative revision to its
+// authoritative tenant and environment kind. The compiled snapshot remains an
+// internal typed value; callers must not serialize CompiledJSON into an Admin
+// API response because it can contain secret references and operator metadata.
+type SimulationSnapshot struct {
+	Snapshot        ActiveSnapshot
+	Scope           TenantScope
+	EnvironmentKind string
+}
+
 // PolicyRevision returns the immutable cache identity for data-plane policy.
 func (snapshot ActiveSnapshot) PolicyRevision() string { return snapshot.RevisionID }
 

@@ -236,6 +236,97 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	}
 }
 
+func TestStorePostgreSQLSimulationSnapshotIsExecutableTenantScopedAndRedacted(t *testing.T) {
+	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("LATCHWAY_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := isolatedConfigurationPool(t, ctx, databaseURL)
+	principal, scope := seedConfigurationTenant(t, ctx, pool)
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC) }
+	provider, err := secretstore.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x91}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := secretstore.NewManager(secretstore.ManagerConfig{Pool: pool, Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretValue := []byte("simulation-secret-never-returned")
+	if _, err := manager.Create(ctx, principal, secretstore.CreateInput{
+		EnvironmentID: scope.EnvironmentID, Name: "simulator-upstream", Value: secretValue,
+	}); err != nil {
+		t.Fatalf("create simulation secret: %v", err)
+	}
+
+	draft, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID,
+		Document:      configurationDocumentWithSecret(t, "simulator-upstream"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SimulationSnapshot(ctx, principal, draft.ID); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("draft SimulationSnapshot() error = %v", err)
+	}
+	viewer := principal
+	viewer.Role = adminauth.RoleViewer
+	if _, err := store.SimulationSnapshot(ctx, viewer, draft.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("viewer SimulationSnapshot() error = %v", err)
+	}
+	report, err := store.ValidateRevision(ctx, principal, draft.ID)
+	if err != nil || !report.Valid {
+		t.Fatalf("ValidateRevision() report=%+v error=%v", report, err)
+	}
+
+	simulation, err := store.SimulationSnapshot(ctx, principal, draft.ID)
+	if err != nil {
+		t.Fatalf("SimulationSnapshot(valid) error = %v", err)
+	}
+	if simulation.Scope != scope || simulation.EnvironmentKind != "production" ||
+		simulation.Snapshot.PolicyRevision() != draft.ID {
+		t.Fatalf("simulation snapshot = %+v", simulation)
+	}
+	if bytes.Contains(simulation.Snapshot.DocumentJSON(), secretValue) ||
+		bytes.Contains(simulation.Snapshot.CompiledJSON(), secretValue) {
+		t.Fatal("simulation snapshot disclosed decrypted secret material")
+	}
+	crossTenant := principal
+	crossTenant.OrganizationID = mustConfigID(t, id.Organization)
+	if _, err := store.SimulationSnapshot(ctx, crossTenant, draft.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant SimulationSnapshot() error = %v", err)
+	}
+
+	active, err := store.ActivateRevision(ctx, principal, draft.ID, draft.ETag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SimulationSnapshot(ctx, principal, active.ID); err != nil {
+		t.Fatalf("active SimulationSnapshot() error = %v", err)
+	}
+	next, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID, BaseRevisionID: active.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report, err = store.ValidateRevision(ctx, principal, next.ID); err != nil || !report.Valid {
+		t.Fatalf("ValidateRevision(next) report=%+v error=%v", report, err)
+	}
+	if _, err := store.ActivateRevision(ctx, principal, next.ID, next.ETag); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SimulationSnapshot(ctx, principal, active.ID); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("superseded SimulationSnapshot() error = %v", err)
+	}
+}
+
 func TestStorePostgreSQLActiveUserOverridePlanGuards(t *testing.T) {
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
 	if databaseURL == "" {

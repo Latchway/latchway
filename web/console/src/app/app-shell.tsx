@@ -1,10 +1,12 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
+import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
-import { useConsoleSession, type ConsoleMode } from "../api/session";
+import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
 
-type ConsoleRoute = "/" | "/system-health";
+type ConsoleRoute = "/" | "/setup" | "/configuration" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
 
 interface NavigationLinkProps {
   children: ReactNode;
@@ -40,7 +42,10 @@ function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
 }
 
 export function AppShell() {
+  const queryClient = useQueryClient();
   const session = useConsoleSession();
+  const [logoutError, setLogoutError] = useState<string>();
+  const [loggingOut, setLoggingOut] = useState(false);
   const { liveness, readiness } = useSystemHealth();
   const mode = session.data?.mode ?? "unknown";
   const needsAccess = mode !== "configured";
@@ -53,6 +58,20 @@ export function AppShell() {
         : overallState === "unavailable"
           ? "System unavailable"
           : "Checking system";
+
+  async function logout(): Promise<void> {
+    setLoggingOut(true);
+    setLogoutError(undefined);
+    try {
+      await logoutAdministrator();
+      queryClient.setQueryData(consoleSessionQueryOptions.queryKey, { mode: "signed-out" });
+      await queryClient.invalidateQueries({ exact: true, queryKey: consoleSessionQueryOptions.queryKey });
+    } catch (error) {
+      setLogoutError(problemFromError(error).detail);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <div className="console-frame">
@@ -92,7 +111,25 @@ export function AppShell() {
             {needsAccess ? "Console access" : "Overview"}
           </NavigationLink>
 
-          <p className="nav-group-label nav-group-label--spaced">Operations</p>
+          {!needsAccess ? <>
+            <NavigationLink description="Guided native first run" to="/setup">Setup wizard</NavigationLink>
+            <NavigationLink description="Validate, diff, and activate" to="/configuration">Configuration</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Identity</p>
+            <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>
+            <NavigationLink description="Trust and revocation" to="/installations">Installations</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Observability</p>
+            <NavigationLink description="Metadata and attempts" to="/requests">Requests</NavigationLink>
+            <NavigationLink description="Tokens and cost" to="/usage">Usage</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Operations</p>
+            <NavigationLink description="Exact production resolver" to="/route-simulator">Route simulator</NavigationLink>
+            <NavigationLink description="Bounded diagnostics" to="/self-tests">Self-tests</NavigationLink>
+            <NavigationLink description="Redacted change history" to="/audit">Audit log</NavigationLink>
+          </> : null}
+
+          <p className="nav-group-label nav-group-label--spaced">System</p>
           <NavigationLink description="Liveness and readiness" to="/system-health">
             System health
           </NavigationLink>
@@ -119,14 +156,15 @@ export function AppShell() {
             <span className="mobile-brand-mark">L</span>
             <span>Latchway</span>
           </div>
-          <Link
+          <div className="topbar__actions"><Link
             className={`health-pill health-pill--${overallState}`}
             to="/system-health"
             aria-label={`${healthLabel}. Open system health.`}
           >
             <span className="health-pill__indicator" aria-hidden="true" />
             <span>{healthLabel}</span>
-          </Link>
+          </Link>{mode === "configured" ? <button className="topbar__logout" disabled={loggingOut} onClick={() => void logout()} type="button">{loggingOut ? "Signing out…" : "Sign out"}</button> : null}</div>
+          {logoutError ? <span className="topbar__error" role="alert">{logoutError}</span> : null}
         </header>
 
         <main className="main-content" id="main-content" tabIndex={-1}>

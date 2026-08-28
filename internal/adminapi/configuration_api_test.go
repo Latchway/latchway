@@ -89,6 +89,28 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	if validation.Code != http.StatusOK || !initialReport.Valid {
 		t.Fatalf("validate initial status=%d report=%+v", validation.Code, initialReport)
 	}
+	authenticated := true
+	simulation := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/config-revisions/"+initial.ID+"/simulate", map[string]any{
+			"feature": "assistant", "platform": "ios", "trust_level": "app_verified",
+			"principal": map[string]any{"authenticated": authenticated, "claims": map[string]any{}},
+			"request":   map[string]any{"streaming": true},
+		}, cookie, csrf, "")
+	if simulation.Code != http.StatusOK || !bytes.Contains(simulation.Body.Bytes(), []byte(`"allowed":true`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"route":"primary"`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"limit_plan":"free"`)) ||
+		bytes.Contains(simulation.Body.Bytes(), []byte("api.example.test")) {
+		t.Fatalf("route simulation status=%d body=%s", simulation.Code, simulation.Body.String())
+	}
+	unauthenticated := false
+	deniedSimulation := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/config-revisions/"+initial.ID+"/simulate", map[string]any{
+			"feature": "assistant", "platform": "ios",
+			"principal": map[string]any{"authenticated": unauthenticated, "claims": map[string]any{}},
+		}, cookie, csrf, "")
+	if deniedSimulation.Code != http.StatusOK || !bytes.Contains(deniedSimulation.Body.Bytes(), []byte(`"allowed":false`)) {
+		t.Fatalf("denied route simulation status=%d body=%s", deniedSimulation.Code, deniedSimulation.Body.String())
+	}
 	activate := performConfigurationJSON(t, handler, http.MethodPost,
 		"/admin/v1/config-revisions/"+initial.ID+"/activate", nil, cookie, csrf, initialETag)
 	if activate.Code != http.StatusOK {
@@ -164,6 +186,14 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	decodeResponse(t, invalidValidation, &invalidReport)
 	if invalidValidation.Code != http.StatusOK || invalidReport.Valid {
 		t.Fatalf("invalid-policy validation status=%d report=%+v", invalidValidation.Code, invalidReport)
+	}
+	invalidSimulation := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/config-revisions/"+invalid.ID+"/simulate", map[string]any{
+			"feature": "assistant", "platform": "ios", "trust_level": "app_verified",
+			"principal": map[string]any{"authenticated": true, "claims": map[string]any{}},
+		}, cookie, csrf, "")
+	if invalidSimulation.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid-policy simulation status=%d body=%s", invalidSimulation.Code, invalidSimulation.Body.String())
 	}
 	invalidActivation := performConfigurationJSON(t, handler, http.MethodPost,
 		"/admin/v1/config-revisions/"+invalid.ID+"/activate", nil, cookie, csrf, invalidCreate.Header().Get("ETag"))
