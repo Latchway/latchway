@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/protocol"
 )
 
 func TestValidatorActivatesTrustedInputAndTotalTokenAlgorithms(t *testing.T) {
@@ -100,7 +101,60 @@ func TestValidatorActivatesTrustedInputAndTotalTokenAlgorithms(t *testing.T) {
 	}
 }
 
-func TestValidatorTrustedTokenBucketAndPerRequestLimitsFailClosedWithoutAccounting(t *testing.T) {
+func TestValidatorActivatesProtocolMatchedStructuredProfiles(t *testing.T) {
+	t.Parallel()
+	for _, protocolID := range []string{
+		protocol.OpenAIChatID,
+		protocol.OpenAIResponsesID,
+		protocol.OpenAIEmbeddingsID,
+		protocol.AnthropicMessagesID,
+	} {
+		protocolID := protocolID
+		t.Run(protocolID, func(t *testing.T) {
+			t.Parallel()
+			validator, err := NewValidator()
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := configurationObject(t)
+			configureInputAccountingFixture(root, "input_tokens", "total_tokens")
+			spec := objectValue(root, "spec")
+			profile := inputAccountingProfileObject(root)
+			profile["protocol"] = protocolID
+			model := objectArray(spec, "models")[0]
+			model["capabilities"] = []any{protocolID}
+			feature := objectArray(spec, "features")[0]
+			feature["protocol"] = protocolID
+			if protocolID == protocol.OpenAIEmbeddingsID {
+				delete(feature, "output")
+			}
+			if protocolID == protocol.AnthropicMessagesID {
+				objectArray(spec, "upstreams")[0]["type"] = "anthropic"
+			}
+			encoded, err := json.Marshal(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if !report.Valid || len(compiled) == 0 {
+				t.Fatalf("structured profile rejected: %+v", report.Issues)
+			}
+			snapshot, err := newActiveSnapshot(
+				"rev_00000000000000000000000000", "env_00000000000000000000000000",
+				encoded, compiled,
+			)
+			if err != nil {
+				t.Fatalf("load structured snapshot: %v", err)
+			}
+			got, ok := snapshot.InputAccountingProfile("chat_profile")
+			if !ok || got.Protocol != protocolID {
+				t.Fatalf("compiled structured profile = %+v ok=%t", got, ok)
+			}
+		})
+	}
+}
+
+func TestValidatorDefersTrustedTokenProofUntilPlanAndRouteSelection(t *testing.T) {
 	t.Parallel()
 	validator, err := NewValidator()
 	if err != nil {
@@ -133,9 +187,8 @@ func TestValidatorTrustedTokenBucketAndPerRequestLimitsFailClosedWithoutAccounti
 				t.Fatal(err)
 			}
 			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-			if report.Valid || compiled != nil ||
-				!hasIssue(report.Issues, "input_accounting_required_for_token_limit") {
-				t.Fatalf("unaccounted %s/%s activated: %+v", test.metric, test.algorithm, report.Issues)
+			if !report.Valid || len(compiled) == 0 {
+				t.Fatalf("mixed-protocol-safe %s/%s configuration rejected: %+v", test.metric, test.algorithm, report.Issues)
 			}
 		})
 	}
@@ -161,8 +214,8 @@ func TestInputAccountingProfileSchemaIsStrictAndBounded(t *testing.T) {
 		{name: "missing method", mutate: func(root map[string]any) {
 			delete(inputAccountingProfileObject(root), "method")
 		}},
-		{name: "wrong protocol", mutate: func(root map[string]any) {
-			inputAccountingProfileObject(root)["protocol"] = "openai_responses"
+		{name: "opaque protocol", mutate: func(root map[string]any) {
+			inputAccountingProfileObject(root)["protocol"] = "opaque_http"
 		}},
 		{name: "wrong method", mutate: func(root map[string]any) {
 			inputAccountingProfileObject(root)["method"] = "heuristic"
@@ -277,9 +330,10 @@ func TestValidatorRejectsImpossibleInputAccountingContexts(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := []struct {
-		name   string
-		code   string
-		mutate func(map[string]any)
+		name                string
+		code                string
+		deferUntilSelection bool
+		mutate              func(map[string]any)
 	}{
 		{name: "framing sum overflow", code: "input_accounting_profile_context_impossible", mutate: func(root map[string]any) {
 			profile := inputAccountingProfileObject(root)
@@ -299,13 +353,13 @@ func TestValidatorRejectsImpossibleInputAccountingContexts(t *testing.T) {
 			profile["maximumFramingTokensPerMessage"] = json.Number("0")
 			profile["maximumContextTokens"] = json.Number("2")
 		}},
-		{name: "route leaves no body byte", code: "input_accounting_route_context_impossible", mutate: func(root map[string]any) {
+		{name: "route leaves no body byte", deferUntilSelection: true, mutate: func(root map[string]any) {
 			inputAccountingProfileObject(root)["maximumContextTokens"] = json.Number("1512")
 		}},
-		{name: "route cannot fit minimal chat body", code: "input_accounting_route_context_impossible", mutate: func(root map[string]any) {
+		{name: "route cannot fit minimal chat body", deferUntilSelection: true, mutate: func(root map[string]any) {
 			inputAccountingProfileObject(root)["maximumContextTokens"] = json.Number("1513")
 		}},
-		{name: "route accounting overflows", code: "input_accounting_route_context_impossible", mutate: func(root map[string]any) {
+		{name: "route accounting overflows", deferUntilSelection: true, mutate: func(root map[string]any) {
 			profile := inputAccountingProfileObject(root)
 			profile["maximumFramingTokensPerRequest"] = json.Number("9223372036854774807")
 			profile["maximumFramingTokensPerMessage"] = json.Number("1")
@@ -322,6 +376,12 @@ func TestValidatorRejectsImpossibleInputAccountingContexts(t *testing.T) {
 				t.Fatal(marshalErr)
 			}
 			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if test.deferUntilSelection {
+				if !report.Valid || len(compiled) == 0 {
+					t.Fatalf("request-specific context was rejected before route selection: %+v", report.Issues)
+				}
+				return
+			}
 			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
 				t.Fatalf("impossible input-accounting context activated: %+v", report.Issues)
 			}
@@ -329,7 +389,7 @@ func TestValidatorRejectsImpossibleInputAccountingContexts(t *testing.T) {
 	}
 }
 
-func TestValidatorAppliesInputAccountingToEveryOverrideReachableRoute(t *testing.T) {
+func TestValidatorAllowsUnrelatedMixedProtocolRoutes(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -364,14 +424,13 @@ func TestValidatorAppliesInputAccountingToEveryOverrideReachableRoute(t *testing
 	legacyRoute["model"] = "legacy"
 	spec["features"] = append(features, legacyFeature)
 
-	unsafe, err := json.Marshal(root)
+	mixed, err := json.Marshal(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, compiled := validator.Validate(unsafe, testEnvironment(), time.Now())
-	if report.Valid || compiled != nil || !hasIssue(report.Issues, "input_accounting_protocol_unsupported") ||
-		!hasIssue(report.Issues, "input_accounting_required_for_token_limit") {
-		t.Fatalf("override-reachable route bypassed trusted input accounting: %+v", report.Issues)
+	report, compiled := validator.Validate(mixed, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("unrelated mixed-protocol route was rejected: %+v", report.Issues)
 	}
 
 	legacyFeature["protocol"] = inputAccountingProtocol
@@ -438,8 +497,9 @@ func TestActiveSnapshotRejectsCorruptInputAccountingState(t *testing.T) {
 		t.Fatalf("input-accounting fixture rejected: %+v", report.Issues)
 	}
 	tests := []struct {
-		name   string
-		mutate func(map[string]any)
+		name     string
+		accepted bool
+		mutate   func(map[string]any)
 	}{
 		{name: "duplicate profile", mutate: func(spec map[string]any) {
 			profiles := objectArray(spec, "inputAccountingProfiles")
@@ -493,13 +553,13 @@ func TestActiveSnapshotRejectsCorruptInputAccountingState(t *testing.T) {
 			profile["maximumFramingTokensPerMessage"] = json.Number("0")
 			profile["maximumContextTokens"] = json.Number("2")
 		}},
-		{name: "route leaves no body byte", mutate: func(spec map[string]any) {
+		{name: "route leaves no body byte", accepted: true, mutate: func(spec map[string]any) {
 			objectArray(spec, "inputAccountingProfiles")[0]["maximumContextTokens"] = json.Number("1512")
 		}},
-		{name: "route cannot fit minimal chat body", mutate: func(spec map[string]any) {
+		{name: "route cannot fit minimal chat body", accepted: true, mutate: func(spec map[string]any) {
 			objectArray(spec, "inputAccountingProfiles")[0]["maximumContextTokens"] = json.Number("1513")
 		}},
-		{name: "route accounting overflow", mutate: func(spec map[string]any) {
+		{name: "route accounting overflow", accepted: true, mutate: func(spec map[string]any) {
 			profile := objectArray(spec, "inputAccountingProfiles")[0]
 			profile["maximumFramingTokensPerRequest"] = json.Number("9223372036854774807")
 			profile["maximumFramingTokensPerMessage"] = json.Number("1")
@@ -514,7 +574,7 @@ func TestActiveSnapshotRejectsCorruptInputAccountingState(t *testing.T) {
 		{name: "null model ref", mutate: func(spec map[string]any) {
 			objectArray(spec, "models")[0]["inputAccountingRef"] = nil
 		}},
-		{name: "removed model ref", mutate: func(spec map[string]any) {
+		{name: "removed model ref", accepted: true, mutate: func(spec map[string]any) {
 			delete(objectArray(spec, "models")[0], "inputAccountingRef")
 		}},
 		{name: "too many profiles", mutate: func(spec map[string]any) {
@@ -541,12 +601,16 @@ func TestActiveSnapshotRejectsCorruptInputAccountingState(t *testing.T) {
 			if marshalErr != nil {
 				t.Fatal(marshalErr)
 			}
-			if _, snapshotErr := newActiveSnapshot(
+			_, snapshotErr := newActiveSnapshot(
 				"rev_00000000000000000000000000",
 				"env_00000000000000000000000000",
 				document,
 				corrupt,
-			); snapshotErr == nil {
+			)
+			if test.accepted && snapshotErr != nil {
+				t.Fatalf("selection-time-safe snapshot was rejected: %v", snapshotErr)
+			}
+			if !test.accepted && snapshotErr == nil {
 				t.Fatal("corrupt input-accounting snapshot was accepted")
 			}
 		})

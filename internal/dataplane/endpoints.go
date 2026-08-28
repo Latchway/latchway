@@ -71,18 +71,15 @@ func newEndpointRegistry(origin url.URL, adapters []protocol.Adapter) (endpointR
 func adapterCapabilitiesValid(protocolID string, capabilities protocol.Capabilities) bool {
 	var expected protocol.Capabilities
 	switch protocolID {
-	case protocol.OpenAIChatID:
+	case protocol.OpenAIResponsesID, protocol.OpenAIChatID, protocol.AnthropicMessagesID:
 		expected = protocol.Capabilities{
 			Streaming: true, ModelRewrite: true, OutputTokenClamp: true,
 			ProviderUsage: true, TrustedInputPreflight: true,
 		}
-	case protocol.OpenAIResponsesID, protocol.AnthropicMessagesID:
-		expected = protocol.Capabilities{
-			Streaming: true, ModelRewrite: true, OutputTokenClamp: true,
-			ProviderUsage: true,
-		}
 	case protocol.OpenAIEmbeddingsID:
-		expected = protocol.Capabilities{ModelRewrite: true, ProviderUsage: true}
+		expected = protocol.Capabilities{
+			ModelRewrite: true, ProviderUsage: true, TrustedInputPreflight: true,
+		}
 	case protocol.OpaqueHTTPID:
 		expected = protocol.Capabilities{Streaming: true}
 	default:

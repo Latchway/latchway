@@ -466,15 +466,7 @@ func prepareInputPreflight(
 	}
 
 	binding := *input
-	var zeroDigest [sha256.Size]byte
-	if binding.Method != UTF8ByteBPEDeclaredFramingV1 ||
-		binding.Protocol != protocol || binding.Protocol != "openai_chat" ||
-		!identifierPattern.MatchString(binding.ProfileID) ||
-		binding.ProfileDigest == zeroDigest || binding.RewrittenBodySHA256 == zeroDigest ||
-		!validPhysicalModel(binding.PhysicalModel) || binding.PhysicalModel != physicalModel ||
-		binding.InputTokenBound <= 0 || binding.OutputTokenBound <= 0 ||
-		binding.InputTokenBound > math.MaxInt64-binding.OutputTokenBound ||
-		binding.TotalTokenBound != binding.InputTokenBound+binding.OutputTokenBound {
+	if !validInputPreflightBinding(&binding, protocol, physicalModel) {
 		return nil, ErrInvalidInput
 	}
 	for _, rule := range rules {
@@ -494,6 +486,39 @@ func prepareInputPreflight(
 		}
 	}
 	return &binding, nil
+}
+
+func validInputPreflightBinding(
+	binding *InputPreflightBinding,
+	requestProtocol, physicalModel string,
+) bool {
+	if binding == nil {
+		return false
+	}
+	var zeroDigest [sha256.Size]byte
+	usesOutput, supportedProtocol := trustedInputProtocolUsesOutput(binding.Protocol)
+	validOutput := binding.OutputTokenBound == 0
+	if usesOutput {
+		validOutput = binding.OutputTokenBound > 0
+	}
+	return supportedProtocol && binding.Method == UTF8ByteBPEDeclaredFramingV1 &&
+		binding.Protocol == requestProtocol && identifierPattern.MatchString(binding.ProfileID) &&
+		binding.ProfileDigest != zeroDigest && binding.RewrittenBodySHA256 != zeroDigest &&
+		validPhysicalModel(binding.PhysicalModel) && binding.PhysicalModel == physicalModel &&
+		binding.InputTokenBound > 0 && validOutput &&
+		binding.InputTokenBound <= math.MaxInt64-binding.OutputTokenBound &&
+		binding.TotalTokenBound == binding.InputTokenBound+binding.OutputTokenBound
+}
+
+func trustedInputProtocolUsesOutput(protocol string) (usesOutput bool, supported bool) {
+	switch protocol {
+	case "openai_responses", "openai_chat", "anthropic_messages":
+		return true, true
+	case "openai_embeddings":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // prepareRules is the single canonical validation and identity path for both
@@ -1106,15 +1131,7 @@ func (reservation Reservation) validate() error {
 	}
 	if reservation.inputPreflight != nil {
 		binding := reservation.inputPreflight
-		var zero [sha256.Size]byte
-		if binding.Method != UTF8ByteBPEDeclaredFramingV1 ||
-			binding.Protocol != "openai_chat" || binding.Protocol != reservation.protocol ||
-			!identifierPattern.MatchString(binding.ProfileID) ||
-			binding.ProfileDigest == zero || binding.RewrittenBodySHA256 == zero ||
-			binding.PhysicalModel != reservation.physicalModel ||
-			binding.InputTokenBound <= 0 || binding.OutputTokenBound <= 0 ||
-			binding.InputTokenBound > math.MaxInt64-binding.OutputTokenBound ||
-			binding.TotalTokenBound != binding.InputTokenBound+binding.OutputTokenBound {
+		if !validInputPreflightBinding(binding, reservation.protocol, reservation.physicalModel) {
 			return ErrInvalidInput
 		}
 	}

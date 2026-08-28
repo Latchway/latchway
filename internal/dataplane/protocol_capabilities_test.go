@@ -107,8 +107,23 @@ func TestValidateFeatureLimitPlanBindsMetricsToProtocolCapabilities(t *testing.T
 			limits:  []configuration.Limit{streams},
 		},
 		{
-			name:    "Responses input quota rejected",
+			name: "Responses input quota", wantOK: true,
 			feature: configuration.Feature{ID: "feature", Protocol: protocol.OpenAIResponsesID, Output: outputPolicy},
+			limits:  []configuration.Limit{input},
+		},
+		{
+			name: "Embeddings input quota", wantOK: true, wantZero: true,
+			feature: configuration.Feature{ID: "feature", Protocol: protocol.OpenAIEmbeddingsID},
+			limits:  []configuration.Limit{input},
+		},
+		{
+			name: "Anthropic input quota", wantOK: true,
+			feature: configuration.Feature{ID: "feature", Protocol: protocol.AnthropicMessagesID, Output: outputPolicy},
+			limits:  []configuration.Limit{input},
+		},
+		{
+			name:    "Opaque input quota rejected",
+			feature: configuration.Feature{ID: "feature", Protocol: protocol.OpaqueHTTPID},
 			limits:  []configuration.Limit{input},
 		},
 		{

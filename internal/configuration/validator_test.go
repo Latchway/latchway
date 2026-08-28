@@ -518,7 +518,7 @@ func TestValidatorActivatesBoundedHardCostCalendarWithZeroInputPricing(t *testin
 	}
 }
 
-func TestValidatorIncludesOverrideReachablePlansInHardCostPricingGate(t *testing.T) {
+func TestValidatorDefersInputPricedProofUntilSelectedHardCostRoute(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -574,9 +574,8 @@ func TestValidatorIncludesOverrideReachablePlansInHardCostPricingGate(t *testing
 		t.Fatal(err)
 	}
 	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-	if report.Valid || compiled != nil ||
-		!hasIssue(report.Issues, "input_accounting_required_for_cost_limit") {
-		t.Fatalf("override-reachable cost plan bypassed conservative pricing: %+v", report.Issues)
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("selection-time input-priced proof was rejected during activation: %+v", report.Issues)
 	}
 
 	objectArray(objectArray(spec, "pricingCatalogs")[0], "entries")[1]["inputNanoUsdPerMillion"] = json.Number("0")
@@ -590,7 +589,7 @@ func TestValidatorIncludesOverrideReachablePlansInHardCostPricingGate(t *testing
 	}
 }
 
-func TestValidatorRejectsHardCostWithoutConservativeConfiguredInputPrice(t *testing.T) {
+func TestValidatorRequiresPricingButDefersInputProofForHardCost(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -602,9 +601,10 @@ func TestValidatorRejectsHardCostWithoutConservativeConfiguredInputPrice(t *test
 		pricingRef string
 		inputRate  json.Number
 		code       string
+		wantValid  bool
 	}{
 		{name: "missing pricing", code: "pricing_required_for_cost_limit"},
-		{name: "input priced", pricingRef: "standard", inputRate: json.Number("1"), code: "input_accounting_required_for_cost_limit"},
+		{name: "input priced", pricingRef: "standard", inputRate: json.Number("1"), wantValid: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -629,6 +629,12 @@ func TestValidatorRejectsHardCostWithoutConservativeConfiguredInputPrice(t *test
 				t.Fatal(marshalErr)
 			}
 			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if test.wantValid {
+				if !report.Valid || len(compiled) == 0 {
+					t.Fatalf("selection-time input proof was rejected: report=%+v", report)
+				}
+				return
+			}
 			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
 				t.Fatalf("unsafe hard cost configuration activated: report=%+v compiled=%q", report, compiled)
 			}

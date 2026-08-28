@@ -5,6 +5,7 @@ package openairesponses
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,7 @@ type Adapter struct {
 }
 
 var _ protocol.Adapter = Adapter{}
+var _ protocol.InputPreflighter = Adapter{}
 
 type responseMode uint8
 
@@ -70,7 +72,7 @@ func (a Adapter) Capabilities() protocol.Capabilities {
 		OutputTokenClamp:      true,
 		ProviderUsage:         true,
 		ExactInputPreflight:   false,
-		TrustedInputPreflight: false,
+		TrustedInputPreflight: true,
 	}
 }
 
@@ -136,8 +138,8 @@ func inspectRequestObject(object map[string]any, raw []byte) (protocol.RequestMe
 		ClientModel:          model,
 		Streaming:            streaming,
 		RequestedOutputLimit: requested,
-		// This remains an untrusted scheduling hint. The Responses adapter
-		// intentionally advertises no trusted input-token preflight.
+		// This remains an untrusted scheduling hint. Only PreflightInput after
+		// route selection and rewriting can produce a quota-safe bound.
 		EstimatedInputTokens: (int64(len(raw)) + 2) / 3,
 		RequestBytes:         int64(len(raw)),
 	}, nil
@@ -199,6 +201,202 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	}
 	*request = *request.WithContext(context.WithValue(request.Context(), responseModeContextKey{}, mode))
 	return effective, nil
+}
+
+// PreflightInput proves a conservative bound over the exact rewritten
+// Responses body. The proof deliberately accepts only local text input and
+// text message items. Files, media, tools, provider-hosted state, schemas, and
+// every other richer shape remain usable when trusted input accounting is not
+// selected, but fail closed here.
+func (a Adapter) PreflightInput(
+	ctx context.Context,
+	request *http.Request,
+	profile protocol.TrustedInputProfile,
+) (protocol.TrustedInputPreflight, error) {
+	if ctx == nil {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	if err := validateTrustedInputProfile(profile); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	object, raw, err := a.readRequest(ctx, request)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	itemCount, outputBound, err := validateTrustedInputRequest(object, profile)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	requestBytes, ok := checkedLength(len(raw))
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request size overflows int64")
+	}
+	itemFraming, ok := checkedMultiply(itemCount, profile.MaximumFramingTokensPerMessage)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input item framing overflows int64")
+	}
+	inputBound, ok := checkedAdd(requestBytes, profile.MaximumFramingTokensPerRequest)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request framing overflows int64")
+	}
+	inputBound, ok = checkedAdd(inputBound, itemFraming)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input bound overflows int64")
+	}
+	totalBound, ok := checkedAdd(inputBound, outputBound)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted total-token bound overflows int64")
+	}
+	if totalBound > profile.MaximumContextTokens {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request and output maximum exceed the physical model context window")
+	}
+
+	installRequestBody(request, raw)
+	return protocol.TrustedInputPreflight{
+		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
+		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
+		RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: requestBytes,
+		MessageCount: itemCount, InputTokenBound: inputBound,
+		OutputTokenBound: outputBound, TotalTokenBound: totalBound,
+	}, nil
+}
+
+func validateTrustedInputProfile(profile protocol.TrustedInputProfile) error {
+	if !safeIdentifierValue(profile.ID, 63) {
+		return errors.New("valid trusted input profile ID is required")
+	}
+	if profile.Protocol != ID {
+		return errors.New("trusted input profile protocol does not match OpenAI Responses")
+	}
+	if profile.Method != protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1 {
+		return errors.New("trusted input profile method is unsupported")
+	}
+	if !safeIdentifierValue(profile.PhysicalModel, 256) {
+		return errors.New("valid trusted input profile physical model is required")
+	}
+	if profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
+		profile.MaximumContextTokens <= 0 {
+		return errors.New("valid trusted input profile token bounds are required")
+	}
+	return nil
+}
+
+func validateTrustedInputRequest(
+	object map[string]any,
+	profile protocol.TrustedInputProfile,
+) (int64, int64, error) {
+	if !hasOnlyMembers(
+		object,
+		"model", "input", "instructions", "max_output_tokens", "stream", "stream_options", "store",
+	) {
+		return 0, 0, requestMalformed("trusted input preflight supports only bounded text request fields")
+	}
+	model, ok := object["model"].(string)
+	if !ok || model != profile.PhysicalModel {
+		return 0, 0, errors.New("trusted input profile physical model does not match rewritten request")
+	}
+	if store, ok := object["store"].(bool); !ok || store {
+		return 0, 0, errors.New("rewritten request is missing store=false")
+	}
+	if _, err := optionalBool(object, "stream"); err != nil {
+		return 0, 0, err
+	}
+	streaming, _ := optionalBool(object, "stream")
+	if err := validateStreamOptions(object, streaming); err != nil {
+		return 0, 0, err
+	}
+	if err := validateInstructions(object); err != nil {
+		return 0, 0, err
+	}
+	itemCount, err := trustedTextInputItemCount(object["input"])
+	if err != nil {
+		return 0, 0, err
+	}
+	outputBound, err := requestedOutputLimit(object)
+	if err != nil {
+		return 0, 0, err
+	}
+	if outputBound <= 0 {
+		return 0, 0, errors.New("rewritten request is missing its output-token maximum")
+	}
+	return itemCount, outputBound, nil
+}
+
+func trustedTextInputItemCount(value any) (int64, error) {
+	switch typed := value.(type) {
+	case string:
+		if typed == "" || !utf8.ValidString(typed) || strings.ContainsRune(typed, '\x00') {
+			return 0, requestMalformed("trusted input must be non-empty local text")
+		}
+		return 1, nil
+	case []any:
+		if len(typed) == 0 || len(typed) > maximumInputItems {
+			return 0, requestMalformed("trusted input items must be a non-empty bounded array")
+		}
+		for _, value := range typed {
+			item, ok := value.(map[string]any)
+			if !ok || !hasOnlyMembers(item, "type", "role", "content") {
+				return 0, requestMalformed("trusted input supports only text message items")
+			}
+			if itemType, present := item["type"]; present && itemType != "message" {
+				return 0, requestMalformed("trusted input supports only text message items")
+			}
+			role, ok := item["role"].(string)
+			if !ok || !stringIn(role, "developer", "system", "user", "assistant") ||
+				!trustedMessageContent(item["content"], role) {
+				return 0, requestMalformed("trusted input supports only text message items")
+			}
+		}
+		return int64(len(typed)), nil
+	default:
+		return 0, requestMalformed("trusted input supports only local text or text message items")
+	}
+}
+
+func trustedMessageContent(value any, role string) bool {
+	switch typed := value.(type) {
+	case string:
+		return utf8.ValidString(typed) && !strings.ContainsRune(typed, '\x00')
+	case []any:
+		if len(typed) == 0 || len(typed) > maximumContentParts {
+			return false
+		}
+		for _, value := range typed {
+			part, ok := value.(map[string]any)
+			partType, typeOK := part["type"].(string)
+			text, textOK := part["text"].(string)
+			if !ok || !hasOnlyMembers(part, "type", "text") || !typeOK || !textOK ||
+				!utf8.ValidString(text) || strings.ContainsRune(text, '\x00') ||
+				(partType != "input_text" && (partType != "output_text" || role != "assistant")) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func checkedLength(value int) (int64, bool) {
+	converted := int64(value)
+	return converted, converted >= 0 && int(converted) == value
+}
+
+func checkedMultiply(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || (left != 0 && right > math.MaxInt64/left) {
+		return 0, false
+	}
+	return left * right, true
+}
+
+func checkedAdd(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || left > math.MaxInt64-right {
+		return 0, false
+	}
+	return left + right, true
 }
 
 func (a Adapter) ObserveResponse(ctx context.Context, response *http.Response) (protocol.ResponseObserver, error) {

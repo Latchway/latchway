@@ -733,7 +733,9 @@
       ],
       "properties": {
         "id": { "$ref": "#/$defs/Identifier" },
-        "protocol": { "const": "openai_chat" },
+        "protocol": {
+          "enum": ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages"]
+        },
         "method": { "const": "utf8_byte_bpe_declared_framing_v1" },
         "physicalModel": { "type": "string", "minLength": 1, "maxLength": 256 },
         "maximumFramingTokensPerRequest": {

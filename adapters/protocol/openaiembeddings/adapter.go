@@ -5,6 +5,7 @@ package openaiembeddings
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,7 @@ type Adapter struct {
 }
 
 var _ protocol.Adapter = Adapter{}
+var _ protocol.InputPreflighter = Adapter{}
 
 type appliedContextKey struct{}
 
@@ -62,7 +64,7 @@ func (a Adapter) Capabilities() protocol.Capabilities {
 		OutputTokenClamp:      false,
 		ProviderUsage:         true,
 		ExactInputPreflight:   false,
-		TrustedInputPreflight: false,
+		TrustedInputPreflight: true,
 	}
 }
 
@@ -150,6 +152,128 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	// Embeddings have no generated-token output maximum. The zero is
 	// intentional and is paired with OutputTokenClamp=false.
 	return 0, nil
+}
+
+// PreflightInput proves a conservative bound for text-only Embeddings input.
+// Caller-supplied token IDs and nested token batches deliberately fail closed:
+// this proof method is tied to the exact physical model's byte-level BPE and
+// does not treat client tokenization as authoritative.
+func (a Adapter) PreflightInput(
+	ctx context.Context,
+	request *http.Request,
+	profile protocol.TrustedInputProfile,
+) (protocol.TrustedInputPreflight, error) {
+	if ctx == nil {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	if err := validateTrustedInputProfile(profile); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	object, raw, err := a.readRequest(ctx, request)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	itemCount, err := validateTrustedInputRequest(object, profile)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	requestBytes, ok := checkedLength(len(raw))
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request size overflows int64")
+	}
+	itemFraming, ok := checkedMultiply(itemCount, profile.MaximumFramingTokensPerMessage)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input item framing overflows int64")
+	}
+	inputBound, ok := checkedAdd(requestBytes, profile.MaximumFramingTokensPerRequest)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request framing overflows int64")
+	}
+	inputBound, ok = checkedAdd(inputBound, itemFraming)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input bound overflows int64")
+	}
+	if inputBound > profile.MaximumContextTokens {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request exceeds the physical model context window")
+	}
+
+	installRequestBody(request, raw)
+	return protocol.TrustedInputPreflight{
+		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
+		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
+		RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: requestBytes,
+		MessageCount: itemCount, InputTokenBound: inputBound,
+		OutputTokenBound: 0, TotalTokenBound: inputBound,
+	}, nil
+}
+
+func validateTrustedInputProfile(profile protocol.TrustedInputProfile) error {
+	if !safeIdentifierValue(profile.ID, 63) {
+		return errors.New("valid trusted input profile ID is required")
+	}
+	if profile.Protocol != ID {
+		return errors.New("trusted input profile protocol does not match OpenAI Embeddings")
+	}
+	if profile.Method != protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1 {
+		return errors.New("trusted input profile method is unsupported")
+	}
+	if !safeIdentifierValue(profile.PhysicalModel, 256) {
+		return errors.New("valid trusted input profile physical model is required")
+	}
+	if profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
+		profile.MaximumContextTokens <= 0 {
+		return errors.New("valid trusted input profile token bounds are required")
+	}
+	return nil
+}
+
+func validateTrustedInputRequest(object map[string]any, profile protocol.TrustedInputProfile) (int64, error) {
+	model, ok := object["model"].(string)
+	if !ok || model != profile.PhysicalModel {
+		return 0, errors.New("trusted input profile physical model does not match rewritten request")
+	}
+	switch typed := object["input"].(type) {
+	case string:
+		if !validTextInput(typed) {
+			return 0, requestMalformed("trusted input must be non-empty local text")
+		}
+		return 1, nil
+	case []any:
+		if len(typed) == 0 || len(typed) > maximumBatchInputs {
+			return 0, requestMalformed("trusted input text batches must be non-empty and bounded")
+		}
+		for _, value := range typed {
+			text, ok := value.(string)
+			if !ok || !validTextInput(text) {
+				return 0, requestMalformed("trusted input supports only text batches")
+			}
+		}
+		return int64(len(typed)), nil
+	default:
+		return 0, requestMalformed("trusted input supports only text or text batches")
+	}
+}
+
+func checkedLength(value int) (int64, bool) {
+	converted := int64(value)
+	return converted, converted >= 0 && int(converted) == value
+}
+
+func checkedMultiply(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || (left != 0 && right > math.MaxInt64/left) {
+		return 0, false
+	}
+	return left * right, true
+}
+
+func checkedAdd(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || left > math.MaxInt64-right {
+		return 0, false
+	}
+	return left + right, true
 }
 
 func (a Adapter) ObserveResponse(ctx context.Context, response *http.Response) (protocol.ResponseObserver, error) {

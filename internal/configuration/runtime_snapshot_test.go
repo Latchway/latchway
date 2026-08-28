@@ -100,11 +100,13 @@ func TestActiveSnapshotRejectsCorruptHardCostPricingGate(t *testing.T) {
 		t.Fatalf("valid hard cost configuration rejected: %+v", report.Issues)
 	}
 	tests := []struct {
-		name   string
-		mutate func(map[string]any)
+		name     string
+		accepted bool
+		mutate   func(map[string]any)
 	}{
 		{
-			name: "input price becomes nonzero",
+			name:     "input price becomes nonzero",
+			accepted: true,
 			mutate: func(spec map[string]any) {
 				objectArray(objectArray(spec, "pricingCatalogs")[0], "entries")[0]["inputNanoUsdPerMillion"] = json.Number("1")
 			},
@@ -128,16 +130,20 @@ func TestActiveSnapshotRejectsCorruptHardCostPricingGate(t *testing.T) {
 			if marshalErr != nil {
 				t.Fatal(marshalErr)
 			}
-			if _, snapshotErr := newActiveSnapshot(
+			_, snapshotErr := newActiveSnapshot(
 				"rev_00000000000000000000000000", "env_00000000000000000000000000", document, corrupt,
-			); snapshotErr == nil {
+			)
+			if test.accepted && snapshotErr != nil {
+				t.Fatalf("selection-time input pricing was rejected: %v", snapshotErr)
+			}
+			if !test.accepted && snapshotErr == nil {
 				t.Fatal("corrupt hard cost pricing gate was accepted")
 			}
 		})
 	}
 }
 
-func TestActiveSnapshotIncludesOverrideReachablePlansInHardCostPricingGate(t *testing.T) {
+func TestActiveSnapshotDefersInputPricedProofUntilSelectedHardCostRoute(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -206,8 +212,8 @@ func TestActiveSnapshotIncludesOverrideReachablePlansInHardCostPricingGate(t *te
 	}
 	if _, err := newActiveSnapshot(
 		"rev_00000000000000000000000000", "env_00000000000000000000000000", document, corrupt,
-	); err == nil {
-		t.Fatal("override-reachable hard-cost plan bypassed runtime pricing gate")
+	); err != nil {
+		t.Fatalf("selection-time input-priced proof was rejected during activation: %v", err)
 	}
 }
 
@@ -744,13 +750,6 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 				delete(limit, "window")
 				delete(limit, "maximum")
 				limit["perRequestMaximum"] = json.Number("100")
-			},
-		},
-		{
-			name: "unsupported limit metric",
-			mutate: func(spec map[string]any) {
-				limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
-				limit["metric"] = "input_tokens"
 			},
 		},
 		{

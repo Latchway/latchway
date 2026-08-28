@@ -3,6 +3,7 @@ package openaiembeddings
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -55,9 +56,69 @@ func TestCapabilitiesAreTruthful(t *testing.T) {
 	}
 	want := protocol.Capabilities{
 		Streaming: false, ModelRewrite: true, OutputTokenClamp: false, ProviderUsage: true,
+		TrustedInputPreflight: true,
 	}
 	if got := (Adapter{}).Capabilities(); got != want {
 		t.Fatalf("Capabilities() = %+v, want %+v", got, want)
+	}
+}
+
+func TestTrustedInputPreflightBindsTextBatchWithZeroOutput(t *testing.T) {
+	request := newRequest(t, `{"model":"client","input":["hello","你好 🌉"],"encoding_format":"float","dimensions":128}`)
+	if output, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+		PhysicalModel: "embedding-model",
+	}); err != nil || output != 0 {
+		t.Fatalf("ApplyFeature() output=%d error=%v", output, err)
+	}
+	rewritten := readBodyFactory(t, request)
+	profile := protocol.TrustedInputProfile{
+		ID: "embeddings_profile", Protocol: ID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "embedding-model", MaximumFramingTokensPerRequest: 5,
+		MaximumFramingTokensPerMessage: 2, MaximumContextTokens: 1_000_000,
+	}
+	preflight, err := (Adapter{}).PreflightInput(context.Background(), request, profile)
+	if err != nil {
+		t.Fatalf("PreflightInput() error = %v", err)
+	}
+	wantInput := int64(len(rewritten)) + 5 + 2*2
+	if preflight.RewrittenBodySHA256 != sha256.Sum256(rewritten) || preflight.MessageCount != 2 ||
+		preflight.InputTokenBound != wantInput || preflight.OutputTokenBound != 0 ||
+		preflight.TotalTokenBound != wantInput || preflight.ProfileDigest != profile.Digest() {
+		t.Fatalf("trusted Embeddings proof = %+v", preflight)
+	}
+	if got := readBody(t, request.Body); !bytes.Equal(got, rewritten) {
+		t.Fatal("preflight did not preserve the exact rewritten body")
+	}
+}
+
+func TestTrustedInputPreflightRejectsCallerTokenizationAndContextOverflow(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"client","input":[0,1,2]}`,
+		`{"model":"client","input":[[0,1],[2,3]]}`,
+	} {
+		request := newRequest(t, body)
+		if _, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{PhysicalModel: "server"}); err != nil {
+			t.Fatalf("token input must remain available without trusted accounting: %v", err)
+		}
+		profile := protocol.TrustedInputProfile{
+			ID: "embeddings_profile", Protocol: ID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "server", MaximumContextTokens: 1_000_000,
+		}
+		if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+			t.Fatalf("token input result=%+v error=%v", result, err)
+		}
+	}
+
+	request := appliedRequest(t, Adapter{})
+	profile := protocol.TrustedInputProfile{
+		ID: "embeddings_profile", Protocol: ID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "server", MaximumContextTokens: 1,
+	}
+	if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); !protocol.IsCode(err, "request_invalid") || result != (protocol.TrustedInputPreflight{}) {
+		t.Fatalf("context overflow result=%+v error=%v", result, err)
 	}
 }
 

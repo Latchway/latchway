@@ -53,9 +53,10 @@ type RequestMetadata struct {
 }
 
 // TrustedInputProfile is an operator-owned accounting declaration for one
-// exact provider protocol and physical model. Framing maxima are non-negative
-// token counts; MaximumContextTokens is a positive, model-specific context
-// window. Adapters validate the declaration before using it.
+// exact structured provider protocol and physical model. Framing maxima are
+// non-negative token counts; the per-message maximum applies to each protocol
+// framing unit (message or input item). MaximumContextTokens is a positive,
+// model-specific context window. Adapters validate the declaration before use.
 type TrustedInputProfile struct {
 	ID                             string
 	Protocol                       string
@@ -104,10 +105,14 @@ type TrustedInputPreflight struct {
 	PhysicalModel       string
 	RewrittenBodySHA256 [sha256.Size]byte
 	RequestBytes        int64
-	MessageCount        int64
-	InputTokenBound     int64
-	OutputTokenBound    int64
-	TotalTokenBound     int64
+	// MessageCount is the bounded number of protocol framing units: Chat and
+	// Anthropic messages, Responses input items, or Embeddings text inputs.
+	// The historical field name is retained in the internal proof contract so
+	// existing durable fingerprints remain stable.
+	MessageCount     int64
+	InputTokenBound  int64
+	OutputTokenBound int64
+	TotalTokenBound  int64
 }
 
 // FeatureDecision contains the server-owned physical request choices.

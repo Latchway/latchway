@@ -2088,7 +2088,10 @@ func TestValidateTrustedInputPreflightBindsDeclaredAccountingFields(t *testing.T
 		PhysicalModel: "physical-model", MaximumFramingTokensPerRequest: 8,
 		MaximumFramingTokensPerMessage: 4, MaximumContextTokens: 4096,
 	}
-	decision := policy.Decision{Model: configuration.Model{UpstreamModel: profile.PhysicalModel}}
+	decision := policy.Decision{
+		Feature: configuration.Feature{Protocol: profile.Protocol},
+		Model:   configuration.Model{UpstreamModel: profile.PhysicalModel},
+	}
 	preflight := protocol.TrustedInputPreflight{
 		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
 		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
@@ -2349,29 +2352,72 @@ func TestHandlerRejectsMissingConfiguredPricingBeforeQuotaOrDispatch(t *testing.
 }
 
 func TestHandlerRejectsMissingTrustedInputProfileBeforeQuotaSecretOrTarget(t *testing.T) {
-	fixture := newHandlerFixture(t)
-	fixture.decision.LimitPlan.Limits = []configuration.Limit{
+	tests := []struct {
+		name         string
+		protocolID   string
+		path         string
+		body         string
+		upstreamType string
+		generative   bool
+	}{
 		{
-			Metric: quota.InputTokensMetric, Algorithm: quota.CalendarAlgorithm,
-			Scope: []string{"feature", "user"}, Window: "1d", Maximum: 1000, Hard: true,
+			name: "OpenAI Chat", protocolID: protocol.OpenAIChatID,
+			path: "/v1/chat/completions", body: `{"model":"client","messages":[{"role":"user","content":"hello"}]}`,
+			upstreamType: "openai_compatible", generative: true,
 		},
 		{
-			Metric: quota.TotalTokensMetric, Algorithm: quota.CalendarAlgorithm,
-			Scope: []string{"feature", "user"}, Window: "1d", Maximum: 2000, Hard: true,
+			name: "OpenAI Responses", protocolID: protocol.OpenAIResponsesID,
+			path: "/v1/responses", body: `{"model":"client","input":"hello"}`,
+			upstreamType: "openai_compatible", generative: true,
+		},
+		{
+			name: "OpenAI Embeddings", protocolID: protocol.OpenAIEmbeddingsID,
+			path: "/v1/embeddings", body: `{"model":"client","input":"hello"}`,
+			upstreamType: "openai_compatible",
+		},
+		{
+			name: "Anthropic Messages", protocolID: protocol.AnthropicMessagesID,
+			path: "/v1/messages", body: `{"model":"client","messages":[{"role":"user","content":"hello"}]}`,
+			upstreamType: "anthropic", generative: true,
 		},
 	}
-	handler := fixture.handler(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			fixture.decision.Feature.Protocol = test.protocolID
+			fixture.decision.Model.Capabilities = []string{test.protocolID}
+			fixture.decision.Upstream.Type = test.upstreamType
+			if !test.generative {
+				fixture.decision.Feature.Output = nil
+			}
+			fixture.decision.LimitPlan.Limits = []configuration.Limit{
+				{
+					Metric: quota.InputTokensMetric, Algorithm: quota.CalendarAlgorithm,
+					Scope: []string{"feature", "user"}, Window: "1d", Maximum: 1000, Hard: true,
+				},
+				{
+					Metric: quota.TotalTokensMetric, Algorithm: quota.CalendarAlgorithm,
+					Scope: []string{"feature", "user"}, Window: "1d", Maximum: 2000, Hard: true,
+				},
+			}
+			handler := fixture.handler(t)
+			request := fixture.request(t)
+			request.URL.Path = test.path
+			request.Body = io.NopCloser(strings.NewReader(test.body))
+			request.ContentLength = int64(len(test.body))
 
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, fixture.request(t))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
 
-	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
-	if fixture.quotas.reserveCalls != 0 || fixture.quotas.beginCalls != 0 ||
-		fixture.secret.calls != 0 || fixture.targets.calls != 0 ||
-		fixture.target.prepareCalls != 0 || fixture.target.dispatchCalls != 0 {
-		t.Fatalf("missing trusted profile reached quota/secret/target/dispatch: %d/%d/%d/%d/%d/%d",
-			fixture.quotas.reserveCalls, fixture.quotas.beginCalls, fixture.secret.calls,
-			fixture.targets.calls, fixture.target.prepareCalls, fixture.target.dispatchCalls)
+			assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+			if fixture.quotas.reserveCalls != 0 || fixture.quotas.beginCalls != 0 ||
+				fixture.secret.calls != 0 || fixture.targets.calls != 0 ||
+				fixture.target.prepareCalls != 0 || fixture.target.dispatchCalls != 0 {
+				t.Fatalf("missing trusted profile reached quota/secret/target/dispatch: %d/%d/%d/%d/%d/%d",
+					fixture.quotas.reserveCalls, fixture.quotas.beginCalls, fixture.secret.calls,
+					fixture.targets.calls, fixture.target.prepareCalls, fixture.target.dispatchCalls)
+			}
+		})
 	}
 }
 

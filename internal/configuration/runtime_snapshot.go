@@ -38,8 +38,10 @@ var runtimeRetryConditions = []string{
 
 const (
 	maximumInputAccountingProfiles = 256
-	inputAccountingProtocol        = "openai_chat"
-	inputAccountingMethod          = "utf8_byte_bpe_declared_framing_v1"
+	// inputAccountingProtocol remains the original Chat protocol alias for
+	// fixtures compiled before structured-protocol accounting was expanded.
+	inputAccountingProtocol = "openai_chat"
+	inputAccountingMethod   = "utf8_byte_bpe_declared_framing_v1"
 )
 
 type compiledUpstream struct {
@@ -467,22 +469,16 @@ func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 	return nil
 }
 
-// runtimeQuotaAccountingValid independently rechecks the activation boundary
-// on persisted compiled snapshots. A server-owned user override may select any
-// configured plan for any feature, so input/total-token proof and hard-cost
-// pricing reachability are global rather than narrowed by a constant CEL
-// expression.
+// runtimeQuotaAccountingValid independently rechecks durable hard-cost
+// prerequisites on persisted snapshots. Trusted input proof is deliberately
+// enforced later, against the selected plan and selected route, so an
+// unrelated rich or opaque feature does not prevent mixed-protocol activation.
 func (snapshot ActiveSnapshot) runtimeQuotaAccountingValid() bool {
-	requiresTokenProof := runtimePlansRequireInputAccounting(snapshot.limitPlans)
 	requiresCostPricing := runtimePlansRequireCostPricing(snapshot.limitPlans)
 	for _, feature := range snapshot.features {
 		for _, route := range feature.Routes {
 			model, ok := snapshot.models[route.ModelID]
 			if !ok {
-				return false
-			}
-			proofValid := snapshot.runtimeRouteInputAccountingCompatible(feature, model)
-			if requiresTokenProof && !proofValid {
 				return false
 			}
 			if requiresCostPricing {
@@ -493,25 +489,13 @@ func (snapshot ActiveSnapshot) runtimeQuotaAccountingValid() bool {
 				if !ok {
 					return false
 				}
-				entry, ok := catalog.Entry(model.ID)
-				if !ok || (entry.InputNanoUSDPerMillion != 0 && !proofValid) {
+				if _, ok := catalog.Entry(model.ID); !ok {
 					return false
 				}
 			}
 		}
 	}
 	return true
-}
-
-func runtimePlansRequireInputAccounting(plans map[string]LimitPlan) bool {
-	for _, plan := range plans {
-		for _, limit := range plan.Limits {
-			if limit.Metric == "input_tokens" || limit.Metric == "total_tokens" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func runtimePlansRequireCostPricing(plans map[string]LimitPlan) bool {
@@ -527,7 +511,7 @@ func runtimePlansRequireCostPricing(plans map[string]LimitPlan) bool {
 
 func runtimeInputAccountingProfile(raw compiledInputAccountingProfile) (InputAccountingProfile, error) {
 	profile := raw.InputAccountingProfile
-	if !runtimeIdentifierPattern.MatchString(profile.ID) || profile.Protocol != inputAccountingProtocol ||
+	if !runtimeIdentifierPattern.MatchString(profile.ID) || !inputAccountingProtocolSupported(profile.Protocol) ||
 		profile.Method != inputAccountingMethod || !runtimeInputAccountingPhysicalModel(profile.PhysicalModel) ||
 		profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
 		profile.MaximumContextTokens <= 0 || !inputAccountingProfileContextPossible(profile) {
@@ -539,19 +523,26 @@ func runtimeInputAccountingProfile(raw compiledInputAccountingProfile) (InputAcc
 // inputAccountingProfileContextPossible proves that at least the smallest
 // legal request for this method can fit. Counting only one placeholder body
 // byte would allow profiles that activate successfully but can never preflight
-// even an empty first message.
+// the protocol's smallest legal first message or item.
 func inputAccountingProfileContextPossible(profile InputAccountingProfile) bool {
-	return inputAccountingContextPossible(profile, 1)
+	outputTokens := int64(1)
+	if profile.Protocol == protocol.OpenAIEmbeddingsID {
+		outputTokens = 0
+	}
+	return inputAccountingContextPossible(profile, outputTokens)
 }
 
 // inputAccountingRouteContextPossible proves that the feature's largest
-// server-permitted output fits alongside an exact minimal rewritten Chat body
-// and the mandatory request and first-message framing.
+// server-permitted output fits alongside the protocol's exact minimal
+// rewritten body and mandatory request plus first message/item framing.
 func inputAccountingRouteContextPossible(
 	profile InputAccountingProfile,
 	absoluteMaximumOutputTokens int64,
 ) bool {
-	if absoluteMaximumOutputTokens <= 0 {
+	if protocolRequiresOutputPolicy(profile.Protocol) && absoluteMaximumOutputTokens <= 0 {
+		return false
+	}
+	if !protocolRequiresOutputPolicy(profile.Protocol) && absoluteMaximumOutputTokens != 0 {
 		return false
 	}
 	return inputAccountingContextPossible(profile, absoluteMaximumOutputTokens)
@@ -561,14 +552,11 @@ func inputAccountingContextPossible(
 	profile InputAccountingProfile,
 	outputTokens int64,
 ) bool {
-	minimalBody, err := json.Marshal(map[string]any{
-		"max_tokens": outputTokens,
-		"messages": []any{map[string]any{
-			"content": "",
-			"role":    "user",
-		}},
-		"model": profile.PhysicalModel,
-	})
+	minimalRequest, ok := minimumInputAccountingRequest(profile, outputTokens)
+	if !ok {
+		return false
+	}
+	minimalBody, err := json.Marshal(minimalRequest)
 	if err != nil {
 		return false
 	}
@@ -579,6 +567,32 @@ func inputAccountingContextPossible(
 		outputTokens,
 	)
 	return ok && required <= profile.MaximumContextTokens
+}
+
+func minimumInputAccountingRequest(profile InputAccountingProfile, outputTokens int64) (map[string]any, bool) {
+	switch profile.Protocol {
+	case protocol.OpenAIChatID:
+		return map[string]any{
+			"max_tokens": outputTokens,
+			"messages":   []any{map[string]any{"content": "", "role": "user"}},
+			"model":      profile.PhysicalModel,
+		}, outputTokens > 0
+	case protocol.OpenAIResponsesID:
+		return map[string]any{
+			"input": "x", "max_output_tokens": outputTokens,
+			"model": profile.PhysicalModel, "store": false,
+		}, outputTokens > 0
+	case protocol.OpenAIEmbeddingsID:
+		return map[string]any{"input": "x", "model": profile.PhysicalModel}, outputTokens == 0
+	case protocol.AnthropicMessagesID:
+		return map[string]any{
+			"max_tokens": outputTokens,
+			"messages":   []any{map[string]any{"content": "x", "role": "user"}},
+			"model":      profile.PhysicalModel,
+		}, outputTokens > 0
+	default:
+		return nil, false
+	}
 }
 
 func checkedInputAccountingSum(values ...int64) (int64, bool) {
@@ -598,20 +612,19 @@ func runtimeInputAccountingPhysicalModel(value string) bool {
 }
 
 func runtimeModelInputAccountingCompatible(model Model, profile InputAccountingProfile) bool {
-	return model.InputAccountingRef == profile.ID && profile.Protocol == inputAccountingProtocol &&
+	return model.InputAccountingRef == profile.ID && inputAccountingProtocolSupported(profile.Protocol) &&
 		profile.Method == inputAccountingMethod && profile.PhysicalModel == model.UpstreamModel &&
-		slices.Contains(model.Capabilities, inputAccountingProtocol)
+		slices.Contains(model.Capabilities, profile.Protocol)
 }
 
-func (snapshot ActiveSnapshot) runtimeRouteInputAccountingCompatible(feature Feature, model Model) bool {
-	if feature.Protocol != inputAccountingProtocol || feature.Output == nil || model.InputAccountingRef == "" {
+func inputAccountingProtocolSupported(protocolID string) bool {
+	switch protocolID {
+	case protocol.OpenAIChatID, protocol.OpenAIResponsesID,
+		protocol.OpenAIEmbeddingsID, protocol.AnthropicMessagesID:
+		return true
+	default:
 		return false
 	}
-	profile, ok := snapshot.inputAccounting[model.InputAccountingRef]
-	if !ok || !runtimeModelInputAccountingCompatible(model, profile) {
-		return false
-	}
-	return inputAccountingRouteContextPossible(profile, feature.Output.AbsoluteMaximumTokens)
 }
 
 func runtimeUpstream(raw compiledUpstream) (Upstream, error) {

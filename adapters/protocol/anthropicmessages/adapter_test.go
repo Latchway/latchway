@@ -3,6 +3,7 @@ package anthropicmessages
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"math"
@@ -54,9 +55,80 @@ func TestCapabilitiesAreTruthful(t *testing.T) {
 	}
 	want := protocol.Capabilities{
 		Streaming: true, ModelRewrite: true, OutputTokenClamp: true, ProviderUsage: true,
+		TrustedInputPreflight: true,
 	}
 	if got := (Adapter{}).Capabilities(); got != want {
 		t.Fatalf("Capabilities() = %+v, want %+v", got, want)
+	}
+}
+
+func TestTrustedInputPreflightBindsExactTextMessagesAndOutput(t *testing.T) {
+	request := newRequest(t, `{
+		"model":"client","system":[{"type":"text","text":"Be concise 🌉"}],
+		"messages":[
+			{"role":"user","content":"你好"},
+			{"role":"assistant","content":[{"type":"text","text":"hello"}]}
+		],"stream":true,"max_tokens":17
+	}`)
+	applied, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+		PhysicalModel: "claude-model", DefaultOutputTokens: 64, MaximumOutputTokens: 128,
+	})
+	if err != nil || applied != 17 {
+		t.Fatalf("ApplyFeature() output=%d error=%v", applied, err)
+	}
+	rewritten := readBodyFactory(t, request)
+	profile := protocol.TrustedInputProfile{
+		ID: "anthropic_profile", Protocol: ID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "claude-model", MaximumFramingTokensPerRequest: 9,
+		MaximumFramingTokensPerMessage: 4, MaximumContextTokens: 1_000_000,
+	}
+	preflight, err := (Adapter{}).PreflightInput(context.Background(), request, profile)
+	if err != nil {
+		t.Fatalf("PreflightInput() error = %v", err)
+	}
+	wantInput := int64(len(rewritten)) + 9 + 2*4
+	if preflight.RewrittenBodySHA256 != sha256.Sum256(rewritten) || preflight.MessageCount != 2 ||
+		preflight.InputTokenBound != wantInput || preflight.OutputTokenBound != applied ||
+		preflight.TotalTokenBound != wantInput+applied || preflight.ProfileDigest != profile.Digest() {
+		t.Fatalf("trusted Anthropic proof = %+v", preflight)
+	}
+	if got := readBody(t, request.Body); !bytes.Equal(got, rewritten) {
+		t.Fatal("preflight did not preserve the exact rewritten body")
+	}
+}
+
+func TestTrustedInputPreflightRejectsMediaAndTools(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "image",
+			body: `{"model":"client","messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGk="}}]}]}`,
+		},
+		{
+			name: "tools",
+			body: `{"model":"client","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := newRequest(t, test.body)
+			if _, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+				PhysicalModel: "server", DefaultOutputTokens: 8, MaximumOutputTokens: 16,
+			}); err != nil {
+				t.Fatalf("rich request must remain available without trusted accounting: %v", err)
+			}
+			profile := protocol.TrustedInputProfile{
+				ID: "anthropic_profile", Protocol: ID,
+				Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+				PhysicalModel: "server", MaximumContextTokens: 1_000_000,
+			}
+			if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("PreflightInput() result=%+v error=%v, want closed failure", result, err)
+			}
+		})
 	}
 }
 

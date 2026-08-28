@@ -326,9 +326,10 @@ func (model Model) clone() Model {
 }
 
 // InputAccountingProfile is an immutable operator-owned proof declaration
-// for one exact provider protocol and physical model. The data plane converts
-// this value into the matching protocol-adapter profile only after route and
-// physical-model selection.
+// for one exact structured provider protocol and physical model. Per-message
+// framing also applies to Responses input items and Embeddings text inputs.
+// The data plane converts this value into the matching adapter profile only
+// after route, plan, and physical-model selection.
 type InputAccountingProfile struct {
 	ID                             string `json:"id"`
 	Protocol                       string `json:"protocol"`

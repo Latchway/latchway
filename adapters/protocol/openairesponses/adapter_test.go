@@ -3,6 +3,7 @@ package openairesponses
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -53,9 +54,93 @@ func TestCapabilitiesAreTruthful(t *testing.T) {
 	}
 	want := protocol.Capabilities{
 		Streaming: true, ModelRewrite: true, OutputTokenClamp: true, ProviderUsage: true,
+		TrustedInputPreflight: true,
 	}
 	if got := (Adapter{}).Capabilities(); got != want {
 		t.Fatalf("Capabilities() = %+v, want %+v", got, want)
+	}
+}
+
+func TestTrustedInputPreflightBindsExactRewrittenTextItems(t *testing.T) {
+	request := newRequest(t, `{
+		"model":"client","instructions":"Be concise 🌉",
+		"input":[
+			{"type":"message","role":"developer","content":"rules"},
+			{"role":"user","content":[{"type":"input_text","text":"你好"}]}
+		],"stream":true,"stream_options":{"include_obfuscation":false},"max_output_tokens":17
+	}`)
+	applied, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+		PhysicalModel: "server-model", DefaultOutputTokens: 64, MaximumOutputTokens: 128,
+	})
+	if err != nil || applied != 17 {
+		t.Fatalf("ApplyFeature() output=%d error=%v", applied, err)
+	}
+	rewritten := readBodyFactory(t, request)
+	profile := protocol.TrustedInputProfile{
+		ID: "responses_profile", Protocol: ID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "server-model", MaximumFramingTokensPerRequest: 7,
+		MaximumFramingTokensPerMessage: 3, MaximumContextTokens: 1_000_000,
+	}
+	preflight, err := (Adapter{}).PreflightInput(context.Background(), request, profile)
+	if err != nil {
+		t.Fatalf("PreflightInput() error = %v", err)
+	}
+	wantInput := int64(len(rewritten)) + 7 + 2*3
+	if preflight.ProfileDigest != profile.Digest() || preflight.Protocol != ID ||
+		preflight.PhysicalModel != "server-model" || preflight.RewrittenBodySHA256 != sha256.Sum256(rewritten) ||
+		preflight.RequestBytes != int64(len(rewritten)) || preflight.MessageCount != 2 ||
+		preflight.InputTokenBound != wantInput || preflight.OutputTokenBound != applied ||
+		preflight.TotalTokenBound != wantInput+applied {
+		t.Fatalf("trusted Responses proof = %+v", preflight)
+	}
+	if got := readBody(t, request.Body); !bytes.Equal(got, rewritten) {
+		t.Fatal("preflight did not preserve the exact rewritten body")
+	}
+}
+
+func TestTrustedInputPreflightRejectsRichOrMismatchedResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "tools",
+			body: `{"model":"client","input":"hello","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`,
+		},
+		{
+			name: "tool input items",
+			body: `{"model":"client","input":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"ok"}],"tools":[{"type":"function","name":"lookup"}]}`,
+		},
+		{name: "output schema", body: `{"model":"client","input":"hello","text":{"format":{"type":"json_object"}}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := newRequest(t, test.body)
+			if _, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+				PhysicalModel: "server", DefaultOutputTokens: 8, MaximumOutputTokens: 16,
+			}); err != nil {
+				t.Fatalf("rich request must remain available without trusted accounting: %v", err)
+			}
+			profile := protocol.TrustedInputProfile{
+				ID: "responses_profile", Protocol: ID,
+				Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+				PhysicalModel: "server", MaximumContextTokens: 1_000_000,
+			}
+			if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("PreflightInput() result=%+v error=%v, want closed failure", result, err)
+			}
+		})
+	}
+
+	request := appliedRequest(t, false)
+	profile := protocol.TrustedInputProfile{
+		ID: "responses_profile", Protocol: protocol.OpenAIChatID,
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "server", MaximumContextTokens: 1_000_000,
+	}
+	if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+		t.Fatalf("mismatched profile result=%+v error=%v", result, err)
 	}
 }
 

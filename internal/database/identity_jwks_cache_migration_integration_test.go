@@ -28,7 +28,7 @@ func TestMigratorPostgreSQLIdentityJWKSCacheFreshAndUpgrade(t *testing.T) {
 				t.Fatal(err)
 			}
 			current, available, err := migrator.Status(ctx)
-			if err != nil || current != 15 || available != 15 {
+			if err != nil || current != 16 || available != 16 {
 				t.Fatalf("schema current=%d available=%d err=%v", current, available, err)
 			}
 			now := time.Now().UTC().Truncate(time.Microsecond)

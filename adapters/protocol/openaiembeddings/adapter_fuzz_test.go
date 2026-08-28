@@ -2,6 +2,7 @@ package openaiembeddings
 
 import (
 	"context"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"strings"
@@ -71,6 +72,50 @@ func FuzzInspectAndRewrite(f *testing.F) {
 		closeErr := first.Close()
 		if readErr != nil || closeErr != nil || string(firstBytes) != string(rewritten) {
 			t.Fatalf("GetBody is not a stable replay: read=%v close=%v", readErr, closeErr)
+		}
+	})
+}
+
+func FuzzTrustedInputPreflight(f *testing.F) {
+	f.Add(`{"model":"client","input":"hello"}`)
+	f.Add(`{"model":"client","input":["hello","你好 🌉"]}`)
+	f.Add(`{"model":"client","input":[1,2,3]}`)
+	f.Add("not-json")
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 8<<10 {
+			t.Skip()
+		}
+		request, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/embeddings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		adapter := Adapter{MaximumBodyBytes: 16 << 10}
+		if _, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{PhysicalModel: "server-model"}); err != nil {
+			return
+		}
+		before := readBodyFactory(t, request)
+		profile := protocol.TrustedInputProfile{
+			ID: "embeddings_profile", Protocol: ID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "server-model", MaximumFramingTokensPerRequest: 5,
+			MaximumFramingTokensPerMessage: 3, MaximumContextTokens: 1_000_000,
+		}
+		preflight, preflightErr := adapter.PreflightInput(context.Background(), request, profile)
+		after := readBody(t, request.Body)
+		if string(after) != string(before) {
+			t.Fatal("trusted input preflight changed the exact rewritten body")
+		}
+		if preflightErr != nil {
+			if preflight != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("failed preflight returned a partial proof: %+v", preflight)
+			}
+			return
+		}
+		if preflight.RewrittenBodySHA256 != sha256.Sum256(before) ||
+			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3 ||
+			preflight.OutputTokenBound != 0 || preflight.TotalTokenBound != preflight.InputTokenBound {
+			t.Fatalf("invalid trusted input proof: %+v", preflight)
 		}
 	})
 }

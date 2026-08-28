@@ -348,7 +348,7 @@ func TestPrepareRequestRequiresCanonicalTrustedInputPreflight(t *testing.T) {
 			input.InputPreflight.Protocol = "anthropic_messages"
 		}},
 		{name: "matching unsupported protocol", mutate: func(input *ReserveInput) {
-			input.Protocol = "anthropic_messages"
+			input.Protocol = "opaque_http"
 			input.InputPreflight.Protocol = input.Protocol
 		}},
 		{name: "noncanonical profile ID", mutate: func(input *ReserveInput) {
@@ -400,6 +400,64 @@ func TestPrepareRequestRequiresCanonicalTrustedInputPreflight(t *testing.T) {
 	zeroOutput.InputPreflight = trustedInputPreflight(zeroOutput, 3, 0)
 	if _, err := prepareRequest(zeroOutput); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("zero-output Chat preflight returned %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestPrepareRequestAcceptsProtocolMatchedStructuredPreflights(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		protocol     string
+		outputTokens int64
+	}{
+		{protocol: "openai_responses", outputTokens: 7},
+		{protocol: "openai_chat", outputTokens: 7},
+		{protocol: "openai_embeddings", outputTokens: 0},
+		{protocol: "anthropic_messages", outputTokens: 7},
+	} {
+		t.Run(test.protocol, func(t *testing.T) {
+			input := validReserveInput(t)
+			input.Protocol = test.protocol
+			input.Rules = []Rule{
+				{
+					Metric: InputTokensMetric, Algorithm: CalendarAlgorithm,
+					Scope: []string{"user"}, Window: "1d", Maximum: 1_000,
+					ReservedUnits: 11, Hard: true,
+				},
+				{
+					Metric: TotalTokensMetric, Algorithm: CalendarAlgorithm,
+					Scope: []string{"feature"}, Window: "1d", Maximum: 1_000,
+					ReservedUnits: 11 + test.outputTokens, Hard: true,
+				},
+			}
+			input.InputPreflight = trustedInputPreflight(input, 11, test.outputTokens)
+			if _, err := prepareRequest(input); err != nil {
+				t.Fatalf("prepare %s trusted preflight: %v", test.protocol, err)
+			}
+		})
+	}
+}
+
+func TestStoredAttemptAcceptsValidatedZeroOutputProof(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Protocol = "openai_embeddings"
+	binding := trustedInputPreflight(input, 11, 0)
+	attempt := newStoredAttemptDecision(
+		"atm_00000000000000000000000001", 1,
+		"primary", "provider", "fast", input.PhysicalModel,
+		selectedPricing{}, binding, nil,
+	)
+	attempt.status = "started"
+	decisionDigest := sha256.Sum256([]byte("validated-attempt-decision"))
+	attempt.attemptDecisionSHA256 = decisionDigest[:]
+	if err := attempt.validate(); err != nil {
+		t.Fatalf("validate zero-output stored proof: %v", err)
+	}
+	attempt.outputTokenBound = new(int64)
+	*attempt.outputTokenBound = -1
+	*attempt.totalTokenBound = *attempt.inputTokenBound - 1
+	if err := attempt.validate(); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("negative stored output bound returned %v, want ErrInvalidState", err)
 	}
 }
 

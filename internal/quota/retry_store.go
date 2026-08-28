@@ -988,7 +988,10 @@ func (attempt storedAttempt) validate() error {
 		!identifierPattern.MatchString(*attempt.inputAccountingProfileID) ||
 		bytes.Equal(attempt.inputAccountingProfileDigest, zeroDigest[:]) ||
 		bytes.Equal(attempt.rewrittenBodySHA256, zeroDigest[:]) ||
-		*attempt.inputTokenBound <= 0 || *attempt.outputTokenBound <= 0 ||
+		// Stored attempts do not duplicate the logical protocol. Reservation
+		// validation enforces zero only for Embeddings and positive bounds for
+		// generative protocols, then proof matching preserves that decision here.
+		*attempt.inputTokenBound <= 0 || *attempt.outputTokenBound < 0 ||
 		*attempt.inputTokenBound > math.MaxInt64-*attempt.outputTokenBound ||
 		*attempt.totalTokenBound != *attempt.inputTokenBound+*attempt.outputTokenBound {
 		return ErrInvalidState
@@ -1056,16 +1059,7 @@ func validateRetryInputPreflight(
 		return nil
 	}
 	binding := input.InputPreflight
-	var zero [sha256.Size]byte
-	if binding.Method != UTF8ByteBPEDeclaredFramingV1 ||
-		binding.Protocol != protocol || binding.Protocol != "openai_chat" ||
-		!identifierPattern.MatchString(binding.ProfileID) ||
-		binding.ProfileDigest == zero || binding.RewrittenBodySHA256 == zero ||
-		binding.PhysicalModel != input.PhysicalModel ||
-		!validPhysicalModel(binding.PhysicalModel) ||
-		binding.InputTokenBound <= 0 || binding.OutputTokenBound <= 0 ||
-		binding.InputTokenBound > math.MaxInt64-binding.OutputTokenBound ||
-		binding.TotalTokenBound != binding.InputTokenBound+binding.OutputTokenBound {
+	if !validInputPreflightBinding(binding, protocol, input.PhysicalModel) {
 		return ErrInvalidInput
 	}
 	for metric, units := range allocations {

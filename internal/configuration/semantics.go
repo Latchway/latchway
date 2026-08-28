@@ -71,7 +71,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 	issues = append(issues, pricingSemanticIssues(pricing, models)...)
 	issues = append(issues, limitSemanticIssues(limitPlans)...)
 	issues = append(issues, validator.featureSemanticIssues(
-		features, models, attestations, limitPlans, pricing, inputAccounting,
+		features, models, attestations, limitPlans,
 	)...)
 	issues = append(issues, sessionSemanticIssues(objectValue(spec, "session"))...)
 	issues = append(issues, privacySemanticIssues(objectValue(spec, "privacy"))...)
@@ -432,7 +432,7 @@ func inputAccountingProfileSemanticIssues(profiles map[string]map[string]any) []
 			issues = append(issues, errorIssue(
 				"input_accounting_profile_context_impossible",
 				base+"/maximumContextTokens",
-				"Request framing, one mandatory message, a minimal rewritten Chat body, and output must fit the physical model context without overflowing int64 accounting.",
+				"Request framing, one mandatory message or item, the protocol's minimal rewritten body, and output must fit the physical model context without overflowing int64 accounting.",
 			))
 		}
 	}
@@ -484,13 +484,13 @@ func modelSemanticIssues(models, upstreams, pricing, inputAccounting map[string]
 					"The referenced input-accounting profile does not exist.",
 				))
 			} else if stringValue(profile, "physicalModel") != stringValue(model, "upstreamModel") ||
-				stringValue(profile, "protocol") != inputAccountingProtocol ||
+				!inputAccountingProtocolSupported(stringValue(profile, "protocol")) ||
 				stringValue(profile, "method") != inputAccountingMethod ||
-				!slices.Contains(stringArray(model, "capabilities"), inputAccountingProtocol) {
+				!slices.Contains(stringArray(model, "capabilities"), stringValue(profile, "protocol")) {
 				issues = append(issues, errorIssue(
 					"input_accounting_reference_mismatch",
 					base+"/inputAccountingRef",
-					"The input-accounting profile must exactly match the model's physical model and OpenAI Chat capability.",
+					"The input-accounting profile must exactly match the model's physical model and structured-protocol capability.",
 				))
 			}
 		}
@@ -591,10 +591,9 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 }
 
 func (validator *Validator) featureSemanticIssues(
-	features, models, attestations, limitPlans, pricing, inputAccounting map[string]map[string]any,
+	features, models, attestations, limitPlans map[string]map[string]any,
 ) []Issue {
 	issues := make([]Issue, 0)
-	requiresInputAccounting := rawPlansRequireInputAccounting(limitPlans)
 	requiresCostPricing := rawPlansRequireCostPricing(limitPlans)
 	for _, featureID := range sortedMapKeys(features) {
 		feature := features[featureID]
@@ -640,13 +639,6 @@ func (validator *Validator) featureSemanticIssues(
 			}
 		} else if protocolRequiresOutputPolicy(protocolID) {
 			issues = append(issues, errorIssue("output_policy_required", base+"/output", "Token-generating protocols require a server-owned output limit."))
-		}
-		if requiresInputAccounting && protocolID != inputAccountingProtocol {
-			issues = append(issues, errorIssue(
-				"input_accounting_protocol_unsupported",
-				base+"/protocol",
-				"Every feature must use OpenAI Chat while an administrator-reachable input-token or total-token limit is configured.",
-			))
 		}
 		routes, routeIssues := indexObjects(objectArray(feature, "routes"), base+"/routes")
 		issues = append(issues, routeIssues...)
@@ -703,40 +695,8 @@ func (validator *Validator) featureSemanticIssues(
 			if !slices.Contains(stringArray(model, "capabilities"), protocolID) {
 				issues = append(issues, errorIssue("model_protocol_unsupported", routePath+"/model", "The selected model does not advertise this feature protocol."))
 			}
-			inputPriceRequiresProof := false
 			if requiresCostPricing && stringValue(model, "pricingRef") == "" {
 				issues = append(issues, errorIssue("pricing_required_for_cost_limit", routePath+"/model", "Every routed model requires pricing when a cost limit is configured."))
-			} else if requiresCostPricing {
-				pricingRef := stringValue(model, "pricingRef")
-				if catalog, exists := pricing[pricingRef]; exists {
-					for _, entry := range objectArray(catalog, "entries") {
-						if stringValue(entry, "model") != modelID {
-							continue
-						}
-						inputRate, ok := integerField(entry, "inputNanoUsdPerMillion")
-						if ok && inputRate != 0 {
-							inputPriceRequiresProof = true
-						}
-						break
-					}
-				}
-			}
-			if requiresInputAccounting || inputPriceRequiresProof {
-				if !rawRouteInputAccountingCompatible(feature, model, inputAccounting) {
-					code := "input_accounting_required_for_token_limit"
-					message := "Input-token and total-token limits require every route to use an exactly matched OpenAI Chat input-accounting profile."
-					if !requiresInputAccounting {
-						code = "input_accounting_required_for_cost_limit"
-						message = "A nonzero configured input-token price requires an exactly matched OpenAI Chat input-accounting profile."
-					}
-					issues = append(issues, errorIssue(code, routePath+"/model", message))
-				} else if !rawRouteInputAccountingContextPossible(feature, model, inputAccounting) {
-					issues = append(issues, errorIssue(
-						"input_accounting_route_context_impossible",
-						routePath+"/model",
-						"Request framing, one mandatory message, a minimal rewritten Chat body, and the feature's absolute output maximum must fit the physical model context without overflowing int64 accounting.",
-					))
-				}
 			}
 		}
 		if !hasFallback {
@@ -786,21 +746,6 @@ func opaqueHTTPPolicySemanticIssues(policy map[string]any, base string) []Issue 
 	return issues
 }
 
-func rawPlansRequireInputAccounting(plans map[string]map[string]any) bool {
-	// An active server-owned user override replaces the feature's limit-plan
-	// CEL result and can select any configured plan. Therefore all configured
-	// plans participate in activation reachability even for constant expressions.
-	for _, plan := range plans {
-		for _, limit := range objectArray(plan, "limits") {
-			metric := stringValue(limit, "metric")
-			if metric == "input_tokens" || metric == "total_tokens" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func rawPlansRequireCostPricing(plans map[string]map[string]any) bool {
 	for _, plan := range plans {
 		for _, limit := range objectArray(plan, "limits") {
@@ -810,39 +755,6 @@ func rawPlansRequireCostPricing(plans map[string]map[string]any) bool {
 		}
 	}
 	return false
-}
-
-func rawRouteInputAccountingCompatible(
-	feature, model map[string]any,
-	profiles map[string]map[string]any,
-) bool {
-	if stringValue(feature, "protocol") != inputAccountingProtocol ||
-		!slices.Contains(stringArray(model, "capabilities"), inputAccountingProtocol) {
-		return false
-	}
-	profile, ok := profiles[stringValue(model, "inputAccountingRef")]
-	if !ok || stringValue(profile, "protocol") != inputAccountingProtocol ||
-		stringValue(profile, "method") != inputAccountingMethod ||
-		stringValue(profile, "physicalModel") != stringValue(model, "upstreamModel") {
-		return false
-	}
-	return true
-}
-
-func rawRouteInputAccountingContextPossible(
-	feature, model map[string]any,
-	profiles map[string]map[string]any,
-) bool {
-	profileObject, ok := profiles[stringValue(model, "inputAccountingRef")]
-	if !ok {
-		return false
-	}
-	profile, ok := rawInputAccountingProfile(profileObject)
-	if !ok {
-		return false
-	}
-	absoluteMaximumOutputTokens, ok := integerField(objectValue(feature, "output"), "absoluteMaximumTokens")
-	return ok && inputAccountingRouteContextPossible(profile, absoluteMaximumOutputTokens)
 }
 
 func rawInputAccountingProfile(profile map[string]any) (InputAccountingProfile, bool) {

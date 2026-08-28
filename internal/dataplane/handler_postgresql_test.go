@@ -35,6 +35,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
 	"github.com/latchway/latchway/conformance/mockupstream"
 	"github.com/latchway/latchway/internal/adminauth"
@@ -107,6 +108,22 @@ const (
 	dataPlaneE2ETrustedInputPricing                    = "trusted_input_price"
 	dataPlaneE2ETrustedInputPrompt                     = "prompt-marker-dataplane-e2e-trusted-input-01"
 	dataPlaneE2ETrustedInputRequestID                  = "client-request-dataplane-e2e-trusted-input-01"
+	dataPlaneE2EStructuredTokenPlan                    = "structured_tokens"
+	dataPlaneE2EResponsesFeature                       = "trusted_responses"
+	dataPlaneE2EResponsesModel                         = "responses_fast"
+	dataPlaneE2EResponsesProfile                       = "responses_bytes"
+	dataPlaneE2EResponsesPrompt                        = "prompt-marker-dataplane-e2e-responses-01"
+	dataPlaneE2EResponsesRequestID                     = "client-request-dataplane-e2e-responses-01"
+	dataPlaneE2EEmbeddingsFeature                      = "trusted_embeddings"
+	dataPlaneE2EEmbeddingsModel                        = "embeddings_fast"
+	dataPlaneE2EEmbeddingsProfile                      = "embeddings_bytes"
+	dataPlaneE2EEmbeddingsPrompt                       = "prompt-marker-dataplane-e2e-embeddings-01"
+	dataPlaneE2EEmbeddingsRequestID                    = "client-request-dataplane-e2e-embeddings-01"
+	dataPlaneE2EAnthropicFeature                       = "trusted_anthropic"
+	dataPlaneE2EAnthropicModel                         = "anthropic_fast"
+	dataPlaneE2EAnthropicProfile                       = "anthropic_bytes"
+	dataPlaneE2EAnthropicPrompt                        = "prompt-marker-dataplane-e2e-anthropic-01"
+	dataPlaneE2EAnthropicRequestID                     = "client-request-dataplane-e2e-anthropic-01"
 	dataPlaneE2EUnderboundRequestID                    = "client-request-dataplane-e2e-underbound-proof-01"
 	dataPlaneE2ETamperedInputRequestID                 = "client-request-dataplane-e2e-tampered-input-01"
 	dataPlaneE2ETamperedInputPrompt                    = "prompt-marker-dataplane-e2e-tampered-input-01"
@@ -1363,6 +1380,84 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		buckets: 13, attempts: 11, usageRecords: 55, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETamperedInputPrompt)
+
+	structuredCases := []struct {
+		name, path, feature, clientRequestID, prompt, providerPath, protocolID string
+		body                                                                   map[string]any
+		outputBound                                                            int64
+	}{
+		{
+			name: "OpenAI Responses", path: protocol.OpenAIResponsesPublicPath,
+			feature: dataPlaneE2EResponsesFeature, clientRequestID: dataPlaneE2EResponsesRequestID,
+			prompt: dataPlaneE2EResponsesPrompt, providerPath: "/v1" + protocol.OpenAIResponsesProviderPath,
+			protocolID: protocol.OpenAIResponsesID, outputBound: 8,
+			body: map[string]any{
+				"model": "untrusted-client-model", "input": dataPlaneE2EResponsesPrompt,
+				"max_output_tokens": 9999,
+			},
+		},
+		{
+			name: "OpenAI Embeddings", path: protocol.OpenAIEmbeddingsPublicPath,
+			feature: dataPlaneE2EEmbeddingsFeature, clientRequestID: dataPlaneE2EEmbeddingsRequestID,
+			prompt: dataPlaneE2EEmbeddingsPrompt, providerPath: "/v1" + protocol.OpenAIEmbeddingsProviderPath,
+			protocolID: protocol.OpenAIEmbeddingsID,
+			body: map[string]any{
+				"model": "untrusted-client-model", "input": dataPlaneE2EEmbeddingsPrompt,
+			},
+		},
+		{
+			name: "Anthropic Messages", path: protocol.AnthropicMessagesPublicPath,
+			feature: dataPlaneE2EAnthropicFeature, clientRequestID: dataPlaneE2EAnthropicRequestID,
+			prompt: dataPlaneE2EAnthropicPrompt, providerPath: "/v1" + protocol.AnthropicMessagesProviderPath,
+			protocolID: protocol.AnthropicMessagesID, outputBound: 8,
+			body: map[string]any{
+				"model": "untrusted-client-model", "max_tokens": 9999,
+				"messages": []any{map[string]any{"role": "user", "content": dataPlaneE2EAnthropicPrompt}},
+			},
+		},
+	}
+	for index, test := range structuredCases {
+		t.Run(test.name+" trusted preflight", func(t *testing.T) {
+			target := mustDataPlaneE2EURL(t, dataPlaneE2EOrigin+test.path)
+			proof := signDataPlaneE2EDPoP(
+				t, dpopPrivateKey, http.MethodPost, target, now,
+				"dataplane-e2e-structured-"+strconv.Itoa(index), grant.AccessToken,
+			)
+			request, response := newDataPlaneE2EStructuredRequest(
+				t, test.path, grant.AccessToken, proof, test.feature, test.clientRequestID, test.body,
+			)
+			protectedHandler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("trusted structured request = %d, body=%s", response.Code, response.Body.String())
+			}
+			captured, captureErr := capture.snapshot()
+			wantRequests := 12 + index
+			if captureErr != nil || len(captured) != wantRequests {
+				t.Fatalf("provider capture = requests:%d err:%v, want %d", len(captured), captureErr, wantRequests)
+			}
+			providerRequest := captured[len(captured)-1]
+			assertDataPlaneE2EStructuredProviderRequest(
+				t, providerRequest, privateTargetAuthority, test.providerPath,
+				test.protocolID, test.prompt, test.outputBound,
+			)
+			inputBound := int64(len(providerRequest.body)) +
+				dataPlaneE2ETrustedRequestFraming + dataPlaneE2ETrustedMessageFraming
+			assertDataPlaneE2EStructuredTokenSuccess(
+				t, ctx, pool, test.clientRequestID, test.feature,
+				inputBound, inputBound+test.outputBound,
+			)
+		})
+	}
+	if targets.acquisitions.Load() != 14 || targets.releases.Load() != 14 || len(mock.Observations()) != 14 {
+		t.Fatalf("structured preflight dispatches = acquisitions:%d releases:%d observations:%d, want 14/14/14",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 20, reservations: 15, reservationEntries: 31,
+		buckets: 19, attempts: 14, usageRecords: 70, deniedRequests: 5,
+	})
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
+		dataPlaneE2EResponsesPrompt, dataPlaneE2EEmbeddingsPrompt, dataPlaneE2EAnthropicPrompt)
 }
 
 type dataPlaneE2ETenant struct {
@@ -1509,19 +1604,50 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"secretRef": "secret/debug-attestation-public-keys",
 				}},
 			}},
-			"upstreams": []any{map[string]any{
-				"id": "primary", "type": "openai_compatible", "baseUrl": dataPlaneE2EConfiguredUpstream,
-				"authentication": map[string]any{"type": "bearer", "secretRef": "secret/provider-credential"},
-				"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
-				"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
-			}},
-			"inputAccountingProfiles": []any{map[string]any{
-				"id": dataPlaneE2ETrustedInputProfile, "protocol": "openai_chat",
-				"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
-				"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
-				"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
-				"maximumContextTokens":           int64(4096),
-			}},
+			"upstreams": []any{
+				map[string]any{
+					"id": "primary", "type": "openai_compatible", "baseUrl": dataPlaneE2EConfiguredUpstream,
+					"authentication": map[string]any{"type": "bearer", "secretRef": "secret/provider-credential"},
+					"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
+					"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
+				},
+				map[string]any{
+					"id": "anthropic", "type": "anthropic", "baseUrl": dataPlaneE2EConfiguredUpstream,
+					"authentication": map[string]any{"type": "bearer", "secretRef": "secret/provider-credential"},
+					"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
+					"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
+				},
+			},
+			"inputAccountingProfiles": []any{
+				map[string]any{
+					"id": dataPlaneE2ETrustedInputProfile, "protocol": "openai_chat",
+					"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
+					"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
+					"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
+					"maximumContextTokens":           int64(4096),
+				},
+				map[string]any{
+					"id": dataPlaneE2EResponsesProfile, "protocol": protocol.OpenAIResponsesID,
+					"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
+					"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
+					"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
+					"maximumContextTokens":           int64(4096),
+				},
+				map[string]any{
+					"id": dataPlaneE2EEmbeddingsProfile, "protocol": protocol.OpenAIEmbeddingsID,
+					"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
+					"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
+					"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
+					"maximumContextTokens":           int64(4096),
+				},
+				map[string]any{
+					"id": dataPlaneE2EAnthropicProfile, "protocol": protocol.AnthropicMessagesID,
+					"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
+					"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
+					"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
+					"maximumContextTokens":           int64(4096),
+				},
+			},
 			"models": []any{
 				map[string]any{
 					"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
@@ -1538,18 +1664,48 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"pricingRef": dataPlaneE2ETrustedInputPricing, "inputAccountingRef": dataPlaneE2ETrustedInputProfile,
 					"capabilities": []any{"openai_chat"},
 				},
+				map[string]any{
+					"id": dataPlaneE2EResponsesModel, "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2EPricingCatalog, "inputAccountingRef": dataPlaneE2EResponsesProfile,
+					"capabilities": []any{protocol.OpenAIResponsesID},
+				},
+				map[string]any{
+					"id": dataPlaneE2EEmbeddingsModel, "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2EPricingCatalog, "inputAccountingRef": dataPlaneE2EEmbeddingsProfile,
+					"capabilities": []any{protocol.OpenAIEmbeddingsID},
+				},
+				map[string]any{
+					"id": dataPlaneE2EAnthropicModel, "upstream": "anthropic", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2EPricingCatalog, "inputAccountingRef": dataPlaneE2EAnthropicProfile,
+					"capabilities": []any{protocol.AnthropicMessagesID},
+				},
 			},
 			"pricingCatalogs": []any{
 				map[string]any{
 					"id": dataPlaneE2EPricingCatalog, "currency": quota.USDCurrency,
 					"effectiveAt": "2020-01-01T00:00:00Z",
 					// A user override can select the hard-cost plan for any feature
-					// in this environment. Every routed OpenAI Chat model must
-					// therefore have a conservatively preflightable zero input rate.
-					"entries": []any{map[string]any{
-						"model": "fast", "inputNanoUsdPerMillion": int64(0),
-						"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
-					}},
+					// in this environment. Every routed model therefore has a
+					// complete price; zero input rates do not require a proof solely
+					// for cost reservation.
+					"entries": []any{
+						map[string]any{
+							"model": "fast", "inputNanoUsdPerMillion": int64(0),
+							"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
+						},
+						map[string]any{
+							"model": dataPlaneE2EResponsesModel, "inputNanoUsdPerMillion": int64(0),
+							"outputNanoUsdPerMillion": int64(0), "requestNanoUsd": int64(0),
+						},
+						map[string]any{
+							"model": dataPlaneE2EEmbeddingsModel, "inputNanoUsdPerMillion": int64(0),
+							"outputNanoUsdPerMillion": int64(0), "requestNanoUsd": int64(0),
+						},
+						map[string]any{
+							"model": dataPlaneE2EAnthropicModel, "inputNanoUsdPerMillion": int64(0),
+							"outputNanoUsdPerMillion": int64(0), "requestNanoUsd": int64(0),
+						},
+					},
 				},
 				map[string]any{
 					"id": dataPlaneE2ECostPricingCatalog, "currency": quota.USDCurrency,
@@ -1654,6 +1810,18 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 						},
 					},
 				},
+				map[string]any{
+					"id": dataPlaneE2EStructuredTokenPlan, "limits": []any{
+						map[string]any{
+							"metric": quota.InputTokensMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(100_000), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.TotalTokensMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(100_000), "hard": true,
+						},
+					},
+				},
 			},
 			"features": []any{
 				map[string]any{
@@ -1708,6 +1876,32 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
 					"routes": []any{map[string]any{
 						"id": "trusted_primary", "when": "true", "model": dataPlaneE2ETrustedInputModel, "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2EResponsesFeature, "protocol": protocol.OpenAIResponsesID, "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2EStructuredTokenPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
+					"routes": []any{map[string]any{
+						"id": "responses_primary", "when": "true", "model": dataPlaneE2EResponsesModel, "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2EEmbeddingsFeature, "protocol": protocol.OpenAIEmbeddingsID, "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2EStructuredTokenPlan + "'"},
+					"routes": []any{map[string]any{
+						"id": "embeddings_primary", "when": "true", "model": dataPlaneE2EEmbeddingsModel, "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2EAnthropicFeature, "protocol": protocol.AnthropicMessagesID, "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2EStructuredTokenPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
+					"routes": []any{map[string]any{
+						"id": "anthropic_primary", "when": "true", "model": dataPlaneE2EAnthropicModel, "priority": 10,
 					}},
 				},
 			},
@@ -1944,12 +2138,18 @@ func postDataPlaneE2EFeatureChat(t *testing.T, handler http.Handler, accessToken
 }
 
 func newDataPlaneE2EChatRequest(t *testing.T, accessToken, proof, feature, clientRequestID string, body any) (*http.Request, *dataPlaneE2EResponseRecorder) {
+	return newDataPlaneE2EStructuredRequest(
+		t, chatCompletionsPath, accessToken, proof, feature, clientRequestID, body,
+	)
+}
+
+func newDataPlaneE2EStructuredRequest(t *testing.T, path, accessToken, proof, feature, clientRequestID string, body any) (*http.Request, *dataPlaneE2EResponseRecorder) {
 	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("encode chat request: %v", err)
+		t.Fatalf("encode structured request: %v", err)
 	}
-	request := httptest.NewRequest(http.MethodPost, chatCompletionsPath, bytes.NewReader(encoded))
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
 	request.Header.Set("Content-Type", "application/json")
 	setDataPlaneE2EProtectedHeaders(request, proof)
 	request.Header.Set("Authorization", "DPoP "+accessToken)
@@ -2044,6 +2244,77 @@ func assertDataPlaneE2EProviderChatRequestWithOutputCap(
 	streamOptions, ok := options.(map[string]any)
 	if !ok || len(streamOptions) != 1 || streamOptions["include_usage"] != true {
 		t.Fatalf("streaming provider request did not require final usage: %#v", options)
+	}
+}
+
+func assertDataPlaneE2EStructuredProviderRequest(
+	t *testing.T,
+	request dataPlaneE2EProviderRequest,
+	targetAuthority, providerPath, protocolID, prompt string,
+	outputBound int64,
+) {
+	t.Helper()
+	if request.method != http.MethodPost || request.path != providerPath ||
+		request.host != targetAuthority || request.host == dataPlaneE2EUntrustedHost {
+		t.Fatalf("provider route authority was not target-bound: method=%s path=%s host_matches_target=%t retained_untrusted_host=%t",
+			request.method, request.path, request.host == targetAuthority, request.host == dataPlaneE2EUntrustedHost)
+	}
+	if request.authorization != "Bearer "+dataPlaneE2EProviderSecret || request.staticTenant != "tenant-e2e" {
+		t.Fatal("server-held provider credential or static header was not applied")
+	}
+	for _, forbidden := range []string{
+		"DPoP", "Cookie", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host",
+		"X-Forwarded-Proto", "X-Latchway-Feature", "X-Latchway-Protocol-Version",
+		"X-Latchway-Request-ID", "X-Latchway-SDK", "X-Latchway-SDK-Version",
+		mockupstream.ScenarioHeader, "X-Untrusted-Provider-Header",
+	} {
+		if values := request.headers.Values(forbidden); len(values) != 0 {
+			t.Fatalf("provider request retained forbidden client header %q", forbidden)
+		}
+	}
+
+	var body map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(request.body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&body); err != nil {
+		t.Fatalf("decode rewritten provider request: %v", err)
+	}
+	if err := requireDataPlaneE2EJSONEOF(decoder); err != nil {
+		t.Fatalf("rewritten provider request was not one exact JSON value: %v", err)
+	}
+	if body["model"] != dataPlaneE2EProviderModel {
+		t.Fatalf("physical model = %#v, want %q", body["model"], dataPlaneE2EProviderModel)
+	}
+	switch protocolID {
+	case protocol.OpenAIResponsesID:
+		limit, ok := body["max_output_tokens"].(json.Number)
+		if !ok || limit.String() != strconv.FormatInt(outputBound, 10) || body["input"] != prompt || body["store"] != false {
+			t.Fatalf("Responses rewrite = %#v, want text input, store=false, and output cap %d", body, outputBound)
+		}
+	case protocol.OpenAIEmbeddingsID:
+		if body["input"] != prompt || outputBound != 0 {
+			t.Fatalf("Embeddings rewrite = %#v, want text input and zero output bound", body)
+		}
+		if _, exists := body["max_tokens"]; exists {
+			t.Fatal("Embeddings request unexpectedly gained an output-token cap")
+		}
+		if _, exists := body["max_output_tokens"]; exists {
+			t.Fatal("Embeddings request unexpectedly gained an output-token cap")
+		}
+	case protocol.AnthropicMessagesID:
+		limit, ok := body["max_tokens"].(json.Number)
+		messages, messagesOK := body["messages"].([]any)
+		if !ok || limit.String() != strconv.FormatInt(outputBound, 10) || !messagesOK || len(messages) != 1 ||
+			request.headers.Get("Anthropic-Version") != anthropicmessages.CanonicalAPIVersion {
+			t.Fatalf("Anthropic rewrite = body:%#v version:%q, want one message and output cap %d",
+				body, request.headers.Get("Anthropic-Version"), outputBound)
+		}
+		message, messageOK := messages[0].(map[string]any)
+		if !messageOK || message["role"] != "user" || message["content"] != prompt {
+			t.Fatalf("Anthropic message = %#v, want exact text prompt", messages[0])
+		}
+	default:
+		t.Fatalf("unexpected structured protocol %q", protocolID)
 	}
 }
 
@@ -2515,7 +2786,9 @@ type dataPlaneE2EPrivateTargetFactory struct {
 }
 
 func (factory *dataPlaneE2EPrivateTargetFactory) Acquire(config configuration.Upstream) (TargetLease, error) {
-	if factory == nil || config.ID != "primary" || config.Type != "openai_compatible" ||
+	validUpstream := (config.ID == "primary" && config.Type == "openai_compatible") ||
+		(config.ID == "anthropic" && config.Type == "anthropic")
+	if factory == nil || !validUpstream ||
 		config.BaseURL != factory.configuredBaseURL || config.Authentication.Type != "bearer" ||
 		config.Authentication.SecretRef != "secret/provider-credential" || factory.privateBaseURL == "" {
 		return nil, errTargetConfiguration
@@ -3044,6 +3317,107 @@ func assertDataPlaneE2ETrustedInputSuccess(
 		t, ctx, pool, logicalID, attemptID, priceRevision,
 		dataPlaneE2ETrustedActualCost, dataPlaneE2ETrustedInputPricing,
 	)
+}
+
+func assertDataPlaneE2EStructuredTokenSuccess(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, feature string,
+	inputBound, totalBound int64,
+) {
+	t.Helper()
+	if inputBound <= 11 || totalBound < inputBound {
+		t.Fatalf("structured bounds = input:%d total:%d, want conservative non-negative bounds", inputBound, totalBound)
+	}
+	var logicalID, logicalStatus, featureKey, reservationStatus, attemptID, attemptStatus, physicalModel string
+	var reservations, entries, attempts, usageRecords int64
+	var httpStatus int
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, request.feature_key,
+		       reservation.status, attempt.upstream_attempt_id, attempt.status,
+		       attempt.http_status, attempt.physical_model,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM quota_reservation_entries AS counted
+		        WHERE counted.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &logicalStatus, &featureKey, &reservationStatus,
+		&attemptID, &attemptStatus, &httpStatus, &physicalModel,
+		&reservations, &entries, &attempts, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read structured token success %q: %v", clientRequestID, err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil || id.Validate(attemptID, id.UpstreamAttempt) != nil ||
+		logicalStatus != "succeeded" || featureKey != feature || reservationStatus != "settled" ||
+		attemptStatus != quota.AttemptSucceeded || httpStatus != http.StatusOK ||
+		physicalModel != dataPlaneE2EProviderModel || reservations != 1 || entries != 2 ||
+		attempts != 1 || usageRecords != 5 {
+		t.Fatalf("structured token success %q = logical:%q/%s feature:%s reservation:%s/count:%d entries:%d attempt:%q/%s/%d/%s/count:%d usage:%d",
+			clientRequestID, logicalID, logicalStatus, featureKey, reservationStatus,
+			reservations, entries, attemptID, attemptStatus, httpStatus, physicalModel, attempts, usageRecords)
+	}
+
+	expectedSettledTotal := int64(11)
+	if totalBound > inputBound {
+		expectedSettledTotal = 18
+	}
+	expected := map[string]struct {
+		reserved int64
+		settled  int64
+	}{
+		quota.InputTokensMetric: {reserved: inputBound, settled: 11},
+		quota.TotalTokensMetric: {reserved: totalBound, settled: expectedSettledTotal},
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT bucket.metric, bucket.limit_plan_key, bucket.algorithm,
+		       bucket.window_key, entry.reserved_units,
+		       entry.settled_units, entry.released_units
+		FROM quota_reservations AS reservation
+		JOIN logical_requests AS request USING (logical_request_id)
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		WHERE request.client_request_id = $1
+		ORDER BY bucket.metric COLLATE "C"
+	`, clientRequestID)
+	if err != nil {
+		t.Fatalf("read structured token entries: %v", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var metric, planKey, algorithm, windowKey string
+		var reserved, settled, released int64
+		if err := rows.Scan(&metric, &planKey, &algorithm, &windowKey, &reserved, &settled, &released); err != nil {
+			t.Fatalf("scan structured token entry: %v", err)
+		}
+		want, ok := expected[metric]
+		if !ok || planKey != dataPlaneE2EStructuredTokenPlan || algorithm != quota.CalendarAlgorithm ||
+			!strings.HasPrefix(windowKey, "utc:v1:1d:") || reserved != want.reserved ||
+			settled != want.settled || released != want.reserved-want.settled {
+			t.Fatalf("structured token entry = metric:%s plan:%s algorithm:%s window:%s units:%d/%d/%d want:%+v",
+				metric, planKey, algorithm, windowKey, reserved, settled, released, want)
+		}
+		if _, duplicate := seen[metric]; duplicate {
+			t.Fatalf("structured token entry repeated metric %q", metric)
+		}
+		seen[metric] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate structured token entries: %v", err)
+	}
+	if len(seen) != len(expected) {
+		t.Fatalf("structured token entries = %v, want input and total metrics", seen)
+	}
 }
 
 func assertDataPlaneE2EHardCostDenial(

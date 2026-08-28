@@ -1170,7 +1170,9 @@ func resolveTrustedInputProfile(
 		return protocol.TrustedInputProfile{}, policy.ErrConfiguration
 	}
 	profile, ok := snapshot.InputAccountingProfile(model.InputAccountingRef)
-	if !ok {
+	if !ok || profile.Protocol != decision.Feature.Protocol ||
+		profile.PhysicalModel != model.UpstreamModel ||
+		!slices.Contains(model.Capabilities, profile.Protocol) {
 		return protocol.TrustedInputProfile{}, policy.ErrConfiguration
 	}
 	return protocol.TrustedInputProfile{
@@ -1193,6 +1195,7 @@ func validateTrustedInputPreflight(
 	expectedInputBound, boundOK := trustedInputBoundFromProfile(profile, preflight)
 	if preflight.ProfileID != profile.ID || preflight.ProfileDigest != profile.Digest() ||
 		preflight.Protocol != profile.Protocol || preflight.Method != profile.Method ||
+		preflight.Protocol != decision.Feature.Protocol ||
 		preflight.PhysicalModel != decision.Model.UpstreamModel ||
 		preflight.PhysicalModel != profile.PhysicalModel ||
 		preflight.RequestBytes <= 0 || preflight.RequestBytes > maximumRequestBodyLimit ||
@@ -1575,11 +1578,21 @@ func protocolUsesOutputTokens(protocolID string) bool {
 func protocolSupportsLimitMetric(protocolID, metric string) bool {
 	switch metric {
 	case quota.InputTokensMetric, quota.TotalTokensMetric:
-		return protocolID == protocol.OpenAIChatID
+		return protocolSupportsTrustedInputPreflight(protocolID)
 	case quota.OutputTokensMetric, quota.ConcurrentStreamsMetric:
 		return protocolUsesOutputTokens(protocolID)
 	default:
 		return true
+	}
+}
+
+func protocolSupportsTrustedInputPreflight(protocolID string) bool {
+	switch protocolID {
+	case protocol.OpenAIResponsesID, protocol.OpenAIChatID,
+		protocol.OpenAIEmbeddingsID, protocol.AnthropicMessagesID:
+		return true
+	default:
+		return false
 	}
 }
 
