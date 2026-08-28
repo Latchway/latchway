@@ -147,6 +147,8 @@ func TestCredentialSelfTestKeyAndStoredResultValidation(t *testing.T) {
 		{name: "decimal", body: `{"data":{"is_free_tier":false,"limit":1,"limit_remaining":1e-2}}`, cost: 10_000_000, ok: true},
 		{name: "insufficient", body: `{"data":{"is_free_tier":false,"limit":1,"limit_remaining":0.009}}`, cost: 10_000_000, ok: false},
 		{name: "missing", body: `{"data":{"is_free_tier":false,"limit":1}}`, cost: 1, ok: false},
+		{name: "missing data", body: `{"status":"ok"}`, cost: 1, ok: false},
+		{name: "duplicate credit", body: `{"data":{"is_free_tier":false,"limit":1,"limit_remaining":1,"limit_remaining":0}}`, cost: 1, ok: false},
 		{name: "trailing", body: `{"data":{"is_free_tier":true}} {}`, cost: 1, ok: false},
 	} {
 		test := test

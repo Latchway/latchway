@@ -25,6 +25,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dataplane"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/pricing"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/secrets"
@@ -456,33 +457,32 @@ func (runner *productionCredentialSelfTests) verifyOpenRouterKey(
 }
 
 func validateOpenRouterKeyInformation(body []byte, maximumCost int64) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	var envelope struct {
-		Data *struct {
-			IsFreeTier     bool            `json:"is_free_tier"`
-			Limit          json.RawMessage `json:"limit"`
-			LimitRemaining json.RawMessage `json:"limit_remaining"`
-		} `json:"data"`
-	}
-	if err := decoder.Decode(&envelope); err != nil {
+	decoded, err := jsonsafe.Decode(body)
+	if err != nil {
 		return errors.New("OpenRouter key response is malformed")
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return errors.New("OpenRouter key response has trailing data")
+	envelope, ok := decoded.(map[string]any)
+	if !ok {
+		return errors.New("OpenRouter key response is malformed")
 	}
-	if envelope.Data == nil {
+	dataValue, present := envelope["data"]
+	data, ok := dataValue.(map[string]any)
+	if !present || !ok {
 		return errors.New("OpenRouter key response omitted key information")
 	}
-	if envelope.Data.IsFreeTier {
+	isFreeTier, ok := data["is_free_tier"].(bool)
+	if !ok {
+		return errors.New("OpenRouter key response omitted its access tier")
+	}
+	if isFreeTier {
 		return nil
 	}
-	if bytes.Equal(bytes.TrimSpace(envelope.Data.Limit), []byte("null")) &&
-		bytes.Equal(bytes.TrimSpace(envelope.Data.LimitRemaining), []byte("null")) {
+	limit, hasLimit := data["limit"]
+	remainingValue, hasRemaining := data["limit_remaining"]
+	if hasLimit && hasRemaining && limit == nil && remainingValue == nil {
 		return nil
 	}
-	remaining, ok := jsonNumberValue(envelope.Data.LimitRemaining)
+	remaining, ok := remainingValue.(json.Number)
 	if !ok {
 		return errors.New("OpenRouter key response omitted available credit")
 	}
@@ -493,21 +493,10 @@ func validateOpenRouterKeyInformation(body []byte, maximumCost int64) error {
 	return nil
 }
 
-func jsonNumberValue(value json.RawMessage) (json.Number, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(value))
-	decoder.UseNumber()
-	var number json.Number
-	if err := decoder.Decode(&number); err != nil {
-		return "", false
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return "", false
-	}
-	return number, true
-}
-
 func decimalUSDToNanoUSD(value string) (int64, bool) {
+	if value == "" || len(value) > 128 {
+		return 0, false
+	}
 	rational, ok := new(big.Rat).SetString(value)
 	if !ok || rational.Sign() < 0 {
 		return 0, false
