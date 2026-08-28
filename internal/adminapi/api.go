@@ -26,6 +26,7 @@ import (
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/useroverride"
 )
 
 const (
@@ -40,6 +41,7 @@ type API struct {
 	auth            *adminauth.Store
 	control         *controlplane.Store
 	configurations  *configuration.Store
+	overrides       *useroverride.Store
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -61,6 +63,10 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, err
 	}
+	overrides, err := useroverride.NewStore(pool)
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		return nil, errors.New("admin API logger is nil")
 	}
@@ -70,7 +76,8 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 		return nil, fmt.Errorf("create login equalization hash: %w", err)
 	}
 	return &API{
-		auth: auth, control: control, configurations: configurations, hasher: hasher, dummyHash: dummyHash,
+		auth: auth, control: control, configurations: configurations, overrides: overrides,
+		hasher: hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
 	}, nil
@@ -121,6 +128,8 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/api-tokens", api.apiTokens)
 		protected.With(api.mutationProtection).Post("/api-tokens", api.createAPIToken)
 		protected.With(api.mutationProtection).Delete("/api-tokens/{tokenID}", api.revokeAPIToken)
+		protected.With(api.mutationProtection).Put("/users/{userID}/limit-override", api.replaceUserLimitOverride)
+		protected.With(api.mutationProtection).Delete("/users/{userID}/limit-override", api.clearUserLimitOverride)
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The administrative endpoint was not found."})
@@ -660,6 +669,86 @@ func (api *API) revokeAPIToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type userLimitOverrideRequest struct {
+	LimitPlan string          `json:"limit_plan"`
+	Reason    string          `json:"reason"`
+	ExpiresAt json.RawMessage `json:"expires_at"`
+}
+
+func (api *API) replaceUserLimitOverride(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeJSON[userLimitOverrideRequest](r)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The user limit override request is invalid."))
+		return
+	}
+	expiresAt, err := optionalUserOverrideExpiry(request.ExpiresAt)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The user limit override request is invalid."))
+		return
+	}
+	scope, ok := api.userOverrideScope(w, r)
+	if !ok {
+		return
+	}
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	user, err := api.overrides.Replace(r.Context(), mustPrincipal(r.Context()), useroverride.ReplaceInput{
+		Scope: scope, LimitPlan: request.LimitPlan, Reason: request.Reason,
+		ExpiresAt: expiresAt, RequestID: auditRequestID,
+	})
+	if err != nil {
+		api.handleUserOverrideError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func optionalUserOverrideExpiry(encoded json.RawMessage) (*time.Time, error) {
+	if len(encoded) == 0 {
+		return nil, nil
+	}
+	var instant time.Time
+	if bytes.Equal(bytes.TrimSpace(encoded), []byte("null")) || json.Unmarshal(encoded, &instant) != nil {
+		return nil, errors.New("invalid user override expiry")
+	}
+	instant = instant.UTC()
+	return &instant, nil
+}
+
+func (api *API) clearUserLimitOverride(w http.ResponseWriter, r *http.Request) {
+	scope, ok := api.userOverrideScope(w, r)
+	if !ok {
+		return
+	}
+	auditRequestID, err := id.New(id.AdminRequest)
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	err = api.overrides.Clear(r.Context(), mustPrincipal(r.Context()), scope, auditRequestID)
+	if err != nil {
+		api.handleUserOverrideError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) userOverrideScope(w http.ResponseWriter, r *http.Request) (useroverride.AdminScope, bool) {
+	principal := mustPrincipal(r.Context())
+	scope := useroverride.AdminScope{
+		OrganizationID: principal.OrganizationID, EnvironmentID: r.URL.Query().Get("environment_id"),
+		ApplicationUserID: chi.URLParam(r, "userID"),
+	}
+	if id.Validate(scope.EnvironmentID, id.Environment) != nil || id.Validate(scope.ApplicationUserID, id.ApplicationUser) != nil {
+		api.writeProblem(w, r, invalidRequest("The user and environment identifiers are invalid."))
+		return useroverride.AdminScope{}, false
+	}
+	return scope, true
+}
+
 func capabilityStrings(scope adminauth.CapabilitySet) []string {
 	values := scope.Values()
 	result := make([]string, len(values))
@@ -690,6 +779,10 @@ func (api *API) authenticate(next http.Handler) http.Handler {
 		if err != nil {
 			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Administrator authentication is required."})
 			return
+		}
+		if auditState, ok := r.Context().Value(rejectedMutationAuditContextKey{}).(*rejectedMutationAuditState); ok {
+			principalCopy := principal
+			auditState.principal = &principalCopy
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal)))
 	})
@@ -898,6 +991,21 @@ func (api *API) handleConfigurationError(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+func (api *API) handleUserOverrideError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, useroverride.ErrInvalid):
+		api.writeProblem(w, r, invalidRequest("The user limit override is invalid."))
+	case errors.Is(err, useroverride.ErrForbidden):
+		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The administrator cannot manage user limit overrides."})
+	case errors.Is(err, useroverride.ErrNotFound):
+		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The requested user or environment was not found."})
+	case errors.Is(err, useroverride.ErrConfiguration):
+		api.writeProblem(w, r, invalidRequest("The limit plan is not available in the active environment configuration."))
+	default:
+		api.internal(w, r, err)
+	}
+}
+
 func (api *API) handleAdminAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, adminauth.ErrInvalidAdminInput), errors.Is(err, adminauth.ErrEmptyTokenScope), errors.Is(err, adminauth.ErrInvalidCapability):
@@ -932,17 +1040,48 @@ func requestID(ctx context.Context) string {
 	return generated
 }
 
-func (api *API) recordDenied(ctx context.Context, action, resourceType string) {
+type rejectedMutationAuditState struct {
+	principal *adminauth.Principal
+}
+
+type rejectedMutationAuditContextKey struct{}
+
+func (api *API) recordRejectedMutation(
+	ctx context.Context,
+	action string,
+	resourceType string,
+	principal *adminauth.Principal,
+	outcome adminauth.AuditOutcome,
+) error {
 	eventID, eventErr := id.New(id.AuditEvent)
 	requestID, requestErr := id.New(id.AdminRequest)
 	change, changeErr := adminauth.NewSensitiveAuditChange("credential", adminauth.AuditSet)
 	if eventErr != nil || requestErr != nil || changeErr != nil {
-		return
+		return errors.New("construct rejected mutation audit")
 	}
-	mutation, err := adminauth.NewAuditMutation(eventID, "", "", adminauth.SystemActor(), action, resourceType, requestID, adminauth.AuditDenied, requestID, time.Now().UTC(), []adminauth.AuditChange{change})
-	if err == nil {
-		_ = api.auth.RecordAuditMutation(ctx, mutation)
+	actor := adminauth.SystemActor()
+	organizationID := ""
+	if principal != nil {
+		organizationID = principal.OrganizationID
+		var actorErr error
+		if principal.Method == adminauth.AuthenticationAPIToken {
+			actor, actorErr = adminauth.NewAPITokenActor(principal.CredentialID)
+		} else {
+			actor, actorErr = adminauth.NewAdminUserActor(principal.AdminUserID)
+		}
+		if actorErr != nil {
+			return actorErr
+		}
 	}
+	mutation, err := adminauth.NewAuditMutation(
+		eventID, organizationID, "", actor, action, resourceType,
+		requestID, outcome, requestID, time.Now().UTC(),
+		[]adminauth.AuditChange{change},
+	)
+	if err != nil {
+		return err
+	}
+	return api.auth.RecordAuditMutation(ctx, mutation)
 }
 
 func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
@@ -951,11 +1090,28 @@ func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		state := &rejectedMutationAuditState{}
+		r = r.WithContext(context.WithValue(
+			r.Context(), rejectedMutationAuditContextKey{}, state,
+		))
 		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(wrapped, r)
 		if wrapped.Status() >= http.StatusBadRequest {
 			action, resourceType := rejectedMutationDescriptor(r.Method, r.URL.Path)
-			api.recordDenied(r.Context(), action, resourceType)
+			outcome := adminauth.AuditDenied
+			if wrapped.Status() >= http.StatusInternalServerError {
+				outcome = adminauth.AuditFailed
+			}
+			auditContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+			defer cancel()
+			if err := api.recordRejectedMutation(
+				auditContext, action, resourceType, state.principal, outcome,
+			); err != nil {
+				api.logger.ErrorContext(
+					r.Context(), "record rejected Admin API mutation",
+					"action", action, "error_class", fmt.Sprintf("%T", err),
+				)
+			}
 		}
 	})
 }
@@ -990,6 +1146,10 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.api_token_create", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodDelete:
 		return "admin.api_token_revoke", "admin_request"
+	case strings.HasSuffix(path, "/limit-override") && method == http.MethodPut:
+		return "admin.user_limit_override_replace", "admin_request"
+	case strings.HasSuffix(path, "/limit-override") && method == http.MethodDelete:
+		return "admin.user_limit_override_clear", "admin_request"
 	default:
 		return "admin.request_rejected", "admin_request"
 	}
