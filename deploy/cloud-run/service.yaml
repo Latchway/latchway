@@ -42,8 +42,11 @@ spec:
               value: "true"
             - name: LATCHWAY_DB_MAX_CONNECTIONS
               value: "20"
+            # Cloud Run sends SIGTERM only 10 seconds before forced shutdown.
+            - name: LATCHWAY_SHUTDOWN_TIMEOUT
+              value: "8s"
             - name: LATCHWAY_PUBLIC_ORIGIN
-              value: ${LATCHWAY_PUBLIC_ORIGIN}
+              value: "${LATCHWAY_PUBLIC_ORIGIN}"
             - name: LATCHWAY_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -53,6 +56,11 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: latchway-master-key
+                  key: latest
+            - name: LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: latchway-admin-bootstrap-token
                   key: latest
           startupProbe:
             initialDelaySeconds: 1

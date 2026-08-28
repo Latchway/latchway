@@ -9,7 +9,10 @@ kill_timeout = "35s"
 
 [deploy]
   release_command = "/latchway migrate up"
+  release_command_timeout = "15m"
   strategy = "rolling"
+  max_unavailable = 1
+  wait_timeout = "10m"
 
 [env]
   PORT = "8080"
@@ -31,6 +34,13 @@ kill_timeout = "35s"
     type = "requests"
     soft_limit = 80
     hard_limit = 100
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/healthz"
 
   [[http_service.checks]]
     grace_period = "30s"

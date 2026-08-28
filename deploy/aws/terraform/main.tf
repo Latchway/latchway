@@ -316,11 +316,13 @@ resource "aws_iam_role_policy_attachment" "execution" {
 data "aws_iam_policy_document" "secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue"]
-    resources = [
-      aws_secretsmanager_secret.database_url.arn,
-      aws_secretsmanager_secret.master_key.arn,
-      aws_secretsmanager_secret.admin_bootstrap.arn,
-    ]
+    resources = concat(
+      [
+        aws_secretsmanager_secret.database_url.arn,
+        aws_secretsmanager_secret.master_key.arn,
+      ],
+      var.inject_admin_bootstrap_token ? [aws_secretsmanager_secret.admin_bootstrap.arn] : [],
+    )
   }
 }
 
@@ -396,6 +398,7 @@ resource "aws_ecs_task_definition" "main" {
         { name = "LATCHWAY_MIGRATE_ON_START", value = tostring(var.migrate_on_start) },
         { name = "LATCHWAY_DB_MAX_CONNECTIONS", value = tostring(var.db_connections_per_task) },
         { name = "LATCHWAY_PUBLIC_ORIGIN", value = var.public_origin },
+        { name = "LATCHWAY_SHUTDOWN_TIMEOUT", value = "30s" },
       ]
       secrets = local.runtime_secrets
 
@@ -472,11 +475,12 @@ resource "aws_lb_listener" "https" {
 }
 
 resource "aws_ecs_service" "main" {
-  name            = var.name
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.main.arn
-  desired_count   = var.desired_tasks
-  launch_type     = "FARGATE"
+  name                  = var.name
+  cluster               = aws_ecs_cluster.main.id
+  task_definition       = aws_ecs_task_definition.main.arn
+  desired_count         = var.desired_tasks
+  launch_type           = "FARGATE"
+  wait_for_steady_state = true
 
   enable_execute_command             = false
   health_check_grace_period_seconds  = 120

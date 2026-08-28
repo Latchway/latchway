@@ -88,3 +88,15 @@ variable "allow_unauthenticated" {
   type        = bool
   default     = true
 }
+
+variable "inject_admin_bootstrap_token" {
+  description = "Inject the generated bootstrap token. Set false immediately after the first administrator is created."
+  type        = bool
+  default     = true
+}
+
+variable "migrate_on_start" {
+  description = "Safe first-deploy fallback; set false after adopting the explicit migration-job workflow."
+  type        = bool
+  default     = true
+}

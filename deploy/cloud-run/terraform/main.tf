@@ -60,6 +60,11 @@ resource "random_id" "master_key" {
   byte_length = 32
 }
 
+resource "random_password" "admin_bootstrap" {
+  length  = 48
+  special = false
+}
+
 resource "google_sql_database_instance" "main" {
   name             = "${var.service_name}-postgres"
   region           = var.region
@@ -141,6 +146,19 @@ resource "google_secret_manager_secret_version" "master_key" {
   secret_data = random_id.master_key.b64_std
 }
 
+resource "google_secret_manager_secret" "admin_bootstrap" {
+  secret_id = "${var.service_name}-admin-bootstrap-token"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "admin_bootstrap" {
+  secret      = google_secret_manager_secret.admin_bootstrap.id
+  secret_data = random_password.admin_bootstrap.result
+}
+
 resource "google_service_account" "runtime" {
   account_id   = "${var.service_name}-runtime"
   display_name = "Latchway Cloud Run runtime"
@@ -153,10 +171,15 @@ resource "google_project_iam_member" "cloud_sql_client" {
 }
 
 resource "google_secret_manager_secret_iam_member" "runtime" {
-  for_each = {
-    database_url = google_secret_manager_secret.database_url.secret_id
-    master_key   = google_secret_manager_secret.master_key.secret_id
-  }
+  for_each = merge(
+    {
+      database_url = google_secret_manager_secret.database_url.secret_id
+      master_key   = google_secret_manager_secret.master_key.secret_id
+    },
+    var.inject_admin_bootstrap_token ? {
+      admin_bootstrap = google_secret_manager_secret.admin_bootstrap.secret_id
+    } : {},
+  )
 
   project   = var.project_id
   secret_id = each.value
@@ -222,11 +245,15 @@ resource "google_cloud_run_v2_service" "main" {
       }
       env {
         name  = "LATCHWAY_MIGRATE_ON_START"
-        value = "true"
+        value = tostring(var.migrate_on_start)
       }
       env {
         name  = "LATCHWAY_DB_MAX_CONNECTIONS"
         value = tostring(var.db_connections_per_instance)
+      }
+      env {
+        name  = "LATCHWAY_SHUTDOWN_TIMEOUT"
+        value = "8s"
       }
       env {
         name = "LATCHWAY_DATABASE_URL"
@@ -243,6 +270,18 @@ resource "google_cloud_run_v2_service" "main" {
           secret_key_ref {
             secret  = google_secret_manager_secret.master_key.secret_id
             version = "latest"
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.inject_admin_bootstrap_token ? [1] : []
+        content {
+          name = "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.admin_bootstrap.secret_id
+              version = "latest"
+            }
           }
         }
       }

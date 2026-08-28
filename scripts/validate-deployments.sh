@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+output=${1:-/tmp/latchway-deployment-static.json}
+terraform_image='hashicorp/terraform@sha256:6bbb82d575aa7bd4f0a2c6e3a0838ab9590426c08a71d7a2783643f01004d356'
+release_image='ghcr.io/latchway/latchway@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+
+python3 scripts/deployment-evidence.py static --output "$output"
+python3 -m unittest scripts/test_deployment_evidence.py
+
+LATCHWAY_MASTER_KEY='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+  docker compose -f compose.yaml config --quiet
+
+LATCHWAY_IMAGE="$release_image" \
+POSTGRES_PASSWORD='deployment-static-password' \
+LATCHWAY_DATABASE_URL='postgresql://latchway:deployment-static-password@postgres:5432/latchway?sslmode=disable' \
+LATCHWAY_MASTER_KEY='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+LATCHWAY_PUBLIC_ORIGIN='https://ai.example.com' \
+  docker compose -f deploy/compose/compose.release.yaml config --quiet
+
+docker run --rm \
+  --volume "$PWD/deploy/cloud-run/terraform:/work" \
+  --workdir /work \
+  --env TF_DATA_DIR=/tmp/latchway-cloud-run-tfdata \
+  --entrypoint /bin/sh \
+  "$terraform_image" \
+  -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
+
+docker run --rm \
+  --volume "$PWD/deploy/aws/terraform:/work" \
+  --workdir /work \
+  --env TF_DATA_DIR=/tmp/latchway-aws-tfdata \
+  --entrypoint /bin/sh \
+  "$terraform_image" \
+  -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
+
+if command -v fly >/dev/null 2>&1; then
+  fly config validate --config deploy/fly/fly.toml
+fi
+
+printf 'deployment validation passed; evidence: %s\n' "$output"

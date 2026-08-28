@@ -6,3 +6,5 @@ public_origin = "https://ai.example.com"
 min_instances               = 1
 max_instances               = 10
 db_connections_per_instance = 20
+inject_admin_bootstrap_token = true
+migrate_on_start             = true

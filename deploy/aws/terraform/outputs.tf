@@ -10,6 +10,18 @@ output "task_definition_arn" {
   value = aws_ecs_task_definition.main.arn
 }
 
+output "service_arn" {
+  value = aws_ecs_service.main.id
+}
+
+output "configured_image" {
+  value = var.image
+}
+
+output "cloudwatch_log_group" {
+  value = aws_cloudwatch_log_group.main.name
+}
+
 output "private_subnet_ids" {
   value = [for subnet in aws_subnet.private : subnet.id]
 }
