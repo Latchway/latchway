@@ -273,6 +273,48 @@ def validate_openapi(path: Path, spec: dict[str, Any], contract_version: str) ->
     walk_refs(path, spec)
 
 
+def validate_admin_user_override_contract(path: Path, spec: dict[str, Any]) -> None:
+    operations = {
+        ("/admin/v1/users/{userId}", "get"),
+        ("/admin/v1/users/{userId}/block", "post"),
+        ("/admin/v1/users/{userId}/unblock", "post"),
+        ("/admin/v1/users/{userId}/limit-override", "put"),
+        ("/admin/v1/users/{userId}/limit-override", "delete"),
+    }
+    for route, method in operations:
+        operation = spec.get("paths", {}).get(route, {}).get(method)
+        if not isinstance(operation, dict):
+            raise ValueError(f"{path}: missing {method.upper()} {route}")
+        parameters = [resolved_parameter(path, spec, item) for item in operation.get("parameters", [])]
+        environment = [item for item in parameters if item.get("in") == "query" and item.get("name") == "environment_id"]
+        if len(environment) != 1 or environment[0].get("required") is not True:
+            raise ValueError(f"{path}: {method.upper()} {route} requires one environment_id query parameter")
+
+    put = spec["paths"]["/admin/v1/users/{userId}/limit-override"]["put"]
+    request_schema = put.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {})
+    if set(request_schema.get("required", [])) != {"limit_plan", "reason"}:
+        raise ValueError(f"{path}: limit override PUT must require limit_plan and reason")
+    reason = request_schema.get("properties", {}).get("reason", {})
+    if reason.get("minLength") != 1 or reason.get("maxLength") != 500:
+        raise ValueError(f"{path}: limit override reason bounds must match PostgreSQL")
+
+    schemas = spec.get("components", {}).get("schemas", {})
+    user = schemas.get("ApplicationUser", {})
+    if "identity_providers" not in user.get("required", []) or "identity_provider" in user.get("properties", {}):
+        raise ValueError(f"{path}: ApplicationUser must require plural identity_providers")
+    providers = user.get("properties", {}).get("identity_providers", {})
+    if providers.get("type") != "array" or providers.get("minItems") != 1 or providers.get("uniqueItems") is not True:
+        raise ValueError(f"{path}: ApplicationUser.identity_providers must be a non-empty unique array")
+    if user.get("properties", {}).get("limit_plan_override", {}).get("$ref") != "#/components/schemas/UserLimitOverride":
+        raise ValueError(f"{path}: ApplicationUser.limit_plan_override must be structured")
+
+    override = schemas.get("UserLimitOverride", {})
+    if set(override.get("required", [])) != {"id", "limit_plan", "reason", "created_at"}:
+        raise ValueError(f"{path}: UserLimitOverride required fields drifted")
+    if set(override.get("properties", {})) != {"id", "limit_plan", "reason", "created_at", "expires_at"}:
+        raise ValueError(f"{path}: UserLimitOverride properties drifted")
+
+
 def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
@@ -384,7 +426,7 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "0.1.0" or manifest["wire_protocol"]["current"] != 1:
+    if contract_version != "0.2.0" or manifest["wire_protocol"]["current"] != 1:
         raise ValueError("unexpected contract or wire protocol version")
 
     client_path = API / "client.openapi.yaml"
@@ -393,6 +435,7 @@ def main() -> None:
     admin = load_document(admin_path)
     validate_openapi(client_path, client, contract_version)
     validate_openapi(admin_path, admin, contract_version)
+    validate_admin_user_override_contract(admin_path, admin)
 
     registry = load_document(API / "error-codes.yaml")
     if registry["contract_version"] != contract_version:

@@ -1,5 +1,5 @@
 registry_version: 1
-contract_version: 0.1.0
+contract_version: 0.2.0
 problem_media_type: application/problem+json
 fields:
   required: [type, title, status, detail, code, request_id, retryable]

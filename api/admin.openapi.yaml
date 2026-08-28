@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 0.1.0
+  version: 0.2.0
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -543,6 +543,7 @@ paths:
       summary: Inspect one pseudonymous user and safe normalized claims.
       parameters:
         - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
       responses:
         '200':
           description: User details.
@@ -557,6 +558,7 @@ paths:
       summary: Block a user and revoke active sessions.
       parameters:
         - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/CSRFToken'
       responses:
         '200':
@@ -572,6 +574,7 @@ paths:
       summary: Restore future session eligibility without restoring revoked sessions.
       parameters:
         - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/CSRFToken'
       responses:
         '200':
@@ -587,6 +590,7 @@ paths:
       summary: Replace the user's explicit limit-plan override.
       parameters:
         - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
         required: true
@@ -595,17 +599,28 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [limit_plan]
+              required: [limit_plan, reason]
               properties:
                 limit_plan: { $ref: '#/components/schemas/Identifier' }
                 expires_at: { type: string, format: date-time }
-                reason: { type: string, minLength: 1, maxLength: 512 }
+                reason: { type: string, minLength: 1, maxLength: 500 }
       responses:
         '200':
           description: Updated user.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApplicationUser' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Users]
+      operationId: clearUserLimitOverride
+      summary: Clear the user's explicit limit-plan override.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Limit-plan override cleared. }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/installations:
     get:
@@ -932,6 +947,9 @@ components:
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
+    UserOverrideID:
+      type: string
+      pattern: '^uov_[A-Za-z0-9_-]{16,128}$'
     InstallationID:
       type: string
       pattern: '^ins_[A-Za-z0-9_-]{16,128}$'
@@ -1222,16 +1240,30 @@ components:
     ApplicationUser:
       type: object
       additionalProperties: false
-      required: [id, environment_id, status, identity_provider, normalized_claims, created_at]
+      required: [id, environment_id, status, identity_providers, normalized_claims, created_at]
       properties:
         id: { $ref: '#/components/schemas/UserID' }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
         status: { type: string, enum: [active, blocked] }
-        identity_provider: { $ref: '#/components/schemas/Identifier' }
+        identity_providers:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
         normalized_claims: { type: object, maxProperties: 64, additionalProperties: true }
-        limit_plan_override: { $ref: '#/components/schemas/Identifier' }
+        limit_plan_override: { $ref: '#/components/schemas/UserLimitOverride' }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
+    UserLimitOverride:
+      type: object
+      additionalProperties: false
+      required: [id, limit_plan, reason, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/UserOverrideID' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
     UserPage:
       type: object
       additionalProperties: false
@@ -1392,7 +1424,7 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.1.0 }
+        contract_version: { type: string, const: 0.2.0 }
         protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }

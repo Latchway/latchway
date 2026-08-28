@@ -4,6 +4,10 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Advance the draft contract to 0.2.0 for the Admin-only user-override schema correction while retaining wire protocol version 1.
+
 ### Added
 
 - Phase 0 repository baseline and implementation status records.

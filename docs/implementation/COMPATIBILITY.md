@@ -4,15 +4,17 @@
 
 | Field | Value |
 | --- | --- |
-| Contract version | `0.1.0` |
+| Contract version | `0.2.0` |
 | Wire protocol version | `1` |
-| Status | Draft and unreleased; no compatibility promise |
+| Status | Draft and unreleased; Admin-only contract correction, no compatibility promise |
 | Latest passing core implementation | `6304b655d0e2690cbe154b4a66c4ec87966f4387` |
-| Synchronized bundle baseline core | `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
-| Deterministic bundle SHA-256 | `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12` |
+| Synchronized bundle baseline core | Pending the isolated `0.2.0` contract commit; SDK locks temporarily retain `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
+| Deterministic bundle SHA-256 | `a4b320906d1bb02712451224c2111d3a673b4df24631c2f1de01ca5dfbfd0059` |
 | Database schema version | `9` |
 | Minimum released server | None |
 | Previous wire version supported | None; version 1 is the initial draft |
+
+Contract `0.2.0` is an Admin-only schema correction. It scopes user lookup, block, unblock, limit-override replacement, and limit-override clearing to a required environment; adds the clear operation; requires an override reason of at most 500 characters; corrects `identity_providers` to an array; and returns the structured override record with its identifier, plan, reason, creation time, and optional expiry. Because these are normative Admin API and bundle changes during the pre-1.0 period, the contract advances from `0.1.0` to `0.2.0`. Client session endpoints, headers, DPoP and attestation formats, and client wire semantics do not change, so wire protocol version `1` remains current. The SDKs still synchronize the whole-bundle contract version, fixtures, and exact-match constants; their declared server compatibility therefore advances to `0.2.0`/`0.2.x` without claiming a new device transport protocol.
 
 At the latest passing core commit, the server also composes a local authenticated OpenAI Chat vertical with policy, atomic mixed request-count/output-token/cost reservation, bounded rolling token buckets for the currently supported `logical_requests` and `output_tokens` metrics, bounded hard UTC-calendar cost rules, durable request/stream concurrency leases, an exact adapter-applied output cap, protected upstream dispatch, provider-usage settlement and release, conservative stateful unknown charging, provenance-bearing usage, exact quota-store reservation replay, DPoP replay rejection, atomic daily denial without unrelated mutation, authenticated quota snapshots for supported context-stable plans, and distinct `api`/`worker`/`all` process responsibilities. One semantic request is exactly `1,000,000,000,000` integer balance quanta; an output reservation debits the exact adapter-applied cap. The static output clamp is the minimum of the feature absolute maximum, every applicable per-request maximum, and every applicable token-bucket capacity, independent of rule order and current balance. Token buckets credit every complete `1us` PostgreSQL timestamp tick, preserve exact internal retry timestamps beyond a `time.Duration` horizon, and keep `used_units=0` and `reserved_units=0`. A known successful measured output refunds only unused units; equal usage avoids a bucket write and zero usage refunds in full. Failures, unknown usage, and dispatched expiry retain the full debit; pre-dispatch release and undispatched expiry refund it. Refunds after a policy decrease saturate at the new capacity, and overflow-safe public `Retry-After` advice caps at `MaxInt32` seconds. Accepted replay is stable and denied replay is mutation-free. Per-request-only output and non-applicable stream policies retain a durable entryless lifecycle. Concurrency counts active leases in `reserved_units`, retains released audit rows, emits no occupancy usage record, and maps denial to feature-scoped `concurrency_exceeded` without time-based retry guidance. Immutable USD catalogs attribute known successful and failed attempts with `request fee + ceil(input tokens * input rate / 1,000,000) + ceil(output tokens * output rate / 1,000,000)`, rounding token classes separately. The attempt and dedicated cost record persist catalog ID, USD, exact configuration revision, and calculated confidence; the cost record additionally carries `configured_flat_rate:<attempt-id>` provenance. Explicit zero is durable; unknown usage or overflow retains selected metadata without a false cost row; exact RFC 3339 activation precision is preserved; provider cost extensions are ignored for attribution. Hard cost activates only as `cost_nano_usd/calendar` where configured request/output pricing and a zero input-token rate make the configured cap-bounded predispatch reservation exact. Known cost refunds unused capacity; unknown post-dispatch cost charges the reservation. Quota snapshots use one repeatable-read, read-only quota transaction, project missing buckets as pristine, preserve distinct calendar/token/per-request/concurrency/cost meanings, and perform no route selection or upstream call. They require stable access/plan resolution and fail closed for route-, upstream-, and model-scoped rules. DPoP authorization still consumes replay state. This is bounded debug/mock evidence; user overrides, input/total-token limits, other cost shapes, input-priced hard-cost routes, upstream-reported pricing, retries, the rest of the quota engine, native attestation, complete control plane, operations, deployment, and release gates are not implemented. General token-bucket support is complete only for the currently supported `logical_requests` and `output_tokens` metrics.
 
@@ -24,7 +26,7 @@ The bounded hard-cost implementation is split across quota lifecycle `925cb91fa9
 
 Schema version 9 has a bounded recovery limitation: an expired per-request-only entryless attempt cannot reconstruct its applied cap or add an unknown-output usage row. That rule shape has no durable capacity to recover or mutate; normal known settlement persists provider usage. This limitation is not a compatibility claim or a release exception.
 
-All four SDK repositories still pin the synchronized baseline core and bundle hash above, not the latest passing implementation. That synchronization proves only that the repositories identify the same draft contract artifact. It does not prove behavioral compatibility. A fresh lock decision, shared vectors, current-core live server conformance, published dependency resolution where applicable, and the externally blocked device gates must pass before compatibility is reported.
+All four SDK repositories pin contract `0.2.0`, wire protocol `1`, and the deterministic bundle hash above. Until the isolated contract commit exists, their `core_commit` fields and the JavaScript/React Native verifier commit constants intentionally retain the previous reviewed baseline and must be replaced together with the new immutable commit. This interim synchronization proves only that the repositories identify the same working-tree draft contract artifact. It does not prove behavioral compatibility. Shared vectors, current-core live server conformance, published dependency resolution where applicable, and the externally blocked device gates must pass before compatibility is reported.
 
 ## Required client declaration
 
@@ -65,11 +67,11 @@ Each SDK's existing lock serialization now records these shared values:
 
 | Field | Synchronized value |
 | --- | --- |
-| Contract version | `0.1.0` |
-| Core commit | `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
-| Bundle SHA-256 | `74fc7ada8d835d46b25f763a703b79003cdc8243d6f4b2509645e5a82367ab12` |
+| Contract version | `0.2.0` |
+| Core commit | Pending isolated contract commit; temporarily `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` |
+| Bundle SHA-256 | `a4b320906d1bb02712451224c2111d3a673b4df24631c2f1de01ca5dfbfd0059` |
 | Wire protocol | `1` |
-| Declared minimum server version | `0.1.0` |
-| Declared maximum tested server series | `0.1.x` |
+| Declared minimum server version | `0.2.0` |
+| Declared maximum tested server series | `0.2.x` |
 
 The field name for wire protocol is repository-specific (`wire_protocol` or `wire_protocol_version`). Release-label metadata is also repository-specific and is not evidence that a server or SDK release exists. No release tag, registry publication, or minimum compatible released pair is claimed by this document.
