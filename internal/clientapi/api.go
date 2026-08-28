@@ -516,7 +516,7 @@ func safeFailureDetail(code string) string {
 	case "dpop_replayed":
 		return "The DPoP proof has already been used."
 	case "dpop_nonce_required":
-		return "A new DPoP proof using the response nonce is required."
+		return "A fresh server DPoP nonce is required."
 	case "session_expired":
 		return "The Latchway session is expired."
 	case "session_revoked":

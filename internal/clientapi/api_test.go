@@ -519,6 +519,11 @@ func TestDependencyProblemMappingIsStableAndRedacted(t *testing.T) {
 		if response.Header().Get("DPoP-Nonce") != nonce {
 			t.Fatalf("DPoP-Nonce = %q", response.Header().Get("DPoP-Nonce"))
 		}
+		var document map[string]any
+		decodeJSONResponse(t, response, &document)
+		if document["detail"] != "A fresh server DPoP nonce is required." {
+			t.Fatalf("DPoP nonce detail = %#v", document["detail"])
+		}
 	})
 
 	invalidFailures := []error{
