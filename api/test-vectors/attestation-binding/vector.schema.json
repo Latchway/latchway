@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/test-vectors/0.4.0/attestation-binding-vector-set.schema.json",
+  "$id": "https://latchway.dev/schemas/test-vectors/0.5.0/attestation-binding-vector-set.schema.json",
   "title": "Latchway attestation-binding vector set",
   "type": "object",
   "additionalProperties": false,
   "required": ["format_version", "contract_version", "binding_version", "canonicalization", "hash", "vectors"],
   "properties": {
     "format_version": { "type": "integer", "const": 1 },
-    "contract_version": { "type": "string", "const": "0.4.0" },
+    "contract_version": { "type": "string", "const": "0.5.0" },
     "binding_version": { "type": "integer", "const": 1 },
     "canonicalization": { "type": "string", "const": "RFC 8785 JCS" },
     "hash": { "type": "string", "const": "SHA-256" },

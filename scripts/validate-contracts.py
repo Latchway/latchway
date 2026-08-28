@@ -510,7 +510,7 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "0.4.0" or manifest["wire_protocol"]["current"] != 1:
+    if contract_version != "0.5.0" or manifest["wire_protocol"]["current"] != 1:
         raise ValueError("unexpected contract or wire protocol version")
 
     client_path = API / "client.openapi.yaml"

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 0.4.0
+  version: 0.5.0
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -1440,7 +1440,7 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.4.0 }
+        contract_version: { type: string, const: 0.5.0 }
         protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }

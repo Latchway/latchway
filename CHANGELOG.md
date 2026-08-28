@@ -6,6 +6,9 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Changed
 
+- Advance the draft contract to 0.5.0 for closed, provider-specific Apple App
+  Attest and Google Play Integrity configuration while retaining wire protocol
+  version 1.
 - Advance the draft contract to 0.4.0 for physical-model-bound input
   accounting profiles and a restricted, conservative OpenAI Chat preflight
   that enables hard calendar input/total quotas and input-priced cost

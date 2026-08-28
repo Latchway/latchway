@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/protocol/0.4.0/attestation-binding-v1.schema.json",
+  "$id": "https://latchway.dev/schemas/protocol/0.5.0/attestation-binding-v1.schema.json",
   "title": "Latchway AttestationBinding version 1",
   "type": "object",
   "additionalProperties": false,
