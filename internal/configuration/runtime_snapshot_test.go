@@ -49,7 +49,7 @@ func TestCompiledLimitRejectsDuplicateJSONMembers(t *testing.T) {
 		},
 		{
 			name: "capacity",
-			raw:  `{"metric":"logical_requests","algorithm":"token_bucket","scope":["user"],"capacity":9,"capacity":10,"refillPerSecond":1,"hard":true}`,
+			raw:  `{"metric":"output_tokens","algorithm":"token_bucket","scope":["user"],"capacity":9,"capacity":10,"refillPerSecond":1,"hard":true}`,
 		},
 		{
 			name: "refill",
@@ -689,9 +689,11 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
-			name: "unsupported output token bucket",
+			name: "output token bucket with per-request field",
 			mutate: func(spec map[string]any) {
-				asLogicalTokenBucket(spec)["metric"] = "output_tokens"
+				limit := asLogicalTokenBucket(spec)
+				limit["metric"] = "output_tokens"
+				limit["perRequestMaximum"] = json.Number("1")
 			},
 		},
 		{
@@ -747,6 +749,20 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 				duplicate := deepClone(first).(map[string]any)
 				duplicate["scope"] = []any{"user", "model"}
 				duplicate["perRequestMaximum"] = json.Number("200")
+				plan["limits"] = []any{first, duplicate}
+			},
+		},
+		{
+			name: "duplicate output token bucket identity",
+			mutate: func(spec map[string]any) {
+				plan := objectArray(spec, "limitPlans")[0]
+				first := asLogicalTokenBucket(spec)
+				first["metric"] = "output_tokens"
+				first["scope"] = []any{"feature", "user"}
+				duplicate := deepClone(first).(map[string]any)
+				duplicate["scope"] = []any{"user", "feature"}
+				duplicate["capacity"] = json.Number("20")
+				duplicate["refillPerSecond"] = json.Number("0.5")
 				plan["limits"] = []any{first, duplicate}
 			},
 		},

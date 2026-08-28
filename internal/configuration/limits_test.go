@@ -102,6 +102,30 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenAndC
 	if !ok || changedTokenBucketIdentity != tokenBucketIdentity {
 		t.Fatalf("token-bucket capacity/rate changed immutable identity: %#v != %#v", changedTokenBucketIdentity, tokenBucketIdentity)
 	}
+	outputTokenBucket, outputTokenBucketIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"feature", "user"},
+		Capacity: maximumExecutableTokenBucketCapacity,
+		RefillPerSecond: RefillRate{
+			Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1,
+		},
+		Hard: true,
+	})
+	if !ok || outputTokenBucket.Capacity != maximumExecutableTokenBucketCapacity ||
+		outputTokenBucket.RefillPerSecond != (RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1}) ||
+		!slices.Equal(outputTokenBucket.Scope, []string{"user", "feature"}) {
+		t.Fatalf("output-token token bucket = %+v ok=%t", outputTokenBucket, ok)
+	}
+	if outputTokenBucketIdentity == tokenBucketIdentity {
+		t.Fatal("logical-request and output-token buckets shared an immutable identity")
+	}
+	_, changedOutputTokenBucketIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user", "feature"},
+		Capacity: 1, RefillPerSecond: RefillRate{Numerator: 1, Denominator: 2}, Hard: true,
+	})
+	if !ok || changedOutputTokenBucketIdentity != outputTokenBucketIdentity {
+		t.Fatalf("output-token bucket capacity/rate changed immutable identity: %#v != %#v",
+			changedOutputTokenBucketIdentity, outputTokenBucketIdentity)
+	}
 
 	outputCalendar, outputCalendarIdentity, ok := normalizeExecutableLimit(Limit{
 		Metric: "output_tokens", Algorithm: "calendar", Scope: []string{"model", "user"},
@@ -183,7 +207,6 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		{name: "cost calendar", limit: withLimitMetric(calendar, "cost_nano_usd")},
 		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
 		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
-		{name: "output token bucket", limit: withLimitMetric(tokenBucket, "output_tokens")},
 		{name: "input token bucket", limit: withLimitMetric(tokenBucket, "input_tokens")},
 		{name: "total token bucket", limit: withLimitMetric(tokenBucket, "total_tokens")},
 		{name: "cost token bucket", limit: withLimitMetric(tokenBucket, "cost_nano_usd")},
@@ -228,6 +251,41 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 			t.Parallel()
 			if normalized, identity, ok := normalizeExecutableLimit(test.limit); ok {
 				t.Fatalf("unsupported rule normalized: limit=%+v identity=%+v", normalized, identity)
+			}
+		})
+	}
+}
+
+func TestNormalizeExecutableOutputTokenBucketRejectsInvalidShapesAndBounds(t *testing.T) {
+	t.Parallel()
+
+	valid := Limit{
+		Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user"},
+		Capacity: 10, RefillPerSecond: RefillRate{Numerator: 1, Denominator: 2}, Hard: true,
+	}
+	tests := []struct {
+		name  string
+		limit Limit
+	}{
+		{name: "zero capacity", limit: withLimitCapacity(valid, 0)},
+		{name: "capacity above bound", limit: withLimitCapacity(valid, maximumExecutableTokenBucketCapacity+1)},
+		{name: "missing refill", limit: withLimitRefill(valid, RefillRate{})},
+		{name: "unreduced refill", limit: withLimitRefill(valid, RefillRate{Numerator: 2, Denominator: 4})},
+		{name: "refill above bound", limit: withLimitRefill(valid, RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond + 1, Denominator: 1})},
+		{name: "fractional refill above bound", limit: withLimitRefill(valid, RefillRate{Numerator: 1_000_000_000_001, Denominator: 1_000_000})},
+		{name: "window", limit: withLimitWindow(valid, "1d")},
+		{name: "maximum", limit: withLimitMaximum(valid, 1)},
+		{name: "per request maximum", limit: withLimitPerRequestMaximum(valid, 1)},
+		{name: "soft", limit: withLimitHard(valid, false)},
+		{name: "missing scope", limit: withLimitScope(valid, nil)},
+		{name: "duplicate scope", limit: withLimitScope(valid, []string{"user", "user"})},
+		{name: "unknown scope", limit: withLimitScope(valid, []string{"tenant"})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if normalized, identity, ok := normalizeExecutableLimit(test.limit); ok {
+				t.Fatalf("invalid output-token bucket normalized: limit=%+v identity=%+v", normalized, identity)
 			}
 		})
 	}

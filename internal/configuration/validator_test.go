@@ -127,6 +127,13 @@ func TestValidatorRequiresExplicitLimitScopeAtActivation(t *testing.T) {
 				"refillPerSecond": json.Number("1"),
 			},
 		},
+		{
+			name: "output token bucket",
+			limit: map[string]any{
+				"metric": "output_tokens", "capacity": json.Number("10"),
+				"refillPerSecond": json.Number("1"),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -159,13 +166,6 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 		name  string
 		limit map[string]any
 	}{
-		{
-			name: "output token bucket",
-			limit: map[string]any{
-				"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
-				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
-			},
-		},
 		{
 			name: "input token bucket",
 			limit: map[string]any{
@@ -212,6 +212,20 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			name: "logical request token bucket excessive refill",
 			limit: map[string]any{
 				"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("10"), "refillPerSecond": json.Number("1000000.000001"),
+			},
+		},
+		{
+			name: "output token bucket excessive capacity",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
+				"capacity": json.Number("9223373"), "refillPerSecond": json.Number("1"),
+			},
+		},
+		{
+			name: "output token bucket excessive refill",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
 				"capacity": json.Number("10"), "refillPerSecond": json.Number("1000000.000001"),
 			},
 		},
@@ -291,6 +305,7 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			for _, issue := range report.Issues {
 				if issue.Code == "limit_capability_unsupported" &&
 					(!strings.Contains(issue.Message, "logical_requests token_bucket") ||
+						!strings.Contains(issue.Message, "output_tokens token_bucket") ||
 						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
 						!strings.Contains(issue.Message, "through 1000000") ||
 						!strings.Contains(issue.Message, "output_tokens calendar") ||
@@ -354,6 +369,64 @@ func TestValidatorActivatesCanonicalLogicalRequestTokenBucket(t *testing.T) {
 	runtimeAgain, _ := snapshot.LimitPlan("free")
 	if !slices.Equal(runtimeAgain.Limits[0].Scope, []string{"user", "feature"}) || runtimeAgain.Limits[0].RefillPerSecond != wantRate {
 		t.Fatalf("runtime token bucket plan was not defensively copied: %+v", runtimeAgain)
+	}
+}
+
+func TestValidatorActivatesCanonicalOutputTokenBucket(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	plan := objectArray(objectValue(document, "spec"), "limitPlans")[0]
+	plan["limits"] = []any{
+		map[string]any{
+			"metric": "output_tokens", "scope": []any{"feature", "user"},
+			"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
+		},
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("valid output-token bucket failed schema validation: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("valid output-token bucket rejected: report=%+v compiled=%s", report, compiled)
+	}
+	value, err := jsonsafe.Decode(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := objectArray(objectArray(objectValue(value.(map[string]any), "spec"), "limitPlans")[0], "limits")[0]
+	refill, ok := limit["refillPerSecond"].(json.Number)
+	if !ok || refill.String() != "1000000" || stringValue(limit, "algorithm") != "token_bucket" ||
+		limit["hard"] != true || !slices.Equal(stringArray(limit, "scope"), []string{"user", "feature"}) {
+		t.Fatalf("compiled output-token bucket = %#v", limit)
+	}
+	snapshot, err := newActiveSnapshot(
+		"rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled,
+	)
+	if err != nil {
+		t.Fatalf("newActiveSnapshot() error = %v", err)
+	}
+	runtimePlan, ok := snapshot.LimitPlan("free")
+	wantRate := RefillRate{Numerator: maximumExecutableTokenBucketRefillPerSecond, Denominator: 1}
+	if !ok || len(runtimePlan.Limits) != 1 || runtimePlan.Limits[0].Metric != "output_tokens" ||
+		runtimePlan.Limits[0].Algorithm != "token_bucket" ||
+		runtimePlan.Limits[0].Capacity != maximumExecutableTokenBucketCapacity ||
+		runtimePlan.Limits[0].RefillPerSecond != wantRate || !runtimePlan.Limits[0].Hard {
+		t.Fatalf("runtime output-token bucket = %+v ok=%t", runtimePlan, ok)
+	}
+	runtimePlan.Limits[0].Scope[0] = "changed"
+	runtimeAgain, _ := snapshot.LimitPlan("free")
+	if !slices.Equal(runtimeAgain.Limits[0].Scope, []string{"user", "feature"}) ||
+		runtimeAgain.Limits[0].RefillPerSecond != wantRate {
+		t.Fatalf("runtime output-token bucket plan was not defensively copied: %+v", runtimeAgain)
 	}
 }
 
@@ -698,6 +771,19 @@ func TestValidatorRejectsDuplicateImmutableLimitIdentityByMetricAndAlgorithm(t *
 				},
 				map[string]any{
 					"metric": "logical_requests", "algorithm": "token_bucket", "scope": []any{"user", "feature"},
+					"capacity": json.Number("20"), "refillPerSecond": json.Number("0.25"),
+				},
+			},
+		},
+		{
+			name: "output token bucket",
+			limits: []any{
+				map[string]any{
+					"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"feature", "user"},
+					"capacity": json.Number("10"), "refillPerSecond": json.Number("0.5"),
+				},
+				map[string]any{
+					"metric": "output_tokens", "algorithm": "token_bucket", "scope": []any{"user", "feature"},
 					"capacity": json.Number("20"), "refillPerSecond": json.Number("0.25"),
 				},
 			},

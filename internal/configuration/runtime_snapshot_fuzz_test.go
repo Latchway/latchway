@@ -63,6 +63,10 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 		"metric": "logical_requests", "scope": []any{"feature", "user"},
 		"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
 	})
+	addExecutableLimitSeed("canonical output token bucket", map[string]any{
+		"metric": "output_tokens", "scope": []any{"model", "user"},
+		"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
+	})
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"spec":{"features":[]}}`))
 
