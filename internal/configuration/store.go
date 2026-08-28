@@ -515,19 +515,58 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 		return requestSnapshot, nil
 	}
 	defer finishRequestSnapshot(ActiveSnapshot{}, false)
+	revisionID, err := store.activeSnapshotRevisionID(ctx, scope)
+	if err != nil {
+		return ActiveSnapshot{}, err
+	}
 	cached, cacheHit := store.activeSnapshots.get(cacheKey)
 	now := store.now().UTC()
-	knownRevisionID := ""
-	if cacheHit && activeSnapshotCacheEntryIsFresh(cached, now) {
-		knownRevisionID = cached.snapshot.PolicyRevision()
+	if cacheHit && cached.snapshot.PolicyRevision() == revisionID &&
+		activeSnapshotCacheEntryIsFresh(cached, now) {
+		finishRequestSnapshot(cached.snapshot, true)
+		return cached.snapshot, nil
 	}
+
+	for {
+		snapshot, refreshErr := store.activeSnapshots.refresh(ctx, cacheKey, func() (ActiveSnapshot, error) {
+			latest, latestHit := store.activeSnapshots.get(cacheKey)
+			loadedAt := store.now().UTC()
+			if latestHit && latest.snapshot.PolicyRevision() == revisionID &&
+				activeSnapshotCacheEntryIsFresh(latest, loadedAt) {
+				return latest.snapshot, nil
+			}
+			loaded, loadErr := store.loadActiveSnapshot(ctx, scope)
+			if loadErr != nil {
+				return ActiveSnapshot{}, loadErr
+			}
+			store.activeSnapshots.put(cacheKey, loaded, store.now().UTC())
+			return loaded, nil
+		})
+		if refreshErr != nil {
+			return ActiveSnapshot{}, refreshErr
+		}
+		if snapshot.PolicyRevision() == revisionID {
+			finishRequestSnapshot(snapshot, true)
+			return snapshot, nil
+		}
+		currentRevisionID, currentErr := store.activeSnapshotRevisionID(ctx, scope)
+		if currentErr != nil {
+			return ActiveSnapshot{}, currentErr
+		}
+		if snapshot.PolicyRevision() == currentRevisionID {
+			finishRequestSnapshot(snapshot, true)
+			return snapshot, nil
+		}
+		revisionID = currentRevisionID
+	}
+}
+
+func (store *Store) activeSnapshotRevisionID(ctx context.Context, scope TenantScope) (string, error) {
 	var revisionID string
-	var document, compiled []byte
+	var snapshotPresent bool
 	if err := store.pool.QueryRow(ctx, `
-		SELECT
-			revision.config_revision_id,
-			CASE WHEN revision.config_revision_id = NULLIF($4::text, '') THEN NULL ELSE revision.document END,
-			CASE WHEN revision.config_revision_id = NULLIF($4::text, '') THEN NULL ELSE revision.compiled_document END
+		SELECT revision.config_revision_id,
+		       revision.document IS NOT NULL AND revision.compiled_document IS NOT NULL
 		FROM active_config_revisions AS active_revision
 		JOIN config_revisions AS revision
 		  ON revision.organization_id = active_revision.organization_id
@@ -538,29 +577,43 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 		WHERE active_revision.organization_id = $1
 		  AND active_revision.application_id = $2
 		  AND active_revision.environment_id = $3
-	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, knownRevisionID).Scan(&revisionID, &document, &compiled); err != nil {
+	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID).Scan(&revisionID, &snapshotPresent); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("resolve active configuration revision: %w", err)
+	}
+	if !snapshotPresent {
+		return "", errors.New("active configuration has no durable snapshot")
+	}
+	return revisionID, nil
+}
+
+func (store *Store) loadActiveSnapshot(ctx context.Context, scope TenantScope) (ActiveSnapshot, error) {
+	var revisionID string
+	var document, compiled []byte
+	if err := store.pool.QueryRow(ctx, `
+		SELECT revision.config_revision_id, revision.document, revision.compiled_document
+		FROM active_config_revisions AS active_revision
+		JOIN config_revisions AS revision
+		  ON revision.organization_id = active_revision.organization_id
+		 AND revision.application_id = active_revision.application_id
+		 AND revision.environment_id = active_revision.environment_id
+		 AND revision.config_revision_id = active_revision.config_revision_id
+		 AND revision.status = 'valid'
+		WHERE active_revision.organization_id = $1
+		  AND active_revision.application_id = $2
+		  AND active_revision.environment_id = $3
+	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID).Scan(&revisionID, &document, &compiled); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ActiveSnapshot{}, ErrNotFound
 		}
-		return ActiveSnapshot{}, fmt.Errorf("resolve active compiled configuration: %w", err)
-	}
-	if cacheHit && revisionID == knownRevisionID {
-		if len(document) != 0 || len(compiled) != 0 {
-			return ActiveSnapshot{}, errors.New("active configuration cache query returned an inconsistent snapshot")
-		}
-		finishRequestSnapshot(cached.snapshot, true)
-		return cached.snapshot, nil
+		return ActiveSnapshot{}, fmt.Errorf("load active compiled configuration: %w", err)
 	}
 	if len(compiled) == 0 {
 		return ActiveSnapshot{}, errors.New("active configuration has no compiled snapshot")
 	}
-	snapshot, err := newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
-	if err != nil {
-		return ActiveSnapshot{}, err
-	}
-	store.activeSnapshots.put(cacheKey, snapshot, now)
-	finishRequestSnapshot(snapshot, true)
-	return snapshot, nil
+	return newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
 }
 
 // SimulationSnapshot returns the exact compiled policy for a tenant-scoped

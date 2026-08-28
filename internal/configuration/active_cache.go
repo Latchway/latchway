@@ -2,12 +2,18 @@ package configuration
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
 
+var errActiveSnapshotRefreshIncomplete = errors.New("active configuration refresh did not complete")
+
 const (
 	activeSnapshotCacheCapacity              = 1024
+	activeSnapshotCacheMaximumEstimatedBytes = int64(32 << 20)
+	activeSnapshotCacheEntryBaseBytes        = int64(16 << 10)
+	activeSnapshotCacheExpansionFactor       = int64(8)
 	activeSnapshotFullReconciliationInterval = 30 * time.Second
 )
 
@@ -26,13 +32,23 @@ func newActiveSnapshotCacheKey(scope TenantScope) activeSnapshotCacheKey {
 }
 
 type activeSnapshotCacheEntry struct {
+	snapshot       ActiveSnapshot
+	loadedAt       time.Time
+	estimatedBytes int64
+}
+
+type activeSnapshotRefresh struct {
+	done     chan struct{}
 	snapshot ActiveSnapshot
-	loadedAt time.Time
+	err      error
+	waiters  int
 }
 
 type activeSnapshotCache struct {
-	mu      sync.RWMutex
-	entries map[activeSnapshotCacheKey]activeSnapshotCacheEntry
+	mu             sync.RWMutex
+	entries        map[activeSnapshotCacheKey]activeSnapshotCacheEntry
+	refreshes      map[activeSnapshotCacheKey]*activeSnapshotRefresh
+	estimatedBytes int64
 }
 
 func (cache *activeSnapshotCache) get(key activeSnapshotCacheKey) (activeSnapshotCacheEntry, bool) {
@@ -47,12 +63,21 @@ func (cache *activeSnapshotCache) put(
 	snapshot ActiveSnapshot,
 	loadedAt time.Time,
 ) {
+	estimatedBytes := estimateActiveSnapshotBytes(snapshot)
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	if cache.entries == nil {
 		cache.entries = make(map[activeSnapshotCacheKey]activeSnapshotCacheEntry)
 	}
-	if _, exists := cache.entries[key]; !exists && len(cache.entries) >= activeSnapshotCacheCapacity {
+	if existing, exists := cache.entries[key]; exists {
+		cache.estimatedBytes -= existing.estimatedBytes
+		delete(cache.entries, key)
+	}
+	if estimatedBytes > activeSnapshotCacheMaximumEstimatedBytes {
+		return
+	}
+	for len(cache.entries) >= activeSnapshotCacheCapacity ||
+		cache.estimatedBytes > activeSnapshotCacheMaximumEstimatedBytes-estimatedBytes {
 		var oldestKey activeSnapshotCacheKey
 		var oldestTime time.Time
 		for candidateKey, candidate := range cache.entries {
@@ -61,9 +86,60 @@ func (cache *activeSnapshotCache) put(
 				oldestTime = candidate.loadedAt
 			}
 		}
+		cache.estimatedBytes -= cache.entries[oldestKey].estimatedBytes
 		delete(cache.entries, oldestKey)
 	}
-	cache.entries[key] = activeSnapshotCacheEntry{snapshot: snapshot, loadedAt: loadedAt}
+	cache.entries[key] = activeSnapshotCacheEntry{
+		snapshot: snapshot, loadedAt: loadedAt, estimatedBytes: estimatedBytes,
+	}
+	cache.estimatedBytes += estimatedBytes
+}
+
+func estimateActiveSnapshotBytes(snapshot ActiveSnapshot) int64 {
+	rawBytes := int64(len(snapshot.document)) + int64(len(snapshot.compiled))
+	maximumRawBytes := (activeSnapshotCacheMaximumEstimatedBytes - activeSnapshotCacheEntryBaseBytes) /
+		activeSnapshotCacheExpansionFactor
+	if rawBytes > maximumRawBytes {
+		return activeSnapshotCacheMaximumEstimatedBytes + 1
+	}
+	return activeSnapshotCacheEntryBaseBytes + rawBytes*activeSnapshotCacheExpansionFactor
+}
+
+func (cache *activeSnapshotCache) refresh(
+	ctx context.Context,
+	key activeSnapshotCacheKey,
+	load func() (ActiveSnapshot, error),
+) (ActiveSnapshot, error) {
+	cache.mu.Lock()
+	if cache.refreshes == nil {
+		cache.refreshes = make(map[activeSnapshotCacheKey]*activeSnapshotRefresh)
+	}
+	if existing, ok := cache.refreshes[key]; ok {
+		existing.waiters++
+		cache.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ActiveSnapshot{}, ctx.Err()
+		case <-existing.done:
+			return existing.snapshot, existing.err
+		}
+	}
+	refresh := &activeSnapshotRefresh{
+		done: make(chan struct{}), err: errActiveSnapshotRefreshIncomplete,
+	}
+	cache.refreshes[key] = refresh
+	cache.mu.Unlock()
+
+	func() {
+		defer func() {
+			cache.mu.Lock()
+			delete(cache.refreshes, key)
+			close(refresh.done)
+			cache.mu.Unlock()
+		}()
+		refresh.snapshot, refresh.err = load()
+	}()
+	return refresh.snapshot, refresh.err
 }
 
 func activeSnapshotCacheEntryIsFresh(entry activeSnapshotCacheEntry, now time.Time) bool {

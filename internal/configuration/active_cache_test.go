@@ -2,7 +2,9 @@ package configuration
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -26,6 +28,129 @@ func TestActiveSnapshotCacheIsBounded(t *testing.T) {
 	}
 	if _, ok := cache.entries[activeSnapshotCacheKey{environmentID: fmt.Sprintf("environment-%04d", activeSnapshotCacheCapacity)}]; !ok {
 		t.Fatal("cache evicted the newly inserted entry")
+	}
+}
+
+func TestActiveSnapshotCacheIsByteBounded(t *testing.T) {
+	t.Parallel()
+	var cache activeSnapshotCache
+	base := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
+	rawBytesPerEntry := int((activeSnapshotCacheMaximumEstimatedBytes/2 - activeSnapshotCacheEntryBaseBytes) /
+		activeSnapshotCacheExpansionFactor)
+	for index := 0; index < 3; index++ {
+		cache.put(
+			activeSnapshotCacheKey{environmentID: fmt.Sprintf("large-%d", index)},
+			ActiveSnapshot{
+				RevisionID: fmt.Sprintf("revision-%d", index),
+				document:   make([]byte, rawBytesPerEntry),
+			},
+			base.Add(time.Duration(index)*time.Second),
+		)
+	}
+
+	cache.mu.RLock()
+	if cache.estimatedBytes > activeSnapshotCacheMaximumEstimatedBytes {
+		cache.mu.RUnlock()
+		t.Fatalf("estimated cache bytes = %d, maximum %d", cache.estimatedBytes, activeSnapshotCacheMaximumEstimatedBytes)
+	}
+	if _, ok := cache.entries[activeSnapshotCacheKey{environmentID: "large-0"}]; ok {
+		cache.mu.RUnlock()
+		t.Fatal("byte budget retained the oldest large entry")
+	}
+	if _, ok := cache.entries[activeSnapshotCacheKey{environmentID: "large-2"}]; !ok {
+		cache.mu.RUnlock()
+		t.Fatal("byte budget evicted the newest large entry")
+	}
+	cache.mu.RUnlock()
+
+	maximumRawBytes := int((activeSnapshotCacheMaximumEstimatedBytes-activeSnapshotCacheEntryBaseBytes)/
+		activeSnapshotCacheExpansionFactor) + 1
+	oversizedKey := activeSnapshotCacheKey{environmentID: "oversized"}
+	cache.put(oversizedKey, ActiveSnapshot{RevisionID: "oversized", document: make([]byte, maximumRawBytes)}, base)
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	if _, ok := cache.entries[oversizedKey]; ok {
+		t.Fatal("cache retained a snapshot larger than the complete byte budget")
+	}
+	if cache.estimatedBytes > activeSnapshotCacheMaximumEstimatedBytes {
+		t.Fatalf("estimated cache bytes after rejection = %d, maximum %d", cache.estimatedBytes, activeSnapshotCacheMaximumEstimatedBytes)
+	}
+}
+
+func TestActiveSnapshotCacheCoalescesRefreshByScope(t *testing.T) {
+	t.Parallel()
+	var cache activeSnapshotCache
+	key := activeSnapshotCacheKey{environmentID: "environment"}
+	want := ActiveSnapshot{RevisionID: "revision"}
+	loaderStarted := make(chan struct{})
+	releaseLoader := make(chan struct{})
+	leaderResult := make(chan ActiveSnapshot, 1)
+	leaderError := make(chan error, 1)
+	var loaderCalls atomic.Int32
+	go func() {
+		snapshot, err := cache.refresh(context.Background(), key, func() (ActiveSnapshot, error) {
+			loaderCalls.Add(1)
+			close(loaderStarted)
+			<-releaseLoader
+			return want, nil
+		})
+		leaderResult <- snapshot
+		leaderError <- err
+	}()
+	<-loaderStarted
+
+	cancelledContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cache.refresh(cancelledContext, key, func() (ActiveSnapshot, error) {
+		t.Fatal("cancelled waiter invoked the coalesced loader")
+		return ActiveSnapshot{}, nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled refresh error = %v, want context cancellation", err)
+	}
+
+	waiterResult := make(chan ActiveSnapshot, 1)
+	waiterError := make(chan error, 1)
+	go func() {
+		snapshot, err := cache.refresh(context.Background(), key, func() (ActiveSnapshot, error) {
+			loaderCalls.Add(1)
+			return ActiveSnapshot{RevisionID: "unexpected-second-load"}, nil
+		})
+		waiterResult <- snapshot
+		waiterError <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		cache.mu.RLock()
+		refresh := cache.refreshes[key]
+		waiters := 0
+		if refresh != nil {
+			waiters = refresh.waiters
+		}
+		cache.mu.RUnlock()
+		if waiters >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("refresh waiter did not join the in-flight load")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(releaseLoader)
+
+	if err := <-leaderError; err != nil {
+		t.Fatalf("leader refresh error = %v", err)
+	}
+	if got := <-leaderResult; got.PolicyRevision() != want.PolicyRevision() {
+		t.Fatalf("leader revision = %q, want %q", got.PolicyRevision(), want.PolicyRevision())
+	}
+	if err := <-waiterError; err != nil {
+		t.Fatalf("waiter refresh error = %v", err)
+	}
+	if got := <-waiterResult; got.PolicyRevision() != want.PolicyRevision() {
+		t.Fatalf("waiter revision = %q, want %q", got.PolicyRevision(), want.PolicyRevision())
+	}
+	if calls := loaderCalls.Load(); calls != 1 {
+		t.Fatalf("refresh loader calls = %d, want 1", calls)
 	}
 }
 
