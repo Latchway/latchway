@@ -546,6 +546,21 @@ func TestHandlerDoesNotReleaseWhenBeginAttemptItselfFails(t *testing.T) {
 	}
 }
 
+func TestHandlerClassifiesBeginAttemptDeadlineAsDependencyFailure(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.quotas.beginErr = context.DeadlineExceeded
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "server_not_ready", http.StatusServiceUnavailable)
+	if fixture.quotas.beginCalls != 1 || fixture.quotas.releaseCalls != 0 || fixture.quotas.settleCalls != 0 {
+		t.Fatalf("ambiguous begin deadline lifecycle begin/release/settle = %d/%d/%d",
+			fixture.quotas.beginCalls, fixture.quotas.releaseCalls, fixture.quotas.settleCalls)
+	}
+}
+
 func TestHandlerReleasesWhenSecretFailsBeforeAttempt(t *testing.T) {
 	fixture := newHandlerFixture(t)
 	fixture.decision.Upstream.Authentication = configuration.UpstreamAuthentication{

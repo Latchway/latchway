@@ -136,6 +136,21 @@ func TestFallbackConditionNeverRetriesAfterTheRequestDeadline(t *testing.T) {
 	}
 }
 
+func TestUnscopedDeadlineIsNotAnUpstreamTimeout(t *testing.T) {
+	t.Parallel()
+	if isUpstreamTimeout(context.DeadlineExceeded) {
+		t.Fatal("an unscoped dependency deadline was classified as an upstream timeout")
+	}
+	for _, wrapped := range []error{
+		fmt.Errorf("%w: %w", errUpstreamDispatch, context.DeadlineExceeded),
+		fmt.Errorf("%w: %w", errUpstreamRelay, context.DeadlineExceeded),
+	} {
+		if !isUpstreamTimeout(wrapped) {
+			t.Fatalf("scoped upstream deadline was not classified as a timeout: %v", wrapped)
+		}
+	}
+}
+
 func TestRouteAllowsOnlyExplicitFallbackConditions(t *testing.T) {
 	t.Parallel()
 

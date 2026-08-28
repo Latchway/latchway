@@ -69,9 +69,10 @@ func isPreHeaderTimeout(err error) bool {
 }
 
 func isUpstreamTimeout(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, upstream.ErrResponseIdleTimeout) ||
-		(errors.Is(err, errUpstreamDispatch) && errorIsTimeout(err))
+	return errors.Is(err, upstream.ErrResponseIdleTimeout) ||
+		(errors.Is(err, errUpstreamDispatch) &&
+			(errors.Is(err, context.DeadlineExceeded) || errorIsTimeout(err))) ||
+		(errors.Is(err, errUpstreamRelay) && errors.Is(err, context.DeadlineExceeded))
 }
 
 func routeAllowsFallback(route configuration.Route, condition string) bool {
