@@ -1,0 +1,71 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: latchway
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cloudsql-instances: ${CLOUD_SQL_CONNECTION_NAME}
+        run.googleapis.com/vpc-access-connector: ${VPC_CONNECTOR}
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: ${SERVICE_ACCOUNT}
+      containerConcurrency: 100
+      timeoutSeconds: 3600
+      containers:
+        - name: latchway
+          image: ${LATCHWAY_IMAGE}
+          command: ["/latchway"]
+          args: ["serve", "--role", "all"]
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: PORT
+              value: "8080"
+            - name: LATCHWAY_ROLE
+              value: all
+            - name: LATCHWAY_LOG_LEVEL
+              value: info
+            - name: LATCHWAY_MIGRATE_ON_START
+              value: "true"
+            - name: LATCHWAY_DB_MAX_CONNECTIONS
+              value: "20"
+            - name: LATCHWAY_PUBLIC_ORIGIN
+              value: ${LATCHWAY_PUBLIC_ORIGIN}
+            - name: LATCHWAY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: latchway-database-url
+                  key: latest
+            - name: LATCHWAY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: latchway-master-key
+                  key: latest
+          startupProbe:
+            initialDelaySeconds: 1
+            timeoutSeconds: 3
+            periodSeconds: 3
+            failureThreshold: 40
+            httpGet:
+              path: /readyz
+              port: 8080
+          livenessProbe:
+            timeoutSeconds: 3
+            periodSeconds: 15
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 8080

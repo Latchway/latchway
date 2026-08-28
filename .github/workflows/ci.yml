@@ -16,7 +16,7 @@ jobs:
   contracts:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Validate normative contracts
@@ -25,13 +25,44 @@ jobs:
         run: |
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-b
-          cmp /tmp/contract-a/latchway-contract-0.4.0.tar.gz /tmp/contract-b/latchway-contract-0.4.0.tar.gz
+          diff --recursive --brief /tmp/contract-a /tmp/contract-b
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Check formatting
+        run: make fmt
+      - name: Verify sqlc output
+        run: make check-generated
+      - name: Vet
+        run: go vet ./...
+      - name: GolangCI-Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+          args: --timeout=10m
 
   core:
+    name: Core (PostgreSQL ${{ matrix.postgres.major }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres:
+          - major: "15"
+            image: postgres:15.19-alpine
+          - major: "18"
+            image: postgres:18.6-alpine
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: ${{ matrix.postgres.image }}
         env:
           POSTGRES_DB: latchway
           POSTGRES_USER: latchway
@@ -46,33 +77,29 @@ jobs:
     env:
       LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-ci@127.0.0.1:5432/latchway?sslmode=disable
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Check formatting
-        run: make fmt
-      - name: Verify sqlc output
-        run: make check-generated
-      - name: Vet
-        run: go vet ./...
       - name: Unit and PostgreSQL integration tests
         run: go test -count=1 ./...
       - name: Fuzz security-sensitive parsers
+        if: matrix.postgres.major == '18'
         run: make fuzz-smoke
       - name: Race tests
+        if: matrix.postgres.major == '18'
         run: go test -race -count=1 ./...
 
   console:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
           cache: pnpm
@@ -89,14 +116,77 @@ jobs:
         working-directory: web/console
         run: pnpm verify:reproducible
 
-  image:
+  deployments:
     runs-on: ubuntu-24.04
-    needs: [contracts, core, console]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: deploy/cloudflare/pnpm-lock.yaml
+      - name: Check Cloudflare Worker and generated bindings
+        working-directory: deploy/cloudflare
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm check
+      - name: Validate Cloud Run Terraform
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/cloud-run/terraform:/work"
+          --workdir /work
+          --env TF_DATA_DIR=/tmp/latchway-cloud-run-tfdata
+          --entrypoint /bin/sh
+          hashicorp/terraform@sha256:6bbb82d575aa7bd4f0a2c6e3a0838ab9590426c08a71d7a2783643f01004d356
+          -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
+      - name: Validate AWS Terraform
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/aws/terraform:/work"
+          --workdir /work
+          --env TF_DATA_DIR=/tmp/latchway-aws-tfdata
+          --entrypoint /bin/sh
+          hashicorp/terraform@sha256:6bbb82d575aa7bd4f0a2c6e3a0838ab9590426c08a71d7a2783643f01004d356
+          -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
+      - name: Parse deployment manifests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          fly = tomllib.loads(Path("deploy/fly/fly.toml").read_text())
+          assert fly["deploy"]["release_command"] == "/latchway migrate up"
+          assert fly["http_service"]["internal_port"] == 8080
+          PY
+
+  image:
+    runs-on: ubuntu-24.04
+    needs: [contracts, lint, core, console, deployments]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
       - name: Build production OCI image
         run: docker build --pull --tag latchway:ci .
       - name: Assert non-root runtime identity
-        run: test "$(docker image inspect --format '{{.Config.User}}' latchway:ci)" = "65532"
+        run: test "$(docker image inspect --format '{{.Config.User}}' latchway:ci)" = "65532:65532"
+      - name: Exercise production container startup and readiness
+        run: scripts/container-smoke.sh latchway:ci
+      - name: Compile multi-architecture OCI layout
+        run: >-
+          docker buildx build
+          --platform linux/amd64,linux/arm64
+          --output type=oci,dest=/tmp/latchway-multiarch.tar
+          .
+      - name: Verify both release platforms are present
+        run: >-
+          python3 scripts/verify-oci-platforms.py
+          /tmp/latchway-multiarch.tar
+          linux/amd64
+          linux/arm64

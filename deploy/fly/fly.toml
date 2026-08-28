@@ -1,0 +1,45 @@
+app = "replace-with-your-latchway-app"
+primary_region = "sin"
+
+kill_signal = "SIGTERM"
+kill_timeout = "35s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  release_command = "/latchway migrate up"
+  strategy = "rolling"
+
+[env]
+  PORT = "8080"
+  LATCHWAY_ROLE = "all"
+  LATCHWAY_LOG_LEVEL = "info"
+  LATCHWAY_MIGRATE_ON_START = "false"
+  LATCHWAY_DB_MAX_CONNECTIONS = "20"
+  LATCHWAY_SHUTDOWN_TIMEOUT = "30s"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 2
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 80
+    hard_limit = 100
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/readyz"
+
+[[vm]]
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2

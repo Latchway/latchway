@@ -9,7 +9,9 @@ artifacts
 bin
 coverage
 docs
-web/console/node_modules
+**/node_modules
+**/.wrangler
+**/.wrangler-dist
 web/console/coverage
 skills-lock.json
 **/.DS_Store

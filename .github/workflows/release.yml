@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: latchway
+          POSTGRES_USER: latchway
+          POSTGRES_PASSWORD: latchway-release
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U latchway -d latchway"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-release@127.0.0.1:5432/latchway?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: web/console/pnpm-lock.yaml
+      - name: Verify release source and tag
+        run: python3 scripts/release-preflight.py "$GITHUB_REF_NAME"
+      - name: Validate normative contracts
+        run: python3 scripts/validate-contracts.py
+      - name: Test core
+        run: go test -count=1 ./...
+      - name: Test console
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm --dir web/console install --frozen-lockfile
+          pnpm --dir web/console check
+
+  image:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve immutable image name
+        id: image-name
+        shell: bash
+        run: echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        id: metadata
+        with:
+          images: ${{ steps.image-name.outputs.value }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - name: Resolve reproducible build metadata
+        id: build-metadata
+        shell: bash
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "date=$(git show -s --format=%cI "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+      - name: Build the pre-publication candidate
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: latchway:release-candidate
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.build-metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.build-metadata.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+      - name: Scan candidate for critical and high vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: latchway:release-candidate
+          format: table
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+      - name: Enforce container license policy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: latchway:release-candidate
+          format: table
+          scanners: license
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: latchway:release-candidate
+          format: spdx-json
+          output-file: latchway.spdx.json
+          upload-artifact: false
+      - name: Publish the gated multi-architecture image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.build-metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.build-metadata.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the image digest with GitHub OIDC
+        shell: bash
+        env:
+          IMAGE: ${{ steps.image-name.outputs.value }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign verify \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE@$DIGEST"
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > latchway-image.txt
+      - name: Publish SLSA provenance attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.image-name.outputs.value }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Publish SBOM attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.image-name.outputs.value }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: latchway.spdx.json
+          push-to-registry: true
+      - name: Build deterministic contract release asset
+        shell: bash
+        run: |
+          mkdir -p dist/release
+          python3 scripts/build-contract-bundle.py --output-directory dist/release
+          sha256sum dist/release/* > dist/release/SHA256SUMS
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-${{ github.ref_name }}-supply-chain
+          path: |
+            latchway.spdx.json
+            latchway-image.txt
+            dist/release/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create GitHub release from the verified tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          --verify-tag
+          --generate-notes
+          --title "Latchway $GITHUB_REF_NAME"
+          latchway.spdx.json
+          latchway-image.txt
+          dist/release/*
