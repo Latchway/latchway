@@ -499,14 +499,15 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 // commit. A caller may replay only the exact same trusted request. The client
 // correlation hint is compared as durable data, never used as the lookup key.
 //
-// All lifecycle transactions take locks in this order for a request that has
-// a reservation: quota_reservations, logical_requests, upstream_attempts, then
-// quota_reservation_entries/quota_buckets, then concurrency_leases. Bucket and
-// lease families are each locked in stable identifier order. Taking the
-// reservation lock before reading the logical row keeps later READ COMMITTED
-// statements on one stable lifecycle state without reversing that order.
-// Denied requests have no reservation and are immutable, so they lock
-// logical_requests first.
+// Lifecycle transactions take locks in this order for a request that has a
+// reservation: quota_reservations, logical_requests, upstream_attempts, then
+// quota_reservation_entries, quota_buckets when capacity is mutated, and
+// finally concurrency_leases. BeginAttempt and MarkFirstByte skip the shared
+// bucket lock but never reverse this order. Bucket and lease families are each
+// visited in stable identifier order. Taking the reservation lock before
+// reading the logical row keeps later READ COMMITTED statements on one stable
+// lifecycle state. Denied requests have no reservation and are immutable, so
+// they lock logical_requests first.
 func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedRequest, fingerprint string) (Reservation, error) {
 	pricing := pricingForRequest(prepared)
 	reservationKey := reservationIdempotencyKey(fingerprint, pricing, hasHardCostReservation(prepared.rules))
@@ -1467,7 +1468,7 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 			return Attempt{}, false, err
 		}
 	}
-	entries, err := lockEntries(ctx, tx, lockedReservation)
+	entries, err := lockLifecycleEntries(ctx, tx, lockedReservation)
 	if err != nil {
 		return Attempt{}, false, err
 	}
@@ -1653,7 +1654,7 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 		!storedInitialInputPreflightMatches(stored, reservation.inputPreflight)) {
 		return ErrInvalidState
 	}
-	entries, err := lockEntries(ctx, tx, reservation)
+	entries, err := lockLifecycleEntries(ctx, tx, reservation)
 	if err != nil {
 		return err
 	}
@@ -2484,7 +2485,33 @@ type lockedEntry struct {
 	version              int64
 }
 
+// lockEntries locks both the request-private reservation entries and their
+// shared quota buckets. Capacity-mutating settlement and recovery paths use
+// this form so every bucket mutation remains serialized in canonical order.
 func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
+	return lockEntriesWithScope(ctx, tx, reservation, true)
+}
+
+// lockLifecycleEntries locks only request-private reservation entries while
+// reading the committed bucket state needed for fail-closed validation.
+// BeginAttempt and MarkFirstByte already serialize on the request-private
+// reservation row and never mutate bucket capacity, so taking shared bucket
+// row locks here would unnecessarily serialize unrelated requests that share
+// a quota scope.
+func lockLifecycleEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
+	return lockEntriesWithScope(ctx, tx, reservation, false)
+}
+
+func lockEntriesWithScope(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	lockBuckets bool,
+) ([]lockedEntry, error) {
+	lockClause := "FOR UPDATE OF entry"
+	if lockBuckets {
+		lockClause = "FOR UPDATE OF entry, bucket"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
 		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
@@ -2505,8 +2532,7 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		WHERE entry.organization_id = $1 AND entry.application_id = $2
 		  AND entry.environment_id = $3 AND entry.quota_reservation_id = $4
 		ORDER BY bucket.quota_bucket_id COLLATE "C"
-		FOR UPDATE OF entry, bucket
-	`, reservation.organizationID, reservation.applicationID,
+		`+lockClause, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.reservationID)
 	if err != nil {
 		return nil, persistenceFailure("lock quota reservation entries", err)
