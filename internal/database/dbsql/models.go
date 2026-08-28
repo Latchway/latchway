@@ -397,6 +397,10 @@ type QuotaReservationEntry struct {
 	ReservedUnits           int64  `db:"reserved_units" json:"reserved_units"`
 	SettledUnits            int64  `db:"settled_units" json:"settled_units"`
 	ReleasedUnits           int64  `db:"released_units" json:"released_units"`
+	// Immutable amount reserved when this target-scoped entry was first materialized; reserved_units may grow through later atomic retry reservations.
+	InitialReservedUnits int64 `db:"initial_reserved_units" json:"initial_reserved_units"`
+	// Contiguous upstream attempt that first materialized this reservation entry; schema-11 and initial schema-12 entries are attempt 1.
+	OriginAttemptNumber int32 `db:"origin_attempt_number" json:"origin_attempt_number"`
 }
 
 type RefreshToken struct {
@@ -511,26 +515,55 @@ type SessionGrant struct {
 }
 
 type UpstreamAttempt struct {
-	UpstreamAttemptID string             `db:"upstream_attempt_id" json:"upstream_attempt_id"`
-	OrganizationID    string             `db:"organization_id" json:"organization_id"`
-	ApplicationID     string             `db:"application_id" json:"application_id"`
-	EnvironmentID     string             `db:"environment_id" json:"environment_id"`
-	LogicalRequestID  string             `db:"logical_request_id" json:"logical_request_id"`
-	AttemptNumber     int32              `db:"attempt_number" json:"attempt_number"`
-	RouteKey          string             `db:"route_key" json:"route_key"`
-	UpstreamKey       string             `db:"upstream_key" json:"upstream_key"`
-	PhysicalModel     *string            `db:"physical_model" json:"physical_model"`
-	Status            string             `db:"status" json:"status"`
-	StartedAt         pgtype.Timestamptz `db:"started_at" json:"started_at"`
-	FirstByteAt       pgtype.Timestamptz `db:"first_byte_at" json:"first_byte_at"`
-	CompletedAt       pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	HttpStatus        *int32             `db:"http_status" json:"http_status"`
-	FailureCode       *string            `db:"failure_code" json:"failure_code"`
-	BilledCostNanoUsd *int64             `db:"billed_cost_nano_usd" json:"billed_cost_nano_usd"`
-	Currency          *string            `db:"currency" json:"currency"`
-	PriceRevision     *string            `db:"price_revision" json:"price_revision"`
-	PricingSource     *string            `db:"pricing_source" json:"pricing_source"`
-	CostConfidence    *string            `db:"cost_confidence" json:"cost_confidence"`
+	UpstreamAttemptID             string             `db:"upstream_attempt_id" json:"upstream_attempt_id"`
+	OrganizationID                string             `db:"organization_id" json:"organization_id"`
+	ApplicationID                 string             `db:"application_id" json:"application_id"`
+	EnvironmentID                 string             `db:"environment_id" json:"environment_id"`
+	LogicalRequestID              string             `db:"logical_request_id" json:"logical_request_id"`
+	AttemptNumber                 int32              `db:"attempt_number" json:"attempt_number"`
+	RouteKey                      string             `db:"route_key" json:"route_key"`
+	UpstreamKey                   string             `db:"upstream_key" json:"upstream_key"`
+	PhysicalModel                 *string            `db:"physical_model" json:"physical_model"`
+	Status                        string             `db:"status" json:"status"`
+	StartedAt                     pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FirstByteAt                   pgtype.Timestamptz `db:"first_byte_at" json:"first_byte_at"`
+	CompletedAt                   pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	HttpStatus                    *int32             `db:"http_status" json:"http_status"`
+	FailureCode                   *string            `db:"failure_code" json:"failure_code"`
+	BilledCostNanoUsd             *int64             `db:"billed_cost_nano_usd" json:"billed_cost_nano_usd"`
+	Currency                      *string            `db:"currency" json:"currency"`
+	PriceRevision                 *string            `db:"price_revision" json:"price_revision"`
+	PricingSource                 *string            `db:"pricing_source" json:"pricing_source"`
+	CostConfidence                *string            `db:"cost_confidence" json:"cost_confidence"`
+	ModelKey                      *string            `db:"model_key" json:"model_key"`
+	AttemptDecisionBindingVersion int16              `db:"attempt_decision_binding_version" json:"attempt_decision_binding_version"`
+	AttemptDecisionSha256         []byte             `db:"attempt_decision_sha256" json:"attempt_decision_sha256"`
+	PerRequestOutputTokenBound    *int64             `db:"per_request_output_token_bound" json:"per_request_output_token_bound"`
+	InputAccountingBindingVersion int16              `db:"input_accounting_binding_version" json:"input_accounting_binding_version"`
+	InputAccountingMethod         *string            `db:"input_accounting_method" json:"input_accounting_method"`
+	InputAccountingProfileID      *string            `db:"input_accounting_profile_id" json:"input_accounting_profile_id"`
+	InputAccountingProfileDigest  []byte             `db:"input_accounting_profile_digest" json:"input_accounting_profile_digest"`
+	RewrittenBodySha256           []byte             `db:"rewritten_body_sha256" json:"rewritten_body_sha256"`
+	InputTokenBound               *int64             `db:"input_token_bound" json:"input_token_bound"`
+	OutputTokenBound              *int64             `db:"output_token_bound" json:"output_token_bound"`
+	TotalTokenBound               *int64             `db:"total_token_bound" json:"total_token_bound"`
+}
+
+// Per-dispatch token and cost allocations and their conservative settlement under one logical quota reservation.
+type UpstreamAttemptQuotaEntry struct {
+	OrganizationID          string             `db:"organization_id" json:"organization_id"`
+	ApplicationID           string             `db:"application_id" json:"application_id"`
+	EnvironmentID           string             `db:"environment_id" json:"environment_id"`
+	LogicalRequestID        string             `db:"logical_request_id" json:"logical_request_id"`
+	UpstreamAttemptID       string             `db:"upstream_attempt_id" json:"upstream_attempt_id"`
+	QuotaReservationID      string             `db:"quota_reservation_id" json:"quota_reservation_id"`
+	QuotaReservationEntryID string             `db:"quota_reservation_entry_id" json:"quota_reservation_entry_id"`
+	QuotaBucketID           string             `db:"quota_bucket_id" json:"quota_bucket_id"`
+	Metric                  string             `db:"metric" json:"metric"`
+	AllocatedUnits          int64              `db:"allocated_units" json:"allocated_units"`
+	ChargedUnits            *int64             `db:"charged_units" json:"charged_units"`
+	ReleasedUnits           *int64             `db:"released_units" json:"released_units"`
+	SettledAt               pgtype.Timestamptz `db:"settled_at" json:"settled_at"`
 }
 
 type UsageRecord struct {

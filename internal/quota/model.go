@@ -32,18 +32,20 @@ import (
 )
 
 const (
-	LogicalRequestsMetric    = "logical_requests"
-	InputTokensMetric        = "input_tokens"
-	OutputTokensMetric       = "output_tokens"
-	TotalTokensMetric        = "total_tokens"
-	ConcurrentRequestsMetric = "concurrent_requests"
-	ConcurrentStreamsMetric  = "concurrent_streams"
-	CostNanoUSDMetric        = "cost_nano_usd"
-	CalendarAlgorithm        = "calendar"
-	TokenBucketAlgorithm     = "token_bucket"
-	PerRequestAlgorithm      = "per_request"
-	ConcurrencyAlgorithm     = "concurrency"
-	maximumRulesPerRequest   = 128
+	LogicalRequestsMetric     = "logical_requests"
+	InputTokensMetric         = "input_tokens"
+	OutputTokensMetric        = "output_tokens"
+	TotalTokensMetric         = "total_tokens"
+	ConcurrentRequestsMetric  = "concurrent_requests"
+	ConcurrentStreamsMetric   = "concurrent_streams"
+	CostNanoUSDMetric         = "cost_nano_usd"
+	CalendarAlgorithm         = "calendar"
+	TokenBucketAlgorithm      = "token_bucket"
+	PerRequestAlgorithm       = "per_request"
+	ConcurrencyAlgorithm      = "concurrency"
+	maximumRulesPerRequest    = 128
+	maximumAttemptsPerRequest = 32
+	maximumReservationEntries = maximumRulesPerRequest * maximumAttemptsPerRequest
 
 	ProviderReportedProvenance = "provider_reported"
 	UnknownUsageProvenance     = "unknown"
@@ -101,6 +103,7 @@ const (
 	requestDigestDomain             = "latchway/quota-request/v1\x00"
 	reservationPricingBindingDomain = "latchway/quota-reservation-pricing/v1\x00"
 	inputPreflightBindingDomain     = "latchway/quota-input-preflight-binding/v2\x00"
+	attemptDecisionBindingDomain    = "latchway/quota-attempt-decision/v1\x00"
 )
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
@@ -223,9 +226,29 @@ type Reservation struct {
 	upstreamKey      string
 	modelKey         string
 	physicalModel    string
+	protocol         string
 	pricing          selectedPricing
+	inputPreflight   *InputPreflightBinding
+	retryPlan        *reservationRetryPlan
 	windowResetAt    time.Time
 	expiresAt        time.Time
+}
+
+// reservationRetryPlan is a defensive copy of the immutable, server-resolved
+// rule set and authorization dimensions that produced the logical
+// reservation. It is deliberately carried only inside the opaque Reservation
+// handle: a retry caller selects a physical target and supplies trusted
+// per-attempt units, but cannot replace the rules or scope identities used to
+// materialize that target's buckets.
+type reservationRetryPlan struct {
+	applicationUserID string
+	installationID    string
+	sessionGrantID    string
+	configRevisionID  string
+	featureKey        string
+	limitPlanKey      string
+	streaming         bool
+	rules             []Rule
 }
 
 // selectedPricing is copied into every opaque reservation and persisted on
@@ -265,6 +288,28 @@ type Attempt struct {
 func (attempt Attempt) ID() string               { return attempt.attemptID }
 func (attempt Attempt) LogicalRequestID() string { return attempt.reservation.logicalRequestID }
 func (attempt Attempt) Number() int32            { return attempt.number }
+
+// AttemptAllocation is the trusted capacity reserved immediately before one
+// retry dispatch. Allocations are permitted only for token and cost metrics;
+// a logical request is charged once and its concurrency leases span the whole
+// retry sequence.
+type AttemptAllocation struct {
+	Metric string
+	Units  int64
+}
+
+// RetryAttemptInput is the immutable server-owned physical decision for the
+// attempt after Previous. The store derives the next contiguous attempt
+// number and the exact configuration revision used by Pricing.
+type RetryAttemptInput struct {
+	RouteKey       string
+	UpstreamKey    string
+	ModelKey       string
+	PhysicalModel  string
+	Pricing        PricingSelection
+	InputPreflight *InputPreflightBinding
+	Allocations    []AttemptAllocation
+}
 
 // ExceededError reports the safe reset boundary for one denied request. It
 // deliberately omits bucket and scope hashes.
@@ -668,7 +713,7 @@ func canonicalScopeDimensions(input []string) ([]string, error) {
 // encoded as unpadded base64url. The immutable rule digest intentionally
 // excludes mutable maximum, capacity, and refill values; changing a policy
 // does not manufacture a fresh bucket.
-func canonicalDigest(domain string, parts []string) string {
+func canonicalDigestBytes(domain string, parts []string) [sha256.Size]byte {
 	digest := sha256.New()
 	_, _ = digest.Write([]byte(domain))
 	var length [4]byte
@@ -677,7 +722,14 @@ func canonicalDigest(domain string, parts []string) string {
 		_, _ = digest.Write(length[:])
 		_, _ = digest.Write([]byte(part))
 	}
-	return base64.RawURLEncoding.EncodeToString(digest.Sum(nil))
+	var result [sha256.Size]byte
+	copy(result[:], digest.Sum(nil))
+	return result
+}
+
+func canonicalDigest(domain string, parts []string) string {
+	digest := canonicalDigestBytes(domain, parts)
+	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 // requestFingerprint is persisted on the logical request. It binds every
@@ -865,6 +917,100 @@ func validPhysicalModel(value string) bool {
 	return strings.IndexFunc(value, unicode.IsControl) == -1
 }
 
+func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error) {
+	if !identifierPattern.MatchString(input.RouteKey) ||
+		!identifierPattern.MatchString(input.UpstreamKey) ||
+		!identifierPattern.MatchString(input.ModelKey) ||
+		!validPhysicalModel(input.PhysicalModel) ||
+		(input.Pricing.CatalogID == "") != (input.Pricing.Currency == "") ||
+		(input.Pricing.CatalogID != "" &&
+			(!identifierPattern.MatchString(input.Pricing.CatalogID) || input.Pricing.Currency != USDCurrency)) ||
+		len(input.Allocations) > len(reservedTokenMetricOrder)+1 {
+		return RetryAttemptInput{}, ErrInvalidInput
+	}
+	result := input
+	if input.InputPreflight != nil {
+		binding := *input.InputPreflight
+		result.InputPreflight = &binding
+	}
+	result.Allocations = append([]AttemptAllocation(nil), input.Allocations...)
+	sort.Slice(result.Allocations, func(left, right int) bool {
+		return attemptAllocationOrder(result.Allocations[left].Metric) <
+			attemptAllocationOrder(result.Allocations[right].Metric)
+	})
+	byMetric := make(map[string]int64, len(result.Allocations))
+	for index, allocation := range result.Allocations {
+		if attemptAllocationOrder(allocation.Metric) == math.MaxInt ||
+			(allocation.Metric == CostNanoUSDMetric && allocation.Units < 0) ||
+			(allocation.Metric != CostNanoUSDMetric && allocation.Units <= 0) ||
+			(index > 0 && result.Allocations[index-1].Metric == allocation.Metric) {
+			return RetryAttemptInput{}, ErrInvalidInput
+		}
+		byMetric[allocation.Metric] = allocation.Units
+	}
+	tokenReservations := make(map[string]int64, 3)
+	for _, metric := range reservedTokenMetricOrder {
+		if units, ok := byMetric[metric]; ok {
+			tokenReservations[metric] = units
+		}
+	}
+	if !validTokenReservationRelationship(tokenReservations) {
+		return RetryAttemptInput{}, ErrInvalidInput
+	}
+	return result, nil
+}
+
+func cloneInputPreflightBinding(input *InputPreflightBinding) *InputPreflightBinding {
+	if input == nil {
+		return nil
+	}
+	result := *input
+	return &result
+}
+
+func retryPlanForRequest(prepared preparedRequest) *reservationRetryPlan {
+	return &reservationRetryPlan{
+		applicationUserID: prepared.ApplicationUserID,
+		installationID:    prepared.InstallationID,
+		sessionGrantID:    prepared.SessionGrantID,
+		configRevisionID:  prepared.ConfigRevisionID,
+		featureKey:        prepared.FeatureKey,
+		limitPlanKey:      prepared.LimitPlanKey,
+		streaming:         prepared.Streaming,
+		rules:             cloneLimitRules(prepared.Rules),
+	}
+}
+
+func cloneReservationRetryPlan(input *reservationRetryPlan) *reservationRetryPlan {
+	if input == nil {
+		return nil
+	}
+	result := *input
+	result.rules = cloneLimitRules(input.rules)
+	return &result
+}
+
+func cloneLimitRules(input []Rule) []Rule {
+	result := make([]Rule, len(input))
+	for index := range input {
+		result[index] = input[index]
+		result[index].Scope = append([]string(nil), input[index].Scope...)
+	}
+	return result
+}
+
+func attemptAllocationOrder(metric string) int {
+	for index, candidate := range reservedTokenMetricOrder {
+		if metric == candidate {
+			return index
+		}
+	}
+	if metric == CostNanoUSDMetric {
+		return len(reservedTokenMetricOrder)
+	}
+	return math.MaxInt
+}
+
 func pricingForRequest(prepared preparedRequest) selectedPricing {
 	if prepared.Pricing.CatalogID == "" {
 		return selectedPricing{}
@@ -903,6 +1049,20 @@ func (reservation Reservation) validate() error {
 		reservation.pricing.validate() != nil ||
 		reservation.expiresAt.IsZero() || len(reservation.entries) > maximumRulesPerRequest {
 		return ErrInvalidInput
+	}
+	if reservation.inputPreflight != nil {
+		binding := reservation.inputPreflight
+		var zero [sha256.Size]byte
+		if binding.Method != UTF8ByteBPEDeclaredFramingV1 ||
+			binding.Protocol != "openai_chat" || binding.Protocol != reservation.protocol ||
+			!identifierPattern.MatchString(binding.ProfileID) ||
+			binding.ProfileDigest == zero || binding.RewrittenBodySHA256 == zero ||
+			binding.PhysicalModel != reservation.physicalModel ||
+			binding.InputTokenBound <= 0 || binding.OutputTokenBound <= 0 ||
+			binding.InputTokenBound > math.MaxInt64-binding.OutputTokenBound ||
+			binding.TotalTokenBound != binding.InputTokenBound+binding.OutputTokenBound {
+			return ErrInvalidInput
+		}
 	}
 	if len(reservation.entries) == 0 {
 		if !reservation.windowResetAt.IsZero() {
@@ -964,6 +1124,27 @@ func (reservation Reservation) validate() error {
 			maximumReset = entry.resetAt
 		}
 	}
+	_, hasInput := tokenReservations[InputTokensMetric]
+	_, hasTotal := tokenReservations[TotalTokensMetric]
+	if (hasInput || hasTotal) && reservation.inputPreflight == nil {
+		return ErrInvalidInput
+	}
+	if binding := reservation.inputPreflight; binding != nil {
+		for metric, units := range tokenReservations {
+			var expected int64
+			switch metric {
+			case InputTokensMetric:
+				expected = binding.InputTokenBound
+			case OutputTokensMetric:
+				expected = binding.OutputTokenBound
+			case TotalTokensMetric:
+				expected = binding.TotalTokenBound
+			}
+			if units != expected {
+				return ErrInvalidInput
+			}
+		}
+	}
 	if !validTokenReservationRelationship(tokenReservations) ||
 		!reservation.windowResetAt.Equal(maximumReset) {
 		return ErrInvalidInput
@@ -1014,7 +1195,8 @@ func validReservationEntryUnits(metric, algorithm string, units int64) bool {
 }
 
 func (attempt Attempt) validate() error {
-	if attempt.reservation.validate() != nil || id.Validate(attempt.attemptID, id.UpstreamAttempt) != nil || attempt.number != 1 {
+	if attempt.reservation.validate() != nil || id.Validate(attempt.attemptID, id.UpstreamAttempt) != nil ||
+		attempt.number < 1 || attempt.number > maximumAttemptsPerRequest {
 		return ErrInvalidInput
 	}
 	return nil

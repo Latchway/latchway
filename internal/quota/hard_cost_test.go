@@ -252,7 +252,7 @@ func TestHardCostReservationLifecycleStateAllowsExactPartialSettlement(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			got := existingReservationStateMatches(
 				test.logical, test.reservation, CostNanoUSDMetric, CalendarAlgorithm,
-				test.reserved, test.reserved, test.settled, test.released,
+				test.reserved, test.reserved, test.reserved, test.settled, test.released,
 			)
 			if got != test.want {
 				t.Fatalf("cost lifecycle match = %t, want %t", got, test.want)

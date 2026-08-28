@@ -417,8 +417,8 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			INSERT INTO quota_reservation_entries (
 				quota_reservation_entry_id, organization_id, application_id,
 				environment_id, quota_reservation_id, quota_bucket_id,
-				reserved_units, settled_units, released_units
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 0)
+				initial_reserved_units, reserved_units, settled_units, released_units
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 0, 0)
 		`, plan.entryID, prepared.OrganizationID, prepared.ApplicationID,
 			prepared.EnvironmentID, identifiers.reservation, plan.locked.id,
 			plan.reservedUnits); err != nil {
@@ -435,8 +435,10 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		reservationID: identifiers.reservation, entries: entries,
 		routeKey: prepared.RouteKey, upstreamKey: prepared.UpstreamKey,
 		modelKey: prepared.ModelKey, physicalModel: prepared.PhysicalModel,
-		pricing:       pricing,
-		windowResetAt: maximumResetAt(entries), expiresAt: expiresAt,
+		protocol: prepared.Protocol, pricing: pricing,
+		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
+		retryPlan:      retryPlanForRequest(prepared),
+		windowResetAt:  maximumResetAt(entries), expiresAt: expiresAt,
 	}, nil
 }
 
@@ -513,6 +515,10 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	plans, err := plannedBucketsAt(prepared, logical.requestedAt.UTC())
 	if err != nil {
 		return Reservation{}, ErrInvalidState
+	}
+	attempts, err := loadAttemptsForUpdate(ctx, tx, prepared.LogicalRequestID.String())
+	if err != nil {
+		return Reservation{}, err
 	}
 
 	if logical.status == "denied" {
@@ -620,7 +626,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logicalRequestID, reservationID, idempotency string
 		status, entryID, bucketID                    string
 		expiresAt                                    time.Time
-		reservedUnits, settledUnits, releasedUnits   int64
+		initialReservedUnits, reservedUnits          int64
+		originAttemptNumber                          int32
+		settledUnits, releasedUnits                  int64
 		bucketOrganizationID, bucketApplicationID    string
 		limitPlanKey, ruleKey, metric, scopeType     string
 		scopeDimensions                              []string
@@ -633,7 +641,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		       reservation.quota_reservation_id, reservation.idempotency_key,
 		       reservation.status, reservation.expires_at,
 		       entry.quota_reservation_entry_id, entry.quota_bucket_id,
-		       entry.reserved_units, entry.settled_units, entry.released_units,
+		       entry.origin_attempt_number, entry.initial_reserved_units,
+		       entry.reserved_units,
+		       entry.settled_units, entry.released_units,
 		       bucket.organization_id, bucket.application_id,
 		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
 		       bucket.scope_type, bucket.scope_dimensions, bucket.scope_key,
@@ -658,8 +668,10 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 	defer rows.Close()
 	planIndexes := make(map[string]int, len(plans))
+	plansByRule := make(map[string]plannedBucket, len(plans))
 	for index := range plans {
 		planIndexes[plannedBucketIdentity(plans[index].rule.ruleKey, plans[index].rule.scopeKey)] = index
+		plansByRule[plans[index].rule.ruleKey] = plans[index]
 	}
 	matchedPlans := make([]bool, len(plans))
 	entries := make([]reservationEntry, 0, len(plans))
@@ -671,7 +683,8 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			&existing.organizationID, &existing.applicationID, &existing.environmentID,
 			&existing.logicalRequestID, &existing.reservationID, &existing.idempotency,
 			&existing.status, &existing.expiresAt, &existing.entryID, &existing.bucketID,
-			&existing.reservedUnits, &existing.settledUnits, &existing.releasedUnits,
+			&existing.originAttemptNumber, &existing.initialReservedUnits, &existing.reservedUnits,
+			&existing.settledUnits, &existing.releasedUnits,
 			&existing.bucketOrganizationID, &existing.bucketApplicationID,
 			&existing.limitPlanKey, &existing.ruleKey, &existing.metric,
 			&existing.scopeType, &existing.scopeDimensions, &existing.scopeKey,
@@ -679,11 +692,22 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		); err != nil {
 			return Reservation{}, persistenceFailure("scan existing quota reservation", err)
 		}
-		planIndex, ok := planIndexes[plannedBucketIdentity(existing.ruleKey, existing.scopeKey)]
-		if !ok || matchedPlans[planIndex] {
+		planIndex, initial := planIndexes[plannedBucketIdentity(existing.ruleKey, existing.scopeKey)]
+		plan, sourceRule := plansByRule[existing.ruleKey]
+		if initial {
+			if matchedPlans[planIndex] || existing.originAttemptNumber != 1 {
+				return Reservation{}, ErrInvalidInput
+			}
+			plan = plans[planIndex]
+		} else if !sourceRule || existing.originAttemptNumber < 2 ||
+			existing.originAttemptNumber > int32(len(attempts)) ||
+			plan.rule.Metric == LogicalRequestsMetric ||
+			!storedAttemptScopeKeyMatches(
+				prepared, attempts[existing.originAttemptNumber-1],
+				plan.rule.scopeDimensions, existing.scopeKey,
+			) {
 			return Reservation{}, ErrInvalidInput
 		}
-		plan := plans[planIndex]
 		if existing.organizationID != prepared.OrganizationID ||
 			existing.applicationID != prepared.ApplicationID ||
 			existing.environmentID != prepared.EnvironmentID ||
@@ -698,11 +722,16 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			(isConcurrencyMetric(existing.metric) && existing.bucketUsed != 0) {
 			return Reservation{}, ErrInvalidInput
 		}
+		expectedInitial := existing.initialReservedUnits
+		if initial {
+			expectedInitial = plan.reservedUnits
+		}
 		if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
 			id.Validate(existing.entryID, id.QuotaEntry) != nil ||
 			id.Validate(existing.bucketID, id.QuotaBucket) != nil ||
 			!existingReservationStateMatches(logical.status, existing.status,
-				plan.rule.Metric, plan.rule.Algorithm, plan.reservedUnits, existing.reservedUnits,
+				plan.rule.Metric, plan.rule.Algorithm, expectedInitial,
+				existing.initialReservedUnits, existing.reservedUnits,
 				existing.settledUnits, existing.releasedUnits) {
 			return Reservation{}, ErrInvalidState
 		}
@@ -714,13 +743,15 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			!expiresAt.Equal(existing.expiresAt) {
 			return Reservation{}, ErrInvalidState
 		}
-		matchedPlans[planIndex] = true
-		entries = append(entries, reservationEntry{
-			bucketID: existing.bucketID, entryID: existing.entryID,
-			metric: plan.rule.Metric, algorithm: plan.rule.Algorithm,
-			reservedUnits: plan.reservedUnits,
-			resetAt:       plan.period.end,
-		})
+		if initial {
+			matchedPlans[planIndex] = true
+			entries = append(entries, reservationEntry{
+				bucketID: existing.bucketID, entryID: existing.entryID,
+				metric: plan.rule.Metric, algorithm: plan.rule.Algorithm,
+				reservedUnits: plan.reservedUnits,
+				resetAt:       plan.period.end,
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return Reservation{}, persistenceFailure("iterate existing quota reservation", err)
@@ -733,20 +764,30 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			return Reservation{}, ErrInvalidState
 		}
 	}
-	storedAttempt, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
-	if err != nil {
-		return Reservation{}, err
-	}
+	attemptExists := len(attempts) != 0
 	if !existingAttemptPresenceMatches(logical.status, reservationStatus, attemptExists) {
+		return Reservation{}, ErrInvalidState
+	}
+	if attemptExists && (attempts[0].routeKey != prepared.RouteKey ||
+		attempts[0].upstreamKey != prepared.UpstreamKey || attempts[0].physicalModel == nil ||
+		*attempts[0].physicalModel != prepared.PhysicalModel ||
+		!storedModelKeyMatches(attempts[0], prepared.ModelKey) ||
+		!attemptPricingMatchesReservation(attempts[0], Reservation{pricing: pricing}) ||
+		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight)) {
 		return Reservation{}, ErrInvalidState
 	}
 	replayed := lockedReservation{
 		Reservation: Reservation{
 			organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 			environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
-			reservationID: reservationID, entries: entries, expiresAt: expiresAt,
+			reservationID: reservationID, entries: entries, protocol: prepared.Protocol,
+			inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
+			retryPlan:      retryPlanForRequest(prepared), expiresAt: expiresAt,
 		},
 		status: reservationStatus, expiresAt: expiresAt,
+		applicationUserID: prepared.ApplicationUserID,
+		installationID:    prepared.InstallationID,
+		featureKey:        prepared.FeatureKey,
 	}
 	lockedEntries, err := lockEntries(ctx, tx, replayed)
 	if err != nil {
@@ -765,7 +806,14 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 	if reservationStatus == "pending" {
 		replayed.entries = entries
-		if !pendingEntriesMatch(logical.status, replayed, lockedEntries, leases) {
+		lifecycleMatches, lifecycleErr := retryPendingLifecycleMatches(
+			ctx, tx, replayed, logical.status, lockedEntries, attempts,
+		)
+		if lifecycleErr != nil {
+			return Reservation{}, lifecycleErr
+		}
+		if !pendingEntriesMatch(logical.status, replayed, lockedEntries, leases) ||
+			!lifecycleMatches {
 			return Reservation{}, ErrInvalidState
 		}
 	} else {
@@ -773,23 +821,23 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			return Reservation{}, ErrInvalidState
 		}
 		if reservationStatus == "settled" && attemptExists {
-			cost := Cost{}
-			if storedAttempt.billedCost != nil {
-				cost = Cost{
-					NanoUSD: *storedAttempt.billedCost, Known: true,
-					Confidence: CalculatedCostConfidence,
-				}
-			}
-			if !terminalCostEntriesMatch(lockedEntries, cost) {
-				return Reservation{}, ErrInvalidState
-			}
-			tokenEntriesMatch, tokenErr := terminalStoredTokenEntriesMatch(
-				ctx, tx, replayed, storedAttempt, lockedEntries,
+			aggregateMatches, aggregateErr := retryAggregateMatchesEntries(
+				ctx, tx, replayed, lockedEntries,
 			)
-			if tokenErr != nil {
-				return Reservation{}, tokenErr
+			if aggregateErr != nil {
+				return Reservation{}, aggregateErr
 			}
-			if !tokenEntriesMatch {
+			logicalUsageMatches, usageErr := logicalUsageRecordMatches(ctx, tx, replayed)
+			if usageErr != nil {
+				return Reservation{}, usageErr
+			}
+			accountingMatches, accountingErr := terminalAttemptAccountingSequenceMatches(
+				ctx, tx, replayed, logical.status, lockedEntries, attempts,
+			)
+			if accountingErr != nil {
+				return Reservation{}, accountingErr
+			}
+			if !aggregateMatches || !logicalUsageMatches || !accountingMatches {
 				return Reservation{}, ErrInvalidState
 			}
 		}
@@ -800,9 +848,11 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID:    reservationID, entries: entries, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, pricing: pricing,
-		windowResetAt: maximumResetAt(entries),
-		expiresAt:     expiresAt,
+		physicalModel: prepared.PhysicalModel, protocol: prepared.Protocol, pricing: pricing,
+		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
+		retryPlan:      retryPlanForRequest(prepared),
+		windowResetAt:  maximumResetAt(entries),
+		expiresAt:      expiresAt,
 	}, nil
 }
 
@@ -856,9 +906,18 @@ func loadExistingEntrylessReservation(
 		existing.reservationID != lockedReservationID || existing.idempotency != reservationKey {
 		return Reservation{}, ErrInvalidInput
 	}
-	_, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
+	attempts, err := loadAttemptsForUpdate(ctx, tx, prepared.LogicalRequestID.String())
 	if err != nil {
 		return Reservation{}, err
+	}
+	attemptExists := len(attempts) != 0
+	if attemptExists && (attempts[0].routeKey != prepared.RouteKey ||
+		attempts[0].upstreamKey != prepared.UpstreamKey || attempts[0].physicalModel == nil ||
+		*attempts[0].physicalModel != prepared.PhysicalModel ||
+		!storedModelKeyMatches(attempts[0], prepared.ModelKey) ||
+		!attemptPricingMatchesReservation(attempts[0], Reservation{pricing: pricingForRequest(prepared)}) ||
+		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight)) {
+		return Reservation{}, ErrInvalidState
 	}
 	validLifecycle := false
 	switch existing.status {
@@ -869,18 +928,53 @@ func loadExistingEntrylessReservation(
 	case "released", "expired":
 		validLifecycle = logicalStatus == "failed"
 	}
+	replayed := lockedReservation{Reservation: Reservation{
+		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
+		environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
+		reservationID: existing.reservationID, protocol: prepared.Protocol,
+		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
+		retryPlan:      retryPlanForRequest(prepared),
+	}, status: existing.status, expiresAt: existing.expiresAt,
+		applicationUserID: prepared.ApplicationUserID,
+		installationID:    prepared.InstallationID,
+		featureKey:        prepared.FeatureKey,
+	}
+	terminalAccountingMatches := true
+	if existing.status == "settled" {
+		terminalAccountingMatches, err = terminalAttemptAccountingSequenceMatches(
+			ctx, tx, replayed, logicalStatus, nil, attempts,
+		)
+		if err != nil {
+			return Reservation{}, err
+		}
+	}
 	if id.Validate(existing.reservationID, id.QuotaReservation) != nil ||
 		existing.entryCount != 0 || existing.leaseCount != 0 || !validLifecycle ||
-		!existingAttemptPresenceMatches(logicalStatus, existing.status, attemptExists) {
+		!existingAttemptPresenceMatches(logicalStatus, existing.status, attemptExists) ||
+		!terminalAccountingMatches {
 		return Reservation{}, ErrInvalidState
+	}
+	if existing.status == "pending" {
+		pendingMatches, pendingErr := retryPendingLifecycleMatches(
+			ctx, tx, replayed, logicalStatus, nil, attempts,
+		)
+		if pendingErr != nil {
+			return Reservation{}, pendingErr
+		}
+		if !pendingMatches {
+			return Reservation{}, ErrInvalidState
+		}
 	}
 	return Reservation{
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 		environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID: existing.reservationID, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, pricing: pricingForRequest(prepared),
-		expiresAt: existing.expiresAt,
+		physicalModel: prepared.PhysicalModel, protocol: prepared.Protocol,
+		pricing:        pricingForRequest(prepared),
+		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
+		retryPlan:      retryPlanForRequest(prepared),
+		expiresAt:      existing.expiresAt,
 	}, nil
 }
 
@@ -890,20 +984,29 @@ func existingReservationStateMatches(
 	metric string,
 	algorithm string,
 	expected int64,
+	initialReserved int64,
 	reserved int64,
 	settled int64,
 	released int64,
 ) bool {
 	if !validReservationEntryUnits(metric, algorithm, expected) ||
-		reserved != expected || settled < 0 || released < 0 ||
+		initialReserved != expected || reserved < initialReserved || settled < 0 || released < 0 ||
 		settled > reserved || released > reserved-settled ||
-		!validReservationEntryUnits(metric, algorithm, reserved) {
+		(metric == LogicalRequestsMetric || isConcurrencyMetric(metric)) && reserved != initialReserved {
 		return false
 	}
 	switch reservationStatus {
 	case "pending":
-		return settled == 0 && released == 0 &&
-			(logicalStatus == "reserved" || logicalStatus == "dispatched" || logicalStatus == "streaming")
+		if logicalStatus == "reserved" {
+			return reserved == initialReserved && settled == 0 && released == 0
+		}
+		if logicalStatus != "dispatched" && logicalStatus != "streaming" {
+			return false
+		}
+		if metric == LogicalRequestsMetric || isConcurrencyMetric(metric) {
+			return settled == 0 && released == 0
+		}
+		return true
 	case "settled":
 		if logicalStatus != "succeeded" && logicalStatus != "failed" && logicalStatus != "cancelled" {
 			return false
@@ -911,15 +1014,12 @@ func existingReservationStateMatches(
 		if isConcurrencyMetric(metric) {
 			return settled == 0 && released == reserved
 		}
-		if metric == CostNanoUSDMetric {
-			return settled+released == reserved
-		}
-		if metric == LogicalRequestsMetric || logicalStatus != "succeeded" {
+		if metric == LogicalRequestsMetric {
 			return settled == reserved && released == 0
 		}
 		return settled+released == reserved
 	case "released", "expired":
-		return settled == 0 && released == reserved && logicalStatus == "failed"
+		return reserved == initialReserved && settled == 0 && released == reserved && logicalStatus == "failed"
 	default:
 		return false
 	}
@@ -1285,9 +1385,17 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	if err != nil {
 		return Attempt{}, false, err
 	}
-	existing, found, err := loadAttemptForUpdate(ctx, tx, reservation.logicalRequestID, 1)
+	attempts, err := loadAttemptsForUpdate(ctx, tx, reservation.logicalRequestID)
 	if err != nil {
 		return Attempt{}, false, err
+	}
+	found := len(attempts) != 0
+	var perRequestOutputBound *int64
+	if reservation.retryPlan != nil {
+		perRequestOutputBound, err = perRequestOutputTokenBound(reservation.retryPlan.rules)
+		if err != nil {
+			return Attempt{}, false, err
+		}
 	}
 	entries, err := lockEntries(ctx, tx, lockedReservation)
 	if err != nil {
@@ -1298,35 +1406,47 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		return Attempt{}, false, err
 	}
 	if found {
+		existing := attempts[0]
 		if existing.routeKey != reservation.routeKey || existing.upstreamKey != reservation.upstreamKey ||
 			existing.physicalModel == nil || *existing.physicalModel != reservation.physicalModel ||
-			!attemptPricingMatchesReservation(existing, reservation) {
+			!storedModelKeyMatches(existing, reservation.modelKey) ||
+			(existing.attemptDecisionBindingVersion == 1 &&
+				!optionalInt64Matches(existing.perRequestOutputTokenBound, perRequestOutputBound)) ||
+			!attemptPricingMatchesReservation(existing, reservation) ||
+			!storedInitialInputPreflightMatches(existing, reservation.inputPreflight) {
 			return Attempt{}, false, ErrInvalidState
 		}
 		switch lockedReservation.status {
 		case "pending":
-			if !pendingEntriesMatch(logical.status, lockedReservation, entries, leases) {
+			lifecycleMatches, lifecycleErr := retryPendingLifecycleMatches(
+				ctx, tx, lockedReservation, logical.status, entries, attempts,
+			)
+			if lifecycleErr != nil {
+				return Attempt{}, false, lifecycleErr
+			}
+			if !pendingEntriesMatch(logical.status, lockedReservation, entries, leases) ||
+				!lifecycleMatches {
 				return Attempt{}, false, ErrInvalidState
 			}
 		case "settled":
-			cost := Cost{}
-			if existing.billedCost != nil {
-				cost = Cost{
-					NanoUSD: *existing.billedCost, Known: true,
-					Confidence: CalculatedCostConfidence,
-				}
+			aggregateMatches, aggregateErr := retryAggregateMatchesEntries(
+				ctx, tx, lockedReservation, entries,
+			)
+			if aggregateErr != nil {
+				return Attempt{}, false, aggregateErr
+			}
+			logicalUsageMatches, usageErr := logicalUsageRecordMatches(ctx, tx, lockedReservation)
+			if usageErr != nil {
+				return Attempt{}, false, usageErr
+			}
+			accountingMatches, accountingErr := terminalAttemptAccountingSequenceMatches(
+				ctx, tx, lockedReservation, logical.status, entries, attempts,
+			)
+			if accountingErr != nil {
+				return Attempt{}, false, accountingErr
 			}
 			if !terminalEntriesMatch(logical.status, lockedReservation.status, entries, leases) ||
-				!terminalCostEntriesMatch(entries, cost) {
-				return Attempt{}, false, ErrInvalidState
-			}
-			tokenEntriesMatch, tokenErr := terminalStoredTokenEntriesMatch(
-				ctx, tx, lockedReservation, existing, entries,
-			)
-			if tokenErr != nil {
-				return Attempt{}, false, tokenErr
-			}
-			if !tokenEntriesMatch {
+				!aggregateMatches || !logicalUsageMatches || !accountingMatches {
 				return Attempt{}, false, ErrInvalidState
 			}
 		default:
@@ -1365,23 +1485,64 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	if command.RowsAffected() != 1 {
 		return Attempt{}, false, ErrInvalidState
 	}
+	var accountingMethod, accountingProfileID, accountingProfileDigest any
+	var rewrittenBodyDigest, inputBound, outputBound, totalBound any
+	if binding := reservation.inputPreflight; binding != nil {
+		accountingMethod = binding.Method
+		accountingProfileID = binding.ProfileID
+		accountingProfileDigest = binding.ProfileDigest[:]
+		rewrittenBodyDigest = binding.RewrittenBodySHA256[:]
+		inputBound = binding.InputTokenBound
+		outputBound = binding.OutputTokenBound
+		totalBound = binding.TotalTokenBound
+	}
+	initialAllocations, err := initialAttemptAllocations(entries)
+	if err != nil {
+		return Attempt{}, false, err
+	}
+	decisionAttempt := newStoredAttemptDecision(
+		attemptID, 1, reservation.routeKey, reservation.upstreamKey,
+		reservation.modelKey, reservation.physicalModel, reservation.pricing,
+		reservation.inputPreflight, perRequestOutputBound,
+	)
+	decisionDigest, err := attemptDecisionDigest(
+		lockedReservation, decisionAttempt,
+		attemptQuotaRowsForDecision(entries, initialAllocations),
+	)
+	if err != nil {
+		return Attempt{}, false, err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO upstream_attempts (
 			upstream_attempt_id, organization_id, application_id, environment_id,
 			logical_request_id, attempt_number, route_key, upstream_key,
-			physical_model, status, started_at, currency, price_revision,
-			pricing_source, cost_confidence
+			physical_model, model_key, attempt_decision_binding_version,
+			attempt_decision_sha256, per_request_output_token_bound,
+			input_accounting_binding_version,
+			status, started_at, currency, price_revision, pricing_source,
+			cost_confidence, input_accounting_method,
+			input_accounting_profile_id, input_accounting_profile_digest,
+			rewritten_body_sha256, input_token_bound, output_token_bound,
+			total_token_bound
 		) VALUES (
-			$1, $2, $3, $4, $5, 1, $6, $7, $8, 'started', $9,
-			$10, $11, $12, $13
+			$1, $2, $3, $4, $5, 1, $6, $7, $8, $9, 1, $10, $11, 1,
+			'started', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
 		)
 	`, attemptID, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID,
 		reservation.routeKey, reservation.upstreamKey, reservation.physicalModel,
-		now, nullableString(reservation.pricing.currency),
+		reservation.modelKey, decisionDigest[:], perRequestOutputBound, now,
+		nullableString(reservation.pricing.currency),
 		nullableString(reservation.pricing.revision), nullableString(reservation.pricing.source),
-		nullableString(initialCostConfidence(reservation.pricing))); err != nil {
+		nullableString(initialCostConfidence(reservation.pricing)), accountingMethod,
+		accountingProfileID, accountingProfileDigest, rewrittenBodyDigest,
+		inputBound, outputBound, totalBound); err != nil {
 		return Attempt{}, false, mapWriteError("insert upstream attempt", err)
+	}
+	if err := insertAttemptQuotaEntries(
+		ctx, tx, lockedReservation, attemptID, entries, initialAllocations,
+	); err != nil {
+		return Attempt{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Attempt{}, false, persistenceFailure("commit upstream attempt", err)
@@ -1408,14 +1569,62 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 	if err != nil {
 		return err
 	}
-	stored, found, err := loadAttemptForUpdate(ctx, tx, attempt.reservation.logicalRequestID, 1)
+	attempts, err := loadAttemptsForUpdate(ctx, tx, attempt.reservation.logicalRequestID)
 	if err != nil {
 		return err
 	}
-	if !found || stored.id != attempt.attemptID {
+	if attempt.number > int32(len(attempts)) ||
+		attempts[attempt.number-1].id != attempt.attemptID {
 		return ErrNotFound
 	}
-	if !attemptPricingMatchesReservation(stored, reservation.Reservation) {
+	stored := attempts[attempt.number-1]
+	if attempt.number == 1 && (!attemptPricingMatchesReservation(stored, reservation.Reservation) ||
+		!storedModelKeyMatches(stored, reservation.modelKey) ||
+		!storedInitialInputPreflightMatches(stored, reservation.inputPreflight)) {
+		return ErrInvalidState
+	}
+	entries, err := lockEntries(ctx, tx, reservation)
+	if err != nil {
+		return err
+	}
+	leases, err := lockConcurrencyLeases(ctx, tx, reservation, entries)
+	if err != nil {
+		return err
+	}
+	switch reservation.status {
+	case "pending":
+		lifecycleMatches, lifecycleErr := retryPendingLifecycleMatches(
+			ctx, tx, reservation, logical.status, entries, attempts,
+		)
+		if lifecycleErr != nil {
+			return lifecycleErr
+		}
+		if !pendingEntriesMatch(logical.status, reservation, entries, leases) ||
+			!lifecycleMatches {
+			return ErrInvalidState
+		}
+	case "settled":
+		aggregateMatches, aggregateErr := retryAggregateMatchesEntries(
+			ctx, tx, reservation, entries,
+		)
+		if aggregateErr != nil {
+			return aggregateErr
+		}
+		logicalUsageMatches, usageErr := logicalUsageRecordMatches(ctx, tx, reservation)
+		if usageErr != nil {
+			return usageErr
+		}
+		accountingMatches, accountingErr := terminalAttemptAccountingSequenceMatches(
+			ctx, tx, reservation, logical.status, entries, attempts,
+		)
+		if accountingErr != nil {
+			return accountingErr
+		}
+		if !terminalEntriesMatch(logical.status, reservation.status, entries, leases) ||
+			!aggregateMatches || !logicalUsageMatches || !accountingMatches {
+			return ErrInvalidState
+		}
+	default:
 		return ErrInvalidState
 	}
 	if stored.firstByteAt != nil {
@@ -1459,9 +1668,17 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 	return nil
 }
 
-// Settle consumes exactly one logical-request unit for every attempt that was
-// committed by BeginAttempt, including failed, timed-out, and cancelled work.
+// Settle finalizes the last attempt and charges exactly one logical-request
+// unit. The schema-12 attempt ledger makes this path identical for a one-
+// attempt request and a request completed after retries.
 func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome) error {
+	return store.SettleFinalAttempt(ctx, attempt, outcome)
+}
+
+// settleSingleLegacy retains the pre-schema-12 implementation as a narrowly
+// scoped recovery primitive while rolling-upgrade paths are validated. New
+// requests always use the attempt ledger through SettleFinalAttempt.
+func (store *Store) settleSingleLegacy(ctx context.Context, attempt Attempt, outcome Outcome) error {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || attempt.validate() != nil || outcome.validate() != nil {
 		return ErrInvalidInput
 	}
@@ -1583,10 +1800,11 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 	if err != nil {
 		return err
 	}
-	_, attemptExists, err := loadAttemptForUpdate(ctx, tx, reservation.logicalRequestID, 1)
+	attempts, err := loadAttemptsForUpdate(ctx, tx, reservation.logicalRequestID)
 	if err != nil {
 		return err
 	}
+	attemptExists := len(attempts) != 0
 	entries, err := lockEntries(ctx, tx, lockedReservation)
 	if err != nil {
 		return err
@@ -1684,10 +1902,14 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	storedAttempt, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, selected.logicalRequestID)
+	lockedReservation.applicationUserID = logical.applicationUserID
+	lockedReservation.installationID = logical.installationID
+	lockedReservation.featureKey = logical.featureKey
+	attempts, err := loadAttemptsForUpdate(ctx, tx, selected.logicalRequestID)
 	if err != nil {
 		return false, err
 	}
+	attemptExists := len(attempts) != 0
 	entries, err := lockEntries(ctx, tx, lockedReservation)
 	if err != nil {
 		return false, err
@@ -1696,62 +1918,138 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var usageIDs settlementUsageIDs
-	var recoveredOutcome Outcome
+	lifecycleMatches, lifecycleErr := retryPendingLifecycleMatches(
+		ctx, tx, lockedReservation, logical.status, entries, attempts,
+	)
+	if lifecycleErr != nil {
+		return false, lifecycleErr
+	}
+	if !pendingEntriesMatch(logical.status, lockedReservation, entries, leases) ||
+		!lifecycleMatches {
+		return false, ErrInvalidState
+	}
+	var logicalUsageID string
 	if attemptExists {
-		if storedAttempt.status != "started" ||
-			(logical.status != "dispatched" && logical.status != "streaming") {
+		if logical.status != "dispatched" && logical.status != "streaming" {
 			return false, ErrInvalidState
 		}
-		pricing, pricingErr := storedAttempt.selectedPricing()
+		hasCostReservation := false
+		for _, entry := range entries {
+			if entry.metric == CostNanoUSDMetric {
+				hasCostReservation = true
+				break
+			}
+		}
+		firstPricing, pricingErr := attempts[0].selectedPricing()
 		if pricingErr != nil {
 			return false, pricingErr
 		}
-		_, hasCostReservation, costErr := lockedCostReservationUnits(entries)
-		if costErr != nil {
-			return false, costErr
-		}
-		if hasCostReservation &&
-			(!pricing.present() || pricing.revision != logical.configRevisionID) {
+		if hasCostReservation && (!firstPricing.present() ||
+			firstPricing.revision != logical.configRevisionID ||
+			logical.trustedDecisionFingerprint == nil ||
+			reservationIdempotencyKey(
+				*logical.trustedDecisionFingerprint, firstPricing, true,
+			) != selectedIdempotencyKey) {
 			return false, ErrInvalidState
 		}
-		if hasCostReservation &&
-			(logical.trustedDecisionFingerprint == nil ||
-				reservationIdempotencyKey(*logical.trustedDecisionFingerprint, pricing, true) != selectedIdempotencyKey) {
+		for index := range attempts[:len(attempts)-1] {
+			if attempts[index].status != AttemptFailed && attempts[index].status != AttemptTimedOut {
+				return false, ErrInvalidState
+			}
+			quotaEntries, quotaErr := loadAttemptQuotaEntriesForUpdate(
+				ctx, tx, lockedReservation, attempts[index],
+			)
+			if quotaErr != nil || !attemptQuotaEntriesSettled(quotaEntries) {
+				if quotaErr != nil {
+					return false, quotaErr
+				}
+				return false, ErrInvalidState
+			}
+		}
+		last := &attempts[len(attempts)-1]
+		lastQuota, quotaErr := loadAttemptQuotaEntriesForUpdate(ctx, tx, lockedReservation, *last)
+		if quotaErr != nil {
+			return false, quotaErr
+		}
+		if last.status == "started" {
+			pricing, pricingErr := last.selectedPricing()
+			if pricingErr != nil {
+				return false, pricingErr
+			}
+			recoveredOutcome, normalizeErr := normalizeOutcomeForPricing(Outcome{
+				Status: AttemptTimedOut, FailureCode: expiryFailureCode,
+				Usage: Usage{Provenance: UnknownUsageProvenance},
+			}, pricing)
+			if normalizeErr != nil {
+				return false, normalizeErr
+			}
+			tokenReservations, tokenErr := attemptTokenReservationUnits(lastQuota)
+			if tokenErr != nil {
+				return false, tokenErr
+			}
+			usageIDs, idErr := store.newSettlementUsageIDsForTokenMetrics(
+				recoveredOutcome.Usage, tokenReservations, recoveredOutcome.Cost, pricing,
+			)
+			if idErr != nil {
+				return false, idErr
+			}
+			now, err = statementTime(ctx, tx)
+			if err != nil {
+				return false, err
+			}
+			if err := settleRetryAttemptLocked(
+				ctx, tx, lockedReservation, *last, entries, lastQuota,
+				recoveredOutcome, usageIDs, pricing, now,
+			); err != nil {
+				return false, err
+			}
+			last.status = AttemptTimedOut
+			last.failureCode = optionalText(expiryFailureCode)
+			last.billedCost, last.costConfidence = storedSettlementCost(pricing, recoveredOutcome.Cost)
+			completedAt := now
+			last.completedAt = &completedAt
+			logicalUsageID = usageIDs.logical
+			entries, err = lockEntries(ctx, tx, lockedReservation)
+			if err != nil {
+				return false, err
+			}
+		} else if (last.status != AttemptFailed && last.status != AttemptTimedOut) ||
+			!attemptQuotaEntriesSettled(lastQuota) {
 			return false, ErrInvalidState
 		}
-		lockedReservation.pricing = pricing
-		recoveredOutcome, err = normalizeOutcomeForPricing(Outcome{
-			Status: AttemptTimedOut, FailureCode: expiryFailureCode,
-			Usage: Usage{Provenance: UnknownUsageProvenance},
-		}, pricing)
+		aggregateMatches, aggregateErr := retryAggregateMatchesEntries(
+			ctx, tx, lockedReservation, entries,
+		)
+		if aggregateErr != nil {
+			return false, aggregateErr
+		}
+		if !aggregateMatches {
+			return false, ErrInvalidState
+		}
+		if logicalUsageID == "" {
+			logicalUsageID, err = store.newID(id.UsageRecord)
+			if err != nil {
+				return false, fmt.Errorf("generate expired logical usage identifier: %w", err)
+			}
+		}
+		now, err = statementTime(ctx, tx)
 		if err != nil {
 			return false, err
 		}
-		tokenReservations, tokenErr := lockedTokenReservationUnits(entries)
-		if tokenErr != nil {
-			return false, tokenErr
-		}
-		generatedUsageIDs, idErr := store.newSettlementUsageIDsForTokenMetrics(
-			recoveredOutcome.Usage, tokenReservations, recoveredOutcome.Cost,
-			lockedReservation.pricing,
-		)
-		if idErr != nil {
-			return false, idErr
-		}
-		usageIDs = generatedUsageIDs
-	} else if logical.status != "reserved" {
-		return false, ErrInvalidState
-	}
-	now, err = statementTime(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	if attemptExists {
-		if err := settleLocked(ctx, tx, lockedReservation, logical, storedAttempt, entries, leases, recoveredOutcome, usageIDs, now); err != nil {
+		if err := finalizeRetryReservationLocked(
+			ctx, tx, lockedReservation, logical, entries, leases, *last,
+			Outcome{Status: AttemptTimedOut, FailureCode: expiryFailureCode},
+			logicalUsageID, now,
+		); err != nil {
 			return false, err
 		}
+	} else if logical.status != "reserved" {
+		return false, ErrInvalidState
 	} else {
+		now, err = statementTime(ctx, tx)
+		if err != nil {
+			return false, err
+		}
 		if err := releaseLocked(ctx, tx, lockedReservation, logical, entries, leases, "expired", expiryFailureCode, now); err != nil {
 			return false, err
 		}
@@ -1764,23 +2062,37 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 
 type lockedReservation struct {
 	Reservation
-	status    string
-	expiresAt time.Time
+	status            string
+	expiresAt         time.Time
+	applicationUserID string
+	installationID    string
+	featureKey        string
 }
 
 func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lockedReservation, error) {
 	var result lockedReservation
 	err := tx.QueryRow(ctx, `
-		SELECT organization_id, application_id, environment_id,
-		       logical_request_id, quota_reservation_id, status, expires_at
-		FROM quota_reservations
-		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
-		  AND logical_request_id = $4 AND quota_reservation_id = $5
-		FOR UPDATE
+		SELECT reservation.organization_id, reservation.application_id,
+		       reservation.environment_id, reservation.logical_request_id,
+		       reservation.quota_reservation_id, reservation.status,
+		       reservation.expires_at, logical.application_user_id,
+		       logical.installation_id, logical.feature_key
+		FROM quota_reservations AS reservation
+		JOIN logical_requests AS logical
+		  ON logical.organization_id = reservation.organization_id
+		 AND logical.application_id = reservation.application_id
+		 AND logical.environment_id = reservation.environment_id
+		 AND logical.logical_request_id = reservation.logical_request_id
+		WHERE reservation.organization_id = $1 AND reservation.application_id = $2
+		  AND reservation.environment_id = $3
+		  AND reservation.logical_request_id = $4
+		  AND reservation.quota_reservation_id = $5
+		FOR UPDATE OF reservation
 	`, expected.organizationID, expected.applicationID, expected.environmentID,
 		expected.logicalRequestID, expected.reservationID).Scan(
 		&result.organizationID, &result.applicationID, &result.environmentID,
 		&result.logicalRequestID, &result.reservationID, &result.status, &result.expiresAt,
+		&result.applicationUserID, &result.installationID, &result.featureKey,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedReservation{}, ErrNotFound
@@ -1788,12 +2100,20 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 	if err != nil {
 		return lockedReservation{}, persistenceFailure("lock quota reservation", err)
 	}
+	if id.Validate(result.applicationUserID, id.ApplicationUser) != nil ||
+		id.Validate(result.installationID, id.Installation) != nil ||
+		!identifierPattern.MatchString(result.featureKey) {
+		return lockedReservation{}, ErrInvalidState
+	}
 	result.Reservation.entries = append([]reservationEntry(nil), expected.entries...)
 	result.Reservation.routeKey = expected.routeKey
 	result.Reservation.upstreamKey = expected.upstreamKey
 	result.Reservation.modelKey = expected.modelKey
 	result.Reservation.physicalModel = expected.physicalModel
+	result.Reservation.protocol = expected.protocol
 	result.Reservation.pricing = expected.pricing
+	result.Reservation.inputPreflight = cloneInputPreflightBinding(expected.inputPreflight)
+	result.Reservation.retryPlan = cloneReservationRetryPlan(expected.retryPlan)
 	result.Reservation.windowResetAt = expected.windowResetAt
 	return result, nil
 }
@@ -1801,22 +2121,32 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 type lockedLogical struct {
 	status                     string
 	failureCode                *string
+	protocol                   string
 	configRevisionID           string
 	trustedDecisionFingerprint *string
+	applicationUserID          string
+	installationID             string
+	sessionGrantID             string
+	featureKey                 string
+	requestedAt                time.Time
 }
 
 func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (lockedLogical, error) {
 	var result lockedLogical
 	err := tx.QueryRow(ctx, `
-		SELECT status, failure_code, config_revision_id, trusted_decision_fingerprint
+		SELECT status, failure_code, protocol, config_revision_id,
+		       trusted_decision_fingerprint, application_user_id, installation_id,
+		       session_grant_id, feature_key, requested_at
 		FROM logical_requests
 		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
 		  AND logical_request_id = $4
 		FOR UPDATE
 	`, expected.organizationID, expected.applicationID, expected.environmentID,
 		expected.logicalRequestID).Scan(
-		&result.status, &result.failureCode, &result.configRevisionID,
-		&result.trustedDecisionFingerprint,
+		&result.status, &result.failureCode, &result.protocol, &result.configRevisionID,
+		&result.trustedDecisionFingerprint, &result.applicationUserID,
+		&result.installationID, &result.sessionGrantID, &result.featureKey,
+		&result.requestedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedLogical{}, ErrNotFound
@@ -1827,25 +2157,45 @@ func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (l
 	if id.Validate(result.configRevisionID, id.ConfigRevision) != nil {
 		return lockedLogical{}, ErrInvalidState
 	}
+	if plan := expected.retryPlan; plan != nil &&
+		(result.applicationUserID != plan.applicationUserID ||
+			result.installationID != plan.installationID ||
+			result.sessionGrantID != plan.sessionGrantID ||
+			result.configRevisionID != plan.configRevisionID ||
+			result.featureKey != plan.featureKey) {
+		return lockedLogical{}, ErrInvalidState
+	}
 	return result, nil
 }
 
 type storedAttempt struct {
-	id             string
-	number         int32
-	routeKey       string
-	upstreamKey    string
-	physicalModel  *string
-	status         string
-	firstByteAt    *time.Time
-	completedAt    *time.Time
-	httpStatus     *int32
-	failureCode    *string
-	billedCost     *int64
-	currency       *string
-	priceRevision  *string
-	pricingSource  *string
-	costConfidence *string
+	id                            string
+	number                        int32
+	routeKey                      string
+	upstreamKey                   string
+	physicalModel                 *string
+	modelKey                      *string
+	status                        string
+	firstByteAt                   *time.Time
+	completedAt                   *time.Time
+	httpStatus                    *int32
+	failureCode                   *string
+	billedCost                    *int64
+	currency                      *string
+	priceRevision                 *string
+	pricingSource                 *string
+	costConfidence                *string
+	attemptDecisionBindingVersion int16
+	attemptDecisionSHA256         []byte
+	perRequestOutputTokenBound    *int64
+	inputAccountingBindingVersion int16
+	inputAccountingMethod         *string
+	inputAccountingProfileID      *string
+	inputAccountingProfileDigest  []byte
+	rewrittenBodySHA256           []byte
+	inputTokenBound               *int64
+	outputTokenBound              *int64
+	totalTokenBound               *int64
 }
 
 func initialCostConfidence(pricing selectedPricing) string {
@@ -1912,18 +2262,30 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 	var result storedAttempt
 	err := tx.QueryRow(ctx, `
 		SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
-		       physical_model, status, first_byte_at, completed_at,
+		       physical_model, model_key, status, first_byte_at, completed_at,
 		       http_status, failure_code, billed_cost_nano_usd, currency,
-		       price_revision, pricing_source, cost_confidence
+		       price_revision, pricing_source, cost_confidence,
+		       attempt_decision_binding_version, attempt_decision_sha256,
+		       per_request_output_token_bound,
+		       input_accounting_binding_version,
+		       input_accounting_method, input_accounting_profile_id,
+		       input_accounting_profile_digest, rewritten_body_sha256,
+		       input_token_bound, output_token_bound, total_token_bound
 		FROM upstream_attempts
 		WHERE logical_request_id = $1 AND attempt_number = $2
 		FOR UPDATE
 	`, logicalRequestID, number).Scan(
 		&result.id, &result.number, &result.routeKey, &result.upstreamKey,
-		&result.physicalModel, &result.status, &result.firstByteAt,
+		&result.physicalModel, &result.modelKey, &result.status, &result.firstByteAt,
 		&result.completedAt, &result.httpStatus, &result.failureCode,
 		&result.billedCost, &result.currency, &result.priceRevision,
 		&result.pricingSource, &result.costConfidence,
+		&result.attemptDecisionBindingVersion, &result.attemptDecisionSHA256,
+		&result.perRequestOutputTokenBound,
+		&result.inputAccountingBindingVersion,
+		&result.inputAccountingMethod, &result.inputAccountingProfileID,
+		&result.inputAccountingProfileDigest, &result.rewrittenBodySHA256,
+		&result.inputTokenBound, &result.outputTokenBound, &result.totalTokenBound,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return storedAttempt{}, false, nil
@@ -1931,7 +2293,7 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 	if err != nil {
 		return storedAttempt{}, false, persistenceFailure("lock upstream attempt", err)
 	}
-	if id.Validate(result.id, id.UpstreamAttempt) != nil || result.number != number || result.validatePricing() != nil {
+	if id.Validate(result.id, id.UpstreamAttempt) != nil || result.number != number || result.validate() != nil {
 		return storedAttempt{}, false, ErrInvalidState
 	}
 	return result, true, nil
@@ -1940,9 +2302,15 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID string) (storedAttempt, bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
-		       physical_model, status, first_byte_at, completed_at,
+		       physical_model, model_key, status, first_byte_at, completed_at,
 		       http_status, failure_code, billed_cost_nano_usd, currency,
-		       price_revision, pricing_source, cost_confidence
+		       price_revision, pricing_source, cost_confidence,
+		       attempt_decision_binding_version, attempt_decision_sha256,
+		       per_request_output_token_bound,
+		       input_accounting_binding_version,
+		       input_accounting_method, input_accounting_profile_id,
+		       input_accounting_profile_digest, rewritten_body_sha256,
+		       input_token_bound, output_token_bound, total_token_bound
 		FROM upstream_attempts
 		WHERE logical_request_id = $1
 		ORDER BY attempt_number
@@ -1961,14 +2329,20 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 	var result storedAttempt
 	if err := rows.Scan(
 		&result.id, &result.number, &result.routeKey, &result.upstreamKey,
-		&result.physicalModel, &result.status, &result.firstByteAt,
+		&result.physicalModel, &result.modelKey, &result.status, &result.firstByteAt,
 		&result.completedAt, &result.httpStatus, &result.failureCode,
 		&result.billedCost, &result.currency, &result.priceRevision,
 		&result.pricingSource, &result.costConfidence,
+		&result.attemptDecisionBindingVersion, &result.attemptDecisionSHA256,
+		&result.perRequestOutputTokenBound,
+		&result.inputAccountingBindingVersion,
+		&result.inputAccountingMethod, &result.inputAccountingProfileID,
+		&result.inputAccountingProfileDigest, &result.rewrittenBodySHA256,
+		&result.inputTokenBound, &result.outputTokenBound, &result.totalTokenBound,
 	); err != nil {
 		return storedAttempt{}, false, persistenceFailure("scan recovered upstream attempt", err)
 	}
-	if rows.Next() || result.number != 1 || id.Validate(result.id, id.UpstreamAttempt) != nil || result.validatePricing() != nil {
+	if rows.Next() || result.number != 1 || id.Validate(result.id, id.UpstreamAttempt) != nil || result.validate() != nil {
 		return storedAttempt{}, false, ErrInvalidState
 	}
 	if err := rows.Err(); err != nil {
@@ -1978,29 +2352,40 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 }
 
 type lockedEntry struct {
-	id                string
-	bucketID          string
-	metric            string
-	algorithm         string
-	windowKey         string
-	reservedUnits     int64
-	settledUnits      int64
-	releasedUnits     int64
-	bucketUsed        int64
-	bucketReserved    int64
-	hardMaximum       *int64
-	available         *int64
-	refillNumerator   *int64
-	refillDenominator *int64
-	refilledAt        *time.Time
-	version           int64
+	id                   string
+	bucketID             string
+	limitPlanKey         string
+	ruleKey              string
+	metric               string
+	algorithm            string
+	windowKey            string
+	scopeType            string
+	scopeDimensions      []string
+	scopeKey             string
+	originAttemptNumber  int32
+	initialReservedUnits int64
+	reservedUnits        int64
+	settledUnits         int64
+	releasedUnits        int64
+	bucketUsed           int64
+	bucketReserved       int64
+	hardMaximum          *int64
+	available            *int64
+	refillNumerator      *int64
+	refillDenominator    *int64
+	refilledAt           *time.Time
+	version              int64
 }
 
 func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) ([]lockedEntry, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
-		       bucket.metric, bucket.algorithm, bucket.window_key,
-		       entry.reserved_units, entry.settled_units, entry.released_units,
+		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
+		       bucket.algorithm, bucket.window_key, bucket.scope_type,
+		       bucket.scope_dimensions, bucket.scope_key,
+		       entry.origin_attempt_number,
+		       entry.initial_reserved_units, entry.reserved_units,
+		       entry.settled_units, entry.released_units,
 		       bucket.used_units, bucket.reserved_units, bucket.hard_maximum,
 		       bucket.available_units, bucket.refill_numerator,
 		       bucket.refill_denominator, bucket.refilled_at, bucket.version
@@ -2022,13 +2407,15 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 	defer rows.Close()
 	entries := make([]lockedEntry, 0, len(reservation.entries))
 	for rows.Next() {
-		if len(entries) == maximumRulesPerRequest {
+		if len(entries) == maximumReservationEntries {
 			return nil, ErrInvalidState
 		}
 		var entry lockedEntry
 		if err := rows.Scan(
-			&entry.id, &entry.bucketID, &entry.metric, &entry.algorithm, &entry.windowKey,
-			&entry.reservedUnits,
+			&entry.id, &entry.bucketID, &entry.limitPlanKey, &entry.ruleKey,
+			&entry.metric, &entry.algorithm, &entry.windowKey, &entry.scopeType,
+			&entry.scopeDimensions, &entry.scopeKey, &entry.originAttemptNumber,
+			&entry.initialReservedUnits, &entry.reservedUnits,
 			&entry.settledUnits, &entry.releasedUnits, &entry.bucketUsed,
 			&entry.bucketReserved, &entry.hardMaximum, &entry.available,
 			&entry.refillNumerator, &entry.refillDenominator, &entry.refilledAt,
@@ -2036,8 +2423,17 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		); err != nil {
 			return nil, persistenceFailure("scan quota reservation entry", err)
 		}
+		canonicalDimensions, dimensionsErr := canonicalScopeDimensions(entry.scopeDimensions)
 		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
-			!validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			dimensionsErr != nil || !slicesEqual(canonicalDimensions, entry.scopeDimensions) ||
+			!identifierPattern.MatchString(entry.limitPlanKey) ||
+			entry.ruleKey == "" || entry.scopeKey == "" ||
+			entry.originAttemptNumber < 1 || entry.originAttemptNumber > maximumAttemptsPerRequest ||
+			entry.reservedUnits < 0 ||
+			!validReservationEntryUnits(entry.metric, entry.algorithm, entry.initialReservedUnits) ||
+			entry.initialReservedUnits > entry.reservedUnits ||
+			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
+				entry.reservedUnits != entry.initialReservedUnits) ||
 			entry.version < 0 ||
 			(isConcurrencyMetric(entry.metric) !=
 				(entry.algorithm == ConcurrencyAlgorithm && entry.windowKey == "active")) ||
@@ -2066,15 +2462,16 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 		return nil, ErrInvalidState
 	}
 	if len(reservation.entries) != 0 {
-		if len(entries) != len(reservation.entries) {
-			return nil, ErrInvalidState
+		byID := make(map[string]lockedEntry, len(entries))
+		for _, entry := range entries {
+			byID[entry.id] = entry
 		}
-		for index := range entries {
-			if entries[index].id != reservation.entries[index].entryID ||
-				entries[index].bucketID != reservation.entries[index].bucketID ||
-				entries[index].metric != reservation.entries[index].metric ||
-				entries[index].algorithm != reservation.entries[index].algorithm ||
-				entries[index].reservedUnits != reservation.entries[index].reservedUnits {
+		for _, expected := range reservation.entries {
+			entry, ok := byID[expected.entryID]
+			if !ok || entry.id != expected.entryID || entry.bucketID != expected.bucketID ||
+				entry.metric != expected.metric || entry.algorithm != expected.algorithm ||
+				entry.originAttemptNumber != 1 ||
+				entry.initialReservedUnits != expected.reservedUnits {
 				return nil, ErrInvalidState
 			}
 		}
@@ -2864,8 +3261,10 @@ func terminalEntriesMatch(
 	for _, entry := range entries {
 		if !lockedEntryBucketValid(entry) ||
 			!existingReservationStateMatches(
-				logicalStatus, reservationStatus, entry.metric, entry.algorithm, entry.reservedUnits,
-				entry.reservedUnits, entry.settledUnits, entry.releasedUnits,
+				logicalStatus, reservationStatus, entry.metric, entry.algorithm,
+				entry.initialReservedUnits,
+				entry.initialReservedUnits, entry.reservedUnits,
+				entry.settledUnits, entry.releasedUnits,
 			) {
 			return false
 		}
@@ -2886,11 +3285,14 @@ func pendingEntriesMatch(
 	leases []lockedConcurrencyLease,
 ) bool {
 	for _, entry := range entries {
+		outstanding := entry.reservedUnits - entry.settledUnits - entry.releasedUnits
 		if !lockedEntryBucketValid(entry) ||
-			(entry.algorithm != TokenBucketAlgorithm && entry.bucketReserved < entry.reservedUnits) ||
+			outstanding < 0 ||
+			(entry.algorithm != TokenBucketAlgorithm && entry.bucketReserved < outstanding) ||
 			!existingReservationStateMatches(
-				logicalStatus, reservation.status, entry.metric, entry.algorithm, entry.reservedUnits,
-				entry.reservedUnits, entry.settledUnits, entry.releasedUnits,
+				logicalStatus, reservation.status, entry.metric, entry.algorithm,
+				entry.initialReservedUnits, entry.initialReservedUnits, entry.reservedUnits,
+				entry.settledUnits, entry.releasedUnits,
 			) || (isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
 			return false
 		}

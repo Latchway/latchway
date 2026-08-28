@@ -497,6 +497,7 @@ func TestInputAndTotalTokenCalendarStateValidation(t *testing.T) {
 	}
 
 	input := validReserveInput(t)
+	input.InputPreflight = trustedInputPreflight(input, 11, 7)
 	resetAt := time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC)
 	entries := []reservationEntry{
 		{
@@ -542,8 +543,9 @@ func TestInputAndTotalTokenCalendarStateValidation(t *testing.T) {
 		environmentID: input.EnvironmentID, logicalRequestID: input.LogicalRequestID.String(),
 		reservationID: mustInputTotalModelID(t, id.QuotaReservation),
 		entries:       entries, routeKey: input.RouteKey, upstreamKey: input.UpstreamKey,
-		modelKey: input.ModelKey, physicalModel: input.PhysicalModel,
-		windowResetAt: resetAt, expiresAt: resetAt.Add(time.Minute),
+		modelKey: input.ModelKey, physicalModel: input.PhysicalModel, protocol: input.Protocol,
+		inputPreflight: cloneInputPreflightBinding(input.InputPreflight),
+		windowResetAt:  resetAt, expiresAt: resetAt.Add(time.Minute),
 	}
 	if err := reservation.validate(); err != nil {
 		t.Fatalf("validate input/total calendar reservation: %v", err)

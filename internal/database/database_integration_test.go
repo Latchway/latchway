@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,10 +15,53 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/internal/database/dbsql"
 	"github.com/latchway/latchway/migrations"
 )
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
+
+func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
+	t.Parallel()
+	for _, model := range []struct {
+		name   string
+		typeOf reflect.Type
+		fields map[string]string
+	}{
+		{
+			name: "upstream attempt", typeOf: reflect.TypeOf(dbsql.UpstreamAttempt{}),
+			fields: map[string]string{
+				"ModelKey": "model_key", "AttemptDecisionBindingVersion": "attempt_decision_binding_version",
+				"AttemptDecisionSha256":         "attempt_decision_sha256",
+				"PerRequestOutputTokenBound":    "per_request_output_token_bound",
+				"InputAccountingBindingVersion": "input_accounting_binding_version",
+			},
+		},
+		{
+			name: "reservation entry", typeOf: reflect.TypeOf(dbsql.QuotaReservationEntry{}),
+			fields: map[string]string{
+				"InitialReservedUnits": "initial_reserved_units",
+				"OriginAttemptNumber":  "origin_attempt_number",
+			},
+		},
+		{
+			name: "attempt quota entry", typeOf: reflect.TypeOf(dbsql.UpstreamAttemptQuotaEntry{}),
+			fields: map[string]string{
+				"LogicalRequestID": "logical_request_id", "UpstreamAttemptID": "upstream_attempt_id",
+				"QuotaReservationID": "quota_reservation_id", "AllocatedUnits": "allocated_units",
+				"ChargedUnits": "charged_units", "ReleasedUnits": "released_units",
+			},
+		},
+	} {
+		for fieldName, columnName := range model.fields {
+			field, ok := model.typeOf.FieldByName(fieldName)
+			if !ok || field.Tag.Get("db") != columnName {
+				t.Errorf("generated %s field %s db tag = %q, want %q",
+					model.name, fieldName, field.Tag.Get("db"), columnName)
+			}
+		}
+	}
+}
 
 func TestMigratorPostgreSQL(t *testing.T) {
 	ctx, pool := newPostgreSQLIntegrationPool(t)
@@ -818,6 +862,7 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 9, name: "000009_logical_request_fingerprint.sql"},
 		{version: 10, name: "000010_secret_name_contract.sql"},
 		{version: 11, name: "000011_audit_indeterminate_outcome.sql"},
+		{version: 12, name: "000012_upstream_attempt_accounting.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break
