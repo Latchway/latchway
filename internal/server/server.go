@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/config"
+	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/requestidentity"
@@ -68,6 +69,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	}
 	router := chi.NewRouter()
 	router.Use(latchwayRequestID)
+	router.Use(activeConfigurationSnapshotCache)
 	router.Use(correlationIDHeader)
 	router.Use(recoverer(logger))
 	router.Use(securityHeaders)
@@ -98,6 +100,12 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 		},
 		logger: logger,
 	}, nil
+}
+
+func activeConfigurationSnapshotCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		next.ServeHTTP(writer, request.WithContext(configuration.WithActiveSnapshotCache(request.Context())))
+	})
 }
 
 // dataPlaneRoute reserves the complete AI-compatible /v1 and /proxy spaces for

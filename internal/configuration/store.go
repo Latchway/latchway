@@ -22,9 +22,10 @@ import (
 
 // Store persists immutable configuration snapshots and the active pointer.
 type Store struct {
-	pool      *pgxpool.Pool
-	validator *Validator
-	now       func() time.Time
+	pool            *pgxpool.Pool
+	validator       *Validator
+	now             func() time.Time
+	activeSnapshots activeSnapshotCache
 }
 
 // NewStore constructs the configuration store and compiles the canonical
@@ -367,6 +368,7 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	if err := tx.Commit(ctx); err != nil {
 		return Revision{}, mapDatabaseError("commit configuration activation", err)
 	}
+	store.activeSnapshots.put(newActiveSnapshotCacheKey(environment.TenantScope), candidate, now)
 	revision.State = StateActive
 	revision.ActivatedAt = &now
 	return revision, nil
@@ -438,6 +440,7 @@ func (store *Store) Rollback(ctx context.Context, principal adminauth.Principal,
 	if err := tx.Commit(ctx); err != nil {
 		return Revision{}, mapDatabaseError("commit configuration rollback", err)
 	}
+	store.activeSnapshots.put(newActiveSnapshotCacheKey(environment.TenantScope), targetSnapshot, now)
 	target.State = StateActive
 	return target, nil
 }
@@ -506,10 +509,25 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 	if id.Validate(scope.OrganizationID, id.Organization) != nil || id.Validate(scope.ApplicationID, id.Application) != nil || id.Validate(scope.EnvironmentID, id.Environment) != nil {
 		return ActiveSnapshot{}, ErrInvalid
 	}
+	cacheKey := newActiveSnapshotCacheKey(scope)
+	requestSnapshot, requestCacheHit, finishRequestSnapshot := beginRequestActiveSnapshot(ctx, store, cacheKey)
+	if requestCacheHit {
+		return requestSnapshot, nil
+	}
+	defer finishRequestSnapshot(ActiveSnapshot{}, false)
+	cached, cacheHit := store.activeSnapshots.get(cacheKey)
+	now := store.now().UTC()
+	knownRevisionID := ""
+	if cacheHit && activeSnapshotCacheEntryIsFresh(cached, now) {
+		knownRevisionID = cached.snapshot.PolicyRevision()
+	}
 	var revisionID string
 	var document, compiled []byte
 	if err := store.pool.QueryRow(ctx, `
-		SELECT revision.config_revision_id, revision.document, revision.compiled_document
+		SELECT
+			revision.config_revision_id,
+			CASE WHEN revision.config_revision_id = NULLIF($4::text, '') THEN NULL ELSE revision.document END,
+			CASE WHEN revision.config_revision_id = NULLIF($4::text, '') THEN NULL ELSE revision.compiled_document END
 		FROM active_config_revisions AS active_revision
 		JOIN config_revisions AS revision
 		  ON revision.organization_id = active_revision.organization_id
@@ -520,16 +538,29 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 		WHERE active_revision.organization_id = $1
 		  AND active_revision.application_id = $2
 		  AND active_revision.environment_id = $3
-	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID).Scan(&revisionID, &document, &compiled); err != nil {
+	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, knownRevisionID).Scan(&revisionID, &document, &compiled); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ActiveSnapshot{}, ErrNotFound
 		}
 		return ActiveSnapshot{}, fmt.Errorf("resolve active compiled configuration: %w", err)
 	}
+	if cacheHit && revisionID == knownRevisionID {
+		if len(document) != 0 || len(compiled) != 0 {
+			return ActiveSnapshot{}, errors.New("active configuration cache query returned an inconsistent snapshot")
+		}
+		finishRequestSnapshot(cached.snapshot, true)
+		return cached.snapshot, nil
+	}
 	if len(compiled) == 0 {
 		return ActiveSnapshot{}, errors.New("active configuration has no compiled snapshot")
 	}
-	return newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
+	snapshot, err := newActiveSnapshot(revisionID, scope.EnvironmentID, document, compiled)
+	if err != nil {
+		return ActiveSnapshot{}, err
+	}
+	store.activeSnapshots.put(cacheKey, snapshot, now)
+	finishRequestSnapshot(snapshot, true)
+	return snapshot, nil
 }
 
 // SimulationSnapshot returns the exact compiled policy for a tenant-scoped
