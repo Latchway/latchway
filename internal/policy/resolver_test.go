@@ -145,6 +145,100 @@ func TestResolverWeightedSelectionIsStableAndDefensive(t *testing.T) {
 	}
 }
 
+func TestResolverPlanOrdersEveryMatchedRouteDeterministicallyAndDetached(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.Routes = []configuration.Route{
+		{ID: "priority-canary", When: "true", ModelID: "fast", Priority: 5, Weight: 1, StickyBy: "user", FallbackOn: []string{"status_503"}},
+		{ID: "priority-stable", When: "true", ModelID: "reasoning", Priority: 5, Weight: 9, StickyBy: "user", FallbackOn: []string{"status_502"}},
+		{ID: "secondary-a", When: "true", ModelID: "fast", Priority: 20, Weight: 3, StickyBy: "none", FallbackOn: []string{"connect_error"}},
+		{ID: "secondary-b", When: "true", ModelID: "reasoning", Priority: 20, Weight: 1, StickyBy: "none"},
+	}
+	snapshot.features["assistant"] = feature
+	snapshot.upstreams["primary"] = configuration.Upstream{
+		ID: "primary", Type: "openai_compatible", BaseURL: "https://api.example.test/v1",
+		DestinationPolicy: configuration.UpstreamDestinationPolicy{AllowedPorts: []int{443}, DNSPinning: true},
+		StaticHeaders:     map[string]string{"X-Provider-Tenant": "configured"},
+	}
+	input := policyInput("premium")
+
+	first, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Candidates) != 4 || len(again.Candidates) != 4 {
+		t.Fatalf("candidate counts = %d, %d", len(first.Candidates), len(again.Candidates))
+	}
+	seen := make(map[string]struct{}, len(first.Candidates))
+	for index, candidate := range first.Candidates {
+		if candidate.Route.ID != again.Candidates[index].Route.ID {
+			t.Fatalf("route order changed: first=%v again=%v", first.Candidates, again.Candidates)
+		}
+		if _, duplicate := seen[candidate.Route.ID]; duplicate {
+			t.Fatalf("route %q appeared more than once", candidate.Route.ID)
+		}
+		seen[candidate.Route.ID] = struct{}{}
+		if index < 2 && candidate.Route.Priority != 5 {
+			t.Fatalf("primary priority group candidate %d = %+v", index, candidate.Route)
+		}
+		if index >= 2 && candidate.Route.Priority != 20 {
+			t.Fatalf("secondary priority group candidate %d = %+v", index, candidate.Route)
+		}
+		if candidate.Model.ID != candidate.Route.ModelID ||
+			candidate.Upstream.ID != candidate.Model.UpstreamID {
+			t.Fatalf("candidate references do not close: %+v", candidate)
+		}
+	}
+	primary, err := resolver.Resolve(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary.Route.ID != first.Candidates[0].Route.ID {
+		t.Fatalf("Resolve primary %q != plan primary %q", primary.Route.ID, first.Candidates[0].Route.ID)
+	}
+
+	// The user-sticky priority group is independent from the logical request
+	// identifier used by later non-sticky groups.
+	anotherRequest := input
+	anotherRequest.logicalRequestID = "req_00000000000000000000000001"
+	sticky, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", anotherRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		if sticky.Candidates[index].Route.ID != first.Candidates[index].Route.ID {
+			t.Fatalf("user-sticky priority group changed: first=%v next=%v", first.Candidates, sticky.Candidates)
+		}
+	}
+
+	first.Feature.Routes[0].FallbackOn[0] = "changed-feature"
+	first.LimitPlan.Limits[0].Scope = append(first.LimitPlan.Limits[0].Scope, "changed")
+	first.Candidates[0].Route.FallbackOn[0] = "changed-route"
+	first.Candidates[0].Model.Capabilities[0] = "changed-model"
+	first.Candidates[0].Upstream.DestinationPolicy.AllowedPorts[0] = 80
+	first.Candidates[0].Upstream.StaticHeaders["X-Provider-Tenant"] = "changed"
+	detached, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detached.Candidates[0].Route.FallbackOn[0] == "changed-route" ||
+		detached.Candidates[0].Model.Capabilities[0] == "changed-model" ||
+		detached.Candidates[0].Upstream.DestinationPolicy.AllowedPorts[0] != 443 ||
+		detached.Candidates[0].Upstream.StaticHeaders["X-Provider-Tenant"] != "configured" {
+		t.Fatalf("caller mutation reached route plan: %+v", detached.Candidates[0])
+	}
+}
+
 func TestResolverFailsClosedForAmbiguousOrInvalidRuntimeState(t *testing.T) {
 	t.Parallel()
 
@@ -175,6 +269,13 @@ func TestResolverFailsClosedForAmbiguousOrInvalidRuntimeState(t *testing.T) {
 				delete(snapshot.plans, "premium")
 			},
 			want: ErrLimitPlanNotFound,
+		},
+		{
+			name: "matched later route model missing",
+			mutate: func(snapshot *fakeSnapshot, _ *Input) {
+				delete(snapshot.models, "fast")
+			},
+			want: ErrRouteNotFound,
 		},
 		{
 			name: "bounded activation",

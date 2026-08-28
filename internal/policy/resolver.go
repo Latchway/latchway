@@ -149,6 +149,26 @@ type Decision struct {
 	Upstream  configuration.Upstream
 }
 
+// RouteDecision is one server-owned physical candidate in a deterministic
+// route plan. Candidates are ordered for dispatch, but moving to the next
+// candidate is permitted only when the current route's FallbackOn policy
+// accepts the executor's typed terminal outcome.
+type RouteDecision struct {
+	Route    configuration.Route
+	Model    configuration.Model
+	Upstream configuration.Upstream
+}
+
+// DecisionPlan captures access, limit-plan, and every matched physical route
+// from one immutable policy evaluation. The first candidate is the primary
+// route. Later candidates are inert until a bounded executor applies the
+// preceding candidate's fallback policy.
+type DecisionPlan struct {
+	Feature    configuration.Feature
+	LimitPlan  configuration.LimitPlan
+	Candidates []RouteDecision
+}
+
 // QuotaProjection is the request-shape-independent feature and limit plan
 // selected for a quota snapshot. Each returned value is deeply detached from
 // the immutable configuration snapshot and the resolver's compiled cache.
@@ -240,86 +260,121 @@ func newResolver(now func() time.Time) (*Resolver, error) {
 	}, nil
 }
 
-// Resolve evaluates access, limit-plan selection, and route predicates, then
-// resolves the selected physical model and upstream from the same snapshot.
+// Resolve evaluates one complete deterministic route plan and returns its
+// primary physical decision. The full ordered plan is available through
+// ResolvePlan so production dispatch and route simulation can share exactly
+// the same policy evaluation.
 func (resolver *Resolver) Resolve(ctx context.Context, snapshot Snapshot, featureID string, input Input) (Decision, error) {
+	plan, err := resolver.ResolvePlan(ctx, snapshot, featureID, input)
+	if err != nil {
+		return Decision{}, err
+	}
+	if len(plan.Candidates) == 0 {
+		return Decision{}, ErrRouteNotFound
+	}
+	primary := plan.Candidates[0]
+	return Decision{
+		Feature: plan.Feature, LimitPlan: plan.LimitPlan,
+		Route: primary.Route, Model: primary.Model, Upstream: primary.Upstream,
+	}, nil
+}
+
+// ResolvePlan evaluates access, limit-plan selection, and every route
+// predicate exactly once, then returns a detached deterministic weighted
+// ordering across all matching priority groups. It fails closed when any
+// matched candidate cannot resolve its configured model, capability, or
+// upstream from the same immutable snapshot.
+func (resolver *Resolver) ResolvePlan(
+	ctx context.Context,
+	snapshot Snapshot,
+	featureID string,
+	input Input,
+) (DecisionPlan, error) {
 	if resolver == nil || resolver.environment == nil || resolver.now == nil || resolver.cache == nil || ctx == nil ||
 		snapshot == nil || !policyIdentifierPattern.MatchString(featureID) {
-		return Decision{}, ErrInvalidInput
+		return DecisionPlan{}, ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	// Protected policy resolution always operates on durable, server-owned
 	// identities. Validate them even when the selected route does not happen to
 	// use a particular sticky key so later quota and persistence layers cannot be
 	// wired to an untrusted correlation hint by accident.
 	if !validInput(input) {
-		return Decision{}, ErrInvalidInput
+		return DecisionPlan{}, ErrInvalidInput
 	}
 	now := resolver.now().UTC()
 	if now.IsZero() || !input.authorization.accessExpiresAt.After(now) || !input.authorization.identityExpiresAt.After(now) {
-		return Decision{}, session.ErrTokenExpired
+		return DecisionPlan{}, session.ErrTokenExpired
 	}
 	feature, ok := snapshot.Feature(featureID)
 	if !ok {
-		return Decision{}, ErrFeatureNotFound
+		return DecisionPlan{}, ErrFeatureNotFound
 	}
 	if err := enforceFeatureAttestation(snapshot, feature, input.authorization, now); err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	activation, err := boundedActivation(input)
 	if err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	compiled, err := resolver.compiled(snapshot, feature)
 	if err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	allowed, err := evaluateBool(ctx, compiled.access, activation)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Decision{}, ctxErr
+			return DecisionPlan{}, ctxErr
 		}
-		return Decision{}, ErrFeatureNotAllowed
+		return DecisionPlan{}, ErrFeatureNotAllowed
 	}
 	if !allowed {
-		return Decision{}, ErrFeatureNotAllowed
+		return DecisionPlan{}, ErrFeatureNotAllowed
 	}
 	planID, err := selectLimitPlanID(ctx, compiled.limitPlan, activation, input.authorization.limitPlanOverride)
 	if err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	plan, err := resolveLimitPlan(snapshot, planID)
 	if err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
 	matched := make([]configuration.Route, 0, len(compiled.routes))
 	for _, route := range compiled.routes {
 		matches, evalErr := evaluateBool(ctx, route.when, activation)
 		if evalErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return Decision{}, ctxErr
+				return DecisionPlan{}, ctxErr
 			}
-			return Decision{}, fmt.Errorf("%w: evaluate route %s", ErrConfiguration, route.ID)
+			return DecisionPlan{}, fmt.Errorf("%w: evaluate route %s", ErrConfiguration, route.ID)
 		}
 		if matches {
 			matched = append(matched, cloneRoute(route.Route))
 		}
 	}
-	route, err := selectRoute(feature.ID, matched, input)
+	ordered, err := orderRoutes(feature.ID, matched, input)
 	if err != nil {
-		return Decision{}, err
+		return DecisionPlan{}, err
 	}
-	model, ok := snapshot.Model(route.ModelID)
-	if !ok || !slices.Contains(model.Capabilities, feature.Protocol) {
-		return Decision{}, ErrRouteNotFound
+	candidates := make([]RouteDecision, 0, len(ordered))
+	for _, route := range ordered {
+		model, found := snapshot.Model(route.ModelID)
+		if !found || !slices.Contains(model.Capabilities, feature.Protocol) {
+			return DecisionPlan{}, ErrRouteNotFound
+		}
+		upstream, found := snapshot.Upstream(model.UpstreamID)
+		if !found {
+			return DecisionPlan{}, ErrRouteNotFound
+		}
+		candidates = append(candidates, RouteDecision{
+			Route: cloneRoute(route), Model: cloneModel(model), Upstream: cloneUpstream(upstream),
+		})
 	}
-	upstream, ok := snapshot.Upstream(model.UpstreamID)
-	if !ok {
-		return Decision{}, ErrRouteNotFound
-	}
-	return Decision{Feature: feature, LimitPlan: plan, Route: route, Model: model, Upstream: upstream}, nil
+	return DecisionPlan{
+		Feature: cloneFeature(feature), LimitPlan: cloneLimitPlan(plan), Candidates: candidates,
+	}, nil
 }
 
 // ResolveQuota evaluates the only request-derived policy value currently
@@ -730,68 +785,132 @@ func evaluateString(ctx context.Context, program cel.Program, activation map[str
 }
 
 func selectRoute(featureID string, matched []configuration.Route, input Input) (configuration.Route, error) {
-	if len(matched) == 0 {
-		return configuration.Route{}, ErrRouteNotFound
+	ordered, err := orderRoutes(featureID, matched, input)
+	if err != nil {
+		return configuration.Route{}, err
 	}
-	minimumPriority := matched[0].Priority
-	for _, route := range matched[1:] {
-		if route.Priority < minimumPriority {
-			minimumPriority = route.Priority
+	return ordered[0], nil
+}
+
+func orderRoutes(featureID string, matched []configuration.Route, input Input) ([]configuration.Route, error) {
+	if !policyIdentifierPattern.MatchString(featureID) || len(matched) == 0 || len(matched) > 32 {
+		return nil, ErrRouteNotFound
+	}
+	grouped := append([]configuration.Route(nil), matched...)
+	slices.SortFunc(grouped, func(left, right configuration.Route) int {
+		if left.Priority < right.Priority {
+			return -1
 		}
-	}
-	candidates := make([]configuration.Route, 0, len(matched))
-	for _, route := range matched {
-		if route.Priority == minimumPriority {
-			candidates = append(candidates, route)
+		if left.Priority > right.Priority {
+			return 1
 		}
-	}
-	slices.SortFunc(candidates, func(left, right configuration.Route) int {
 		return stringCompare(left.ID, right.ID)
 	})
-	if len(candidates) == 1 {
-		return candidates[0], nil
+	ordered := make([]configuration.Route, 0, len(grouped))
+	seen := make(map[string]struct{}, len(grouped))
+	for start := 0; start < len(grouped); {
+		priority := grouped[start].Priority
+		end := start + 1
+		for end < len(grouped) && grouped[end].Priority == priority {
+			end++
+		}
+		for _, route := range grouped[start:end] {
+			if !policyIdentifierPattern.MatchString(route.ID) ||
+				!policyIdentifierPattern.MatchString(route.ModelID) || route.Priority < 0 {
+				return nil, ErrRouteNotFound
+			}
+			if _, duplicate := seen[route.ID]; duplicate {
+				return nil, ErrRouteNotFound
+			}
+			seen[route.ID] = struct{}{}
+		}
+		groupOrder, err := weightedRouteOrder(featureID, grouped[start:end], input)
+		if err != nil {
+			return nil, err
+		}
+		ordered = append(ordered, groupOrder...)
+		start = end
+	}
+	return ordered, nil
+}
+
+func weightedRouteOrder(
+	featureID string,
+	candidates []configuration.Route,
+	input Input,
+) ([]configuration.Route, error) {
+	if len(candidates) == 0 {
+		return nil, ErrRouteNotFound
 	}
 	stickyBy := candidates[0].StickyBy
-	var totalWeight uint64
-	for _, route := range candidates {
-		if route.StickyBy != stickyBy || route.Weight <= 0 || uint64(route.Weight) > math.MaxUint64-totalWeight {
-			return configuration.Route{}, ErrRouteNotFound
-		}
-		totalWeight += uint64(route.Weight)
-	}
 	var selectionKey string
 	switch stickyBy {
 	case "none":
 		selectionKey = input.logicalRequestID
 		if id.Validate(selectionKey, id.LogicalRequest) != nil {
-			return configuration.Route{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
 	case "user":
 		selectionKey = input.authorization.userID
 		if id.Validate(selectionKey, id.ApplicationUser) != nil {
-			return configuration.Route{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
 	case "installation":
 		selectionKey = input.authorization.installationID
 		if id.Validate(selectionKey, id.Installation) != nil {
-			return configuration.Route{}, ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
 	default:
-		return configuration.Route{}, ErrRouteNotFound
+		return nil, ErrRouteNotFound
 	}
-	if selectionKey == "" || len(selectionKey) > 256 || totalWeight == 0 {
-		return configuration.Route{}, ErrInvalidInput
+	if selectionKey == "" || len(selectionKey) > 256 {
+		return nil, ErrInvalidInput
 	}
-	digest := sha256.Sum256([]byte(featureID + "\x00" + stickyBy + "\x00" + selectionKey))
-	selected := binary.BigEndian.Uint64(digest[:8]) % totalWeight
-	for _, route := range candidates {
-		weight := uint64(route.Weight)
-		if selected < weight {
-			return route, nil
+	remaining := append([]configuration.Route(nil), candidates...)
+	result := make([]configuration.Route, 0, len(remaining))
+	for round := 0; len(remaining) > 0; round++ {
+		var totalWeight uint64
+		for _, route := range remaining {
+			if route.StickyBy != stickyBy || route.Weight <= 0 ||
+				uint64(route.Weight) > math.MaxUint64-totalWeight {
+				return nil, ErrRouteNotFound
+			}
+			totalWeight += uint64(route.Weight)
 		}
-		selected -= weight
+		if totalWeight == 0 {
+			return nil, ErrRouteNotFound
+		}
+		digest := routeOrderDigest(featureID, stickyBy, selectionKey, round)
+		selected := binary.BigEndian.Uint64(digest[:8]) % totalWeight
+		selectedIndex := -1
+		for index, route := range remaining {
+			weight := uint64(route.Weight)
+			if selected < weight {
+				selectedIndex = index
+				break
+			}
+			selected -= weight
+		}
+		if selectedIndex < 0 {
+			return nil, ErrRouteNotFound
+		}
+		result = append(result, cloneRoute(remaining[selectedIndex]))
+		remaining = slices.Delete(remaining, selectedIndex, selectedIndex+1)
 	}
-	return configuration.Route{}, ErrRouteNotFound
+	return result, nil
+}
+
+func routeOrderDigest(featureID, stickyBy, selectionKey string, round int) [sha256.Size]byte {
+	// Preserve the established primary-route mapping exactly. Additional draws
+	// use a domain-separated counter so weighted selection without replacement
+	// does not reuse one pseudo-random value at every round.
+	if round == 0 {
+		return sha256.Sum256([]byte(featureID + "\x00" + stickyBy + "\x00" + selectionKey))
+	}
+	return sha256.Sum256([]byte(
+		"latchway/route-order/v1\x00" + featureID + "\x00" + stickyBy + "\x00" +
+			selectionKey + "\x00" + strconv.Itoa(round),
+	))
 }
 
 func boundedActivation(input Input) (map[string]any, error) {
@@ -909,6 +1028,25 @@ func stringCompare(left, right string) int {
 func cloneRoute(route configuration.Route) configuration.Route {
 	route.FallbackOn = append([]string(nil), route.FallbackOn...)
 	return route
+}
+
+func cloneModel(model configuration.Model) configuration.Model {
+	model.Capabilities = append([]string(nil), model.Capabilities...)
+	return model
+}
+
+func cloneUpstream(upstream configuration.Upstream) configuration.Upstream {
+	upstream.DestinationPolicy.AllowedPorts = append(
+		[]int(nil), upstream.DestinationPolicy.AllowedPorts...,
+	)
+	if upstream.StaticHeaders != nil {
+		headers := make(map[string]string, len(upstream.StaticHeaders))
+		for name, value := range upstream.StaticHeaders {
+			headers[name] = value
+		}
+		upstream.StaticHeaders = headers
+	}
+	return upstream
 }
 
 func cloneFeature(feature configuration.Feature) configuration.Feature {
