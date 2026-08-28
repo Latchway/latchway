@@ -136,6 +136,45 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 	}
 }
 
+func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *testing.T) {
+	token := strings.Repeat("self-test-control-token-", 2)
+	t.Setenv("TEST_LATCHWAY_SELF_TEST_TOKEN", token)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/admin/v1/self-tests" ||
+			request.Header.Get("Authorization") != "Bearer "+token {
+			t.Fatalf("self-test request = %s %s", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		decoder := json.NewDecoder(request.Body)
+		decoder.UseNumber()
+		if err := decoder.Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["kind"] != "openrouter" || body["environment_id"] != controlTestEnvironment ||
+			body["upstream"] != "openrouter" || body["model"] != "canary" ||
+			body["max_cost_nano_usd"] != json.Number("10000000") {
+			t.Fatalf("self-test body = %#v", body)
+		}
+		if _, present := body["api_key"]; present {
+			t.Fatal("provider credential entered Admin API request")
+		}
+		return controlHTTPResponse(request, http.StatusAccepted,
+			`{"id":"tst_00000000000000000000000000","kind":"openrouter","state":"passed","created_at":"2026-08-29T00:00:00Z","completed_at":"2026-08-29T00:00:01Z","checks":[{"name":"usage","state":"passed","safe_detail":"Usage passed."}]}`, nil), nil
+	})}
+	var output bytes.Buffer
+	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "verify", "openrouter",
+		"--environment", controlTestEnvironment, "--upstream", "openrouter", "--model", "canary",
+		"--api-token-env", "TEST_LATCHWAY_SELF_TEST_TOKEN",
+	}, opts); err != nil {
+		t.Fatalf("verify openrouter error = %v", err)
+	}
+	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"state": "passed"`) {
+		t.Fatalf("unsafe or incomplete self-test output = %q", output.String())
+	}
+}
+
 func TestControlPlaneConsumerCommandsDoNotImportDatabaseStores(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"configuration_commands.go", "control_client.go", "operational_commands.go", "route_commands.go"} {

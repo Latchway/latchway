@@ -135,9 +135,17 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret manager: %w", err)
 	}
+	targetCache := dataplane.NewTargetCache()
+	keepTargetCache := false
+	defer func() {
+		if !keepTargetCache {
+			_ = targetCache.Close()
+		}
+	}()
 	adminAPI, err := adminapi.New(
 		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
 		adminapi.WithRole(string(cfg.Role)),
+		adminapi.WithCredentialSelfTests(secretStore, targetCache),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
@@ -227,7 +235,6 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client API: %w", err)
 	}
-	targetCache := dataplane.NewTargetCache()
 	dataPlane, err := dataplane.New(dataplane.Config{
 		AccessTokens: accessVerifier, Sessions: sessionStore,
 		Configuration: configurationStore, Policies: policyEngine,
@@ -259,6 +266,7 @@ func newAPIRuntime(
 		_ = targetCache.Close()
 		return nil, nil, err
 	}
+	keepTargetCache = true
 	return httpServer, targetCache, nil
 }
 

@@ -35,8 +35,9 @@ const (
 )
 
 type operationalStore struct {
-	pool  *pgxpool.Pool
-	newID func(id.Prefix) (string, error)
+	pool      *pgxpool.Pool
+	newID     func(id.Prefix) (string, error)
+	selfTests credentialSelfTestRunner
 }
 
 func newOperationalStore(pool *pgxpool.Pool) *operationalStore {
@@ -1270,12 +1271,27 @@ func (store *operationalStore) startSelfTest(
 	principal adminauth.Principal,
 	input startSelfTestInput,
 ) (selfTestDocument, error) {
-	if input.Kind != "local" || input.Upstream != "" || input.Model != "" || input.MaxCost != 0 ||
-		id.Validate(input.Environment, id.Environment) != nil || id.Validate(input.RequestID, id.AdminRequest) != nil {
+	if id.Validate(input.Environment, id.Environment) != nil ||
+		id.Validate(input.RequestID, id.AdminRequest) != nil {
 		return selfTestDocument{}, errOperationalInvalid
 	}
 	if !principal.Allows(adminauth.RunSelfTests, adminauth.AuthorizationContext{}) {
 		return selfTestDocument{}, errOperationalForbidden
+	}
+	switch input.Kind {
+	case "local":
+		if input.Upstream != "" || input.Model != "" || input.MaxCost != 0 {
+			return selfTestDocument{}, errOperationalInvalid
+		}
+	case "upstream", "openrouter":
+		if store.selfTests == nil || !selfTestIdentifierPattern.MatchString(input.Upstream) ||
+			!selfTestIdentifierPattern.MatchString(input.Model) || input.MaxCost < 1 ||
+			input.MaxCost > maximumSelfTestCostNanoUSD {
+			return selfTestDocument{}, errOperationalInvalid
+		}
+		return store.startCredentialSelfTest(ctx, principal, input)
+	default:
+		return selfTestDocument{}, errOperationalInvalid
 	}
 	currentSchema, availableSchema, err := database.NewMigrator(store.pool).Status(ctx)
 	if err != nil {
@@ -1408,7 +1424,7 @@ func (store *operationalStore) getSelfTest(
 	}
 	var run selfTestDocument
 	if len(payload) == 0 || len(payload) > 64<<10 || json.Unmarshal(payload, &run) != nil ||
-		run.ID != selfTestID || run.Kind != "local" || len(run.Checks) == 0 || len(run.Checks) > 32 {
+		run.ID != selfTestID || !validStoredSelfTest(run) {
 		return selfTestDocument{}, errOperationalCorrupt
 	}
 	return run, nil

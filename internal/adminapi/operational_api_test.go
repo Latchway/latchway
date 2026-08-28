@@ -252,6 +252,37 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if unsupportedSelfTest.Code != http.StatusBadRequest {
 		t.Fatalf("unsupported self-test status/body=%d %s", unsupportedSelfTest.Code, unsupportedSelfTest.Body.String())
 	}
+	api.operations.selfTests = credentialSelfTestRunnerFixture(func(
+		_ context.Context,
+		input credentialSelfTestInput,
+	) credentialSelfTestResult {
+		if input.Scope.OrganizationID != session.OrganizationID || input.Scope.ApplicationID != application.ID ||
+			input.Scope.EnvironmentID != environment.ID || input.Kind != "upstream" ||
+			input.UpstreamID != "primary" || input.ModelID != "canary" || input.MaxCostNano != 1_000_000 {
+			return failedCredentialSelfTest(nil, "fixture", "The test runner received the wrong tenant-scoped input.")
+		}
+		return credentialSelfTestResult{State: "passed", Checks: []selfTestCheck{
+			passedSelfTestCheck("fixture", "The credential-aware fixture completed."),
+		}}
+	})
+	credentialSelfTest := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests", map[string]any{
+		"kind": "upstream", "environment_id": environment.ID,
+		"upstream": "primary", "model": "canary", "max_cost_nano_usd": 1_000_000,
+	}, cookie, csrf, "https://console.example.test")
+	if credentialSelfTest.Code != http.StatusAccepted ||
+		!bytes.Contains(credentialSelfTest.Body.Bytes(), []byte(`"state":"passed"`)) {
+		t.Fatalf("credential self-test status/body=%d %s", credentialSelfTest.Code, credentialSelfTest.Body.String())
+	}
+	var credentialSelfTestDocument struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, credentialSelfTest, &credentialSelfTestDocument)
+	credentialSelfTestGet := performGET(handler, "/admin/v1/self-tests/"+credentialSelfTestDocument.ID, cookie)
+	if credentialSelfTestGet.Code != http.StatusOK ||
+		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`"kind":"upstream"`)) ||
+		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`credential-aware fixture completed`)) {
+		t.Fatalf("credential self-test get status/body=%d %s", credentialSelfTestGet.Code, credentialSelfTestGet.Body.String())
+	}
 	selfTestWithUnknownQuery := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests?unexpected=true", map[string]any{
 		"kind": "local", "environment_id": environment.ID,
 	}, cookie, csrf, "https://console.example.test")
@@ -507,4 +538,13 @@ func seedOperationalFixture(
 type pgxExecutor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+type credentialSelfTestRunnerFixture func(context.Context, credentialSelfTestInput) credentialSelfTestResult
+
+func (fixture credentialSelfTestRunnerFixture) Run(
+	ctx context.Context,
+	input credentialSelfTestInput,
+) credentialSelfTestResult {
+	return fixture(ctx, input)
 }

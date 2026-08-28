@@ -30,6 +30,7 @@ import { useConsoleSession } from "../api/session";
 
 const environmentPattern = "env_[A-Za-z0-9_-]{16,128}";
 const revisionPattern = "rev_[A-Za-z0-9_-]{16,128}";
+const identifierPattern = "[a-z][a-z0-9_-]{0,62}";
 
 function PageHeading({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
@@ -286,17 +287,24 @@ export function RouteSimulatorPage() {
 }
 
 export function SelfTestsPage() {
-  const session = useConsoleSession(); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const session = useConsoleSession(); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local");
   if (session.data?.mode !== "configured") return <AccessRequired />;
   const canRun = session.data.session?.capabilities.includes("run_self_tests") ?? false;
   async function start(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
-    try { setRun((await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body: { kind: String(form.get("kind")), environment_id: String(form.get("environment")) } })).data); }
+    try {
+      const body: Record<string, string | number> = { kind, environment_id: String(form.get("environment")) };
+      if (kind !== "local") {
+        body.upstream = String(form.get("upstream")); body.model = String(form.get("model"));
+        body.max_cost_nano_usd = Number(form.get("max_cost_nano_usd"));
+      }
+      setRun((await adminRequest("/admin/v1/self-tests", SelfTestSchema, { method: "POST", body })).data);
+    }
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
   async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { setRun((await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
-  return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification is durable and redaction-safe. Upstream and OpenRouter tests fail closed until a credential-aware dispatcher is configured.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => void start(event)}><label>Environment ID<input name="environment" pattern={environmentPattern} required /></label><label>Test kind<select name="kind"><option value="local">Local</option><option value="upstream">Upstream (dispatcher required)</option><option value="openrouter">OpenRouter (dispatcher required)</option></select></label><button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
+  return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
+    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierPattern} required /></label><label>Model ID<input name="model" pattern={identifierPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the configured two-request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
     {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
   </div>;
 }

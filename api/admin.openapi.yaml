@@ -775,8 +775,14 @@ paths:
       summary: Start a bounded diagnostic or conformance test.
       description: |
         `local` runs durable PostgreSQL, schema and active-configuration checks.
-        `upstream` and `openrouter` are reserved for the credential-aware
-        dispatch runner and are rejected until that runner is configured.
+        `upstream` and `openrouter` resolve one upstream and model from the active
+        compiled revision, require an exact trusted-input profile plus active USD
+        pricing, prove the two-request worst-case cost is no greater than the
+        caller's ceiling, and only then use the server-held credential through the
+        protected dispatcher. OpenRouter additionally verifies key access/credit,
+        final streaming usage, output clamping, and body-free error normalization.
+        No provider credential, prompt, response, URL, or provider error body is
+        returned or written to the durable result.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -1462,9 +1468,21 @@ components:
       properties:
         kind: { type: string, enum: [local, upstream, openrouter] }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
-        upstream: { $ref: '#/components/schemas/Identifier' }
-        model: { type: string, maxLength: 256 }
+        upstream: { $ref: '#/components/schemas/Identifier', description: Active server-owned upstream identifier. }
+        model: { $ref: '#/components/schemas/Identifier', description: Active configured model identifier, not a client-selected physical model string. }
         max_cost_nano_usd: { type: integer, minimum: 0, maximum: 1000000000 }
+      oneOf:
+        - properties:
+            kind: { const: local }
+          not:
+            anyOf:
+              - required: [upstream]
+              - required: [model]
+              - required: [max_cost_nano_usd]
+        - required: [upstream, model, max_cost_nano_usd]
+          properties:
+            kind: { enum: [upstream, openrouter] }
+            max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
     SelfTestRun:
       type: object
       additionalProperties: false

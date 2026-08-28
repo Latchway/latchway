@@ -116,6 +116,17 @@ latchway secret list --environment env_...
 ```
 
 `latchway verify local --environment env_...` persists a bounded database,
-schema, and active-configuration self-test. Upstream and OpenRouter verification
-remain fail-closed unless the server has a credential-aware bounded dispatcher;
-the CLI never obtains or forwards a provider credential itself.
+schema, and active-configuration self-test. Credential-aware verification names
+only active server-owned configuration and a hard two-request cost ceiling:
+
+```bash
+latchway verify upstream --environment env_... --upstream primary --model canary
+latchway verify openrouter --environment env_... --upstream openrouter --model canary \
+  --max-cost-nano-usd 10000000
+```
+
+The default credential-test ceiling is `10,000,000` nano-USD (US$0.01). The
+server requires configured pricing and trusted model-aware input accounting and
+refuses dispatch if it cannot prove the bound. The CLI never reads, obtains, or
+forwards a provider credential; every credential remains in the server's
+write-only secret store.

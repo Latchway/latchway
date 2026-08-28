@@ -533,12 +533,19 @@ func newVerifyCommand(opts *options) *cobra.Command {
 	for _, kind := range []string{"local", "upstream", "openrouter"} {
 		kind := kind
 		var environmentID, upstream, model string
+		defaultMaximumCost := int64(0)
+		if kind != "local" {
+			defaultMaximumCost = 10_000_000
+		}
 		var maxCost int64
 		subcommand := &cobra.Command{
 			Use: kind, Short: verifyShort(kind), Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				if id.Validate(environmentID, id.Environment) != nil || maxCost < 0 || maxCost > 1_000_000_000 {
-					return errors.New("verification environment or cost bound is invalid")
+				localInputValid := kind == "local" && upstream == "" && model == "" && maxCost == 0
+				credentialInputValid := kind != "local" && secretNamePattern.MatchString(upstream) &&
+					secretNamePattern.MatchString(model) && maxCost >= 1 && maxCost <= 1_000_000_000
+				if id.Validate(environmentID, id.Environment) != nil || (!localInputValid && !credentialInputValid) {
+					return errors.New("verification environment, configured selection, or cost bound is invalid")
 				}
 				request := map[string]any{"kind": kind, "environment_id": environmentID}
 				if upstream != "" {
@@ -563,8 +570,8 @@ func newVerifyCommand(opts *options) *cobra.Command {
 		}
 		subcommand.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
 		subcommand.Flags().StringVar(&upstream, "upstream", "", "server-owned upstream identifier")
-		subcommand.Flags().StringVar(&model, "model", "", "physical test model")
-		subcommand.Flags().Int64Var(&maxCost, "max-cost-nano-usd", 0, "hard verification cost ceiling")
+		subcommand.Flags().StringVar(&model, "model", "", "active configured model identifier")
+		subcommand.Flags().Int64Var(&maxCost, "max-cost-nano-usd", defaultMaximumCost, "hard two-request verification cost ceiling (10,000,000 is US$0.01)")
 		_ = subcommand.MarkFlagRequired("environment")
 		command.AddCommand(subcommand)
 	}
@@ -576,9 +583,9 @@ func verifyShort(kind string) string {
 	case "local":
 		return "Run durable database, schema, and active-configuration checks"
 	case "upstream":
-		return "Request credential-aware upstream verification (fails until the dispatcher is configured)"
+		return "Run bounded verification against an active server-owned upstream and model"
 	default:
-		return "Request bounded OpenRouter verification (fails until the dispatcher is configured)"
+		return "Run bounded OpenRouter key, usage, streaming, clamp, and error checks"
 	}
 }
 

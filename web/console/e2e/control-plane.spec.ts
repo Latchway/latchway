@@ -32,6 +32,7 @@ function problem(route: Route, code: string, status: number, detail: string) {
 async function installAdminFixture(page: Page) {
   let authenticated = false;
   const mutations: Array<{ path: string; csrf: string | null }> = [];
+  const selfTestBodies: Array<Record<string, unknown>> = [];
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
     capabilities: ["activate_configuration", "inspect_users", "manage_secrets", "revoke_installations", "run_self_tests"],
@@ -56,12 +57,17 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/plan`) return problem(route, "resource_not_found", 404, "No active configuration exists.");
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/activate`) return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: {}, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
-    if (url.pathname === "/admin/v1/self-tests") return json(route, 202, { checks: [{ name: "database", safe_detail: "PostgreSQL transaction completed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind: "local", state: "passed" });
+    if (url.pathname === "/admin/v1/self-tests") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      selfTestBodies.push(body);
+      const kind = typeof body.kind === "string" ? body.kind : "local";
+      return json(route, 202, { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind, state: "passed" });
+    }
     if (url.pathname === "/admin/v1/users" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "active" }], page: { has_more: false } });
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { mutations };
+  return { mutations, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -104,4 +110,29 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+});
+
+test("credential-aware self-test sends configured identifiers and a numeric cost ceiling", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /^Self-tests/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByLabel("Test kind").selectOption("openrouter");
+  await page.getByLabel("Upstream ID").fill("openrouter");
+  await page.getByLabel("Model ID").fill("canary");
+  await expect(page.getByLabel("Maximum total cost (nano-USD)")).toHaveValue("10000000");
+  await page.getByRole("button", { name: "Run self-test" }).click();
+  await expect(page.getByRole("heading", { name: "openrouter self-test" })).toBeVisible();
+  await expect(page.getByText("Bounded provider usage passed.")).toBeVisible();
+  expect(fixture.selfTestBodies).toEqual([{
+    environment_id: ids.environment,
+    kind: "openrouter",
+    max_cost_nano_usd: 10_000_000,
+    model: "canary",
+    upstream: "openrouter"
+  }]);
+  expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
 });

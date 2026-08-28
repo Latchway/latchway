@@ -47,17 +47,29 @@ or free-form mutation reasons.
 
 ## Self-tests and system status
 
-`POST /admin/v1/self-tests` currently executes the durable `local` diagnostic:
+`POST /admin/v1/self-tests` executes three durable diagnostics. `local` checks
 PostgreSQL transaction availability, migration compatibility, and presence of
-an active compiled environment configuration. The completed redaction-safe
-result is stored in the existing jobs ledger and can be retrieved after a
-restart. The API never converts a failed check into a transport success claim;
-the accepted run has a terminal `passed` or `failed` state.
+an active compiled environment configuration. `upstream` and `openrouter`
+resolve one upstream and model from that active immutable snapshot. They accept
+only configured identifiers, never an arbitrary URL or credential.
 
-Credential-aware `upstream` and `openrouter` runners remain intentionally
-unavailable until the worker owns a bounded dispatcher, secret capability,
-budget reservation, cancellation, and durable run-state transition. Requests
-for those kinds fail validation instead of returning a fabricated result.
+Credential-aware runs require an OpenAI Chat capability, an exact model-bound
+trusted-input profile, an active configured USD price, and a positive operator
+cost ceiling. The runner rewrites both a streaming and non-streaming request to
+a one-token output maximum, computes their conservative combined price before
+target acquisition, and refuses dispatch when it cannot prove the ceiling. Each
+request re-enters the encrypted secret callback and shared protected target
+cache. Reported input/output/total usage, final SSE usage, output clamp, and
+configured cost are checked against the pre-dispatch bounds. The OpenRouter
+variant additionally validates the canonical HTTPS target, key information and
+available access, plus a malformed-request probe whose body is consumed but
+never exposed.
+
+Completed redaction-safe results are stored in the jobs ledger and can be
+retrieved after a restart. The result contains only fixed check names and safe
+details: no provider credential, prompt, response, URL, raw dependency error,
+or provider error body. A completed diagnostic has terminal `passed` or
+`failed` state; a failed check is never presented as a successful verification.
 
 `GET /admin/v1/system` reports build version, contract and protocol versions,
 the configured process role, current migration version, and a readiness bit.
