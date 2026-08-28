@@ -48,15 +48,32 @@ jobs:
       - name: Verify release source and tag
         run: python3 scripts/release-preflight.py "$GITHUB_REF_NAME"
       - name: Validate normative contracts
-        run: python3 scripts/validate-contracts.py
-      - name: Test core
-        run: go test -count=1 ./...
+        run: |
+          python3 scripts/validate-contracts.py
+          python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a
+          python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-b
+          diff --recursive --brief /tmp/contract-a /tmp/contract-b
+      - name: Check and test core
+        run: |
+          make fmt
+          git diff --exit-code
+          make check-generated
+          go vet ./...
+          go test -count=1 ./...
+          go test -race -count=1 ./...
+          make fuzz-smoke
+      - name: Scan reachable release-binary vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
+          govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
       - name: Test console
         run: |
           corepack enable
           corepack prepare pnpm@10.15.0 --activate
           pnpm --dir web/console install --frozen-lockfile
           pnpm --dir web/console check
+          pnpm --dir web/console verify:reproducible
 
   image:
     needs: verify
@@ -116,6 +133,8 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
           sbom: false
+      - name: Smoke the exact pre-publication candidate
+        run: scripts/container-smoke.sh latchway:release-candidate
       - name: Scan candidate for critical and high vulnerabilities
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:

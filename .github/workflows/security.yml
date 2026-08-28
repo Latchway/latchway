@@ -44,7 +44,8 @@ jobs:
       - name: Scan reachable Go vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          govulncheck ./...
+          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
+          govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
       - name: Scan source, dependencies, secrets, and infrastructure
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
