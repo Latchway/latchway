@@ -116,6 +116,49 @@ jobs:
         working-directory: web/console
         run: pnpm verify:reproducible
 
+  reliability:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: latchway
+          POSTGRES_USER: latchway
+          POSTGRES_PASSWORD: latchway-failure-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U latchway -d latchway"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-failure-ci@127.0.0.1:5432/latchway?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Run deterministic failure and replica gates
+        run: >-
+          scripts/run-failure-gates.sh
+          -scope automated
+          -output /tmp/latchway-failure-ci.json
+      - name: Retain machine-readable reliability evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-failure-evidence
+          path: |
+            /tmp/latchway-failure-ci.json
+            /tmp/latchway-failure-ci.json.junit.xml
+            /tmp/latchway-failure-ci.logs
+          if-no-files-found: error
+          retention-days: 30
+
   deployments:
     runs-on: ubuntu-24.04
     steps:
@@ -165,7 +208,7 @@ jobs:
 
   image:
     runs-on: ubuntu-24.04
-    needs: [contracts, lint, core, console, deployments]
+    needs: [contracts, lint, core, console, reliability, deployments]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
