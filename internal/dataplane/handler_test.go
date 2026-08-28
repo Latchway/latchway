@@ -2166,6 +2166,36 @@ func TestHandlerClassifiesProviderUsageAboveAppliedMaximumWithoutRewritingClient
 	}
 }
 
+func TestHandlerValidatesEveryRoutePlanCandidateBeforeReservation(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	second := policy.RouteDecision{
+		Route:    fixture.decision.Route,
+		Model:    fixture.decision.Model,
+		Upstream: fixture.decision.Upstream,
+	}
+	second.Route.ID = "secondary"
+	second.Upstream.Type = "anthropic"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature:   fixture.decision.Feature,
+		LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{{
+			Route:    fixture.decision.Route,
+			Model:    fixture.decision.Model,
+			Upstream: fixture.decision.Upstream,
+		}, second},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+	if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 || fixture.target.dispatchCalls != 0 {
+		t.Fatalf("corrupt later route reached side effects: reserve/target/dispatch=%d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.targets.calls, fixture.target.dispatchCalls)
+	}
+}
+
 func TestPolicyEngineRejectsUnsealedAuthorizationBeforeCELResolution(t *testing.T) {
 	resolver := &fakePolicyResolver{}
 	engine, err := NewPolicyEngine(resolver)
@@ -2398,6 +2428,7 @@ type fakePolicyEngine struct {
 	logicalID     requestidentity.LogicalID
 	metadata      protocol.RequestMetadata
 	decision      policy.Decision
+	plan          *policy.DecisionPlan
 	err           error
 }
 
@@ -2442,6 +2473,9 @@ func (fake *fakePolicyEngine) ResolvePlan(
 	decision, err := fake.Resolve(ctx, snapshot, feature, authorization, logicalID, metadata)
 	if err != nil {
 		return policy.DecisionPlan{}, err
+	}
+	if fake.plan != nil {
+		return *fake.plan, nil
 	}
 	return policy.DecisionPlan{
 		Feature:   decision.Feature,

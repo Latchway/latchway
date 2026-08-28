@@ -277,14 +277,14 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	decision, err := handler.policies.Resolve(
+	plan, err := handler.policies.ResolvePlan(
 		request.Context(), snapshot, declaration.feature, authorization, logicalID, metadata,
 	)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	validated, err := validateDecision(declaration.feature, decision, endpoint.protocolID)
+	decision, validated, err := validateDecisionPlan(declaration.feature, plan, endpoint.protocolID)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
@@ -961,6 +961,37 @@ func validateDecision(featureID string, decision policy.Decision, endpointProtoc
 		return validatedDecision{}, policy.ErrConfiguration
 	}
 	return validateFeatureLimitPlan(featureID, decision.Feature, decision.LimitPlan)
+}
+
+func validateDecisionPlan(
+	featureID string,
+	plan policy.DecisionPlan,
+	endpointProtocol string,
+) (policy.Decision, validatedDecision, error) {
+	if len(plan.Candidates) == 0 || len(plan.Candidates) > 32 {
+		return policy.Decision{}, validatedDecision{}, policy.ErrConfiguration
+	}
+	var primary policy.Decision
+	var primaryValidation validatedDecision
+	for index, candidate := range plan.Candidates {
+		decision := policy.Decision{
+			Feature: plan.Feature, LimitPlan: plan.LimitPlan,
+			Route: candidate.Route, Model: candidate.Model, Upstream: candidate.Upstream,
+		}
+		validated, err := validateDecision(featureID, decision, endpointProtocol)
+		if err != nil {
+			return policy.Decision{}, validatedDecision{}, err
+		}
+		if index == 0 {
+			primary = decision
+			primaryValidation = validated
+			continue
+		}
+		if !reflect.DeepEqual(primaryValidation, validated) {
+			return policy.Decision{}, validatedDecision{}, policy.ErrConfiguration
+		}
+	}
+	return primary, primaryValidation, nil
 }
 
 // validateFeatureLimitPlan is the shared capability gate for protected
