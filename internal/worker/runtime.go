@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 const (
@@ -22,6 +24,11 @@ type QuotaExpirer interface {
 	ExpirePendingBatch(context.Context, int) (int64, error)
 }
 
+type operationalQuota interface {
+	ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error)
+	ReconcilePendingUsageBatch(context.Context, int) (int64, error)
+}
+
 // ReplayCleaner is the narrow DPoP replay-maintenance capability used by
 // Runtime.
 type ReplayCleaner interface {
@@ -32,6 +39,24 @@ type ReplayCleaner interface {
 // used by Runtime.
 type AttestationCleaner interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+type ChallengeCleaner interface {
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+type SigningKeyMaintainer interface {
+	MaintainSigningKeys(context.Context) (int64, error)
+}
+
+type IdentityKeyMaintainer interface {
+	MaintainIdentityKeys(context.Context) (int64, error)
+}
+
+type OperationalJobs interface {
+	AggregateHourlyUsage(context.Context, time.Time) (int64, error)
+	AggregateDailyUsage(context.Context, time.Time) (int64, error)
+	EnforceRetention(context.Context, time.Time, int) (int64, error)
 }
 
 // Ticker is the stoppable clock source used between maintenance runs.
@@ -50,6 +75,12 @@ type Config struct {
 	Quotas       QuotaExpirer
 	Replays      ReplayCleaner
 	Attestations AttestationCleaner
+	Challenges   ChallengeCleaner
+	SigningKeys  SigningKeyMaintainer
+	IdentityKeys IdentityKeyMaintainer
+	Operations   OperationalJobs
+	Queue        *Queue
+	Telemetry    *telemetry.Registry
 	Logger       *slog.Logger
 
 	Interval             time.Duration
@@ -72,6 +103,12 @@ type Runtime struct {
 	quotas       QuotaExpirer
 	replays      ReplayCleaner
 	attestations AttestationCleaner
+	challenges   ChallengeCleaner
+	signingKeys  SigningKeyMaintainer
+	identityKeys IdentityKeyMaintainer
+	operations   OperationalJobs
+	queue        *Queue
+	telemetry    *telemetry.Registry
 	logger       *slog.Logger
 
 	interval             time.Duration
@@ -95,6 +132,11 @@ func New(config Config) (*Runtime, error) {
 	}
 	if config.Attestations == nil {
 		return nil, errors.New("worker attestation cleaner is nil")
+	}
+	if config.Queue != nil {
+		if _, ok := config.Quotas.(operationalQuota); !ok || config.Challenges == nil || config.SigningKeys == nil || config.IdentityKeys == nil || config.Operations == nil {
+			return nil, errors.New("durable worker job dependency is nil")
+		}
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -133,7 +175,9 @@ func New(config Config) (*Runtime, error) {
 
 	return &Runtime{
 		quotas: config.Quotas, replays: config.Replays,
-		attestations: config.Attestations, logger: config.Logger,
+		attestations: config.Attestations, challenges: config.Challenges,
+		signingKeys: config.SigningKeys, identityKeys: config.IdentityKeys, operations: config.Operations,
+		queue: config.Queue, telemetry: config.Telemetry, logger: config.Logger,
 		interval: config.Interval, runTimeout: config.RunTimeout,
 		quotaBatchSize: config.QuotaBatchSize, replayBatchSize: config.ReplayBatchSize,
 		attestationBatchSize: config.AttestationBatchSize,
@@ -185,6 +229,10 @@ func (runtime *Runtime) runPass(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	if runtime.queue != nil {
+		runtime.runDurablePass(ctx)
+		return
+	}
 	before := runtime.now().UTC()
 	runtime.runQuotaExpiry(ctx)
 	if ctx.Err() != nil {
@@ -195,6 +243,154 @@ func (runtime *Runtime) runPass(ctx context.Context) {
 		return
 	}
 	runtime.runAttestationCleanup(ctx, before)
+}
+
+func (runtime *Runtime) runDurablePass(ctx context.Context) {
+	now := runtime.now().UTC()
+	if now.IsZero() {
+		runtime.logFailure(ctx, "worker_heartbeat", 0, 0, "invalid_clock")
+		return
+	}
+	heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, runtime.runTimeout)
+	err := runtime.queue.Heartbeat(heartbeatCtx)
+	heartbeatCancel()
+	if err != nil {
+		runtime.logFailure(ctx, "worker_heartbeat", 0, 0, "job_failed")
+		if runtime.telemetry != nil {
+			runtime.telemetry.RecordWorkerJob(ctx, "worker_heartbeat", "failed", 0)
+		}
+		return
+	}
+	jobTypes := []string{
+		"release_expired_reservations", "prune_dpop_replays", "prune_challenges",
+		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
+		"enforce_retention", "reconcile_pending_usage",
+	}
+	scheduleCtx, scheduleCancel := context.WithTimeout(ctx, runtime.runTimeout)
+	err = runtime.queue.Schedule(scheduleCtx, now, jobTypes)
+	scheduleCancel()
+	if err != nil {
+		runtime.logFailure(ctx, "worker_heartbeat", 0, 0, "schedule_failed")
+		return
+	}
+	for range len(jobTypes) {
+		if ctx.Err() != nil {
+			return
+		}
+		claimCtx, claimCancel := context.WithTimeout(ctx, runtime.runTimeout)
+		job, found, claimErr := runtime.queue.Claim(claimCtx, defaultWorkerStaleAfter)
+		claimCancel()
+		if claimErr != nil {
+			runtime.logFailure(ctx, "worker_heartbeat", 0, 0, "claim_failed")
+			return
+		}
+		if !found {
+			break
+		}
+		runtime.executeDurableJob(ctx, job)
+	}
+	finalCtx, finalCancel := context.WithTimeout(ctx, runtime.runTimeout)
+	_ = runtime.queue.Heartbeat(finalCtx)
+	finalCancel()
+}
+
+func (runtime *Runtime) executeDurableJob(ctx context.Context, job Job) {
+	started := runtime.now()
+	runCtx, cancel := context.WithTimeout(ctx, runtime.runTimeout)
+	processed, err := runtime.executeJob(runCtx, job)
+	cancel()
+	duration := runtime.now().Sub(started)
+	if duration < 0 {
+		duration = 0
+	}
+	finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer finalizeCancel()
+	if err == nil {
+		err = runtime.queue.Complete(finalizeCtx, job)
+		if err == nil {
+			runtime.logger.InfoContext(ctx, "maintenance job completed",
+				"job", job.Type, "processed", processed, "attempt", job.AttemptCount,
+			)
+			if runtime.telemetry != nil {
+				runtime.telemetry.RecordWorkerJob(ctx, job.Type, "succeeded", duration)
+				if job.Type == "release_expired_reservations" || job.Type == "reconcile_pending_usage" {
+					runtime.telemetry.RecordReservationsReclaimed(ctx, telemetry.Labels{Outcome: "reclaimed"}, processed)
+				}
+			}
+			return
+		}
+	}
+	code := "job_failed"
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		code = "run_timeout"
+	}
+	_ = runtime.queue.Fail(finalizeCtx, job, code)
+	runtime.logFailure(ctx, job.Type, processed, job.AttemptCount, code)
+	if runtime.telemetry != nil {
+		runtime.telemetry.RecordWorkerJob(ctx, job.Type, "failed", duration)
+	}
+}
+
+func (runtime *Runtime) executeJob(ctx context.Context, job Job) (int64, error) {
+	quotaJobs := runtime.quotas.(operationalQuota)
+	switch job.Type {
+	case "release_expired_reservations":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
+			return quotaJobs.ReleaseExpiredUndispatchedBatch(ctx, runtime.quotaBatchSize)
+		})
+	case "reconcile_pending_usage":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
+			return quotaJobs.ReconcilePendingUsageBatch(ctx, runtime.quotaBatchSize)
+		})
+	case "prune_dpop_replays":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.replayBatchSize, func() (int64, error) {
+			return runtime.replays.DeleteExpired(ctx, runtime.now().UTC(), runtime.replayBatchSize)
+		})
+	case "prune_challenges":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.replayBatchSize, func() (int64, error) {
+			return runtime.challenges.DeleteExpired(ctx, runtime.now().UTC(), runtime.replayBatchSize)
+		})
+	case "rotate_signing_keys":
+		return runtime.signingKeys.MaintainSigningKeys(ctx)
+	case "refresh_jwks":
+		return runtime.identityKeys.MaintainIdentityKeys(ctx)
+	case "aggregate_hourly_usage":
+		return runtime.operations.AggregateHourlyUsage(ctx, job.ScheduledAt)
+	case "aggregate_daily_usage":
+		return runtime.operations.AggregateDailyUsage(ctx, job.ScheduledAt)
+	case "enforce_retention":
+		processed, err := runtime.operations.EnforceRetention(ctx, job.ScheduledAt, runtime.replayBatchSize)
+		if err != nil {
+			return processed, err
+		}
+		attestation, err := runBoundedBatches(ctx, runtime.maxBatches, runtime.attestationBatchSize, func() (int64, error) {
+			return runtime.attestations.DeleteExpired(ctx, runtime.now().UTC(), runtime.attestationBatchSize)
+		})
+		return processed + attestation, err
+	default:
+		return 0, errors.New("unsupported durable worker job")
+	}
+}
+
+func runBoundedBatches(ctx context.Context, maxBatches, batchSize int, run func() (int64, error)) (int64, error) {
+	var processed int64
+	for range maxBatches {
+		if err := ctx.Err(); err != nil {
+			return processed, err
+		}
+		count, err := run()
+		if err != nil {
+			return processed, err
+		}
+		if count < 0 || count > int64(batchSize) {
+			return processed, errors.New("maintenance job returned invalid count")
+		}
+		processed += count
+		if count < int64(batchSize) {
+			break
+		}
+	}
+	return processed, nil
 }
 
 func (runtime *Runtime) runQuotaExpiry(ctx context.Context) {

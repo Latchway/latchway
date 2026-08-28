@@ -180,6 +180,71 @@ func (manager *SigningKeyManager) Active(ctx context.Context) (signingKey, error
 	return created, nil
 }
 
+// MaintainSigningKeys rotates a near-expiry active key and retires historical
+// keys only after their complete verification window has elapsed. Retiring
+// public keys therefore remain available for every access token issued before
+// rotation, including across multiple gateway replicas.
+func (manager *SigningKeyManager) MaintainSigningKeys(ctx context.Context) (int64, error) {
+	if manager == nil || ctx == nil {
+		return 0, ErrSigningKeyUnavailable
+	}
+	before, err := manager.activeKeyID(ctx)
+	if err != nil {
+		return 0, err
+	}
+	active, err := manager.Active(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var changed int64
+	if before != active.KeyID() {
+		changed++
+	}
+	retired, err := manager.retireExpired(ctx)
+	if err != nil {
+		return changed, err
+	}
+	return changed + retired, nil
+}
+
+func (manager *SigningKeyManager) activeKeyID(ctx context.Context) (string, error) {
+	var keyID string
+	err := manager.pool.QueryRow(ctx, `
+		SELECT key_id FROM gateway_signing_keys WHERE status = 'active'
+	`).Scan(&keyID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", errors.New("read active gateway signing-key identifier")
+	}
+	return keyID, nil
+}
+
+func (manager *SigningKeyManager) retireExpired(ctx context.Context) (int64, error) {
+	tx, err := manager.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, errors.New("begin expired signing-key retirement")
+	}
+	defer rollbackSigning(tx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", signingKeyAdvisoryLock); err != nil {
+		return 0, errors.New("lock expired signing-key retirement")
+	}
+	now := manager.now().UTC()
+	result, err := tx.Exec(ctx, `
+		UPDATE gateway_signing_keys
+		SET status = 'retired', retired_at = $1
+		WHERE status = 'retiring' AND not_after <= $1
+	`, now)
+	if err != nil {
+		return 0, errors.New("retire expired gateway signing keys")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, errors.New("commit expired signing-key retirement")
+	}
+	return result.RowsAffected(), nil
+}
+
 // verifyMasterKeyConsistency runs under the signing-key rotation advisory lock.
 // Checking every historical record prevents a changed master key from being
 // hidden by rotation and serializes the first marker written to a fresh

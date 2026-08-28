@@ -396,6 +396,24 @@ func TestNewUsesConservativeAttestationBatchDefault(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutesDurableIdentityKeyRefresh(t *testing.T) {
+	t.Parallel()
+	maintainer := identityKeyMaintainerFunc(func(context.Context) (int64, error) { return 7, nil })
+	runtime := &Runtime{quotas: durableQuotaStub{}, identityKeys: maintainer}
+	processed, err := runtime.executeJob(context.Background(), Job{Type: "refresh_jwks"})
+	if err != nil || processed != 7 {
+		t.Fatalf("identity-key refresh processed=%d err=%v", processed, err)
+	}
+
+	const sensitive = "issuer tenant and identity token must stay out of logs"
+	runtime.identityKeys = identityKeyMaintainerFunc(func(context.Context) (int64, error) {
+		return 0, errors.New(sensitive)
+	})
+	if _, err := runtime.executeJob(context.Background(), Job{Type: "refresh_jwks"}); err == nil || err.Error() != sensitive {
+		t.Fatalf("identity-key refresh failure = %v", err)
+	}
+}
+
 func newTestRuntime(t *testing.T, config Config) *Runtime {
 	t.Helper()
 	if config.Logger == nil {
@@ -452,6 +470,22 @@ func waitChannel(t *testing.T, channel <-chan struct{}, name string) {
 type batchResult struct {
 	count int64
 	err   error
+}
+
+type durableQuotaStub struct{}
+
+func (durableQuotaStub) ExpirePendingBatch(context.Context, int) (int64, error) { return 0, nil }
+func (durableQuotaStub) ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
+func (durableQuotaStub) ReconcilePendingUsageBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
+
+type identityKeyMaintainerFunc func(context.Context) (int64, error)
+
+func (maintainer identityKeyMaintainerFunc) MaintainIdentityKeys(ctx context.Context) (int64, error) {
+	return maintainer(ctx)
 }
 
 type fakeQuotaExpirer struct {

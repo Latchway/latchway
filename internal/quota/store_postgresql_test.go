@@ -42,6 +42,14 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 	fixture := newQuotaPostgreSQLFixture(t)
 
 	t.Run("reserve attempt settle denial and duplicate client hint", func(t *testing.T) {
+		var observationMu sync.Mutex
+		var denialObservations []DenialObservation
+		fixture.store.onDenial = func(_ context.Context, observation DenialObservation) {
+			observationMu.Lock()
+			defer observationMu.Unlock()
+			denialObservations = append(denialObservations, observation)
+		}
+		defer func() { fixture.store.onDenial = nil }()
 		input := fixture.input(t, "lifecycle", 1)
 		input.ClientRequestID = "shared-client-hint"
 		reservation, err := fixture.store.Reserve(fixture.ctx, input)
@@ -83,6 +91,14 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 		if _, replayErr := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(replayErr, ErrExceeded) {
 			t.Fatalf("denial replay = %v, want ErrExceeded", replayErr)
 		}
+		observationMu.Lock()
+		if len(denialObservations) != 1 || denialObservations[0].ApplicationID != deniedInput.ApplicationID ||
+			denialObservations[0].EnvironmentID != deniedInput.EnvironmentID ||
+			denialObservations[0].Feature != deniedInput.FeatureKey ||
+			denialObservations[0].LimitPlan != deniedInput.LimitPlanKey || denialObservations[0].Concurrency {
+			t.Fatalf("denial observations = %#v, want one original quota denial", denialObservations)
+		}
+		observationMu.Unlock()
 		deniedMutations := []struct {
 			name   string
 			mutate func(*ReserveInput)

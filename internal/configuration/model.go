@@ -5,6 +5,7 @@ package configuration
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -619,6 +620,21 @@ func (snapshot ActiveSnapshot) SessionPolicy() SessionPolicy { return snapshot.s
 func (snapshot ActiveSnapshot) IdentityProvider(providerID string) (IdentityProvider, bool) {
 	provider, ok := snapshot.identities[providerID]
 	return provider.clone(), ok
+}
+
+// IdentityProviders returns detached copies for bounded maintenance tasks.
+// Ordering is stable so split worker replicas inspect the same source set.
+func (snapshot ActiveSnapshot) IdentityProviders() []IdentityProvider {
+	ids := make([]string, 0, len(snapshot.identities))
+	for providerID := range snapshot.identities {
+		ids = append(ids, providerID)
+	}
+	sort.Strings(ids)
+	providers := make([]IdentityProvider, 0, len(ids))
+	for _, providerID := range ids {
+		providers = append(providers, snapshot.identities[providerID].clone())
+	}
+	return providers
 }
 
 // AttestationPolicy returns a deep copy of a configured policy.

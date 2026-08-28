@@ -21,6 +21,7 @@ type PresetCommon struct {
 	RequiredClaims    []string
 	AuthorizedParties []string
 	Client            *http.Client
+	SharedCache       RemoteKeyDocumentCache
 	Now               func() time.Time
 	ClockSkew         time.Duration
 	ClockSkewSet      bool
@@ -43,12 +44,13 @@ func NewFirebaseVerifier(config FirebasePreset) (*JWTVerifier, error) {
 	if providerID == "" {
 		providerID = "firebase"
 	}
-	keys, err := NewRemoteKeySource(remoteConfig(config.PresetCommon, firebasePublicCertificatesURL, RemoteKeyFormatX509Certificate))
+	issuer := "https://securetoken.google.com/" + config.ProjectID
+	keys, err := NewRemoteKeySource(remoteConfig(config.PresetCommon, issuer, firebasePublicCertificatesURL, RemoteKeyFormatX509Certificate))
 	if err != nil {
 		return nil, err
 	}
 	return NewJWTVerifier(VerifierConfig{
-		ProviderID: providerID, Issuer: "https://securetoken.google.com/" + config.ProjectID,
+		ProviderID: providerID, Issuer: issuer,
 		Audiences: []string{config.ProjectID}, AllowedAlgorithms: []string{"RS256"},
 		AuthorizedParties: config.AuthorizedParties, SubjectClaim: config.SubjectClaim,
 		RequiredClaims: mergeRequiredClaims([]string{"auth_time"}, config.RequiredClaims),
@@ -95,7 +97,7 @@ func NewSupabaseVerifier(config SupabasePreset) (*JWTVerifier, error) {
 	if providerID == "" {
 		providerID = "supabase"
 	}
-	keys, err := NewRemoteKeySource(remoteConfig(config.PresetCommon, strings.TrimSuffix(origin.String(), "/")+"/auth/v1/.well-known/jwks.json", RemoteKeyFormatJWKS))
+	keys, err := NewRemoteKeySource(remoteConfig(config.PresetCommon, issuer, strings.TrimSuffix(origin.String(), "/")+"/auth/v1/.well-known/jwks.json", RemoteKeyFormatJWKS))
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +177,7 @@ func NewClerkVerifier(config ClerkPreset) (*JWTVerifier, error) {
 		if keyURL == "" {
 			keyURL = strings.TrimSuffix(issuer, "/") + "/.well-known/jwks.json"
 		}
-		keys, err = NewRemoteKeySource(remoteConfig(config.PresetCommon, keyURL, RemoteKeyFormatJWKS))
+		keys, err = NewRemoteKeySource(remoteConfig(config.PresetCommon, issuer, keyURL, RemoteKeyFormatJWKS))
 	}
 	if err != nil {
 		return nil, err
@@ -241,8 +243,11 @@ func NewExplicitHS256Verifier(config VerifierConfig, secret []byte, acknowledgeR
 	return NewJWTVerifier(config)
 }
 
-func remoteConfig(common PresetCommon, endpoint string, format RemoteKeyFormat) RemoteKeySourceConfig {
-	return RemoteKeySourceConfig{URL: endpoint, Format: format, Client: common.Client, Now: common.Now}
+func remoteConfig(common PresetCommon, issuer, endpoint string, format RemoteKeyFormat) RemoteKeySourceConfig {
+	return RemoteKeySourceConfig{
+		URL: endpoint, Issuer: issuer, Format: format,
+		Client: common.Client, SharedCache: common.SharedCache, Now: common.Now,
+	}
 }
 
 func projectOrigin(raw string) (*url.URL, error) {

@@ -30,6 +30,7 @@ import (
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/secrets"
 	"github.com/latchway/latchway/internal/session"
+	"github.com/latchway/latchway/internal/telemetry"
 	"github.com/latchway/latchway/internal/upstream"
 )
 
@@ -86,6 +87,45 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	}
 	if fixture.target.preparedBody == "" || strings.Contains(fixture.target.preparedBody, "client-model") || !strings.Contains(fixture.target.preparedBody, "provider-model") {
 		t.Fatalf("provider body was not rewritten: %q", fixture.target.preparedBody)
+	}
+}
+
+func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	registry, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	fixture.telemetry = registry
+	fixture.authorization.TrustLevel = "device_verified"
+	fixture.relayer.outcome = upstream.RelayOutcome{
+		StatusCode: http.StatusOK, BodyBytes: 11, ClientStarted: true,
+		Usage: protocol.Usage{InputTokens: 3, OutputTokens: 4, TotalTokens: 7, Known: true, Provenance: quota.ProviderReportedProvenance},
+	}
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+	if response.Code != http.StatusOK {
+		t.Fatalf("response status=%d body=%s", response.Code, response.Body.String())
+	}
+	metrics := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := metrics.Body.String()
+	for _, expected := range []string{
+		`latchway_upstream_attempts_total{application="` + fixture.authorization.ApplicationID + `",attestation_level="device_verified",environment="` + fixture.authorization.EnvironmentID + `",feature="assistant",model_alias="provider_model",outcome="succeeded",plan="starter",platform="ios",route="primary",upstream="provider"} 1`,
+		`latchway_input_tokens_total`, `latchway_output_tokens_total`,
+		`latchway_reservations_active`, `latchway_time_to_first_token_seconds`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("metrics missing %q:\n%s", expected, body)
+		}
+	}
+	for _, forbidden := range []string{"client-request-123", "request_id=", fixture.authorization.InstallationID, fixture.authorization.ApplicationUserID} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("metrics leaked high-cardinality value %q:\n%s", forbidden, body)
+		}
 	}
 }
 
@@ -3158,6 +3198,7 @@ type handlerFixture struct {
 	target        *fakeDispatchTarget
 	targets       *fakeTargetFactory
 	relayer       *fakeRelayer
+	telemetry     *telemetry.Registry
 }
 
 func newHandlerFixture(t *testing.T) *handlerFixture {
@@ -3200,7 +3241,7 @@ func (fixture *handlerFixture) handler(t *testing.T) *Handler {
 		AccessTokens: fixture.verifier, Sessions: fixture.sessions,
 		Configuration: fixture.snapshots, Policies: fixture.policies,
 		Quotas: fixture.quotas, Secrets: fixture.secret, Targets: fixture.targets,
-		Relayer: fixture.relayer, PublicOrigin: "https://gateway.example",
+		Relayer: fixture.relayer, Telemetry: fixture.telemetry, PublicOrigin: "https://gateway.example",
 		Now: func() time.Time { return fixture.now },
 	})
 	if err != nil {

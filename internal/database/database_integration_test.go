@@ -865,6 +865,7 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 12, name: "000012_upstream_attempt_accounting.sql"},
 		{version: 13, name: "000013_app_attest_key_persistence.sql"},
 		{version: 14, name: "000014_admin_read_path_indexes.sql"},
+		{version: 15, name: "000015_identity_jwks_cache.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break

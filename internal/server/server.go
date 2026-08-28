@@ -21,6 +21,7 @@ import (
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/requestidentity"
+	"github.com/latchway/latchway/internal/telemetry"
 	console "github.com/latchway/latchway/web/console"
 )
 
@@ -37,6 +38,17 @@ type Handlers struct {
 	AdminAPI  http.Handler
 	ClientAPI http.Handler
 	DataPlane http.Handler
+	Metrics   *telemetry.Registry
+	Readiness ReadinessChecks
+}
+
+// ReadinessChecks contains process-specific capabilities that cannot be
+// inferred from PostgreSQL schema state alone. Each check must return a
+// redaction-safe error; the response exposes only the stable check state.
+type ReadinessChecks struct {
+	MasterKey       func(context.Context) error
+	SigningKey      func(context.Context) error
+	WorkerHeartbeat func(context.Context) error
 }
 
 // New builds a server whose readiness reflects PostgreSQL and schema state.
@@ -59,11 +71,12 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	router.Use(correlationIDHeader)
 	router.Use(recoverer(logger))
 	router.Use(securityHeaders)
-	router.Use(accessLog(logger))
+	router.Use(accessLog(logger, handlers.Metrics))
 	router.Use(dataPlaneRoute(handlers.DataPlane))
 
 	router.Get("/healthz", healthHandler)
-	router.Get("/readyz", readinessHandler(pool))
+	router.Get("/readyz", readinessHandler(pool, handlers.Readiness))
+	router.Handle("/metrics", handlers.Metrics.Handler())
 	router.Mount("/admin/v1", handlers.AdminAPI)
 	router.Handle("/client/v1", handlers.ClientAPI)
 	router.Handle("/client/v1/*", handlers.ClientAPI)
@@ -194,21 +207,46 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func readinessHandler(pool *pgxpool.Pool) http.HandlerFunc {
+func readinessHandler(pool *pgxpool.Pool, dependencies ReadinessChecks) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
-		checks := map[string]string{"database": "ok", "schema": "ok"}
+		checks := map[string]string{
+			"database": "ok", "schema": "ok", "active_configuration": "ok",
+			"master_key": "ok", "signing_key": "ok", "worker_heartbeat": "ok",
+		}
 		status := http.StatusOK
-		if err := pool.Ping(ctx); err != nil {
+		if pool == nil || pool.Ping(ctx) != nil {
 			checks["database"] = "unavailable"
 			checks["schema"] = "unknown"
+			checks["active_configuration"] = "unknown"
 			status = http.StatusServiceUnavailable
 		} else {
 			current, available, err := database.NewMigrator(pool).Status(ctx)
 			if err != nil || current != available {
 				checks["schema"] = "incompatible"
+				status = http.StatusServiceUnavailable
+			} else if activeConfigurationsAvailable(ctx, pool) != nil {
+				checks["active_configuration"] = "unavailable"
+				status = http.StatusServiceUnavailable
+			}
+		}
+		for _, check := range []struct {
+			name string
+			run  func(context.Context) error
+		}{
+			{name: "master_key", run: dependencies.MasterKey},
+			{name: "signing_key", run: dependencies.SigningKey},
+			{name: "worker_heartbeat", run: dependencies.WorkerHeartbeat},
+		} {
+			if check.run == nil {
+				checks[check.name] = "not_configured"
+				status = http.StatusServiceUnavailable
+				continue
+			}
+			if err := check.run(ctx); err != nil {
+				checks[check.name] = "unavailable"
 				status = http.StatusServiceUnavailable
 			}
 		}
@@ -218,6 +256,29 @@ func readinessHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		writeJSON(w, status, map[string]any{"status": state, "checks": checks})
 	}
+}
+
+func activeConfigurationsAvailable(ctx context.Context, pool *pgxpool.Pool) error {
+	var missing bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM environments AS environment
+			LEFT JOIN active_config_revisions AS active
+			  ON active.organization_id = environment.organization_id
+			 AND active.application_id = environment.application_id
+			 AND active.environment_id = environment.environment_id
+			WHERE environment.status = 'active'
+			  AND active.environment_id IS NULL
+		)
+	`).Scan(&missing)
+	if err != nil {
+		return errors.New("read active configuration readiness")
+	}
+	if missing {
+		return errors.New("an active environment has no active configuration")
+	}
+	return nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -236,23 +297,72 @@ func correlationIDHeader(next http.Handler) http.Handler {
 	})
 }
 
-func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
+func accessLog(logger *slog.Logger, metrics *telemetry.Registry) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			started := time.Now()
+			route := telemetryRoute(r.URL.Path)
+			var finish func(string, time.Duration)
+			if metrics != nil && observableClientRoute(route) {
+				ctx, complete := metrics.StartRequest(r.Context(), telemetry.Labels{Route: route})
+				r = r.WithContext(ctx)
+				finish = complete
+			}
 			wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(wrapped, r)
+			duration := time.Since(started)
+			if finish != nil {
+				finish(requestOutcome(wrapped.Status()), duration)
+			}
 			logicalID, _ := requestidentity.FromContext(r.Context())
 			logger.InfoContext(r.Context(), "HTTP request",
 				"logical_request_id", logicalID.String(),
 				"request_id", middleware.GetReqID(r.Context()),
 				"method", r.Method,
-				"path", r.URL.EscapedPath(),
+				"route", route,
 				"status", wrapped.Status(),
 				"bytes", wrapped.BytesWritten(),
-				"duration_ms", time.Since(started).Milliseconds(),
+				"duration_ms", duration.Milliseconds(),
 			)
 		})
+	}
+}
+
+func telemetryRoute(path string) string {
+	switch {
+	case path == "/healthz":
+		return "healthz"
+	case path == "/readyz":
+		return "readyz"
+	case path == "/metrics":
+		return "metrics"
+	case path == "/admin/v1" || strings.HasPrefix(path, "/admin/v1/"):
+		return "admin"
+	case path == "/client/v1" || strings.HasPrefix(path, "/client/v1/"):
+		return "client"
+	case path == "/v1" || strings.HasPrefix(path, "/v1/"):
+		return "data_plane"
+	case path == "/proxy" || strings.HasPrefix(path, "/proxy/"):
+		return "proxy"
+	case strings.HasPrefix(path, "/.well-known/"):
+		return "discovery"
+	default:
+		return "console"
+	}
+}
+
+func observableClientRoute(route string) bool {
+	return route == "client" || route == "data_plane" || route == "proxy" || route == "discovery"
+}
+
+func requestOutcome(status int) string {
+	switch {
+	case status >= 500:
+		return "failed"
+	case status >= 400:
+		return "denied"
+	default:
+		return "succeeded"
 	}
 }
 

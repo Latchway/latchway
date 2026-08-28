@@ -16,7 +16,7 @@ func TestMigratorPostgreSQLUpgradeV13AdminReadPathIndexes(t *testing.T) {
 		t.Fatalf("upgrade through Admin read-path indexes: %v", err)
 	}
 	current, available, err := migrator.Status(ctx)
-	if err != nil || current != 14 || available != 14 {
+	if err != nil || current != 15 || available != 15 {
 		t.Fatalf("migration status current=%d available=%d err=%v", current, available, err)
 	}
 

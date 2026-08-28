@@ -37,6 +37,7 @@ import (
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/secrets"
 	"github.com/latchway/latchway/internal/session"
+	"github.com/latchway/latchway/internal/telemetry"
 	"github.com/latchway/latchway/internal/upstream"
 	"github.com/latchway/latchway/internal/weborigin"
 )
@@ -98,10 +99,11 @@ type Config struct {
 	// Adapter replaces one matching built-in adapter for focused tests and
 	// compatibility injection. Adapters supplies the complete bounded registry;
 	// callers must set at most one of these fields.
-	Adapter  protocol.Adapter
-	Adapters []protocol.Adapter
-	Targets  TargetFactory
-	Relayer  ResponseRelayer
+	Adapter   protocol.Adapter
+	Adapters  []protocol.Adapter
+	Targets   TargetFactory
+	Relayer   ResponseRelayer
+	Telemetry *telemetry.Registry
 
 	PublicOrigin             string
 	MaximumRequestBodyBytes  int64
@@ -123,6 +125,7 @@ type Handler struct {
 	endpoints     endpointRegistry
 	targets       TargetFactory
 	relayer       ResponseRelayer
+	telemetry     *telemetry.Registry
 
 	maximumResponseBody int64
 	clientWriteTimeout  time.Duration
@@ -202,7 +205,7 @@ func New(config Config) (*Handler, error) {
 		accessTokens: config.AccessTokens, sessions: config.Sessions,
 		configuration: config.Configuration, policies: config.Policies,
 		quotas: config.Quotas, secrets: config.Secrets, endpoints: endpoints,
-		targets: config.Targets, relayer: config.Relayer,
+		targets: config.Targets, relayer: config.Relayer, telemetry: config.Telemetry,
 		maximumResponseBody: config.MaximumResponseBodyBytes,
 		clientWriteTimeout:  config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
 		now: config.Now, retrySleep: sleepForRetry, ownedTargets: ownedTargets,
@@ -278,12 +281,18 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	principal, err := handler.accessTokens.Verify(request.Context(), declaration.accessToken)
+	identityCtx, finishIdentity := handler.startStage(request.Context(), "identity verification", telemetry.Labels{})
+	principal, err := handler.accessTokens.Verify(identityCtx, declaration.accessToken)
+	finishIdentity(handler.telemetryOutcome(err))
 	if err != nil {
+		if handler.telemetry != nil {
+			handler.telemetry.RecordIdentityFailure(request.Context(), telemetry.Labels{Outcome: handler.telemetryOutcome(err)})
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	authorization, err := handler.sessions.AuthorizeAccess(request.Context(), session.AccessRequestInput{
+	dpopCtx, finishDPoP := handler.startStage(request.Context(), "DPoP verification", telemetry.Labels{})
+	authorization, err := handler.sessions.AuthorizeAccess(dpopCtx, session.AccessRequestInput{
 		AccessToken: declaration.accessToken,
 		Principal:   principal,
 		DPoPProof:   declaration.dpopProof,
@@ -291,7 +300,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		RequestURI:  cloneURL(endpoint.publicURL),
 		Origin:      browserOrigin,
 	})
+	finishDPoP(handler.telemetryOutcome(err))
 	if err != nil {
+		if handler.telemetry != nil && isDPoPFailure(err) {
+			handler.telemetry.RecordDPoPFailure(request.Context(), telemetry.Labels{Outcome: handler.telemetryOutcome(err)})
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
@@ -327,29 +340,50 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	policyCtx, finishPolicy := handler.startStage(request.Context(), "policy evaluation", telemetry.Labels{
+		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
+		Feature: declaration.feature, Platform: authorization.InstallationPlatform,
+		AttestationLevel: authorization.TrustLevel,
+	})
 	plan, err := handler.policies.ResolvePlan(
-		request.Context(), snapshot, declaration.feature, authorization, logicalID, metadata,
+		policyCtx, snapshot, declaration.feature, authorization, logicalID, metadata,
 	)
+	finishPolicy(handler.telemetryOutcome(err))
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	routeCtx, finishRoute := handler.startStage(request.Context(), "route selection", telemetry.Labels{
+		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
+		Feature: declaration.feature, Platform: authorization.InstallationPlatform,
+		AttestationLevel: authorization.TrustLevel, Plan: plan.LimitPlan.ID,
+	})
 	validatedPlan, err := validateDecisionPlan(declaration.feature, plan, endpoint.protocolID)
 	if err != nil {
+		finishRoute(handler.telemetryOutcome(err))
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
 	primary := validatedPlan.candidates[0]
 	pricingAt := handler.now().UTC()
 	prepared, err := handler.prepareExecutionAttempt(
-		request.Context(), replay, endpoint, snapshot, primary.decision, primary.validated, pricingAt,
+		routeCtx, replay, endpoint, snapshot, primary.decision, primary.validated, pricingAt,
 	)
+	finishRoute(handler.telemetryOutcome(err))
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
 
-	reservation, err := handler.quotas.Reserve(request.Context(), quota.ReserveInput{
+	requestLabels := telemetry.Labels{
+		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
+		Feature: prepared.decision.Feature.ID, Route: prepared.decision.Route.ID,
+		Upstream: prepared.decision.Upstream.ID, ModelAlias: prepared.decision.Model.ID,
+		Platform: authorization.InstallationPlatform, AttestationLevel: authorization.TrustLevel,
+		Plan: prepared.decision.LimitPlan.ID,
+	}
+	quotaCtx, finishQuota := handler.startStage(request.Context(), "quota reservation", requestLabels)
+	reservation, err := handler.quotas.Reserve(quotaCtx, quota.ReserveInput{
 		LogicalRequestID: logicalID,
 		OrganizationID:   authorization.OrganizationID, ApplicationID: authorization.ApplicationID,
 		EnvironmentID: authorization.EnvironmentID, ApplicationUserID: authorization.ApplicationUserID,
@@ -362,9 +396,18 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		InputPreflight: quotaInputPreflightBinding(prepared.inputPreflight),
 		Streaming:      metadata.Streaming, Rules: prepared.rules,
 	})
+	finishQuota(handler.telemetryOutcome(err))
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
+	}
+	if handler.telemetry != nil {
+		handler.telemetry.AddActiveReservations(request.Context(), requestLabels, 1)
+		defer handler.telemetry.AddActiveReservations(context.WithoutCancel(request.Context()), requestLabels, -1)
+		if metadata.Streaming {
+			handler.telemetry.AddActiveStreams(request.Context(), requestLabels, 1)
+			defer handler.telemetry.AddActiveStreams(context.WithoutCancel(request.Context()), requestLabels, -1)
+		}
 	}
 
 	result := handler.executeReserved(
@@ -385,9 +428,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			}
 			var lifecycleErr error
 			if !retryExecution {
-				lifecycleErr = handler.releaseReservation(reservation, failureCode(result.err))
+				lifecycleErr = handler.releaseReservation(request.Context(), reservation, failureCode(result.err))
 			} else {
-				lifecycleErr = handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome)
+				lifecycleErr = handler.settleFinalAttempt(request.Context(), retryPrevious, retryPreviousOutcome)
 			}
 			if lifecycleErr != nil {
 				result.err = lifecycleErr
@@ -400,7 +443,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 				result.err = errDispatchNotOwned
 			}
 			if retryExecution && retryBeginDefinitelyCreatedNoAttempt(result.err) {
-				if finalErr := handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome); finalErr != nil {
+				if finalErr := handler.settleFinalAttempt(request.Context(), retryPrevious, retryPreviousOutcome); finalErr != nil {
 					result.err = finalErr
 				}
 			}
@@ -412,6 +455,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		}
 		var outcome quota.Outcome
 		result, outcome = calculateAttemptOutcome(current, result)
+		handler.recordAttempt(request.Context(), authorization, current.decision, result, outcome)
 
 		condition, retryable := fallbackCondition(request.Context(), result)
 		nextCandidateIndex := candidateIndex
@@ -451,7 +495,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 				nextCandidate.decision, nextCandidate.validated, pricingAt,
 			)
 			if prepareErr != nil {
-				settlementErr := handler.settleFinalAttempt(result.attempt, outcome)
+				settlementErr := handler.settleFinalAttempt(request.Context(), result.attempt, outcome)
 				if settlementErr != nil {
 					prepareErr = settlementErr
 				}
@@ -460,13 +504,13 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			}
 			retryInput, retryErr := retryAttemptInput(next)
 			if retryErr != nil {
-				if finalErr := handler.settleFinalAttempt(result.attempt, outcome); finalErr != nil {
+				if finalErr := handler.settleFinalAttempt(request.Context(), result.attempt, outcome); finalErr != nil {
 					retryErr = finalErr
 				}
 				handler.writeMappedError(writer, requestID, declaration.feature, retryErr)
 				return
 			}
-			if settlementErr := handler.settleForRetry(result.attempt, outcome); settlementErr != nil {
+			if settlementErr := handler.settleForRetry(request.Context(), result.attempt, outcome); settlementErr != nil {
 				handler.writeMappedError(writer, requestID, declaration.feature, settlementErr)
 				return
 			}
@@ -518,7 +562,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 				if retryErr == nil {
 					retryErr = request.Context().Err()
 				}
-				if finalErr := handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome); finalErr != nil {
+				if finalErr := handler.settleFinalAttempt(request.Context(), retryPrevious, retryPreviousOutcome); finalErr != nil {
 					retryErr = finalErr
 				}
 				handler.writeMappedError(writer, requestID, declaration.feature, retryErr)
@@ -536,7 +580,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			continue
 		}
 
-		settlementErr := handler.settleFinalAttempt(result.attempt, outcome)
+		settlementErr := handler.settleFinalAttempt(request.Context(), result.attempt, outcome)
 		if result.relay.ClientStarted {
 			return
 		}
@@ -559,6 +603,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 type executionResult struct {
 	attempt       quota.Attempt
 	relay         upstream.RelayOutcome
+	startedAt     time.Time
+	firstByteAt   time.Time
 	err           error
 	beginInvoked  bool
 	dispatchOwner bool
@@ -752,12 +798,15 @@ func (handler *Handler) executeReserved(
 	reservation quota.Reservation,
 	inputPreflight *protocol.TrustedInputPreflight,
 ) executionResult {
-	return handler.executeAttempt(
+	ctx, finish := handler.startStage(ctx, "upstream attempt", attemptTelemetryLabels(decision))
+	result := handler.executeAttempt(
 		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
 		func(beginContext context.Context) (quota.Attempt, bool, error) {
 			return handler.quotas.BeginAttempt(beginContext, reservation)
 		},
 	)
+	finish(handler.telemetryOutcome(result.err))
+	return result
 }
 
 func (handler *Handler) executeRetry(
@@ -771,12 +820,15 @@ func (handler *Handler) executeRetry(
 	retry quota.RetryAttemptInput,
 	inputPreflight *protocol.TrustedInputPreflight,
 ) executionResult {
-	return handler.executeAttempt(
+	ctx, finish := handler.startStage(ctx, "upstream attempt", attemptTelemetryLabels(decision))
+	result := handler.executeAttempt(
 		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
 		func(beginContext context.Context) (quota.Attempt, bool, error) {
 			return handler.quotas.BeginRetryAttempt(beginContext, previous, retry)
 		},
 	)
+	finish(handler.telemetryOutcome(result.err))
+	return result
 }
 
 type beginExecutionAttempt func(context.Context) (quota.Attempt, bool, error)
@@ -889,7 +941,7 @@ func (handler *Handler) dispatchAttempt(
 	begin beginExecutionAttempt,
 	dispatch func(func() error, func(*upstream.DispatchedResponse) error) error,
 ) executionResult {
-	result := executionResult{}
+	result := executionResult{startedAt: handler.now().UTC()}
 	beforeRoundTrip := func() error {
 		if result.beginInvoked {
 			result.err = errDispatchNotConsumed
@@ -917,7 +969,7 @@ func (handler *Handler) dispatchAttempt(
 			result.err = errDispatchNotConsumed
 			return result.err
 		}
-		result.relay, result.err = handler.consumeResponse(
+		result.relay, result.firstByteAt, result.err = handler.consumeResponse(
 			ctx, writer, adapter, decision, result.attempt, response,
 		)
 		return result.err
@@ -938,23 +990,26 @@ func (handler *Handler) consumeResponse(
 	decision policy.Decision,
 	attempt quota.Attempt,
 	response *upstream.DispatchedResponse,
-) (upstream.RelayOutcome, error) {
+) (upstream.RelayOutcome, time.Time, error) {
 	if response == nil || response.Response == nil {
-		return upstream.RelayOutcome{}, errDispatchNotConsumed
+		return upstream.RelayOutcome{}, time.Time{}, errDispatchNotConsumed
 	}
 	defer response.Close()
 	if nilDependency(adapter) {
-		return upstream.RelayOutcome{StatusCode: response.StatusCode}, errInvalidConfiguration
+		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, errInvalidConfiguration
 	}
 	observer, err := adapter.ObserveResponse(ctx, response.Response)
 	if err != nil {
-		return upstream.RelayOutcome{StatusCode: response.StatusCode}, fmt.Errorf("%w: %w", errUpstreamProtocol, err)
+		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, fmt.Errorf("%w: %w", errUpstreamProtocol, err)
 	}
-	outcome, err := handler.relayer.Relay(ctx, writer, response, observer, upstream.ResponseRelayConfig{
+	streamCtx, finishStream := handler.startStage(ctx, "streaming observation", attemptTelemetryLabels(decision))
+	var firstByteAt time.Time
+	outcome, err := handler.relayer.Relay(streamCtx, writer, response, observer, upstream.ResponseRelayConfig{
 		IdleTimeout:        decision.Upstream.Timeouts.Idle,
 		ClientWriteTimeout: handler.clientWriteTimeout,
 		MaxBodyBytes:       handler.maximumResponseBytes(decision),
 		OnFirstByte: func(firstByteContext context.Context) error {
+			firstByteAt = handler.now().UTC()
 			markContext, cancelMark := context.WithTimeout(firstByteContext, handler.persistenceTimeout)
 			defer cancelMark()
 			if err := handler.quotas.MarkFirstByte(markContext, attempt); err != nil {
@@ -966,10 +1021,11 @@ func (handler *Handler) consumeResponse(
 			return nil
 		},
 	})
+	finishStream(handler.telemetryOutcome(err))
 	if err != nil {
-		return outcome, fmt.Errorf("%w: %w", errUpstreamRelay, err)
+		return outcome, firstByteAt, fmt.Errorf("%w: %w", errUpstreamRelay, err)
 	}
-	return outcome, nil
+	return outcome, firstByteAt, nil
 }
 
 func (handler *Handler) maximumResponseBytes(decision policy.Decision) int64 {
@@ -1604,22 +1660,93 @@ func validDecisionWindow(raw string) bool {
 	return err == nil && ok && amount > 0 && amount <= maximum
 }
 
-func (handler *Handler) releaseReservation(reservation quota.Reservation, failure string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
-	defer cancel()
-	return handler.quotas.ReleaseBeforeDispatch(ctx, reservation, failure)
+func (handler *Handler) startStage(ctx context.Context, stage string, labels telemetry.Labels) (context.Context, func(string)) {
+	if handler == nil || handler.telemetry == nil {
+		return ctx, func(string) {}
+	}
+	return handler.telemetry.StartStage(ctx, stage, labels)
 }
 
-func (handler *Handler) settleForRetry(attempt quota.Attempt, outcome quota.Outcome) error {
-	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
-	defer cancel()
-	return handler.quotas.SettleForRetry(ctx, attempt, outcome)
+func (handler *Handler) telemetryOutcome(err error) string {
+	if err == nil {
+		return "succeeded"
+	}
+	code, _ := errorCode(err, handler.now().UTC())
+	switch code {
+	case "server_not_ready", "upstream_unavailable", "upstream_timeout", "upstream_protocol_error", "pricing_unavailable":
+		return "failed"
+	default:
+		return "denied"
+	}
 }
 
-func (handler *Handler) settleFinalAttempt(attempt quota.Attempt, outcome quota.Outcome) error {
-	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
+func attemptTelemetryLabels(decision policy.Decision) telemetry.Labels {
+	return telemetry.Labels{
+		Feature: decision.Feature.ID, Route: decision.Route.ID, Upstream: decision.Upstream.ID,
+		ModelAlias: decision.Model.ID, Plan: decision.LimitPlan.ID,
+	}
+}
+
+func (handler *Handler) recordAttempt(
+	ctx context.Context,
+	authorization session.Authorization,
+	decision policy.Decision,
+	result executionResult,
+	outcome quota.Outcome,
+) {
+	if handler == nil || handler.telemetry == nil || !result.beginInvoked || !result.dispatchOwner {
+		return
+	}
+	labels := attemptTelemetryLabels(decision)
+	labels.Application = authorization.ApplicationID
+	labels.Environment = authorization.EnvironmentID
+	labels.Platform = authorization.InstallationPlatform
+	labels.AttestationLevel = authorization.TrustLevel
+	labels.Outcome = outcome.Status
+	inputTokens, outputTokens, costNanoUSD := int64(-1), int64(-1), int64(-1)
+	if outcome.Usage.Known {
+		inputTokens, outputTokens = outcome.Usage.InputTokens, outcome.Usage.OutputTokens
+	}
+	if outcome.Cost.Known {
+		costNanoUSD = outcome.Cost.NanoUSD
+	}
+	firstToken := time.Duration(-1)
+	if !result.startedAt.IsZero() && !result.firstByteAt.IsZero() && !result.firstByteAt.Before(result.startedAt) {
+		firstToken = result.firstByteAt.Sub(result.startedAt)
+	}
+	handler.telemetry.RecordUpstreamAttempt(ctx, labels, inputTokens, outputTokens, costNanoUSD, firstToken)
+}
+
+func isDPoPFailure(err error) bool {
+	return dpop.IsCode(err, "dpop_nonce_required") || dpop.IsCode(err, "dpop_invalid") ||
+		errors.Is(err, session.ErrDPoPReplayed) || errors.Is(err, session.ErrReplayInvalid)
+}
+
+func (handler *Handler) releaseReservation(parent context.Context, reservation quota.Reservation, failure string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
 	defer cancel()
-	return handler.quotas.SettleFinalAttempt(ctx, attempt, outcome)
+	ctx, finish := handler.startStage(ctx, "quota settlement", telemetry.Labels{})
+	err := handler.quotas.ReleaseBeforeDispatch(ctx, reservation, failure)
+	finish(handler.telemetryOutcome(err))
+	return err
+}
+
+func (handler *Handler) settleForRetry(parent context.Context, attempt quota.Attempt, outcome quota.Outcome) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
+	defer cancel()
+	ctx, finish := handler.startStage(ctx, "quota settlement", telemetry.Labels{Outcome: outcome.Status})
+	err := handler.quotas.SettleForRetry(ctx, attempt, outcome)
+	finish(handler.telemetryOutcome(err))
+	return err
+}
+
+func (handler *Handler) settleFinalAttempt(parent context.Context, attempt quota.Attempt, outcome quota.Outcome) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
+	defer cancel()
+	ctx, finish := handler.startStage(ctx, "quota settlement", telemetry.Labels{Outcome: outcome.Status})
+	err := handler.quotas.SettleFinalAttempt(ctx, attempt, outcome)
+	finish(handler.telemetryOutcome(err))
+	return err
 }
 
 func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr error) quota.Outcome {

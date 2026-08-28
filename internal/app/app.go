@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,14 +24,16 @@ import (
 	"github.com/latchway/latchway/internal/secrets"
 	"github.com/latchway/latchway/internal/server"
 	"github.com/latchway/latchway/internal/session"
+	"github.com/latchway/latchway/internal/telemetry"
 	"github.com/latchway/latchway/internal/worker"
 )
 
 const clientAccessTokenAudience = "latchway-data-plane"
 
-// Run starts only the responsibilities selected by cfg.Role. The worker role
-// never constructs HTTP, administrative, client-session, policy, upstream, or
-// secret dependencies.
+// Run starts only the responsibilities selected by cfg.Role. Worker-only
+// replicas construct the gateway signing-key envelope required for rotation,
+// but never construct HTTP, administrative, identity, policy, or upstream
+// dependencies.
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	selection, err := selectRole(cfg.Role)
 	if err != nil {
@@ -52,9 +56,39 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		}
 	}
 
+	observability, err := telemetry.NewRegistryFromEnvironment(ctx)
+	if err != nil {
+		return fmt.Errorf("construct process telemetry: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = observability.Shutdown(shutdownCtx)
+	}()
+
+	envelope, err := secrets.NewEnvironmentMasterKeyFromEnv()
+	if err != nil {
+		return fmt.Errorf("load runtime master key: %w", err)
+	}
+	if err := secrets.CheckMasterKeyConsistency(ctx, pool, envelope); err != nil {
+		return fmt.Errorf("verify runtime master key: %w", err)
+	}
+	identityKeyCache, err := identity.NewPostgreSQLRemoteKeyCache(pool)
+	if err != nil {
+		return fmt.Errorf("construct shared identity-key cache: %w", err)
+	}
+
 	// Both the data plane and maintenance runtime use this same store in the
 	// all role. Its methods remain transactionally safe across split replicas.
-	quotaStore, err := quota.NewStore(quota.StoreConfig{Pool: pool})
+	quotaStore, err := quota.NewStore(quota.StoreConfig{
+		Pool: pool,
+		OnDenial: func(observationCtx context.Context, observation quota.DenialObservation) {
+			observability.RecordQuotaDenial(observationCtx, telemetry.Labels{
+				Application: observation.ApplicationID, Environment: observation.EnvironmentID,
+				Feature: observation.Feature, Plan: observation.LimitPlan, Outcome: "denied",
+			}, observation.Concurrency)
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("construct quota store: %w", err)
 	}
@@ -62,7 +96,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var api apiRuntime
 	if selection.api {
 		var targetCache *dataplane.TargetCache
-		api, targetCache, err = newAPIRuntime(ctx, cfg, logger, pool, quotaStore)
+		api, targetCache, err = newAPIRuntime(ctx, cfg, logger, pool, quotaStore, envelope, identityKeyCache, observability)
 		if err != nil {
 			return err
 		}
@@ -73,7 +107,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	var jobs workerRuntime
 	if selection.worker {
-		jobs, err = newWorkerRuntime(pool, quotaStore, logger)
+		jobs, err = newWorkerRuntime(cfg.Role, pool, quotaStore, envelope, identityKeyCache, observability, logger)
 		if err != nil {
 			return err
 		}
@@ -89,14 +123,10 @@ func newAPIRuntime(
 	logger *slog.Logger,
 	pool *pgxpool.Pool,
 	quotaStore *quota.Store,
+	envelope *secrets.EnvironmentMasterKey,
+	identityKeyCache identity.RemoteKeyDocumentCache,
+	observability *telemetry.Registry,
 ) (*server.Server, *dataplane.TargetCache, error) {
-	envelope, err := secrets.NewEnvironmentMasterKeyFromEnv()
-	if err != nil {
-		return nil, nil, fmt.Errorf("load runtime master key: %w", err)
-	}
-	if err := secrets.CheckMasterKeyConsistency(ctx, pool, envelope); err != nil {
-		return nil, nil, fmt.Errorf("verify runtime master key: %w", err)
-	}
 	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret store: %w", err)
@@ -162,7 +192,7 @@ func newAPIRuntime(
 	coordinator, err := session.NewClientCoordinator(session.ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
-		AppAttestKeys: appAttestKeys,
+		IdentityKeyCache: identityKeyCache, AppAttestKeys: appAttestKeys,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session coordinator: %w", err)
@@ -199,7 +229,7 @@ func newAPIRuntime(
 		AccessTokens: accessVerifier, Sessions: sessionStore,
 		Configuration: configurationStore, Policies: policyEngine,
 		Quotas: quotaStore, Secrets: secretStore, Targets: targetCache,
-		PublicOrigin: cfg.PublicOrigin,
+		Telemetry: observability, PublicOrigin: cfg.PublicOrigin,
 	})
 	if err != nil {
 		_ = targetCache.Close()
@@ -208,6 +238,19 @@ func newAPIRuntime(
 
 	httpServer, err := server.New(cfg, pool, logger, server.Handlers{
 		AdminAPI: adminAPI.Handler(), ClientAPI: clientAPI.Handler(), DataPlane: dataPlane.Handler(),
+		Metrics: observability,
+		Readiness: server.ReadinessChecks{
+			MasterKey: func(checkCtx context.Context) error {
+				return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
+			},
+			SigningKey: func(checkCtx context.Context) error {
+				_, checkErr := keyManager.PublicJWKS(checkCtx)
+				return checkErr
+			},
+			WorkerHeartbeat: func(checkCtx context.Context) error {
+				return worker.CheckRecentHeartbeat(checkCtx, pool, 90*time.Second)
+			},
+		},
 	})
 	if err != nil {
 		_ = targetCache.Close()
@@ -216,7 +259,15 @@ func newAPIRuntime(
 	return httpServer, targetCache, nil
 }
 
-func newWorkerRuntime(pool *pgxpool.Pool, quotaStore *quota.Store, logger *slog.Logger) (*worker.Runtime, error) {
+func newWorkerRuntime(
+	role config.Role,
+	pool *pgxpool.Pool,
+	quotaStore *quota.Store,
+	envelope *secrets.EnvironmentMasterKey,
+	identityKeyCache identity.RemoteKeyDocumentCache,
+	observability *telemetry.Registry,
+	logger *slog.Logger,
+) (*worker.Runtime, error) {
 	replayStore, err := session.NewReplayStore(session.ReplayStoreConfig{Pool: pool})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker replay cleaner: %w", err)
@@ -225,13 +276,53 @@ func newWorkerRuntime(pool *pgxpool.Pool, quotaStore *quota.Store, logger *slog.
 	if err != nil {
 		return nil, fmt.Errorf("construct worker App Attest cleaner: %w", err)
 	}
+	challengeMaintenance, err := session.NewChallengeMaintenance(pool)
+	if err != nil {
+		return nil, fmt.Errorf("construct worker challenge cleaner: %w", err)
+	}
+	keyManager, err := session.NewSigningKeyManager(session.SigningKeyManagerConfig{Pool: pool, Envelope: envelope})
+	if err != nil {
+		return nil, fmt.Errorf("construct worker signing-key manager: %w", err)
+	}
+	operations, err := worker.NewPostgreSQLOperations(pool)
+	if err != nil {
+		return nil, fmt.Errorf("construct worker operational jobs: %w", err)
+	}
+	configurationStore, err := configuration.NewStore(pool)
+	if err != nil {
+		return nil, fmt.Errorf("construct worker configuration store: %w", err)
+	}
+	identityKeys, err := session.NewIdentityKeyMaintenance(session.IdentityKeyMaintenanceConfig{
+		Pool: pool, Configuration: configurationStore, SharedCache: identityKeyCache,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("construct worker identity-key maintenance: %w", err)
+	}
+	instanceID, err := newRuntimeInstanceID()
+	if err != nil {
+		return nil, err
+	}
+	queue, err := worker.NewQueue(pool, instanceID, string(role))
+	if err != nil {
+		return nil, fmt.Errorf("construct worker job queue: %w", err)
+	}
 	runtime, err := worker.New(worker.Config{
-		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys, Logger: logger,
+		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys,
+		Challenges: challengeMaintenance, SigningKeys: keyManager, IdentityKeys: identityKeys, Operations: operations,
+		Queue: queue, Telemetry: observability, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker runtime: %w", err)
 	}
 	return runtime, nil
+}
+
+func newRuntimeInstanceID() (string, error) {
+	var entropy [18]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return "", errors.New("generate runtime instance identifier")
+	}
+	return "runtime-" + base64.RawURLEncoding.EncodeToString(entropy[:]), nil
 }
 
 type roleSelection struct {

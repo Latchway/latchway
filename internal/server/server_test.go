@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/requestidentity"
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 func TestHealthHandler(t *testing.T) {
@@ -40,6 +43,37 @@ func TestSecurityHeaders(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
 	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff header")
+	}
+}
+
+func TestMetricsEndpointRecordsOnlyNormalizedClientRoute(t *testing.T) {
+	t.Parallel()
+
+	metrics, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = metrics.Shutdown(context.Background()) })
+	var logs bytes.Buffer
+	server, err := New(config.Config{ListenAddress: "127.0.0.1:8080", ReadTimeout: time.Second, IdleTimeout: time.Second}, nil,
+		slog.New(slog.NewJSONHandler(&logs, nil)), Handlers{
+			AdminAPI: http.NotFoundHandler(), ClientAPI: http.NotFoundHandler(),
+			DataPlane: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+			Metrics:   metrics,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const privatePath = "/proxy/credential-like-private-value"
+	requestRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(requestRecorder, httptest.NewRequest(http.MethodPost, privatePath, nil))
+	metricsRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(metricsRecorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if metricsRecorder.Code != http.StatusOK || !strings.Contains(metricsRecorder.Body.String(), `latchway_client_requests_total{outcome="succeeded",route="proxy"} 1`) {
+		t.Fatalf("metrics response status=%d body=%s", metricsRecorder.Code, metricsRecorder.Body.String())
+	}
+	if strings.Contains(logs.String(), privatePath) || !strings.Contains(logs.String(), `"route":"proxy"`) {
+		t.Fatalf("access telemetry used raw path: %s", logs.String())
 	}
 }
 

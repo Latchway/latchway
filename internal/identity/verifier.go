@@ -158,6 +158,19 @@ func NewJWTVerifier(config VerifierConfig) (*JWTVerifier, error) {
 
 func (verifier *JWTVerifier) ID() string { return verifier.id }
 
+// RefreshKeys conditionally refreshes a remote verification-key source. Static
+// and symmetric sources have no remote maintenance requirement.
+func (verifier *JWTVerifier) RefreshKeys(ctx context.Context) error {
+	if verifier == nil || ctx == nil {
+		return errors.New("identity verifier is unavailable")
+	}
+	refresher, ok := verifier.keys.(interface{ Refresh(context.Context) error })
+	if !ok {
+		return nil
+	}
+	return refresher.Refresh(ctx)
+}
+
 func (verifier *JWTVerifier) Verify(ctx context.Context, credential RawIdentityCredential) (VerifiedPrincipal, error) {
 	header, _, err := preflightJWT(credential.reveal())
 	if err != nil {

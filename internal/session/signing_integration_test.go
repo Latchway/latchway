@@ -282,6 +282,94 @@ func TestSigningKeyConcurrentFreshStartChoosesOneMasterKeyPostgreSQL(t *testing.
 	}
 }
 
+func TestSigningKeyMaintenancePreservesSessionsIssuedBeforeRotationPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSessionPool(t)
+	start := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
+	now := start
+	envelope, err := secrets.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x73}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewSigningKeyManager(SigningKeyManagerConfig{
+		Pool: pool, Envelope: envelope, Now: func() time.Time { return now },
+		KeyLifetime: 24 * time.Hour, RotationLead: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := manager.Active(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = start.Add(21*time.Hour + 30*time.Minute)
+	issuer, err := NewAccessTokenIssuer(AccessTokenIssuerConfig{
+		Keys: manager, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		Lifetime: time.Hour, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := NewAccessTokenVerifier(AccessTokenVerifierConfig{
+		Keys: manager, Issuer: "https://gateway.example.test", Audience: "latchway-data-plane",
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := AccessIssueInput{
+		OrganizationID: mustSessionID(t, id.Organization), ApplicationID: mustSessionID(t, id.Application),
+		EnvironmentID: mustSessionID(t, id.Environment), ApplicationUserID: mustSessionID(t, id.ApplicationUser),
+		InstallationID: mustSessionID(t, id.Installation), SessionGrantID: mustSessionID(t, id.SessionGrant),
+		IdentityProvider: "firebase", TrustLevel: "device_verified",
+		PolicyRevisionID: mustSessionID(t, id.ConfigRevision),
+		DPoPJKT:          base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x31}, 32)),
+	}
+	issued, err := issuer.Issue(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preRotation, err := manager.Active(ctx)
+	if err != nil || preRotation.KeyID() != initial.KeyID() {
+		t.Fatalf("session was not issued before rotation: key=%q err=%v", preRotation.KeyID(), err)
+	}
+
+	now = start.Add(22*time.Hour + 5*time.Minute)
+	changed, err := manager.MaintainSigningKeys(ctx)
+	if err != nil || changed != 1 {
+		t.Fatalf("maintenance changed=%d err=%v", changed, err)
+	}
+	active, err := manager.Active(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.KeyID() == initial.KeyID() {
+		t.Fatal("near-expiry key was not rotated")
+	}
+	if _, err := verifier.Verify(ctx, issued.Token); err != nil {
+		t.Fatalf("pre-rotation active session stopped verifying: %v", err)
+	}
+	var oldStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM gateway_signing_keys WHERE key_id = $1`, initial.KeyID()).Scan(&oldStatus); err != nil {
+		t.Fatal(err)
+	}
+	if oldStatus != "retiring" {
+		t.Fatalf("old key status=%q want retiring", oldStatus)
+	}
+
+	now = start.Add(24*time.Hour + time.Minute)
+	changed, err = manager.MaintainSigningKeys(ctx)
+	if err != nil || changed != 1 {
+		t.Fatalf("retirement changed=%d err=%v", changed, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM gateway_signing_keys WHERE key_id = $1`, initial.KeyID()).Scan(&oldStatus); err != nil {
+		t.Fatal(err)
+	}
+	if oldStatus != "retired" {
+		t.Fatalf("expired old key status=%q want retired", oldStatus)
+	}
+}
+
 func isolatedSessionPool(t *testing.T) (*pgxpool.Pool, context.Context) {
 	return isolatedSessionPoolWithMaxConnections(t, 12)
 }

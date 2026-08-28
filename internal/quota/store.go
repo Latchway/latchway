@@ -28,6 +28,17 @@ type StoreConfig struct {
 	Pool           *pgxpool.Pool
 	ReservationTTL time.Duration
 	NewID          func(id.Prefix) (string, error)
+	OnDenial       func(context.Context, DenialObservation)
+}
+
+// DenialObservation contains only bounded configuration dimensions. It omits
+// user, installation, request, and external-identity values by construction.
+type DenialObservation struct {
+	ApplicationID string
+	EnvironmentID string
+	Feature       string
+	LimitPlan     string
+	Concurrency   bool
 }
 
 // Store persists quota and request lifecycle state. No method accepts an
@@ -37,6 +48,7 @@ type Store struct {
 	pool           *pgxpool.Pool
 	reservationTTL time.Duration
 	newID          identifierSource
+	onDenial       func(context.Context, DenialObservation)
 }
 
 func NewStore(config StoreConfig) (*Store, error) {
@@ -54,6 +66,7 @@ func NewStore(config StoreConfig) (*Store, error) {
 	}
 	return &Store{
 		pool: config.Pool, reservationTTL: config.ReservationTTL, newID: config.NewID,
+		onDenial: config.OnDenial,
 	}, nil
 }
 
@@ -341,6 +354,13 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return Reservation{}, persistenceFailure("commit quota denial", err)
+		}
+		if store.onDenial != nil {
+			store.onDenial(ctx, DenialObservation{
+				ApplicationID: prepared.ApplicationID, EnvironmentID: prepared.EnvironmentID,
+				Feature: prepared.FeatureKey, LimitPlan: prepared.LimitPlanKey,
+				Concurrency: len(quotaExceeded) == 0,
+			})
 		}
 		if len(quotaExceeded) != 0 {
 			return Reservation{}, exceededError(logicalRequestID, plans, quotaExceeded)
@@ -1847,12 +1867,42 @@ func (store *Store) ReleaseBeforeDispatch(ctx context.Context, reservation Reser
 // is handled in its own short SKIP LOCKED transaction. A row with an attempt is
 // conservatively settled; a row without one is released and marked expired.
 func (store *Store) ExpirePendingBatch(ctx context.Context, limit int) (int64, error) {
+	return store.expirePendingBatch(ctx, limit, pendingExpiryAny)
+}
+
+// ReleaseExpiredUndispatchedBatch releases reservations that expired before
+// any upstream dispatch. Separating this queue lane from reconciliation keeps
+// multi-replica workers from repeatedly selecting work another lane cannot
+// process.
+func (store *Store) ReleaseExpiredUndispatchedBatch(ctx context.Context, limit int) (int64, error) {
+	return store.expirePendingBatch(ctx, limit, pendingExpiryUndispatched)
+}
+
+// ReconcilePendingUsageBatch conservatively settles expired dispatched
+// reservations according to the configured unknown-usage policy, preventing
+// client disconnects from bypassing hard budgets.
+func (store *Store) ReconcilePendingUsageBatch(ctx context.Context, limit int) (int64, error) {
+	return store.expirePendingBatch(ctx, limit, pendingExpiryDispatched)
+}
+
+type pendingExpiryMode string
+
+const (
+	pendingExpiryAny          pendingExpiryMode = "any"
+	pendingExpiryUndispatched pendingExpiryMode = "undispatched"
+	pendingExpiryDispatched   pendingExpiryMode = "dispatched"
+)
+
+func (store *Store) expirePendingBatch(ctx context.Context, limit int, mode pendingExpiryMode) (int64, error) {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || limit < 1 || limit > maximumExpiryBatch {
+		return 0, ErrInvalidInput
+	}
+	if mode != pendingExpiryAny && mode != pendingExpiryUndispatched && mode != pendingExpiryDispatched {
 		return 0, ErrInvalidInput
 	}
 	var processed int64
 	for processed < int64(limit) {
-		didProcess, err := store.expireOne(ctx)
+		didProcess, err := store.expireOne(ctx, mode)
 		if err != nil {
 			return processed, err
 		}
@@ -1864,7 +1914,7 @@ func (store *Store) ExpirePendingBatch(ctx context.Context, limit int) (int64, e
 	return processed, nil
 }
 
-func (store *Store) expireOne(ctx context.Context) (bool, error) {
+func (store *Store) expireOne(ctx context.Context, mode pendingExpiryMode) (bool, error) {
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return false, persistenceFailure("begin expired reservation recovery", err)
@@ -1881,10 +1931,17 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		       logical_request_id, quota_reservation_id, idempotency_key, expires_at
 		FROM quota_reservations
 		WHERE status = 'pending' AND expires_at <= $1
+		  AND (
+		    $2 = 'any'
+		    OR ($2 = 'dispatched') = EXISTS (
+		      SELECT 1 FROM upstream_attempts
+		      WHERE upstream_attempts.logical_request_id = quota_reservations.logical_request_id
+		    )
+		  )
 		ORDER BY expires_at, quota_reservation_id
 		LIMIT 1
 		FOR UPDATE SKIP LOCKED
-	`, now).Scan(
+	`, now, string(mode)).Scan(
 		&selected.organizationID, &selected.applicationID, &selected.environmentID,
 		&selected.logicalRequestID, &selected.reservationID,
 		&selectedIdempotencyKey, &selected.expiresAt,

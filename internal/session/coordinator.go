@@ -37,6 +37,7 @@ type ClientCoordinatorConfig struct {
 	AccessTokens         *AccessTokenVerifier
 	Secrets              clientSecretStore
 	IdentityHTTPClient   *http.Client
+	IdentityKeyCache     identity.RemoteKeyDocumentCache
 	AttestationTransport http.RoundTripper
 	AppAttestKeys        attestation.AppAttestKeyStore
 	Now                  func() time.Time
@@ -51,6 +52,7 @@ type clientCoordinator struct {
 	challenges           *ChallengeStore
 	secrets              clientSecretStore
 	identityHTTP         *http.Client
+	identityKeyCache     identity.RemoteKeyDocumentCache
 	attestationTransport http.RoundTripper
 	appAttestKeys        attestation.AppAttestKeyStore
 	now                  func() time.Time
@@ -80,8 +82,9 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 		pool: config.Pool, configuration: config.Configuration, users: config.Users,
 		sessions: config.Sessions, accessTokens: config.AccessTokens,
 		challenges: challenges, secrets: config.Secrets,
-		identityHTTP: config.IdentityHTTPClient, attestationTransport: config.AttestationTransport,
-		appAttestKeys: config.AppAttestKeys, now: config.Now,
+		identityHTTP: config.IdentityHTTPClient, identityKeyCache: config.IdentityKeyCache,
+		attestationTransport: config.AttestationTransport,
+		appAttestKeys:        config.AppAttestKeys, now: config.Now,
 		identityCache:    make(map[string]identity.IdentityVerifier),
 		attestationCache: make(map[string]*preparedAttestationVerifier),
 	}, nil
@@ -441,7 +444,7 @@ func (coordinator *clientCoordinator) buildRemoteIdentityVerifier(provider confi
 		ProviderID: provider.ID, Mapper: mapper,
 		SubjectClaim: provider.SubjectClaim, RequiredClaims: provider.RequiredClaims,
 		AuthorizedParties: provider.AuthorizedParties,
-		Client:            coordinator.identityHTTP, Now: coordinator.now,
+		Client:            coordinator.identityHTTP, SharedCache: coordinator.identityKeyCache, Now: coordinator.now,
 		ClockSkew: time.Duration(provider.ClockSkewSeconds) * time.Second, ClockSkewSet: true,
 	}
 	switch provider.Type {
@@ -475,8 +478,8 @@ func (coordinator *clientCoordinator) buildRemoteIdentityVerifier(provider confi
 			return nil, identity.ErrConfiguration
 		}
 		keys, err := identity.NewRemoteKeySource(identity.RemoteKeySourceConfig{
-			URL: provider.JWKSURL, Format: identity.RemoteKeyFormatJWKS,
-			Client: coordinator.identityHTTP, Now: coordinator.now,
+			URL: provider.JWKSURL, Issuer: provider.Issuer, Format: identity.RemoteKeyFormatJWKS,
+			Client: coordinator.identityHTTP, SharedCache: coordinator.identityKeyCache, Now: coordinator.now,
 		})
 		if err != nil {
 			return nil, err

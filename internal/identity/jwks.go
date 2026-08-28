@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,8 +46,10 @@ const (
 // injectable so tests can use an in-memory RoundTripper without opening ports.
 type RemoteKeySourceConfig struct {
 	URL                  string
+	Issuer               string
 	Format               RemoteKeyFormat
 	Client               *http.Client
+	SharedCache          RemoteKeyDocumentCache
 	Now                  func() time.Time
 	DefaultTTL           time.Duration
 	MaximumTTL           time.Duration
@@ -59,6 +64,8 @@ type RemoteKeySource struct {
 	format               RemoteKeyFormat
 	client               *http.Client
 	target               *upstream.Target
+	identity             remoteKeyIdentity
+	sharedCache          RemoteKeyDocumentCache
 	now                  func() time.Time
 	defaultTTL           time.Duration
 	maximumTTL           time.Duration
@@ -67,13 +74,18 @@ type RemoteKeySource struct {
 
 	mu             sync.Mutex
 	keys           map[string]staticKey
+	document       []byte
+	documentHash   [sha256.Size]byte
 	etag           string
+	lastModified   *time.Time
+	fetchedAt      time.Time
 	freshUntil     time.Time
 	staleUntil     time.Time
 	lastForced     time.Time
 	refreshing     bool
 	refreshDone    chan struct{}
 	refreshOutcome error
+	sharedOutcome  error
 }
 
 // NewRemoteKeySource validates config and constructs a public-key source.
@@ -84,6 +96,13 @@ func NewRemoteKeySource(config RemoteKeySourceConfig) (*RemoteKeySource, error) 
 	}
 	if config.Format != RemoteKeyFormatJWKS && config.Format != RemoteKeyFormatX509Certificate {
 		return nil, fmt.Errorf("%w: remote key format", ErrConfiguration)
+	}
+	if config.Issuer == "" {
+		config.Issuer = config.URL
+	}
+	issuer, err := url.Parse(config.Issuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Hostname() == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" || issuer.String() != config.Issuer {
+		return nil, fmt.Errorf("%w: remote key issuer", ErrConfiguration)
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -124,6 +143,7 @@ func NewRemoteKeySource(config RemoteKeySourceConfig) (*RemoteKeySource, error) 
 
 	return &RemoteKeySource{
 		url: config.URL, format: config.Format, client: client, target: target, now: config.Now,
+		identity: newRemoteKeyIdentity(config.Issuer, config.URL, config.Format), sharedCache: config.SharedCache,
 		defaultTTL: config.DefaultTTL, maximumTTL: config.MaximumTTL, staleGrace: config.StaleGrace,
 		forcedRefreshMinimum: config.ForcedRefreshMinimum, keys: make(map[string]staticKey),
 	}, nil
@@ -144,7 +164,7 @@ func (source *RemoteKeySource) Key(ctx context.Context, kid, algorithm string) (
 		return record.key, nil
 	}
 	forced := !found && source.hasKeys()
-	refreshErr := source.refresh(ctx, forced)
+	refreshErr := source.refresh(ctx, forced, false)
 	if refreshErr == nil {
 		record, found, _, _ = source.snapshot(kid, algorithm, source.now().UTC())
 		if found {
@@ -155,6 +175,7 @@ func (source *RemoteKeySource) Key(ctx context.Context, kid, algorithm string) (
 	if errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
 		return nil, refreshErr
 	}
+	record, found, _, staleAllowed = source.snapshot(kid, algorithm, source.now().UTC())
 	if found && staleAllowed && isTransientKeyFetch(refreshErr) {
 		return record.key, nil
 	}
@@ -177,7 +198,17 @@ func (source *RemoteKeySource) hasKeys() bool {
 	return len(source.keys) > 0
 }
 
-func (source *RemoteKeySource) refresh(ctx context.Context, forced bool) error {
+// Refresh performs a conditional refresh of this fixed configured endpoint.
+// Unlike request-time resolution, it reports a shared-cache write failure so
+// the durable worker retries until API-only replicas can consume the result.
+func (source *RemoteKeySource) Refresh(ctx context.Context) error {
+	if source == nil || ctx == nil {
+		return errors.New("remote key source is unavailable")
+	}
+	return source.refresh(ctx, false, true)
+}
+
+func (source *RemoteKeySource) refresh(ctx context.Context, forced, requireShared bool) error {
 	for {
 		now := source.now().UTC()
 		source.mu.Lock()
@@ -189,7 +220,7 @@ func (source *RemoteKeySource) refresh(ctx context.Context, forced bool) error {
 				return ctx.Err()
 			case <-done:
 				source.mu.Lock()
-				outcome := source.refreshOutcome
+				outcome := source.refreshError(requireShared)
 				source.mu.Unlock()
 				return outcome
 			}
@@ -207,41 +238,217 @@ func (source *RemoteKeySource) refresh(ctx context.Context, forced bool) error {
 		}
 		source.refreshing = true
 		source.refreshDone = make(chan struct{})
-		etag := source.etag
+		local := source.cachedRecordLocked()
 		source.mu.Unlock()
 
-		result, err := source.fetch(ctx, etag, now)
+		result := source.refreshRemote(ctx, local, forced, now)
 
 		source.mu.Lock()
-		if err == nil {
-			if result.notModified {
-				if len(source.keys) == 0 {
-					err = errors.New("key endpoint returned not-modified without a cached set")
-				} else {
-					source.freshUntil = now.Add(result.ttl)
-					source.staleUntil = source.freshUntil.Add(result.staleGrace(source.staleGrace))
-				}
-			} else {
-				source.keys = result.keys
-				source.etag = result.etag
-				source.freshUntil = now.Add(result.ttl)
-				source.staleUntil = source.freshUntil.Add(result.staleGrace(source.staleGrace))
-			}
+		if len(result.keys) != 0 && len(result.record.document) != 0 {
+			source.applyRecordLocked(result.record, result.keys)
 		}
-		source.refreshOutcome = err
+		source.refreshOutcome = result.err
+		source.sharedOutcome = result.sharedErr
 		source.refreshing = false
 		close(source.refreshDone)
+		outcome := source.refreshError(requireShared)
 		source.mu.Unlock()
-		return err
+		return outcome
+	}
+}
+
+func (source *RemoteKeySource) refreshError(requireShared bool) error {
+	if source.refreshOutcome != nil {
+		return source.refreshOutcome
+	}
+	if requireShared && source.sharedOutcome != nil {
+		return source.sharedOutcome
+	}
+	return nil
+}
+
+func (source *RemoteKeySource) cachedRecordLocked() cachedRemoteKeyDocument {
+	record := cachedRemoteKeyDocument{
+		document: append([]byte(nil), source.document...), documentHash: source.documentHash,
+		etag: source.etag, fetchedAt: source.fetchedAt,
+		freshUntil: source.freshUntil, staleUntil: source.staleUntil,
+	}
+	if source.lastModified != nil {
+		value := source.lastModified.UTC()
+		record.lastModified = &value
+	}
+	return record
+}
+
+func (source *RemoteKeySource) applyRecordLocked(record cachedRemoteKeyDocument, keys map[string]staticKey) {
+	source.keys = keys
+	source.document = append(source.document[:0], record.document...)
+	source.documentHash = record.documentHash
+	source.etag = record.etag
+	source.lastModified = record.lastModified
+	source.fetchedAt = record.fetchedAt
+	source.freshUntil = record.freshUntil
+	source.staleUntil = record.staleUntil
+}
+
+type remoteRefreshResult struct {
+	record    cachedRemoteKeyDocument
+	keys      map[string]staticKey
+	err       error
+	sharedErr error
+}
+
+func (source *RemoteKeySource) refreshRemote(
+	ctx context.Context,
+	local cachedRemoteKeyDocument,
+	forced bool,
+	now time.Time,
+) remoteRefreshResult {
+	base, baseKeys, baseFound := local, map[string]staticKey(nil), len(local.document) != 0
+	if baseFound {
+		baseKeys, _ = source.parseCachedDocument(local, now)
+	}
+	if source.sharedCache == nil {
+		return source.fetchAndBuild(ctx, remoteKeyRefreshLease{}, base, baseKeys, baseFound, false, now)
+	}
+
+	var sharedErr error
+	shared, found, err := source.sharedCache.load(ctx, source.identity)
+	if err != nil {
+		sharedErr = err
+	} else if found {
+		keys, parseErr := source.parseCachedDocument(shared, now)
+		if parseErr != nil {
+			sharedErr = parseErr
+		} else {
+			base, baseKeys, baseFound = shared, keys, true
+			if !forced && now.Before(shared.freshUntil) {
+				return remoteRefreshResult{record: shared, keys: keys}
+			}
+		}
+	}
+
+	lease, leasedRecord, leasedFound, acquired, err := source.sharedCache.acquire(ctx, source.identity)
+	if err != nil {
+		if sharedErr == nil {
+			sharedErr = err
+		}
+		result := source.fetchAndBuild(ctx, lease, base, baseKeys, baseFound, acquired, now)
+		result.sharedErr = sharedErr
+		return result
+	}
+	if leasedFound {
+		keys, parseErr := source.parseCachedDocument(leasedRecord, now)
+		if parseErr != nil {
+			if acquired {
+				source.releaseLease(ctx, lease)
+			}
+			result := source.fetchAndBuild(ctx, remoteKeyRefreshLease{}, base, baseKeys, baseFound, false, now)
+			result.sharedErr = parseErr
+			return result
+		}
+		base, baseKeys, baseFound = leasedRecord, keys, true
+	}
+	if !acquired {
+		if leasedFound && now.Before(leasedRecord.freshUntil) {
+			return remoteRefreshResult{record: leasedRecord, keys: baseKeys}
+		}
+		return remoteRefreshResult{
+			record: base, keys: baseKeys,
+			err: transientKeyFetch(errors.New("identity key refresh is already in progress")),
+		}
+	}
+	result := source.fetchAndBuild(ctx, lease, base, baseKeys, baseFound, true, now)
+	if sharedErr != nil && result.sharedErr == nil {
+		result.sharedErr = sharedErr
+	}
+	return result
+}
+
+func (source *RemoteKeySource) fetchAndBuild(
+	ctx context.Context,
+	lease remoteKeyRefreshLease,
+	base cachedRemoteKeyDocument,
+	baseKeys map[string]staticKey,
+	baseFound, ownsLease bool,
+	now time.Time,
+) remoteRefreshResult {
+	fetched, err := source.fetch(ctx, base.etag, base.lastModified, now)
+	if err != nil {
+		if ownsLease {
+			source.releaseLease(ctx, lease)
+		}
+		return remoteRefreshResult{record: base, keys: baseKeys, err: err}
+	}
+	var record cachedRemoteKeyDocument
+	keys := fetched.keys
+	if fetched.notModified {
+		if !baseFound || len(base.document) == 0 || len(baseKeys) == 0 {
+			if ownsLease {
+				source.releaseLease(ctx, lease)
+			}
+			return remoteRefreshResult{err: errors.New("key endpoint returned not-modified without a cached set")}
+		}
+		record, keys = base, baseKeys
+		if fetched.etag != "" {
+			record.etag = fetched.etag
+		}
+		if fetched.lastModified != nil {
+			record.lastModified = fetched.lastModified
+		}
+	} else {
+		record = cachedRemoteKeyDocument{
+			document: fetched.document, documentHash: sha256.Sum256(fetched.document),
+			etag: fetched.etag, lastModified: fetched.lastModified,
+		}
+	}
+	record.fetchedAt = now
+	record.freshUntil = now.Add(fetched.ttl)
+	record.staleUntil = record.freshUntil.Add(fetched.staleGrace(source.staleGrace))
+	if ownsLease {
+		if err := source.sharedCache.complete(ctx, lease, record, fetched.noStore); err != nil {
+			return remoteRefreshResult{record: record, keys: keys, sharedErr: err}
+		}
+	}
+	return remoteRefreshResult{record: record, keys: keys}
+}
+
+func (source *RemoteKeySource) releaseLease(parent context.Context, lease remoteKeyRefreshLease) {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
+	defer cancel()
+	_ = source.sharedCache.release(releaseCtx, lease)
+}
+
+func (source *RemoteKeySource) parseCachedDocument(record cachedRemoteKeyDocument, now time.Time) (map[string]staticKey, error) {
+	if len(record.document) < 2 || len(record.document) > maxRemoteKeyDocumentBytes ||
+		sha256.Sum256(record.document) != record.documentHash || record.fetchedAt.IsZero() ||
+		record.fetchedAt.After(now.Add(5*time.Minute)) || record.freshUntil.Before(record.fetchedAt) ||
+		record.freshUntil.Sub(record.fetchedAt) > source.maximumTTL ||
+		record.staleUntil.Before(record.freshUntil) || record.staleUntil.Sub(record.freshUntil) > 24*time.Hour {
+		return nil, errors.New("shared identity key document is invalid")
+	}
+	value, err := jsonsafe.Decode(record.document)
+	if err != nil {
+		return nil, errors.New("shared identity key document is invalid")
+	}
+	switch source.format {
+	case RemoteKeyFormatJWKS:
+		return parseJWKSet(value)
+	case RemoteKeyFormatX509Certificate:
+		return parseX509CertificateMap(value, now)
+	default:
+		return nil, ErrConfiguration
 	}
 }
 
 type remoteKeyFetchResult struct {
-	keys        map[string]staticKey
-	etag        string
-	ttl         time.Duration
-	notModified bool
-	noStore     bool
+	keys         map[string]staticKey
+	document     []byte
+	etag         string
+	lastModified *time.Time
+	ttl          time.Duration
+	notModified  bool
+	noStore      bool
 }
 
 func (result remoteKeyFetchResult) staleGrace(configured time.Duration) time.Duration {
@@ -251,7 +458,7 @@ func (result remoteKeyFetchResult) staleGrace(configured time.Duration) time.Dur
 	return configured
 }
 
-func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.Time) (remoteKeyFetchResult, error) {
+func (source *RemoteKeySource) fetch(ctx context.Context, etag string, lastModified *time.Time, now time.Time) (remoteKeyFetchResult, error) {
 	requestContext := ctx
 	var cancel context.CancelFunc
 	if source.target != nil {
@@ -267,13 +474,16 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.
 	if etag != "" {
 		request.Header.Set("If-None-Match", etag)
 	}
+	if lastModified != nil {
+		request.Header.Set("If-Modified-Since", lastModified.UTC().Format(http.TimeFormat))
+	}
 	var response *http.Response
 	var dispatched *upstream.DispatchedResponse
 	if source.target != nil {
 		prepared, prepareErr := upstream.PrepareBaseRequest(
 			request,
 			source.target,
-			[]string{"Accept", "User-Agent", "If-None-Match"},
+			[]string{"Accept", "User-Agent", "If-None-Match", "If-Modified-Since"},
 			nil,
 		)
 		if prepareErr != nil {
@@ -292,6 +502,9 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.
 		}
 		return remoteKeyFetchResult{}, transientKeyFetch(errors.New("remote key request failed"))
 	}
+	if response == nil || response.Body == nil {
+		return remoteKeyFetchResult{}, transientKeyFetch(errors.New("remote key response is unavailable"))
+	}
 	if dispatched != nil {
 		defer dispatched.Close()
 	} else {
@@ -300,8 +513,10 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.
 
 	ttl := cacheLifetime(response.Header, now, source.defaultTTL, source.maximumTTL)
 	noStore := cacheControlContains(response.Header, "no-store")
+	responseETag := boundedETag(response.Header.Get("ETag"))
+	responseLastModified := boundedLastModified(response.Header.Get("Last-Modified"))
 	if response.StatusCode == http.StatusNotModified {
-		return remoteKeyFetchResult{ttl: ttl, notModified: true, noStore: noStore}, nil
+		return remoteKeyFetchResult{etag: responseETag, lastModified: responseLastModified, ttl: ttl, notModified: true, noStore: noStore}, nil
 	}
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
@@ -331,7 +546,14 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, now time.
 	if err != nil {
 		return remoteKeyFetchResult{}, err
 	}
-	return remoteKeyFetchResult{keys: keys, etag: boundedETag(response.Header.Get("ETag")), ttl: ttl, noStore: noStore}, nil
+	document, err := publicRemoteKeyDocument(source.format, value, keys)
+	if err != nil || len(document) < 2 || len(document) > maxRemoteKeyDocumentBytes {
+		return remoteKeyFetchResult{}, errors.New("remote key document is invalid")
+	}
+	return remoteKeyFetchResult{
+		keys: keys, document: document, etag: responseETag, lastModified: responseLastModified,
+		ttl: ttl, noStore: noStore,
+	}, nil
 }
 
 func parseJWKSet(value any) (map[string]staticKey, error) {
@@ -388,6 +610,68 @@ func parseJWKSet(value any) (map[string]staticKey, error) {
 		return nil, errors.New("JWKS contains no usable signature keys")
 	}
 	return keys, nil
+}
+
+// publicRemoteKeyDocument canonicalizes only the verification material that
+// survived parsing. Provider extensions and every private JWK member are
+// deliberately discarded before a document can reach PostgreSQL.
+func publicRemoteKeyDocument(format RemoteKeyFormat, value any, keys map[string]staticKey) ([]byte, error) {
+	switch format {
+	case RemoteKeyFormatJWKS:
+		ids := make([]string, 0, len(keys))
+		for kid := range keys {
+			ids = append(ids, kid)
+		}
+		sort.Strings(ids)
+		entries := make([]map[string]any, 0, len(ids))
+		for _, kid := range ids {
+			record := keys[kid]
+			entry := map[string]any{
+				"kid": kid, "use": "sig", "key_ops": []string{"verify"},
+			}
+			if record.alg != "" {
+				entry["alg"] = record.alg
+			}
+			switch key := record.key.(type) {
+			case *rsa.PublicKey:
+				if key == nil || key.N == nil || key.E <= 0 {
+					return nil, errors.New("JWKS RSA public key is invalid")
+				}
+				exponent := big.NewInt(int64(key.E)).Bytes()
+				entry["kty"] = "RSA"
+				entry["n"] = base64.RawURLEncoding.EncodeToString(key.N.Bytes())
+				entry["e"] = base64.RawURLEncoding.EncodeToString(exponent)
+			case *ecdsa.PublicKey:
+				if key == nil || key.Curve == nil || key.X == nil || key.Y == nil {
+					return nil, errors.New("JWKS EC public key is invalid")
+				}
+				var curve string
+				switch key.Curve {
+				case elliptic.P256():
+					curve = "P-256"
+				case elliptic.P384():
+					curve = "P-384"
+				default:
+					return nil, errors.New("JWKS EC public key is unsupported")
+				}
+				coordinateBytes := (key.Curve.Params().BitSize + 7) / 8
+				entry["kty"] = "EC"
+				entry["crv"] = curve
+				entry["x"] = base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, coordinateBytes)))
+				entry["y"] = base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, coordinateBytes)))
+			default:
+				return nil, errors.New("JWKS public key type is unsupported")
+			}
+			entries = append(entries, entry)
+		}
+		return json.Marshal(map[string]any{"keys": entries})
+	case RemoteKeyFormatX509Certificate:
+		// parseX509CertificateMap has already proven every value is a bounded
+		// public certificate and rejects all other document members.
+		return json.Marshal(value)
+	default:
+		return nil, ErrConfiguration
+	}
 }
 
 func parseJWKPublicKey(jwk map[string]any) (any, error) {
@@ -573,6 +857,18 @@ func boundedETag(value string) string {
 		return ""
 	}
 	return value
+}
+
+func boundedLastModified(value string) *time.Time {
+	if value == "" || len(value) > 128 || strings.ContainsAny(value, "\r\n\x00") {
+		return nil
+	}
+	parsed, err := http.ParseTime(value)
+	if err != nil {
+		return nil
+	}
+	parsed = parsed.UTC().Truncate(time.Second)
+	return &parsed
 }
 
 type keyFetchError struct {
