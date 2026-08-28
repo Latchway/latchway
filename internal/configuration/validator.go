@@ -15,7 +15,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.3.0/environment-config.schema.json"
+const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.4.0/environment-config.schema.json"
 
 const (
 	// Configuration numbers ultimately fit int64 or the six-decimal refill
@@ -327,6 +327,7 @@ func deepClone(value any) any {
 
 func applyDefaults(root map[string]any) {
 	spec := objectValue(root, "spec")
+	setDefault(spec, "inputAccountingProfiles", []any{})
 	setDefault(spec, "pricingCatalogs", []any{})
 
 	for _, provider := range objectArray(spec, "identityProviders") {

@@ -134,6 +134,26 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenCost
 	if !ok || outputCalendar.Maximum != math.MaxInt64 || !slices.Equal(outputCalendar.Scope, []string{"user", "model"}) {
 		t.Fatalf("output-token calendar rule = %+v ok=%t", outputCalendar, ok)
 	}
+	inputCalendar, inputCalendarIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "input_tokens", Algorithm: "calendar", Scope: []string{"feature", "user"},
+		Window: "1d", Maximum: math.MaxInt64, Hard: true,
+	})
+	if !ok || inputCalendar.Maximum != math.MaxInt64 ||
+		!slices.Equal(inputCalendar.Scope, []string{"user", "feature"}) {
+		t.Fatalf("input-token calendar rule = %+v ok=%t", inputCalendar, ok)
+	}
+	totalCalendar, totalCalendarIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "total_tokens", Algorithm: "calendar", Scope: []string{"model", "user"},
+		Window: "12mo", Maximum: math.MaxInt64, Hard: true,
+	})
+	if !ok || totalCalendar.Maximum != math.MaxInt64 ||
+		!slices.Equal(totalCalendar.Scope, []string{"user", "model"}) {
+		t.Fatalf("total-token calendar rule = %+v ok=%t", totalCalendar, ok)
+	}
+	if inputCalendarIdentity == totalCalendarIdentity || inputCalendarIdentity == outputCalendarIdentity ||
+		totalCalendarIdentity == outputCalendarIdentity {
+		t.Fatal("input, output, and total calendar rules shared an immutable identity")
+	}
 	outputPerRequest, outputPerRequestIdentity, ok := normalizeExecutableLimit(Limit{
 		Metric: "output_tokens", Algorithm: "per_request", Scope: []string{"model", "user"},
 		PerRequestMaximum: math.MaxInt64, Hard: true,
@@ -213,12 +233,14 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 		name  string
 		limit Limit
 	}{
-		{name: "input token calendar", limit: withLimitMetric(calendar, "input_tokens")},
-		{name: "total token calendar", limit: withLimitMetric(calendar, "total_tokens")},
 		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
 		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
 		{name: "input token bucket", limit: withLimitMetric(tokenBucket, "input_tokens")},
 		{name: "total token bucket", limit: withLimitMetric(tokenBucket, "total_tokens")},
+		{name: "input token per request", limit: withLimitMetric(perRequest, "input_tokens")},
+		{name: "total token per request", limit: withLimitMetric(perRequest, "total_tokens")},
+		{name: "soft input token calendar", limit: withLimitHard(withLimitMetric(calendar, "input_tokens"), false)},
+		{name: "soft total token calendar", limit: withLimitHard(withLimitMetric(calendar, "total_tokens"), false)},
 		{name: "cost token bucket", limit: withLimitMetric(tokenBucket, "cost_nano_usd")},
 		{name: "soft token bucket", limit: withLimitHard(tokenBucket, false)},
 		{name: "token bucket zero capacity", limit: withLimitCapacity(tokenBucket, 0)},

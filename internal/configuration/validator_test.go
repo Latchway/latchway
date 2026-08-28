@@ -31,6 +31,9 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 		t.Fatalf("decode compiled configuration: %v", err)
 	}
 	spec := objectValue(value.(map[string]any), "spec")
+	if profiles := objectArray(spec, "inputAccountingProfiles"); len(profiles) != 0 {
+		t.Fatalf("compiled input-accounting default = %#v", profiles)
+	}
 	session := objectValue(spec, "session")
 	if stringValue(session, "challengeTtl") != "5m" || stringValue(session, "accessTokenTtl") != "10m" || stringValue(session, "refreshTokenTtl") != "30d" {
 		t.Fatalf("compiled session defaults = %#v", session)
@@ -251,20 +254,6 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			},
 		},
 		{
-			name: "future metric",
-			limit: map[string]any{
-				"metric": "input_tokens", "algorithm": "calendar", "scope": []any{"user"},
-				"window": "1d", "maximum": json.Number("100"),
-			},
-		},
-		{
-			name: "total token metric",
-			limit: map[string]any{
-				"metric": "total_tokens", "algorithm": "calendar", "scope": []any{"user"},
-				"window": "1d", "maximum": json.Number("100"),
-			},
-		},
-		{
 			name: "soft request limit",
 			limit: map[string]any{
 				"metric": "logical_requests", "algorithm": "calendar", "scope": []any{"user"},
@@ -302,6 +291,8 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
 						!strings.Contains(issue.Message, "through 1000000") ||
 						!strings.Contains(issue.Message, "output_tokens calendar") ||
+						!strings.Contains(issue.Message, "input_tokens calendar") ||
+						!strings.Contains(issue.Message, "total_tokens calendar") ||
 						!strings.Contains(issue.Message, "output_tokens per_request") ||
 						!strings.Contains(issue.Message, "cost_nano_usd calendar") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
@@ -413,7 +404,7 @@ func TestValidatorIncludesOverrideReachablePlansInHardCostPricingGate(t *testing
 	}
 	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
 	if report.Valid || compiled != nil ||
-		!hasIssue(report.Issues, "input_pricing_unsupported_for_cost_limit") {
+		!hasIssue(report.Issues, "input_accounting_required_for_cost_limit") {
 		t.Fatalf("override-reachable cost plan bypassed conservative pricing: %+v", report.Issues)
 	}
 
@@ -442,7 +433,7 @@ func TestValidatorRejectsHardCostWithoutConservativeConfiguredInputPrice(t *test
 		code       string
 	}{
 		{name: "missing pricing", code: "pricing_required_for_cost_limit"},
-		{name: "input priced", pricingRef: "standard", inputRate: json.Number("1"), code: "input_pricing_unsupported_for_cost_limit"},
+		{name: "input priced", pricingRef: "standard", inputRate: json.Number("1"), code: "input_accounting_required_for_cost_limit"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -245,17 +245,34 @@ func (upstream Upstream) clone() Upstream {
 
 // Model maps a client-facing feature route to one physical provider model.
 type Model struct {
-	ID            string
-	UpstreamID    string
-	UpstreamModel string
-	PricingRef    string
-	Capabilities  []string
+	ID                 string
+	UpstreamID         string
+	UpstreamModel      string
+	PricingRef         string
+	InputAccountingRef string
+	Capabilities       []string
 }
 
 func (model Model) clone() Model {
 	model.Capabilities = append([]string(nil), model.Capabilities...)
 	return model
 }
+
+// InputAccountingProfile is an immutable operator-owned proof declaration
+// for one exact provider protocol and physical model. The data plane converts
+// this value into the matching protocol-adapter profile only after route and
+// physical-model selection.
+type InputAccountingProfile struct {
+	ID                             string `json:"id"`
+	Protocol                       string `json:"protocol"`
+	Method                         string `json:"method"`
+	PhysicalModel                  string `json:"physicalModel"`
+	MaximumFramingTokensPerRequest int64  `json:"maximumFramingTokensPerRequest"`
+	MaximumFramingTokensPerMessage int64  `json:"maximumFramingTokensPerMessage"`
+	MaximumContextTokens           int64  `json:"maximumContextTokens"`
+}
+
+func (profile InputAccountingProfile) clone() InputAccountingProfile { return profile }
 
 // PricingEntry is the immutable integer-price schedule for one configured
 // model. Prices are nano-USD per one million tokens plus an optional fixed
@@ -477,16 +494,17 @@ type ActiveSnapshot struct {
 	RevisionID    string
 	EnvironmentID string
 
-	document     json.RawMessage
-	compiled     json.RawMessage
-	session      SessionPolicy
-	identities   map[string]IdentityProvider
-	attestations map[string]AttestationPolicy
-	upstreams    map[string]Upstream
-	models       map[string]Model
-	pricing      map[string]PricingCatalog
-	limitPlans   map[string]LimitPlan
-	features     map[string]Feature
+	document        json.RawMessage
+	compiled        json.RawMessage
+	session         SessionPolicy
+	identities      map[string]IdentityProvider
+	attestations    map[string]AttestationPolicy
+	upstreams       map[string]Upstream
+	models          map[string]Model
+	inputAccounting map[string]InputAccountingProfile
+	pricing         map[string]PricingCatalog
+	limitPlans      map[string]LimitPlan
+	features        map[string]Feature
 }
 
 // PolicyRevision returns the immutable cache identity for data-plane policy.
@@ -530,6 +548,13 @@ func (snapshot ActiveSnapshot) Upstream(upstreamID string) (Upstream, bool) {
 func (snapshot ActiveSnapshot) Model(modelID string) (Model, bool) {
 	model, ok := snapshot.models[modelID]
 	return model.clone(), ok
+}
+
+// InputAccountingProfile returns a detached copy of one trusted input-token
+// accounting declaration.
+func (snapshot ActiveSnapshot) InputAccountingProfile(profileID string) (InputAccountingProfile, bool) {
+	profile, ok := snapshot.inputAccounting[profileID]
+	return profile.clone(), ok
 }
 
 // PricingCatalog returns a deep copy of one configured USD catalog.

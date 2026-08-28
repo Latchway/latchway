@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/test-vectors/0.3.0/dpop-vector-set.schema.json",
+  "$id": "https://latchway.dev/schemas/test-vectors/0.4.0/dpop-vector-set.schema.json",
   "title": "Latchway RFC 9449 DPoP vector set",
   "type": "object",
   "additionalProperties": false,
@@ -20,7 +20,7 @@
   ],
   "properties": {
     "format_version": { "type": "integer", "const": 1 },
-    "contract_version": { "type": "string", "const": "0.3.0" },
+    "contract_version": { "type": "string", "const": "0.4.0" },
     "wire_protocol_version": { "type": "integer", "const": 1 },
     "reference_time": { "type": "integer", "minimum": 0 },
     "maximum_iat_skew_seconds": { "type": "integer", "minimum": 0, "maximum": 300 },

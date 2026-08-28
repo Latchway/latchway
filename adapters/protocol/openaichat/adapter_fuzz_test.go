@@ -2,6 +2,7 @@ package openaichat
 
 import (
 	"context"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"strings"
@@ -57,6 +58,64 @@ func FuzzInspectAndRewrite(f *testing.F) {
 		_, hasCompletion := object["max_completion_tokens"]
 		if hasLegacy == hasCompletion {
 			t.Fatalf("rewrite must contain exactly one output limit: %s", rewritten)
+		}
+	})
+}
+
+func FuzzTrustedInputPreflight(f *testing.F) {
+	f.Add(`{"model":"client","messages":[{"role":"user","content":"hello"}]}`)
+	f.Add(`{"model":"client","messages":[{"role":"developer","content":"brief"},{"role":"user","content":"你好 🌉"}],"stream":true,"n":1}`)
+	f.Add(`{"model":"client","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}]}`)
+	f.Add(`{"model":"client","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"tools":[{"type":"function","function":{"name":"lookup"}}]}`)
+	f.Add("not-json")
+
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 8<<10 {
+			t.Skip()
+		}
+		request, err := http.NewRequest(
+			http.MethodPost,
+			"https://gateway.example/v1/chat/completions",
+			strings.NewReader(body),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		adapter := Adapter{MaximumBodyBytes: 16 << 10}
+		if _, err := adapter.ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+			PhysicalModel: "server-model", DefaultOutputTokens: 64, MaximumOutputTokens: 128,
+		}); err != nil {
+			return
+		}
+		before := requestBodyFromFactory(t, request)
+		profile := protocol.TrustedInputProfile{
+			ID: "fuzz_profile", Protocol: ID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "server-model", MaximumFramingTokensPerRequest: 5,
+			MaximumFramingTokensPerMessage: 3, MaximumContextTokens: 1_000_000,
+		}
+		preflight, preflightErr := adapter.PreflightInput(context.Background(), request, profile)
+		after, readErr := io.ReadAll(request.Body)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(after) != string(before) {
+			t.Fatal("trusted input preflight changed the exact rewritten body")
+		}
+		if preflightErr != nil {
+			if preflight != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("failed preflight returned a partial proof: %+v", preflight)
+			}
+			return
+		}
+		if preflight.RewrittenBodySHA256 != sha256.Sum256(before) ||
+			preflight.RequestBytes != int64(len(before)) ||
+			preflight.InputTokenBound != int64(len(before))+5+preflight.MessageCount*3 ||
+			preflight.OutputTokenBound <= 0 ||
+			preflight.TotalTokenBound != preflight.InputTokenBound+preflight.OutputTokenBound ||
+			preflight.ProfileDigest != profile.Digest() || preflight.PhysicalModel != "server-model" {
+			t.Fatalf("invalid trusted input proof: %+v", preflight)
 		}
 	})
 }

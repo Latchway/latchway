@@ -4,9 +4,9 @@
 // durable token-bucket logical-request rules, hard calendar and durable
 // token-bucket output-token rules, hard concurrent-request and
 // concurrent-stream leases, hard per-request output-token enforcement
-// metadata, and immutable configured-price attribution. The model also
-// recognizes dormant hard UTC-calendar input-token and total-token lifecycle
-// shapes; configuration and data-plane activation remain deliberately gated.
+// metadata, immutable configured-price attribution, and hard UTC-calendar
+// input-token and total-token rules backed by an immutable trusted preflight
+// binding.
 // One request may resolve to multiple rules, which are reserved and finalized
 // atomically. The package does not accept client supplied counters, bucket
 // keys, rule hashes, usage totals, costs, or timestamps.
@@ -55,6 +55,11 @@ const (
 	AttemptFailed    = "failed"
 	AttemptCancelled = "cancelled"
 	AttemptTimedOut  = "timed_out"
+
+	// UTF8ByteBPEDeclaredFramingV1 identifies the initial conservative input
+	// accounting proof. The trusted adapter bounds BPE content by the exact
+	// rewritten UTF-8 bytes and adds operator-declared framing maxima.
+	UTF8ByteBPEDeclaredFramingV1 = "utf8_byte_bpe_declared_framing_v1"
 )
 
 var (
@@ -95,6 +100,7 @@ const (
 	scopeDigestDomain               = "latchway/quota-scope/v1\x00"
 	requestDigestDomain             = "latchway/quota-request/v1\x00"
 	reservationPricingBindingDomain = "latchway/quota-reservation-pricing/v1\x00"
+	inputPreflightBindingDomain     = "latchway/quota-input-preflight-binding/v2\x00"
 )
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
@@ -128,6 +134,22 @@ type PricingSelection struct {
 	Currency  string
 }
 
+// InputPreflightBinding is the server-trusted proof attached after provider
+// request rewriting and physical-model selection. The exact body and profile
+// digests make the proof request-specific. Store.Reserve defensively copies
+// the value before validation and fingerprinting.
+type InputPreflightBinding struct {
+	Method              string
+	Protocol            string
+	ProfileID           string
+	ProfileDigest       [sha256.Size]byte
+	RewrittenBodySHA256 [sha256.Size]byte
+	PhysicalModel       string
+	InputTokenBound     int64
+	OutputTokenBound    int64
+	TotalTokenBound     int64
+}
+
 // ReserveInput contains only canonical durable identities and server-selected
 // policy values. ClientRequestID is correlation-only: it is persisted and
 // compared on replay, but never serves as a lookup, authorization, bucket,
@@ -152,6 +174,7 @@ type ReserveInput struct {
 	ModelKey        string
 	PhysicalModel   string
 	Pricing         PricingSelection
+	InputPreflight  *InputPreflightBinding
 	Streaming       bool
 
 	Rules []Rule
@@ -358,9 +381,72 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		}
 	}
 
+	preflight, err := prepareInputPreflight(
+		input.InputPreflight,
+		input.Protocol,
+		input.PhysicalModel,
+		preparedRules,
+	)
+	if err != nil {
+		return preparedRequest{}, err
+	}
+	// Do not retain the caller's pointer. Fingerprinting and persistence must
+	// observe the single validated value even if the caller reuses its input.
+	input.InputPreflight = preflight
 	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
 	prepared.Rules = clonePreparedRules(preparedRules)
 	return prepared, nil
+}
+
+func prepareInputPreflight(
+	input *InputPreflightBinding,
+	protocol string,
+	physicalModel string,
+	rules []preparedRule,
+) (*InputPreflightBinding, error) {
+	requiresBinding := false
+	for _, rule := range rules {
+		if rule.Metric == InputTokensMetric || rule.Metric == TotalTokensMetric {
+			requiresBinding = true
+			break
+		}
+	}
+	if input == nil {
+		if requiresBinding {
+			return nil, ErrInvalidInput
+		}
+		return nil, nil
+	}
+
+	binding := *input
+	var zeroDigest [sha256.Size]byte
+	if binding.Method != UTF8ByteBPEDeclaredFramingV1 ||
+		binding.Protocol != protocol || binding.Protocol != "openai_chat" ||
+		!identifierPattern.MatchString(binding.ProfileID) ||
+		binding.ProfileDigest == zeroDigest || binding.RewrittenBodySHA256 == zeroDigest ||
+		!validPhysicalModel(binding.PhysicalModel) || binding.PhysicalModel != physicalModel ||
+		binding.InputTokenBound <= 0 || binding.OutputTokenBound <= 0 ||
+		binding.InputTokenBound > math.MaxInt64-binding.OutputTokenBound ||
+		binding.TotalTokenBound != binding.InputTokenBound+binding.OutputTokenBound {
+		return nil, ErrInvalidInput
+	}
+	for _, rule := range rules {
+		var expected int64
+		switch rule.Metric {
+		case InputTokensMetric:
+			expected = binding.InputTokenBound
+		case OutputTokensMetric:
+			expected = binding.OutputTokenBound
+		case TotalTokensMetric:
+			expected = binding.TotalTokenBound
+		default:
+			continue
+		}
+		if rule.ReservedUnits != expected {
+			return nil, ErrInvalidInput
+		}
+	}
+	return &binding, nil
 }
 
 // prepareRules is the single canonical validation and identity path for both
@@ -649,6 +735,23 @@ func requestFingerprint(prepared preparedRequest) string {
 	if prepared.Pricing.CatalogID != "" {
 		parts = append(parts, prepared.Pricing.CatalogID)
 	}
+	// The absence of a preflight binding preserves every historical
+	// fingerprint byte-for-byte. A present proof appends its own versioned
+	// domain marker and a canonical fixed-order serialization.
+	if binding := prepared.InputPreflight; binding != nil {
+		parts = append(parts,
+			inputPreflightBindingDomain,
+			binding.Method,
+			binding.Protocol,
+			binding.ProfileID,
+			base64.RawURLEncoding.EncodeToString(binding.ProfileDigest[:]),
+			base64.RawURLEncoding.EncodeToString(binding.RewrittenBodySHA256[:]),
+			binding.PhysicalModel,
+			strconv.FormatInt(binding.InputTokenBound, 10),
+			strconv.FormatInt(binding.OutputTokenBound, 10),
+			strconv.FormatInt(binding.TotalTokenBound, 10),
+		)
+	}
 	return canonicalDigest(requestDigestDomain, parts)
 }
 
@@ -756,7 +859,7 @@ func validFailureCode(value string) bool {
 }
 
 func validPhysicalModel(value string) bool {
-	if len(value) == 0 || len(value) > 512 || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
+	if len(value) == 0 || len(value) > 256 || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
 		return false
 	}
 	return strings.IndexFunc(value, unicode.IsControl) == -1

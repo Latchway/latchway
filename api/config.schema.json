@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/config/0.3.0/environment-config.schema.json",
+  "$id": "https://latchway.dev/schemas/config/0.4.0/environment-config.schema.json",
   "title": "Latchway EnvironmentConfig",
   "description": "Immutable, revisioned configuration for one Latchway application environment.",
   "type": "object",
@@ -82,6 +82,12 @@
           "minItems": 1,
           "maxItems": 256,
           "items": { "$ref": "#/$defs/Model" }
+        },
+        "inputAccountingProfiles": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/InputAccountingProfile" },
+          "default": []
         },
         "pricingCatalogs": {
           "type": "array",
@@ -412,12 +418,47 @@
         "upstream": { "$ref": "#/$defs/Identifier" },
         "upstreamModel": { "type": "string", "minLength": 1, "maxLength": 256 },
         "pricingRef": { "$ref": "#/$defs/Identifier" },
+        "inputAccountingRef": { "$ref": "#/$defs/Identifier" },
         "capabilities": {
           "type": "array",
           "uniqueItems": true,
           "items": {
             "enum": ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"]
           }
+        }
+      }
+    },
+    "InputAccountingProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "method",
+        "physicalModel",
+        "maximumFramingTokensPerRequest",
+        "maximumFramingTokensPerMessage",
+        "maximumContextTokens"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "protocol": { "const": "openai_chat" },
+        "method": { "const": "utf8_byte_bpe_declared_framing_v1" },
+        "physicalModel": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "maximumFramingTokensPerRequest": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maximumFramingTokensPerMessage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maximumContextTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
         }
       }
     },

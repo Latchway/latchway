@@ -4,9 +4,12 @@
 package dataplane
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -292,8 +295,31 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, errInvalidConfiguration)
 		return
 	}
+	var inputPreflight *protocol.TrustedInputPreflight
+	if trustedInputPreflightRequired(validated.rules, selectedPricing) {
+		profile, profileErr := resolveTrustedInputProfile(snapshot, decision)
+		preflighter, supportsPreflight := handler.adapter.(protocol.InputPreflighter)
+		if profileErr != nil || !supportsPreflight || !handler.adapter.Capabilities().TrustedInputPreflight {
+			handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
+			return
+		}
+		preflight, preflightErr := preflighter.PreflightInput(request.Context(), request, profile)
+		if preflightErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, preflightErr)
+			return
+		}
+		if validateErr := validateTrustedInputPreflight(profile, decision, appliedOutputMaximum, preflight); validateErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, validateErr)
+			return
+		}
+		if integrityErr := verifyAndRebindPreflightBody(request, preflight); integrityErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, integrityErr)
+			return
+		}
+		inputPreflight = &preflight
+	}
 	hardCost, err := assignDecisionReservationUnits(
-		validated.rules, selectedPricing, appliedOutputMaximum,
+		validated.rules, selectedPricing, appliedOutputMaximum, inputPreflight,
 	)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -310,14 +336,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		LimitPlanKey: decision.LimitPlan.ID, RouteKey: decision.Route.ID,
 		UpstreamKey: decision.Upstream.ID, ModelKey: decision.Model.ID,
 		PhysicalModel: decision.Model.UpstreamModel, Pricing: selectedPricing.quotaSelection,
-		Streaming: metadata.Streaming, Rules: validated.rules,
+		InputPreflight: quotaInputPreflightBinding(inputPreflight),
+		Streaming:      metadata.Streaming, Rules: validated.rules,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
 
-	result := handler.executeReserved(request.Context(), writer, request, authorization, decision, reservation)
+	result := handler.executeReserved(request.Context(), writer, request, authorization, decision, reservation, inputPreflight)
 	if !result.beginInvoked {
 		if result.err == nil {
 			result.err = errDispatchNotConsumed
@@ -339,11 +366,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if result.err == nil && !result.relay.ClientStarted {
 		result.err = errDispatchNotConsumed
 	}
-	providerUsageOverCap := result.relay.Usage.Known &&
-		result.relay.Usage.OutputTokens > appliedOutputMaximum
-	if providerUsageOverCap {
+	providerUsageOverBound := providerUsageExceedsTrustedBounds(
+		result.relay.Usage, appliedOutputMaximum, inputPreflight,
+	)
+	if providerUsageOverBound {
 		result.err = fmt.Errorf(
-			"%w: provider-reported output tokens exceed the applied request maximum",
+			"%w: provider-reported usage exceeds the trusted request bounds",
 			errUpstreamProtocol,
 		)
 		// The provider measurement cannot be reconciled with the exact request
@@ -353,7 +381,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		result.relay.Usage = protocol.Usage{}
 	}
 	var calculatedCost quota.Cost
-	if !providerUsageOverCap {
+	if !providerUsageOverBound {
 		calculatedCost, result.err = calculateConfiguredCost(selectedPricing, result.relay.Usage, result.err)
 	}
 	calculatedCost = boundedSettlementCost(calculatedCost, hardCost)
@@ -391,9 +419,15 @@ func (handler *Handler) executeReserved(
 	authorization session.Authorization,
 	decision policy.Decision,
 	reservation quota.Reservation,
+	inputPreflight *protocol.TrustedInputPreflight,
 ) executionResult {
 	if !validTargetTimeouts(decision.Upstream.Timeouts) {
 		return executionResult{err: errTargetConfiguration}
+	}
+	if inputPreflight != nil {
+		if err := verifyAndRebindPreflightBody(incoming, *inputPreflight); err != nil {
+			return executionResult{err: err}
+		}
 	}
 	executionContext, cancelExecution := context.WithTimeout(ctx, decision.Upstream.Timeouts.Total)
 	defer cancelExecution()
@@ -574,25 +608,43 @@ func assignDecisionReservationUnits(
 	rules []quota.Rule,
 	selected configuredPricing,
 	appliedOutputMaximum int64,
+	inputPreflight *protocol.TrustedInputPreflight,
 ) (hardCostReservation, error) {
 	if appliedOutputMaximum <= 0 {
 		return hardCostReservation{}, policy.ErrConfiguration
 	}
 	hasCostRule := false
+	requiresInputBound := false
 	for _, rule := range rules {
-		if rule.Metric == quota.CostNanoUSDMetric {
+		switch rule.Metric {
+		case quota.CostNanoUSDMetric:
 			hasCostRule = true
-			break
+		case quota.InputTokensMetric, quota.TotalTokensMetric:
+			requiresInputBound = true
 		}
+	}
+	if requiresInputBound && inputPreflight == nil {
+		return hardCostReservation{}, policy.ErrConfiguration
+	}
+	if inputPreflight != nil &&
+		(inputPreflight.InputTokenBound <= 0 ||
+			inputPreflight.OutputTokenBound != appliedOutputMaximum ||
+			inputPreflight.InputTokenBound > math.MaxInt64-inputPreflight.OutputTokenBound ||
+			inputPreflight.TotalTokenBound != inputPreflight.InputTokenBound+inputPreflight.OutputTokenBound) {
+		return hardCostReservation{}, policy.ErrConfiguration
 	}
 	var bound hardCostReservation
 	if hasCostRule {
-		if !selected.configured || selected.rates.InputNanoUSDPerMillion != 0 {
+		if !selected.configured || (selected.rates.InputNanoUSDPerMillion != 0 && inputPreflight == nil) {
 			return hardCostReservation{}, policy.ErrConfiguration
+		}
+		inputMaximum := int64(0)
+		if inputPreflight != nil {
+			inputMaximum = inputPreflight.InputTokenBound
 		}
 		calculated, err := pricing.Calculate(
 			selected.rates,
-			pricing.Usage{OutputTokens: appliedOutputMaximum},
+			pricing.Usage{InputTokens: inputMaximum, OutputTokens: appliedOutputMaximum},
 			selected.source,
 		)
 		if err != nil || !calculated.Known() {
@@ -604,13 +656,155 @@ func assignDecisionReservationUnits(
 	}
 	for index := range rules {
 		switch rules[index].Metric {
+		case quota.InputTokensMetric:
+			rules[index].ReservedUnits = inputPreflight.InputTokenBound
 		case quota.OutputTokensMetric:
 			rules[index].ReservedUnits = appliedOutputMaximum
+		case quota.TotalTokensMetric:
+			rules[index].ReservedUnits = inputPreflight.TotalTokenBound
 		case quota.CostNanoUSDMetric:
 			rules[index].ReservedUnits = bound.nanoUSD
 		}
 	}
 	return bound, nil
+}
+
+func trustedInputPreflightRequired(rules []quota.Rule, selected configuredPricing) bool {
+	for _, rule := range rules {
+		switch rule.Metric {
+		case quota.InputTokensMetric, quota.TotalTokensMetric:
+			return true
+		case quota.CostNanoUSDMetric:
+			if selected.configured && selected.rates.InputNanoUSDPerMillion != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveTrustedInputProfile(
+	snapshot configuration.ActiveSnapshot,
+	decision policy.Decision,
+) (protocol.TrustedInputProfile, error) {
+	model, ok := snapshot.Model(decision.Model.ID)
+	if !ok || !reflect.DeepEqual(model, decision.Model) || model.InputAccountingRef == "" {
+		return protocol.TrustedInputProfile{}, policy.ErrConfiguration
+	}
+	profile, ok := snapshot.InputAccountingProfile(model.InputAccountingRef)
+	if !ok {
+		return protocol.TrustedInputProfile{}, policy.ErrConfiguration
+	}
+	return protocol.TrustedInputProfile{
+		ID:                             profile.ID,
+		Protocol:                       profile.Protocol,
+		Method:                         profile.Method,
+		PhysicalModel:                  profile.PhysicalModel,
+		MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
+		MaximumFramingTokensPerMessage: profile.MaximumFramingTokensPerMessage,
+		MaximumContextTokens:           profile.MaximumContextTokens,
+	}, nil
+}
+
+func validateTrustedInputPreflight(
+	profile protocol.TrustedInputProfile,
+	decision policy.Decision,
+	appliedOutputMaximum int64,
+	preflight protocol.TrustedInputPreflight,
+) error {
+	expectedInputBound, boundOK := trustedInputBoundFromProfile(profile, preflight)
+	if preflight.ProfileID != profile.ID || preflight.ProfileDigest != profile.Digest() ||
+		preflight.Protocol != profile.Protocol || preflight.Method != profile.Method ||
+		preflight.PhysicalModel != decision.Model.UpstreamModel ||
+		preflight.PhysicalModel != profile.PhysicalModel ||
+		preflight.RequestBytes <= 0 || preflight.RequestBytes > maximumRequestBodyLimit ||
+		preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
+		!boundOK || preflight.InputTokenBound != expectedInputBound ||
+		preflight.OutputTokenBound != appliedOutputMaximum ||
+		preflight.InputTokenBound > math.MaxInt64-preflight.OutputTokenBound ||
+		preflight.TotalTokenBound != preflight.InputTokenBound+preflight.OutputTokenBound ||
+		preflight.TotalTokenBound > profile.MaximumContextTokens {
+		return policy.ErrConfiguration
+	}
+	return nil
+}
+
+func trustedInputBoundFromProfile(
+	profile protocol.TrustedInputProfile,
+	preflight protocol.TrustedInputPreflight,
+) (int64, bool) {
+	if preflight.RequestBytes <= 0 || preflight.MessageCount <= 0 || preflight.MessageCount > 4096 ||
+		profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
+		profile.MaximumFramingTokensPerMessage != 0 &&
+			preflight.MessageCount > math.MaxInt64/profile.MaximumFramingTokensPerMessage {
+		return 0, false
+	}
+	messageFraming := preflight.MessageCount * profile.MaximumFramingTokensPerMessage
+	if preflight.RequestBytes > math.MaxInt64-profile.MaximumFramingTokensPerRequest {
+		return 0, false
+	}
+	bound := preflight.RequestBytes + profile.MaximumFramingTokensPerRequest
+	if bound > math.MaxInt64-messageFraming {
+		return 0, false
+	}
+	return bound + messageFraming, true
+}
+
+func verifyAndRebindPreflightBody(
+	request *http.Request,
+	preflight protocol.TrustedInputPreflight,
+) error {
+	if request == nil || request.Body == nil || preflight.RequestBytes <= 0 ||
+		preflight.RequestBytes > maximumRequestBodyLimit || request.ContentLength != preflight.RequestBytes {
+		return policy.ErrConfiguration
+	}
+	bytesLimit := preflight.RequestBytes + 1
+	body, err := io.ReadAll(io.LimitReader(request.Body, bytesLimit))
+	closeErr := request.Body.Close()
+	if err != nil || closeErr != nil || int64(len(body)) != preflight.RequestBytes ||
+		sha256.Sum256(body) != preflight.RewrittenBodySHA256 {
+		return policy.ErrConfiguration
+	}
+	// Own and reinstall the exact bytes that were checked. The outbound request
+	// is reconstructed only after this second verification and no caller gains
+	// mutable access to the backing slice.
+	owned := append([]byte(nil), body...)
+	request.Body = io.NopCloser(bytes.NewReader(owned))
+	request.ContentLength = int64(len(owned))
+	request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(owned)), nil
+	}
+	return nil
+}
+
+func quotaInputPreflightBinding(
+	preflight *protocol.TrustedInputPreflight,
+) *quota.InputPreflightBinding {
+	if preflight == nil {
+		return nil
+	}
+	return &quota.InputPreflightBinding{
+		Method: preflight.Method, Protocol: preflight.Protocol, ProfileID: preflight.ProfileID,
+		ProfileDigest: preflight.ProfileDigest, RewrittenBodySHA256: preflight.RewrittenBodySHA256,
+		PhysicalModel: preflight.PhysicalModel, InputTokenBound: preflight.InputTokenBound,
+		OutputTokenBound: preflight.OutputTokenBound, TotalTokenBound: preflight.TotalTokenBound,
+	}
+}
+
+func providerUsageExceedsTrustedBounds(
+	usage protocol.Usage,
+	appliedOutputMaximum int64,
+	inputPreflight *protocol.TrustedInputPreflight,
+) bool {
+	if !usage.Known {
+		return false
+	}
+	if usage.OutputTokens > appliedOutputMaximum {
+		return true
+	}
+	return inputPreflight != nil &&
+		(usage.InputTokens > inputPreflight.InputTokenBound ||
+			usage.TotalTokens > inputPreflight.TotalTokenBound)
 }
 
 func boundedSettlementCost(cost quota.Cost, bound hardCostReservation) quota.Cost {
@@ -796,7 +990,8 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
 			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
 			validDecisionTokenBucketRefill(limit.RefillPerSecond)
-	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.CalendarAlgorithm:
+	case (limit.Metric == quota.InputTokensMetric || limit.Metric == quota.OutputTokensMetric ||
+		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case limit.Metric == quota.CostNanoUSDMetric && limit.Algorithm == quota.CalendarAlgorithm:
@@ -924,7 +1119,9 @@ func failureCode(err error) string {
 		return "pricing_unavailable"
 	case errors.Is(err, quota.ErrDependency), errors.Is(err, quota.ErrInvalidState):
 		return "quota_state_unavailable"
-	case errors.Is(err, errTargetConfiguration):
+	case errors.Is(err, policy.ErrConfiguration), errors.Is(err, quota.ErrInvalidInput),
+		errors.Is(err, errInvalidConfiguration), errors.Is(err, errUnsupportedLimitPlan),
+		errors.Is(err, errTargetConfiguration):
 		return "configuration_invalid"
 	default:
 		return "upstream_unavailable"

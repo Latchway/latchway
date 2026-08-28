@@ -5,6 +5,7 @@ package openaichat
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/protocol"
@@ -49,11 +52,12 @@ func (a Adapter) Match(request *http.Request) bool {
 
 func (a Adapter) Capabilities() protocol.Capabilities {
 	return protocol.Capabilities{
-		Streaming:           true,
-		ModelRewrite:        true,
-		OutputTokenClamp:    true,
-		ProviderUsage:       true,
-		ExactInputPreflight: false,
+		Streaming:             true,
+		ModelRewrite:          true,
+		OutputTokenClamp:      true,
+		ProviderUsage:         true,
+		ExactInputPreflight:   false,
+		TrustedInputPreflight: true,
 	}
 }
 
@@ -99,6 +103,8 @@ func inspectRequestObject(object map[string]any, raw []byte) (protocol.RequestMe
 		ClientModel:          model,
 		Streaming:            streaming,
 		RequestedOutputLimit: requested,
+		// This pre-route raw-body heuristic is intentionally untrusted. Only
+		// PreflightInput can produce a quota-safe input-token bound.
 		EstimatedInputTokens: (int64(len(raw)) + 2) / 3,
 		RequestBytes:         int64(len(raw)),
 	}, nil
@@ -159,19 +165,215 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	if int64(len(rewritten)) > a.maximumBodyBytes() {
 		return 0, errors.New("rewritten chat request exceeds configured limit")
 	}
-	request.Body = io.NopCloser(bytes.NewReader(rewritten))
-	request.ContentLength = int64(len(rewritten))
-	request.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(rewritten)), nil
-	}
+	installRequestBody(request, rewritten)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Del("Content-Length")
 	mode := responseModeJSON
 	if streaming {
 		mode = responseModeSSE
 	}
 	*request = *request.WithContext(context.WithValue(request.Context(), responseModeContextKey{}, mode))
 	return effective, nil
+}
+
+// PreflightInput proves a conservative input-token bound over the exact body
+// installed by ApplyFeature. It intentionally supports only a strict
+// text-only subset of Chat Completions. Rich requests remain available when
+// trusted input accounting is not required, but they fail closed here because
+// tools, files, media, and provider extensions can add input not bounded by
+// the JSON bytes alone.
+func (a Adapter) PreflightInput(
+	ctx context.Context,
+	request *http.Request,
+	profile protocol.TrustedInputProfile,
+) (protocol.TrustedInputPreflight, error) {
+	if ctx == nil {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	if err := validateTrustedInputProfile(profile); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	object, raw, err := a.readRequest(request)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	messageCount, outputBound, err := validateTrustedInputRequest(object, profile)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	requestBytes, ok := checkedLength(len(raw))
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request size overflows int64")
+	}
+	messageFraming, ok := checkedMultiply(messageCount, profile.MaximumFramingTokensPerMessage)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input message framing overflows int64")
+	}
+	inputBound, ok := checkedAdd(requestBytes, profile.MaximumFramingTokensPerRequest)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input request framing overflows int64")
+	}
+	inputBound, ok = checkedAdd(inputBound, messageFraming)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted input bound overflows int64")
+	}
+	totalBound, ok := checkedAdd(inputBound, outputBound)
+	if !ok {
+		return protocol.TrustedInputPreflight{}, errors.New("trusted total-token bound overflows int64")
+	}
+	if totalBound > profile.MaximumContextTokens {
+		return protocol.TrustedInputPreflight{}, requestMalformed("request and output maximum exceed the physical model context window")
+	}
+
+	// Rebind every body accessor to the exact bytes that were hashed and
+	// validated. The owned slice is not exposed and later integrity checks can
+	// compare against RewrittenBodySHA256 before dispatch.
+	installRequestBody(request, raw)
+	return protocol.TrustedInputPreflight{
+		ProfileID:           profile.ID,
+		ProfileDigest:       profile.Digest(),
+		Protocol:            profile.Protocol,
+		Method:              profile.Method,
+		PhysicalModel:       profile.PhysicalModel,
+		RewrittenBodySHA256: sha256.Sum256(raw),
+		RequestBytes:        requestBytes,
+		MessageCount:        messageCount,
+		InputTokenBound:     inputBound,
+		OutputTokenBound:    outputBound,
+		TotalTokenBound:     totalBound,
+	}, nil
+}
+
+func validateTrustedInputProfile(profile protocol.TrustedInputProfile) error {
+	if !safeIdentifierValue(profile.ID, 63) {
+		return errors.New("valid trusted input profile ID is required")
+	}
+	if profile.Protocol != ID {
+		return errors.New("trusted input profile protocol does not match OpenAI Chat")
+	}
+	if profile.Method != protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1 {
+		return errors.New("trusted input profile method is unsupported")
+	}
+	if !safeIdentifierValue(profile.PhysicalModel, 256) {
+		return errors.New("valid trusted input profile physical model is required")
+	}
+	if profile.MaximumFramingTokensPerRequest < 0 || profile.MaximumFramingTokensPerMessage < 0 ||
+		profile.MaximumContextTokens <= 0 {
+		return errors.New("valid trusted input profile token bounds are required")
+	}
+	return nil
+}
+
+func validateTrustedInputRequest(
+	object map[string]any,
+	profile protocol.TrustedInputProfile,
+) (int64, int64, error) {
+	allowedRoot := map[string]struct{}{
+		"model": {}, "messages": {}, "stream": {}, "stream_options": {}, "n": {},
+		"max_tokens": {}, "max_completion_tokens": {},
+	}
+	for key := range object {
+		if _, ok := allowedRoot[key]; !ok {
+			return 0, 0, requestMalformed("trusted input preflight supports only bounded text request fields")
+		}
+	}
+	model, ok := object["model"].(string)
+	if !ok || model != profile.PhysicalModel {
+		return 0, 0, errors.New("trusted input profile physical model does not match rewritten request")
+	}
+	messages, ok := object["messages"].([]any)
+	if !ok || len(messages) == 0 || len(messages) > 4096 {
+		return 0, 0, requestMalformed("messages must be a non-empty bounded array")
+	}
+	for _, value := range messages {
+		message, ok := value.(map[string]any)
+		if !ok || len(message) != 2 {
+			return 0, 0, requestMalformed("trusted input messages must contain exactly role and content")
+		}
+		role, roleOK := message["role"].(string)
+		content, contentOK := message["content"].(string)
+		if !roleOK || !slicesContainsString([]string{"developer", "system", "user", "assistant"}, role) {
+			return 0, 0, requestMalformed("trusted input messages must use a text-only role")
+		}
+		if !contentOK || !utf8.ValidString(content) || strings.ContainsRune(content, '\x00') {
+			return 0, 0, requestMalformed("trusted input message content must be a non-null UTF-8 string")
+		}
+	}
+	streaming := false
+	if value, present := object["stream"]; present {
+		streaming, ok = value.(bool)
+		if !ok {
+			return 0, 0, requestMalformed("stream must be a boolean for trusted input preflight")
+		}
+	}
+	if value, present := object["stream_options"]; present {
+		options, objectOK := value.(map[string]any)
+		includeUsage, usageOK := options["include_usage"].(bool)
+		if !streaming || !objectOK || len(options) != 1 || !usageOK || !includeUsage {
+			return 0, 0, requestMalformed("stream_options must contain only include_usage=true for a streaming request")
+		}
+	} else if streaming {
+		return 0, 0, errors.New("rewritten streaming request is missing provider usage reporting")
+	}
+	if value, present := object["n"]; present {
+		number, numberOK := value.(json.Number)
+		parsed, parseErr := number.Int64()
+		if !numberOK || parseErr != nil || parsed != 1 {
+			return 0, 0, requestMalformed("n must be exactly 1 for trusted input preflight")
+		}
+	}
+	outputBound, outputField, err := requestedOutputLimit(object)
+	if err != nil {
+		return 0, 0, err
+	}
+	if outputBound <= 0 {
+		return 0, 0, errors.New("rewritten request is missing its output-token maximum")
+	}
+	otherOutputField := "max_tokens"
+	if outputField == otherOutputField {
+		otherOutputField = "max_completion_tokens"
+	}
+	if _, present := object[otherOutputField]; present {
+		return 0, 0, errors.New("rewritten request contains ambiguous output-token maxima")
+	}
+	messageCount, ok := checkedLength(len(messages))
+	if !ok {
+		return 0, 0, errors.New("trusted input message count overflows int64")
+	}
+	return messageCount, outputBound, nil
+}
+
+func checkedLength(value int) (int64, bool) {
+	converted := int64(value)
+	return converted, converted >= 0 && int(converted) == value
+}
+
+func checkedMultiply(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || (left != 0 && right > math.MaxInt64/left) {
+		return 0, false
+	}
+	return left * right, true
+}
+
+func checkedAdd(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || left > math.MaxInt64-right {
+		return 0, false
+	}
+	return left + right, true
+}
+
+func installRequestBody(request *http.Request, body []byte) {
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.ContentLength = int64(len(body))
+	request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	request.Header.Del("Content-Length")
 }
 
 func (a Adapter) ObserveResponse(ctx context.Context, response *http.Response) (protocol.ResponseObserver, error) {
@@ -346,8 +548,8 @@ func upstreamMalformed(detail string) error {
 }
 
 func safeIdentifierValue(value string, maximum int) bool {
-	return value != "" && len(value) <= maximum && strings.TrimSpace(value) == value &&
-		!strings.ContainsAny(value, "\r\n\x00")
+	return value != "" && len(value) <= maximum && utf8.ValidString(value) &&
+		strings.TrimSpace(value) == value && strings.IndexFunc(value, unicode.IsControl) == -1
 }
 
 func validateMessages(value any) error {

@@ -1,6 +1,8 @@
 package quota
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"math"
 	"sort"
@@ -36,6 +38,7 @@ func TestPrepareRequestSupportsHardInputAndTotalTokenCalendars(t *testing.T) {
 			Maximum: 20_000, ReservedUnits: 18, Hard: true,
 		},
 	}
+	input.InputPreflight = trustedInputPreflight(input, 11, 7)
 
 	prepared, err := prepareRequest(input)
 	if err != nil {
@@ -79,10 +82,15 @@ func TestPrepareRequestRejectsUnsupportedInputAndTotalTokenShapes(t *testing.T) 
 		t.Run(metric, func(t *testing.T) {
 			t.Parallel()
 			base := validReserveInput(t)
+			reserved := int64(8)
+			if metric == TotalTokensMetric {
+				reserved = 15
+			}
 			base.Rules = []Rule{{
 				Metric: metric, Algorithm: CalendarAlgorithm, Scope: []string{"user"},
-				Window: "1d", Maximum: 1_000, ReservedUnits: 8, Hard: true,
+				Window: "1d", Maximum: 1_000, ReservedUnits: reserved, Hard: true,
 			}}
+			base.InputPreflight = trustedInputPreflight(base, 8, 7)
 			tests := []struct {
 				name   string
 				mutate func(*Rule)
@@ -143,6 +151,7 @@ func TestPrepareRequestRequiresUniformReservationsPerInputAndTotalMetric(t *test
 			ReservedUnits: 18, Hard: true,
 		},
 	}
+	base.InputPreflight = trustedInputPreflight(base, 11, 7)
 	if _, err := prepareRequest(base); err != nil {
 		t.Fatalf("prepare independently uniform input/total reservations: %v", err)
 	}
@@ -186,6 +195,7 @@ func TestPrepareRequestValidatesProvableTotalReservationRelationships(t *testing
 				ReservedUnits: 18, Hard: true,
 			},
 		}
+		input.InputPreflight = trustedInputPreflight(input, 11, 7)
 		return input
 	}
 	if _, err := prepareRequest(newInput()); err != nil {
@@ -223,6 +233,128 @@ func TestPrepareRequestValidatesProvableTotalReservationRelationships(t *testing
 	}
 }
 
+func TestPrepareRequestRequiresCanonicalTrustedInputPreflight(t *testing.T) {
+	t.Parallel()
+	newInput := func() ReserveInput {
+		input := validReserveInput(t)
+		input.Rules = []Rule{
+			{
+				Metric: InputTokensMetric, Algorithm: CalendarAlgorithm,
+				Scope: []string{"user"}, Window: "1d", Maximum: 1_000,
+				ReservedUnits: 11, Hard: true,
+			},
+			{
+				Metric: OutputTokensMetric, Algorithm: CalendarAlgorithm,
+				Scope: []string{"feature"}, Window: "1d", Maximum: 1_000,
+				ReservedUnits: 7, Hard: true,
+			},
+			{
+				Metric: TotalTokensMetric, Algorithm: CalendarAlgorithm,
+				Scope: []string{"environment"}, Window: "1d", Maximum: 2_000,
+				ReservedUnits: 18, Hard: true,
+			},
+		}
+		input.InputPreflight = trustedInputPreflight(input, 11, 7)
+		return input
+	}
+
+	if _, err := prepareRequest(newInput()); err != nil {
+		t.Fatalf("prepare canonical input preflight: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*ReserveInput)
+	}{
+		{name: "missing binding", mutate: func(input *ReserveInput) { input.InputPreflight = nil }},
+		{name: "unknown method", mutate: func(input *ReserveInput) {
+			input.InputPreflight.Method = "estimated_tokens_v1"
+		}},
+		{name: "different protocol", mutate: func(input *ReserveInput) {
+			input.InputPreflight.Protocol = "anthropic_messages"
+		}},
+		{name: "matching unsupported protocol", mutate: func(input *ReserveInput) {
+			input.Protocol = "anthropic_messages"
+			input.InputPreflight.Protocol = input.Protocol
+		}},
+		{name: "noncanonical profile ID", mutate: func(input *ReserveInput) {
+			input.InputPreflight.ProfileID = "Not-Canonical"
+		}},
+		{name: "zero profile digest", mutate: func(input *ReserveInput) {
+			input.InputPreflight.ProfileDigest = [sha256.Size]byte{}
+		}},
+		{name: "zero body digest", mutate: func(input *ReserveInput) {
+			input.InputPreflight.RewrittenBodySHA256 = [sha256.Size]byte{}
+		}},
+		{name: "different physical model", mutate: func(input *ReserveInput) {
+			input.InputPreflight.PhysicalModel = "provider/model-v2"
+		}},
+		{name: "zero input bound", mutate: func(input *ReserveInput) {
+			input.InputPreflight.InputTokenBound = 0
+		}},
+		{name: "negative output bound", mutate: func(input *ReserveInput) {
+			input.InputPreflight.OutputTokenBound = -1
+		}},
+		{name: "overflowing total", mutate: func(input *ReserveInput) {
+			input.InputPreflight.InputTokenBound = math.MaxInt64
+			input.InputPreflight.OutputTokenBound = 1
+			input.InputPreflight.TotalTokenBound = math.MaxInt64
+		}},
+		{name: "inexact total", mutate: func(input *ReserveInput) {
+			input.InputPreflight.TotalTokenBound++
+		}},
+		{name: "input reservation mismatch", mutate: func(input *ReserveInput) {
+			input.Rules[0].ReservedUnits++
+		}},
+		{name: "output reservation mismatch", mutate: func(input *ReserveInput) {
+			input.Rules[1].ReservedUnits++
+		}},
+		{name: "total reservation mismatch", mutate: func(input *ReserveInput) {
+			input.Rules[2].ReservedUnits++
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := cloneReserveInput(newInput())
+			test.mutate(&input)
+			if _, err := prepareRequest(input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("invalid binding returned %v", err)
+			}
+		})
+	}
+
+	zeroOutput := validReserveInput(t)
+	zeroOutput.InputPreflight = trustedInputPreflight(zeroOutput, 3, 0)
+	if _, err := prepareRequest(zeroOutput); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("zero-output Chat preflight returned %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestPrepareRequestDefensivelyCopiesInputPreflight(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = []Rule{{
+		Metric: InputTokensMetric, Algorithm: CalendarAlgorithm,
+		Scope: []string{"user"}, Window: "1d", Maximum: 1_000,
+		ReservedUnits: 11, Hard: true,
+	}}
+	callerBinding := trustedInputPreflight(input, 11, 7)
+	input.InputPreflight = callerBinding
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare defensively copied binding: %v", err)
+	}
+	if prepared.InputPreflight == callerBinding {
+		t.Fatal("prepared request retained the caller-owned binding pointer")
+	}
+	wantFingerprint := requestFingerprint(prepared)
+	callerBinding.ProfileID = "changed-profile"
+	callerBinding.ProfileDigest[0] ^= 0xff
+	callerBinding.RewrittenBodySHA256[0] ^= 0xff
+	callerBinding.InputTokenBound++
+	if got := requestFingerprint(prepared); got != wantFingerprint {
+		t.Fatalf("caller mutation changed prepared fingerprint: got %q want %q", got, wantFingerprint)
+	}
+}
+
 func TestInputAndTotalTokenFingerprintBindingsPreserveOutputSerialization(t *testing.T) {
 	t.Parallel()
 	input := validReserveInput(t)
@@ -238,6 +370,7 @@ func TestInputAndTotalTokenFingerprintBindingsPreserveOutputSerialization(t *tes
 			ReservedUnits: 18, Hard: true,
 		},
 	}
+	input.InputPreflight = trustedInputPreflight(input, 11, 7)
 	prepared, err := prepareRequest(input)
 	if err != nil {
 		t.Fatalf("prepare fingerprint rules: %v", err)
@@ -250,12 +383,66 @@ func TestInputAndTotalTokenFingerprintBindingsPreserveOutputSerialization(t *tes
 			strconv.FormatInt(rule.ReservedUnits, 10),
 		)
 	}
+	binding := prepared.InputPreflight
+	parts = append(parts,
+		inputPreflightBindingDomain,
+		binding.Method,
+		binding.Protocol,
+		binding.ProfileID,
+		base64.RawURLEncoding.EncodeToString(binding.ProfileDigest[:]),
+		base64.RawURLEncoding.EncodeToString(binding.RewrittenBodySHA256[:]),
+		binding.PhysicalModel,
+		strconv.FormatInt(binding.InputTokenBound, 10),
+		strconv.FormatInt(binding.OutputTokenBound, 10),
+		strconv.FormatInt(binding.TotalTokenBound, 10),
+	)
 	if got, want := requestFingerprint(prepared), canonicalDigest(requestDigestDomain, parts); got != want {
 		t.Fatalf("input/total fingerprint = %q, want reservation-bound serialization %q", got, want)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*ReserveInput)
+	}{
+		{name: "rewritten body", mutate: func(input *ReserveInput) {
+			input.InputPreflight.RewrittenBodySHA256[0] ^= 0xff
+		}},
+		{name: "profile ID", mutate: func(input *ReserveInput) {
+			input.InputPreflight.ProfileID = "alternate-profile"
+		}},
+		{name: "profile digest", mutate: func(input *ReserveInput) {
+			input.InputPreflight.ProfileDigest[0] ^= 0xff
+		}},
+		{name: "physical model", mutate: func(input *ReserveInput) {
+			input.PhysicalModel = "provider/model-v2"
+			input.InputPreflight.PhysicalModel = input.PhysicalModel
+		}},
+		{name: "input and total bounds", mutate: func(input *ReserveInput) {
+			input.Rules[0].ReservedUnits++
+			input.Rules[1].ReservedUnits++
+			input.InputPreflight.InputTokenBound++
+			input.InputPreflight.TotalTokenBound++
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed, err := prepareRequest(func() ReserveInput {
+				value := cloneReserveInput(input)
+				test.mutate(&value)
+				return value
+			}())
+			if err != nil {
+				t.Fatalf("prepare altered valid binding: %v", err)
+			}
+			if requestFingerprint(changed) == requestFingerprint(prepared) {
+				t.Fatal("altered binding was omitted from the trusted fingerprint")
+			}
+		})
 	}
 
 	changedReservation := cloneReserveInput(input)
 	changedReservation.Rules[0].ReservedUnits++
+	changedReservation.Rules[1].ReservedUnits++
+	changedReservation.InputPreflight.InputTokenBound++
+	changedReservation.InputPreflight.TotalTokenBound++
 	changed, err := prepareRequest(changedReservation)
 	if err != nil {
 		t.Fatalf("prepare changed input reservation: %v", err)

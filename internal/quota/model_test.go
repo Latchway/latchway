@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -1047,9 +1048,25 @@ func mustLogicalID(t *testing.T) requestidentity.LogicalID {
 
 func cloneReserveInput(input ReserveInput) ReserveInput {
 	result := input
+	if input.InputPreflight != nil {
+		binding := *input.InputPreflight
+		result.InputPreflight = &binding
+	}
 	result.Rules = append([]Rule(nil), input.Rules...)
 	for index := range result.Rules {
 		result.Rules[index].Scope = append([]string(nil), input.Rules[index].Scope...)
 	}
 	return result
+}
+
+func trustedInputPreflight(input ReserveInput, inputTokens, outputTokens int64) *InputPreflightBinding {
+	profileDigest := sha256.Sum256([]byte("test-input-accounting-profile-v1"))
+	bodyDigest := sha256.Sum256([]byte("rewritten:" + input.LogicalRequestID.String()))
+	totalTokens := inputTokens + outputTokens
+	return &InputPreflightBinding{
+		Method: UTF8ByteBPEDeclaredFramingV1, Protocol: input.Protocol, ProfileID: "test-profile",
+		ProfileDigest: profileDigest, RewrittenBodySHA256: bodyDigest,
+		PhysicalModel: input.PhysicalModel, InputTokenBound: inputTokens,
+		OutputTokenBound: outputTokens, TotalTokenBound: totalTokens,
+	}
 }

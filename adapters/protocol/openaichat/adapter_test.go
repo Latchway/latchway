@@ -2,9 +2,11 @@ package openaichat
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -55,6 +57,257 @@ func TestInspectAndApplyFeature(t *testing.T) {
 	if streamOptions["include_usage"] != true {
 		t.Fatal("stream usage was not enabled")
 	}
+}
+
+func TestTrustedInputPreflightBindsExactRewrittenUnicodeBody(t *testing.T) {
+	t.Parallel()
+
+	body := `{
+		"model":"client-alias",
+		"messages":[
+			{"role":"developer","content":"Respond briefly."},
+			{"role":"user","content":"你好 🌉"}
+		],
+		"stream":true,
+		"n":1,
+		"max_completion_tokens":100
+	}`
+	request := rewrittenTrustedInputRequest(t, body, protocol.FeatureDecision{
+		PhysicalModel: "gpt-5.1", DefaultOutputTokens: 40, MaximumOutputTokens: 80,
+	})
+	rewrittenBefore := requestBodyFromFactory(t, request)
+	profile := testTrustedInputProfile("gpt-5.1")
+	profile.MaximumFramingTokensPerRequest = 11
+	profile.MaximumFramingTokensPerMessage = 7
+
+	preflight, err := (Adapter{}).PreflightInput(context.Background(), request, profile)
+	if err != nil {
+		t.Fatalf("PreflightInput() error = %v", err)
+	}
+	wantInput := int64(len(rewrittenBefore)) + 11 + 2*7
+	if preflight.ProfileID != profile.ID || preflight.ProfileDigest != profile.Digest() ||
+		preflight.Protocol != ID || preflight.Method != protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1 ||
+		preflight.PhysicalModel != "gpt-5.1" || preflight.RequestBytes != int64(len(rewrittenBefore)) ||
+		preflight.MessageCount != 2 || preflight.InputTokenBound != wantInput ||
+		preflight.OutputTokenBound != 80 || preflight.TotalTokenBound != wantInput+80 {
+		t.Fatalf("unexpected trusted input preflight: %+v", preflight)
+	}
+	if wantDigest := sha256.Sum256(rewrittenBefore); preflight.RewrittenBodySHA256 != wantDigest {
+		t.Fatalf("rewritten body digest = %x, want %x", preflight.RewrittenBodySHA256, wantDigest)
+	}
+	rewrittenAfter, err := io.ReadAll(request.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rewrittenAfter) != string(rewrittenBefore) {
+		t.Fatalf("preflight mutated rewritten body:\n before=%s\n  after=%s", rewrittenBefore, rewrittenAfter)
+	}
+	if request.ContentLength != int64(len(rewrittenBefore)) || string(requestBodyFromFactory(t, request)) != string(rewrittenBefore) {
+		t.Fatal("preflight did not preserve immutable request body accessors")
+	}
+	if !strings.Contains(string(rewrittenBefore), "你好 🌉") {
+		t.Fatalf("Unicode content was not preserved in rewritten body: %s", rewrittenBefore)
+	}
+	if capabilities := (Adapter{}).Capabilities(); !capabilities.TrustedInputPreflight || capabilities.ExactInputPreflight {
+		t.Fatalf("unexpected input preflight capabilities: %+v", capabilities)
+	}
+	var _ protocol.InputPreflighter = Adapter{}
+}
+
+func TestTrustedInputPreflightRejectsUnboundedRequestShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unknown root extension", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"temperature":0.2}`},
+		{name: "tools", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup"}}]}`},
+		{name: "legacy functions", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"functions":[{"name":"lookup"}]}`},
+		{name: "root file", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"file":"remote"}`},
+		{name: "root file id", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"file_id":"file_01"}`},
+		{name: "root data", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"data":"AA=="}`},
+		{name: "remote reference", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"image_url":"https://example.test/image.png"}`},
+		{name: "message extension", body: `{"model":"client","messages":[{"role":"user","content":"hi","name":"alias"}]}`},
+		{name: "tool message", body: `{"model":"client","messages":[{"role":"tool","tool_call_id":"call_01","content":"result"}]}`},
+		{name: "function message", body: `{"model":"client","messages":[{"role":"function","name":"lookup","content":"result"}]}`},
+		{name: "null assistant content", body: `{"model":"client","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_01","type":"function","function":{"name":"lookup","arguments":"{}"}}]}]}`},
+		{name: "text content array", body: `{"model":"client","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`},
+		{name: "image content array", body: `{"model":"client","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}]}`},
+		{name: "file content array", body: `{"model":"client","messages":[{"role":"user","content":[{"type":"file","file":{"file_id":"file_01"}}]}]}`},
+		{name: "audio content array", body: `{"model":"client","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AA==","format":"wav"}}]}]}`},
+		{name: "nullable stream", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"stream":null}`},
+		{name: "nullable n", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"n":null}`},
+		{name: "nonstream options", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"stream_options":{"include_usage":true}}`},
+		{name: "stream options extension", body: `{"model":"client","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"future_option":true}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := rewrittenTrustedInputRequest(t, test.body, protocol.FeatureDecision{
+				PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32,
+			})
+			before := requestBodyFromFactory(t, request)
+			preflight, err := (Adapter{}).PreflightInput(context.Background(), request, testTrustedInputProfile("physical"))
+			if !protocol.IsCode(err, "request_invalid") {
+				t.Fatalf("PreflightInput() result=%+v error=%v, want request_invalid", preflight, err)
+			}
+			if preflight != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("failed preflight returned partial proof: %+v", preflight)
+			}
+			after, readErr := io.ReadAll(request.Body)
+			if readErr != nil || string(after) != string(before) {
+				t.Fatalf("failed preflight changed request body: after=%q error=%v", after, readErr)
+			}
+		})
+	}
+}
+
+func TestTrustedInputPreflightRejectsInvalidOrMismatchedProfiles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*protocol.TrustedInputProfile)
+	}{
+		{name: "missing id", mutate: func(profile *protocol.TrustedInputProfile) { profile.ID = "" }},
+		{name: "wrong protocol", mutate: func(profile *protocol.TrustedInputProfile) { profile.Protocol = "openai_responses" }},
+		{name: "wrong method", mutate: func(profile *protocol.TrustedInputProfile) { profile.Method = "heuristic" }},
+		{name: "missing physical model", mutate: func(profile *protocol.TrustedInputProfile) { profile.PhysicalModel = "" }},
+		{name: "different physical model", mutate: func(profile *protocol.TrustedInputProfile) { profile.PhysicalModel = "other-physical" }},
+		{name: "physical model contains internal control", mutate: func(profile *protocol.TrustedInputProfile) { profile.PhysicalModel = "phy\tsical" }},
+		{name: "negative request framing", mutate: func(profile *protocol.TrustedInputProfile) { profile.MaximumFramingTokensPerRequest = -1 }},
+		{name: "negative message framing", mutate: func(profile *protocol.TrustedInputProfile) { profile.MaximumFramingTokensPerMessage = -1 }},
+		{name: "zero context", mutate: func(profile *protocol.TrustedInputProfile) { profile.MaximumContextTokens = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := rewrittenTrustedInputRequest(t,
+				`{"model":"client","messages":[{"role":"user","content":"hi"}]}`,
+				protocol.FeatureDecision{PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32},
+			)
+			profile := testTrustedInputProfile("physical")
+			test.mutate(&profile)
+			preflight, err := (Adapter{}).PreflightInput(context.Background(), request, profile)
+			if err == nil || preflight != (protocol.TrustedInputPreflight{}) {
+				t.Fatalf("PreflightInput() result=%+v error=%v, want closed failure", preflight, err)
+			}
+		})
+	}
+}
+
+func TestTrustedInputPreflightRejectsContextAndArithmeticOverflow(t *testing.T) {
+	t.Parallel()
+
+	baseBody := `{"model":"client","messages":[{"role":"user","content":"hi"}]}`
+	t.Run("context maximum", func(t *testing.T) {
+		request := rewrittenTrustedInputRequest(t, baseBody, protocol.FeatureDecision{
+			PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32,
+		})
+		profile := testTrustedInputProfile("physical")
+		profile.MaximumContextTokens = 1
+		if _, err := (Adapter{}).PreflightInput(context.Background(), request, profile); !protocol.IsCode(err, "request_invalid") {
+			t.Fatalf("context mismatch error = %v, want request_invalid", err)
+		}
+	})
+	t.Run("request framing addition", func(t *testing.T) {
+		request := rewrittenTrustedInputRequest(t, baseBody, protocol.FeatureDecision{
+			PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32,
+		})
+		profile := testTrustedInputProfile("physical")
+		profile.MaximumFramingTokensPerRequest = math.MaxInt64
+		profile.MaximumContextTokens = math.MaxInt64
+		if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+			t.Fatalf("request-framing overflow result=%+v error=%v", result, err)
+		}
+	})
+	t.Run("message framing multiplication", func(t *testing.T) {
+		request := rewrittenTrustedInputRequest(t,
+			`{"model":"client","messages":[{"role":"system","content":"one"},{"role":"user","content":"two"}]}`,
+			protocol.FeatureDecision{PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32},
+		)
+		profile := testTrustedInputProfile("physical")
+		profile.MaximumFramingTokensPerMessage = math.MaxInt64
+		profile.MaximumContextTokens = math.MaxInt64
+		if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+			t.Fatalf("message-framing overflow result=%+v error=%v", result, err)
+		}
+	})
+	t.Run("total addition", func(t *testing.T) {
+		request := rewrittenTrustedInputRequest(t, baseBody, protocol.FeatureDecision{
+			PhysicalModel: "physical", DefaultOutputTokens: math.MaxInt64, MaximumOutputTokens: math.MaxInt64,
+		})
+		profile := testTrustedInputProfile("physical")
+		profile.MaximumContextTokens = math.MaxInt64
+		if result, err := (Adapter{}).PreflightInput(context.Background(), request, profile); err == nil || result != (protocol.TrustedInputPreflight{}) {
+			t.Fatalf("total overflow result=%+v error=%v", result, err)
+		}
+	})
+}
+
+func TestTrustedInputPreflightHonorsCancellationWithoutMutatingBody(t *testing.T) {
+	t.Parallel()
+
+	request := rewrittenTrustedInputRequest(t,
+		`{"model":"client","messages":[{"role":"user","content":"hi"}]}`,
+		protocol.FeatureDecision{PhysicalModel: "physical", DefaultOutputTokens: 16, MaximumOutputTokens: 32},
+	)
+	before := requestBodyFromFactory(t, request)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := (Adapter{}).PreflightInput(ctx, request, testTrustedInputProfile("physical"))
+	if !errors.Is(err, context.Canceled) || result != (protocol.TrustedInputPreflight{}) {
+		t.Fatalf("cancelled preflight result=%+v error=%v", result, err)
+	}
+	after, readErr := io.ReadAll(request.Body)
+	if readErr != nil || string(after) != string(before) {
+		t.Fatalf("cancelled preflight changed request body: after=%q error=%v", after, readErr)
+	}
+}
+
+func testTrustedInputProfile(physicalModel string) protocol.TrustedInputProfile {
+	return protocol.TrustedInputProfile{
+		ID:                             "fixture_profile",
+		Protocol:                       ID,
+		Method:                         protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel:                  physicalModel,
+		MaximumFramingTokensPerRequest: 8,
+		MaximumFramingTokensPerMessage: 4,
+		MaximumContextTokens:           1_000_000,
+	}
+}
+
+func rewrittenTrustedInputRequest(t *testing.T, body string, decision protocol.FeatureDecision) *http.Request {
+	t.Helper()
+	request, err := http.NewRequest(
+		http.MethodPost,
+		"https://gateway.example/v1/chat/completions",
+		strings.NewReader(body),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if _, err := (Adapter{}).ApplyFeature(context.Background(), request, decision); err != nil {
+		t.Fatalf("ApplyFeature() error = %v", err)
+	}
+	return request
+}
+
+func requestBodyFromFactory(t *testing.T, request *http.Request) []byte {
+	t.Helper()
+	if request == nil || request.GetBody == nil {
+		t.Fatal("request body factory is missing")
+	}
+	body, err := request.GetBody()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+	value, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func TestRejectsAmbiguousOrDuplicateLimits(t *testing.T) {
@@ -170,6 +423,11 @@ func TestInspectAcceptsBoundedMessageAndToolShapes(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	if _, err := (Adapter{}).InspectRequest(context.Background(), request); err != nil {
 		t.Fatalf("InspectRequest() error = %v", err)
+	}
+	if _, err := (Adapter{}).ApplyFeature(context.Background(), request, protocol.FeatureDecision{
+		PhysicalModel: "physical", DefaultOutputTokens: 32, MaximumOutputTokens: 64,
+	}); err != nil {
+		t.Fatalf("rich request stopped working without trusted input preflight: %v", err)
 	}
 }
 

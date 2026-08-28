@@ -40,6 +40,8 @@ fuzz-smoke:
 	$(GO) test ./internal/session -run '^$$' -fuzz '^FuzzPreflightAccessToken$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/clientapi -run '^$$' -fuzz '^FuzzProtectedCredentialHeaders$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzActiveSnapshotCompilation$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzCompiledInputAccountingProfile$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzTrustedInputPreflight$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/policy -run '^$$' -fuzz '^FuzzResolve$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 
 generate:

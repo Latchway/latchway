@@ -6,9 +6,10 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Changed
 
-- Advance the draft contract to 0.3.0 for normative secret UTF-8 byte bounds
-  and current-version mutation semantics, plus explicit correlated handling of
-  indeterminate database commits, while retaining wire protocol version 1.
+- Advance the draft contract to 0.4.0 for physical-model-bound input
+  accounting profiles and a restricted, conservative OpenAI Chat preflight
+  that enables hard calendar input/total quotas and input-priced cost
+  reservation, while retaining wire protocol version 1.
 
 ### Added
 
@@ -16,6 +17,9 @@ All notable project changes will be documented here. The format follows [Keep a 
   deletion across the PostgreSQL domain layer, Admin API, and CLI, including
   tenant authorization, audit redaction, stale-write protection, clock-skew and
   concurrency tests, safe commit recovery, and runtime wiring.
+- Exact rewritten-body and accounting-profile proof binding across the Chat
+  adapter, policy/configuration activation, durable quota replay, conservative
+  settlement, and authenticated PostgreSQL dispatch gates.
 - Phase 0 repository baseline and implementation status records.
 - Phase 1 governance, architecture, threat-model, and decision records.
 - Draft protocol contract 0.1.0 with wire protocol version 1.

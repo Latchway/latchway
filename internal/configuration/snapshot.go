@@ -15,13 +15,14 @@ type compiledSnapshotDocument struct {
 			RefreshTokenTTL         string `json:"refreshTokenTtl"`
 			MaximumClockSkewSeconds *int   `json:"maximumClockSkewSeconds"`
 		} `json:"session"`
-		IdentityProviders []IdentityProvider          `json:"identityProviders"`
-		AttestationPolicy []compiledAttestationPolicy `json:"attestationPolicies"`
-		Upstreams         []compiledUpstream          `json:"upstreams"`
-		Models            []compiledModel             `json:"models"`
-		PricingCatalogs   []compiledPricingCatalog    `json:"pricingCatalogs"`
-		LimitPlans        []compiledLimitPlan         `json:"limitPlans"`
-		Features          []compiledFeature           `json:"features"`
+		IdentityProviders []IdentityProvider               `json:"identityProviders"`
+		AttestationPolicy []compiledAttestationPolicy      `json:"attestationPolicies"`
+		Upstreams         []compiledUpstream               `json:"upstreams"`
+		Models            []compiledModel                  `json:"models"`
+		InputAccounting   []compiledInputAccountingProfile `json:"inputAccountingProfiles"`
+		PricingCatalogs   []compiledPricingCatalog         `json:"pricingCatalogs"`
+		LimitPlans        []compiledLimitPlan              `json:"limitPlans"`
+		Features          []compiledFeature                `json:"features"`
 	} `json:"spec"`
 }
 
@@ -42,16 +43,17 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 	}
 	snapshot := ActiveSnapshot{
 		RevisionID: revisionID, EnvironmentID: environmentID,
-		document:     append(json.RawMessage(nil), document...),
-		compiled:     append(json.RawMessage(nil), compiled...),
-		session:      session,
-		identities:   make(map[string]IdentityProvider, len(parsed.Spec.IdentityProviders)),
-		attestations: make(map[string]AttestationPolicy, len(parsed.Spec.AttestationPolicy)),
-		upstreams:    make(map[string]Upstream, len(parsed.Spec.Upstreams)),
-		models:       make(map[string]Model, len(parsed.Spec.Models)),
-		pricing:      make(map[string]PricingCatalog, len(parsed.Spec.PricingCatalogs)),
-		limitPlans:   make(map[string]LimitPlan, len(parsed.Spec.LimitPlans)),
-		features:     make(map[string]Feature, len(parsed.Spec.Features)),
+		document:        append(json.RawMessage(nil), document...),
+		compiled:        append(json.RawMessage(nil), compiled...),
+		session:         session,
+		identities:      make(map[string]IdentityProvider, len(parsed.Spec.IdentityProviders)),
+		attestations:    make(map[string]AttestationPolicy, len(parsed.Spec.AttestationPolicy)),
+		upstreams:       make(map[string]Upstream, len(parsed.Spec.Upstreams)),
+		models:          make(map[string]Model, len(parsed.Spec.Models)),
+		inputAccounting: make(map[string]InputAccountingProfile, len(parsed.Spec.InputAccounting)),
+		pricing:         make(map[string]PricingCatalog, len(parsed.Spec.PricingCatalogs)),
+		limitPlans:      make(map[string]LimitPlan, len(parsed.Spec.LimitPlans)),
+		features:        make(map[string]Feature, len(parsed.Spec.Features)),
 	}
 	for _, provider := range parsed.Spec.IdentityProviders {
 		if provider.ID == "" {
@@ -78,7 +80,14 @@ func newActiveSnapshot(revisionID, environmentID string, document, compiled json
 			requiredPolicyByPlatform[platform] = policy.ID
 		}
 	}
-	if err := snapshot.loadRuntimeConfiguration(parsed.Spec.Upstreams, parsed.Spec.Models, parsed.Spec.PricingCatalogs, parsed.Spec.LimitPlans, parsed.Spec.Features); err != nil {
+	if err := snapshot.loadRuntimeConfiguration(
+		parsed.Spec.Upstreams,
+		parsed.Spec.InputAccounting,
+		parsed.Spec.Models,
+		parsed.Spec.PricingCatalogs,
+		parsed.Spec.LimitPlans,
+		parsed.Spec.Features,
+	); err != nil {
 		return ActiveSnapshot{}, err
 	}
 	return snapshot, nil

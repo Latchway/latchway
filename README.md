@@ -12,7 +12,7 @@ Applications keep their identity provider and HTTP request format. Clients never
 
 ## Contract foundation
 
-Protocol contract `0.3.0` uses wire protocol version `1`. Normative artifacts live in [`api/`](api/):
+Protocol contract `0.4.0` uses wire protocol version `1`. Normative artifacts live in [`api/`](api/):
 
 - client and Admin OpenAPI 3.1 descriptions;
 - the immutable environment configuration JSON Schema;

@@ -21,6 +21,82 @@ func TestStorePostgreSQLInputAndTotalTokenQuota(t *testing.T) {
 		Known: true, Provenance: ProviderReportedProvenance,
 	}
 
+	t.Run("preflight binding permits exact replay and rejects altered proofs", func(t *testing.T) {
+		input := fixture.calendarTokenInput(t, "store-preflight-replay",
+			calendarTokenReservation{metric: InputTokensMetric, maximum: 100, reserved: 11},
+			calendarTokenReservation{metric: OutputTokensMetric, maximum: 100, reserved: 7},
+			calendarTokenReservation{metric: TotalTokensMetric, maximum: 100, reserved: 18},
+		)
+		wrongProtocol := cloneReserveInput(input)
+		wrongProtocol.InputPreflight.Protocol = "anthropic_messages"
+		if _, err := fixture.store.Reserve(fixture.ctx, wrongProtocol); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("first reserve with wrong preflight protocol = %v, want ErrInvalidInput", err)
+		}
+		zeroOutput := cloneReserveInput(input)
+		zeroOutput.Rules = []Rule{zeroOutput.Rules[0], zeroOutput.Rules[2]}
+		zeroOutput.Rules[1].ReservedUnits = zeroOutput.InputPreflight.InputTokenBound
+		zeroOutput.InputPreflight.OutputTokenBound = 0
+		zeroOutput.InputPreflight.TotalTokenBound = zeroOutput.InputPreflight.InputTokenBound
+		if _, err := fixture.store.Reserve(fixture.ctx, zeroOutput); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("first reserve with zero-output Chat preflight = %v, want ErrInvalidInput", err)
+		}
+		first, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve preflight-bound request: %v", err)
+		}
+		replayed, err := fixture.store.Reserve(fixture.ctx, cloneReserveInput(input))
+		if err != nil || replayed.ID() != first.ID() {
+			t.Fatalf("exact preflight replay = %#v, %v; want reservation %s", replayed, err, first.ID())
+		}
+		if _, err := fixture.store.Reserve(fixture.ctx, zeroOutput); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("replay with zero-output Chat preflight = %v, want ErrInvalidInput", err)
+		}
+
+		for _, test := range []struct {
+			name   string
+			mutate func(*ReserveInput)
+		}{
+			{name: "body", mutate: func(input *ReserveInput) {
+				input.InputPreflight.RewrittenBodySHA256[0] ^= 0xff
+			}},
+			{name: "profile ID", mutate: func(input *ReserveInput) {
+				input.InputPreflight.ProfileID = "alternate-profile"
+			}},
+			{name: "profile digest", mutate: func(input *ReserveInput) {
+				input.InputPreflight.ProfileDigest[0] ^= 0xff
+			}},
+			{name: "protocol", mutate: func(input *ReserveInput) {
+				input.InputPreflight.Protocol = "anthropic_messages"
+			}},
+			{name: "physical model", mutate: func(input *ReserveInput) {
+				input.PhysicalModel = "provider/model-v2"
+				input.InputPreflight.PhysicalModel = input.PhysicalModel
+			}},
+			{name: "bounds", mutate: func(input *ReserveInput) {
+				input.Rules[0].ReservedUnits++
+				input.Rules[2].ReservedUnits++
+				input.InputPreflight.InputTokenBound++
+				input.InputPreflight.TotalTokenBound++
+			}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				changed := cloneReserveInput(input)
+				test.mutate(&changed)
+				if _, err := fixture.store.Reserve(fixture.ctx, changed); !errors.Is(err, ErrInvalidInput) {
+					t.Fatalf("altered preflight replay = %v, want ErrInvalidInput", err)
+				}
+			})
+		}
+
+		replayed, err = fixture.store.Reserve(fixture.ctx, input)
+		if err != nil || replayed.ID() != first.ID() {
+			t.Fatalf("exact replay after rejected proofs = %#v, %v", replayed, err)
+		}
+		if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, first, "preflight_replay_done"); err != nil {
+			t.Fatalf("release preflight replay fixture: %v", err)
+		}
+	})
+
 	t.Run("input-only and total-only known success settle their reported metric", func(t *testing.T) {
 		tests := []struct {
 			name        string
@@ -124,6 +200,7 @@ func TestStorePostgreSQLInputAndTotalTokenQuota(t *testing.T) {
 					ReservedUnits: 13, Hard: true,
 				},
 			}
+			input.InputPreflight = trustedInputPreflight(input, 13, 7)
 			return input
 		}
 		tests := []struct {
@@ -274,9 +351,17 @@ func TestStorePostgreSQLInputAndTotalTokenQuota(t *testing.T) {
 				if err != nil {
 					t.Fatalf("reserve %s denial holder: %v", test.holderMetric, err)
 				}
+				inputMaximum, totalMaximum := int64(4), int64(5)
+				untouchedMaximum, untouchedReserved := inputMaximum, int64(4)
+				if test.holderMetric == InputTokensMetric {
+					inputMaximum = 10
+					untouchedMaximum, untouchedReserved = totalMaximum, 5
+				} else {
+					totalMaximum = 10
+				}
 				deniedInput := fixture.calendarTokenInput(t, feature,
-					calendarTokenReservation{metric: test.holderMetric, maximum: 10, reserved: 4},
-					calendarTokenReservation{metric: test.untouchedMetric, maximum: 4, reserved: 4},
+					calendarTokenReservation{metric: InputTokensMetric, maximum: inputMaximum, reserved: 4},
+					calendarTokenReservation{metric: TotalTokensMetric, maximum: totalMaximum, reserved: 5},
 				)
 				if _, err := fixture.store.Reserve(fixture.ctx, deniedInput); !errors.Is(err, ErrExceeded) {
 					t.Fatalf("mixed %s denial = %v, want ErrExceeded", test.holderMetric, err)
@@ -285,14 +370,17 @@ func TestStorePostgreSQLInputAndTotalTokenQuota(t *testing.T) {
 					t, fixture, holder.ID(), test.holderMetric, 8, 0, 0, 0, 8,
 				)
 				probeInput := fixture.calendarTokenInput(t, feature,
-					calendarTokenReservation{metric: test.untouchedMetric, maximum: 4, reserved: 4},
+					calendarTokenReservation{
+						metric: test.untouchedMetric, maximum: untouchedMaximum, reserved: untouchedReserved,
+					},
 				)
 				probe, err := fixture.store.Reserve(fixture.ctx, probeInput)
 				if err != nil {
 					t.Fatalf("reserve exact untouched %s capacity after denial: %v", test.untouchedMetric, err)
 				}
 				assertCalendarTokenEntryState(
-					t, fixture, probe.ID(), test.untouchedMetric, 4, 0, 0, 0, 4,
+					t, fixture, probe.ID(), test.untouchedMetric,
+					untouchedReserved, 0, 0, 0, untouchedReserved,
 				)
 				if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, probe, "atomic_probe_done"); err != nil {
 					t.Fatalf("release untouched %s probe: %v", test.untouchedMetric, err)
@@ -635,6 +723,29 @@ func (fixture quotaPostgreSQLFixture) calendarTokenInput(
 			Scope: []string{"user", "feature"}, Window: "1d",
 			Maximum: reservation.maximum, ReservedUnits: reservation.reserved, Hard: true,
 		})
+	}
+	reserved := make(map[string]int64, 3)
+	for _, reservation := range reservations {
+		reserved[reservation.metric] = reservation.reserved
+	}
+	inputTokens, hasInput := reserved[InputTokensMetric]
+	outputTokens, hasOutput := reserved[OutputTokensMetric]
+	totalTokens, hasTotal := reserved[TotalTokensMetric]
+	if hasInput || hasTotal {
+		switch {
+		case hasTotal && !hasInput && !hasOutput:
+			// The current proof is OpenAI Chat-specific, so even a total-only
+			// quota fixture carries a positive applied output maximum.
+			outputTokens = 1
+			inputTokens = totalTokens - outputTokens
+		case hasTotal && !hasInput:
+			inputTokens = totalTokens - outputTokens
+		case hasTotal && !hasOutput:
+			outputTokens = totalTokens - inputTokens
+		case !hasOutput:
+			outputTokens = 1
+		}
+		input.InputPreflight = trustedInputPreflight(input, inputTokens, outputTokens)
 	}
 	return input
 }

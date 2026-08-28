@@ -67,6 +67,35 @@ func FuzzActiveSnapshotCompilation(f *testing.F) {
 		"metric": "output_tokens", "scope": []any{"model", "user"},
 		"capacity": json.Number("9223372.0"), "refillPerSecond": json.Number("1.000000e6"),
 	})
+	value, err := jsonsafe.Decode(source)
+	if err != nil {
+		f.Fatalf("decode trusted input seed: %v", err)
+	}
+	inputRoot := value.(map[string]any)
+	inputSpec := objectValue(inputRoot, "spec")
+	inputSpec["inputAccountingProfiles"] = []any{map[string]any{
+		"id": "chat_profile", "protocol": inputAccountingProtocol, "method": inputAccountingMethod,
+		"physicalModel":                  "physical-fast",
+		"maximumFramingTokensPerRequest": json.Number("8"),
+		"maximumFramingTokensPerMessage": json.Number("4"),
+		"maximumContextTokens":           json.Number("128000"),
+	}}
+	inputModel := objectArray(inputSpec, "models")[0]
+	inputModel["inputAccountingRef"] = "chat_profile"
+	inputModel["capabilities"] = []any{inputAccountingProtocol}
+	objectArray(inputSpec, "limitPlans")[0]["limits"] = []any{map[string]any{
+		"metric": "input_tokens", "algorithm": "calendar", "scope": []any{"user", "feature"},
+		"window": "1d", "maximum": json.Number("1000000"), "hard": true,
+	}}
+	inputSource, err := json.Marshal(inputRoot)
+	if err != nil {
+		f.Fatalf("marshal trusted input seed: %v", err)
+	}
+	inputReport, inputCompiled := validator.Validate(inputSource, testEnvironment(), time.Unix(0, 0).UTC())
+	if !inputReport.Valid {
+		f.Fatalf("trusted input seed rejected: %+v", inputReport.Issues)
+	}
+	f.Add([]byte(inputCompiled))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"spec":{"features":[]}}`))
 

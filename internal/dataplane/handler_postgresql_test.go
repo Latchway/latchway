@@ -35,6 +35,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/adapters/protocol/openaichat"
 	"github.com/latchway/latchway/conformance/mockupstream"
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/attestation"
@@ -45,6 +46,7 @@ import (
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/identity"
 	"github.com/latchway/latchway/internal/policy"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/quota"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/secrets"
@@ -98,6 +100,19 @@ const (
 	dataPlaneE2ECostMaximum                      int64 = 17
 	dataPlaneE2ECostReservation                  int64 = 10
 	dataPlaneE2EActualCost                       int64 = 9
+	dataPlaneE2ETrustedInputFeature                    = "trusted_tokens"
+	dataPlaneE2ETrustedInputPlan                       = "trusted_tokens"
+	dataPlaneE2ETrustedInputModel                      = "trusted_fast"
+	dataPlaneE2ETrustedInputProfile                    = "chat_bytes"
+	dataPlaneE2ETrustedInputPricing                    = "trusted_input_price"
+	dataPlaneE2ETrustedInputPrompt                     = "prompt-marker-dataplane-e2e-trusted-input-01"
+	dataPlaneE2ETrustedInputRequestID                  = "client-request-dataplane-e2e-trusted-input-01"
+	dataPlaneE2EUnderboundRequestID                    = "client-request-dataplane-e2e-underbound-proof-01"
+	dataPlaneE2ETamperedInputRequestID                 = "client-request-dataplane-e2e-tampered-input-01"
+	dataPlaneE2ETamperedInputPrompt                    = "prompt-marker-dataplane-e2e-tampered-input-01"
+	dataPlaneE2ETrustedRequestFraming            int64 = 8
+	dataPlaneE2ETrustedMessageFraming            int64 = 4
+	dataPlaneE2ETrustedActualCost                int64 = 34
 	dataPlaneE2ETokenBalanceScale                int64 = 1_000_000_000_000
 	dataPlaneE2ETokenRefillInterval                    = 100 * time.Second
 	dataPlaneE2EOutputTokenRefillInterval              = 700 * time.Second
@@ -279,6 +294,27 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	}) {
 		t.Fatalf("active hard-cost pricing = catalog:%+v entry:%+v ok=%t/%t",
 			costCatalog, costEntry, ok, costEntryOK)
+	}
+	trustedProfile, profileOK := snapshot.InputAccountingProfile(dataPlaneE2ETrustedInputProfile)
+	trustedModel, modelOK := snapshot.Model(dataPlaneE2ETrustedInputModel)
+	trustedPlan, planOK := snapshot.LimitPlan(dataPlaneE2ETrustedInputPlan)
+	trustedPrice, priceOK := snapshot.PricingEntry(dataPlaneE2ETrustedInputPricing, dataPlaneE2ETrustedInputModel)
+	if !profileOK || !modelOK || !planOK || !priceOK ||
+		trustedProfile.ID != dataPlaneE2ETrustedInputProfile ||
+		trustedProfile.Protocol != "openai_chat" ||
+		trustedProfile.Method != quota.UTF8ByteBPEDeclaredFramingV1 ||
+		trustedProfile.PhysicalModel != dataPlaneE2EProviderModel ||
+		trustedProfile.MaximumFramingTokensPerRequest != dataPlaneE2ETrustedRequestFraming ||
+		trustedProfile.MaximumFramingTokensPerMessage != dataPlaneE2ETrustedMessageFraming ||
+		trustedProfile.MaximumContextTokens != 4096 ||
+		trustedModel.InputAccountingRef != dataPlaneE2ETrustedInputProfile ||
+		len(trustedPlan.Limits) != 4 || trustedPrice != (configuration.PricingEntry{
+		ModelID: dataPlaneE2ETrustedInputModel, InputNanoUSDPerMillion: 2_000_000,
+		OutputNanoUSDPerMillion: 1_000_000, RequestNanoUSD: 5,
+	}) {
+		t.Fatalf("active trusted accounting = profile:%+v model:%+v plan:%+v price:%+v ok=%t/%t/%t/%t",
+			trustedProfile, trustedModel, trustedPlan, trustedPrice,
+			profileOK, modelOK, planOK, priceOK)
 	}
 
 	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
@@ -1158,6 +1194,141 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
 		dataPlaneE2ECostPrompt, dataPlaneE2ECostDeniedPrompt)
+
+	countingSecrets := &dataPlaneE2ECountingSecretStore{next: secretStore}
+	underboundHandler, err := New(Config{
+		AccessTokens: accessVerifier, Sessions: sessionStore,
+		Configuration: configurationStore, Policies: policyEngine,
+		Quotas: replayingQuotaStore, Secrets: countingSecrets,
+		Adapter: dataPlaneE2EUnderboundAdapter{}, Targets: targets,
+		PublicOrigin: dataPlaneE2EOrigin,
+	})
+	if err != nil {
+		t.Fatalf("construct malicious-preflight handler: %v", err)
+	}
+	t.Cleanup(func() { _ = underboundHandler.Close() })
+	underboundProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-underbound-proof", grant.AccessToken,
+	)
+	underboundResponse := postDataPlaneE2EFeatureChat(
+		t, withDataPlaneE2ERequestIdentity(t, underboundHandler.Handler()),
+		grant.AccessToken, underboundProof,
+		dataPlaneE2ETrustedInputFeature, dataPlaneE2EUnderboundRequestID,
+		concurrencyBody("malicious-underbound-proof-must-not-dispatch", false),
+	)
+	assertDataPlaneE2EProblem(t, underboundResponse, http.StatusUnprocessableEntity, "configuration_invalid")
+	if countingSecrets.calls.Load() != 0 || targets.acquisitions.Load() != 10 ||
+		targets.releases.Load() != 10 || len(mock.Observations()) != 10 {
+		t.Fatalf("underbound proof reached secret/target/provider: secret=%d acquisitions=%d releases=%d observations=%d",
+			countingSecrets.calls.Load(), targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 15, reservations: 10, reservationEntries: 13,
+		buckets: 7, attempts: 10, usageRecords: 50, deniedRequests: 5,
+	})
+
+	trustedProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-trusted-input", grant.AccessToken,
+	)
+	trustedResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, trustedProof,
+		dataPlaneE2ETrustedInputFeature, dataPlaneE2ETrustedInputRequestID,
+		concurrencyBody(dataPlaneE2ETrustedInputPrompt, false),
+	)
+	if trustedResponse.Code != http.StatusOK {
+		t.Fatalf("trusted input/total request = %d, body=%s",
+			trustedResponse.Code, trustedResponse.Body.String())
+	}
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 11 {
+		t.Fatalf("trusted input provider capture = requests:%d err:%v, want eleven dispatches",
+			len(providerRequests), captureErr)
+	}
+	trustedProviderRequest := providerRequests[10]
+	assertDataPlaneE2EProviderChatRequestWithOutputCap(
+		t, trustedProviderRequest, privateTargetAuthority,
+		dataPlaneE2ETrustedInputPrompt, false, 8,
+	)
+	trustedInputBound := int64(len(trustedProviderRequest.body)) +
+		dataPlaneE2ETrustedRequestFraming + dataPlaneE2ETrustedMessageFraming
+	assertDataPlaneE2ETrustedInputSuccess(
+		t, ctx, pool, dataPlaneE2ETrustedInputRequestID, revisionID, trustedInputBound,
+	)
+	if replayingQuotaStore.successfulTrustedReplays.Load() != 1 ||
+		replayingQuotaStore.rejectedTrustedMutations.Load() != 1 {
+		t.Fatalf("trusted preflight exact/altered replays = %d/%d, want 1/1",
+			replayingQuotaStore.successfulTrustedReplays.Load(),
+			replayingQuotaStore.rejectedTrustedMutations.Load())
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 16, reservations: 11, reservationEntries: 17,
+		buckets: 11, attempts: 11, usageRecords: 55, deniedRequests: 5,
+	})
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETrustedInputPrompt)
+
+	// Prove the second exact-body check runs after durable reservation but
+	// before secrets, target acquisition, or BeginAttempt. The adapter retains
+	// only the in-flight request pointer for this test; the quota wrapper mutates
+	// that request synchronously after Reserve commits.
+	tamperAdapter := &dataPlaneE2ECapturingAdapter{}
+	tamperSecrets := &dataPlaneE2ECountingSecretStore{next: secretStore}
+	tamperQuotas := &dataPlaneE2EPostReserveTamperingQuotaStore{
+		QuotaStore: quotaStore,
+		tamper:     tamperAdapter.TamperBody,
+	}
+	tamperHandler, err := New(Config{
+		AccessTokens: accessVerifier, Sessions: sessionStore,
+		Configuration: configurationStore, Policies: policyEngine,
+		Quotas: tamperQuotas, Secrets: tamperSecrets,
+		Adapter: tamperAdapter, Targets: targets,
+		PublicOrigin: dataPlaneE2EOrigin,
+	})
+	if err != nil {
+		t.Fatalf("construct post-reserve tamper handler: %v", err)
+	}
+	t.Cleanup(func() { _ = tamperHandler.Close() })
+	tamperProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-tampered-input", grant.AccessToken,
+	)
+	tamperResponse := postDataPlaneE2EFeatureChat(
+		t, withDataPlaneE2ERequestIdentity(t, tamperHandler.Handler()),
+		grant.AccessToken, tamperProof,
+		dataPlaneE2ETrustedInputFeature, dataPlaneE2ETamperedInputRequestID,
+		concurrencyBody(dataPlaneE2ETamperedInputPrompt, false),
+	)
+	assertDataPlaneE2EProblem(t, tamperResponse, http.StatusUnprocessableEntity, "configuration_invalid")
+	if !tamperAdapter.tampered.Load() || tamperQuotas.reserveCalls.Load() != 1 ||
+		tamperQuotas.releaseCalls.Load() != 1 || tamperQuotas.beginCalls.Load() != 0 ||
+		tamperQuotas.releaseFailure != "configuration_invalid" {
+		t.Fatalf("post-reserve tamper lifecycle = tampered:%t reserve/release/begin:%d/%d/%d failure:%q",
+			tamperAdapter.tampered.Load(), tamperQuotas.reserveCalls.Load(),
+			tamperQuotas.releaseCalls.Load(), tamperQuotas.beginCalls.Load(),
+			tamperQuotas.releaseFailure)
+	}
+	if tamperSecrets.calls.Load() != 0 || targets.acquisitions.Load() != 11 ||
+		targets.releases.Load() != 11 || len(mock.Observations()) != 11 {
+		t.Fatalf("post-reserve tamper reached secret/target/provider: secret=%d acquisitions=%d releases=%d observations=%d",
+			tamperSecrets.calls.Load(), targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	var tamperedStatus, tamperedFailure string
+	if err := pool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_code, '')
+		FROM logical_requests
+		WHERE client_request_id = $1
+	`, dataPlaneE2ETamperedInputRequestID).Scan(&tamperedStatus, &tamperedFailure); err != nil {
+		t.Fatalf("read post-reserve tamper state: %v", err)
+	}
+	if tamperedStatus != "failed" || tamperedFailure != "configuration_invalid" {
+		t.Fatalf("post-reserve tamper durable state = %q/%q", tamperedStatus, tamperedFailure)
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 17, reservations: 12, reservationEntries: 21,
+		buckets: 11, attempts: 11, usageRecords: 55, deniedRequests: 5,
+	})
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETamperedInputPrompt)
 }
 
 type dataPlaneE2ETenant struct {
@@ -1310,14 +1481,28 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 				"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
 				"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
 			}},
+			"inputAccountingProfiles": []any{map[string]any{
+				"id": dataPlaneE2ETrustedInputProfile, "protocol": "openai_chat",
+				"method": "utf8_byte_bpe_declared_framing_v1", "physicalModel": dataPlaneE2EProviderModel,
+				"maximumFramingTokensPerRequest": dataPlaneE2ETrustedRequestFraming,
+				"maximumFramingTokensPerMessage": dataPlaneE2ETrustedMessageFraming,
+				"maximumContextTokens":           int64(4096),
+			}},
 			"models": []any{
 				map[string]any{
 					"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
-					"pricingRef": dataPlaneE2EPricingCatalog, "capabilities": []any{"openai_chat"},
+					"pricingRef": dataPlaneE2EPricingCatalog, "inputAccountingRef": dataPlaneE2ETrustedInputProfile,
+					"capabilities": []any{"openai_chat"},
 				},
 				map[string]any{
 					"id": dataPlaneE2ECostModel, "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
-					"pricingRef": dataPlaneE2ECostPricingCatalog, "capabilities": []any{"openai_chat"},
+					"pricingRef": dataPlaneE2ECostPricingCatalog, "inputAccountingRef": dataPlaneE2ETrustedInputProfile,
+					"capabilities": []any{"openai_chat"},
+				},
+				map[string]any{
+					"id": dataPlaneE2ETrustedInputModel, "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2ETrustedInputPricing, "inputAccountingRef": dataPlaneE2ETrustedInputProfile,
+					"capabilities": []any{"openai_chat"},
 				},
 			},
 			"pricingCatalogs": []any{
@@ -1338,6 +1523,14 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"entries": []any{map[string]any{
 						"model": dataPlaneE2ECostModel, "inputNanoUsdPerMillion": int64(0),
 						"outputNanoUsdPerMillion": int64(1_000_000), "requestNanoUsd": int64(2),
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2ETrustedInputPricing, "currency": quota.USDCurrency,
+					"effectiveAt": "2020-01-01T00:00:00Z",
+					"entries": []any{map[string]any{
+						"model": dataPlaneE2ETrustedInputModel, "inputNanoUsdPerMillion": int64(2_000_000),
+						"outputNanoUsdPerMillion": int64(1_000_000), "requestNanoUsd": int64(5),
 					}},
 				},
 			},
@@ -1389,6 +1582,26 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 						"maximum": dataPlaneE2ECostMaximum, "hard": true,
 					}},
 				},
+				map[string]any{
+					"id": dataPlaneE2ETrustedInputPlan, "limits": []any{
+						map[string]any{
+							"metric": quota.InputTokensMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(100_000), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.OutputTokensMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(100_000), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.TotalTokensMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(200_000), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.CostNanoUSDMetric, "algorithm": quota.CalendarAlgorithm,
+							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(1_000_000), "hard": true,
+						},
+					},
+				},
 			},
 			"features": []any{
 				map[string]any{
@@ -1434,6 +1647,15 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
 					"routes": []any{map[string]any{
 						"id": "cost_primary", "when": "true", "model": dataPlaneE2ECostModel, "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2ETrustedInputFeature, "protocol": "openai_chat", "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2ETrustedInputPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
+					"routes": []any{map[string]any{
+						"id": "trusted_primary", "when": "true", "model": dataPlaneE2ETrustedInputModel, "priority": 10,
 					}},
 				},
 			},
@@ -1851,6 +2073,131 @@ type dataPlaneE2EResponseRecorder struct {
 
 func (*dataPlaneE2EResponseRecorder) SetWriteDeadline(time.Time) error { return nil }
 
+type dataPlaneE2EUnderboundAdapter struct {
+	openaichat.Adapter
+}
+
+func (adapter dataPlaneE2EUnderboundAdapter) PreflightInput(
+	ctx context.Context,
+	request *http.Request,
+	profile protocol.TrustedInputProfile,
+) (protocol.TrustedInputPreflight, error) {
+	preflight, err := adapter.Adapter.PreflightInput(ctx, request, profile)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	// Simulate a faulty or injected optional capability that binds the correct
+	// profile/body/model while lying about the conservative input bound.
+	preflight.InputTokenBound = 1
+	preflight.TotalTokenBound = 1 + preflight.OutputTokenBound
+	return preflight, nil
+}
+
+type dataPlaneE2ECapturingAdapter struct {
+	openaichat.Adapter
+	mu       sync.Mutex
+	request  *http.Request
+	tampered atomic.Bool
+}
+
+func (adapter *dataPlaneE2ECapturingAdapter) PreflightInput(
+	ctx context.Context,
+	request *http.Request,
+	profile protocol.TrustedInputProfile,
+) (protocol.TrustedInputPreflight, error) {
+	preflight, err := adapter.Adapter.PreflightInput(ctx, request, profile)
+	if err != nil {
+		return protocol.TrustedInputPreflight{}, err
+	}
+	adapter.mu.Lock()
+	adapter.request = request
+	adapter.mu.Unlock()
+	return preflight, nil
+}
+
+func (adapter *dataPlaneE2ECapturingAdapter) TamperBody() {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.request == nil || adapter.request.GetBody == nil {
+		return
+	}
+	body, err := adapter.request.GetBody()
+	if err != nil {
+		return
+	}
+	altered, readErr := io.ReadAll(body)
+	closeErr := body.Close()
+	if readErr != nil || closeErr != nil || int64(len(altered)) != adapter.request.ContentLength {
+		return
+	}
+	marker := bytes.Index(altered, []byte(dataPlaneE2ETamperedInputPrompt))
+	if marker < 0 {
+		return
+	}
+	// Keep both the JSON shape and byte length valid so only the exact-body
+	// SHA-256 comparison can distinguish this request from its proof.
+	altered[marker+len(dataPlaneE2ETamperedInputPrompt)-1] = '2'
+	adapter.request.Body = io.NopCloser(bytes.NewReader(altered))
+	adapter.request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(altered)), nil
+	}
+	adapter.tampered.Store(true)
+}
+
+type dataPlaneE2EPostReserveTamperingQuotaStore struct {
+	QuotaStore
+	tamper         func()
+	reserveCalls   atomic.Int64
+	beginCalls     atomic.Int64
+	releaseCalls   atomic.Int64
+	releaseFailure string
+}
+
+func (store *dataPlaneE2EPostReserveTamperingQuotaStore) Reserve(
+	ctx context.Context,
+	input quota.ReserveInput,
+) (quota.Reservation, error) {
+	store.reserveCalls.Add(1)
+	reservation, err := store.QuotaStore.Reserve(ctx, input)
+	if err == nil && store.tamper != nil {
+		store.tamper()
+	}
+	return reservation, err
+}
+
+func (store *dataPlaneE2EPostReserveTamperingQuotaStore) BeginAttempt(
+	ctx context.Context,
+	reservation quota.Reservation,
+) (quota.Attempt, bool, error) {
+	store.beginCalls.Add(1)
+	return store.QuotaStore.BeginAttempt(ctx, reservation)
+}
+
+func (store *dataPlaneE2EPostReserveTamperingQuotaStore) ReleaseBeforeDispatch(
+	ctx context.Context,
+	reservation quota.Reservation,
+	failure string,
+) error {
+	store.releaseCalls.Add(1)
+	store.releaseFailure = failure
+	return store.QuotaStore.ReleaseBeforeDispatch(ctx, reservation, failure)
+}
+
+type dataPlaneE2ECountingSecretStore struct {
+	next  SecretStore
+	calls atomic.Int64
+}
+
+func (store *dataPlaneE2ECountingSecretStore) Use(
+	ctx context.Context,
+	scope secrets.Scope,
+	reference string,
+	consume func([]byte) error,
+) error {
+	store.calls.Add(1)
+	return store.next.Use(ctx, scope, reference, consume)
+}
+
 // dataPlaneE2EReplayingQuotaStore proves that exact accepted and denied
 // decisions produced by the handler are idempotent in the real PostgreSQL
 // store. Replay gates keep each proof isolated while later requests exercise
@@ -1859,6 +2206,9 @@ type dataPlaneE2EReplayingQuotaStore struct {
 	*quota.Store
 	replayAttempted            atomic.Bool
 	successfulReplays          atomic.Int64
+	trustedReplayAttempted     atomic.Bool
+	successfulTrustedReplays   atomic.Int64
+	rejectedTrustedMutations   atomic.Int64
 	concurrencyReplayAttempted atomic.Bool
 	concurrencyDenialReplays   atomic.Int64
 	tokenDenialReplayAttempted atomic.Bool
@@ -1946,6 +2296,29 @@ func (store *dataPlaneE2EReplayingQuotaStore) Reserve(
 		}
 		store.tokenResetChecks.Add(1)
 		return reservation, nil
+	}
+	if input.FeatureKey == dataPlaneE2ETrustedInputFeature &&
+		store.trustedReplayAttempted.CompareAndSwap(false, true) {
+		if input.InputPreflight == nil {
+			return quota.Reservation{}, errors.New("trusted input reservation omitted its preflight binding")
+		}
+		replayed, replayErr := store.Store.Reserve(ctx, input)
+		if replayErr != nil || replayed.ID() != reservation.ID() {
+			return quota.Reservation{}, fmt.Errorf("replay exact trusted input reservation: %#v, %w", replayed, replayErr)
+		}
+		store.successfulTrustedReplays.Add(1)
+
+		altered := input
+		alteredBinding := *input.InputPreflight
+		alteredBinding.RewrittenBodySHA256[0] ^= 0xff
+		altered.InputPreflight = &alteredBinding
+		if _, alteredErr := store.Store.Reserve(ctx, altered); !errors.Is(alteredErr, quota.ErrInvalidInput) {
+			return quota.Reservation{}, fmt.Errorf(
+				"altered trusted body binding replay = %v, want %w", alteredErr, quota.ErrInvalidInput,
+			)
+		}
+		store.rejectedTrustedMutations.Add(1)
+		return replayed, nil
 	}
 	if !store.replayAttempted.CompareAndSwap(false, true) {
 		return reservation, err
@@ -2479,6 +2852,128 @@ func assertDataPlaneE2EHardCostSuccess(
 	assertDataPlaneE2EPricedUsage(
 		t, ctx, pool, logicalID, attemptID, priceRevision,
 		dataPlaneE2EActualCost, dataPlaneE2ECostPricingCatalog,
+	)
+}
+
+func assertDataPlaneE2ETrustedInputSuccess(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, priceRevision string,
+	inputBound int64,
+) {
+	t.Helper()
+	if inputBound <= 11 {
+		t.Fatalf("trusted input bound = %d, want a conservative bound above provider usage", inputBound)
+	}
+	var logicalID, logicalStatus, featureKey, configRevision string
+	var reservationStatus, attemptID, attemptStatus, physicalModel string
+	var currency, persistedPriceRevision, pricingSource, costConfidence string
+	var billedCost, reservations, entries, attempts, usageRecords int64
+	var httpStatus int
+	var firstByte bool
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, request.feature_key,
+		       request.config_revision_id, reservation.status,
+		       attempt.upstream_attempt_id, attempt.status, attempt.http_status,
+		       attempt.physical_model, attempt.billed_cost_nano_usd,
+		       attempt.currency, attempt.price_revision, attempt.pricing_source,
+		       attempt.cost_confidence, attempt.first_byte_at IS NOT NULL,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM quota_reservation_entries AS counted
+		        WHERE counted.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &logicalStatus, &featureKey, &configRevision,
+		&reservationStatus, &attemptID, &attemptStatus, &httpStatus,
+		&physicalModel, &billedCost, &currency, &persistedPriceRevision,
+		&pricingSource, &costConfidence, &firstByte,
+		&reservations, &entries, &attempts, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read trusted input success %q: %v", clientRequestID, err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil ||
+		id.Validate(attemptID, id.UpstreamAttempt) != nil || logicalStatus != "succeeded" ||
+		featureKey != dataPlaneE2ETrustedInputFeature || configRevision != priceRevision ||
+		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
+		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel ||
+		billedCost != dataPlaneE2ETrustedActualCost || currency != quota.USDCurrency ||
+		persistedPriceRevision != priceRevision || pricingSource != dataPlaneE2ETrustedInputPricing ||
+		costConfidence != quota.CalculatedCostConfidence || !firstByte ||
+		reservations != 1 || entries != 4 || attempts != 1 || usageRecords != 5 {
+		t.Fatalf("trusted input success = logical:%q/%s feature/revision:%s/%s reservation:%s/count:%d entries:%d attempt:%q/%s/%d/%s/count:%d price:%d/%s/%s/%s/%s first_byte:%t usage:%d",
+			logicalID, logicalStatus, featureKey, configRevision,
+			reservationStatus, reservations, entries, attemptID, attemptStatus,
+			httpStatus, physicalModel, attempts, billedCost, currency,
+			persistedPriceRevision, pricingSource, costConfidence, firstByte, usageRecords)
+	}
+
+	type expectedEntry struct {
+		reserved int64
+		settled  int64
+		released int64
+	}
+	outputBound := int64(8)
+	totalBound := inputBound + outputBound
+	costBound := inputBound*2 + outputBound + 5
+	expected := map[string]expectedEntry{
+		quota.InputTokensMetric:  {reserved: inputBound, settled: 11, released: inputBound - 11},
+		quota.OutputTokensMetric: {reserved: outputBound, settled: 7, released: 1},
+		quota.TotalTokensMetric:  {reserved: totalBound, settled: 18, released: totalBound - 18},
+		quota.CostNanoUSDMetric:  {reserved: costBound, settled: dataPlaneE2ETrustedActualCost, released: costBound - dataPlaneE2ETrustedActualCost},
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT bucket.metric, bucket.limit_plan_key, bucket.algorithm,
+		       bucket.window_key, entry.reserved_units,
+		       entry.settled_units, entry.released_units
+		FROM quota_reservations AS reservation
+		JOIN logical_requests AS request USING (logical_request_id)
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		WHERE request.client_request_id = $1
+		ORDER BY bucket.metric COLLATE "C"
+	`, clientRequestID)
+	if err != nil {
+		t.Fatalf("read trusted input entries: %v", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var metric, planKey, algorithm, windowKey string
+		var reserved, settled, released int64
+		if err := rows.Scan(&metric, &planKey, &algorithm, &windowKey, &reserved, &settled, &released); err != nil {
+			t.Fatalf("scan trusted input entry: %v", err)
+		}
+		want, ok := expected[metric]
+		if !ok || planKey != dataPlaneE2ETrustedInputPlan || algorithm != quota.CalendarAlgorithm ||
+			!strings.HasPrefix(windowKey, "utc:v1:1d:") ||
+			reserved != want.reserved || settled != want.settled || released != want.released {
+			t.Fatalf("trusted input entry = metric:%s plan:%s algorithm:%s window:%s units:%d/%d/%d want:%+v",
+				metric, planKey, algorithm, windowKey, reserved, settled, released, want)
+		}
+		if _, duplicate := seen[metric]; duplicate {
+			t.Fatalf("trusted input entry repeated metric %q", metric)
+		}
+		seen[metric] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate trusted input entries: %v", err)
+	}
+	if len(seen) != len(expected) {
+		t.Fatalf("trusted input entries = %v, want all metrics", seen)
+	}
+	assertDataPlaneE2EPricedUsage(
+		t, ctx, pool, logicalID, attemptID, priceRevision,
+		dataPlaneE2ETrustedActualCost, dataPlaneE2ETrustedInputPricing,
 	)
 }
 

@@ -1,7 +1,9 @@
 package dataplane
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -323,6 +325,21 @@ func TestHandlerReleasesWhenTargetFailsBeforeAttempt(t *testing.T) {
 				t.Fatalf("target failure release/dispatch = %q/%d", fixture.quotas.releaseFailure, fixture.target.dispatchCalls)
 			}
 		})
+	}
+}
+
+func TestFailureCodeClassifiesConfigurationErrors(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{
+		policy.ErrConfiguration,
+		quota.ErrInvalidInput,
+		errInvalidConfiguration,
+		errUnsupportedLimitPlan,
+		errTargetConfiguration,
+	} {
+		if got := failureCode(err); got != "configuration_invalid" {
+			t.Fatalf("failureCode(%v) = %q, want configuration_invalid", err, got)
+		}
 	}
 }
 
@@ -1560,7 +1577,7 @@ func TestAssignDecisionReservationUnitsUsesExactSharedHardCostBound(t *testing.T
 		{Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm, Scope: []string{"user"}, PerRequestMaximum: 8, Hard: true},
 		{Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm, Scope: []string{"feature"}, Window: "1mo", Maximum: 200, Hard: true},
 	}
-	bound, err := assignDecisionReservationUnits(rules, selected, 3)
+	bound, err := assignDecisionReservationUnits(rules, selected, 3, nil)
 	if err != nil {
 		t.Fatalf("assign hard-cost reservation: %v", err)
 	}
@@ -1578,9 +1595,168 @@ func TestAssignDecisionReservationUnitsUsesExactSharedHardCostBound(t *testing.T
 		zeroRules,
 		configuredPricing{configured: true, source: source},
 		3,
+		nil,
 	)
 	if err != nil || !zeroBound.active || zeroBound.nanoUSD != 0 || zeroRules[0].ReservedUnits != 0 {
 		t.Fatalf("zero hard-cost reservation = bound:%+v rules:%+v err:%v", zeroBound, zeroRules, err)
+	}
+}
+
+func TestAssignDecisionReservationUnitsUsesTrustedInputAndTotalBounds(t *testing.T) {
+	t.Parallel()
+	source, err := pricing.NewSource("standard", id.Must(id.ConfigRevision))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := configuredPricing{
+		configured: true,
+		rates: pricing.Rates{
+			InputNanoUSDPerMillion:  2_000_000,
+			OutputNanoUSDPerMillion: 3_000_000,
+			RequestNanoUSD:          7,
+		},
+		source: source,
+	}
+	preflight := &protocol.TrustedInputPreflight{
+		InputTokenBound: 11, OutputTokenBound: 3, TotalTokenBound: 14,
+	}
+	rules := []quota.Rule{
+		{Metric: quota.InputTokensMetric, Algorithm: quota.CalendarAlgorithm},
+		{Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm},
+		{Metric: quota.TotalTokensMetric, Algorithm: quota.CalendarAlgorithm},
+		{Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm},
+	}
+	bound, err := assignDecisionReservationUnits(rules, selected, 3, preflight)
+	if err != nil {
+		t.Fatalf("assign trusted token reservations: %v", err)
+	}
+	// 7 fixed + 11*2 input + 3*3 output = 38 nano-USD.
+	if bound != (hardCostReservation{active: true, nanoUSD: 38}) ||
+		rules[0].ReservedUnits != 11 || rules[1].ReservedUnits != 3 ||
+		rules[2].ReservedUnits != 14 || rules[3].ReservedUnits != 38 {
+		t.Fatalf("trusted reservations = bound:%+v rules:%+v", bound, rules)
+	}
+
+	for _, invalid := range []*protocol.TrustedInputPreflight{
+		nil,
+		{InputTokenBound: 11, OutputTokenBound: 2, TotalTokenBound: 13},
+		{InputTokenBound: math.MaxInt64, OutputTokenBound: 3, TotalTokenBound: math.MaxInt64},
+	} {
+		unchanged := []quota.Rule{
+			{Metric: quota.OutputTokensMetric, Algorithm: quota.CalendarAlgorithm},
+			{Metric: quota.TotalTokensMetric, Algorithm: quota.CalendarAlgorithm},
+		}
+		if _, err := assignDecisionReservationUnits(unchanged, selected, 3, invalid); !errors.Is(err, policy.ErrConfiguration) {
+			t.Fatalf("invalid proof %+v error = %v", invalid, err)
+		}
+		if unchanged[0].ReservedUnits != 0 || unchanged[1].ReservedUnits != 0 {
+			t.Fatalf("invalid proof partially mutated rules: %+v", unchanged)
+		}
+	}
+}
+
+func TestTrustedPreflightBodyIntegrityAndProviderDrift(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"messages":[{"content":"hello","role":"user"}],"model":"physical","max_completion_tokens":3}`)
+	digest := sha256.Sum256(body)
+	preflight := protocol.TrustedInputPreflight{
+		RewrittenBodySHA256: digest, RequestBytes: int64(len(body)),
+		InputTokenBound: 100, OutputTokenBound: 3, TotalTokenBound: 103,
+	}
+	request, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyAndRebindPreflightBody(request, preflight); err != nil {
+		t.Fatalf("verify exact preflight body: %v", err)
+	}
+	rebound, err := io.ReadAll(request.Body)
+	if err != nil || string(rebound) != string(body) {
+		t.Fatalf("rebound body = %q error=%v", rebound, err)
+	}
+
+	tamperedBody := append([]byte(nil), body...)
+	marker := bytes.Index(tamperedBody, []byte("hello"))
+	if marker < 0 {
+		t.Fatal("trusted body is missing its prompt marker")
+	}
+	tamperedBody[marker] = 'j'
+	tampered, err := http.NewRequest(http.MethodPost, request.URL.String(), bytes.NewReader(tamperedBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tampered.ContentLength != preflight.RequestBytes {
+		t.Fatalf("same-length tamper content length = %d, want %d", tampered.ContentLength, preflight.RequestBytes)
+	}
+	if err := verifyAndRebindPreflightBody(tampered, preflight); !errors.Is(err, policy.ErrConfiguration) {
+		t.Fatalf("tampered body error = %v", err)
+	}
+
+	within := protocol.Usage{Known: true, InputTokens: 99, OutputTokens: 3, TotalTokens: 102}
+	if providerUsageExceedsTrustedBounds(within, 3, &preflight) {
+		t.Fatal("within-bound provider usage was rejected")
+	}
+	for _, over := range []protocol.Usage{
+		{Known: true, InputTokens: 101, OutputTokens: 2, TotalTokens: 103},
+		{Known: true, InputTokens: 100, OutputTokens: 4, TotalTokens: 104},
+		{Known: true, InputTokens: 100, OutputTokens: 3, TotalTokens: 104},
+	} {
+		if !providerUsageExceedsTrustedBounds(over, 3, &preflight) {
+			t.Fatalf("over-bound provider usage was accepted: %+v", over)
+		}
+	}
+	if providerUsageExceedsTrustedBounds(protocol.Usage{}, 3, &preflight) {
+		t.Fatal("unknown usage was classified as profile drift")
+	}
+}
+
+func TestValidateTrustedInputPreflightBindsDeclaredAccountingFields(t *testing.T) {
+	t.Parallel()
+	profile := protocol.TrustedInputProfile{
+		ID: "chat_profile", Protocol: "openai_chat",
+		Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+		PhysicalModel: "physical-model", MaximumFramingTokensPerRequest: 8,
+		MaximumFramingTokensPerMessage: 4, MaximumContextTokens: 4096,
+	}
+	decision := policy.Decision{Model: configuration.Model{UpstreamModel: profile.PhysicalModel}}
+	preflight := protocol.TrustedInputPreflight{
+		ProfileID: profile.ID, ProfileDigest: profile.Digest(), Protocol: profile.Protocol,
+		Method: profile.Method, PhysicalModel: profile.PhysicalModel,
+		RequestBytes: 100, MessageCount: 1, InputTokenBound: 112,
+		OutputTokenBound: 3, TotalTokenBound: 115,
+	}
+	if err := validateTrustedInputPreflight(profile, decision, 3, preflight); err != nil {
+		t.Fatalf("valid declared proof rejected: %v", err)
+	}
+
+	invalid := []protocol.TrustedInputPreflight{
+		func() protocol.TrustedInputPreflight {
+			candidate := preflight
+			candidate.InputTokenBound = 1
+			candidate.TotalTokenBound = 4
+			return candidate
+		}(),
+		func() protocol.TrustedInputPreflight {
+			candidate := preflight
+			candidate.MessageCount = 4097
+			return candidate
+		}(),
+		func() protocol.TrustedInputPreflight {
+			candidate := preflight
+			candidate.RequestBytes++
+			return candidate
+		}(),
+	}
+	for _, candidate := range invalid {
+		if err := validateTrustedInputPreflight(profile, decision, 3, candidate); !errors.Is(err, policy.ErrConfiguration) {
+			t.Fatalf("malicious declared proof %+v error = %v", candidate, err)
+		}
+	}
+
+	overflowProfile := profile
+	overflowProfile.MaximumFramingTokensPerMessage = math.MaxInt64
+	if _, ok := trustedInputBoundFromProfile(overflowProfile, preflight); ok {
+		t.Fatal("overflowing declared message framing produced an input bound")
 	}
 }
 
@@ -1619,7 +1795,7 @@ func TestAssignDecisionReservationUnitsRejectsUnsafeHardCostPricingBeforeMutatio
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			rules := append([]quota.Rule(nil), baseRules...)
-			_, assignErr := assignDecisionReservationUnits(rules, test.selected, test.applied)
+			_, assignErr := assignDecisionReservationUnits(rules, test.selected, test.applied, nil)
 			if !errors.Is(assignErr, test.want) || rules[0].ReservedUnits != 0 {
 				t.Fatalf("unsafe reservation = rules:%+v err:%v want:%v", rules, assignErr, test.want)
 			}
@@ -1799,6 +1975,33 @@ func TestHandlerRejectsMissingConfiguredPricingBeforeQuotaOrDispatch(t *testing.
 		t.Fatalf("missing pricing reached quota/target/dispatch: %d/%d/%d/%d",
 			fixture.quotas.reserveCalls, fixture.quotas.beginCalls,
 			fixture.targets.calls, fixture.target.dispatchCalls)
+	}
+}
+
+func TestHandlerRejectsMissingTrustedInputProfileBeforeQuotaSecretOrTarget(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{
+		{
+			Metric: quota.InputTokensMetric, Algorithm: quota.CalendarAlgorithm,
+			Scope: []string{"feature", "user"}, Window: "1d", Maximum: 1000, Hard: true,
+		},
+		{
+			Metric: quota.TotalTokensMetric, Algorithm: quota.CalendarAlgorithm,
+			Scope: []string{"feature", "user"}, Window: "1d", Maximum: 2000, Hard: true,
+		},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+	if fixture.quotas.reserveCalls != 0 || fixture.quotas.beginCalls != 0 ||
+		fixture.secret.calls != 0 || fixture.targets.calls != 0 ||
+		fixture.target.prepareCalls != 0 || fixture.target.dispatchCalls != 0 {
+		t.Fatalf("missing trusted profile reached quota/secret/target/dispatch: %d/%d/%d/%d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.quotas.beginCalls, fixture.secret.calls,
+			fixture.targets.calls, fixture.target.prepareCalls, fixture.target.dispatchCalls)
 	}
 }
 
