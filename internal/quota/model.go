@@ -87,18 +87,20 @@ var scopeOrder = []string{
 }
 
 const (
-	ruleDigestDomain    = "latchway/quota-rule/v1\x00"
-	scopeDigestDomain   = "latchway/quota-scope/v1\x00"
-	requestDigestDomain = "latchway/quota-request/v1\x00"
+	ruleDigestDomain                = "latchway/quota-rule/v1\x00"
+	scopeDigestDomain               = "latchway/quota-scope/v1\x00"
+	requestDigestDomain             = "latchway/quota-request/v1\x00"
+	reservationPricingBindingDomain = "latchway/quota-reservation-pricing/v1\x00"
 )
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
-// output cap applied to the provider request. It is zero for logical-request
-// and concurrency rules, whose one unit is derived by the store. Capacity and
-// the reduced RefillNumerator/RefillDenominator are populated only for a
-// token_bucket rule. PerRequestMaximum is populated only for
-// output_tokens/per_request metadata, which is fingerprinted but does not
-// create a durable bucket.
+// output-token cap or cost reservation applied to the provider request. It is
+// zero for logical-request and concurrency rules, whose one unit is derived by
+// the store. A cost reservation may also be zero when trusted configured
+// pricing proves that the request is free. Capacity and the reduced
+// RefillNumerator/RefillDenominator are populated only for a token_bucket
+// rule. PerRequestMaximum is populated only for output_tokens/per_request
+// metadata, which is fingerprinted but does not create a durable bucket.
 type Rule struct {
 	Metric            string
 	Algorithm         string
@@ -346,6 +348,11 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	if err != nil {
 		return preparedRequest{}, err
 	}
+	for _, rule := range preparedRules {
+		if rule.Metric == CostNanoUSDMetric && input.Pricing.CatalogID == "" {
+			return preparedRequest{}, ErrInvalidInput
+		}
+	}
 
 	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
 	prepared.Rules = clonePreparedRules(preparedRules)
@@ -354,8 +361,8 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 
 // prepareRules is the single canonical validation and identity path for both
 // reservations and read-only snapshots. Snapshot rules describe selected
-// policy rather than a provider reservation, so output shapes require a zero
-// ReservedUnits while retaining every other executable-policy invariant.
+// policy rather than a provider reservation, so output and cost shapes require
+// a zero ReservedUnits while retaining every other executable-policy invariant.
 func prepareRules(input []Rule, values map[string]string, mode rulePreparationMode) ([]preparedRule, error) {
 	if len(input) < 1 || len(input) > maximumRulesPerRequest ||
 		(mode != reserveRulePreparation && mode != snapshotRulePreparation) {
@@ -363,6 +370,8 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 	}
 	preparedRules := make([]preparedRule, 0, len(input))
 	var outputReservation int64
+	var costReservation int64
+	costReservationSet := false
 	for _, rule := range input {
 		dimensions, err := canonicalScopeDimensions(rule.Scope)
 		if err != nil || !rule.Hard {
@@ -414,6 +423,16 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
+		case rule.Metric == CostNanoUSDMetric && rule.Algorithm == CalendarAlgorithm:
+			costReserved := rule.ReservedUnits >= 0
+			if mode == snapshotRulePreparation {
+				costReserved = rule.ReservedUnits == 0
+			}
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !costReserved ||
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
+				return nil, ErrInvalidInput
+			}
+			stateful = true
 		case (rule.Metric == ConcurrentRequestsMetric || rule.Metric == ConcurrentStreamsMetric) &&
 			rule.Algorithm == ConcurrencyAlgorithm:
 			if rule.Window != "" || rule.Maximum <= 0 || rule.PerRequestMaximum != 0 ||
@@ -429,6 +448,14 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			if outputReservation == 0 {
 				outputReservation = rule.ReservedUnits
 			} else if outputReservation != rule.ReservedUnits {
+				return nil, ErrInvalidInput
+			}
+		}
+		if mode == reserveRulePreparation && rule.Metric == CostNanoUSDMetric {
+			if !costReservationSet {
+				costReservation = rule.ReservedUnits
+				costReservationSet = true
+			} else if costReservation != rule.ReservedUnits {
 				return nil, ErrInvalidInput
 			}
 		}
@@ -529,10 +556,10 @@ func canonicalDigest(domain string, parts []string) string {
 	return base64.RawURLEncoding.EncodeToString(digest.Sum(nil))
 }
 
-// requestFingerprint is persisted on the logical request and, when accepted,
-// as the reservation idempotency key. It binds every retry (including a
-// denial) to the exact server-owned decision and mutable policy values without
-// changing bucket identity. LogicalID makes it unique per accepted HTTP request.
+// requestFingerprint is persisted on the logical request. It binds every
+// retry (including a denial) to the exact server-owned decision and mutable
+// policy values without changing bucket identity. LogicalID makes it unique
+// per accepted HTTP request.
 func requestFingerprint(prepared preparedRequest) string {
 	parts := []string{
 		prepared.LogicalRequestID.String(),
@@ -562,9 +589,9 @@ func requestFingerprint(prepared preparedRequest) string {
 			)
 		}
 		// Preserve the exact historical logical_requests/calendar serialization.
-		// New output-token shapes bind both their configured per-request maximum
-		// and the exact cap applied to this provider request.
-		if rule.Metric == OutputTokensMetric {
+		// New output-token and cost shapes bind both their configured per-request
+		// maximum and the exact cap applied to this provider request.
+		if rule.Metric == OutputTokensMetric || rule.Metric == CostNanoUSDMetric {
 			parts = append(parts,
 				strconv.FormatInt(rule.PerRequestMaximum, 10),
 				strconv.FormatInt(rule.ReservedUnits, 10),
@@ -584,6 +611,30 @@ func requestFingerprint(prepared preparedRequest) string {
 		parts = append(parts, prepared.Pricing.CatalogID)
 	}
 	return canonicalDigest(requestDigestDomain, parts)
+}
+
+// reservationIdempotencyKey preserves the historical key for every quota
+// shape that predates hard-cost reservations. A hard-cost reservation binds
+// its configured catalog independently so recovery can validate the attempt's
+// immutable pricing source against the logical request fingerprint without
+// trusting the attempt row as both the value and its own proof.
+func reservationIdempotencyKey(fingerprint string, pricing selectedPricing, bindHardCostPricing bool) string {
+	if !bindHardCostPricing {
+		return fingerprint
+	}
+	return canonicalDigest(reservationPricingBindingDomain, []string{
+		fingerprint,
+		pricing.source,
+	})
+}
+
+func hasHardCostReservation(rules []preparedRule) bool {
+	for _, rule := range rules {
+		if rule.Metric == CostNanoUSDMetric && rule.Algorithm == CalendarAlgorithm {
+			return true
+		}
+	}
+	return false
 }
 
 func (outcome Outcome) validate() error {
@@ -717,10 +768,13 @@ func (reservation Reservation) validate() error {
 	var maximumReset time.Time
 	entryIDs := make(map[string]struct{}, len(reservation.entries))
 	leaseIDs := make(map[string]struct{}, len(reservation.entries))
+	var costReservation int64
+	costReservationSet := false
 	for index, entry := range reservation.entries {
 		concurrency := entry.algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(entry.metric)
 		calendar := entry.algorithm == CalendarAlgorithm &&
-			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
+			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric ||
+				entry.metric == CostNanoUSDMetric)
 		tokenBucket := entry.algorithm == TokenBucketAlgorithm &&
 			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
@@ -737,6 +791,14 @@ func (reservation Reservation) validate() error {
 			return ErrInvalidInput
 		}
 		entryIDs[entry.entryID] = struct{}{}
+		if entry.metric == CostNanoUSDMetric {
+			if !costReservationSet {
+				costReservation = entry.reservedUnits
+				costReservationSet = true
+			} else if costReservation != entry.reservedUnits {
+				return ErrInvalidInput
+			}
+		}
 		if concurrency {
 			if _, duplicate := leaseIDs[entry.leaseID]; duplicate {
 				return ErrInvalidInput
@@ -758,19 +820,26 @@ func isConcurrencyMetric(metric string) bool {
 }
 
 func isStatefulMetric(metric string) bool {
-	return metric == LogicalRequestsMetric || metric == OutputTokensMetric || isConcurrencyMetric(metric)
+	return metric == LogicalRequestsMetric || metric == OutputTokensMetric ||
+		metric == CostNanoUSDMetric || isConcurrencyMetric(metric)
 }
 
 func isStatefulRule(metric, algorithm string) bool {
 	return algorithm == CalendarAlgorithm &&
-		(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
+		(metric == LogicalRequestsMetric || metric == OutputTokensMetric || metric == CostNanoUSDMetric) ||
 		algorithm == TokenBucketAlgorithm &&
 			(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
 		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)
 }
 
 func validReservationEntryUnits(metric, algorithm string, units int64) bool {
-	if units <= 0 || !isStatefulRule(metric, algorithm) {
+	if !isStatefulRule(metric, algorithm) || units < 0 {
+		return false
+	}
+	if metric == CostNanoUSDMetric {
+		return algorithm == CalendarAlgorithm
+	}
+	if units == 0 {
 		return false
 	}
 	if metric == LogicalRequestsMetric || isConcurrencyMetric(metric) {

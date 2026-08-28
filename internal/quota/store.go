@@ -144,6 +144,8 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	}
 	logicalRequestID := prepared.LogicalRequestID.String()
 	fingerprint := requestFingerprint(prepared)
+	pricing := pricingForRequest(prepared)
+	reservationKey := reservationIdempotencyKey(fingerprint, pricing, hasHardCostReservation(prepared.rules))
 
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -280,7 +282,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			continue
 		}
 		if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
-			plan.reservedUnits <= 0 ||
+			!validReservationEntryUnits(plan.rule.Metric, plan.rule.Algorithm, plan.reservedUnits) ||
 			bucket.used > math.MaxInt64-bucket.reserved ||
 			(isConcurrencyMetric(plan.rule.Metric) && bucket.used != 0) {
 			return Reservation{}, ErrInvalidState
@@ -368,7 +370,9 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			WHERE quota_bucket_id = $1
 			  AND used_units = $5
 			  AND reserved_units = $6
-			  AND $3::bigint > 0
+			  AND ($3::bigint > 0 OR (
+			        $3::bigint = 0 AND metric = 'cost_nano_usd' AND algorithm = 'calendar'
+			      ))
 			  AND $2 >= used_units
 			  AND $3::bigint <= $2 - used_units - reserved_units
 		`, bucket.id, plan.rule.Maximum, plan.reservedUnits, decisionAt,
@@ -404,7 +408,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			logical_request_id, idempotency_key, status, created_at, expires_at
 		) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
 	`, identifiers.reservation, prepared.OrganizationID, prepared.ApplicationID,
-		prepared.EnvironmentID, logicalRequestID, fingerprint, decisionAt, expiresAt); err != nil {
+		prepared.EnvironmentID, logicalRequestID, reservationKey, decisionAt, expiresAt); err != nil {
 		return Reservation{}, mapWriteError("insert quota reservation", err)
 	}
 	for index := range plans {
@@ -431,7 +435,7 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		reservationID: identifiers.reservation, entries: entries,
 		routeKey: prepared.RouteKey, upstreamKey: prepared.UpstreamKey,
 		modelKey: prepared.ModelKey, physicalModel: prepared.PhysicalModel,
-		pricing:       pricingForRequest(prepared),
+		pricing:       pricing,
 		windowResetAt: maximumResetAt(entries), expiresAt: expiresAt,
 	}, nil
 }
@@ -450,6 +454,8 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 // Denied requests have no reservation and are immutable, so they lock
 // logical_requests first.
 func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedRequest, fingerprint string) (Reservation, error) {
+	pricing := pricingForRequest(prepared)
+	reservationKey := reservationIdempotencyKey(fingerprint, pricing, hasHardCostReservation(prepared.rules))
 	var lockedReservationID string
 	reservationErr := tx.QueryRow(ctx, `
 		SELECT quota_reservation_id
@@ -558,7 +564,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 				continue
 			}
 			if bucket.hardMaximum == nil || bucket.used < 0 || bucket.reserved < 0 ||
-				plan.reservedUnits <= 0 ||
+				!validReservationEntryUnits(plan.rule.Metric, plan.rule.Algorithm, plan.reservedUnits) ||
 				bucket.used > math.MaxInt64-bucket.reserved ||
 				(isConcurrencyMetric(plan.rule.Metric) && bucket.used != 0) {
 				return Reservation{}, ErrInvalidState
@@ -606,7 +612,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 
 	if len(plans) == 0 {
-		return loadExistingEntrylessReservation(ctx, tx, prepared, fingerprint, logical.status, lockedReservationID)
+		return loadExistingEntrylessReservation(ctx, tx, prepared, reservationKey, logical.status, lockedReservationID)
 	}
 
 	type existingReservation struct {
@@ -682,7 +688,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			existing.applicationID != prepared.ApplicationID ||
 			existing.environmentID != prepared.EnvironmentID ||
 			existing.logicalRequestID != prepared.LogicalRequestID.String() ||
-			existing.idempotency != fingerprint ||
+			existing.idempotency != reservationKey ||
 			existing.bucketOrganizationID != prepared.OrganizationID ||
 			existing.bucketApplicationID != prepared.ApplicationID ||
 			existing.limitPlanKey != prepared.LimitPlanKey ||
@@ -727,7 +733,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			return Reservation{}, ErrInvalidState
 		}
 	}
-	_, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
+	storedAttempt, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -762,8 +768,22 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		if !pendingEntriesMatch(logical.status, replayed, lockedEntries, leases) {
 			return Reservation{}, ErrInvalidState
 		}
-	} else if !terminalEntriesMatch(logical.status, reservationStatus, lockedEntries, leases) {
-		return Reservation{}, ErrInvalidState
+	} else {
+		if !terminalEntriesMatch(logical.status, reservationStatus, lockedEntries, leases) {
+			return Reservation{}, ErrInvalidState
+		}
+		if reservationStatus == "settled" && attemptExists {
+			cost := Cost{}
+			if storedAttempt.billedCost != nil {
+				cost = Cost{
+					NanoUSD: *storedAttempt.billedCost, Known: true,
+					Confidence: CalculatedCostConfidence,
+				}
+			}
+			if !terminalCostEntriesMatch(lockedEntries, cost) {
+				return Reservation{}, ErrInvalidState
+			}
+		}
 	}
 	return Reservation{
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
@@ -771,7 +791,7 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID:    reservationID, entries: entries, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
-		physicalModel: prepared.PhysicalModel, pricing: pricingForRequest(prepared),
+		physicalModel: prepared.PhysicalModel, pricing: pricing,
 		windowResetAt: maximumResetAt(entries),
 		expiresAt:     expiresAt,
 	}, nil
@@ -781,7 +801,7 @@ func loadExistingEntrylessReservation(
 	ctx context.Context,
 	tx pgx.Tx,
 	prepared preparedRequest,
-	fingerprint string,
+	reservationKey string,
 	logicalStatus string,
 	lockedReservationID string,
 ) (Reservation, error) {
@@ -824,7 +844,7 @@ func loadExistingEntrylessReservation(
 		existing.applicationID != prepared.ApplicationID ||
 		existing.environmentID != prepared.EnvironmentID ||
 		existing.logicalRequestID != prepared.LogicalRequestID.String() ||
-		existing.reservationID != lockedReservationID || existing.idempotency != fingerprint {
+		existing.reservationID != lockedReservationID || existing.idempotency != reservationKey {
 		return Reservation{}, ErrInvalidInput
 	}
 	_, attemptExists, err := loadOnlyAttemptForUpdate(ctx, tx, prepared.LogicalRequestID.String())
@@ -881,6 +901,9 @@ func existingReservationStateMatches(
 		}
 		if isConcurrencyMetric(metric) {
 			return settled == 0 && released == reserved
+		}
+		if metric == CostNanoUSDMetric {
+			return settled+released == reserved
 		}
 		if metric == LogicalRequestsMetric || logicalStatus != "succeeded" {
 			return settled == reserved && released == 0
@@ -960,7 +983,7 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 		if rule.Metric == LogicalRequestsMetric || isConcurrencyMetric(rule.Metric) {
 			reservedUnits = 1
 		}
-		if reservedUnits <= 0 {
+		if !validReservationEntryUnits(rule.Metric, rule.Algorithm, reservedUnits) {
 			return nil, ErrInvalidInput
 		}
 		plans = append(plans, plannedBucket{rule: rule, period: period, reservedUnits: reservedUnits})
@@ -1277,7 +1300,15 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 				return Attempt{}, false, ErrInvalidState
 			}
 		case "settled":
-			if !terminalEntriesMatch(logical.status, lockedReservation.status, entries, leases) {
+			cost := Cost{}
+			if existing.billedCost != nil {
+				cost = Cost{
+					NanoUSD: *existing.billedCost, Known: true,
+					Confidence: CalculatedCostConfidence,
+				}
+			}
+			if !terminalEntriesMatch(logical.status, lockedReservation.status, entries, leases) ||
+				!terminalCostEntriesMatch(entries, cost) {
 				return Attempt{}, false, ErrInvalidState
 			}
 		default:
@@ -1455,6 +1486,12 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		if !terminalEntriesMatch(logical.status, reservation.status, entries, leases) {
 			return ErrInvalidState
 		}
+		if validationErr := validateCostSettlement(entries, outcome.Cost); validationErr != nil {
+			return validationErr
+		}
+		if !terminalCostEntriesMatch(entries, outcome.Cost) {
+			return ErrInvalidState
+		}
 		matches, matchErr := terminalSettlementMatches(ctx, tx, reservation, storedAttempt, outcome)
 		if matchErr != nil {
 			return matchErr
@@ -1473,6 +1510,9 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	}
 	entries, err := lockEntries(ctx, tx, reservation)
 	if err != nil {
+		return err
+	}
+	if err := validateCostSettlement(entries, outcome.Cost); err != nil {
 		return err
 	}
 	leases, err := lockConcurrencyLeases(ctx, tx, reservation, entries)
@@ -1596,9 +1636,10 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var selected Reservation
+	var selectedIdempotencyKey string
 	err = tx.QueryRow(ctx, `
 		SELECT organization_id, application_id, environment_id,
-		       logical_request_id, quota_reservation_id, expires_at
+		       logical_request_id, quota_reservation_id, idempotency_key, expires_at
 		FROM quota_reservations
 		WHERE status = 'pending' AND expires_at <= $1
 		ORDER BY expires_at, quota_reservation_id
@@ -1606,7 +1647,8 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		FOR UPDATE SKIP LOCKED
 	`, now).Scan(
 		&selected.organizationID, &selected.applicationID, &selected.environmentID,
-		&selected.logicalRequestID, &selected.reservationID, &selected.expiresAt,
+		&selected.logicalRequestID, &selected.reservationID,
+		&selectedIdempotencyKey, &selected.expiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -1643,6 +1685,19 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		pricing, pricingErr := storedAttempt.selectedPricing()
 		if pricingErr != nil {
 			return false, pricingErr
+		}
+		_, hasCostReservation, costErr := lockedCostReservationUnits(entries)
+		if costErr != nil {
+			return false, costErr
+		}
+		if hasCostReservation &&
+			(!pricing.present() || pricing.revision != logical.configRevisionID) {
+			return false, ErrInvalidState
+		}
+		if hasCostReservation &&
+			(logical.trustedDecisionFingerprint == nil ||
+				reservationIdempotencyKey(*logical.trustedDecisionFingerprint, pricing, true) != selectedIdempotencyKey) {
+			return false, ErrInvalidState
 		}
 		lockedReservation.pricing = pricing
 		recoveredOutcome, err = normalizeOutcomeForPricing(Outcome{
@@ -1723,25 +1778,33 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 }
 
 type lockedLogical struct {
-	status      string
-	failureCode *string
+	status                     string
+	failureCode                *string
+	configRevisionID           string
+	trustedDecisionFingerprint *string
 }
 
 func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (lockedLogical, error) {
 	var result lockedLogical
 	err := tx.QueryRow(ctx, `
-		SELECT status, failure_code
+		SELECT status, failure_code, config_revision_id, trusted_decision_fingerprint
 		FROM logical_requests
 		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
 		  AND logical_request_id = $4
 		FOR UPDATE
 	`, expected.organizationID, expected.applicationID, expected.environmentID,
-		expected.logicalRequestID).Scan(&result.status, &result.failureCode)
+		expected.logicalRequestID).Scan(
+		&result.status, &result.failureCode, &result.configRevisionID,
+		&result.trustedDecisionFingerprint,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedLogical{}, ErrNotFound
 	}
 	if err != nil {
 		return lockedLogical{}, persistenceFailure("lock logical request", err)
+	}
+	if id.Validate(result.configRevisionID, id.ConfigRevision) != nil {
+		return lockedLogical{}, ErrInvalidState
 	}
 	return result, nil
 }
@@ -2178,6 +2241,55 @@ func lockedOutputReservationUnits(entries []lockedEntry) (int64, bool, error) {
 	return units, found, nil
 }
 
+func lockedCostReservationUnits(entries []lockedEntry) (int64, bool, error) {
+	var units int64
+	found := false
+	for _, entry := range entries {
+		if entry.metric != CostNanoUSDMetric {
+			continue
+		}
+		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			found && entry.reservedUnits != units {
+			return 0, false, ErrInvalidState
+		}
+		units = entry.reservedUnits
+		found = true
+	}
+	return units, found, nil
+}
+
+func validateCostSettlement(entries []lockedEntry, cost Cost) error {
+	reserved, found, err := lockedCostReservationUnits(entries)
+	if err != nil || !found || !cost.Known {
+		return err
+	}
+	if cost.NanoUSD > reserved {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func terminalCostEntriesMatch(entries []lockedEntry, cost Cost) bool {
+	reserved, found, err := lockedCostReservationUnits(entries)
+	if err != nil || !found {
+		return err == nil
+	}
+	settled := reserved
+	if cost.Known {
+		if cost.NanoUSD > reserved {
+			return false
+		}
+		settled = cost.NanoUSD
+	}
+	for _, entry := range entries {
+		if entry.metric == CostNanoUSDMetric &&
+			(entry.settledUnits != settled || entry.releasedUnits != entry.reservedUnits-settled) {
+			return false
+		}
+	}
+	return true
+}
+
 func reservationOutputReservationUnits(entries []reservationEntry) (int64, bool, error) {
 	var units int64
 	found := false
@@ -2484,7 +2596,10 @@ func lockedEntryBucketValid(entry lockedEntry) bool {
 		_, err := tokenStateFromLockedEntry(entry)
 		return err == nil
 	}
-	return entry.hardMaximum != nil && entry.bucketUsed >= 0 && entry.bucketReserved >= 0 &&
+	return entry.hardMaximum != nil && *entry.hardMaximum > 0 &&
+		entry.bucketUsed >= 0 && entry.bucketReserved >= 0 &&
+		entry.bucketUsed <= *entry.hardMaximum &&
+		entry.bucketReserved <= *entry.hardMaximum-entry.bucketUsed &&
 		entry.available == nil && entry.refillNumerator == nil &&
 		entry.refillDenominator == nil && entry.refilledAt == nil
 }
@@ -2561,6 +2676,9 @@ func settleLocked(
 		!attemptPricingMatchesReservation(attempt, reservation.Reservation) {
 		return ErrInvalidState
 	}
+	if err := validateCostSettlement(entries, outcome.Cost); err != nil {
+		return err
+	}
 	settledUnits := make([]int64, len(entries))
 	releasedUnits := make([]int64, len(entries))
 	for _, entry := range entries {
@@ -2579,6 +2697,11 @@ func settleLocked(
 		settled := entry.reservedUnits
 		if isConcurrencyMetric(entry.metric) {
 			settled = 0
+		} else if entry.metric == CostNanoUSDMetric && outcome.Cost.Known {
+			settled = outcome.Cost.NanoUSD
+			if settled > entry.reservedUnits {
+				return ErrInvalidInput
+			}
 		} else if entry.metric == OutputTokensMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
 			settled = outcome.Usage.OutputTokens
 			if settled > entry.reservedUnits {
@@ -2625,7 +2748,10 @@ func settleLocked(
 				    version = version + 1,
 				    updated_at = GREATEST(updated_at, $4)
 				WHERE quota_bucket_id = $1
-				  AND $2::bigint >= 0 AND $3::bigint > 0
+				  AND $2::bigint >= 0
+				  AND ($3::bigint > 0 OR (
+				        $3::bigint = 0 AND metric = 'cost_nano_usd' AND algorithm = 'calendar'
+				      ))
 				  AND reserved_units >= $3::bigint
 				  AND hard_maximum IS NOT NULL
 				  AND used_units <= hard_maximum
@@ -2734,6 +2860,9 @@ func releaseLocked(
 		len(entries) > maximumRulesPerRequest {
 		return ErrInvalidState
 	}
+	if _, _, err := lockedCostReservationUnits(entries); err != nil {
+		return err
+	}
 	for _, entry := range entries {
 		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
 			entry.settledUnits != 0 || entry.releasedUnits != 0 ||
@@ -2767,7 +2896,11 @@ func releaseLocked(
 				SET reserved_units = reserved_units - $2::bigint,
 				    version = version + 1,
 				    updated_at = GREATEST(updated_at, $3)
-				WHERE quota_bucket_id = $1 AND $2::bigint > 0 AND reserved_units >= $2::bigint
+				WHERE quota_bucket_id = $1
+				  AND ($2::bigint > 0 OR (
+				        $2::bigint = 0 AND metric = 'cost_nano_usd' AND algorithm = 'calendar'
+				      ))
+				  AND reserved_units >= $2::bigint
 			`, entry.bucketID, entry.reservedUnits, now)
 			if err != nil {
 				return persistenceFailure("release quota bucket", err)
