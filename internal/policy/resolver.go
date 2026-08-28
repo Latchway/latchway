@@ -145,6 +145,14 @@ type Decision struct {
 	Upstream  configuration.Upstream
 }
 
+// QuotaProjection is the request-shape-independent feature and limit plan
+// selected for a quota snapshot. Each returned value is deeply detached from
+// the immutable configuration snapshot and the resolver's compiled cache.
+type QuotaProjection struct {
+	Feature   configuration.Feature
+	LimitPlan configuration.LimitPlan
+}
+
 // Snapshot is the minimum immutable configuration surface required by policy
 // resolution. configuration.ActiveSnapshot is its production implementation.
 type Snapshot interface {
@@ -183,6 +191,11 @@ type cacheKey struct {
 type Resolver struct {
 	environment *cel.Env
 	now         func() time.Time
+	// validateAuthorization is fixed by newResolver. Keeping the dependency
+	// private preserves the sealed session boundary while allowing this package's
+	// tests to prove single-call and single-clock behavior without manufacturing
+	// session seals outside the session package.
+	validateAuthorization func(session.Authorization, time.Time) (session.Authorization, error)
 
 	mu    sync.RWMutex
 	cache map[cacheKey]*compiledFeature
@@ -213,7 +226,14 @@ func newResolver(now func() time.Time) (*Resolver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct CEL environment", ErrConfiguration)
 	}
-	return &Resolver{environment: environment, now: now, cache: make(map[cacheKey]*compiledFeature)}, nil
+	return &Resolver{
+		environment: environment,
+		now:         now,
+		validateAuthorization: func(authorization session.Authorization, at time.Time) (session.Authorization, error) {
+			return authorization.ValidatedSnapshot(at)
+		},
+		cache: make(map[cacheKey]*compiledFeature),
+	}, nil
 }
 
 // Resolve evaluates access, limit-plan selection, and route predicates, then
@@ -230,13 +250,7 @@ func (resolver *Resolver) Resolve(ctx context.Context, snapshot Snapshot, featur
 	// identities. Validate them even when the selected route does not happen to
 	// use a particular sticky key so later quota and persistence layers cannot be
 	// wired to an untrusted correlation hint by accident.
-	if id.Validate(input.authorization.organizationID, id.Organization) != nil ||
-		id.Validate(input.authorization.applicationID, id.Application) != nil ||
-		id.Validate(input.authorization.environmentID, id.Environment) != nil ||
-		id.Validate(input.authorization.userID, id.ApplicationUser) != nil ||
-		id.Validate(input.authorization.installationID, id.Installation) != nil ||
-		id.Validate(input.logicalRequestID, id.LogicalRequest) != nil ||
-		!validEnvironmentKind(input.environment.Kind) || input.authorization.claims == nil {
+	if !validInput(input) {
 		return Decision{}, ErrInvalidInput
 	}
 	now := resolver.now().UTC()
@@ -308,6 +322,143 @@ func (resolver *Resolver) Resolve(ctx context.Context, snapshot Snapshot, featur
 		return Decision{}, ErrRouteNotFound
 	}
 	return Decision{Feature: feature, LimitPlan: plan, Route: route, Model: model, Upstream: upstream}, nil
+}
+
+// ResolveQuota evaluates the only request-derived policy value currently
+// available to feature CEL (streaming) in both states. A quota snapshot has no
+// request-mode discriminator, so access and the complete selected limit plan
+// must be identical before a projection can be returned. Physical routing is
+// deliberately neither evaluated nor selected here.
+func (resolver *Resolver) ResolveQuota(
+	ctx context.Context,
+	snapshot Snapshot,
+	featureID string,
+	authorization session.Authorization,
+	logicalID requestidentity.LogicalID,
+	environment EnvironmentFacts,
+) (QuotaProjection, error) {
+	if resolver == nil || resolver.environment == nil || resolver.now == nil ||
+		resolver.validateAuthorization == nil || resolver.cache == nil || ctx == nil ||
+		snapshot == nil || !policyIdentifierPattern.MatchString(featureID) {
+		return QuotaProjection{}, ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return QuotaProjection{}, err
+	}
+
+	// This is the only clock read in the quota operation. Session validation,
+	// attestation freshness, and both CEL activations share this exact instant.
+	now := resolver.now().UTC()
+	validated, err := resolver.validateAuthorization(authorization, now)
+	if err != nil {
+		return QuotaProjection{}, err
+	}
+	if !validEnvironmentKind(environment.Kind) || environment.Kind != validated.EnvironmentKind {
+		return QuotaProjection{}, ErrInvalidInput
+	}
+	nonStreaming, err := inputFromAuthorization(
+		validated, logicalID, ProtocolRequestMetadata{Streaming: false}, environment,
+	)
+	if err != nil || !validInput(nonStreaming) {
+		return QuotaProjection{}, ErrInvalidInput
+	}
+	streaming := nonStreaming
+	streaming.request.Streaming = true
+
+	feature, ok := snapshot.Feature(featureID)
+	if !ok {
+		return QuotaProjection{}, ErrFeatureNotFound
+	}
+	if feature.ID != featureID || !policyIdentifierPattern.MatchString(feature.ID) {
+		return QuotaProjection{}, ErrConfiguration
+	}
+	// Feature attestation is request-shape invariant. Enforce it once against
+	// the same validated authorization and instant shared by both activations.
+	if err := enforceFeatureAttestation(snapshot, feature, nonStreaming.authorization, now); err != nil {
+		return QuotaProjection{}, err
+	}
+	compiled, err := resolver.compiled(snapshot, feature)
+	if err != nil {
+		return QuotaProjection{}, err
+	}
+	nonStreamingActivation, err := boundedActivation(nonStreaming)
+	if err != nil {
+		return QuotaProjection{}, err
+	}
+	streamingActivation, err := boundedActivation(streaming)
+	if err != nil {
+		return QuotaProjection{}, err
+	}
+	nonStreamingAllowed, err := evaluateBool(ctx, compiled.access, nonStreamingActivation)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return QuotaProjection{}, contextErr
+		}
+		return QuotaProjection{}, ErrConfiguration
+	}
+	streamingAllowed, err := evaluateBool(ctx, compiled.access, streamingActivation)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return QuotaProjection{}, contextErr
+		}
+		return QuotaProjection{}, ErrConfiguration
+	}
+	if !nonStreamingAllowed && !streamingAllowed {
+		return QuotaProjection{}, ErrFeatureNotAllowed
+	}
+	if nonStreamingAllowed != streamingAllowed {
+		return QuotaProjection{}, ErrConfiguration
+	}
+
+	nonStreamingPlanID, err := evaluateString(ctx, compiled.limitPlan, nonStreamingActivation)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return QuotaProjection{}, contextErr
+		}
+		return QuotaProjection{}, ErrConfiguration
+	}
+	streamingPlanID, err := evaluateString(ctx, compiled.limitPlan, streamingActivation)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return QuotaProjection{}, contextErr
+		}
+		return QuotaProjection{}, ErrConfiguration
+	}
+	if !policyIdentifierPattern.MatchString(nonStreamingPlanID) ||
+		!policyIdentifierPattern.MatchString(streamingPlanID) {
+		return QuotaProjection{}, ErrLimitPlanNotFound
+	}
+	if nonStreamingPlanID != streamingPlanID {
+		return QuotaProjection{}, ErrConfiguration
+	}
+	nonStreamingPlan, ok := snapshot.LimitPlan(nonStreamingPlanID)
+	if !ok {
+		return QuotaProjection{}, ErrLimitPlanNotFound
+	}
+	streamingPlan, ok := snapshot.LimitPlan(streamingPlanID)
+	if !ok {
+		return QuotaProjection{}, ErrLimitPlanNotFound
+	}
+	if nonStreamingPlan.ID != nonStreamingPlanID || streamingPlan.ID != streamingPlanID ||
+		len(nonStreamingPlan.Limits) == 0 || len(nonStreamingPlan.Limits) > 128 ||
+		len(streamingPlan.Limits) == 0 || len(streamingPlan.Limits) > 128 ||
+		!reflect.DeepEqual(nonStreamingPlan, streamingPlan) {
+		return QuotaProjection{}, ErrConfiguration
+	}
+	return QuotaProjection{
+		Feature:   cloneFeature(feature),
+		LimitPlan: cloneLimitPlan(nonStreamingPlan),
+	}, nil
+}
+
+func validInput(input Input) bool {
+	return id.Validate(input.authorization.organizationID, id.Organization) == nil &&
+		id.Validate(input.authorization.applicationID, id.Application) == nil &&
+		id.Validate(input.authorization.environmentID, id.Environment) == nil &&
+		id.Validate(input.authorization.userID, id.ApplicationUser) == nil &&
+		id.Validate(input.authorization.installationID, id.Installation) == nil &&
+		id.Validate(input.logicalRequestID, id.LogicalRequest) == nil &&
+		validEnvironmentKind(input.environment.Kind) && input.authorization.claims != nil
 }
 
 func enforceFeatureAttestation(snapshot Snapshot, feature configuration.Feature, authorization authorizationFacts, now time.Time) error {
@@ -723,6 +874,33 @@ func stringCompare(left, right string) int {
 func cloneRoute(route configuration.Route) configuration.Route {
 	route.FallbackOn = append([]string(nil), route.FallbackOn...)
 	return route
+}
+
+func cloneFeature(feature configuration.Feature) configuration.Feature {
+	if feature.Output != nil {
+		output := *feature.Output
+		feature.Output = &output
+	}
+	if feature.OpaqueHTTP != nil {
+		opaque := *feature.OpaqueHTTP
+		opaque.AllowedMethods = append([]string(nil), opaque.AllowedMethods...)
+		opaque.PathPrefixes = append([]string(nil), opaque.PathPrefixes...)
+		opaque.AllowedRequestHeaders = append([]string(nil), opaque.AllowedRequestHeaders...)
+		feature.OpaqueHTTP = &opaque
+	}
+	feature.Routes = append([]configuration.Route(nil), feature.Routes...)
+	for index := range feature.Routes {
+		feature.Routes[index] = cloneRoute(feature.Routes[index])
+	}
+	return feature
+}
+
+func cloneLimitPlan(plan configuration.LimitPlan) configuration.LimitPlan {
+	plan.Limits = append([]configuration.Limit(nil), plan.Limits...)
+	for index := range plan.Limits {
+		plan.Limits[index].Scope = append([]string(nil), plan.Limits[index].Scope...)
+	}
+	return plan
 }
 
 func cloneClaims(claims map[string]any) map[string]any {

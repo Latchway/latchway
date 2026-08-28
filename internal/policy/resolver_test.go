@@ -554,6 +554,351 @@ func TestResolverPreservesCancellation(t *testing.T) {
 	}
 }
 
+func TestResolverResolveQuotaReturnsStableDetachedProjectionWithoutRouting(t *testing.T) {
+	t.Parallel()
+
+	clockCalls := 0
+	validationCalls := 0
+	resolver, err := newResolver(func() time.Time {
+		clockCalls++
+		return policyTestNow
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.validateAuthorization = func(authorization session.Authorization, at time.Time) (session.Authorization, error) {
+		validationCalls++
+		if !at.Equal(policyTestNow) {
+			t.Fatalf("authorization validation time = %s", at)
+		}
+		return authorization, nil
+	}
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.Routes = []configuration.Route{
+		{ID: "one", When: "true", ModelID: "missing-one", Priority: 1, Weight: 0, StickyBy: "user", FallbackOn: []string{"status_503"}},
+		{ID: "two", When: "true", ModelID: "missing-two", Priority: 1, Weight: 0, StickyBy: "installation", FallbackOn: []string{"status_502"}},
+	}
+	feature.OpaqueHTTP = &configuration.OpaqueHTTPPolicy{
+		AllowedMethods: []string{"POST"}, PathPrefixes: []string{"/safe"},
+		AllowedRequestHeaders: []string{"content-type"},
+	}
+	snapshot.features["assistant"] = feature
+	plan := snapshot.plans["premium"]
+	plan.Limits[0].Scope = []string{"user", "feature"}
+	snapshot.plans["premium"] = plan
+	delete(snapshot.models, "fast")
+	delete(snapshot.models, "reasoning")
+	delete(snapshot.upstreams, "primary")
+
+	projection, err := resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", quotaAuthorization("premium"),
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clockCalls != 1 || validationCalls != 1 {
+		t.Fatalf("clock/validation calls = %d/%d", clockCalls, validationCalls)
+	}
+	if projection.Feature.ID != "assistant" || projection.LimitPlan.ID != "premium" ||
+		projection.LimitPlan.Limits[0].Maximum != 500 {
+		t.Fatalf("quota projection = %+v", projection)
+	}
+
+	projection.Feature.Output.AbsoluteMaximumTokens = 1
+	projection.Feature.Routes[0].FallbackOn[0] = "changed"
+	projection.Feature.OpaqueHTTP.AllowedMethods[0] = "DELETE"
+	projection.LimitPlan.Limits[0].Scope[0] = "installation"
+	if snapshot.features["assistant"].Output.AbsoluteMaximumTokens != 1500 ||
+		snapshot.features["assistant"].Routes[0].FallbackOn[0] != "status_503" ||
+		snapshot.features["assistant"].OpaqueHTTP.AllowedMethods[0] != "POST" ||
+		snapshot.plans["premium"].Limits[0].Scope[0] != "user" {
+		t.Fatal("returned quota projection retained snapshot-owned mutable state")
+	}
+}
+
+func TestResolverResolveQuotaRejectsRequestDependentPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		access    string
+		limitPlan string
+		want      error
+	}{
+		{name: "stream-dependent access", access: "!request.streaming", want: ErrConfiguration},
+		{name: "both denied", access: "false", want: ErrFeatureNotAllowed},
+		{name: "stream-dependent plan", access: "true", limitPlan: "request.streaming ? 'premium' : 'free'", want: ErrConfiguration},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := quotaResolver(t, func() time.Time { return policyTestNow })
+			snapshot := policySnapshot()
+			feature := snapshot.features["assistant"]
+			if test.access != "" {
+				feature.AccessExpression = test.access
+			}
+			if test.limitPlan != "" {
+				feature.LimitPlanExpression = test.limitPlan
+			}
+			snapshot.features["assistant"] = feature
+			_, resolveErr := resolver.ResolveQuota(
+				context.Background(), snapshot, "assistant", quotaAuthorization("premium"),
+				quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+			)
+			if !errors.Is(resolveErr, test.want) {
+				t.Fatalf("ResolveQuota() error = %v, want %v", resolveErr, test.want)
+			}
+		})
+	}
+}
+
+func TestResolverResolveQuotaFailsClosedForMissingAndCorruptSnapshots(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		build   func() Snapshot
+		feature string
+		want    error
+	}{
+		{
+			name: "missing feature", feature: "missing",
+			build: func() Snapshot { snapshot := policySnapshot(); return snapshot },
+			want:  ErrFeatureNotFound,
+		},
+		{
+			name: "missing plan",
+			build: func() Snapshot {
+				snapshot := policySnapshot()
+				delete(snapshot.plans, "premium")
+				return snapshot
+			},
+			want: ErrLimitPlanNotFound,
+		},
+		{
+			name: "detached feature identity",
+			build: func() Snapshot {
+				snapshot := policySnapshot()
+				feature := snapshot.features["assistant"]
+				feature.ID = "other"
+				snapshot.features["assistant"] = feature
+				return snapshot
+			},
+			want: ErrConfiguration,
+		},
+		{
+			name: "detached plan identity",
+			build: func() Snapshot {
+				snapshot := policySnapshot()
+				plan := snapshot.plans["premium"]
+				plan.ID = "other"
+				snapshot.plans["premium"] = plan
+				return snapshot
+			},
+			want: ErrConfiguration,
+		},
+		{
+			name: "unstable plan content",
+			build: func() Snapshot {
+				return &alternatingQuotaPlanSnapshot{fakeSnapshot: policySnapshot()}
+			},
+			want: ErrConfiguration,
+		},
+		{
+			name: "detached revision",
+			build: func() Snapshot {
+				snapshot := policySnapshot()
+				snapshot.revision = "rev_00000000000000000000000001"
+				return snapshot
+			},
+			want: session.ErrAttestationStepUpRequired,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := quotaResolver(t, func() time.Time { return policyTestNow })
+			featureID := test.feature
+			if featureID == "" {
+				featureID = "assistant"
+			}
+			_, resolveErr := resolver.ResolveQuota(
+				context.Background(), test.build(), featureID, quotaAuthorization("premium"),
+				quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+			)
+			if !errors.Is(resolveErr, test.want) {
+				t.Fatalf("ResolveQuota() error = %v, want %v", resolveErr, test.want)
+			}
+		})
+	}
+
+	resolver := quotaResolver(t, func() time.Time { return policyTestNow })
+	if _, err := resolver.ResolveQuota(
+		context.Background(), nil, "assistant", quotaAuthorization("premium"),
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("nil snapshot error = %v", err)
+	}
+}
+
+func TestResolverResolveQuotaPropagatesSessionAndAttestationErrors(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.ResolveQuota(
+		context.Background(), policySnapshot(), "assistant", session.Authorization{},
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); !errors.Is(err, session.ErrSessionInvalid) {
+		t.Fatalf("unsealed authorization error = %v", err)
+	}
+
+	resolver = quotaResolver(t, func() time.Time { return policyTestNow })
+	authorization := quotaAuthorization("premium")
+	authorization.AttestationExpiresAt = policyTestNow
+	if _, err := resolver.ResolveQuota(
+		context.Background(), policySnapshot(), "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); !errors.Is(err, session.ErrAttestationRefreshNeeded) {
+		t.Fatalf("stale attestation error = %v", err)
+	}
+}
+
+func TestResolverResolveQuotaPreservesCancellationBeforeClockAndValidation(t *testing.T) {
+	t.Parallel()
+
+	clockCalls := 0
+	validationCalls := 0
+	resolver, err := newResolver(func() time.Time {
+		clockCalls++
+		return policyTestNow
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.validateAuthorization = func(authorization session.Authorization, _ time.Time) (session.Authorization, error) {
+		validationCalls++
+		return authorization, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolver.ResolveQuota(
+		ctx, policySnapshot(), "assistant", quotaAuthorization("premium"),
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled ResolveQuota() error = %v", err)
+	}
+	if clockCalls != 0 || validationCalls != 0 {
+		t.Fatalf("canceled clock/validation calls = %d/%d", clockCalls, validationCalls)
+	}
+}
+
+func TestResolverResolveQuotaUsesOneClockAtExpiryBoundary(t *testing.T) {
+	t.Parallel()
+
+	clockCalls := 0
+	validationCalls := 0
+	resolver, err := newResolver(func() time.Time {
+		clockCalls++
+		if clockCalls == 1 {
+			return policyTestNow.In(time.FixedZone("boundary", 7*60*60))
+		}
+		return policyTestNow.Add(time.Second)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.validateAuthorization = func(authorization session.Authorization, at time.Time) (session.Authorization, error) {
+		validationCalls++
+		if at.Location() != time.UTC || !at.Equal(policyTestNow) {
+			t.Fatalf("validation instant = %s (%s)", at, at.Location())
+		}
+		if !authorization.AccessExpiresAt.After(at) {
+			return session.Authorization{}, session.ErrTokenExpired
+		}
+		return authorization, nil
+	}
+	authorization := quotaAuthorization("premium")
+	authorization.AccessExpiresAt = policyTestNow.Add(time.Nanosecond)
+	authorization.AttestedAt = policyTestNow.Add(-10*time.Minute + time.Nanosecond)
+	if _, err := resolver.ResolveQuota(
+		context.Background(), policySnapshot(), "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	); err != nil {
+		t.Fatalf("boundary ResolveQuota() error = %v", err)
+	}
+	if clockCalls != 1 || validationCalls != 1 {
+		t.Fatalf("boundary clock/validation calls = %d/%d", clockCalls, validationCalls)
+	}
+}
+
+type alternatingQuotaPlanSnapshot struct {
+	fakeSnapshot
+	calls int
+}
+
+func (snapshot *alternatingQuotaPlanSnapshot) LimitPlan(identifier string) (configuration.LimitPlan, bool) {
+	plan, ok := snapshot.fakeSnapshot.LimitPlan(identifier)
+	if !ok {
+		return configuration.LimitPlan{}, false
+	}
+	snapshot.calls++
+	plan = cloneLimitPlan(plan)
+	if snapshot.calls%2 == 0 {
+		plan.Limits[0].Maximum++
+	}
+	return plan, true
+}
+
+func quotaResolver(t *testing.T, now func() time.Time) *Resolver {
+	t.Helper()
+	resolver, err := newResolver(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.validateAuthorization = func(authorization session.Authorization, _ time.Time) (session.Authorization, error) {
+		return authorization, nil
+	}
+	return resolver
+}
+
+func quotaLogicalID(t *testing.T) requestidentity.LogicalID {
+	t.Helper()
+	ctx, err := requestidentity.NewContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicalID, ok := requestidentity.FromContext(ctx)
+	if !ok {
+		t.Fatal("logical request identity missing")
+	}
+	return logicalID
+}
+
+func quotaAuthorization(plan string) session.Authorization {
+	input := policyInput(plan)
+	return session.Authorization{
+		OrganizationID: input.authorization.organizationID, ApplicationID: input.authorization.applicationID,
+		EnvironmentID: input.authorization.environmentID, EnvironmentKind: input.environment.Kind,
+		ApplicationUserID: input.authorization.userID, InstallationID: input.authorization.installationID,
+		InstallationPlatform: input.authorization.installationPlatform,
+		SessionGrantID:       "sgr_00000000000000000000000000",
+		PolicyRevisionID:     input.authorization.policyRevisionID,
+		IdentityProvider:     input.authorization.identityProvider,
+		DPoPJKT:              strings.Repeat("A", 43),
+		TrustLevel:           input.authorization.trustLevel,
+		AttestationProvider:  input.authorization.attestationProvider,
+		NormalizedClaims:     cloneClaims(input.authorization.claims),
+		IdentityExpiresAt:    input.authorization.identityExpiresAt,
+		AttestedAt:           input.authorization.attestedAt,
+		AttestationExpiresAt: input.authorization.attestationExpiresAt,
+		AccessExpiresAt:      input.authorization.accessExpiresAt,
+	}
+}
+
 type fakeSnapshot struct {
 	revision     string
 	environment  string
