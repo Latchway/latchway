@@ -883,6 +883,12 @@ func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, 
 	}
 	if provider == "debug" {
 		selection["secretRef"] = "secret/debug-attestation-public-keys"
+	} else if provider == "app_attest" {
+		selection["appAttest"] = map[string]any{
+			"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
+			"environment": "development", "allowedValidationCategories": []any{1},
+			"allowedBundleVersions": []any{"1.0"},
+		}
 	}
 	compiledDocument, err := json.Marshal(map[string]any{"spec": sessionTestCompiledSpec(
 		[]any{map[string]any{"id": "firebase", "type": "firebase"}},

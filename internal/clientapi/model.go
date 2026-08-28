@@ -75,6 +75,14 @@ func newEvidencePayload(value map[string]any) (EvidencePayload, error) {
 	return EvidencePayload{material: &evidencePayloadMaterial{encoded: append([]byte(nil), encoded...)}}, nil
 }
 
+// NewEvidencePayload creates the same bounded, immutable provider payload used
+// by the HTTP parser. Trusted in-process coordinators and integration tests can
+// therefore exercise the exact exchange boundary without bypassing payload
+// size, JSON-shape, or defensive-copy validation.
+func NewEvidencePayload(value map[string]any) (EvidencePayload, error) {
+	return newEvidencePayload(value)
+}
+
 // Object returns a defensive copy for a trusted provider verifier.
 func (payload EvidencePayload) Object() (map[string]any, error) {
 	if payload.material == nil {

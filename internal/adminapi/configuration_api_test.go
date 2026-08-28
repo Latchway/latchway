@@ -209,7 +209,7 @@ func configurationObjectForAPI(t *testing.T, description string) map[string]any 
 		"metadata":{"organization":"example","application":"habits","environment":"production"},
 		"spec":{
 			"identityProviders":[{"id":"firebase","type":"firebase","projectId":"habits-production"}],
-			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required"}}}],
+			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required","appAttest":{"appIdPrefix":"TEAM1234","bundleId":"com.example.habits","environment":"production","allowedValidationCategories":[1],"allowedBundleVersions":["1.0"]}}}}],
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
 			"models":[{"id":"fast","upstream":"primary","upstreamModel":"configured-fast-model"}],
 			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","window":"1d","maximum":5,"scope":["user","feature"]}]}],

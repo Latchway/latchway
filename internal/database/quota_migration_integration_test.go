@@ -92,7 +92,7 @@ func TestMigratorPostgreSQLQuotaIdentityUpgradeFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repaired quota migration status: %v", err)
 	}
-	if current != 12 || available != 12 {
+	if current != 13 || available != 13 {
 		t.Fatalf("schema versions after repaired upgrade current=%d available=%d", current, available)
 	}
 }
@@ -189,7 +189,7 @@ func TestMigratorPostgreSQLLogicalRequestFingerprintUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fingerprint migration status: %v", err)
 	}
-	if current != 12 || available != 12 {
+	if current != 13 || available != 13 {
 		t.Fatalf("fingerprint schema versions current=%d available=%d", current, available)
 	}
 }
@@ -231,7 +231,7 @@ func TestMigratorPostgreSQLSecretNameContractUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read rejected secret-name migration status: %v", err)
 	}
-	if current != 9 || available != 12 {
+	if current != 9 || available != 13 {
 		t.Fatalf("rejected secret-name migration status current=%d available=%d", current, available)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -270,7 +270,7 @@ func TestMigratorPostgreSQLSecretNameContractUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current != 12 || available != 12 {
+	if current != 13 || available != 13 {
 		t.Fatalf("secret-name schema versions current=%d available=%d", current, available)
 	}
 }
@@ -312,7 +312,7 @@ func TestMigratorPostgreSQLAuditIndeterminateOutcomeUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current != 12 || available != 12 {
+	if current != 13 || available != 13 {
 		t.Fatalf("audit-outcome schema versions current=%d available=%d", current, available)
 	}
 }

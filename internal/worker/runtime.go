@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	defaultInterval         = 30 * time.Second
-	defaultRunTimeout       = 10 * time.Second
-	defaultQuotaBatchSize   = 100
-	defaultReplayBatchSize  = 1_000
-	defaultMaxBatchesPerRun = 4
+	defaultInterval             = 30 * time.Second
+	defaultRunTimeout           = 10 * time.Second
+	defaultQuotaBatchSize       = 100
+	defaultReplayBatchSize      = 1_000
+	defaultAttestationBatchSize = 100
+	defaultMaxBatchesPerRun     = 4
 )
 
 // QuotaExpirer is the narrow quota-maintenance capability used by Runtime.
@@ -24,6 +25,12 @@ type QuotaExpirer interface {
 // ReplayCleaner is the narrow DPoP replay-maintenance capability used by
 // Runtime.
 type ReplayCleaner interface {
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+// AttestationCleaner is the narrow App Attest state-maintenance capability
+// used by Runtime.
+type AttestationCleaner interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
@@ -40,34 +47,39 @@ type TickerFactory func(time.Duration) Ticker
 // Config defines a bounded maintenance runtime. Zero scheduling and batch
 // values select conservative production defaults.
 type Config struct {
-	Quotas  QuotaExpirer
-	Replays ReplayCleaner
-	Logger  *slog.Logger
+	Quotas       QuotaExpirer
+	Replays      ReplayCleaner
+	Attestations AttestationCleaner
+	Logger       *slog.Logger
 
-	Interval        time.Duration
-	RunTimeout      time.Duration
-	QuotaBatchSize  int
-	ReplayBatchSize int
-	MaxBatches      int
+	Interval             time.Duration
+	RunTimeout           time.Duration
+	QuotaBatchSize       int
+	ReplayBatchSize      int
+	AttestationBatchSize int
+	MaxBatches           int
 
 	Now       func() time.Time
 	NewTicker TickerFactory
 }
 
 // Runtime continuously recovers abandoned quota reservations and removes
-// expired DPoP replay digests. A job failure is non-fatal: it is recorded using
-// a redaction-safe code and retried on the next interval. Construction errors
-// and unexpected runtime exits remain fatal to the process orchestrator.
+// expired DPoP replay digests and App Attest maintenance state. A job failure
+// is non-fatal: it is recorded using a redaction-safe code and retried on the
+// next interval. Construction errors and unexpected runtime exits remain fatal
+// to the process orchestrator.
 type Runtime struct {
-	quotas  QuotaExpirer
-	replays ReplayCleaner
-	logger  *slog.Logger
+	quotas       QuotaExpirer
+	replays      ReplayCleaner
+	attestations AttestationCleaner
+	logger       *slog.Logger
 
-	interval        time.Duration
-	runTimeout      time.Duration
-	quotaBatchSize  int
-	replayBatchSize int
-	maxBatches      int
+	interval             time.Duration
+	runTimeout           time.Duration
+	quotaBatchSize       int
+	replayBatchSize      int
+	attestationBatchSize int
+	maxBatches           int
 
 	now       func() time.Time
 	newTicker TickerFactory
@@ -80,6 +92,9 @@ func New(config Config) (*Runtime, error) {
 	}
 	if config.Replays == nil {
 		return nil, errors.New("worker replay cleaner is nil")
+	}
+	if config.Attestations == nil {
+		return nil, errors.New("worker attestation cleaner is nil")
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -96,6 +111,9 @@ func New(config Config) (*Runtime, error) {
 	if config.ReplayBatchSize == 0 {
 		config.ReplayBatchSize = defaultReplayBatchSize
 	}
+	if config.AttestationBatchSize == 0 {
+		config.AttestationBatchSize = defaultAttestationBatchSize
+	}
 	if config.MaxBatches == 0 {
 		config.MaxBatches = defaultMaxBatchesPerRun
 	}
@@ -108,15 +126,18 @@ func New(config Config) (*Runtime, error) {
 	if config.Interval <= 0 || config.RunTimeout <= 0 ||
 		config.QuotaBatchSize < 1 || config.QuotaBatchSize > 500 ||
 		config.ReplayBatchSize < 1 || config.ReplayBatchSize > 10_000 ||
+		config.AttestationBatchSize < 1 || config.AttestationBatchSize > 1_000 ||
 		config.MaxBatches < 1 || config.MaxBatches > 100 {
 		return nil, errors.New("worker scheduling or batch configuration is invalid")
 	}
 
 	return &Runtime{
-		quotas: config.Quotas, replays: config.Replays, logger: config.Logger,
+		quotas: config.Quotas, replays: config.Replays,
+		attestations: config.Attestations, logger: config.Logger,
 		interval: config.Interval, runTimeout: config.RunTimeout,
 		quotaBatchSize: config.QuotaBatchSize, replayBatchSize: config.ReplayBatchSize,
-		maxBatches: config.MaxBatches, now: config.Now, newTicker: config.NewTicker,
+		attestationBatchSize: config.AttestationBatchSize,
+		maxBatches:           config.MaxBatches, now: config.Now, newTicker: config.NewTicker,
 	}, nil
 }
 
@@ -164,11 +185,16 @@ func (runtime *Runtime) runPass(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	before := runtime.now().UTC()
 	runtime.runQuotaExpiry(ctx)
 	if ctx.Err() != nil {
 		return
 	}
-	runtime.runReplayCleanup(ctx)
+	runtime.runReplayCleanup(ctx, before)
+	if ctx.Err() != nil {
+		return
+	}
+	runtime.runAttestationCleanup(ctx, before)
 }
 
 func (runtime *Runtime) runQuotaExpiry(ctx context.Context) {
@@ -177,14 +203,23 @@ func (runtime *Runtime) runQuotaExpiry(ctx context.Context) {
 	})
 }
 
-func (runtime *Runtime) runReplayCleanup(ctx context.Context) {
-	before := runtime.now().UTC()
+func (runtime *Runtime) runReplayCleanup(ctx context.Context, before time.Time) {
 	if before.IsZero() {
 		runtime.logFailure(ctx, "dpop_replay_cleanup", 0, 0, "invalid_clock")
 		return
 	}
 	runtime.runBatches(ctx, "dpop_replay_cleanup", runtime.replayBatchSize, func(runCtx context.Context) (int64, error) {
 		return runtime.replays.DeleteExpired(runCtx, before, runtime.replayBatchSize)
+	})
+}
+
+func (runtime *Runtime) runAttestationCleanup(ctx context.Context, before time.Time) {
+	if before.IsZero() {
+		runtime.logFailure(ctx, "attestation_state_cleanup", 0, 0, "invalid_clock")
+		return
+	}
+	runtime.runBatches(ctx, "attestation_state_cleanup", runtime.attestationBatchSize, func(runCtx context.Context) (int64, error) {
+		return runtime.attestations.DeleteExpired(runCtx, before, runtime.attestationBatchSize)
 	})
 }
 

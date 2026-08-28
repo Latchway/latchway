@@ -134,7 +134,14 @@ func TestRefreshUsesCurrentActivePolicyPostgreSQL(t *testing.T) {
 			identityProviders: refreshIdentityProviders("firebase"),
 			attestationPolicies: refreshAttestationPolicies(map[string]any{
 				"id": "native", "maxAge": "10m", "platforms": map[string]any{
-					"ios": map[string]any{"provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified"},
+					"ios": map[string]any{
+						"provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified",
+						"appAttest": map[string]any{
+							"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
+							"environment": "development", "allowedValidationCategories": []any{1},
+							"allowedBundleVersions": []any{"1.0"},
+						},
+					},
 				},
 			}),
 			wantErr: ErrAttestationStepUpRequired,

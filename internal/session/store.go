@@ -240,6 +240,9 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 	if err != nil {
 		return IssuedSession{}, err
 	}
+	if err := linkAppAttestKey(ctx, tx, installation.ID, input, now); err != nil {
+		return IssuedSession{}, err
+	}
 	if trustChanged {
 		if err := revokeInstallationSessionsForTrustChange(ctx, tx, installation.ID, now); err != nil {
 			return IssuedSession{}, err
@@ -297,6 +300,54 @@ func (store *Store) Exchange(ctx context.Context, input ExchangeInput) (IssuedSe
 		RefreshExpiresAt: refreshExpiresAt, GrantID: grantID, Installation: installation,
 		Trust: Trust{Provider: input.attestation.Provider, Level: input.attestation.TrustLevel, VerifiedAt: input.attestation.VerifiedAt, ExpiresAt: input.attestation.ExpiresAt},
 	}, nil
+}
+
+// linkAppAttestKey completes the two-phase App Attest lifecycle in the same
+// transaction that creates the installation and session grant. The sealed
+// verifier result is the only source of provider key identity; every other
+// predicate is reconstructed from the authoritative challenge. A key may be
+// linked repeatedly only to the exact same installation.
+func linkAppAttestKey(ctx context.Context, tx pgx.Tx, installationID string, input ExchangeInput, now time.Time) error {
+	if input.attestation.Provider != "app_attest" {
+		return nil
+	}
+	keyID, ok := input.attestation.AppAttestKeyID()
+	if !ok || id.Validate(installationID, id.Installation) != nil || now.IsZero() {
+		return ErrSessionInvalid
+	}
+	command, err := tx.Exec(ctx, `
+		UPDATE attestation_keys
+		SET installation_id = $1,
+		    linked_at = CASE
+		        WHEN linked_at IS NULL THEN GREATEST(created_at, transaction_timestamp(), $10)
+		        ELSE linked_at
+		    END,
+		    updated_at = GREATEST(updated_at, transaction_timestamp(), $10)
+		WHERE provider = 'app_attest'
+		  AND provider_key_hash = $2
+		  AND organization_id = $3
+		  AND application_id = $4
+		  AND environment_id = $5
+		  AND application_user_id = $6
+		  AND binding_environment = $7
+		  AND platform = $8
+		  AND dpop_jkt = $9
+		  AND status = 'active'
+		  AND (
+		      (installation_id IS NULL AND linked_at IS NULL)
+		      OR (installation_id = $1 AND linked_at IS NOT NULL)
+		  )
+	`, installationID, keyID[:], input.challenge.OrganizationID,
+		input.challenge.Binding.ApplicationID, input.challenge.EnvironmentID,
+		input.challenge.Binding.PrincipalID, input.challenge.Binding.Environment,
+		input.challenge.Binding.Platform, input.challenge.Binding.DPoPJKT, now)
+	if err != nil {
+		return fmt.Errorf("link App Attest key to installation: %w", err)
+	}
+	if command.RowsAffected() != 1 {
+		return ErrSessionInvalid
+	}
+	return nil
 }
 
 func challengeAttestationAllows(policy ChallengeAttestationPolicy, result attestation.Result, now time.Time) bool {

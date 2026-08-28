@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -66,12 +68,16 @@ type Result struct {
 	NormalizedSignals map[string]any
 	EvidenceHash      [sha256.Size]byte
 
-	bindingHash [sha256.Size]byte
-	seal        [sha256.Size]byte
+	bindingHash    [sha256.Size]byte
+	appAttestKeyID [sha256.Size]byte
+	seal           [sha256.Size]byte
 }
 
 func (result Result) validate() error {
 	if !providerPattern.MatchString(result.Provider) || !trustLevelPattern.MatchString(result.TrustLevel) || result.VerifiedAt.IsZero() || !result.ExpiresAt.After(result.VerifiedAt) || result.NormalizedSignals == nil || result.EvidenceHash == ([sha256.Size]byte{}) || result.bindingHash == ([sha256.Size]byte{}) {
+		return ErrInvalid
+	}
+	if (result.Provider == appAttestProvider) != (result.appAttestKeyID != ([sha256.Size]byte{})) {
 		return ErrInvalid
 	}
 	encoded, err := json.Marshal(result.NormalizedSignals)
@@ -86,9 +92,22 @@ func (result Result) validate() error {
 }
 
 func newResult(provider, trustLevel string, verifiedAt, expiresAt time.Time, signals map[string]any, evidenceHash, bindingHash [sha256.Size]byte) (Result, error) {
+	return newResultWithAppAttestKeyID(
+		provider, trustLevel, verifiedAt, expiresAt, signals, evidenceHash, bindingHash,
+		[sha256.Size]byte{},
+	)
+}
+
+func newResultWithAppAttestKeyID(
+	provider, trustLevel string,
+	verifiedAt, expiresAt time.Time,
+	signals map[string]any,
+	evidenceHash, bindingHash, appAttestKeyID [sha256.Size]byte,
+) (Result, error) {
 	result := Result{
 		Provider: provider, TrustLevel: trustLevel, VerifiedAt: verifiedAt.UTC(), ExpiresAt: expiresAt.UTC(),
 		NormalizedSignals: signals, EvidenceHash: evidenceHash, bindingHash: bindingHash,
+		appAttestKeyID: appAttestKeyID,
 	}
 	seal, err := resultSeal(result)
 	if err != nil {
@@ -120,7 +139,10 @@ func (result Result) ValidatedSnapshot(expectedBindingHash [sha256.Size]byte, no
 	if !ok {
 		return Result{}, ErrInvalid
 	}
-	return newResult(result.Provider, result.TrustLevel, result.VerifiedAt, result.ExpiresAt, signals, result.EvidenceHash, result.bindingHash)
+	return newResultWithAppAttestKeyID(
+		result.Provider, result.TrustLevel, result.VerifiedAt, result.ExpiresAt,
+		signals, result.EvidenceHash, result.bindingHash, result.appAttestKeyID,
+	)
 }
 
 func resultSeal(result Result) ([sha256.Size]byte, error) {
@@ -137,7 +159,18 @@ func resultSeal(result Result) ([sha256.Size]byte, error) {
 	payload.WriteByte(0)
 	payload.Write(result.EvidenceHash[:])
 	payload.Write(result.bindingHash[:])
+	payload.Write(result.appAttestKeyID[:])
 	return sha256.Sum256(payload.Bytes()), nil
+}
+
+// Format and LogValue prevent private verifier state and provider evidence
+// metadata from being traversed by diagnostic or structured loggers.
+func (Result) Format(state fmt.State, _ rune) {
+	_, _ = io.WriteString(state, "attestation.Result{[REDACTED]}")
+}
+
+func (Result) LogValue() slog.Value {
+	return slog.StringValue("attestation.Result{[REDACTED]}")
 }
 
 var trustLevelPattern = regexp.MustCompile(`^(none|identity_only|web_risk_verified|app_verified|device_verified|strong_device_verified|debug)$`)

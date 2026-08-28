@@ -344,7 +344,15 @@ func applyDefaults(root map[string]any) {
 				continue
 			}
 			setDefault(selection, "dangerousAllowInProduction", false)
-			setDefault(selection, "minimumTrustLevel", defaultTrustLevel(stringValue(selection, "provider")))
+			minimumTrust := defaultTrustLevel(stringValue(selection, "provider"))
+			if playIntegrity := objectValue(selection, "playIntegrity"); len(playIntegrity) != 0 {
+				if stringValue(playIntegrity, "minimumDeviceIntegrity") == "strong" {
+					minimumTrust = "strong_device_verified"
+				} else {
+					minimumTrust = "device_verified"
+				}
+			}
+			setDefault(selection, "minimumTrustLevel", minimumTrust)
 		}
 	}
 	for _, upstream := range objectArray(spec, "upstreams") {

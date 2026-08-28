@@ -90,6 +90,17 @@ type AdminUser struct {
 	PasswordResetRequired bool               `db:"password_reset_required" json:"password_reset_required"`
 }
 
+type AppAttestKeyCommitReceipt struct {
+	CommitToken      []byte             `db:"commit_token" json:"commit_token"`
+	OrganizationID   string             `db:"organization_id" json:"organization_id"`
+	ApplicationID    string             `db:"application_id" json:"application_id"`
+	EnvironmentID    string             `db:"environment_id" json:"environment_id"`
+	AttestationKeyID string             `db:"attestation_key_id" json:"attestation_key_id"`
+	SignCount        int64              `db:"sign_count" json:"sign_count"`
+	CommittedAt      pgtype.Timestamptz `db:"committed_at" json:"committed_at"`
+	ExpiresAt        pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+}
+
 type Application struct {
 	ApplicationID  string             `db:"application_id" json:"application_id"`
 	OrganizationID string             `db:"organization_id" json:"organization_id"`
@@ -131,20 +142,33 @@ type AttestationEvent struct {
 }
 
 type AttestationKey struct {
-	AttestationKeyID string             `db:"attestation_key_id" json:"attestation_key_id"`
-	OrganizationID   string             `db:"organization_id" json:"organization_id"`
-	ApplicationID    string             `db:"application_id" json:"application_id"`
-	EnvironmentID    string             `db:"environment_id" json:"environment_id"`
-	InstallationID   string             `db:"installation_id" json:"installation_id"`
-	Provider         string             `db:"provider" json:"provider"`
-	ProviderKeyID    *string            `db:"provider_key_id" json:"provider_key_id"`
-	PublicKey        []byte             `db:"public_key" json:"public_key"`
-	Environment      string             `db:"environment" json:"environment"`
-	SignCount        int64              `db:"sign_count" json:"sign_count"`
-	Status           string             `db:"status" json:"status"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	RevokedAt        pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	AttestationKeyID      string             `db:"attestation_key_id" json:"attestation_key_id"`
+	OrganizationID        string             `db:"organization_id" json:"organization_id"`
+	ApplicationID         string             `db:"application_id" json:"application_id"`
+	EnvironmentID         string             `db:"environment_id" json:"environment_id"`
+	InstallationID        *string            `db:"installation_id" json:"installation_id"`
+	Provider              string             `db:"provider" json:"provider"`
+	ProviderKeyID         *string            `db:"provider_key_id" json:"provider_key_id"`
+	PublicKey             []byte             `db:"public_key" json:"public_key"`
+	Environment           string             `db:"environment" json:"environment"`
+	SignCount             int64              `db:"sign_count" json:"sign_count"`
+	Status                string             `db:"status" json:"status"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	RevokedAt             pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	ApplicationUserID     string             `db:"application_user_id" json:"application_user_id"`
+	BindingEnvironment    string             `db:"binding_environment" json:"binding_environment"`
+	Platform              string             `db:"platform" json:"platform"`
+	DpopJkt               string             `db:"dpop_jkt" json:"dpop_jkt"`
+	ProviderKeyHash       []byte             `db:"provider_key_hash" json:"provider_key_hash"`
+	AppIDHash             []byte             `db:"app_id_hash" json:"app_id_hash"`
+	LastAssertionHash     []byte             `db:"last_assertion_hash" json:"last_assertion_hash"`
+	ExtensionsPresent     *bool              `db:"extensions_present" json:"extensions_present"`
+	ValidationCategory    *int64             `db:"validation_category" json:"validation_category"`
+	BundleVersion         *string            `db:"bundle_version" json:"bundle_version"`
+	AttestedAtUnixSeconds *int64             `db:"attested_at_unix_seconds" json:"attested_at_unix_seconds"`
+	AttestedAtNanosecond  *int32             `db:"attested_at_nanosecond" json:"attested_at_nanosecond"`
+	LinkedAt              pgtype.Timestamptz `db:"linked_at" json:"linked_at"`
 }
 
 type AuditEvent struct {

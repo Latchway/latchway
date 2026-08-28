@@ -366,6 +366,136 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 }
 
+func TestClientCoordinatorAppAttestChallengePostgreSQL(t *testing.T) {
+	pool, ctx := isolatedSessionPool(t)
+	now := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
+	fixture := createChallengeFixture(t, ctx, pool)
+	masterKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x67}, 32))
+	envelope, err := secrets.NewEnvironmentMasterKey(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminUserID := insertClientHTTPAdministrator(t, ctx, pool, fixture.organizationID, now)
+	identityPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityPublicDER, err := x509.MarshalPKIXPublicKey(&identityPrivateKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertClientHTTPEncryptedSecret(
+		t, ctx, pool, envelope, fixture, adminUserID, "identity-public-key",
+		pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: identityPublicDER}), now.Add(-time.Minute),
+	)
+	activateClientHTTPConfigurationWithAttestation(
+		t, ctx, pool, fixture, adminUserID, now,
+		map[string]any{
+			"provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified",
+			"appAttest": map[string]any{
+				"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
+				"environment": "development", "allowedValidationCategories": []any{1},
+				"allowedBundleVersions": []any{"1.0"},
+			},
+		},
+		map[string]struct{}{"identity-public-key": {}},
+	)
+	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configurationStore, err := configuration.NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var protector *identity.SubjectProtector
+	if err := envelope.UseIdentitySubjectHMACKey(func(key []byte) error {
+		protector, err = identity.NewSubjectProtector(key)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	userStore, err := identity.NewUserStore(pool, protector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore, err := NewStore(StoreConfig{
+		Pool: pool, AccessTokens: unusedAccessIssuer{}, Configuration: configurationStore, Now: nowClock(now),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := jwt.MapClaims{
+		"iss": clientHTTPIdentityIssuer, "aud": clientHTTPIdentityAudience,
+		"sub": "external-app-attest-user", "iat": now.Add(-time.Minute).Unix(), "exp": now.Add(time.Hour).Unix(),
+	}
+	identityToken, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(identityPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dpopKey, _, _ := newChallengeKey(t)
+	target := clientHTTPURL(t, "/client/v1/session-challenges")
+	challengeInput := func(label string) clientapi.ChallengeInput {
+		proof := signedSessionDPoP(t, dpopKey, http.MethodPost, target, now, label)
+		return clientapi.ChallengeInput{
+			Metadata: clientapi.RequestMetadata{
+				HTTPMethod: http.MethodPost, TargetURL: *target,
+				DPoPProof: clientapi.NewSensitiveString(proof.value),
+			},
+			ApplicationID: fixture.applicationID, Environment: "development",
+			IdentityProvider: "custom", IdentityToken: clientapi.NewSensitiveString(identityToken), Platform: "ios",
+		}
+	}
+	var typedNilKeys *attestation.PostgreSQLAppAttestKeyStore
+	broken, err := NewClientCoordinator(ClientCoordinatorConfig{
+		Pool: pool, Configuration: configurationStore, Users: userStore, Sessions: sessionStore,
+		AccessTokens: &AccessTokenVerifier{}, Secrets: secretStore, AppAttestKeys: typedNilKeys, Now: nowClock(now),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = broken.CreateChallenge(ctx, challengeInput("app-attest-preflight-failure"))
+	var failure *clientapi.DependencyError
+	if !errors.As(err, &failure) || failure.Code != "server_not_ready" {
+		t.Fatalf("typed nil App Attest preflight error = %v", err)
+	}
+	var users int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM application_users`).Scan(&users); err != nil || users != 1 {
+		// createChallengeFixture owns the one pre-existing user; identity.Resolve
+		// must not add the external subject before verifier preflight succeeds.
+		t.Fatalf("preflight failure application-user count=%d err=%v", users, err)
+	}
+	appAttestKeys, err := attestation.NewPostgreSQLAppAttestKeyStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := NewClientCoordinator(ClientCoordinatorConfig{
+		Pool: pool, Configuration: configurationStore, Users: userStore, Sessions: sessionStore,
+		AccessTokens: &AccessTokenVerifier{}, Secrets: secretStore, AppAttestKeys: appAttestKeys, Now: nowClock(now),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := coordinator.CreateChallenge(ctx, challengeInput("app-attest-preflight-success"))
+	if err != nil {
+		t.Fatalf("create non-debug App Attest challenge: %v", err)
+	}
+	if challenge.Attestation.Provider != "app_attest" || challenge.Attestation.Mode != "required" ||
+		challenge.Attestation.ProviderOptions != nil {
+		t.Fatalf("App Attest challenge = %#v", challenge.Attestation)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM application_users`).Scan(&users); err != nil || users != 2 {
+		t.Fatalf("successful App Attest challenge user count=%d err=%v", users, err)
+	}
+	_, err = coordinator.ExchangeSession(ctx, clientapi.ExchangeInput{
+		ChallengeID: challenge.ChallengeID,
+		Attestation: clientapi.AttestationEvidence{Provider: "play_integrity"},
+	})
+	if !errors.As(err, &failure) || failure.Code != "attestation_invalid" {
+		t.Fatalf("provider-mismatched exchange error = %v", err)
+	}
+}
+
 // This integration test owns only the session lifecycle. The feature-quota
 // dependency is required by the complete client transport but must remain
 // unreachable in this fixture.
@@ -456,6 +586,24 @@ func insertClientHTTPEncryptedSecret(t *testing.T, ctx context.Context, pool *pg
 }
 
 func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fixture challengeFixture, adminUserID string, now time.Time) string {
+	return activateClientHTTPConfigurationWithAttestation(t, ctx, pool, fixture, adminUserID, now, map[string]any{
+		"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
+		"secretRef": "secret/debug-attestation-public-keys",
+	}, map[string]struct{}{
+		"identity-public-key": {}, "debug-attestation-public-keys": {},
+	})
+}
+
+func activateClientHTTPConfigurationWithAttestation(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	fixture challengeFixture,
+	adminUserID string,
+	now time.Time,
+	selection map[string]any,
+	secretNames map[string]struct{},
+) string {
 	t.Helper()
 	document, err := json.Marshal(map[string]any{
 		"apiVersion": "latchway.dev/v1alpha1",
@@ -472,10 +620,7 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 			}},
 			"attestationPolicies": []any{map[string]any{
 				"id": "native", "maxAge": "10m",
-				"platforms": map[string]any{"ios": map[string]any{
-					"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
-					"secretRef": "secret/debug-attestation-public-keys",
-				}},
+				"platforms": map[string]any{"ios": selection},
 			}},
 			"upstreams": []any{map[string]any{
 				"id": "primary", "type": "openai_compatible", "baseUrl": "https://api.example.test/v1",
@@ -517,9 +662,7 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 		},
 		OrganizationSlug: "challenge-test", ApplicationSlug: "challenge-app",
 		EnvironmentSlug: "development", EnvironmentKind: "development",
-		SecretNames: map[string]struct{}{
-			"identity-public-key": {}, "debug-attestation-public-keys": {},
-		},
+		SecretNames: secretNames,
 	}, now)
 	if !report.Valid || len(compiled) == 0 {
 		t.Fatalf("client HTTP configuration did not compile: %+v", report.Issues)

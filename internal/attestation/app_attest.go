@@ -12,6 +12,9 @@ import (
 	"encoding/binary"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -65,14 +68,23 @@ type AppAttestStoredKey struct {
 	PrincipalID            string
 	DPoPJKT                string
 	Counter                uint32
-	ExtensionsPresent      bool
-	ValidationCategory     uint32
-	BundleVersion          string
-	AttestedAt             time.Time
+	// LastAssertionHash binds the current counter to the exact assertion bytes
+	// and challenge binding that advanced it. A same-counter retry is accepted
+	// only when this digest matches, which recovers safely from a later session
+	// transaction failure without accepting a different assertion replay.
+	LastAssertionHash  [sha256.Size]byte
+	ExtensionsPresent  bool
+	ValidationCategory uint32
+	BundleVersion      string
+	AttestedAt         time.Time
 }
 
 func (AppAttestStoredKey) String() string   { return "[REDACTED]" }
 func (AppAttestStoredKey) GoString() string { return "attestation.AppAttestStoredKey{[REDACTED]}" }
+func (AppAttestStoredKey) Format(state fmt.State, _ rune) {
+	_, _ = io.WriteString(state, "[REDACTED]")
+}
+func (AppAttestStoredKey) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
 
 // AppAttestKeyTransaction receives an owned snapshot. Returning nil commits
 // the returned state; returning an error must leave the stored state unchanged.
@@ -141,7 +153,7 @@ func newAppAttestVerifier(config AppAttestConfig, roots *x509.CertPool) (*AppAtt
 		!appAttestAppIDPrefixPattern.MatchString(config.AppIDPrefix) ||
 		!validAppAttestBundleID(config.BundleID) ||
 		(config.AttestationEnvironment != AppAttestDevelopment && config.AttestationEnvironment != AppAttestProduction) ||
-		config.Store == nil || roots == nil {
+		nilPlayIntegrityDependency(config.Store) || roots == nil {
 		return nil, ErrConfiguration
 	}
 	if config.Now == nil {
@@ -243,10 +255,22 @@ func (verifier *AppAttestVerifier) Verify(ctx context.Context, evidence Evidence
 		signals["validation_category"] = int64(state.ValidationCategory)
 		signals["bundle_version"] = state.BundleVersion
 	}
-	return newResult(
+	return newResultWithAppAttestKeyID(
 		appAttestProvider, "app_verified", now, now.Add(verifier.resultLifetime),
-		signals, evidenceHash, bindingHash,
+		signals, evidenceHash, bindingHash, keyID,
 	)
+}
+
+// AppAttestKeyID returns the Apple credential identifier only from a valid,
+// sealed App Attest result. Session persistence uses this narrow accessor to
+// link the pre-session key row to the exact installation without trusting a
+// caller-controlled signal map.
+func (result Result) AppAttestKeyID() ([sha256.Size]byte, bool) {
+	var keyID [sha256.Size]byte
+	if result.Provider != appAttestProvider || result.validate() != nil {
+		return keyID, false
+	}
+	return result.appAttestKeyID, true
 }
 
 func (verifier *AppAttestVerifier) validateBinding(binding Binding) error {
@@ -325,7 +349,7 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 
 	var callbackErr error
 	callbackCount := 0
-	storeErr := verifier.store.TransactAppAttestKey(ctx, keyID, func(_ AppAttestStoredKey, exists bool) (AppAttestStoredKey, error) {
+	storeErr := verifier.store.TransactAppAttestKey(ctx, keyID, func(current AppAttestStoredKey, exists bool) (AppAttestStoredKey, error) {
 		callbackCount++
 		if callbackCount != 1 {
 			callbackErr = ErrAppAttestKeyStore
@@ -336,6 +360,17 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 			return AppAttestStoredKey{}, err
 		}
 		if exists {
+			current = cloneAppAttestStoredKey(current)
+			if validateAppAttestStoredKey(keyID, current) == nil &&
+				sameAppAttestRegistration(current, next) {
+				// Registration is durably committed before the surrounding session
+				// transaction begins. An equivalent verified registration for the
+				// same unused key and immutable scope is therefore a no-op, allowing
+				// recovery from a transient later session failure without abandoning
+				// the Apple key. Preserve its original timestamp and never reset a
+				// used counter.
+				return current, nil
+			}
 			callbackErr = invalid("app attest key registration")
 			return AppAttestStoredKey{}, callbackErr
 		}
@@ -345,6 +380,23 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 		return AppAttestStoredKey{}, err
 	}
 	return cloneAppAttestStoredKey(next), nil
+}
+
+func sameAppAttestRegistration(current, candidate AppAttestStoredKey) bool {
+	return current.Counter == 0 && candidate.Counter == 0 &&
+		current.LastAssertionHash == ([sha256.Size]byte{}) &&
+		candidate.LastAssertionHash == ([sha256.Size]byte{}) &&
+		bytes.Equal(current.PublicKeyX963, candidate.PublicKeyX963) &&
+		subtle.ConstantTimeCompare(current.AppIDHash[:], candidate.AppIDHash[:]) == 1 &&
+		current.AttestationEnvironment == candidate.AttestationEnvironment &&
+		current.ApplicationID == candidate.ApplicationID &&
+		current.EnvironmentID == candidate.EnvironmentID &&
+		current.Platform == candidate.Platform &&
+		current.PrincipalID == candidate.PrincipalID &&
+		current.DPoPJKT == candidate.DPoPJKT &&
+		current.ExtensionsPresent == candidate.ExtensionsPresent &&
+		current.ValidationCategory == candidate.ValidationCategory &&
+		current.BundleVersion == candidate.BundleVersion
 }
 
 func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
@@ -361,6 +413,7 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 	if subtle.ConstantTimeCompare(parsed.rpIDHash[:], verifier.appIDHash[:]) != 1 || !verifier.extensionsAllowed(parsed.extensions) {
 		return AppAttestStoredKey{}, invalid("app attest assertion authenticator data")
 	}
+	assertionHash := appAttestAssertionReplayHash(keyID, object, bindingHash)
 
 	var committed AppAttestStoredKey
 	var callbackErr error
@@ -392,7 +445,7 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 			callbackErr = invalid("app attest assertion scope")
 			return AppAttestStoredKey{}, callbackErr
 		}
-		if parsed.counter == 0 || parsed.counter <= current.Counter {
+		if parsed.counter == 0 || parsed.counter < current.Counter {
 			callbackErr = invalid("app attest assertion counter")
 			return AppAttestStoredKey{}, callbackErr
 		}
@@ -409,7 +462,23 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 			callbackErr = invalid("app attest assertion signature")
 			return AppAttestStoredKey{}, callbackErr
 		}
+		if parsed.counter == current.Counter {
+			if current.LastAssertionHash == ([sha256.Size]byte{}) ||
+				subtle.ConstantTimeCompare(current.LastAssertionHash[:], assertionHash[:]) != 1 ||
+				current.ExtensionsPresent != parsed.extensions.present ||
+				current.ValidationCategory != parsed.extensions.validationCategory ||
+				current.BundleVersion != parsed.extensions.bundleVersion {
+				callbackErr = invalid("app attest assertion counter")
+				return AppAttestStoredKey{}, callbackErr
+			}
+			// The exact assertion and binding already advanced the durable counter.
+			// Return the stored snapshot without a write so the still-unconsumed
+			// session challenge can recover from a later transactional failure.
+			committed = cloneAppAttestStoredKey(current)
+			return cloneAppAttestStoredKey(current), nil
+		}
 		current.Counter = parsed.counter
+		current.LastAssertionHash = assertionHash
 		current.ExtensionsPresent = parsed.extensions.present
 		current.ValidationCategory = parsed.extensions.validationCategory
 		current.BundleVersion = parsed.extensions.bundleVersion
@@ -531,6 +600,25 @@ func appAttestEvidenceHash(kind string, keyID [sha256.Size]byte, object []byte) 
 	return result
 }
 
+func appAttestAssertionReplayHash(
+	keyID [sha256.Size]byte,
+	object []byte,
+	bindingHash [sha256.Size]byte,
+) [sha256.Size]byte {
+	digest := sha256.New()
+	digest.Write([]byte("latchway/app-attest-assertion-retry/v1"))
+	digest.Write([]byte{0})
+	digest.Write(keyID[:])
+	digest.Write(bindingHash[:])
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(object)))
+	digest.Write(length[:])
+	digest.Write(object)
+	var result [sha256.Size]byte
+	copy(result[:], digest.Sum(nil))
+	return result
+}
+
 func normalizeAppAttestStoreError(ctx context.Context, storeErr, callbackErr error, callbackCount int) error {
 	if storeErr == nil {
 		if callbackCount != 1 || callbackErr != nil {
@@ -554,6 +642,7 @@ func validateAppAttestStoredKey(keyID [sha256.Size]byte, key AppAttestStoredKey)
 		!applicationPattern.MatchString(key.ApplicationID) || !environmentPattern.MatchString(key.EnvironmentID) ||
 		!validAppAttestPlatform(key.Platform) || !principalPattern.MatchString(key.PrincipalID) ||
 		validateBase64URL(key.DPoPJKT, sha256.Size, sha256.Size) != nil ||
+		(key.Counter == 0) != (key.LastAssertionHash == ([sha256.Size]byte{})) ||
 		!validAppAttestStoredExtensions(key) ||
 		key.AttestedAt.IsZero() {
 		return ErrInvalid

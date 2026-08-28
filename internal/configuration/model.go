@@ -172,19 +172,57 @@ func (provider IdentityProvider) clone() IdentityProvider {
 // PlatformAttestation is a compiled provider selection for one client
 // platform. Its SecretRef names server-side material but never contains it.
 type PlatformAttestation struct {
-	Provider                   string   `json:"provider"`
-	Mode                       string   `json:"mode"`
-	MinimumTrustLevel          string   `json:"minimumTrustLevel,omitempty"`
-	ApplicationIdentifiers     []string `json:"applicationIdentifiers,omitempty"`
-	AllowedOrigins             []string `json:"allowedOrigins,omitempty"`
-	SecretRef                  string   `json:"secretRef,omitempty"`
-	DangerousAllowInProduction bool     `json:"dangerousAllowInProduction"`
+	Provider                   string                      `json:"provider"`
+	Mode                       string                      `json:"mode"`
+	MinimumTrustLevel          string                      `json:"minimumTrustLevel,omitempty"`
+	ApplicationIdentifiers     []string                    `json:"applicationIdentifiers,omitempty"`
+	AllowedOrigins             []string                    `json:"allowedOrigins,omitempty"`
+	SecretRef                  string                      `json:"secretRef,omitempty"`
+	DangerousAllowInProduction bool                        `json:"dangerousAllowInProduction"`
+	AppAttest                  *AppAttestConfiguration     `json:"appAttest,omitempty"`
+	PlayIntegrity              *PlayIntegrityConfiguration `json:"playIntegrity,omitempty"`
 }
 
 func (selection PlatformAttestation) clone() PlatformAttestation {
 	selection.ApplicationIdentifiers = append([]string(nil), selection.ApplicationIdentifiers...)
 	selection.AllowedOrigins = append([]string(nil), selection.AllowedOrigins...)
+	if selection.AppAttest != nil {
+		configuration := *selection.AppAttest
+		configuration.AllowedValidationCategories = append([]uint32(nil), configuration.AllowedValidationCategories...)
+		configuration.AllowedBundleVersions = append([]string(nil), configuration.AllowedBundleVersions...)
+		selection.AppAttest = &configuration
+	}
+	if selection.PlayIntegrity != nil {
+		configuration := *selection.PlayIntegrity
+		configuration.CertificateSHA256Digests = append([]string(nil), configuration.CertificateSHA256Digests...)
+		selection.PlayIntegrity = &configuration
+	}
 	return selection
+}
+
+// AppAttestConfiguration is the server-owned Apple verifier configuration for
+// one immutable platform selection. It contains no secret material.
+type AppAttestConfiguration struct {
+	AppIDPrefix                 string   `json:"appIdPrefix"`
+	BundleID                    string   `json:"bundleId"`
+	Environment                 string   `json:"environment"`
+	AllowedValidationCategories []uint32 `json:"allowedValidationCategories"`
+	AllowedBundleVersions       []string `json:"allowedBundleVersions"`
+}
+
+// PlayIntegrityConfiguration is the server-owned Google Play verifier
+// configuration. CredentialSource selects a fixed production credential
+// mechanism; SecretRef, when required, remains on PlatformAttestation.
+type PlayIntegrityConfiguration struct {
+	PackageName              string   `json:"packageName"`
+	CloudProjectNumber       int64    `json:"cloudProjectNumber"`
+	CertificateSHA256Digests []string `json:"certificateSha256Digests"`
+	MinimumDeviceIntegrity   string   `json:"minimumDeviceIntegrity"`
+	RequireLicensed          bool     `json:"requireLicensed"`
+	AllowTestingResponses    bool     `json:"allowTestingResponses"`
+	MinimumVersionCode       int64    `json:"minimumVersionCode"`
+	MaximumVersionCode       int64    `json:"maximumVersionCode"`
+	CredentialSource         string   `json:"credentialSource"`
 }
 
 // AttestationPolicy is an immutable typed policy indexed by platform.

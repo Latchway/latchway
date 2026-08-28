@@ -332,7 +332,159 @@
           "items": { "type": "string", "format": "uri", "pattern": "^https://" }
         },
         "secretRef": { "$ref": "#/$defs/SecretRef" },
-        "dangerousAllowInProduction": { "type": "boolean", "default": false }
+        "dangerousAllowInProduction": { "type": "boolean", "default": false },
+        "appAttest": { "$ref": "#/$defs/AppAttestConfiguration" },
+        "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "provider": { "const": "app_attest" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": { "anyOf": [{ "required": ["playIntegrity"] }, { "required": ["secretRef"] }] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "play_integrity" } },
+            "required": ["provider"]
+          },
+          "then": { "not": { "required": ["appAttest"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "app_attest" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["appAttest"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "play_integrity" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["playIntegrity"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "playIntegrity": {
+                "properties": { "credentialSource": { "const": "metadata" } },
+                "required": ["credentialSource"]
+              }
+            },
+            "required": ["playIntegrity"]
+          },
+          "then": { "not": { "required": ["secretRef"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "playIntegrity": {
+                "properties": { "credentialSource": { "const": "service_account" } },
+                "required": ["credentialSource"]
+              }
+            },
+            "required": ["playIntegrity"]
+          },
+          "then": { "required": ["secretRef"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "enum": ["firebase_app_check", "turnstile", "debug"] }
+            },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": { "anyOf": [{ "required": ["appAttest"] }, { "required": ["playIntegrity"] }] }
+          }
+        }
+      ]
+    },
+    "AppAttestConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appIdPrefix",
+        "bundleId",
+        "environment",
+        "allowedValidationCategories",
+        "allowedBundleVersions"
+      ],
+      "properties": {
+        "appIdPrefix": { "type": "string", "pattern": "^[A-Z0-9]{1,64}$" },
+        "bundleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"
+        },
+        "environment": { "enum": ["development", "production"] },
+        "allowedValidationCategories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": { "enum": [1, 2, 3, 4, 5, 6, 10] }
+        },
+        "allowedBundleVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?$"
+          }
+        }
+      }
+    },
+    "PlayIntegrityConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageName",
+        "cloudProjectNumber",
+        "certificateSha256Digests",
+        "minimumDeviceIntegrity",
+        "requireLicensed",
+        "allowTestingResponses",
+        "minimumVersionCode",
+        "maximumVersionCode",
+        "credentialSource"
+      ],
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+        },
+        "cloudProjectNumber": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "certificateSha256Digests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}=?$" }
+        },
+        "minimumDeviceIntegrity": { "enum": ["device", "strong"] },
+        "requireLicensed": { "type": "boolean" },
+        "allowTestingResponses": { "type": "boolean" },
+        "minimumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "maximumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "credentialSource": { "enum": ["metadata", "service_account"] }
       }
     },
     "Upstream": {
@@ -707,8 +859,34 @@
           {
             "id": "native",
             "platforms": {
-              "ios": { "provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified" },
-              "android": { "provider": "play_integrity", "mode": "required", "minimumTrustLevel": "app_verified" }
+              "ios": {
+                "provider": "app_attest",
+                "mode": "required",
+                "minimumTrustLevel": "app_verified",
+                "appAttest": {
+                  "appIdPrefix": "TEAM1234",
+                  "bundleId": "com.example.habits",
+                  "environment": "production",
+                  "allowedValidationCategories": [1],
+                  "allowedBundleVersions": ["1.0"]
+                }
+              },
+              "android": {
+                "provider": "play_integrity",
+                "mode": "required",
+                "minimumTrustLevel": "device_verified",
+                "playIntegrity": {
+                  "packageName": "com.example.habits",
+                  "cloudProjectNumber": 123456789,
+                  "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
+                  "minimumDeviceIntegrity": "device",
+                  "requireLicensed": true,
+                  "allowTestingResponses": false,
+                  "minimumVersionCode": 1,
+                  "maximumVersionCode": 0,
+                  "credentialSource": "metadata"
+                }
+              }
             }
           }
         ],

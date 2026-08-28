@@ -595,10 +595,16 @@ func newAccessRevocationFixture(t *testing.T) accessRevocationFixture {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO attestation_keys (
 			attestation_key_id, organization_id, application_id, environment_id,
-			installation_id, provider, environment, status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, 'debug', 'development', 'active', $6, $6)
+			application_user_id, installation_id, provider, environment,
+			binding_environment, platform, dpop_jkt, status,
+			created_at, updated_at, linked_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, 'debug', 'development',
+			$7, $8, $9, 'active', $10, $10, $10
+		)
 	`, attestationKeyID, principal.OrganizationID, principal.ApplicationID,
-		principal.EnvironmentID, principal.InstallationID, now); err != nil {
+		principal.EnvironmentID, principal.ApplicationUserID, principal.InstallationID,
+		challenge.Binding.Environment, challenge.Binding.Platform, principal.DPoPJKT, now); err != nil {
 		t.Fatalf("create active revocation attestation key: %v", err)
 	}
 	return accessRevocationFixture{

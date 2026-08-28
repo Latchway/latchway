@@ -17,9 +17,11 @@ func TestRuntimeRunsImmediatelyAndBoundsEachPass(t *testing.T) {
 	ticker := newManualTicker()
 	quota := &fakeQuotaExpirer{results: []batchResult{{count: 2}, {count: 2}, {count: 2}, {count: 0}}}
 	replay := &fakeReplayCleaner{results: []batchResult{{count: 3}, {count: 1}, {count: 0}}}
+	attestation := &fakeAttestationCleaner{results: []batchResult{{count: 2}, {count: 2}, {count: 0}}}
 	now := time.Date(2026, time.August, 28, 4, 5, 6, 0, time.UTC)
 	runtime := newTestRuntime(t, Config{
-		Quotas: quota, Replays: replay, QuotaBatchSize: 2, ReplayBatchSize: 3,
+		Quotas: quota, Replays: replay, Attestations: attestation,
+		QuotaBatchSize: 2, ReplayBatchSize: 3, AttestationBatchSize: 2,
 		MaxBatches: 2, Now: func() time.Time { return now },
 		NewTicker: func(time.Duration) Ticker { return ticker },
 	})
@@ -30,16 +32,24 @@ func TestRuntimeRunsImmediatelyAndBoundsEachPass(t *testing.T) {
 
 	quota.waitCalls(t, 2)
 	replay.waitCalls(t, 2)
+	attestation.waitCalls(t, 2)
 	if got := quota.callCount(); got != 2 {
 		t.Fatalf("immediate quota calls = %d, want bounded 2", got)
 	}
 	if got := replay.beforeValues(); len(got) != 2 || !got[0].Equal(now) || !got[1].Equal(now) {
 		t.Fatalf("replay cutoffs = %v, want one stable cutoff %v", got, now)
 	}
+	if got := attestation.beforeValues(); len(got) != 2 || !got[0].Equal(now) || !got[1].Equal(now) {
+		t.Fatalf("attestation cutoffs = %v, want one stable cutoff %v", got, now)
+	}
+	if got := attestation.limitValues(); len(got) != 2 || got[0] != 2 || got[1] != 2 {
+		t.Fatalf("attestation limits = %v, want [2 2]", got)
+	}
 
 	ticker.tick(now.Add(time.Minute))
 	quota.waitCalls(t, 4)
 	replay.waitCalls(t, 3)
+	attestation.waitCalls(t, 3)
 	cancel()
 	if err := waitRuntime(t, done); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -58,11 +68,12 @@ func TestRuntimeRetriesErrorsWithoutLoggingDependencyDetails(t *testing.T) {
 	tickerReady := make(chan struct{})
 	quota := &fakeQuotaExpirer{results: []batchResult{{err: errors.New(sensitiveDetail)}, {count: 0}}}
 	replay := &fakeReplayCleaner{results: []batchResult{{count: 0}, {count: 0}}}
+	attestation := &fakeAttestationCleaner{results: []batchResult{{count: 0}, {count: 0}}}
 	runtime, err := New(Config{
-		Quotas: quota, Replays: replay,
+		Quotas: quota, Replays: replay, Attestations: attestation,
 		Logger:   slog.New(slog.NewJSONHandler(&logs, nil)),
 		Interval: time.Minute, RunTimeout: time.Second,
-		QuotaBatchSize: 2, ReplayBatchSize: 2, MaxBatches: 1,
+		QuotaBatchSize: 2, ReplayBatchSize: 2, AttestationBatchSize: 2, MaxBatches: 1,
 		Now: time.Now, NewTicker: func(time.Duration) Ticker {
 			close(tickerReady)
 			return ticker
@@ -77,6 +88,7 @@ func TestRuntimeRetriesErrorsWithoutLoggingDependencyDetails(t *testing.T) {
 	go func() { done <- runtime.Run(ctx) }()
 	quota.waitCalls(t, 1)
 	replay.waitCalls(t, 1)
+	attestation.waitCalls(t, 1)
 	waitChannel(t, tickerReady, "ticker creation after immediate pass")
 	if got := logs.String(); !strings.Contains(got, `"error_code":"job_failed"`) || strings.Contains(got, sensitiveDetail) {
 		t.Fatalf("unsafe or incomplete worker log = %s", got)
@@ -85,6 +97,7 @@ func TestRuntimeRetriesErrorsWithoutLoggingDependencyDetails(t *testing.T) {
 	ticker.tick(time.Now())
 	quota.waitCalls(t, 2)
 	replay.waitCalls(t, 2)
+	attestation.waitCalls(t, 2)
 	cancel()
 	if err := waitRuntime(t, done); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -101,8 +114,9 @@ func TestRuntimeCancellationStopsAnActiveJobAndSkipsRemainingWork(t *testing.T) 
 		return 0, ctx.Err()
 	})
 	replay := &fakeReplayCleaner{}
+	attestation := &fakeAttestationCleaner{}
 	runtime := newTestRuntime(t, Config{
-		Quotas: quota, Replays: replay,
+		Quotas: quota, Replays: replay, Attestations: attestation,
 		NewTicker: func(time.Duration) Ticker { return newManualTicker() },
 	})
 
@@ -121,6 +135,9 @@ func TestRuntimeCancellationStopsAnActiveJobAndSkipsRemainingWork(t *testing.T) 
 	if got := replay.callCount(); got != 0 {
 		t.Fatalf("replay cleanup calls after cancellation = %d, want 0", got)
 	}
+	if got := attestation.callCount(); got != 0 {
+		t.Fatalf("attestation cleanup calls after cancellation = %d, want 0", got)
+	}
 }
 
 func TestRuntimeTimesOutAJobAndContinuesToTheIndependentJob(t *testing.T) {
@@ -132,11 +149,12 @@ func TestRuntimeTimesOutAJobAndContinuesToTheIndependentJob(t *testing.T) {
 		return 0, ctx.Err()
 	})
 	replay := &fakeReplayCleaner{results: []batchResult{{count: 0}}}
+	attestation := &fakeAttestationCleaner{results: []batchResult{{count: 0}}}
 	runtime, err := New(Config{
-		Quotas: quota, Replays: replay,
+		Quotas: quota, Replays: replay, Attestations: attestation,
 		Logger:   slog.New(slog.NewJSONHandler(&logs, nil)),
 		Interval: time.Hour, RunTimeout: 10 * time.Millisecond,
-		QuotaBatchSize: 1, ReplayBatchSize: 1, MaxBatches: 1,
+		QuotaBatchSize: 1, ReplayBatchSize: 1, AttestationBatchSize: 1, MaxBatches: 1,
 		Now: time.Now, NewTicker: func(time.Duration) Ticker { return newManualTicker() },
 	})
 	if err != nil {
@@ -147,6 +165,7 @@ func TestRuntimeTimesOutAJobAndContinuesToTheIndependentJob(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- runtime.Run(ctx) }()
 	replay.waitCalls(t, 1)
+	attestation.waitCalls(t, 1)
 	cancel()
 	if err := waitRuntime(t, done); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -156,20 +175,200 @@ func TestRuntimeTimesOutAJobAndContinuesToTheIndependentJob(t *testing.T) {
 	}
 }
 
+func TestRuntimeSharesOneUTCCutoffAndOrdersAttestationAfterReplay(t *testing.T) {
+	t.Parallel()
+
+	sourceTime := time.Date(2026, time.August, 28, 11, 12, 13, 14, time.FixedZone("test", 7*60*60))
+	wantCutoff := sourceTime.UTC()
+	nowCalls := 0
+	var calls []string
+	quota := quotaExpirerFunc(func(context.Context, int) (int64, error) {
+		calls = append(calls, "quota")
+		return 0, nil
+	})
+	replay := replayCleanerFunc(func(_ context.Context, before time.Time, _ int) (int64, error) {
+		calls = append(calls, "replay")
+		if before != wantCutoff || before.Location() != time.UTC {
+			t.Fatalf("replay cutoff = %v (%v), want UTC %v", before, before.Location(), wantCutoff)
+		}
+		return 0, nil
+	})
+	attestation := attestationCleanerFunc(func(_ context.Context, before time.Time, _ int) (int64, error) {
+		calls = append(calls, "attestation")
+		if before != wantCutoff || before.Location() != time.UTC {
+			t.Fatalf("attestation cutoff = %v (%v), want UTC %v", before, before.Location(), wantCutoff)
+		}
+		return 0, nil
+	})
+	runtime := newTestRuntime(t, Config{
+		Quotas: quota, Replays: replay, Attestations: attestation,
+		Now: func() time.Time {
+			nowCalls++
+			return sourceTime
+		},
+	})
+
+	runtime.runPass(context.Background())
+
+	if got := strings.Join(calls, ","); got != "quota,replay,attestation" {
+		t.Fatalf("maintenance order = %q, want quota,replay,attestation", got)
+	}
+	if nowCalls != 1 {
+		t.Fatalf("clock calls = %d, want 1 per pass", nowCalls)
+	}
+}
+
+func TestRuntimeCancellationDuringReplaySkipsAttestation(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	replay := replayCleanerFunc(func(ctx context.Context, _ time.Time, _ int) (int64, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+	attestation := &fakeAttestationCleaner{}
+	runtime := newTestRuntime(t, Config{
+		Quotas: &fakeQuotaExpirer{}, Replays: replay, Attestations: attestation,
+		NewTicker: func(time.Duration) Ticker { return newManualTicker() },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runtime.Run(ctx) }()
+	waitChannel(t, started, "replay cleanup")
+	cancel()
+	if err := waitRuntime(t, done); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := attestation.callCount(); got != 0 {
+		t.Fatalf("attestation cleanup calls after replay cancellation = %d, want 0", got)
+	}
+}
+
+func TestRuntimeReplayTimeoutStillRunsAttestation(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	replay := replayCleanerFunc(func(ctx context.Context, _ time.Time, _ int) (int64, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+	attestation := &fakeAttestationCleaner{results: []batchResult{{count: 0}}}
+	runtime := newTestRuntime(t, Config{
+		Quotas: &fakeQuotaExpirer{}, Replays: replay, Attestations: attestation,
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)), RunTimeout: 10 * time.Millisecond,
+	})
+
+	runtime.runPass(context.Background())
+
+	if got := attestation.callCount(); got != 1 {
+		t.Fatalf("attestation calls after replay timeout = %d, want 1", got)
+	}
+	gotLogs := logs.String()
+	if !strings.Contains(gotLogs, `"job":"dpop_replay_cleanup"`) ||
+		!strings.Contains(gotLogs, `"error_code":"run_timeout"`) {
+		t.Fatalf("replay timeout log = %s", gotLogs)
+	}
+}
+
+func TestRuntimeAttestationFailureUsesStableRedactedJobCode(t *testing.T) {
+	t.Parallel()
+
+	const sensitiveDetail = "app attest key, receipt, and tenant secret"
+	var logs bytes.Buffer
+	runtime := newTestRuntime(t, Config{
+		Quotas: &fakeQuotaExpirer{}, Replays: &fakeReplayCleaner{},
+		Attestations: attestationCleanerFunc(func(context.Context, time.Time, int) (int64, error) {
+			return 0, errors.New(sensitiveDetail)
+		}),
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+
+	runtime.runPass(context.Background())
+
+	got := logs.String()
+	if !strings.Contains(got, `"job":"attestation_state_cleanup"`) ||
+		!strings.Contains(got, `"error_code":"job_failed"`) ||
+		strings.Contains(got, sensitiveDetail) {
+		t.Fatalf("unsafe or incomplete attestation log = %s", got)
+	}
+}
+
+func TestRuntimeAttestationCleanupHonorsRunTimeout(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	attestation := attestationCleanerFunc(func(ctx context.Context, _ time.Time, _ int) (int64, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+	runtime := newTestRuntime(t, Config{
+		Quotas: &fakeQuotaExpirer{}, Replays: &fakeReplayCleaner{}, Attestations: attestation,
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)), RunTimeout: 10 * time.Millisecond,
+	})
+
+	runtime.runPass(context.Background())
+
+	got := logs.String()
+	if !strings.Contains(got, `"job":"attestation_state_cleanup"`) ||
+		!strings.Contains(got, `"error_code":"run_timeout"`) {
+		t.Fatalf("attestation timeout log = %s", got)
+	}
+}
+
+func TestRuntimeInvalidClockSkipsTimeBasedCleanupWithStableCodes(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	quota := &fakeQuotaExpirer{}
+	replay := &fakeReplayCleaner{}
+	attestation := &fakeAttestationCleaner{}
+	runtime := newTestRuntime(t, Config{
+		Quotas: quota, Replays: replay, Attestations: attestation,
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Now: func() time.Time { return time.Time{} },
+	})
+
+	runtime.runPass(context.Background())
+
+	if got := quota.callCount(); got != 1 {
+		t.Fatalf("quota calls = %d, want 1", got)
+	}
+	if got := replay.callCount(); got != 0 {
+		t.Fatalf("replay calls with invalid clock = %d, want 0", got)
+	}
+	if got := attestation.callCount(); got != 0 {
+		t.Fatalf("attestation calls with invalid clock = %d, want 0", got)
+	}
+	gotLogs := logs.String()
+	if !strings.Contains(gotLogs, `"job":"dpop_replay_cleanup"`) ||
+		!strings.Contains(gotLogs, `"job":"attestation_state_cleanup"`) ||
+		strings.Count(gotLogs, `"error_code":"invalid_clock"`) != 2 {
+		t.Fatalf("invalid-clock logs = %s", gotLogs)
+	}
+}
+
 func TestNewRejectsInvalidDependenciesAndBounds(t *testing.T) {
 	t.Parallel()
 
-	valid := Config{Quotas: &fakeQuotaExpirer{}, Replays: &fakeReplayCleaner{}}
+	valid := Config{
+		Quotas:       &fakeQuotaExpirer{},
+		Replays:      &fakeReplayCleaner{},
+		Attestations: &fakeAttestationCleaner{},
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*Config)
 	}{
 		{name: "quota", mutate: func(config *Config) { config.Quotas = nil }},
 		{name: "replay", mutate: func(config *Config) { config.Replays = nil }},
+		{name: "attestation", mutate: func(config *Config) { config.Attestations = nil }},
 		{name: "interval", mutate: func(config *Config) { config.Interval = -time.Second }},
 		{name: "timeout", mutate: func(config *Config) { config.RunTimeout = -time.Second }},
 		{name: "quota batch", mutate: func(config *Config) { config.QuotaBatchSize = 501 }},
 		{name: "replay batch", mutate: func(config *Config) { config.ReplayBatchSize = 10_001 }},
+		{name: "attestation batch low", mutate: func(config *Config) { config.AttestationBatchSize = -1 }},
+		{name: "attestation batch", mutate: func(config *Config) { config.AttestationBatchSize = 1_001 }},
 		{name: "batches", mutate: func(config *Config) { config.MaxBatches = 101 }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -179,6 +378,21 @@ func TestNewRejectsInvalidDependenciesAndBounds(t *testing.T) {
 				t.Fatalf("New() = %#v, %v; want rejection", runtime, err)
 			}
 		})
+	}
+}
+
+func TestNewUsesConservativeAttestationBatchDefault(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := New(Config{
+		Quotas: &fakeQuotaExpirer{}, Replays: &fakeReplayCleaner{},
+		Attestations: &fakeAttestationCleaner{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if runtime.attestationBatchSize != 100 {
+		t.Fatalf("attestation batch default = %d, want 100", runtime.attestationBatchSize)
 	}
 }
 
@@ -198,6 +412,9 @@ func newTestRuntime(t *testing.T, config Config) *Runtime {
 	}
 	if config.ReplayBatchSize == 0 {
 		config.ReplayBatchSize = 2
+	}
+	if config.AttestationBatchSize == 0 {
+		config.AttestationBatchSize = 2
 	}
 	if config.MaxBatches == 0 {
 		config.MaxBatches = 2
@@ -341,6 +558,70 @@ func (fake *fakeReplayCleaner) signal() {
 	}
 }
 
+type fakeAttestationCleaner struct {
+	mu      sync.Mutex
+	results []batchResult
+	calls   int
+	before  []time.Time
+	limits  []int
+	notify  chan struct{}
+}
+
+func (fake *fakeAttestationCleaner) DeleteExpired(_ context.Context, before time.Time, limit int) (int64, error) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	fake.calls++
+	fake.before = append(fake.before, before)
+	fake.limits = append(fake.limits, limit)
+	fake.signal()
+	if len(fake.results) == 0 {
+		return 0, nil
+	}
+	result := fake.results[0]
+	fake.results = fake.results[1:]
+	return result.count, result.err
+}
+
+func (fake *fakeAttestationCleaner) callCount() int {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.calls
+}
+
+func (fake *fakeAttestationCleaner) beforeValues() []time.Time {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return append([]time.Time(nil), fake.before...)
+}
+
+func (fake *fakeAttestationCleaner) limitValues() []int {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return append([]int(nil), fake.limits...)
+}
+
+func (fake *fakeAttestationCleaner) waitCalls(t *testing.T, want int) {
+	t.Helper()
+	waitCalls(t, want, fake.callCount, func() <-chan struct{} {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if fake.notify == nil {
+			fake.notify = make(chan struct{}, 1)
+		}
+		return fake.notify
+	})
+}
+
+func (fake *fakeAttestationCleaner) signal() {
+	if fake.notify == nil {
+		fake.notify = make(chan struct{}, 1)
+	}
+	select {
+	case fake.notify <- struct{}{}:
+	default:
+	}
+}
+
 func waitCalls(t *testing.T, want int, current func() int, notify func() <-chan struct{}) {
 	t.Helper()
 	deadline := time.NewTimer(time.Second)
@@ -358,6 +639,18 @@ type quotaExpirerFunc func(context.Context, int) (int64, error)
 
 func (function quotaExpirerFunc) ExpirePendingBatch(ctx context.Context, limit int) (int64, error) {
 	return function(ctx, limit)
+}
+
+type replayCleanerFunc func(context.Context, time.Time, int) (int64, error)
+
+func (function replayCleanerFunc) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return function(ctx, before, limit)
+}
+
+type attestationCleanerFunc func(context.Context, time.Time, int) (int64, error)
+
+func (function attestationCleanerFunc) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return function(ctx, before, limit)
 }
 
 type manualTicker struct {

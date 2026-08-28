@@ -1316,6 +1316,7 @@ func TestValidatorRequiresDebugAttestationKeySecret(t *testing.T) {
 		"ios",
 	)
 	selection["provider"] = "debug"
+	delete(selection, "appAttest")
 	selection["minimumTrustLevel"] = "debug"
 	selection["dangerousAllowInProduction"] = true
 	encoded, _ := json.Marshal(document)
@@ -1576,7 +1577,13 @@ func TestValidatorRequiresUnambiguousPlatformAttestationAndSupportsDebugNode(t *
 	ambiguousPolicies := objectArray(ambiguousSpec, "attestationPolicies")
 	ambiguousSpec["attestationPolicies"] = append(ambiguousPolicies, map[string]any{
 		"id": "second", "platforms": map[string]any{
-			"ios": map[string]any{"provider": "app_attest", "mode": "required"},
+			"ios": map[string]any{
+				"provider": "app_attest", "mode": "required",
+				"appAttest": map[string]any{
+					"appIdPrefix": "TEAM1234", "bundleId": "com.example.habits", "environment": "production",
+					"allowedValidationCategories": []any{json.Number("1")}, "allowedBundleVersions": []any{"1.0"},
+				},
+			},
 		},
 	})
 	encoded, _ = json.Marshal(ambiguous)
@@ -1864,7 +1871,7 @@ func configurationObject(t *testing.T) map[string]any {
 		"metadata":{"organization":"example","application":"habits","environment":"production"},
 		"spec":{
 			"identityProviders":[{"id":"firebase","type":"firebase","projectId":"habits-production","claimMappings":{"plan":"claims.subscription_tier"}}],
-			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required"},"android":{"provider":"play_integrity","mode":"required"}}}],
+			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required","appAttest":{"appIdPrefix":"TEAM1234","bundleId":"com.example.habits","environment":"production","allowedValidationCategories":[1],"allowedBundleVersions":["1.0"]}},"android":{"provider":"play_integrity","mode":"required","playIntegrity":{"packageName":"com.example.habits","cloudProjectNumber":123456789,"certificateSha256Digests":["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],"minimumDeviceIntegrity":"device","requireLicensed":true,"allowTestingResponses":false,"minimumVersionCode":1,"maximumVersionCode":0,"credentialSource":"metadata"}}}}],
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
 			"models":[{"id":"fast","upstream":"primary","upstreamModel":"configured-fast-model"}],
 			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","scope":["user","feature"],"window":"1d","maximum":5}]}],

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"strings"
 	"sync"
@@ -154,11 +155,30 @@ func TestAppAttestVerifierRegistersKeyAndConsumesBoundAssertion(t *testing.T) {
 		attestationResult.NormalizedSignals["assertion_counter"] != int64(0) {
 		t.Fatalf("unexpected attestation result: %#v", attestationResult)
 	}
+	resultKeyID, ok := attestationResult.AppAttestKeyID()
+	if !ok || resultKeyID != fixture.keyID {
+		t.Fatalf("sealed App Attest key ID = %x valid=%v", resultKeyID, ok)
+	}
+	if _, public := attestationResult.NormalizedSignals["app_attest_key_id"]; public {
+		t.Fatal("App Attest credential identifier escaped into normalized signals")
+	}
+	if formatted := fmt.Sprintf("%#v", attestationResult); formatted != "attestation.Result{[REDACTED]}" {
+		t.Fatalf("App Attest result formatter = %q", formatted)
+	}
 	if attestationResult.EvidenceHash != appAttestEvidenceHash("attestation", fixture.keyID, fixture.attestation) {
 		t.Fatal("attestation evidence hash did not bind the decoded object")
 	}
-	if _, err := attestationResult.ValidatedSnapshot(attestationHash, appAttestTestNow); err != nil {
+	snapshot, err := attestationResult.ValidatedSnapshot(attestationHash, appAttestTestNow)
+	if err != nil {
 		t.Fatalf("validate sealed attestation result: %v", err)
+	}
+	if snapshotKeyID, valid := snapshot.AppAttestKeyID(); !valid || snapshotKeyID != fixture.keyID {
+		t.Fatalf("snapshot App Attest key ID = %x valid=%v", snapshotKeyID, valid)
+	}
+	tamperedResult := attestationResult
+	tamperedResult.appAttestKeyID[0] ^= 0xff
+	if _, ok := tamperedResult.AppAttestKeyID(); ok {
+		t.Fatal("tampered result exposed an App Attest key ID")
 	}
 
 	stored, exists := store.snapshot(fixture.keyID)
@@ -189,16 +209,34 @@ func TestAppAttestVerifierRegistersKeyAndConsumesBoundAssertion(t *testing.T) {
 		t.Fatalf("validate sealed assertion result: %v", err)
 	}
 	stored, exists = store.snapshot(fixture.keyID)
-	if !exists || stored.Counter != 7 {
+	wantRetryHash := appAttestAssertionReplayHash(fixture.keyID, assertion, assertionHash)
+	if !exists || stored.Counter != 7 || stored.LastAssertionHash != wantRetryHash {
 		t.Fatalf("assertion counter was not atomically stored: %#v exists=%v", stored, exists)
 	}
 
-	if _, err := verifier.Verify(context.Background(), assertionEvidence, assertionBinding); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("replayed assertion error = %v, want ErrInvalid", err)
+	retriedResult, err := verifier.Verify(context.Background(), assertionEvidence, assertionBinding)
+	if err != nil || retriedResult.EvidenceHash != assertionResult.EvidenceHash ||
+		retriedResult.NormalizedSignals["assertion_counter"] != int64(7) {
+		t.Fatalf("exact assertion retry result=%#v err=%v", retriedResult, err)
 	}
 	stored, _ = store.snapshot(fixture.keyID)
-	if stored.Counter != 7 {
-		t.Fatalf("replay changed counter to %d", stored.Counter)
+	if stored.Counter != 7 || stored.LastAssertionHash != wantRetryHash {
+		t.Fatalf("exact retry changed durable state: %#v", stored)
+	}
+
+	// The retry exception is byte- and binding-exact. A newly signed assertion
+	// with the same counter but a different challenge remains a replay.
+	equalBinding := appAttestTestBinding(4)
+	equalAssertion := mustAppAttestAssertion(t, fixture, equalBinding, 7, appAttestAssertionOptions{})
+	if bytes.Equal(equalAssertion, assertion) {
+		t.Fatal("different challenge produced identical assertion evidence")
+	}
+	if _, err := verifier.Verify(
+		context.Background(),
+		mustAppAttestEvidence(t, fixture.keyID, "assertion_object", equalAssertion, equalBinding),
+		equalBinding,
+	); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("different equal-counter assertion error = %v, want ErrInvalid", err)
 	}
 	lowerBinding := appAttestTestBinding(3)
 	lowerAssertion := mustAppAttestAssertion(t, fixture, lowerBinding, 6, appAttestAssertionOptions{})
@@ -888,7 +926,7 @@ func TestAppAttestNonceExtensionRequiresOneExactDEROctetString(t *testing.T) {
 	}
 }
 
-func TestAppAttestKeyRegistrationIsUniqueAndStoreErrorsAreRedacted(t *testing.T) {
+func TestAppAttestKeyRegistrationExactRetryIsIdempotentAndStoreErrorsAreRedacted(t *testing.T) {
 	binding := appAttestTestBinding(1)
 	fixture := mustAppAttestFixture(t, binding, appAttestFixtureOptions{environment: AppAttestProduction})
 	store := newMemoryAppAttestKeyStore()
@@ -897,30 +935,67 @@ func TestAppAttestKeyRegistrationIsUniqueAndStoreErrorsAreRedacted(t *testing.T)
 	if _, err := verifier.Verify(context.Background(), evidence, binding); err != nil {
 		t.Fatalf("register key: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), evidence, binding); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("duplicate registration error = %v, want ErrInvalid", err)
+	first, exists := store.snapshot(fixture.keyID)
+	if !exists {
+		t.Fatal("first registration did not persist")
+	}
+	verifier.now = func() time.Time { return appAttestTestNow.Add(time.Minute) }
+	retried, err := verifier.Verify(context.Background(), evidence, binding)
+	if err != nil {
+		t.Fatalf("retry exact registration: %v", err)
+	}
+	second, exists := store.snapshot(fixture.keyID)
+	if !exists || !second.AttestedAt.Equal(first.AttestedAt) || second.Counter != 0 ||
+		retried.NormalizedSignals["assertion_counter"] != int64(0) {
+		t.Fatalf("idempotent registration changed state: first=%#v second=%#v result=%#v",
+			first, second, retried)
 	}
 	if store.callCount() != 2 {
 		t.Fatalf("transaction calls = %d, want 2", store.callCount())
 	}
 
+	// An existing key with any different valid scope is not an idempotent
+	// registration and must remain unusable for this challenge.
+	otherScope := cloneAppAttestStoredKey(second)
+	otherJKT := sha256.Sum256([]byte("different valid DPoP binding"))
+	otherScope.DPoPJKT = base64.RawURLEncoding.EncodeToString(otherJKT[:])
+	store.replace(fixture.keyID, otherScope)
+	if _, err := verifier.Verify(context.Background(), evidence, binding); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("different-scope registration error = %v, want ErrInvalid", err)
+	}
+
 	secret := "postgres://operator:password@private/key-row"
 	failing := appAttestFailingStore{err: errors.New(secret)}
 	verifier = mustTestAppAttestVerifier(t, failing, fixture.root, AppAttestProduction)
-	_, err := verifier.Verify(context.Background(), evidence, binding)
+	_, err = verifier.Verify(context.Background(), evidence, binding)
 	if !errors.Is(err, ErrAppAttestKeyStore) || strings.Contains(err.Error(), secret) {
 		t.Fatalf("store error was not normalized safely: %v", err)
 	}
 	stored := AppAttestStoredKey{PublicKeyX963: bytes.Repeat([]byte{0xab}, 65), PrincipalID: "usr_secret"}
-	if strings.Contains(fmt.Sprint(stored), "ab") || strings.Contains(fmt.Sprintf("%#v", stored), "usr_secret") {
-		t.Fatal("stored key formatting exposed key state")
+	for _, value := range []any{stored, &stored} {
+		for _, formatted := range []string{
+			fmt.Sprintf("%v", value), fmt.Sprintf("%+v", value), fmt.Sprintf("%#v", value),
+			fmt.Sprintf("%s", value), fmt.Sprintf("%q", value), fmt.Sprintf("%+x", value), fmt.Sprintf("%d", value),
+		} {
+			if formatted != "[REDACTED]" {
+				t.Fatalf("stored key formatter = %q", formatted)
+			}
+		}
+	}
+	var structured bytes.Buffer
+	slog.New(slog.NewJSONHandler(&structured, nil)).Info(
+		"App Attest state", "value", stored, "pointer", &stored,
+	)
+	if !strings.Contains(structured.String(), "[REDACTED]") ||
+		strings.Contains(structured.String(), "usr_secret") || strings.Contains(structured.String(), "PublicKeyX963") {
+		t.Fatalf("structured log exposed stored key state: %s", structured.String())
 	}
 	if strings.Contains(fmt.Sprint(evidence), "attestation_object") || strings.Contains(fmt.Sprintf("%#v", evidence), validObjectPrefix(fixture.attestation)) {
 		t.Fatal("evidence formatting exposed provider data")
 	}
 }
 
-func TestAppAttestAssertionCounterTransactionRejectsConcurrentReplay(t *testing.T) {
+func TestAppAttestAssertionCounterTransactionAcceptsOnlyExactConcurrentRetry(t *testing.T) {
 	attestationBinding := appAttestTestBinding(1)
 	fixture := mustAppAttestFixture(t, attestationBinding, appAttestFixtureOptions{environment: AppAttestProduction})
 	store := newMemoryAppAttestKeyStore()
@@ -956,7 +1031,7 @@ func TestAppAttestAssertionCounterTransactionRejectsConcurrentReplay(t *testing.
 	}
 	close(start)
 	wait.Wait()
-	if successes.Load() != 1 || invalids.Load() != workers-1 || unexpected.Load() != 0 {
+	if successes.Load() != workers || invalids.Load() != 0 || unexpected.Load() != 0 {
 		t.Fatalf("success=%d invalid=%d unexpected=%d", successes.Load(), invalids.Load(), unexpected.Load())
 	}
 	stored, _ := store.snapshot(fixture.keyID)
@@ -1144,6 +1219,7 @@ func TestNewAppAttestVerifierRejectsUnsafeConfiguration(t *testing.T) {
 		{name: "bundle ID", mutate: func(config *AppAttestConfig) { config.BundleID = "com..unsafe" }},
 		{name: "attestation environment", mutate: func(config *AppAttestConfig) { config.AttestationEnvironment = "staging" }},
 		{name: "store", mutate: func(config *AppAttestConfig) { config.Store = nil }},
+		{name: "typed nil store", mutate: func(config *AppAttestConfig) { config.Store = (*memoryAppAttestKeyStore)(nil) }},
 		{name: "empty categories", mutate: func(config *AppAttestConfig) { config.AllowedValidationCategories = nil }},
 		{name: "invalid category", mutate: func(config *AppAttestConfig) { config.AllowedValidationCategories = []uint32{7} }},
 		{name: "duplicate category", mutate: func(config *AppAttestConfig) { config.AllowedValidationCategories = []uint32{4, 4} }},

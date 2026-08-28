@@ -863,6 +863,7 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 10, name: "000010_secret_name_contract.sql"},
 		{version: 11, name: "000011_audit_indeterminate_outcome.sql"},
 		{version: 12, name: "000012_upstream_attempt_accounting.sql"},
+		{version: 13, name: "000013_app_attest_key_persistence.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break

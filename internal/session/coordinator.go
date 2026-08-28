@@ -30,35 +30,41 @@ type clientSecretStore interface {
 // caller cannot bypass identity, DPoP, policy, or attestation verification and
 // write directly to the package-private challenge store.
 type ClientCoordinatorConfig struct {
-	Pool               *pgxpool.Pool
-	Configuration      *configuration.Store
-	Users              *identity.UserStore
-	Sessions           *Store
-	AccessTokens       *AccessTokenVerifier
-	Secrets            clientSecretStore
-	IdentityHTTPClient *http.Client
-	Now                func() time.Time
+	Pool                 *pgxpool.Pool
+	Configuration        *configuration.Store
+	Users                *identity.UserStore
+	Sessions             *Store
+	AccessTokens         *AccessTokenVerifier
+	Secrets              clientSecretStore
+	IdentityHTTPClient   *http.Client
+	AttestationTransport http.RoundTripper
+	AppAttestKeys        attestation.AppAttestKeyStore
+	Now                  func() time.Time
 }
 
 type clientCoordinator struct {
-	pool          *pgxpool.Pool
-	configuration *configuration.Store
-	users         *identity.UserStore
-	sessions      *Store
-	accessTokens  *AccessTokenVerifier
-	challenges    *ChallengeStore
-	secrets       clientSecretStore
-	identityHTTP  *http.Client
-	now           func() time.Time
+	pool                 *pgxpool.Pool
+	configuration        *configuration.Store
+	users                *identity.UserStore
+	sessions             *Store
+	accessTokens         *AccessTokenVerifier
+	challenges           *ChallengeStore
+	secrets              clientSecretStore
+	identityHTTP         *http.Client
+	attestationTransport http.RoundTripper
+	appAttestKeys        attestation.AppAttestKeyStore
+	now                  func() time.Time
 
-	identityMu    sync.Mutex
-	identityCache map[string]identity.IdentityVerifier
+	identityMu       sync.Mutex
+	identityCache    map[string]identity.IdentityVerifier
+	attestationMu    sync.Mutex
+	attestationCache map[string]*preparedAttestationVerifier
 }
 
 // NewClientCoordinator constructs the fail-closed implementation used by the
 // client HTTP API.
 func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator, error) {
-	if config.Pool == nil || config.Configuration == nil || config.Users == nil || config.Sessions == nil || config.AccessTokens == nil || config.Secrets == nil {
+	if config.Pool == nil || config.Configuration == nil || config.Users == nil || config.Sessions == nil || config.AccessTokens == nil || nilCoordinatorDependency(config.Secrets) {
 		return nil, errors.New("client coordinator dependency is nil")
 	}
 	if config.Now == nil {
@@ -74,8 +80,10 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 		pool: config.Pool, configuration: config.Configuration, users: config.Users,
 		sessions: config.Sessions, accessTokens: config.AccessTokens,
 		challenges: challenges, secrets: config.Secrets,
-		identityHTTP: config.IdentityHTTPClient, now: config.Now,
-		identityCache: make(map[string]identity.IdentityVerifier),
+		identityHTTP: config.IdentityHTTPClient, attestationTransport: config.AttestationTransport,
+		appAttestKeys: config.AppAttestKeys, now: config.Now,
+		identityCache:    make(map[string]identity.IdentityVerifier),
+		attestationCache: make(map[string]*preparedAttestationVerifier),
 	}, nil
 }
 
@@ -139,10 +147,7 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 	if !ok || policy.ID == "" || selection.Mode != "required" {
 		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
 	}
-	if selection.Provider != "debug" {
-		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
-	}
-	if err := coordinator.preflightDebugVerifier(ctx, environment, snapshot, policy, selection); err != nil {
+	if err := coordinator.preflightAttestationVerifier(ctx, environment, snapshot, policy, selection, input.Platform); err != nil {
 		return clientapi.ChallengeResult{}, clientFailure("server_not_ready")
 	}
 	// Resolve can persist a newly observed upstream subject. Prove that the
@@ -179,7 +184,8 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 		ExpiresAt: challenge.ExpiresAt,
 		Attestation: clientapi.AttestationRequirement{
 			Provider: challenge.Attestation.Provider, Mode: challenge.Attestation.Mode,
-			ClientDataHash: clientDataHash,
+			ClientDataHash:  clientDataHash,
+			ProviderOptions: attestationProviderOptions(selection),
 		},
 	}, nil
 }
@@ -189,7 +195,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure(mapExchangeChallengeError(err))
 	}
-	if input.Attestation.Provider != challenge.Attestation.Provider || challenge.Attestation.Provider != "debug" {
+	if input.Attestation.Provider != challenge.Attestation.Provider {
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	environment, err := coordinator.resolveEnvironment(ctx, challenge.Binding.ApplicationID, challenge.Binding.Environment)
@@ -224,7 +230,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
-	verified, err := coordinator.verifyDebugEvidence(ctx, environment, snapshot, policy, selection, evidence, challenge.Binding)
+	verified, err := coordinator.verifyAttestationEvidence(ctx, environment, snapshot, policy, selection, evidence, challenge.Binding)
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure(mapAttestationError(err))
 	}
@@ -783,7 +789,9 @@ func mapAttestationError(err error) string {
 	switch {
 	case errors.Is(err, attestation.ErrUnsupported):
 		return "attestation_unsupported"
-	case errors.Is(err, attestation.ErrConfiguration):
+	case errors.Is(err, attestation.ErrConfiguration),
+		errors.Is(err, attestation.ErrPlayIntegrityService),
+		errors.Is(err, attestation.ErrAppAttestKeyStore):
 		return "server_not_ready"
 	default:
 		return "attestation_invalid"

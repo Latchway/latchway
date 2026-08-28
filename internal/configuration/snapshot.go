@@ -119,7 +119,9 @@ func runtimeAttestationSelection(platform string, selection PlatformAttestation)
 		(selection.Mode == "required" && selection.MinimumTrustLevel == "none") ||
 		(selection.SecretRef != "" && !runtimeSecretRefPattern.MatchString(selection.SecretRef)) ||
 		(selection.Provider == "debug" && selection.Mode != "disabled" && selection.SecretRef == "") ||
-		(selection.Mode != "disabled" && (len(selection.ApplicationIdentifiers) != 0 || len(selection.AllowedOrigins) != 0)) {
+		(selection.Mode != "disabled" && (len(selection.ApplicationIdentifiers) != 0 || len(selection.AllowedOrigins) != 0)) ||
+		!runtimeAttestationProviderConfiguration(selection) ||
+		!runtimeAttestationTrustCapability(selection) {
 		return false
 	}
 	return runtimeAttestationStrings(selection.ApplicationIdentifiers, 256, false) &&

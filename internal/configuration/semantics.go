@@ -244,6 +244,7 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			provider := stringValue(selection, "provider")
 			mode := stringValue(selection, "mode")
 			selectionPath := base + "/platforms/" + pointerToken(platform)
+			typedSelection, typedSelectionOK := decodePlatformAttestation(selection)
 			if mode == "required" {
 				if _, exists := requiredPolicyByPlatform[platform]; exists {
 					issues = append(issues, errorIssue("attestation_required_policy_ambiguous", selectionPath+"/mode", "A client platform may have only one required attestation policy."))
@@ -261,6 +262,19 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			if provider == "debug" && mode != "disabled" && stringValue(selection, "secretRef") == "" {
 				issues = append(issues, errorIssue("debug_attestation_secret_required", selectionPath+"/secretRef", "Enabled debug attestation requires a server-side public-key secret reference."))
 			}
+			if !typedSelectionOK || !runtimeAttestationProviderConfiguration(typedSelection) {
+				issues = append(issues, errorIssue("attestation_provider_configuration_invalid", selectionPath, "The attestation provider configuration is missing, mismatched, or invalid."))
+			} else if mode != "disabled" && !runtimeAttestationTrustCapability(typedSelection) {
+				issues = append(issues, errorIssue("attestation_trust_unreachable", selectionPath+"/minimumTrustLevel", "The selected provider configuration cannot produce the required minimum trust level."))
+			}
+			if typedSelectionOK && provider == "app_attest" && typedSelection.AppAttest != nil &&
+				environmentKind == "production" && typedSelection.AppAttest.Environment != "production" {
+				issues = append(issues, errorIssue("app_attest_environment_forbidden", selectionPath+"/appAttest/environment", "Production environments require Apple's production App Attest trust environment."))
+			}
+			if typedSelectionOK && provider == "play_integrity" && typedSelection.PlayIntegrity != nil &&
+				environmentKind == "production" && typedSelection.PlayIntegrity.AllowTestingResponses && !allowDangerous {
+				issues = append(issues, errorIssue("play_integrity_testing_forbidden", selectionPath+"/playIntegrity/allowTestingResponses", "Play Integrity testing responses in production require explicit dangerous acknowledgement."))
+			}
 			if mode == "required" && stringValue(selection, "minimumTrustLevel") == "none" {
 				issues = append(issues, errorIssue("attestation_trust_too_weak", selectionPath+"/minimumTrustLevel", "Required attestation must require a verified trust level."))
 			}
@@ -277,6 +291,18 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 		}
 	}
 	return issues
+}
+
+func decodePlatformAttestation(selection map[string]any) (PlatformAttestation, bool) {
+	encoded, err := json.Marshal(selection)
+	if err != nil {
+		return PlatformAttestation{}, false
+	}
+	var result PlatformAttestation
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return PlatformAttestation{}, false
+	}
+	return result, true
 }
 
 func providerAllowedOnPlatform(provider, platform string) bool {

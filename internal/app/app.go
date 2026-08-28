@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminapi"
+	"github.com/latchway/latchway/internal/attestation"
 	"github.com/latchway/latchway/internal/clientapi"
 	"github.com/latchway/latchway/internal/config"
 	"github.com/latchway/latchway/internal/configuration"
@@ -154,9 +155,14 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session store: %w", err)
 	}
+	appAttestKeys, err := attestation.NewPostgreSQLAppAttestKeyStore(pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct App Attest key store: %w", err)
+	}
 	coordinator, err := session.NewClientCoordinator(session.ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
+		AppAttestKeys: appAttestKeys,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session coordinator: %w", err)
@@ -215,8 +221,12 @@ func newWorkerRuntime(pool *pgxpool.Pool, quotaStore *quota.Store, logger *slog.
 	if err != nil {
 		return nil, fmt.Errorf("construct worker replay cleaner: %w", err)
 	}
+	appAttestKeys, err := attestation.NewPostgreSQLAppAttestKeyStore(pool)
+	if err != nil {
+		return nil, fmt.Errorf("construct worker App Attest cleaner: %w", err)
+	}
 	runtime, err := worker.New(worker.Config{
-		Quotas: quotaStore, Replays: replayStore, Logger: logger,
+		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker runtime: %w", err)

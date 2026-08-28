@@ -7,12 +7,14 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/latchway/latchway/internal/attestation"
 	"github.com/latchway/latchway/internal/clientapi"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
@@ -279,6 +281,9 @@ func TestCoordinatorMapsSafeDependencyErrors(t *testing.T) {
 		{name: "identity key outage", got: mapIdentityError(identity.ErrKeyUnavailable), want: "server_not_ready"},
 		{name: "blocked user", got: mapUserResolutionError(identity.ErrUserBlocked), want: "identity_token_invalid"},
 		{name: "user database outage", got: mapUserResolutionError(errors.New("postgres unavailable")), want: "server_not_ready"},
+		{name: "Play Integrity outage", got: mapAttestationError(fmt.Errorf("upstream detail: %w", attestation.ErrPlayIntegrityService)), want: "server_not_ready"},
+		{name: "App Attest key store outage", got: mapAttestationError(fmt.Errorf("database detail: %w", attestation.ErrAppAttestKeyStore)), want: "server_not_ready"},
+		{name: "invalid attestation", got: mapAttestationError(attestation.ErrInvalid), want: "attestation_invalid"},
 		{name: "DPoP invalid", got: mapDPoPError(&dpop.Error{Code: "dpop_invalid"}), want: "dpop_invalid"},
 		{name: "DPoP replay", got: mapSessionError(ErrDPoPReplayed), want: "dpop_replayed"},
 		{name: "access replay input", got: mapAccessRequestError(ErrReplayInvalid), want: "dpop_invalid"},
