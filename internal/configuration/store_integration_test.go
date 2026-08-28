@@ -170,27 +170,33 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 		t.Fatalf("ActivateRevision(invalid policy) error = %v", err)
 	}
 
-	futureDocument := configurationObject(t)
-	futureSpec := objectValue(futureDocument, "spec")
-	objectArray(futureSpec, "features")[0]["protocol"] = "openai_responses"
-	objectArray(futureSpec, "models")[0]["capabilities"] = []any{"openai_responses"}
-	futureJSON, _ := json.Marshal(futureDocument)
-	if issues := store.validator.SchemaIssues(futureJSON); len(issues) != 0 {
-		t.Fatalf("future-protocol draft is not schema-valid: %+v", issues)
+	opaqueDocument := configurationObject(t)
+	opaqueSpec := objectValue(opaqueDocument, "spec")
+	opaqueFeature := objectArray(opaqueSpec, "features")[0]
+	opaqueFeature["protocol"] = "opaque_http"
+	delete(opaqueFeature, "output")
+	opaqueFeature["opaqueHttp"] = map[string]any{
+		"allowedMethods": []any{"POST"}, "pathPrefixes": []any{"/safe"},
+		"maxBodyBytes": json.Number("1024"),
 	}
-	future, err := store.CreateRevision(ctx, principal, CreateInput{
-		EnvironmentID: scope.EnvironmentID, Document: futureJSON,
-		Description: "future protocol without executable adapter",
+	objectArray(opaqueSpec, "models")[0]["capabilities"] = []any{"opaque_http"}
+	opaqueJSON, _ := json.Marshal(opaqueDocument)
+	if issues := store.validator.SchemaIssues(opaqueJSON); len(issues) != 0 {
+		t.Fatalf("opaque-protocol draft is not schema-valid: %+v", issues)
+	}
+	opaque, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID, Document: opaqueJSON,
+		Description: "opaque protocol without executable adapter",
 	})
 	if err != nil {
-		t.Fatalf("CreateRevision(future protocol) error = %v", err)
+		t.Fatalf("CreateRevision(opaque protocol) error = %v", err)
 	}
-	futureReport, err := store.ValidateRevision(ctx, principal, future.ID)
-	if err != nil || futureReport.Valid || !hasIssue(futureReport.Issues, "protocol_endpoint_unavailable") {
-		t.Fatalf("future protocol report=%+v error=%v", futureReport, err)
+	opaqueReport, err := store.ValidateRevision(ctx, principal, opaque.ID)
+	if err != nil || opaqueReport.Valid || !hasIssue(opaqueReport.Issues, "protocol_endpoint_unavailable") {
+		t.Fatalf("opaque protocol report=%+v error=%v", opaqueReport, err)
 	}
-	if _, err := store.ActivateRevision(ctx, principal, future.ID, future.ETag); !errors.Is(err, ErrConfigurationInvalid) {
-		t.Fatalf("ActivateRevision(future protocol) error = %v", err)
+	if _, err := store.ActivateRevision(ctx, principal, opaque.ID, opaque.ETag); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("ActivateRevision(opaque protocol) error = %v", err)
 	}
 	activeBeforeRollback, err := store.GetActiveRevision(ctx, principal, scope.EnvironmentID)
 	if err != nil || activeBeforeRollback.ID != current.ID {
