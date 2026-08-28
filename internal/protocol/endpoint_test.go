@@ -25,7 +25,7 @@ func TestEndpointCatalogIsBoundedUniqueAndFailClosed(t *testing.T) {
 		}
 		seenProtocols[endpoint.Protocol] = struct{}{}
 		seenPaths[endpoint.PublicPath] = struct{}{}
-		if endpoint.Executable != (endpoint.Protocol != OpaqueHTTPID) {
+		if !endpoint.Executable {
 			t.Fatalf("protocol %q executable = %t", endpoint.Protocol, endpoint.Executable)
 		}
 	}
@@ -36,12 +36,10 @@ func TestEndpointCatalogIsBoundedUniqueAndFailClosed(t *testing.T) {
 		!slices.Equal(chat.AllowedMethods(), []string{http.MethodPost}) {
 		t.Fatalf("chat endpoint = %+v methods=%v", chat, chat.AllowedMethods())
 	}
-	for _, protocolID := range []string{OpaqueHTTPID, "unknown"} {
-		if ProtocolExecutable(protocolID) {
-			t.Fatalf("unsupported protocol %q reported executable", protocolID)
-		}
+	if ProtocolExecutable("unknown") {
+		t.Fatal("unknown protocol reported executable")
 	}
-	for _, protocolID := range []string{OpenAIResponsesID, OpenAIChatID, OpenAIEmbeddingsID, AnthropicMessagesID} {
+	for _, protocolID := range []string{OpenAIResponsesID, OpenAIChatID, OpenAIEmbeddingsID, AnthropicMessagesID, OpaqueHTTPID} {
 		if !ProtocolExecutable(protocolID) {
 			t.Fatalf("structured protocol %q is not executable", protocolID)
 		}

@@ -165,6 +165,171 @@ func TestHandlerExecutesEveryStructuredProtocolWithExactProviderMapping(t *testi
 	}
 }
 
+func TestHandlerExecutesRestrictedOpaqueHTTPWithExactFeatureAndRouteBounds(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	configureOpaqueDecision(&fixture.decision, []string{http.MethodPost})
+	fixture.decision.Feature.OpaqueHTTP.AllowedRequestHeaders = []string{"Content-Type", "X-Trace"}
+	fixture.decision.Feature.OpaqueHTTP.MaximumBodyBytes = 16
+	fixture.decision.Route.MaximumResponseBytes = 7
+	fixture.relayer.outcome = upstream.RelayOutcome{
+		StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true,
+		Usage: protocol.Usage{Known: false},
+	}
+	fixture.relayer.body = `ok`
+	handler := fixture.handler(t)
+
+	request := fixture.request(t)
+	request.URL.Path = "/proxy/assistant/v2/current"
+	request.Body = io.NopCloser(strings.NewReader("opaque"))
+	request.ContentLength = 6
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-Trace", "public-correlation")
+	request.Header.Set("X-Api-Key", "must-not-forward")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != "ok" {
+		t.Fatalf("opaque response=(%d,%q)", response.Code, response.Body.String())
+	}
+	if fixture.target.preparePath != "/v2/current" || fixture.target.preparedBody != "opaque" ||
+		!slices.Equal(fixture.target.forwardedHeaders, []string{"Content-Type", "X-Trace"}) {
+		t.Fatalf("opaque target path/body/headers=%q/%q/%v", fixture.target.preparePath,
+			fixture.target.preparedBody, fixture.target.forwardedHeaders)
+	}
+	if len(fixture.relayer.configs) != 1 || fixture.relayer.configs[0].MaxBodyBytes != 7 {
+		t.Fatalf("opaque response bounds=%+v", fixture.relayer.configs)
+	}
+	if fixture.quotas.settleOutcome.Usage != unknownQuotaUsage() {
+		t.Fatalf("opaque usage settlement=%+v", fixture.quotas.settleOutcome.Usage)
+	}
+}
+
+func TestHandlerSuppressesUnsafeOpaqueReplayUnlessExplicitlyDeclared(t *testing.T) {
+	tests := []struct {
+		name           string
+		method         string
+		retryUnsafe    bool
+		wantRetryCalls int
+		wantStatus     int
+	}{
+		{name: "POST default", method: http.MethodPost, wantStatus: http.StatusServiceUnavailable},
+		{name: "PUT default", method: http.MethodPut, wantStatus: http.StatusServiceUnavailable},
+		{name: "PATCH default", method: http.MethodPatch, wantStatus: http.StatusServiceUnavailable},
+		{name: "DELETE default", method: http.MethodDelete, wantStatus: http.StatusServiceUnavailable},
+		{name: "unsafe explicitly idempotent", method: http.MethodPost, retryUnsafe: true, wantRetryCalls: 1, wantStatus: http.StatusOK},
+		{name: "safe GET", method: http.MethodGet, wantRetryCalls: 1, wantStatus: http.StatusOK},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			configureOpaqueDecision(&fixture.decision, []string{test.method})
+			fixture.decision.Route.RetryPolicy = &configuration.RetryPolicy{
+				MaxAttempts: 2, RetryOn: []string{fallbackConnectError},
+			}
+			fixture.decision.Route.RetryUnsafeMethods = test.retryUnsafe
+			first := &fakeDispatchTarget{dispatchErr: errors.New("ambiguous transport failure")}
+			second := &fakeDispatchTarget{response: testDispatchedResponse()}
+			fixture.targets.targets = []DispatchTarget{first, second}
+			fixture.quotas.beginRetryOwner = true
+			fixture.relayer.body = `ok`
+			handler := fixture.handler(t)
+			request := fixture.request(t)
+			request.Method = test.method
+			request.URL.Path = "/proxy/assistant/v2/current"
+			request.Body = http.NoBody
+			request.ContentLength = 0
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus || fixture.quotas.beginRetryCalls != test.wantRetryCalls {
+				t.Fatalf("status/retries=%d/%d want %d/%d body=%s", response.Code,
+					fixture.quotas.beginRetryCalls, test.wantStatus, test.wantRetryCalls, response.Body.String())
+			}
+			if test.wantRetryCalls == 0 && fixture.targets.calls != 1 {
+				t.Fatalf("unsafe request acquired %d targets", fixture.targets.calls)
+			}
+		})
+	}
+}
+
+func TestHandlerRequiresEveryOpaqueFallbackRouteToPermitUnsafeReplay(t *testing.T) {
+	tests := []struct {
+		name                 string
+		method               string
+		primaryRetryUnsafe   bool
+		secondaryRetryUnsafe bool
+		wantFallback         bool
+	}{
+		{name: "unsafe primary not opted in", method: http.MethodPost, secondaryRetryUnsafe: true},
+		{name: "unsafe fallback not opted in", method: http.MethodPost, primaryRetryUnsafe: true},
+		{
+			name: "unsafe both routes opted in", method: http.MethodPost,
+			primaryRetryUnsafe: true, secondaryRetryUnsafe: true, wantFallback: true,
+		},
+		{name: "safe GET", method: http.MethodGet, wantFallback: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			configureOpaqueDecision(&fixture.decision, []string{test.method})
+			primary := policy.RouteDecision{
+				Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+			}
+			primary.Route.FallbackOn = []string{fallbackConnectError}
+			primary.Route.RetryUnsafeMethods = test.primaryRetryUnsafe
+			secondary := policy.RouteDecision{
+				Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+			}
+			secondary.Route.ID = "secondary"
+			secondary.Route.RetryUnsafeMethods = test.secondaryRetryUnsafe
+			fixture.policies.plan = &policy.DecisionPlan{
+				Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+				Candidates: []policy.RouteDecision{primary, secondary},
+			}
+			first := &fakeDispatchTarget{dispatchErr: errors.New("ambiguous transport failure")}
+			second := &fakeDispatchTarget{response: testDispatchedResponse()}
+			fixture.targets.targets = []DispatchTarget{first, second}
+			fixture.quotas.beginRetryOwner = true
+			fixture.relayer.body = `ok`
+			handler := fixture.handler(t)
+			request := fixture.request(t)
+			request.Method = test.method
+			request.URL.Path = "/proxy/assistant/v2/current"
+			request.Body = http.NoBody
+			request.ContentLength = 0
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			wantStatus := http.StatusServiceUnavailable
+			wantAttempts := 1
+			if test.wantFallback {
+				wantStatus = http.StatusOK
+				wantAttempts = 2
+			}
+			if response.Code != wantStatus || fixture.targets.calls != wantAttempts ||
+				fixture.quotas.beginRetryCalls != wantAttempts-1 {
+				t.Fatalf("status/targets/retries=%d/%d/%d want %d/%d/%d body=%s",
+					response.Code, fixture.targets.calls, fixture.quotas.beginRetryCalls,
+					wantStatus, wantAttempts, wantAttempts-1, response.Body.String())
+			}
+		})
+	}
+}
+
+func configureOpaqueDecision(decision *policy.Decision, methods []string) {
+	decision.Feature.Protocol = protocol.OpaqueHTTPID
+	decision.Feature.Output = nil
+	decision.Feature.OpaqueHTTP = &configuration.OpaqueHTTPPolicy{
+		AllowedMethods: methods, PathPrefixes: []string{"/v2"}, MaximumBodyBytes: 1024,
+		AllowedRequestHeaders: []string{"Content-Type"},
+	}
+	decision.Route.MaximumResponseBytes = 4096
+	decision.Model.Capabilities = []string{protocol.OpaqueHTTPID}
+	decision.Upstream.Type = "generic"
+}
+
 func TestHandlerDoesNotDispatchWhenAttemptOwnershipIsReplay(t *testing.T) {
 	fixture := newHandlerFixture(t)
 	fixture.quotas.beginOwner = false
@@ -693,7 +858,7 @@ func TestHandlerRejectsCanonicalPathAndDeclarationFailuresBeforeAuthentication(t
 		{name: "query", edit: func(request *http.Request) { request.URL.RawQuery = "debug=true" }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "force query", edit: func(request *http.Request) { request.URL.ForceQuery = true }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "raw path", edit: func(request *http.Request) { request.URL.RawPath = "/v1/%63hat/completions" }, code: "request_invalid", status: http.StatusBadRequest},
-		{name: "unavailable bounded proxy", edit: func(request *http.Request) { request.URL.Path = "/proxy/weather/v2/current" }, code: "resource_not_found", status: http.StatusNotFound},
+		{name: "opaque feature mismatch", edit: func(request *http.Request) { request.URL.Path = "/proxy/weather/v2/current" }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "unknown path", edit: func(request *http.Request) { request.URL.Path = "/v1/unknown" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "duplicate protocol", edit: func(request *http.Request) { request.Header.Add("X-Latchway-Protocol-Version", "1") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
 		{name: "case duplicate SDK", edit: func(request *http.Request) { request.Header["x-latchway-sdk"] = []string{"ios"} }, code: "request_invalid", status: http.StatusBadRequest},
@@ -3505,6 +3670,7 @@ type fakeRelayer struct {
 	bodies       []string
 	secret       *fakeSecretStore
 	insideSecret bool
+	configs      []upstream.ResponseRelayConfig
 }
 
 type trackingReadCloser struct {
@@ -3531,6 +3697,7 @@ func (fake *fakeRelayer) Relay(
 	config upstream.ResponseRelayConfig,
 ) (upstream.RelayOutcome, error) {
 	fake.calls++
+	fake.configs = append(fake.configs, config)
 	outcome := fake.outcome
 	relayErr := fake.err
 	body := fake.body

@@ -317,45 +317,73 @@ paths:
           $ref: '#/components/responses/AIResponse'
         default:
           $ref: '#/components/responses/Problem'
-  /proxy/{route}/{remainingPath}:
-    post:
+  /proxy/{feature}/{remainingPath}:
+    parameters:
+      - $ref: '#/components/parameters/FeaturePath'
+      - $ref: '#/components/parameters/RemainingPath'
+      - $ref: '#/components/parameters/FeatureHeader'
+      - $ref: '#/components/parameters/ProtocolVersion'
+      - $ref: '#/components/parameters/SDK'
+      - $ref: '#/components/parameters/SDKVersion'
+      - $ref: '#/components/parameters/RequestID'
+    get:
       tags: [AI proxy]
-      operationId: proxyRestrictedOpaqueHttp
-      summary: Proxy a restricted opaque HTTP route to a configured destination.
-      description: |
-        `remainingPath` is interpreted only beneath the route's configured path
-        prefixes. Absolute URLs, alternate authorities and arbitrary destinations
-        are rejected. Deployments may use a router catch-all for additional segments.
-      security:
+      operationId: proxyRestrictedOpaqueHttpGet
+      summary: Proxy a restricted opaque GET request to a server-configured generic upstream.
+      description: &OpaqueHTTPDescription |
+        The path `feature` must exactly equal `X-Latchway-Feature`.
+        `remainingPath` is interpreted only beneath the feature's configured
+        path prefixes. Absolute URLs and client-selected upstream authorities
+        are never interpreted as destinations; query strings are rejected.
+        Deployments may use a router catch-all for additional segments. Request
+        headers are forwarded only from the configured allowlist, and each
+        route owns an explicit response byte bound and streaming policy.
+      security: &OpaqueHTTPSecurity
         - DPoPAccessToken: []
           DPoPProof: []
-      parameters:
-        - $ref: '#/components/parameters/RoutePath'
-        - $ref: '#/components/parameters/RemainingPath'
-        - $ref: '#/components/parameters/FeatureHeader'
-        - $ref: '#/components/parameters/ProtocolVersion'
-        - $ref: '#/components/parameters/SDK'
-        - $ref: '#/components/parameters/SDKVersion'
-        - $ref: '#/components/parameters/RequestID'
       requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FreeFormJSON' }
-          application/octet-stream:
-            schema: { type: string, contentEncoding: base64 }
-      responses:
-        '200':
-          description: Restricted upstream response after response-header filtering.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FreeFormJSON' }
-            text/event-stream:
-              schema: { type: string }
-            application/octet-stream:
-              schema: { type: string, contentEncoding: base64 }
+        $ref: '#/components/requestBodies/OpaqueRequest'
+      responses: &OpaqueHTTPResponses
+        '2XX':
+          $ref: '#/components/responses/OpaqueResponse'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [AI proxy]
+      operationId: proxyRestrictedOpaqueHttpPost
+      summary: Proxy a restricted opaque POST request to a server-configured generic upstream.
+      description: *OpaqueHTTPDescription
+      security: *OpaqueHTTPSecurity
+      requestBody:
+        $ref: '#/components/requestBodies/OpaqueRequest'
+      responses: *OpaqueHTTPResponses
+    put:
+      tags: [AI proxy]
+      operationId: proxyRestrictedOpaqueHttpPut
+      summary: Proxy a restricted opaque PUT request to a server-configured generic upstream.
+      description: *OpaqueHTTPDescription
+      security: *OpaqueHTTPSecurity
+      requestBody:
+        $ref: '#/components/requestBodies/OpaqueRequest'
+      responses: *OpaqueHTTPResponses
+    patch:
+      tags: [AI proxy]
+      operationId: proxyRestrictedOpaqueHttpPatch
+      summary: Proxy a restricted opaque PATCH request to a server-configured generic upstream.
+      description: *OpaqueHTTPDescription
+      security: *OpaqueHTTPSecurity
+      requestBody:
+        $ref: '#/components/requestBodies/OpaqueRequest'
+      responses: *OpaqueHTTPResponses
+    delete:
+      tags: [AI proxy]
+      operationId: proxyRestrictedOpaqueHttpDelete
+      summary: Proxy a restricted opaque DELETE request to a server-configured generic upstream.
+      description: *OpaqueHTTPDescription
+      security: *OpaqueHTTPSecurity
+      requestBody:
+        $ref: '#/components/requestBodies/OpaqueRequest'
+      responses: *OpaqueHTTPResponses
 components:
   securitySchemes:
     DPoPAccessToken:
@@ -406,11 +434,6 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/FeatureID' }
-    RoutePath:
-      name: route
-      in: path
-      required: true
-      schema: { $ref: '#/components/schemas/Identifier' }
     RemainingPath:
       name: remainingPath
       in: path
@@ -432,6 +455,16 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/FreeFormJSON'
+    OpaqueRequest:
+      required: false
+      description: Opaque bytes bounded by the selected feature's maxBodyBytes policy.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FreeFormJSON' }
+        application/octet-stream:
+          schema: { type: string, contentEncoding: base64 }
+        '*/*':
+          schema: { type: string, contentEncoding: base64 }
   responses:
     Problem:
       description: RFC 9457 problem with a stable Latchway code and safe detail.
@@ -466,6 +499,20 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/FreeFormJSON' }
+    OpaqueResponse:
+      description: Restricted upstream response after response-header filtering and route byte/streaming enforcement.
+      headers:
+        X-Latchway-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FreeFormJSON' }
+        text/event-stream:
+          schema: { type: string }
+        application/octet-stream:
+          schema: { type: string, contentEncoding: base64 }
+        '*/*':
+          schema: { type: string, contentEncoding: base64 }
   schemas:
     Identifier:
       type: string

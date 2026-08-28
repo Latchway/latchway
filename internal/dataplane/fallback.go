@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/upstream"
 )
 
@@ -81,6 +82,17 @@ func routeAllowsRetry(route configuration.Route, condition string, attempts int6
 	policy := route.RetryPolicy
 	return policy != nil && condition != "" && attempts >= 1 &&
 		attempts < policy.MaxAttempts && slices.Contains(policy.RetryOn, condition)
+}
+
+// opaqueReplayAllowed prevents a transport ambiguity from replaying an unsafe
+// generic request unless the administrator explicitly declared that every
+// execution of this route is idempotent. Structured adapters retain their
+// protocol-specific retry behavior.
+func opaqueReplayAllowed(endpoint endpointMatch, route configuration.Route) bool {
+	if endpoint.protocolID != protocol.OpaqueHTTPID || endpoint.publicMethod == http.MethodGet {
+		return true
+	}
+	return route.RetryUnsafeMethods
 }
 
 // routeRetryBackoff returns the deterministic delay before retryOrdinal, where

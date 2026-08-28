@@ -98,6 +98,7 @@ var endpointCatalog = [...]Endpoint{
 	},
 	{
 		Protocol: OpaqueHTTPID, PublicPath: OpaqueHTTPPublicPrefix, Prefix: true,
+		Executable: true,
 		methods: endpointMethodGet | endpointMethodPost | endpointMethodPut |
 			endpointMethodPatch | endpointMethodDelete,
 	},

@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
+	"github.com/latchway/latchway/adapters/protocol/opaquehttp"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
 	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
 	"github.com/latchway/latchway/adapters/protocol/openairesponses"
@@ -109,7 +110,7 @@ type Config struct {
 	Now                      func() time.Time
 }
 
-// Handler serves the bounded protected structured-protocol endpoint registry.
+// Handler serves the bounded protected protocol endpoint registry.
 // It must be mounted behind requestidentity middleware.
 type Handler struct {
 	accessTokens  AccessTokenVerifier
@@ -213,6 +214,7 @@ func defaultProtocolAdapters(maximumBodyBytes int64) []protocol.Adapter {
 		openaichat.Adapter{MaximumBodyBytes: maximumBodyBytes},
 		openaiembeddings.Adapter{MaximumBodyBytes: maximumBodyBytes},
 		anthropicmessages.Adapter{MaximumBodyBytes: maximumBodyBytes},
+		opaquehttp.Adapter{MaximumBodyBytes: maximumBodyBytes},
 	}
 }
 
@@ -253,6 +255,13 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	declaration, violation := parseDeclaration(request)
 	if violation != nil {
 		handler.writeViolation(writer, requestID, violation)
+		return
+	}
+	if endpoint.protocolID == protocol.OpaqueHTTPID && endpoint.opaqueRoute != declaration.feature {
+		handler.writeViolation(writer, requestID, requestViolation(
+			"header.X-Latchway-Feature",
+			"The opaque HTTP path feature must exactly match X-Latchway-Feature.",
+		))
 		return
 	}
 
@@ -319,7 +328,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	primary := validatedPlan.candidates[0]
 	pricingAt := handler.now().UTC()
 	prepared, err := handler.prepareExecutionAttempt(
-		request.Context(), replay, endpoint.adapter, snapshot, primary.decision, primary.validated, pricingAt,
+		request.Context(), replay, endpoint, snapshot, primary.decision, primary.validated, pricingAt,
 	)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -397,7 +406,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		retrySelected := false
 		sameRouteRetry := false
 		retryPolicyInvalid := false
-		if retryable && totalAttempts < maximumLogicalAttempts {
+		if retryable && totalAttempts < maximumLogicalAttempts &&
+			opaqueReplayAllowed(endpoint, current.decision.Route) {
 			if routeAllowsRetry(current.decision.Route, condition, routeAttempts) {
 				var delayOK bool
 				retryDelay, delayOK = routeRetryBackoff(
@@ -413,7 +423,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 				}
 			}
 			if !retrySelected && !retryPolicyInvalid && routeAllowsFallback(current.decision.Route, condition) &&
-				candidateIndex+1 < len(validatedPlan.candidates) {
+				candidateIndex+1 < len(validatedPlan.candidates) &&
+				opaqueReplayAllowed(endpoint, validatedPlan.candidates[candidateIndex+1].decision.Route) {
 				nextCandidateIndex++
 				nextRouteAttempts = 1
 				retrySelected = true
@@ -422,7 +433,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		if retrySelected {
 			nextCandidate := validatedPlan.candidates[nextCandidateIndex]
 			next, prepareErr := handler.prepareExecutionAttempt(
-				request.Context(), replay, endpoint.adapter, snapshot,
+				request.Context(), replay, endpoint, snapshot,
 				nextCandidate.decision, nextCandidate.validated, pricingAt,
 			)
 			if prepareErr != nil {
@@ -463,11 +474,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			if sameRouteRetry && errors.Is(retryErr, context.DeadlineExceeded) &&
 				request.Context().Err() == nil &&
 				routeAllowsFallback(current.decision.Route, condition) &&
-				candidateIndex+1 < len(validatedPlan.candidates) {
+				candidateIndex+1 < len(validatedPlan.candidates) &&
+				opaqueReplayAllowed(endpoint, validatedPlan.candidates[candidateIndex+1].decision.Route) {
 				fallbackIndex := candidateIndex + 1
 				fallbackCandidate := validatedPlan.candidates[fallbackIndex]
 				fallbackNext, fallbackErr := handler.prepareExecutionAttempt(
-					request.Context(), replay, endpoint.adapter, snapshot,
+					request.Context(), replay, endpoint, snapshot,
 					fallbackCandidate.decision, fallbackCandidate.validated, pricingAt,
 				)
 				var fallbackRetryInput quota.RetryAttemptInput
@@ -624,12 +636,13 @@ func calculateAttemptOutcome(
 func (handler *Handler) prepareExecutionAttempt(
 	ctx context.Context,
 	replay replayableRequest,
-	adapter protocol.Adapter,
+	endpoint endpointMatch,
 	snapshot configuration.ActiveSnapshot,
 	decision policy.Decision,
 	validated validatedDecision,
 	pricingAt time.Time,
 ) (preparedExecutionAttempt, error) {
+	adapter := endpoint.adapter
 	if ctx == nil || nilDependency(adapter) || pricingAt.IsZero() {
 		return preparedExecutionAttempt{}, errInvalidConfiguration
 	}
@@ -641,11 +654,11 @@ func (handler *Handler) prepareExecutionAttempt(
 	if err != nil {
 		return preparedExecutionAttempt{}, err
 	}
-	appliedOutputMaximum, err := adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, protocol.FeatureDecision{
-		PhysicalModel:       decision.Model.UpstreamModel,
-		DefaultOutputTokens: validated.defaultOutputTokens,
-		MaximumOutputTokens: validated.maximumOutputTokens,
-	})
+	featureDecision, err := protocolFeatureDecision(endpoint, decision, validated)
+	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	appliedOutputMaximum, err := adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, featureDecision)
 	if err != nil {
 		return preparedExecutionAttempt{}, err
 	}
@@ -682,6 +695,37 @@ func (handler *Handler) prepareExecutionAttempt(
 		appliedOutputMaximum: appliedOutputMaximum, inputPreflight: inputPreflight,
 		hardCost: hardCost,
 	}, nil
+}
+
+func protocolFeatureDecision(
+	endpoint endpointMatch,
+	decision policy.Decision,
+	validated validatedDecision,
+) (protocol.FeatureDecision, error) {
+	result := protocol.FeatureDecision{
+		PhysicalModel:       decision.Model.UpstreamModel,
+		DefaultOutputTokens: validated.defaultOutputTokens,
+		MaximumOutputTokens: validated.maximumOutputTokens,
+	}
+	if endpoint.protocolID != protocol.OpaqueHTTPID {
+		return result, nil
+	}
+	if decision.Feature.OpaqueHTTP == nil || decision.Route.MaximumResponseBytes <= 0 ||
+		endpoint.providerPath == "" || endpoint.providerPath != endpoint.opaquePath {
+		return protocol.FeatureDecision{}, policy.ErrConfiguration
+	}
+	policy := decision.Feature.OpaqueHTTP
+	result.OpaqueHTTP = &protocol.OpaqueHTTPDecision{
+		FeatureID:             decision.Feature.ID,
+		ProviderPath:          endpoint.providerPath,
+		AllowedMethods:        append([]string(nil), policy.AllowedMethods...),
+		PathPrefixes:          append([]string(nil), policy.PathPrefixes...),
+		MaximumBodyBytes:      policy.MaximumBodyBytes,
+		AllowedRequestHeaders: append([]string(nil), policy.AllowedRequestHeaders...),
+		MaximumResponseBytes:  decision.Route.MaximumResponseBytes,
+		StreamingAllowed:      decision.Route.StreamingAllowed,
+	}
+	return result, nil
 }
 
 func (handler *Handler) executeReserved(
@@ -753,7 +797,7 @@ func (handler *Handler) executeAttempt(
 	}
 	defer lease.Release()
 	prepared, err := lease.Prepare(
-		incoming, endpoint.providerPath, protocolForwardedHeaders(endpoint.protocolID), decision.Upstream.StaticHeaders,
+		incoming, endpoint.providerPath, protocolForwardedHeaders(endpoint.protocolID, decision.Feature), decision.Upstream.StaticHeaders,
 	)
 	if err != nil {
 		return executionResult{err: fmt.Errorf("%w: prepare request", errTargetConfiguration)}
@@ -813,7 +857,10 @@ func (handler *Handler) executeAttempt(
 	}
 }
 
-func protocolForwardedHeaders(protocolID string) []string {
+func protocolForwardedHeaders(protocolID string, feature configuration.Feature) []string {
+	if protocolID == protocol.OpaqueHTTPID && feature.OpaqueHTTP != nil {
+		return append([]string(nil), feature.OpaqueHTTP.AllowedRequestHeaders...)
+	}
 	if protocolID == protocol.AnthropicMessagesID {
 		return []string{"Content-Type", "Anthropic-Version"}
 	}
@@ -892,7 +939,7 @@ func (handler *Handler) consumeResponse(
 	outcome, err := handler.relayer.Relay(ctx, writer, response, observer, upstream.ResponseRelayConfig{
 		IdleTimeout:        decision.Upstream.Timeouts.Idle,
 		ClientWriteTimeout: handler.clientWriteTimeout,
-		MaxBodyBytes:       handler.maximumResponseBody,
+		MaxBodyBytes:       handler.maximumResponseBytes(decision),
 		OnFirstByte: func(firstByteContext context.Context) error {
 			markContext, cancelMark := context.WithTimeout(firstByteContext, handler.persistenceTimeout)
 			defer cancelMark()
@@ -909,6 +956,14 @@ func (handler *Handler) consumeResponse(
 		return outcome, fmt.Errorf("%w: %w", errUpstreamRelay, err)
 	}
 	return outcome, nil
+}
+
+func (handler *Handler) maximumResponseBytes(decision policy.Decision) int64 {
+	maximum := handler.maximumResponseBody
+	if decision.Feature.Protocol == protocol.OpaqueHTTPID && decision.Route.MaximumResponseBytes > 0 {
+		maximum = min(maximum, decision.Route.MaximumResponseBytes)
+	}
+	return maximum
 }
 
 type validatedDecision struct {
@@ -1268,6 +1323,7 @@ func validateDecision(featureID string, decision policy.Decision, endpointProtoc
 	requiredUpstreamType, knownProtocol := protocol.RequiredUpstreamType(endpointProtocol)
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
 		!validFallbackPolicy(decision.Route.FallbackOn) || !validRetryPolicy(decision.Route.RetryPolicy) ||
+		!validRouteProtocolPolicy(decision.Feature.Protocol, decision.Route) ||
 		decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
 		endpointProtocol == "" || decision.Feature.Protocol != endpointProtocol ||
@@ -1330,7 +1386,7 @@ func validateFeatureLimitPlan(
 ) (validatedDecision, error) {
 	requiresOutput := protocolUsesOutputTokens(feature.Protocol)
 	if feature.ID != featureID || !protocol.ProtocolExecutable(feature.Protocol) ||
-		feature.OpaqueHTTP != nil ||
+		!validFeatureProtocolPolicy(feature) ||
 		(requiresOutput && (feature.Output == nil || feature.Output.DefaultMaximumTokens <= 0 ||
 			feature.Output.AbsoluteMaximumTokens <= 0 ||
 			feature.Output.DefaultMaximumTokens > feature.Output.AbsoluteMaximumTokens)) ||
@@ -1382,6 +1438,62 @@ func validateFeatureLimitPlan(
 	return validatedDecision{
 		rules: rules, defaultOutputTokens: effectiveDefault, maximumOutputTokens: effectiveMaximum,
 	}, nil
+}
+
+func validFeatureProtocolPolicy(feature configuration.Feature) bool {
+	if feature.Protocol != protocol.OpaqueHTTPID {
+		return feature.OpaqueHTTP == nil
+	}
+	policy := feature.OpaqueHTTP
+	if policy == nil || len(policy.AllowedMethods) == 0 || len(policy.AllowedMethods) > 5 ||
+		len(policy.PathPrefixes) == 0 || len(policy.PathPrefixes) > 32 ||
+		policy.MaximumBodyBytes < 0 || policy.MaximumBodyBytes > maximumRequestBodyLimit ||
+		len(policy.AllowedRequestHeaders) > 32 {
+		return false
+	}
+	seenMethods := make(map[string]struct{}, len(policy.AllowedMethods))
+	for _, method := range policy.AllowedMethods {
+		if !slices.Contains([]string{
+			http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
+		}, method) {
+			return false
+		}
+		if _, duplicate := seenMethods[method]; duplicate {
+			return false
+		}
+		seenMethods[method] = struct{}{}
+	}
+	seenPrefixes := make(map[string]struct{}, len(policy.PathPrefixes))
+	for _, prefix := range policy.PathPrefixes {
+		if len(prefix) > 512 || strings.ContainsAny(prefix, "%?#") ||
+			(prefix != "/" && !validOpaquePublicPath(prefix)) {
+			return false
+		}
+		if _, duplicate := seenPrefixes[prefix]; duplicate {
+			return false
+		}
+		seenPrefixes[prefix] = struct{}{}
+	}
+	seenHeaders := make(map[string]struct{}, len(policy.AllowedRequestHeaders))
+	for _, name := range policy.AllowedRequestHeaders {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical == "Anthropic-Version" {
+			return false
+		}
+		if _, duplicate := seenHeaders[canonical]; duplicate {
+			return false
+		}
+		seenHeaders[canonical] = struct{}{}
+	}
+	_, err := upstream.ForwardHeaders(make(http.Header), policy.AllowedRequestHeaders)
+	return err == nil
+}
+
+func validRouteProtocolPolicy(protocolID string, route configuration.Route) bool {
+	if protocolID == protocol.OpaqueHTTPID {
+		return route.MaximumResponseBytes > 0 && route.MaximumResponseBytes <= maximumResponseBodyLimit
+	}
+	return route.MaximumResponseBytes == 0 && !route.StreamingAllowed && !route.RetryUnsafeMethods
 }
 
 func protocolUsesOutputTokens(protocolID string) bool {

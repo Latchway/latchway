@@ -16,6 +16,10 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Added
 
+- Restricted generic HTTP execution at `/proxy/{feature}/{path...}` with exact
+  feature binding, generic protected destinations, method/path/body/header
+  allowlists, per-route response and SSE bounds, unknown-usage settlement, and
+  explicit opt-in before unsafe-method retry or fallback.
 - Canonical encrypted secret creation, listing, rotation, and reference-aware
   deletion across the PostgreSQL domain layer, Admin API, and CLI, including
   tenant authorization, audit redaction, stale-write protection, clock-skew and

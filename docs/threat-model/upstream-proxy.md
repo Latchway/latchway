@@ -12,6 +12,14 @@ Reject ambiguous framing, conflicting content lengths, malformed transfer encodi
 
 Apply route-specific limits for body, headers, connections, first byte, idle, and total duration. Parse SSE incrementally with bounded event and line sizes; do not buffer the response. Do not retry or fall back once any response byte reaches the client. Record each upstream attempt separately while counting the logical request once.
 
+Opaque HTTP is further restricted to `/proxy/{feature}/{path...}` with exact
+path/header feature equality, no query, a configured method and segment-bound
+path allowlist, a buffered request-body bound, and a per-route response bound.
+`text/event-stream` requires an explicit route opt-in. Only `GET` may use
+configured retry/fallback by default; every other opaque method requires the
+route's explicit idempotence declaration, and a fallback route must opt in
+independently.
+
 ## Response handling
 
 Do not trust upstream usage, cost, content type, headers, or error bodies without protocol validation and size bounds. Strip hop-by-hop and sensitive response headers. Label configured, upstream-reported, calculated, estimated, and unknown usage provenance distinctly. A hard cost limit fails closed when required pricing is unavailable.

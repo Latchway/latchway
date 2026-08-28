@@ -83,6 +83,8 @@ func adapterCapabilitiesValid(protocolID string, capabilities protocol.Capabilit
 		}
 	case protocol.OpenAIEmbeddingsID:
 		expected = protocol.Capabilities{ModelRewrite: true, ProviderUsage: true}
+	case protocol.OpaqueHTTPID:
+		expected = protocol.Capabilities{Streaming: true}
 	default:
 		return false
 	}
@@ -125,9 +127,13 @@ func (registry endpointRegistry) match(request *http.Request) (endpointMatch, *v
 
 	publicURL := registry.origin
 	publicURL.Path = request.URL.Path
+	providerPath := entry.description.ProviderPath
+	if entry.description.Protocol == protocol.OpaqueHTTPID {
+		providerPath = opaquePath
+	}
 	return endpointMatch{
 		protocolID: entry.description.Protocol, publicMethod: request.Method,
-		publicURL: publicURL, providerPath: entry.description.ProviderPath,
+		publicURL: publicURL, providerPath: providerPath,
 		opaqueRoute: opaqueRoute, opaquePath: opaquePath, adapter: entry.adapter,
 	}, nil
 }
@@ -157,15 +163,22 @@ func (registry endpointRegistry) endpointForPath(publicPath string) (registeredE
 func validOpaquePublicPath(value string) bool {
 	if len(value) < 2 || len(value) > maximumPublicEndpointPathBytes ||
 		value[0] != '/' || strings.Contains(value, "\\") || strings.Contains(value, "//") ||
-		pathpkg.Clean(value) != value {
+		strings.ContainsAny(value, "%?#") {
 		return false
 	}
 	for _, character := range value {
-		if character < 0x20 || character == 0x7f {
+		if character < 0x20 || character >= 0x7f {
 			return false
 		}
 	}
-	return true
+	if (&url.URL{Path: value}).EscapedPath() != value {
+		return false
+	}
+	canonical := pathpkg.Clean(value)
+	if strings.HasSuffix(value, "/") && canonical != "/" {
+		canonical += "/"
+	}
+	return canonical == value
 }
 
 func endpointNotFoundViolation() *violation {

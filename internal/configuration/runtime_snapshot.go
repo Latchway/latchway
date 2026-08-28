@@ -352,14 +352,17 @@ type compiledFeature struct {
 		AbsoluteMaximumTokens int64 `json:"absoluteMaximumTokens"`
 	} `json:"output"`
 	Routes []struct {
-		ID          string               `json:"id"`
-		When        string               `json:"when"`
-		ModelID     string               `json:"model"`
-		Priority    int64                `json:"priority"`
-		Weight      int64                `json:"weight"`
-		StickyBy    string               `json:"stickyBy"`
-		FallbackOn  []string             `json:"fallbackOn"`
-		RetryPolicy *compiledRetryPolicy `json:"retryPolicy"`
+		ID                   string               `json:"id"`
+		When                 string               `json:"when"`
+		ModelID              string               `json:"model"`
+		Priority             int64                `json:"priority"`
+		Weight               int64                `json:"weight"`
+		StickyBy             string               `json:"stickyBy"`
+		FallbackOn           []string             `json:"fallbackOn"`
+		RetryPolicy          *compiledRetryPolicy `json:"retryPolicy"`
+		MaximumResponseBytes int64                `json:"maxResponseBytes"`
+		StreamingAllowed     bool                 `json:"streamingAllowed"`
+		RetryUnsafeMethods   bool                 `json:"retryUnsafeMethods"`
 	} `json:"routes"`
 	OpaqueHTTP *struct {
 		AllowedMethods        []string `json:"allowedMethods"`
@@ -820,6 +823,13 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		if !runtimeRetryConditionsValid(rawRoute.FallbackOn, false) {
 			return Feature{}, ErrInvalid
 		}
+		if raw.Protocol == "opaque_http" {
+			if rawRoute.MaximumResponseBytes <= 0 || rawRoute.MaximumResponseBytes > 100<<20 {
+				return Feature{}, ErrInvalid
+			}
+		} else if rawRoute.MaximumResponseBytes != 0 || rawRoute.StreamingAllowed || rawRoute.RetryUnsafeMethods {
+			return Feature{}, ErrInvalid
+		}
 		retryPolicy, err := runtimeRetryPolicy(rawRoute.RetryPolicy)
 		if err != nil {
 			return Feature{}, ErrInvalid
@@ -827,8 +837,11 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		feature.Routes = append(feature.Routes, Route{
 			ID: rawRoute.ID, When: rawRoute.When, ModelID: rawRoute.ModelID,
 			Priority: rawRoute.Priority, Weight: rawRoute.Weight, StickyBy: rawRoute.StickyBy,
-			FallbackOn:  append([]string(nil), rawRoute.FallbackOn...),
-			RetryPolicy: retryPolicy,
+			FallbackOn:           append([]string(nil), rawRoute.FallbackOn...),
+			RetryPolicy:          retryPolicy,
+			MaximumResponseBytes: rawRoute.MaximumResponseBytes,
+			StreamingAllowed:     rawRoute.StreamingAllowed,
+			RetryUnsafeMethods:   rawRoute.RetryUnsafeMethods,
 		})
 	}
 	if raw.OpaqueHTTP != nil {
@@ -898,7 +911,10 @@ func protocolRequiresOutputPolicy(protocol string) bool {
 }
 
 func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
-	if len(policy.AllowedMethods) == 0 || len(policy.PathPrefixes) == 0 || policy.MaximumBodyBytes > 100<<20 {
+	if len(policy.AllowedMethods) == 0 || len(policy.AllowedMethods) > 5 ||
+		len(policy.PathPrefixes) == 0 || len(policy.PathPrefixes) > 32 ||
+		policy.MaximumBodyBytes < 0 || policy.MaximumBodyBytes > 100<<20 ||
+		len(policy.AllowedRequestHeaders) > 32 {
 		return false
 	}
 	seenMethods := make(map[string]struct{}, len(policy.AllowedMethods))

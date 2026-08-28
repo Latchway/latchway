@@ -1,6 +1,21 @@
 # Protocol compatibility
 
-## Current contract
+## Contract 0.5 working-tree note
+
+The normative `api/` sources are currently draft contract `0.5.0` with wire
+protocol `1`. The local restricted opaque HTTP implementation replaces a
+reserved, non-executable `/proxy/` template with the exact feature-bound shape
+`/proxy/{feature}/{remainingPath...}`. Because no opaque endpoint or released
+server/client compatibility pair previously executed that template, this does
+not remove a supported wire behavior and the wire protocol remains `1`.
+Existing session and DPoP transports are unchanged; a client using the new
+opaque capability requires a server build that contains the executable
+adapter. Local core validation is recorded in `STATUS.md`; cross-SDK and
+published compatibility evidence remains open. The immutable contract `0.4.0`
+checkpoint below remains historical evidence until the broader `0.5.0`
+compatibility record is consolidated.
+
+## Last consolidated immutable contract
 
 | Field | Value |
 | --- | --- |

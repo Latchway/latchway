@@ -473,14 +473,17 @@ func (policy RetryPolicy) clone() RetryPolicy {
 
 // Route is one policy-guarded model choice within a feature.
 type Route struct {
-	ID          string
-	When        string
-	ModelID     string
-	Priority    int64
-	Weight      int64
-	StickyBy    string
-	FallbackOn  []string
-	RetryPolicy *RetryPolicy
+	ID                   string
+	When                 string
+	ModelID              string
+	Priority             int64
+	Weight               int64
+	StickyBy             string
+	FallbackOn           []string
+	RetryPolicy          *RetryPolicy
+	MaximumResponseBytes int64
+	StreamingAllowed     bool
+	RetryUnsafeMethods   bool
 }
 
 func (route Route) clone() Route {

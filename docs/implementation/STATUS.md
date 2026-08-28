@@ -1,5 +1,24 @@
 # Implementation status
 
+## Local working-tree update — restricted opaque HTTP (2026-08-29)
+
+The uncommitted working tree now contains an executable restricted opaque HTTP
+adapter at `/proxy/{feature}/{remainingPath...}`. It binds the path feature
+exactly to the signed feature header, accepts only configured methods and
+canonical segment-bound paths, buffers request bytes within the feature limit,
+forwards only configured non-sensitive headers, dispatches only through protected
+`generic` upstreams, applies a required per-route response limit and explicit
+SSE policy, and records provider usage as unknown. Unsafe opaque methods do not
+retry or fall back unless every executed route explicitly declares replay safe.
+
+The PostgreSQL-enabled full Go suite, full vet, contract validation, focused
+opaque/configuration/data-plane race tests, an opaque adapter fuzz smoke,
+formatting/diff checks, and two byte-identical contract bundles at SHA-256
+`2953d71bde0f2414734114400d3ad3e4c829f7f3cc195f2ea9857046d6030b9f` pass in
+the shared local working tree. This closes the restricted opaque-route
+implementation item locally; it is not an immutable checkpoint, SDK
+conformance result, publication, or release-readiness claim.
+
 ## Current phase
 
 The core repository has committed and locally validated the governance and draft-contract foundation, runnable Go/PostgreSQL/embedded-console foundation, one-time administrative bootstrap and tenant slice, immutable configuration revisions, identity verification, signed debug attestation, the Phase 6 RFC 9449 DPoP session slice, the first authenticated OpenAI Chat proxy vertical, tenant-scoped write-only provider-secret lifecycle, and a restricted production-grade trusted input/total-token preflight. The immutable contract-`0.4.0`/schema-`11` core checkpoint is `c9347421fac4c729f20ea87f9205c66c15fa983f`.

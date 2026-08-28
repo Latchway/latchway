@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
@@ -602,8 +603,10 @@ func (validator *Validator) featureSemanticIssues(
 			}
 		}
 		if protocolID == "opaque_http" {
-			if _, ok := feature["opaqueHttp"]; !ok {
+			if opaquePolicy, ok := feature["opaqueHttp"].(map[string]any); !ok {
 				issues = append(issues, errorIssue("opaque_http_policy_missing", base+"/opaqueHttp", "Opaque HTTP features require an explicit method, path, and body policy."))
+			} else {
+				issues = append(issues, opaqueHTTPPolicySemanticIssues(opaquePolicy, base+"/opaqueHttp")...)
 			}
 		} else if _, ok := feature["opaqueHttp"]; ok {
 			issues = append(issues, errorIssue("opaque_http_policy_unexpected", base+"/opaqueHttp", "Opaque HTTP policy is valid only for opaque HTTP features."))
@@ -634,6 +637,21 @@ func (validator *Validator) featureSemanticIssues(
 		for _, routeID := range sortedMapKeys(routes) {
 			route := routes[routeID]
 			routePath := base + "/routes/" + pointerToken(routeID)
+			if protocolID == "opaque_http" {
+				if _, ok := integerField(route, "maxResponseBytes"); !ok {
+					issues = append(issues, errorIssue(
+						"opaque_http_response_limit_missing",
+						routePath+"/maxResponseBytes",
+						"Every opaque HTTP route requires an explicit positive response byte limit.",
+					))
+				}
+			} else if hasAnyField(route, "maxResponseBytes", "streamingAllowed", "retryUnsafeMethods") {
+				issues = append(issues, errorIssue(
+					"opaque_http_route_policy_unexpected",
+					routePath,
+					"Opaque HTTP response, streaming, and unsafe-method replay policy is valid only for opaque HTTP features.",
+				))
+			}
 			if retryPolicy, ok := route["retryPolicy"].(map[string]any); ok {
 				initialBackoff, initialOK := integerField(retryPolicy, "initialBackoffMilliseconds")
 				maximumBackoff, maximumOK := integerField(retryPolicy, "maximumBackoffMilliseconds")
@@ -706,6 +724,46 @@ func (validator *Validator) featureSemanticIssues(
 		if !hasFallback {
 			issues = append(issues, warningIssue("route_fallback_missing", base+"/routes", "No unconditional route exists; some valid requests may have no route."))
 		}
+	}
+	return issues
+}
+
+func opaqueHTTPPolicySemanticIssues(policy map[string]any, base string) []Issue {
+	issues := make([]Issue, 0)
+	seenPrefixes := make(map[string]struct{})
+	for index, prefix := range stringArray(policy, "pathPrefixes") {
+		path := fmt.Sprintf("%s/pathPrefixes/%d", base, index)
+		if !runtimeCanonicalUpstreamPath(prefix) {
+			issues = append(issues, errorIssue(
+				"opaque_http_path_prefix_invalid", path,
+				"Opaque HTTP path prefixes must be canonical bounded provider-relative paths without escaping, a query, or a fragment.",
+			))
+		}
+		if _, duplicate := seenPrefixes[prefix]; duplicate {
+			issues = append(issues, errorIssue(
+				"opaque_http_path_prefix_duplicate", path,
+				"Opaque HTTP path prefixes must be unique.",
+			))
+		}
+		seenPrefixes[prefix] = struct{}{}
+	}
+	seenHeaders := make(map[string]struct{})
+	for index, header := range stringArray(policy, "allowedRequestHeaders") {
+		path := fmt.Sprintf("%s/allowedRequestHeaders/%d", base, index)
+		canonical := http.CanonicalHeaderKey(header)
+		if !runtimeHeaderNamePattern.MatchString(header) || runtimeForwardHeaderForbidden(canonical) {
+			issues = append(issues, errorIssue(
+				"opaque_http_request_header_forbidden", path,
+				"Opaque HTTP request-header forwarding cannot include credentials, Latchway controls, forwarding metadata, compression, or hop-by-hop headers.",
+			))
+		}
+		if _, duplicate := seenHeaders[canonical]; duplicate {
+			issues = append(issues, errorIssue(
+				"opaque_http_request_header_duplicate", path,
+				"Opaque HTTP request-header names must be unique case-insensitively.",
+			))
+		}
+		seenHeaders[canonical] = struct{}{}
 	}
 	return issues
 }

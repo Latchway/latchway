@@ -180,19 +180,20 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 		"maxBodyBytes": json.Number("1024"),
 	}
 	objectArray(opaqueSpec, "models")[0]["capabilities"] = []any{"opaque_http"}
+	objectArray(opaqueSpec, "upstreams")[0]["type"] = "generic"
 	opaqueJSON, _ := json.Marshal(opaqueDocument)
 	if issues := store.validator.SchemaIssues(opaqueJSON); len(issues) != 0 {
 		t.Fatalf("opaque-protocol draft is not schema-valid: %+v", issues)
 	}
 	opaque, err := store.CreateRevision(ctx, principal, CreateInput{
 		EnvironmentID: scope.EnvironmentID, Document: opaqueJSON,
-		Description: "opaque protocol without executable adapter",
+		Description: "opaque protocol without a response bound",
 	})
 	if err != nil {
 		t.Fatalf("CreateRevision(opaque protocol) error = %v", err)
 	}
 	opaqueReport, err := store.ValidateRevision(ctx, principal, opaque.ID)
-	if err != nil || opaqueReport.Valid || !hasIssue(opaqueReport.Issues, "protocol_endpoint_unavailable") {
+	if err != nil || opaqueReport.Valid || !hasIssue(opaqueReport.Issues, "opaque_http_response_limit_missing") {
 		t.Fatalf("opaque protocol report=%+v error=%v", opaqueReport, err)
 	}
 	if _, err := store.ActivateRevision(ctx, principal, opaque.ID, opaque.ETag); !errors.Is(err, ErrConfigurationInvalid) {

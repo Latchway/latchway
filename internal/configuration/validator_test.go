@@ -49,7 +49,7 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	}
 }
 
-func TestValidatorActivatesStructuredProtocolsButKeepsOpaqueFailClosed(t *testing.T) {
+func TestValidatorActivatesEveryExecutableProtocol(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -77,6 +77,8 @@ func TestValidatorActivatesStructuredProtocolsButKeepsOpaqueFailClosed(t *testin
 					"allowedMethods": []any{"POST"}, "pathPrefixes": []any{"/safe"},
 					"maxBodyBytes": json.Number("1024"),
 				}
+				objectArray(feature, "routes")[0]["maxResponseBytes"] = json.Number("4096")
+				objectArray(spec, "upstreams")[0]["type"] = "generic"
 			}
 			encoded, marshalErr := json.Marshal(document)
 			if marshalErr != nil {
@@ -86,12 +88,8 @@ func TestValidatorActivatesStructuredProtocolsButKeepsOpaqueFailClosed(t *testin
 				t.Fatalf("protocol configuration is not schema-valid: %+v", issues)
 			}
 			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-			if protocolID == "opaque_http" {
-				if report.Valid || compiled != nil || !hasIssue(report.Issues, "protocol_endpoint_unavailable") {
-					t.Fatalf("opaque protocol activated: report=%+v compiled=%s", report, compiled)
-				}
-			} else if !report.Valid || len(compiled) == 0 {
-				t.Fatalf("structured protocol did not activate: report=%+v compiled=%s", report, compiled)
+			if !report.Valid || len(compiled) == 0 {
+				t.Fatalf("executable protocol did not activate: report=%+v compiled=%s", report, compiled)
 			}
 
 			// Independently exercise the persisted compiled-snapshot boundary.
@@ -104,13 +102,89 @@ func TestValidatorActivatesStructuredProtocolsButKeepsOpaqueFailClosed(t *testin
 			_, snapshotErr := newActiveSnapshot(
 				"validation", "validation", encoded, compiled,
 			)
-			if protocolID == "opaque_http" && snapshotErr == nil {
-				t.Fatal("opaque protocol loaded as an active runtime snapshot")
-			}
-			if protocolID != "opaque_http" && snapshotErr != nil {
-				t.Fatalf("structured protocol failed runtime snapshot load: %v", snapshotErr)
+			if snapshotErr != nil {
+				t.Fatalf("executable protocol failed runtime snapshot load: %v", snapshotErr)
 			}
 		})
+	}
+}
+
+func TestValidatorEnforcesClosedOpaqueHTTPRouteAndForwardingPolicy(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(map[string]any, map[string]any)
+		code   string
+	}{
+		{
+			name: "missing response bound",
+			mutate: func(_ map[string]any, route map[string]any) {
+				delete(route, "maxResponseBytes")
+			},
+			code: "opaque_http_response_limit_missing",
+		},
+		{
+			name: "noncanonical provider prefix",
+			mutate: func(feature map[string]any, _ map[string]any) {
+				objectValue(feature, "opaqueHttp")["pathPrefixes"] = []any{"/v2/../private"}
+			},
+			code: "opaque_http_path_prefix_invalid",
+		},
+		{
+			name: "provider credential forwarding",
+			mutate: func(feature map[string]any, _ map[string]any) {
+				objectValue(feature, "opaqueHttp")["allowedRequestHeaders"] = []any{"X-Api-Key"}
+			},
+			code: "opaque_http_request_header_forbidden",
+		},
+		{
+			name: "case-insensitive duplicate forwarding header",
+			mutate: func(feature map[string]any, _ map[string]any) {
+				objectValue(feature, "opaqueHttp")["allowedRequestHeaders"] = []any{"X-Trace", "x-trace"}
+			},
+			code: "opaque_http_request_header_duplicate",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			spec := objectValue(document, "spec")
+			feature := objectArray(spec, "features")[0]
+			feature["protocol"] = "opaque_http"
+			delete(feature, "output")
+			feature["opaqueHttp"] = map[string]any{
+				"allowedMethods": []any{"GET", "POST"},
+				"pathPrefixes":   []any{"/v2"}, "maxBodyBytes": json.Number("1024"),
+				"allowedRequestHeaders": []any{"Content-Type", "X-Trace"},
+			}
+			route := objectArray(feature, "routes")[0]
+			route["maxResponseBytes"] = json.Number("4096")
+			objectArray(spec, "models")[0]["capabilities"] = []any{"opaque_http"}
+			objectArray(spec, "upstreams")[0]["type"] = "generic"
+			test.mutate(feature, route)
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("unsafe opaque policy compiled: report=%+v compiled=%s", report, compiled)
+			}
+		})
+	}
+
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	route := objectArray(objectArray(spec, "features")[0], "routes")[0]
+	route["maxResponseBytes"] = json.Number("4096")
+	encoded, _ := json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "opaque_http_route_policy_unexpected") {
+		t.Fatalf("structured route accepted opaque policy: report=%+v compiled=%s", report, compiled)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
+	"github.com/latchway/latchway/adapters/protocol/opaquehttp"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
 	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
 	"github.com/latchway/latchway/adapters/protocol/openairesponses"
@@ -75,7 +76,7 @@ func TestEndpointRegistryRejectsAnotherMethodBeforeAdapterDispatch(t *testing.T)
 	}
 }
 
-func TestEndpointRegistryBoundsAndCanonicalizesOpaqueShapeBeforeAvailability(t *testing.T) {
+func TestEndpointRegistryBoundsAndCanonicalizesOpaqueShape(t *testing.T) {
 	origin, err := canonicalPublicOrigin("https://gateway.example")
 	if err != nil {
 		t.Fatal(err)
@@ -84,12 +85,17 @@ func TestEndpointRegistryBoundsAndCanonicalizesOpaqueShapeBeforeAvailability(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	canonical := httptest.NewRequest(http.MethodPost, "/proxy/weather/v2/current", nil)
+	match, violation := registry.match(canonical)
+	if violation != nil || match.protocolID != protocol.OpaqueHTTPID || match.opaqueRoute != "weather" ||
+		match.opaquePath != "/v2/current" || match.providerPath != "/v2/current" {
+		t.Fatalf("canonical opaque match = %+v violation=%+v", match, violation)
+	}
 	for _, test := range []struct {
 		name string
 		path string
 		code string
 	}{
-		{name: "canonical future route", path: "/proxy/weather/v2/current", code: "resource_not_found"},
 		{name: "missing remaining path", path: "/proxy/weather", code: "resource_not_found"},
 		{name: "invalid route key", path: "/proxy/Weather/v2/current", code: "resource_not_found"},
 		{name: "dot segment", path: "/proxy/weather/v2/../private", code: "resource_not_found"},
@@ -117,5 +123,6 @@ func structuredEndpointAdapters() []protocol.Adapter {
 		openaichat.Adapter{},
 		openaiembeddings.Adapter{},
 		anthropicmessages.Adapter{},
+		opaquehttp.Adapter{},
 	}
 }

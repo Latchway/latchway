@@ -115,6 +115,21 @@ type FeatureDecision struct {
 	PhysicalModel       string
 	DefaultOutputTokens int64
 	MaximumOutputTokens int64
+	OpaqueHTTP          *OpaqueHTTPDecision
+}
+
+// OpaqueHTTPDecision is the complete server-owned boundary applied to one
+// generic HTTP attempt. ProviderPath is always relative to the selected
+// protected target; it can never carry an authority, query, or fragment.
+type OpaqueHTTPDecision struct {
+	FeatureID             string
+	ProviderPath          string
+	AllowedMethods        []string
+	PathPrefixes          []string
+	MaximumBodyBytes      int64
+	AllowedRequestHeaders []string
+	MaximumResponseBytes  int64
+	StreamingAllowed      bool
 }
 
 // Usage records normalized provider measurements.
