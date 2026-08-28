@@ -10,6 +10,7 @@ const (
 	tokenRateDecimalScale int64 = 1_000_000
 	tokenBucketWindowKey        = "rolling"
 	tokenRefillTick             = time.Microsecond
+	tokenTicksPerSecond   int64 = int64(time.Second / tokenRefillTick)
 	maximumTokenCapacity  int64 = math.MaxInt64 / tokenBalanceScale
 )
 
@@ -127,8 +128,10 @@ func refillTokenBalance(balance, maximum, credit int64, cursor, now time.Time) (
 	if balance == maximum {
 		return balance, now.UTC(), nil
 	}
-	elapsed := now.Sub(cursor)
-	ticks := int64(elapsed / tokenRefillTick)
+	ticks, err := elapsedTokenTicks(cursor, now)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
 	if ticks <= 0 {
 		return balance, cursor, nil
 	}
@@ -140,12 +143,16 @@ func refillTokenBalance(balance, maximum, credit int64, cursor, now time.Time) (
 	// ticks < ceil(missing/credit), so this product is strictly below missing
 	// and therefore cannot overflow int64.
 	addition := ticks * credit
-	advance := time.Duration(ticks) * tokenRefillTick
-	return balance + addition, cursor.Add(advance).UTC(), nil
+	advanced, err := addTokenTicks(cursor, ticks)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	return balance + addition, advanced, nil
 }
 
 func reserveTokenBalance(state tokenBucketState, units int64) (tokenBucketState, bool, error) {
-	if validatePersistedTokenBucket(state) != nil || units <= 0 || units > math.MaxInt64/tokenBalanceScale {
+	if validatePersistedTokenBucket(state) != nil || units <= 0 || units > state.capacity ||
+		units > math.MaxInt64/tokenBalanceScale {
 		return tokenBucketState{}, false, ErrInvalidState
 	}
 	required := units * tokenBalanceScale
@@ -176,7 +183,7 @@ func refundTokenBalance(state tokenBucketState, units int64, now time.Time) (tok
 
 func tokenRetryAt(state tokenBucketState, units int64, now time.Time) (time.Time, error) {
 	if validatePersistedTokenBucket(state) != nil || units <= 0 ||
-		units > math.MaxInt64/tokenBalanceScale || now.IsZero() {
+		units > state.capacity || units > math.MaxInt64/tokenBalanceScale || now.IsZero() {
 		return time.Time{}, ErrInvalidState
 	}
 	required := units * tokenBalanceScale
@@ -188,14 +195,76 @@ func tokenRetryAt(state tokenBucketState, units int64, now time.Time) (time.Time
 		return time.Time{}, ErrInvalidState
 	}
 	ticks := ceilingDivision(required-state.balance, credit)
-	if ticks > int64(math.MaxInt64/time.Duration(tokenRefillTick)) {
+	retryAt, err := addTokenTicks(state.refilledAt, ticks)
+	if err != nil {
 		return time.Time{}, ErrInvalidState
 	}
-	retryAt := state.refilledAt.Add(time.Duration(ticks) * tokenRefillTick).UTC()
 	if retryAt.Before(now) {
 		return now.UTC(), nil
 	}
 	return retryAt, nil
+}
+
+// elapsedTokenTicks returns the exact number of complete refill ticks between
+// two instants without passing through time.Duration. It saturates only when
+// the count itself exceeds int64; that is sufficient to fill every valid
+// bucket because a valid scaled capacity is strictly below MaxInt64.
+func elapsedTokenTicks(from, to time.Time) (int64, error) {
+	if from.IsZero() || to.IsZero() {
+		return 0, ErrInvalidState
+	}
+	if to.Before(from) {
+		return 0, nil
+	}
+	fromSeconds, toSeconds := from.Unix(), to.Unix()
+	if toSeconds < fromSeconds {
+		return 0, ErrInvalidState
+	}
+	maximumWholeSeconds := int64(math.MaxInt64 / tokenTicksPerSecond)
+	// Permit one extra raw second because borrowing for a negative nanosecond
+	// difference can reduce it before conversion to complete microseconds.
+	comparisonSpan := maximumWholeSeconds + 1
+	if fromSeconds <= math.MaxInt64-comparisonSpan &&
+		toSeconds > fromSeconds+comparisonSpan {
+		return math.MaxInt64, nil
+	}
+	seconds := toSeconds - fromSeconds
+	nanoseconds := int64(to.Nanosecond()) - int64(from.Nanosecond())
+	if nanoseconds < 0 {
+		seconds--
+		nanoseconds += int64(time.Second)
+	}
+	if seconds < 0 {
+		return 0, ErrInvalidState
+	}
+	if seconds > maximumWholeSeconds {
+		return math.MaxInt64, nil
+	}
+	ticks := seconds * tokenTicksPerSecond
+	additional := nanoseconds / int64(tokenRefillTick)
+	if additional > math.MaxInt64-ticks {
+		return math.MaxInt64, nil
+	}
+	return ticks + additional, nil
+}
+
+// addTokenTicks adds an exact microsecond tick count by splitting it into Unix
+// seconds and a sub-second remainder. This supports the full valid retry
+// horizon (about 292,000 years) without time.Duration overflow.
+func addTokenTicks(at time.Time, ticks int64) (time.Time, error) {
+	if at.IsZero() || ticks < 0 {
+		return time.Time{}, ErrInvalidState
+	}
+	seconds := ticks / tokenTicksPerSecond
+	nanoseconds := int64(at.Nanosecond()) +
+		(ticks%tokenTicksPerSecond)*int64(tokenRefillTick)
+	seconds += nanoseconds / int64(time.Second)
+	nanoseconds %= int64(time.Second)
+	baseSeconds := at.Unix()
+	if baseSeconds > math.MaxInt64-seconds {
+		return time.Time{}, ErrInvalidState
+	}
+	return time.Unix(baseSeconds+seconds, nanoseconds).UTC(), nil
 }
 
 func ceilingDivision(numerator, denominator int64) int64 {

@@ -191,6 +191,108 @@ func TestTokenBucketRetryAtUsesExactMicrosecondCeiling(t *testing.T) {
 	}
 }
 
+func TestTokenBucketVariableUnitsUseExactBalanceAndRefunds(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	state := tokenBucketState{
+		capacity: 100, balance: 64*tokenBalanceScale - 1,
+		numerator: tokenRateDecimalScale, denominator: 1, refilledAt: start,
+	}
+	if _, accepted, err := reserveTokenBalance(state, 64); err != nil || accepted {
+		t.Fatalf("one quantum short accepted=%t: %v", accepted, err)
+	}
+	retryAt, err := tokenRetryAt(state, 64, start)
+	if err != nil || !retryAt.Equal(start.Add(time.Microsecond)) {
+		t.Fatalf("one quantum retry=%v: %v", retryAt, err)
+	}
+	state.balance++
+	reserved, accepted, err := reserveTokenBalance(state, 64)
+	if err != nil || !accepted || reserved.balance != 0 {
+		t.Fatalf("exact variable reserve=%#v accepted=%t: %v", reserved, accepted, err)
+	}
+
+	partiallySpent := tokenBucketState{
+		capacity: 100, balance: 36 * tokenBalanceScale,
+		numerator: 1, denominator: 1, refilledAt: start,
+	}
+	partial, err := refundTokenBalance(partiallySpent, 57, start.Add(time.Second))
+	if err != nil || partial.balance != 93*tokenBalanceScale || !partial.refilledAt.Equal(start) {
+		t.Fatalf("partial variable refund=%#v: %v", partial, err)
+	}
+	full, err := refundTokenBalance(partiallySpent, 64, start.Add(time.Second))
+	if err != nil || full.balance != 100*tokenBalanceScale ||
+		!full.refilledAt.Equal(start.Add(time.Second)) {
+		t.Fatalf("saturating variable refund=%#v: %v", full, err)
+	}
+}
+
+func TestTokenBucketHugeRetryAndRefillAvoidDurationOverflow(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, time.August, 28, 12, 0, 0, 123_000, time.UTC)
+	state := tokenBucketState{
+		capacity: maximumTokenCapacity, balance: 0,
+		numerator: 1, denominator: tokenRateDecimalScale, refilledAt: start,
+	}
+	ticks := maximumTokenCapacity * tokenBalanceScale
+	wantRetry, err := addTokenTicks(start, ticks)
+	if err != nil {
+		t.Fatalf("construct huge retry boundary: %v", err)
+	}
+	retryAt, err := tokenRetryAt(state, maximumTokenCapacity, start)
+	if err != nil || !retryAt.Equal(wantRetry) || retryAt.Year() < 294_000 {
+		t.Fatalf("huge retry=%v want=%v: %v", retryAt, wantRetry, err)
+	}
+	before, err := addTokenTicks(start, ticks-1)
+	if err != nil {
+		t.Fatalf("construct pre-boundary: %v", err)
+	}
+	preBoundary, err := reconcileTokenBucket(
+		state, state.capacity, state.numerator, state.denominator, before,
+	)
+	if err != nil {
+		t.Fatalf("huge pre-boundary refill: %v", err)
+	}
+	if preBoundary.balance != maximumTokenCapacity*tokenBalanceScale-1 {
+		t.Fatalf("huge pre-boundary balance=%d", preBoundary.balance)
+	}
+	if _, accepted, err := reserveTokenBalance(preBoundary, maximumTokenCapacity); err != nil || accepted {
+		t.Fatalf("huge pre-boundary accepted=%t: %v", accepted, err)
+	}
+	atBoundary, err := reconcileTokenBucket(
+		state, state.capacity, state.numerator, state.denominator, retryAt,
+	)
+	if err != nil {
+		t.Fatalf("huge boundary refill: %v", err)
+	}
+	reserved, accepted, err := reserveTokenBalance(atBoundary, maximumTokenCapacity)
+	if err != nil || !accepted || reserved.balance != 0 {
+		t.Fatalf("huge boundary reserve=%#v accepted=%t: %v", reserved, accepted, err)
+	}
+
+	middle, err := addTokenTicks(start, ticks/2)
+	if err != nil {
+		t.Fatalf("construct huge midpoint: %v", err)
+	}
+	fragmented, err := reconcileTokenBucket(
+		state, state.capacity, state.numerator, state.denominator, middle,
+	)
+	if err != nil {
+		t.Fatalf("huge first fragment: %v", err)
+	}
+	fragmented, err = reconcileTokenBucket(
+		fragmented, state.capacity, state.numerator, state.denominator, retryAt,
+	)
+	if err != nil || fragmented.balance != atBoundary.balance ||
+		!fragmented.refilledAt.Equal(atBoundary.refilledAt) {
+		t.Fatalf("huge fragmented=%#v batched=%#v: %v", fragmented, atBoundary, err)
+	}
+
+	nearUnixLimit := time.Unix(math.MaxInt64-1, 0).UTC()
+	if _, err := addTokenTicks(nearUnixLimit, 2*tokenTicksPerSecond); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("overflowing tick addition returned %v", err)
+	}
+}
+
 func TestTokenBucketFractionalEligibilityBoundaryAndSaturatingOverflowSafety(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)

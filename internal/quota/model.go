@@ -1,9 +1,10 @@
 // Package quota owns durable quota reservations and request accounting.
 //
 // The bounded implementation in this package supports hard calendar and
-// durable token-bucket logical-request rules, hard calendar output-token
-// rules, hard concurrent-request and concurrent-stream leases, hard
-// per-request output-token enforcement metadata, and immutable
+// durable token-bucket logical-request rules, hard calendar and durable
+// token-bucket output-token rules, hard concurrent-request and
+// concurrent-stream leases, hard per-request output-token enforcement
+// metadata, and immutable
 // configured-price attribution. One request may resolve to multiple rules,
 // which are reserved and finalized atomically. The package does not accept
 // client supplied counters, bucket keys, rule hashes, usage totals, costs, or
@@ -95,7 +96,7 @@ const (
 // output cap applied to the provider request. It is zero for logical-request
 // and concurrency rules, whose one unit is derived by the store. Capacity and
 // the reduced RefillNumerator/RefillDenominator are populated only for a
-// logical_requests/token_bucket rule. PerRequestMaximum is populated only for
+// token_bucket rule. PerRequestMaximum is populated only for
 // output_tokens/per_request metadata, which is fingerprinted but does not
 // create a durable bucket.
 type Rule struct {
@@ -354,6 +355,15 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 				rule.ReservedUnits != 0 || validateTokenBucketPolicy(
 				rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
 			) != nil {
+				return preparedRequest{}, ErrInvalidInput
+			}
+			stateful = true
+		case rule.Metric == OutputTokensMetric && rule.Algorithm == TokenBucketAlgorithm:
+			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
+				rule.ReservedUnits <= 0 || rule.ReservedUnits > rule.Capacity ||
+				validateTokenBucketPolicy(
+					rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
+				) != nil {
 				return preparedRequest{}, ErrInvalidInput
 			}
 			stateful = true
@@ -674,14 +684,13 @@ func (reservation Reservation) validate() error {
 		concurrency := entry.algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(entry.metric)
 		calendar := entry.algorithm == CalendarAlgorithm &&
 			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
-		tokenBucket := entry.algorithm == TokenBucketAlgorithm && entry.metric == LogicalRequestsMetric
+		tokenBucket := entry.algorithm == TokenBucketAlgorithm &&
+			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			id.Validate(entry.entryID, id.QuotaEntry) != nil ||
 			(!calendar && !entry.resetAt.IsZero()) || (calendar && entry.resetAt.IsZero()) ||
 			(!calendar && !tokenBucket && !concurrency) ||
-			entry.reservedUnits <= 0 ||
-			(entry.metric == LogicalRequestsMetric && entry.reservedUnits != 1) ||
-			(concurrency && entry.reservedUnits != 1) ||
+			!validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
 			(concurrency && id.Validate(entry.leaseID, id.ConcurrencyLease) != nil) ||
 			(!concurrency && entry.leaseID != "") ||
 			(index > 0 && reservation.entries[index-1].bucketID >= entry.bucketID) {
@@ -718,8 +727,25 @@ func isStatefulMetric(metric string) bool {
 func isStatefulRule(metric, algorithm string) bool {
 	return algorithm == CalendarAlgorithm &&
 		(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
-		algorithm == TokenBucketAlgorithm && metric == LogicalRequestsMetric ||
+		algorithm == TokenBucketAlgorithm &&
+			(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
 		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)
+}
+
+func validReservationEntryUnits(metric, algorithm string, units int64) bool {
+	if units <= 0 || !isStatefulRule(metric, algorithm) {
+		return false
+	}
+	if metric == LogicalRequestsMetric || isConcurrencyMetric(metric) {
+		return units == 1
+	}
+	if algorithm == TokenBucketAlgorithm {
+		// Compare against the global representable bound rather than the
+		// bucket's current capacity. A valid pending reservation can exceed a
+		// capacity selected by a later conservative policy transition.
+		return units <= maximumTokenCapacity
+	}
+	return true
 }
 
 func (attempt Attempt) validate() error {

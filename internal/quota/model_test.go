@@ -678,8 +678,15 @@ func TestPrepareRequestSupportsExactLogicalTokenBucket(t *testing.T) {
 		t.Fatalf("token plan = %#v", plans)
 	}
 
-	baseRuleKey := prepared.rules[0].ruleKey
-	baseScopeKey := prepared.rules[0].scopeKey
+	var baseToken preparedRule
+	for _, rule := range prepared.rules {
+		if rule.Algorithm == TokenBucketAlgorithm {
+			baseToken = rule
+			break
+		}
+	}
+	baseRuleKey := baseToken.ruleKey
+	baseScopeKey := baseToken.scopeKey
 	baseFingerprint := requestFingerprint(prepared)
 	for _, mutate := range []func(*Rule){
 		func(rule *Rule) { rule.Capacity++ },
@@ -697,6 +704,118 @@ func TestPrepareRequestSupportsExactLogicalTokenBucket(t *testing.T) {
 		if requestFingerprint(other) == baseFingerprint {
 			t.Fatal("mutable token policy was omitted from replay fingerprint")
 		}
+	}
+}
+
+func TestPrepareRequestSupportsExactOutputTokenBucket(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.Rules = []Rule{
+		{
+			Metric: OutputTokensMetric, Algorithm: TokenBucketAlgorithm,
+			Scope: []string{"feature", "user"}, ReservedUnits: 64, Capacity: 100,
+			RefillNumerator: 333_333, RefillDenominator: tokenRateDecimalScale,
+			Hard: true,
+		},
+		{
+			Metric: OutputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"feature", "user"}, PerRequestMaximum: 128,
+			ReservedUnits: 64, Hard: true,
+		},
+	}
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare output token bucket: %v", err)
+	}
+	plans, err := plannedBucketsAt(prepared, time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("plan output token bucket: %v", err)
+	}
+	if len(plans) != 1 || plans[0].rule.Algorithm != TokenBucketAlgorithm ||
+		plans[0].period.key != tokenBucketWindowKey || !plans[0].period.end.IsZero() ||
+		plans[0].reservedUnits != 64 {
+		t.Fatalf("output token plan = %#v", plans)
+	}
+
+	var baseToken preparedRule
+	for _, rule := range prepared.rules {
+		if rule.Algorithm == TokenBucketAlgorithm {
+			baseToken = rule
+			break
+		}
+	}
+	baseRuleKey := baseToken.ruleKey
+	baseScopeKey := baseToken.scopeKey
+	baseFingerprint := requestFingerprint(prepared)
+	for _, mutate := range []func([]Rule){
+		func(rules []Rule) { rules[0].Capacity++ },
+		func(rules []Rule) { rules[0].RefillNumerator = 1; rules[0].RefillDenominator = 2 },
+		func(rules []Rule) { rules[0].ReservedUnits--; rules[1].ReservedUnits-- },
+	} {
+		changed := cloneReserveInput(input)
+		mutate(changed.Rules)
+		other, prepareErr := prepareRequest(changed)
+		if prepareErr != nil {
+			t.Fatalf("prepare changed output token policy: %v", prepareErr)
+		}
+		var token preparedRule
+		for _, rule := range other.rules {
+			if rule.Algorithm == TokenBucketAlgorithm {
+				token = rule
+				break
+			}
+		}
+		if token.ruleKey != baseRuleKey || token.scopeKey != baseScopeKey {
+			t.Fatal("mutable output token policy changed durable bucket identity")
+		}
+		if requestFingerprint(other) == baseFingerprint {
+			t.Fatal("mutable output token policy was omitted from replay fingerprint")
+		}
+	}
+}
+
+func TestPrepareRequestRejectsUnsafeOutputTokenBuckets(t *testing.T) {
+	t.Parallel()
+	base := validReserveInput(t)
+	base.Rules = []Rule{{
+		Metric: OutputTokensMetric, Algorithm: TokenBucketAlgorithm,
+		Scope: []string{"user"}, ReservedUnits: 64, Capacity: 100,
+		RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+		Hard: true,
+	}}
+	tests := []struct {
+		name   string
+		mutate func(*Rule)
+	}{
+		{name: "missing units", mutate: func(rule *Rule) { rule.ReservedUnits = 0 }},
+		{name: "units above capacity", mutate: func(rule *Rule) { rule.ReservedUnits = 101 }},
+		{name: "capacity overflow", mutate: func(rule *Rule) {
+			rule.Capacity = maximumTokenCapacity + 1
+			rule.ReservedUnits = maximumTokenCapacity + 1
+		}},
+		{name: "window", mutate: func(rule *Rule) { rule.Window = "1d" }},
+		{name: "maximum", mutate: func(rule *Rule) { rule.Maximum = 100 }},
+		{name: "per request maximum", mutate: func(rule *Rule) { rule.PerRequestMaximum = 100 }},
+		{name: "invalid rate", mutate: func(rule *Rule) { rule.RefillDenominator = 3 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := cloneReserveInput(base)
+			test.mutate(&input.Rules[0])
+			if _, err := prepareRequest(input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("unsafe output token bucket returned %v", err)
+			}
+		})
+	}
+
+	mismatched := cloneReserveInput(base)
+	mismatched.Rules = append(mismatched.Rules, Rule{
+		Metric: OutputTokensMetric, Algorithm: CalendarAlgorithm,
+		Scope: []string{"feature"}, Window: "1d", Maximum: 1_000,
+		ReservedUnits: 63, Hard: true,
+	})
+	if _, err := prepareRequest(mismatched); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("mismatched output reservations returned %v", err)
 	}
 }
 
@@ -776,6 +895,16 @@ func TestTokenBucketReservationHasNoCalendarReset(t *testing.T) {
 	if err := reservation.validate(); err != nil || !reservation.ResetAt().IsZero() {
 		t.Fatalf("valid token reservation reset=%s: %v", reservation.ResetAt(), err)
 	}
+	reservation.entries[0].metric = OutputTokensMetric
+	reservation.entries[0].reservedUnits = maximumTokenCapacity
+	if err := reservation.validate(); err != nil || !reservation.ResetAt().IsZero() {
+		t.Fatalf("valid output token reservation reset=%s: %v", reservation.ResetAt(), err)
+	}
+	reservation.entries[0].reservedUnits++
+	if err := reservation.validate(); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized output token reservation returned %v", err)
+	}
+	reservation.entries[0].reservedUnits = 64
 	reservation.entries[0].resetAt = time.Now().UTC()
 	reservation.windowResetAt = reservation.entries[0].resetAt
 	if err := reservation.validate(); !errors.Is(err, ErrInvalidInput) {

@@ -270,7 +270,11 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			if stateErr != nil {
 				return Reservation{}, stateErr
 			}
-			if reconciled.balance < tokenBalanceScale {
+			_, accepted, reserveErr := reserveTokenBalance(reconciled, plan.reservedUnits)
+			if reserveErr != nil {
+				return Reservation{}, reserveErr
+			}
+			if !accepted {
 				quotaExceeded = append(quotaExceeded, index)
 			}
 			continue
@@ -544,7 +548,11 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 					return Reservation{}, stateErr
 				}
 				quotaPlans = append(quotaPlans, index)
-				if plan.tokenState.balance < tokenBalanceScale {
+				_, accepted, reserveErr := reserveTokenBalance(plan.tokenState, plan.reservedUnits)
+				if reserveErr != nil {
+					return Reservation{}, reserveErr
+				}
+				if !accepted {
 					quotaExceeded = append(quotaExceeded, index)
 				}
 				continue
@@ -857,10 +865,10 @@ func existingReservationStateMatches(
 	settled int64,
 	released int64,
 ) bool {
-	if expected <= 0 || reserved != expected || settled < 0 || released < 0 ||
+	if !validReservationEntryUnits(metric, algorithm, expected) ||
+		reserved != expected || settled < 0 || released < 0 ||
 		settled > reserved || released > reserved-settled ||
-		!isStatefulRule(metric, algorithm) ||
-		((metric == LogicalRequestsMetric || isConcurrencyMetric(metric)) && reserved != 1) {
+		!validReservationEntryUnits(metric, algorithm, reserved) {
 		return false
 	}
 	switch reservationStatus {
@@ -1945,7 +1953,8 @@ func lockEntries(ctx context.Context, tx pgx.Tx, reservation lockedReservation) 
 			return nil, persistenceFailure("scan quota reservation entry", err)
 		}
 		if id.Validate(entry.id, id.QuotaEntry) != nil || id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
-			!isStatefulRule(entry.metric, entry.algorithm) || entry.version < 0 ||
+			!validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			entry.version < 0 ||
 			(isConcurrencyMetric(entry.metric) !=
 				(entry.algorithm == ConcurrencyAlgorithm && entry.windowKey == "active")) ||
 			(entry.algorithm == CalendarAlgorithm && entry.windowKey == "") ||
@@ -2159,7 +2168,8 @@ func lockedOutputReservationUnits(entries []lockedEntry) (int64, bool, error) {
 		if entry.metric != OutputTokensMetric {
 			continue
 		}
-		if entry.reservedUnits <= 0 || found && entry.reservedUnits != units {
+		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			found && entry.reservedUnits != units {
 			return 0, false, ErrInvalidState
 		}
 		units = entry.reservedUnits
@@ -2175,7 +2185,8 @@ func reservationOutputReservationUnits(entries []reservationEntry) (int64, bool,
 		if entry.metric != OutputTokensMetric {
 			continue
 		}
-		if entry.reservedUnits <= 0 || found && entry.reservedUnits != units {
+		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			found && entry.reservedUnits != units {
 			return 0, false, ErrInvalidState
 		}
 		units = entry.reservedUnits
@@ -2553,12 +2564,10 @@ func settleLocked(
 	settledUnits := make([]int64, len(entries))
 	releasedUnits := make([]int64, len(entries))
 	for _, entry := range entries {
-		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			entry.settledUnits != 0 || entry.releasedUnits != 0 ||
 			!lockedEntryBucketValid(entry) ||
 			(entry.algorithm != TokenBucketAlgorithm && entry.bucketReserved < entry.reservedUnits) ||
-			!isStatefulRule(entry.metric, entry.algorithm) ||
-			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
-				entry.reservedUnits != 1) ||
 			(isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
 			return ErrInvalidState
 		}
@@ -2592,7 +2601,23 @@ func settleLocked(
 	for index, entry := range entries {
 		var command pgconn.CommandTag
 		var err error
-		if entry.algorithm != TokenBucketAlgorithm {
+		if entry.algorithm == TokenBucketAlgorithm {
+			if releasedUnits[index] > 0 {
+				state, stateErr := tokenStateFromLockedEntry(entry)
+				if stateErr != nil {
+					return stateErr
+				}
+				refunded, stateErr := refundTokenBalance(state, releasedUnits[index], now)
+				if stateErr != nil {
+					return stateErr
+				}
+				if err := persistTokenBucketEntry(
+					ctx, tx, entry, refunded, now, "refund unused token bucket reservation",
+				); err != nil {
+					return err
+				}
+			}
+		} else {
 			command, err = tx.Exec(ctx, `
 				UPDATE quota_buckets
 				SET used_units = used_units + $2::bigint,
@@ -2710,12 +2735,10 @@ func releaseLocked(
 		return ErrInvalidState
 	}
 	for _, entry := range entries {
-		if entry.reservedUnits <= 0 || entry.settledUnits != 0 || entry.releasedUnits != 0 ||
+		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+			entry.settledUnits != 0 || entry.releasedUnits != 0 ||
 			!lockedEntryBucketValid(entry) ||
 			(entry.algorithm != TokenBucketAlgorithm && entry.bucketReserved < entry.reservedUnits) ||
-			!isStatefulRule(entry.metric, entry.algorithm) ||
-			((entry.metric == LogicalRequestsMetric || isConcurrencyMetric(entry.metric)) &&
-				entry.reservedUnits != 1) ||
 			(isConcurrencyMetric(entry.metric) && entry.bucketUsed != 0) {
 			return ErrInvalidState
 		}
