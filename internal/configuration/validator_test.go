@@ -1672,7 +1672,12 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 	featureObject := objectArray(spec, "features")[0]
 	featureObject["output"] = map[string]any{"defaultMaximumTokens": json.Number("800"), "absoluteMaximumTokens": json.Number("1500")}
 	routeObject := objectArray(featureObject, "routes")[0]
-	routeObject["fallbackOn"] = []any{"status_503"}
+	routeObject["fallbackOn"] = []any{"status_408"}
+	routeObject["retryPolicy"] = map[string]any{
+		"maxAttempts": json.Number("3"), "initialBackoffMilliseconds": json.Number("25"),
+		"maximumBackoffMilliseconds": json.Number("100"), "jitterRatio": json.Number("0.25"),
+		"retryOn": []any{"connect_error", "status_408"},
+	}
 	document, err := json.Marshal(configuration)
 	if err != nil {
 		t.Fatal(err)
@@ -1765,19 +1770,51 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 		t.Fatalf("limit plan snapshot was mutable: %+v", planAgain)
 	}
 	feature, ok := snapshot.Feature("assistant")
-	if !ok || feature.Protocol != "openai_chat" || feature.Output == nil || feature.Output.DefaultMaximumTokens != 800 || feature.Output.AbsoluteMaximumTokens != 1500 || len(feature.Routes) != 1 || !slices.Equal(feature.Routes[0].FallbackOn, []string{"status_503"}) {
+	if !ok || feature.Protocol != "openai_chat" || feature.Output == nil || feature.Output.DefaultMaximumTokens != 800 || feature.Output.AbsoluteMaximumTokens != 1500 || len(feature.Routes) != 1 || !slices.Equal(feature.Routes[0].FallbackOn, []string{"status_408"}) ||
+		feature.Routes[0].RetryPolicy == nil || feature.Routes[0].RetryPolicy.MaxAttempts != 3 ||
+		feature.Routes[0].RetryPolicy.InitialBackoff != 25*time.Millisecond ||
+		feature.Routes[0].RetryPolicy.MaximumBackoff != 100*time.Millisecond ||
+		feature.Routes[0].RetryPolicy.JitterRatio != 0.25 ||
+		!slices.Equal(feature.Routes[0].RetryPolicy.RetryOn, []string{"connect_error", "status_408"}) {
 		t.Fatalf("feature snapshot = %+v ok=%t", feature, ok)
 	}
 	feature.Output.DefaultMaximumTokens = 1
 	feature.Routes[0].FallbackOn[0] = "changed"
+	feature.Routes[0].RetryPolicy.RetryOn[0] = "changed"
+	feature.Routes[0].RetryPolicy.MaxAttempts = 8
 	featureAgain, _ := snapshot.Feature("assistant")
-	if featureAgain.Output.DefaultMaximumTokens != 800 || featureAgain.Routes[0].FallbackOn[0] != "status_503" {
+	if featureAgain.Output.DefaultMaximumTokens != 800 || featureAgain.Routes[0].FallbackOn[0] != "status_408" ||
+		featureAgain.Routes[0].RetryPolicy == nil || featureAgain.Routes[0].RetryPolicy.MaxAttempts != 3 ||
+		featureAgain.Routes[0].RetryPolicy.RetryOn[0] != "connect_error" {
 		t.Fatalf("feature snapshot was mutable: %+v", featureAgain)
 	}
 	compiledCopy := snapshot.CompiledJSON()
 	compiledCopy[0] = '['
 	if bytes.Equal(compiledCopy, snapshot.CompiledJSON()) {
 		t.Fatal("compiled JSON was not defensively copied")
+	}
+}
+
+func TestValidatorRejectsIncoherentRouteRetryBackoff(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	route := objectArray(objectArray(objectValue(document, "spec"), "features")[0], "routes")[0]
+	route["retryPolicy"] = map[string]any{
+		"maxAttempts": json.Number("2"), "initialBackoffMilliseconds": json.Number("100"),
+		"maximumBackoffMilliseconds": json.Number("10"), "retryOn": []any{"status_503"},
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "route_retry_backoff_invalid") {
+		t.Fatalf("incoherent retry backoff accepted: report=%+v compiled=%s", report, compiled)
 	}
 }
 

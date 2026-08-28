@@ -981,6 +981,39 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "retry policy exceeds per-route attempt bound",
+			mutate: func(spec map[string]any) {
+				feature := objectArray(spec, "features")[0]
+				objectArray(feature, "routes")[0]["retryPolicy"] = map[string]any{
+					"maxAttempts": json.Number("9"), "initialBackoffMilliseconds": json.Number("0"),
+					"maximumBackoffMilliseconds": json.Number("0"), "jitterRatio": json.Number("0"),
+					"retryOn": []any{"status_503"},
+				}
+			},
+		},
+		{
+			name: "retry policy has unbounded initial backoff",
+			mutate: func(spec map[string]any) {
+				feature := objectArray(spec, "features")[0]
+				objectArray(feature, "routes")[0]["retryPolicy"] = map[string]any{
+					"maxAttempts": json.Number("2"), "initialBackoffMilliseconds": json.Number("1"),
+					"maximumBackoffMilliseconds": json.Number("0"), "jitterRatio": json.Number("0"),
+					"retryOn": []any{"status_503"},
+				}
+			},
+		},
+		{
+			name: "retry policy duplicates a condition",
+			mutate: func(spec map[string]any) {
+				feature := objectArray(spec, "features")[0]
+				objectArray(feature, "routes")[0]["retryPolicy"] = map[string]any{
+					"maxAttempts": json.Number("2"), "initialBackoffMilliseconds": json.Number("0"),
+					"maximumBackoffMilliseconds": json.Number("0"), "jitterRatio": json.Number("0"),
+					"retryOn": []any{"status_408", "status_408"},
+				}
+			},
+		},
+		{
 			name: "mixed sticky selection within weighted priority",
 			mutate: func(spec map[string]any) {
 				feature := objectArray(spec, "features")[0]

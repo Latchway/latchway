@@ -595,7 +595,49 @@
         "fallbackOn": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["connect_error", "timeout_before_headers", "status_429", "status_500", "status_502", "status_503", "status_504"] }
+          "items": { "$ref": "#/$defs/RetryCondition" }
+        },
+        "retryPolicy": { "$ref": "#/$defs/RetryPolicy" }
+      }
+    },
+    "RetryCondition": {
+      "enum": ["connect_error", "timeout_before_headers", "status_408", "status_429", "status_500", "status_502", "status_503", "status_504"]
+    },
+    "RetryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "retryOn"],
+      "properties": {
+        "maxAttempts": {
+          "description": "Maximum attempts on this route, including the initial attempt.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8
+        },
+        "initialBackoffMilliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 0
+        },
+        "maximumBackoffMilliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 0
+        },
+        "jitterRatio": {
+          "description": "Deterministic downward jitter as a fraction of the exponential backoff.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "retryOn": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/RetryCondition" }
         }
       }
     },
@@ -698,7 +740,19 @@
             "limitPlan": { "expression": "'free'" },
             "output": { "defaultMaximumTokens": 800, "absoluteMaximumTokens": 1500 },
             "routes": [
-              { "id": "primary", "when": "true", "model": "fast", "priority": 10 }
+              {
+                "id": "primary",
+                "when": "true",
+                "model": "fast",
+                "priority": 10,
+                "retryPolicy": {
+                  "maxAttempts": 3,
+                  "initialBackoffMilliseconds": 100,
+                  "maximumBackoffMilliseconds": 1000,
+                  "jitterRatio": 0.2,
+                  "retryOn": ["connect_error", "timeout_before_headers", "status_429", "status_503"]
+                }
+              }
             ]
           }
         ]

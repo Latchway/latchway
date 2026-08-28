@@ -225,6 +225,38 @@ func TestHandlerClassifiesDispatchDeadlineAsTimeout(t *testing.T) {
 	}
 }
 
+func TestHandlerClassifiesNetErrorDispatchTimeoutConsistently(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.target.dispatchErr = timeoutNetError{}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "upstream_timeout", http.StatusGatewayTimeout)
+	if fixture.quotas.settleCalls != 1 || fixture.quotas.settleOutcome != (quota.Outcome{
+		Status: quota.AttemptTimedOut, FailureCode: "upstream_timeout", Usage: unknownQuotaUsage(),
+	}) {
+		t.Fatalf("net.Error timeout settlement = %#v calls=%d", fixture.quotas.settleOutcome, fixture.quotas.settleCalls)
+	}
+}
+
+func TestHandlerDoesNotMisclassifyRelayNetErrorAsPreHeaderTimeout(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK}
+	fixture.relayer.err = timeoutNetError{}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "upstream_unavailable", http.StatusServiceUnavailable)
+	if fixture.quotas.settleCalls != 1 || fixture.quotas.settleOutcome.Status != quota.AttemptFailed ||
+		fixture.quotas.settleOutcome.FailureCode != "upstream_unavailable" {
+		t.Fatalf("relay net.Error settlement = %#v calls=%d", fixture.quotas.settleOutcome, fixture.quotas.settleCalls)
+	}
+}
+
 func TestHandlerClassifiesGenericRelayFailureAsUpstreamUnavailable(t *testing.T) {
 	fixture := newHandlerFixture(t)
 	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK}
@@ -2270,6 +2302,598 @@ func TestHandlerValidatesEveryRoutePlanCandidateBeforeReservation(t *testing.T) 
 	}
 }
 
+func TestHandlerAcceptsAValidatedFallbackPlanWithoutDispatchingAnInertCandidate(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{"connect_error", "status_503"}
+	secondary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		fixture.targets.calls != 1 || fixture.target.dispatchCalls != 1 {
+		t.Fatalf("validated plan status/reserve/target/dispatch = %d/%d/%d/%d",
+			response.Code, fixture.quotas.reserveCalls, fixture.targets.calls, fixture.target.dispatchCalls)
+	}
+}
+
+func TestHandlerFallsBackWithFreshTargetRequestAndPerAttemptAccounting(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, configuration.Limit{
+		Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+		Scope: []string{"environment", "model"}, PerRequestMaximum: 64, Hard: true,
+	})
+	primaryDecision := fixture.decision
+	primaryDecision.Route.FallbackOn = []string{fallbackConnectError}
+	secondaryDecision := fixture.decision
+	secondaryDecision.Route.ID = "secondary"
+	secondaryDecision.Route.ModelID = "secondary_model"
+	secondaryDecision.Model.ID = "secondary_model"
+	secondaryDecision.Model.UpstreamID = "secondary_provider"
+	secondaryDecision.Model.UpstreamModel = "secondary-provider-model"
+	secondaryDecision.Upstream.ID = "secondary_provider"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{
+			{Route: primaryDecision.Route, Model: primaryDecision.Model, Upstream: primaryDecision.Upstream},
+			{Route: secondaryDecision.Route, Model: secondaryDecision.Model, Upstream: secondaryDecision.Upstream},
+		},
+	}
+	primaryTarget := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	secondaryTarget := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{primaryTarget, secondaryTarget}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` {
+		t.Fatalf("fallback response = (%d, %q)", response.Code, response.Body.String())
+	}
+	if fixture.quotas.reserveCalls != 1 || fixture.quotas.beginCalls != 1 ||
+		fixture.quotas.beginRetryCalls != 1 || fixture.quotas.settleRetryCalls != 1 ||
+		fixture.quotas.settleCalls != 1 {
+		t.Fatalf("fallback quota lifecycle reserve/begin/retryBegin/retrySettle/final = %d/%d/%d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.quotas.beginCalls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleRetryCalls, fixture.quotas.settleCalls)
+	}
+	if fixture.quotas.settleRetryOutcome.Status != quota.AttemptFailed ||
+		fixture.quotas.settleRetryOutcome.FailureCode != "upstream_unavailable" ||
+		fixture.quotas.settleOutcome.Status != quota.AttemptSucceeded {
+		t.Fatalf("fallback outcomes retry=%#v final=%#v",
+			fixture.quotas.settleRetryOutcome, fixture.quotas.settleOutcome)
+	}
+	retryInput := fixture.quotas.beginRetryInput
+	if retryInput.RouteKey != "secondary" || retryInput.UpstreamKey != "secondary_provider" ||
+		retryInput.ModelKey != "secondary_model" || retryInput.PhysicalModel != "secondary-provider-model" {
+		t.Fatalf("retry physical decision = %#v", retryInput)
+	}
+	if len(retryInput.Allocations) != 1 || retryInput.Allocations[0] != (quota.AttemptAllocation{
+		Metric: quota.OutputTokensMetric, Units: 64,
+	}) {
+		t.Fatalf("retry allocations = %#v", retryInput.Allocations)
+	}
+	if primaryTarget.preparedRequest == nil || secondaryTarget.preparedRequest == nil ||
+		primaryTarget.preparedRequest == secondaryTarget.preparedRequest ||
+		!strings.Contains(primaryTarget.preparedBody, `"model":"provider-model"`) ||
+		!strings.Contains(secondaryTarget.preparedBody, `"model":"secondary-provider-model"`) {
+		t.Fatalf("attempt request isolation primary=%p/%s secondary=%p/%s",
+			primaryTarget.preparedRequest, primaryTarget.preparedBody,
+			secondaryTarget.preparedRequest, secondaryTarget.preparedBody)
+	}
+	if primaryTarget.roundTripCalls != 1 || secondaryTarget.roundTripCalls != 1 ||
+		fixture.targets.releaseCalls != 2 {
+		t.Fatalf("attempt dispatch/release = %d/%d/%d",
+			primaryTarget.roundTripCalls, secondaryTarget.roundTripCalls, fixture.targets.releaseCalls)
+	}
+}
+
+func TestHandlerExhaustsSameRouteRetriesBeforeFallbackAndAccountsEveryAttempt(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackConnectError}
+	primary.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 3, InitialBackoff: 10 * time.Millisecond,
+		MaximumBackoff: 40 * time.Millisecond, RetryOn: []string{fallbackConnectError},
+	}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	secondary.Route.ModelID = "secondary_model"
+	secondary.Route.RetryPolicy = nil
+	secondary.Model.ID = "secondary_model"
+	secondary.Model.UpstreamID = "secondary_provider"
+	secondary.Model.UpstreamModel = "secondary-provider-model"
+	secondary.Upstream.ID = "secondary_provider"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	first := &fakeDispatchTarget{dispatchErr: errors.New("first private dial failure")}
+	second := &fakeDispatchTarget{dispatchErr: errors.New("second private dial failure")}
+	third := &fakeDispatchTarget{dispatchErr: errors.New("third private dial failure")}
+	fourth := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{first, second, third, fourth}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+	var delays []time.Duration
+	handler.retrySleep = func(ctx context.Context, delay time.Duration) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		delays = append(delays, delay)
+		return nil
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` {
+		t.Fatalf("retry/fallback response = (%d, %q)", response.Code, response.Body.String())
+	}
+	if fixture.quotas.beginCalls != 1 || fixture.quotas.beginRetryCalls != 3 ||
+		fixture.quotas.settleRetryCalls != 3 || fixture.quotas.settleCalls != 1 ||
+		fixture.targets.calls != 4 || fixture.targets.releaseCalls != 4 {
+		t.Fatalf("attempt lifecycle begin/retryBegin/retrySettle/final/targets/releases = %d/%d/%d/%d/%d/%d",
+			fixture.quotas.beginCalls, fixture.quotas.beginRetryCalls, fixture.quotas.settleRetryCalls,
+			fixture.quotas.settleCalls, fixture.targets.calls, fixture.targets.releaseCalls)
+	}
+	if !slices.Equal(delays, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}) {
+		t.Fatalf("same-route retry delays = %v", delays)
+	}
+	if len(fixture.quotas.beginRetryInputs) != 3 ||
+		fixture.quotas.beginRetryInputs[0].RouteKey != "primary" ||
+		fixture.quotas.beginRetryInputs[1].RouteKey != "primary" ||
+		fixture.quotas.beginRetryInputs[2].RouteKey != "secondary" {
+		t.Fatalf("retry target order = %#v", fixture.quotas.beginRetryInputs)
+	}
+	if len(fixture.targets.upstreams) != 4 || fixture.targets.upstreams[0].ID != "provider" ||
+		fixture.targets.upstreams[1].ID != "provider" || fixture.targets.upstreams[2].ID != "provider" ||
+		fixture.targets.upstreams[3].ID != "secondary_provider" {
+		t.Fatalf("upstream attempt order = %#v", fixture.targets.upstreams)
+	}
+	if first.preparedRequest == second.preparedRequest || second.preparedRequest == third.preparedRequest ||
+		third.preparedRequest == fourth.preparedRequest ||
+		!strings.Contains(first.preparedBody, `"model":"provider-model"`) ||
+		!strings.Contains(second.preparedBody, `"model":"provider-model"`) ||
+		!strings.Contains(third.preparedBody, `"model":"provider-model"`) ||
+		!strings.Contains(fourth.preparedBody, `"model":"secondary-provider-model"`) {
+		t.Fatalf("attempt request bodies were not freshly rendered: %q / %q / %q / %q",
+			first.preparedBody, second.preparedBody, third.preparedBody, fourth.preparedBody)
+	}
+}
+
+func TestHandlerReturnsSuccessfulSameRouteRetryWithoutFallingBack(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackConnectError}
+	primary.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 3, RetryOn: []string{fallbackConnectError},
+	}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	first := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	second := &fakeDispatchTarget{response: testDispatchedResponse()}
+	unusedFallback := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{first, second, unusedFallback}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` ||
+		fixture.targets.calls != 2 || fixture.quotas.beginRetryCalls != 1 ||
+		fixture.quotas.settleRetryCalls != 1 || fixture.quotas.settleCalls != 1 ||
+		fixture.quotas.beginRetryInput.RouteKey != "primary" || unusedFallback.roundTripCalls != 0 {
+		t.Fatalf("same-route success response=%d/%q targets=%d retryBegin/retrySettle/final=%d/%d/%d input=%#v fallbackTrips=%d",
+			response.Code, response.Body.String(), fixture.targets.calls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleRetryCalls, fixture.quotas.settleCalls,
+			fixture.quotas.beginRetryInput, unusedFallback.roundTripCalls)
+	}
+}
+
+func TestHandlerStopsSameRouteRetryWhenBackoffExceedsRemainingDeadline(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 2, InitialBackoff: time.Second, MaximumBackoff: time.Second,
+		RetryOn: []string{fallbackConnectError},
+	}
+	fixture.target.dispatchErr = errors.New("private dial failure")
+	handler := fixture.handler(t)
+	request := fixture.request(t)
+	ctx, cancel := context.WithTimeout(request.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	assertProblemCode(t, response, "upstream_unavailable", http.StatusServiceUnavailable)
+	if fixture.quotas.beginRetryCalls != 0 || fixture.quotas.settleRetryCalls != 0 ||
+		fixture.quotas.settleCalls != 1 || fixture.targets.calls != 1 {
+		t.Fatalf("deadline-bounded retry lifecycle retryBegin/retrySettle/final/targets = %d/%d/%d/%d",
+			fixture.quotas.beginRetryCalls, fixture.quotas.settleRetryCalls,
+			fixture.quotas.settleCalls, fixture.targets.calls)
+	}
+}
+
+func TestHandlerFallsBackImmediatelyWhenSameRouteBackoffExceedsDeadline(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackConnectError}
+	primary.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 2, InitialBackoff: time.Second, MaximumBackoff: time.Second,
+		RetryOn: []string{fallbackConnectError},
+	}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	secondary.Route.RetryPolicy = nil
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	first := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	second := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{first, second}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+	sleepCalls := 0
+	handler.retrySleep = func(context.Context, time.Duration) error {
+		sleepCalls++
+		return nil
+	}
+	request := fixture.request(t)
+	ctx, cancel := context.WithTimeout(request.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` ||
+		fixture.targets.calls != 2 || fixture.quotas.beginRetryCalls != 1 ||
+		fixture.quotas.beginRetryInput.RouteKey != "secondary" || sleepCalls != 0 {
+		t.Fatalf("deadline fallback response=%d/%q targets=%d retryBegin=%d input=%#v sleepCalls=%d",
+			response.Code, response.Body.String(), fixture.targets.calls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.beginRetryInput, sleepCalls)
+	}
+}
+
+func TestHandlerFallsBackWhenRetryDelayStopsFittingAfterSettlement(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackConnectError}
+	primary.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 2, InitialBackoff: 10 * time.Millisecond, MaximumBackoff: 10 * time.Millisecond,
+		RetryOn: []string{fallbackConnectError},
+	}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	secondary.Route.RetryPolicy = nil
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	first := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	second := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{first, second}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.body = `{"ok":true}`
+	handler := fixture.handler(t)
+	sleepCalls := 0
+	handler.retrySleep = func(ctx context.Context, delay time.Duration) error {
+		sleepCalls++
+		if ctx.Err() != nil || delay != 10*time.Millisecond {
+			t.Fatalf("retry sleep context/delay = %v/%s", ctx.Err(), delay)
+		}
+		return context.DeadlineExceeded
+	}
+	request := fixture.request(t)
+	ctx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+	defer cancel()
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` ||
+		fixture.targets.calls != 2 || fixture.quotas.settleRetryCalls != 1 ||
+		fixture.quotas.beginRetryCalls != 1 || fixture.quotas.settleCalls != 1 ||
+		fixture.quotas.beginRetryInput.RouteKey != "secondary" || sleepCalls != 1 {
+		t.Fatalf("post-settlement deadline fallback response=%d/%q targets=%d retrySettle/retryBegin/final=%d/%d/%d input=%#v sleepCalls=%d",
+			response.Code, response.Body.String(), fixture.targets.calls, fixture.quotas.settleRetryCalls,
+			fixture.quotas.beginRetryCalls, fixture.quotas.settleCalls,
+			fixture.quotas.beginRetryInput, sleepCalls)
+	}
+}
+
+func TestHandlerCancellationDuringBackoffFinalizesWithoutAnotherAttempt(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 2, InitialBackoff: time.Second, MaximumBackoff: time.Second,
+		RetryOn: []string{fallbackConnectError},
+	}
+	fixture.target.dispatchErr = errors.New("private dial failure")
+	fixture.quotas.beginRetryOwner = true
+	handler := fixture.handler(t)
+	request := fixture.request(t)
+	ctx, cancel := context.WithCancel(request.Context())
+	handler.retrySleep = func(context.Context, time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	if fixture.quotas.settleRetryCalls != 1 || fixture.quotas.beginRetryCalls != 0 ||
+		fixture.quotas.settleCalls != 1 || fixture.targets.calls != 1 {
+		t.Fatalf("cancelled backoff lifecycle retrySettle/retryBegin/final/targets = %d/%d/%d/%d",
+			fixture.quotas.settleRetryCalls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleCalls, fixture.targets.calls)
+	}
+}
+
+func TestHandlerCapsAggregateRetriesAndFallbacksAtThirtyTwoAttempts(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	candidates := make([]policy.RouteDecision, 5)
+	for index := range candidates {
+		candidate := policy.RouteDecision{
+			Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+		}
+		candidate.Route.ID = fmt.Sprintf("route_%d", index)
+		candidate.Route.FallbackOn = []string{fallbackConnectError}
+		candidate.Route.RetryPolicy = &configuration.RetryPolicy{
+			MaxAttempts: 8, RetryOn: []string{fallbackConnectError},
+		}
+		candidates[index] = candidate
+	}
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan, Candidates: candidates,
+	}
+	fixture.targets.targets = make([]DispatchTarget, maximumLogicalAttempts)
+	for index := range fixture.targets.targets {
+		fixture.targets.targets[index] = &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	}
+	fixture.quotas.beginRetryOwner = true
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "upstream_unavailable", http.StatusServiceUnavailable)
+	if fixture.targets.calls != int(maximumLogicalAttempts) ||
+		fixture.quotas.beginRetryCalls != int(maximumLogicalAttempts-1) ||
+		fixture.quotas.settleRetryCalls != int(maximumLogicalAttempts-1) ||
+		fixture.quotas.settleCalls != 1 {
+		t.Fatalf("aggregate cap targets/retryBegin/retrySettle/final = %d/%d/%d/%d",
+			fixture.targets.calls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleRetryCalls, fixture.quotas.settleCalls)
+	}
+	for _, input := range fixture.quotas.beginRetryInputs {
+		if input.RouteKey == "route_4" {
+			t.Fatal("candidate beyond the global attempt cap was dispatched")
+		}
+	}
+}
+
+func TestHandlerFallsBackOnExplicitStatusBeforeClientCommit(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{"status_503"}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	firstTarget := &fakeDispatchTarget{response: testDispatchedResponse()}
+	secondTarget := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{firstTarget, secondTarget}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.outcomes = []upstream.RelayOutcome{
+		{StatusCode: http.StatusServiceUnavailable},
+		{StatusCode: http.StatusOK, ClientStarted: true},
+	}
+	fixture.relayer.errs = []error{upstream.ErrUpstreamNonSuccess, nil}
+	fixture.relayer.bodies = []string{"", `{"ok":true}`}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` ||
+		fixture.relayer.calls != 2 || fixture.quotas.beginRetryCalls != 1 ||
+		fixture.quotas.settleRetryOutcome.HTTPStatus != http.StatusServiceUnavailable ||
+		fixture.quotas.settleRetryOutcome.FailureCode != "upstream_non_success" {
+		t.Fatalf("status fallback response=%d/%q relay=%d beginRetry=%d firstOutcome=%#v",
+			response.Code, response.Body.String(), fixture.relayer.calls,
+			fixture.quotas.beginRetryCalls, fixture.quotas.settleRetryOutcome)
+	}
+}
+
+func TestHandlerFallsBackOnConfiguredStatus408BeforeClientCommit(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{"status_408"}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	fixture.targets.targets = []DispatchTarget{
+		&fakeDispatchTarget{response: testDispatchedResponse()},
+		&fakeDispatchTarget{response: testDispatchedResponse()},
+	}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.outcomes = []upstream.RelayOutcome{
+		{StatusCode: http.StatusRequestTimeout},
+		{StatusCode: http.StatusOK, ClientStarted: true},
+	}
+	fixture.relayer.errs = []error{upstream.ErrUpstreamNonSuccess, nil}
+	fixture.relayer.bodies = []string{"", `{"ok":true}`}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}` ||
+		fixture.quotas.beginRetryCalls != 1 || fixture.quotas.settleRetryOutcome.HTTPStatus != http.StatusRequestTimeout {
+		t.Fatalf("status-408 fallback response=%d/%q beginRetry=%d outcome=%#v",
+			response.Code, response.Body.String(), fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleRetryOutcome)
+	}
+}
+
+func TestHandlerTerminalizesPreviousAttemptWhenRetryQuotaIsDenied(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackConnectError}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	firstTarget := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+	secondTarget := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{firstTarget, secondTarget}
+	fixture.quotas.beginRetryErr = quota.ErrConcurrencyExceeded
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "concurrency_exceeded", http.StatusTooManyRequests)
+	if fixture.quotas.settleRetryCalls != 1 || fixture.quotas.beginRetryCalls != 1 ||
+		fixture.quotas.settleCalls != 1 || fixture.quotas.settleOutcome != fixture.quotas.settleRetryOutcome ||
+		secondTarget.roundTripCalls != 0 {
+		t.Fatalf("denied retry lifecycle settleRetry/beginRetry/final/roundTrip=%d/%d/%d/%d outcomes=%#v/%#v",
+			fixture.quotas.settleRetryCalls, fixture.quotas.beginRetryCalls, fixture.quotas.settleCalls,
+			secondTarget.roundTripCalls, fixture.quotas.settleRetryOutcome, fixture.quotas.settleOutcome)
+	}
+}
+
+func TestHandlerMapsCalendarAndTokenRetryQuotaDenialsTo429(t *testing.T) {
+	for _, algorithm := range []string{"calendar", "token_bucket"} {
+		t.Run(algorithm, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			primary := policy.RouteDecision{
+				Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+			}
+			primary.Route.FallbackOn = []string{fallbackConnectError}
+			secondary := primary
+			secondary.Route.ID = "secondary"
+			fixture.policies.plan = &policy.DecisionPlan{
+				Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+				Candidates: []policy.RouteDecision{primary, secondary},
+			}
+			firstTarget := &fakeDispatchTarget{dispatchErr: errors.New("private dial failure")}
+			secondTarget := &fakeDispatchTarget{response: testDispatchedResponse()}
+			fixture.targets.targets = []DispatchTarget{firstTarget, secondTarget}
+			fixture.quotas.beginRetryErr = retryQuotaExceededError{retryAt: fixture.now.Add(2 * time.Second)}
+			handler := fixture.handler(t)
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, fixture.request(t))
+
+			assertProblemCode(t, response, "quota_exceeded", http.StatusTooManyRequests)
+			if response.Header().Get("Retry-After") != "2" || fixture.quotas.settleRetryCalls != 1 ||
+				fixture.quotas.beginRetryCalls != 1 || fixture.quotas.settleCalls != 1 ||
+				secondTarget.roundTripCalls != 0 {
+				t.Fatalf("%s retry denial Retry-After/lifecycle = %q/%d/%d/%d roundTrips=%d",
+					algorithm, response.Header().Get("Retry-After"), fixture.quotas.settleRetryCalls,
+					fixture.quotas.beginRetryCalls, fixture.quotas.settleCalls, secondTarget.roundTripCalls)
+			}
+		})
+	}
+}
+
+func TestHandlerNeverFallsBackAfterClientCommit(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{"status_503"}
+	primary.Route.RetryPolicy = &configuration.RetryPolicy{
+		MaxAttempts: 3, RetryOn: []string{"status_503"},
+	}
+	secondary := primary
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusServiceUnavailable, ClientStarted: true}
+	fixture.relayer.err = upstream.ErrUpstreamNonSuccess
+	fixture.relayer.body = `{"partial":true}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusServiceUnavailable || response.Body.String() != `{"partial":true}` ||
+		fixture.quotas.beginRetryCalls != 0 || fixture.targets.calls != 1 ||
+		fixture.quotas.settleCalls != 1 {
+		t.Fatalf("post-commit fallback response=%d/%q beginRetry=%d targets=%d final=%d",
+			response.Code, response.Body.String(), fixture.quotas.beginRetryCalls,
+			fixture.targets.calls, fixture.quotas.settleCalls)
+	}
+}
+
+func TestHandlerRejectsDuplicateRouteInDecisionPlanBeforeReservation(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	candidate := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{candidate, candidate},
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "configuration_invalid", http.StatusUnprocessableEntity)
+	if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 {
+		t.Fatalf("duplicate route reached side effects: reserve/target=%d/%d",
+			fixture.quotas.reserveCalls, fixture.targets.calls)
+	}
+}
+
 func TestPolicyEngineRejectsUnsealedAuthorizationBeforeCELResolution(t *testing.T) {
 	resolver := &fakePolicyResolver{}
 	engine, err := NewPolicyEngine(resolver)
@@ -2570,6 +3194,12 @@ type fakeQuotaStore struct {
 	beginOwner         bool
 	beginErr           error
 	attempt            quota.Attempt
+	beginRetryCalls    int
+	beginRetryInput    quota.RetryAttemptInput
+	beginRetryInputs   []quota.RetryAttemptInput
+	beginRetryAttempt  quota.Attempt
+	beginRetryOwner    bool
+	beginRetryErr      error
 	markCalls          int
 	markErr            error
 	markBlock          bool
@@ -2577,6 +3207,9 @@ type fakeQuotaStore struct {
 	settleCalls        int
 	settleOutcome      quota.Outcome
 	settleErr          error
+	settleRetryCalls   int
+	settleRetryOutcome quota.Outcome
+	settleRetryErr     error
 	releaseCalls       int
 	releaseFailure     string
 	releaseErr         error
@@ -2584,6 +3217,14 @@ type fakeQuotaStore struct {
 	beginInsideSecret  bool
 	settleInsideSecret bool
 }
+
+type retryQuotaExceededError struct {
+	retryAt time.Time
+}
+
+func (retryQuotaExceededError) Error() string              { return quota.ErrExceeded.Error() }
+func (retryQuotaExceededError) Unwrap() error              { return quota.ErrExceeded }
+func (failure retryQuotaExceededError) RetryAt() time.Time { return failure.retryAt }
 
 func (fake *fakeQuotaStore) Reserve(_ context.Context, input quota.ReserveInput) (quota.Reservation, error) {
 	fake.reserveCalls++
@@ -2600,6 +3241,17 @@ func (fake *fakeQuotaStore) BeginAttempt(_ context.Context, _ quota.Reservation)
 		fake.beginInsideSecret = fake.secret.inside
 	}
 	return fake.attempt, fake.beginOwner, fake.beginErr
+}
+
+func (fake *fakeQuotaStore) BeginRetryAttempt(
+	_ context.Context,
+	_ quota.Attempt,
+	input quota.RetryAttemptInput,
+) (quota.Attempt, bool, error) {
+	fake.beginRetryCalls++
+	fake.beginRetryInput = input
+	fake.beginRetryInputs = append(fake.beginRetryInputs, input)
+	return fake.beginRetryAttempt, fake.beginRetryOwner, fake.beginRetryErr
 }
 
 func (fake *fakeQuotaStore) MarkFirstByte(ctx context.Context, _ quota.Attempt) error {
@@ -2621,6 +3273,16 @@ func (fake *fakeQuotaStore) Settle(_ context.Context, _ quota.Attempt, outcome q
 		fake.settleInsideSecret = fake.secret.inside
 	}
 	return fake.settleErr
+}
+
+func (fake *fakeQuotaStore) SettleForRetry(_ context.Context, _ quota.Attempt, outcome quota.Outcome) error {
+	fake.settleRetryCalls++
+	fake.settleRetryOutcome = outcome
+	return fake.settleRetryErr
+}
+
+func (fake *fakeQuotaStore) SettleFinalAttempt(ctx context.Context, attempt quota.Attempt, outcome quota.Outcome) error {
+	return fake.Settle(ctx, attempt, outcome)
 }
 
 func (fake *fakeQuotaStore) ReleaseBeforeDispatch(_ context.Context, _ quota.Reservation, failure string) error {
@@ -2654,16 +3316,27 @@ func (fake *fakeSecretStore) Use(_ context.Context, _ secrets.Scope, _ string, c
 type fakeTargetFactory struct {
 	calls        int
 	target       DispatchTarget
+	targets      []DispatchTarget
+	upstreams    []configuration.Upstream
 	err          error
 	releaseCalls int
 }
 
-func (fake *fakeTargetFactory) Acquire(_ configuration.Upstream) (TargetLease, error) {
+func (fake *fakeTargetFactory) Acquire(upstream configuration.Upstream) (TargetLease, error) {
 	fake.calls++
+	fake.upstreams = append(fake.upstreams, upstream)
 	if fake.err != nil {
 		return nil, fake.err
 	}
-	return &fakeTargetLease{DispatchTarget: fake.target, release: func() { fake.releaseCalls++ }}, nil
+	target := fake.target
+	if len(fake.targets) != 0 {
+		index := fake.calls - 1
+		if index >= len(fake.targets) {
+			return nil, errors.New("unexpected fake target acquisition")
+		}
+		target = fake.targets[index]
+	}
+	return &fakeTargetLease{DispatchTarget: target, release: func() { fake.releaseCalls++ }}, nil
 }
 
 type fakeTargetLease struct {
@@ -2825,8 +3498,11 @@ func newProductionDispatchTarget(t *testing.T) (*protectedDispatchTarget, *count
 type fakeRelayer struct {
 	calls        int
 	outcome      upstream.RelayOutcome
+	outcomes     []upstream.RelayOutcome
 	err          error
+	errs         []error
 	body         string
+	bodies       []string
 	secret       *fakeSecretStore
 	insideSecret bool
 }
@@ -2855,18 +3531,31 @@ func (fake *fakeRelayer) Relay(
 	config upstream.ResponseRelayConfig,
 ) (upstream.RelayOutcome, error) {
 	fake.calls++
+	outcome := fake.outcome
+	relayErr := fake.err
+	body := fake.body
+	index := fake.calls - 1
+	if index < len(fake.outcomes) {
+		outcome = fake.outcomes[index]
+	}
+	if index < len(fake.errs) {
+		relayErr = fake.errs[index]
+	}
+	if index < len(fake.bodies) {
+		body = fake.bodies[index]
+	}
 	if fake.secret != nil {
 		fake.insideSecret = fake.secret.inside
 	}
-	if config.OnFirstByte != nil && fake.body != "" {
+	if config.OnFirstByte != nil && body != "" {
 		if err := config.OnFirstByte(ctx); err != nil {
 			return upstream.RelayOutcome{}, err
 		}
 	}
-	if fake.outcome.ClientStarted {
+	if outcome.ClientStarted {
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(fake.outcome.StatusCode)
-		_, _ = writer.Write([]byte(fake.body))
+		writer.WriteHeader(outcome.StatusCode)
+		_, _ = writer.Write([]byte(body))
 	}
-	return fake.outcome, fake.err
+	return outcome, relayErr
 }

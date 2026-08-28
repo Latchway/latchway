@@ -608,6 +608,18 @@ func (validator *Validator) featureSemanticIssues(
 		for _, routeID := range sortedMapKeys(routes) {
 			route := routes[routeID]
 			routePath := base + "/routes/" + pointerToken(routeID)
+			if retryPolicy, ok := route["retryPolicy"].(map[string]any); ok {
+				initialBackoff, initialOK := integerField(retryPolicy, "initialBackoffMilliseconds")
+				maximumBackoff, maximumOK := integerField(retryPolicy, "maximumBackoffMilliseconds")
+				if initialOK && maximumOK && (maximumBackoff < initialBackoff ||
+					(initialBackoff == 0 && maximumBackoff != 0)) {
+					issues = append(issues, errorIssue(
+						"route_retry_backoff_invalid",
+						routePath+"/retryPolicy/maximumBackoffMilliseconds",
+						"Maximum retry backoff must be at least the initial backoff, and both must be zero when backoff is disabled.",
+					))
+				}
+			}
 			when := strings.TrimSpace(stringValue(route, "when"))
 			issues = append(issues, validator.celIssues(validator.policyCEL, when, routePath+"/when", cel.BoolType)...)
 			priority, _ := integerField(route, "priority")

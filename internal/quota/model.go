@@ -302,13 +302,14 @@ type AttemptAllocation struct {
 // attempt after Previous. The store derives the next contiguous attempt
 // number and the exact configuration revision used by Pricing.
 type RetryAttemptInput struct {
-	RouteKey       string
-	UpstreamKey    string
-	ModelKey       string
-	PhysicalModel  string
-	Pricing        PricingSelection
-	InputPreflight *InputPreflightBinding
-	Allocations    []AttemptAllocation
+	RouteKey               string
+	UpstreamKey            string
+	ModelKey               string
+	PhysicalModel          string
+	Pricing                PricingSelection
+	InputNanoUSDPerMillion int64
+	InputPreflight         *InputPreflightBinding
+	Allocations            []AttemptAllocation
 }
 
 // ExceededError reports the safe reset boundary for one denied request. It
@@ -925,6 +926,7 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 		(input.Pricing.CatalogID == "") != (input.Pricing.Currency == "") ||
 		(input.Pricing.CatalogID != "" &&
 			(!identifierPattern.MatchString(input.Pricing.CatalogID) || input.Pricing.Currency != USDCurrency)) ||
+		input.InputNanoUSDPerMillion < 0 ||
 		len(input.Allocations) > len(reservedTokenMetricOrder)+1 {
 		return RetryAttemptInput{}, ErrInvalidInput
 	}
@@ -947,6 +949,9 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 			return RetryAttemptInput{}, ErrInvalidInput
 		}
 		byMetric[allocation.Metric] = allocation.Units
+	}
+	if _, hasCost := byMetric[CostNanoUSDMetric]; !hasCost && input.InputNanoUSDPerMillion != 0 {
+		return RetryAttemptInput{}, ErrInvalidInput
 	}
 	tokenReservations := make(map[string]int64, 3)
 	for _, metric := range reservedTokenMetricOrder {

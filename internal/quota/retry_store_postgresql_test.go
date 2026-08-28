@@ -269,8 +269,12 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			PhysicalModel: "provider/model-v2",
 			Allocations:   []AttemptAllocation{{Metric: OutputTokensMetric, Units: 1}},
 		}
-		if _, _, err := fixture.store.BeginRetryAttempt(fixture.ctx, first, denied); !errors.Is(err, ErrExceeded) {
-			t.Fatalf("retry capacity denial = %v, want ErrExceeded", err)
+		_, _, denialErr := fixture.store.BeginRetryAttempt(fixture.ctx, first, denied)
+		var exceeded *ExceededError
+		if !errors.Is(denialErr, ErrExceeded) || !errors.As(denialErr, &exceeded) ||
+			exceeded.LogicalRequestID() != input.LogicalRequestID.String() || exceeded.Maximum() != 10 ||
+			exceeded.Used() != 10 || exceeded.Reserved() != 0 || !exceeded.RetryAt().After(time.Now().Add(-time.Second)) {
+			t.Fatalf("retry capacity denial = %#v (%v), want typed calendar ExceededError", exceeded, denialErr)
 		}
 		assertCalendarTokenEntryState(t, fixture, reservation.ID(), OutputTokensMetric, 10, 10, 0, 10, 0)
 		if got := fixture.count(t, `
@@ -288,6 +292,93 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			t.Fatalf("finalize between attempts: %v", err)
 		}
 		assertRetryLogicalState(t, fixture, reservation.ID(), "failed", "settled", 1, 0)
+	})
+
+	t.Run("token retry capacity denial returns safe retry time and rolls back", func(t *testing.T) {
+		input := fixture.outputTokenBucketInput(t, "multi-attempt-token-denial", 10, 1, 1, 10)
+		input.LimitPlanKey = "multi-attempt-token-denial"
+		input.Rules = append(input.Rules, Rule{
+			Metric: LogicalRequestsMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1d", Maximum: 100, Hard: true,
+		})
+		reservation, first := reserveAndBeginTokenAttempt(t, fixture, input)
+		outcome := Outcome{Status: AttemptTimedOut, FailureCode: "upstream_timeout"}
+		if err := fixture.store.SettleForRetry(fixture.ctx, first, outcome); err != nil {
+			t.Fatalf("settle first token attempt before denial: %v", err)
+		}
+		denied := RetryAttemptInput{
+			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
+			PhysicalModel: "provider/model-v2",
+			Allocations:   []AttemptAllocation{{Metric: OutputTokensMetric, Units: 1}},
+		}
+		_, _, denialErr := fixture.store.BeginRetryAttempt(fixture.ctx, first, denied)
+		var exceeded *ExceededError
+		if !errors.Is(denialErr, ErrExceeded) || !errors.As(denialErr, &exceeded) ||
+			exceeded.LogicalRequestID() != input.LogicalRequestID.String() || exceeded.Maximum() != 10 ||
+			exceeded.Used() != 10 || exceeded.Reserved() != 0 || !exceeded.RetryAt().After(time.Now().Add(-time.Second)) {
+			t.Fatalf("token retry denial = %#v (%v), want typed token ExceededError", exceeded, denialErr)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("attempts after token retry denial = %d, want 1", got)
+		}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, first, outcome); err != nil {
+			t.Fatalf("finalize token denial request: %v", err)
+		}
+		assertRetryLogicalState(t, fixture, reservation.ID(), "failed", "settled", 1, 0)
+	})
+
+	t.Run("retry denial reports latest reset without partial reservation writes", func(t *testing.T) {
+		input := fixture.outputTokenBucketInput(
+			t, "multi-attempt-latest-retry-reset", 1, 1, 1_000_000, 1,
+		)
+		input.LimitPlanKey = "multi-attempt-latest-retry-reset"
+		input.Pricing = PricingSelection{CatalogID: "output-only", Currency: USDCurrency}
+		input.Rules = append(input.Rules, Rule{
+			Metric: CostNanoUSDMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1h",
+			Maximum: 1, ReservedUnits: 1, Hard: true,
+		})
+		reservation, first := reserveAndBeginTokenAttempt(t, fixture, input)
+		outcome := Outcome{Status: AttemptFailed, FailureCode: "upstream_unavailable"}
+		if err := fixture.store.SettleForRetry(fixture.ctx, first, outcome); err != nil {
+			t.Fatalf("settle both exhausted allocations: %v", err)
+		}
+		retryInput := RetryAttemptInput{
+			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
+			PhysicalModel: "provider/model-v2",
+			Pricing:       PricingSelection{CatalogID: "output-only", Currency: USDCurrency},
+			Allocations: []AttemptAllocation{
+				{Metric: OutputTokensMetric, Units: 1},
+				{Metric: CostNanoUSDMetric, Units: 1},
+			},
+		}
+		_, _, denialErr := fixture.store.BeginRetryAttempt(fixture.ctx, first, retryInput)
+		var exceeded *ExceededError
+		if !errors.Is(denialErr, ErrExceeded) || !errors.As(denialErr, &exceeded) ||
+			exceeded.LogicalRequestID() != input.LogicalRequestID.String() ||
+			exceeded.Maximum() != 1 || exceeded.Used() != 1 || exceeded.Reserved() != 0 ||
+			!exceeded.RetryAt().After(time.Now().Add(10*24*time.Hour)) {
+			t.Fatalf("multi-bucket retry denial = %#v (%v), want latest token reset", exceeded, denialErr)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM quota_reservation_entries
+			WHERE quota_reservation_id = $1
+			  AND initial_reserved_units = 1 AND reserved_units = 1
+			  AND settled_units = 1 AND released_units = 0
+		`, reservation.ID()); got != 2 {
+			t.Fatalf("unchanged exhausted reservation entries = %d, want 2", got)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("attempts after multi-bucket retry denial = %d, want 1", got)
+		}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, first, outcome); err != nil {
+			t.Fatalf("finalize multi-bucket retry denial: %v", err)
+		}
 	})
 
 	t.Run("concurrent exact retry begin elects one dispatch owner", func(t *testing.T) {
@@ -863,9 +954,10 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 		}
 		retryInput := RetryAttemptInput{
 			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
-			PhysicalModel: "provider/model-v2",
-			Pricing:       PricingSelection{CatalogID: "standard-usd", Currency: USDCurrency},
-			Allocations:   allocations,
+			PhysicalModel:          "provider/model-v2",
+			Pricing:                PricingSelection{CatalogID: "standard-usd", Currency: USDCurrency},
+			InputNanoUSDPerMillion: 1,
+			Allocations:            allocations,
 		}
 		if _, _, err := fixture.store.BeginRetryAttempt(fixture.ctx, first, retryInput); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("unbound priced retry = %v, want ErrInvalidInput", err)
@@ -981,6 +1073,52 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			t.Fatalf("begin replay with tampered first proof = %v, want ErrInvalidState", err)
 		}
 	})
+
+	t.Run("zero-input-rate cost retry is safely bounded without input proof", func(t *testing.T) {
+		input := fixture.input(t, "multi-attempt-output-priced-cost", 100)
+		input.LimitPlanKey = "multi-attempt-output-priced-cost"
+		input.Pricing = PricingSelection{CatalogID: "output-only", Currency: USDCurrency}
+		input.Rules = append(input.Rules, Rule{
+			Metric: CostNanoUSDMetric, Algorithm: CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1d",
+			Maximum: 100, ReservedUnits: 10, Hard: true,
+		})
+		reservation, first := reserveAndBeginTokenAttempt(t, fixture, input)
+		firstOutcome := Outcome{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "provider_busy"}
+		if err := fixture.store.SettleForRetry(fixture.ctx, first, firstOutcome); err != nil {
+			t.Fatalf("settle output-priced first attempt: %v", err)
+		}
+		retryInput := RetryAttemptInput{
+			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
+			PhysicalModel: "provider/model-v2",
+			Pricing:       PricingSelection{CatalogID: "output-only", Currency: USDCurrency},
+			Allocations:   []AttemptAllocation{{Metric: CostNanoUSDMetric, Units: 15}},
+		}
+		inputPriced := retryInput
+		inputPriced.InputNanoUSDPerMillion = 1
+		if _, _, err := fixture.store.BeginRetryAttempt(
+			fixture.ctx, first, inputPriced,
+		); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("input-priced cost retry without proof = %v, want ErrInvalidInput", err)
+		}
+		second, owner, err := fixture.store.BeginRetryAttempt(fixture.ctx, first, retryInput)
+		if err != nil || !owner || second.Number() != 2 {
+			t.Fatalf("begin output-priced cost retry = %#v owner=%t: %v", second, owner, err)
+		}
+		secondOutcome := Outcome{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "provider_busy"}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, second, secondOutcome); err != nil {
+			t.Fatalf("settle output-priced cost retry: %v", err)
+		}
+		assertRetryLogicalState(t, fixture, reservation.ID(), "failed", "settled", 1, 0)
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM upstream_attempt_quota_entries
+			WHERE logical_request_id = $1 AND metric = 'cost_nano_usd'
+			  AND allocated_units IN (10, 15) AND charged_units = allocated_units
+		`, input.LogicalRequestID.String()); got != 2 {
+			t.Fatalf("output-priced cost attempt ledger rows = %d, want 2", got)
+		}
+	})
 }
 
 func assertRetryLogicalState(
@@ -1079,6 +1217,8 @@ func TestPrepareRetryAttemptInput(t *testing.T) {
 		func(input *RetryAttemptInput) { input.Allocations[0].Units = 0 },
 		func(input *RetryAttemptInput) { input.Allocations[0].Metric = LogicalRequestsMetric },
 		func(input *RetryAttemptInput) { input.PhysicalModel = " model" },
+		func(input *RetryAttemptInput) { input.InputNanoUSDPerMillion = -1 },
+		func(input *RetryAttemptInput) { input.InputNanoUSDPerMillion = 1 },
 	} {
 		candidate := valid
 		candidate.Allocations = append([]AttemptAllocation(nil), valid.Allocations...)

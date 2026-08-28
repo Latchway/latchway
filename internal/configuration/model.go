@@ -418,19 +418,39 @@ type OutputPolicy struct {
 	AbsoluteMaximumTokens int64
 }
 
+// RetryPolicy bounds same-route retries. MaxAttempts includes the route's
+// initial attempt; a nil policy therefore means exactly one attempt.
+type RetryPolicy struct {
+	MaxAttempts    int64
+	InitialBackoff time.Duration
+	MaximumBackoff time.Duration
+	JitterRatio    float64
+	RetryOn        []string
+}
+
+func (policy RetryPolicy) clone() RetryPolicy {
+	policy.RetryOn = append([]string(nil), policy.RetryOn...)
+	return policy
+}
+
 // Route is one policy-guarded model choice within a feature.
 type Route struct {
-	ID         string
-	When       string
-	ModelID    string
-	Priority   int64
-	Weight     int64
-	StickyBy   string
-	FallbackOn []string
+	ID          string
+	When        string
+	ModelID     string
+	Priority    int64
+	Weight      int64
+	StickyBy    string
+	FallbackOn  []string
+	RetryPolicy *RetryPolicy
 }
 
 func (route Route) clone() Route {
 	route.FallbackOn = append([]string(nil), route.FallbackOn...)
+	if route.RetryPolicy != nil {
+		cloned := route.RetryPolicy.clone()
+		route.RetryPolicy = &cloned
+	}
 	return route
 }
 

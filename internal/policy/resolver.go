@@ -1027,6 +1027,11 @@ func stringCompare(left, right string) int {
 
 func cloneRoute(route configuration.Route) configuration.Route {
 	route.FallbackOn = append([]string(nil), route.FallbackOn...)
+	if route.RetryPolicy != nil {
+		cloned := *route.RetryPolicy
+		cloned.RetryOn = append([]string(nil), route.RetryPolicy.RetryOn...)
+		route.RetryPolicy = &cloned
+	}
 	return route
 }
 

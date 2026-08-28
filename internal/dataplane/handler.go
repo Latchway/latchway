@@ -126,6 +126,7 @@ type Handler struct {
 	clientWriteTimeout  time.Duration
 	persistenceTimeout  time.Duration
 	now                 func() time.Time
+	retrySleep          func(context.Context, time.Duration) error
 	ownedTargets        *TargetCache
 }
 
@@ -202,7 +203,7 @@ func New(config Config) (*Handler, error) {
 		targets: config.Targets, relayer: config.Relayer,
 		maximumResponseBody: config.MaximumResponseBodyBytes,
 		clientWriteTimeout:  config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
-		now: config.Now, ownedTargets: ownedTargets,
+		now: config.Now, retrySleep: sleepForRetry, ownedTargets: ownedTargets,
 	}, nil
 }
 
@@ -310,13 +311,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	decision, validated, err := validateDecisionPlan(declaration.feature, plan, endpoint.protocolID)
+	validatedPlan, err := validateDecisionPlan(declaration.feature, plan, endpoint.protocolID)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	primary := validatedPlan.candidates[0]
+	pricingAt := handler.now().UTC()
 	prepared, err := handler.prepareExecutionAttempt(
-		request.Context(), replay, endpoint.adapter, snapshot, decision, validated,
+		request.Context(), replay, endpoint.adapter, snapshot, primary.decision, primary.validated, pricingAt,
 	)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -334,7 +337,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		UpstreamKey: prepared.decision.Upstream.ID, ModelKey: prepared.decision.Model.ID,
 		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
 		InputPreflight: quotaInputPreflightBinding(prepared.inputPreflight),
-		Streaming:      metadata.Streaming, Rules: validated.rules,
+		Streaming:      metadata.Streaming, Rules: prepared.rules,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -345,63 +348,186 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		prepared.request.Context(), writer, prepared.request, endpoint, authorization,
 		prepared.decision, reservation, prepared.inputPreflight,
 	)
-	if !result.beginInvoked {
-		if result.err == nil {
+	candidateIndex := 0
+	routeAttempts := int64(1)
+	totalAttempts := int64(1)
+	current := prepared
+	retryExecution := false
+	var retryPrevious quota.Attempt
+	var retryPreviousOutcome quota.Outcome
+	for {
+		if !result.beginInvoked {
+			if result.err == nil {
+				result.err = errDispatchNotConsumed
+			}
+			var lifecycleErr error
+			if !retryExecution {
+				lifecycleErr = handler.releaseReservation(reservation, failureCode(result.err))
+			} else {
+				lifecycleErr = handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome)
+			}
+			if lifecycleErr != nil {
+				result.err = lifecycleErr
+			}
+			handler.writeMappedError(writer, requestID, declaration.feature, result.err)
+			return
+		}
+		if !result.dispatchOwner {
+			if result.err == nil {
+				result.err = errDispatchNotOwned
+			}
+			if retryExecution && retryBeginDefinitelyCreatedNoAttempt(result.err) {
+				if finalErr := handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome); finalErr != nil {
+					result.err = finalErr
+				}
+			}
+			handler.writeMappedError(writer, requestID, declaration.feature, result.err)
+			return
+		}
+		if result.err == nil && !result.relay.ClientStarted {
 			result.err = errDispatchNotConsumed
 		}
-		if releaseErr := handler.releaseReservation(reservation, failureCode(result.err)); releaseErr != nil {
-			result.err = releaseErr
-		}
-		handler.writeMappedError(writer, requestID, declaration.feature, result.err)
-		return
-	}
-	if result.err != nil && !result.dispatchOwner {
-		handler.writeMappedError(writer, requestID, declaration.feature, result.err)
-		return
-	}
-	if !result.dispatchOwner {
-		handler.writeMappedError(writer, requestID, declaration.feature, errDispatchNotOwned)
-		return
-	}
-	if result.err == nil && !result.relay.ClientStarted {
-		result.err = errDispatchNotConsumed
-	}
-	providerUsageOverBound := providerUsageExceedsTrustedBounds(
-		result.relay.Usage, prepared.appliedOutputMaximum, prepared.inputPreflight,
-	)
-	if providerUsageOverBound {
-		result.err = fmt.Errorf(
-			"%w: provider-reported usage exceeds the trusted request bounds",
-			errUpstreamProtocol,
-		)
-		// The provider measurement cannot be reconciled with the exact request
-		// bound. Settle every stateful reservation conservatively instead of
-		// passing an impossible output measurement that would leave the durable
-		// reservation pending.
-		result.relay.Usage = protocol.Usage{}
-	}
-	var calculatedCost quota.Cost
-	if !providerUsageOverBound {
-		calculatedCost, result.err = calculateConfiguredCost(prepared.pricing, result.relay.Usage, result.err)
-	}
-	calculatedCost = boundedSettlementCost(calculatedCost, prepared.hardCost)
+		var outcome quota.Outcome
+		result, outcome = calculateAttemptOutcome(current, result)
 
-	settlementErr := handler.settleAttempt(result.attempt, result.relay, calculatedCost, result.err)
-	if result.relay.ClientStarted {
+		condition, retryable := fallbackCondition(request.Context(), result)
+		nextCandidateIndex := candidateIndex
+		nextRouteAttempts := routeAttempts
+		retryDelay := time.Duration(0)
+		retrySelected := false
+		sameRouteRetry := false
+		retryPolicyInvalid := false
+		if retryable && totalAttempts < maximumLogicalAttempts {
+			if routeAllowsRetry(current.decision.Route, condition, routeAttempts) {
+				var delayOK bool
+				retryDelay, delayOK = routeRetryBackoff(
+					logicalID.String(), current.decision.Route, routeAttempts,
+				)
+				if !delayOK {
+					result.err = policy.ErrConfiguration
+					retryPolicyInvalid = true
+				} else if retryDelayFitsContext(request.Context(), retryDelay) {
+					nextRouteAttempts++
+					retrySelected = true
+					sameRouteRetry = true
+				}
+			}
+			if !retrySelected && !retryPolicyInvalid && routeAllowsFallback(current.decision.Route, condition) &&
+				candidateIndex+1 < len(validatedPlan.candidates) {
+				nextCandidateIndex++
+				nextRouteAttempts = 1
+				retrySelected = true
+			}
+		}
+		if retrySelected {
+			nextCandidate := validatedPlan.candidates[nextCandidateIndex]
+			next, prepareErr := handler.prepareExecutionAttempt(
+				request.Context(), replay, endpoint.adapter, snapshot,
+				nextCandidate.decision, nextCandidate.validated, pricingAt,
+			)
+			if prepareErr != nil {
+				settlementErr := handler.settleFinalAttempt(result.attempt, outcome)
+				if settlementErr != nil {
+					prepareErr = settlementErr
+				}
+				handler.writeMappedError(writer, requestID, declaration.feature, prepareErr)
+				return
+			}
+			retryInput, retryErr := retryAttemptInput(next)
+			if retryErr != nil {
+				if finalErr := handler.settleFinalAttempt(result.attempt, outcome); finalErr != nil {
+					retryErr = finalErr
+				}
+				handler.writeMappedError(writer, requestID, declaration.feature, retryErr)
+				return
+			}
+			if settlementErr := handler.settleForRetry(result.attempt, outcome); settlementErr != nil {
+				handler.writeMappedError(writer, requestID, declaration.feature, settlementErr)
+				return
+			}
+			retryPrevious = result.attempt
+			retryPreviousOutcome = outcome
+			if sameRouteRetry && handler.retrySleep == nil {
+				retryErr = errInvalidConfiguration
+			} else if sameRouteRetry {
+				retryErr = handler.retrySleep(request.Context(), retryDelay)
+			} else if request.Context().Err() != nil {
+				retryErr = request.Context().Err()
+			}
+			// Preparation and durable settlement can consume enough of the total
+			// request budget that a retry delay which fit when selected no longer
+			// fits when the sleep begins. If the request itself is still live,
+			// treat only that same-route retry as unavailable and continue with an
+			// immediately eligible fallback. The prior attempt is already settled
+			// for retry, so the fallback still reserves exactly one next attempt.
+			if sameRouteRetry && errors.Is(retryErr, context.DeadlineExceeded) &&
+				request.Context().Err() == nil &&
+				routeAllowsFallback(current.decision.Route, condition) &&
+				candidateIndex+1 < len(validatedPlan.candidates) {
+				fallbackIndex := candidateIndex + 1
+				fallbackCandidate := validatedPlan.candidates[fallbackIndex]
+				fallbackNext, fallbackErr := handler.prepareExecutionAttempt(
+					request.Context(), replay, endpoint.adapter, snapshot,
+					fallbackCandidate.decision, fallbackCandidate.validated, pricingAt,
+				)
+				var fallbackRetryInput quota.RetryAttemptInput
+				if fallbackErr == nil {
+					fallbackRetryInput, fallbackErr = retryAttemptInput(fallbackNext)
+				}
+				if fallbackErr == nil && request.Context().Err() != nil {
+					fallbackErr = request.Context().Err()
+				}
+				if fallbackErr == nil {
+					next = fallbackNext
+					retryInput = fallbackRetryInput
+					nextCandidateIndex = fallbackIndex
+					nextRouteAttempts = 1
+					sameRouteRetry = false
+					retryErr = nil
+				} else {
+					retryErr = fallbackErr
+				}
+			}
+			if retryErr != nil || request.Context().Err() != nil {
+				if retryErr == nil {
+					retryErr = request.Context().Err()
+				}
+				if finalErr := handler.settleFinalAttempt(retryPrevious, retryPreviousOutcome); finalErr != nil {
+					retryErr = finalErr
+				}
+				handler.writeMappedError(writer, requestID, declaration.feature, retryErr)
+				return
+			}
+			candidateIndex = nextCandidateIndex
+			routeAttempts = nextRouteAttempts
+			totalAttempts++
+			current = next
+			retryExecution = true
+			result = handler.executeRetry(
+				next.request.Context(), writer, next.request, endpoint, authorization,
+				next.decision, retryPrevious, retryInput, next.inputPreflight,
+			)
+			continue
+		}
+
+		settlementErr := handler.settleFinalAttempt(result.attempt, outcome)
+		if result.relay.ClientStarted {
+			return
+		}
+		if settlementErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, settlementErr)
+			return
+		}
+		if result.err != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, result.err)
+			return
+		}
+		// A successful bounded relay always commits provider response headers,
+		// even for an empty body. Reaching this point means the relayer violated
+		// its contract and must not be treated as a successful attempt.
+		handler.writeMappedError(writer, requestID, declaration.feature, errDispatchNotConsumed)
 		return
 	}
-	if settlementErr != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, settlementErr)
-		return
-	}
-	if result.err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, result.err)
-		return
-	}
-	// A successful bounded relay always commits provider response headers, even
-	// for an empty response body. Reaching this point means the relayer violated
-	// its contract and must not be treated as a successful attempt.
-	handler.writeMappedError(writer, requestID, declaration.feature, errDispatchNotConsumed)
 }
 
 type executionResult struct {
@@ -415,10 +541,84 @@ type executionResult struct {
 type preparedExecutionAttempt struct {
 	request              *http.Request
 	decision             policy.Decision
+	rules                []quota.Rule
 	pricing              configuredPricing
 	appliedOutputMaximum int64
 	inputPreflight       *protocol.TrustedInputPreflight
 	hardCost             hardCostReservation
+}
+
+func retryAttemptInput(prepared preparedExecutionAttempt) (quota.RetryAttemptInput, error) {
+	units := make(map[string]int64, 4)
+	for _, rule := range prepared.rules {
+		switch rule.Metric {
+		case quota.InputTokensMetric, quota.OutputTokensMetric, quota.TotalTokensMetric, quota.CostNanoUSDMetric:
+			if existing, duplicate := units[rule.Metric]; duplicate && existing != rule.ReservedUnits {
+				return quota.RetryAttemptInput{}, policy.ErrConfiguration
+			}
+			units[rule.Metric] = rule.ReservedUnits
+		}
+	}
+	allocations := make([]quota.AttemptAllocation, 0, len(units))
+	for _, metric := range []string{
+		quota.InputTokensMetric,
+		quota.OutputTokensMetric,
+		quota.TotalTokensMetric,
+		quota.CostNanoUSDMetric,
+	} {
+		if value, ok := units[metric]; ok {
+			allocations = append(allocations, quota.AttemptAllocation{Metric: metric, Units: value})
+		}
+	}
+	inputNanoUSDPerMillion := int64(0)
+	if _, hasCost := units[quota.CostNanoUSDMetric]; hasCost {
+		inputNanoUSDPerMillion = prepared.pricing.rates.InputNanoUSDPerMillion
+	}
+	return quota.RetryAttemptInput{
+		RouteKey:               prepared.decision.Route.ID,
+		UpstreamKey:            prepared.decision.Upstream.ID,
+		ModelKey:               prepared.decision.Model.ID,
+		PhysicalModel:          prepared.decision.Model.UpstreamModel,
+		Pricing:                prepared.pricing.quotaSelection,
+		InputNanoUSDPerMillion: inputNanoUSDPerMillion,
+		InputPreflight:         quotaInputPreflightBinding(prepared.inputPreflight),
+		Allocations:            allocations,
+	}, nil
+}
+
+func retryBeginDefinitelyCreatedNoAttempt(err error) bool {
+	return errors.Is(err, quota.ErrExceeded) ||
+		errors.Is(err, quota.ErrConcurrencyExceeded) ||
+		errors.Is(err, quota.ErrExpired) ||
+		errors.Is(err, quota.ErrInvalidInput)
+}
+
+func calculateAttemptOutcome(
+	prepared preparedExecutionAttempt,
+	result executionResult,
+) (executionResult, quota.Outcome) {
+	providerUsageOverBound := providerUsageExceedsTrustedBounds(
+		result.relay.Usage, prepared.appliedOutputMaximum, prepared.inputPreflight,
+	)
+	if providerUsageOverBound {
+		result.err = fmt.Errorf(
+			"%w: provider-reported usage exceeds the trusted request bounds",
+			errUpstreamProtocol,
+		)
+		// The provider measurement cannot be reconciled with the exact request
+		// bound. Settle every stateful reservation conservatively instead of
+		// passing an impossible measurement that could leave durable capacity
+		// pending or undercharge a failed attempt.
+		result.relay.Usage = protocol.Usage{}
+	}
+	var calculatedCost quota.Cost
+	if !providerUsageOverBound {
+		calculatedCost, result.err = calculateConfiguredCost(
+			prepared.pricing, result.relay.Usage, result.err,
+		)
+	}
+	calculatedCost = boundedSettlementCost(calculatedCost, prepared.hardCost)
+	return result, quotaOutcome(result.relay, calculatedCost, result.err)
 }
 
 func (handler *Handler) prepareExecutionAttempt(
@@ -428,11 +628,12 @@ func (handler *Handler) prepareExecutionAttempt(
 	snapshot configuration.ActiveSnapshot,
 	decision policy.Decision,
 	validated validatedDecision,
+	pricingAt time.Time,
 ) (preparedExecutionAttempt, error) {
-	if ctx == nil || nilDependency(adapter) {
+	if ctx == nil || nilDependency(adapter) || pricingAt.IsZero() {
 		return preparedExecutionAttempt{}, errInvalidConfiguration
 	}
-	selectedPricing, err := resolveConfiguredPricing(snapshot, decision.Model, handler.now())
+	selectedPricing, err := resolveConfiguredPricing(snapshot, decision.Model, pricingAt)
 	if err != nil {
 		return preparedExecutionAttempt{}, err
 	}
@@ -477,7 +678,7 @@ func (handler *Handler) prepareExecutionAttempt(
 		return preparedExecutionAttempt{}, err
 	}
 	return preparedExecutionAttempt{
-		request: attemptRequest, decision: decision, pricing: selectedPricing,
+		request: attemptRequest, decision: decision, rules: validated.rules, pricing: selectedPricing,
 		appliedOutputMaximum: appliedOutputMaximum, inputPreflight: inputPreflight,
 		hardCost: hardCost,
 	}, nil
@@ -493,8 +694,50 @@ func (handler *Handler) executeReserved(
 	reservation quota.Reservation,
 	inputPreflight *protocol.TrustedInputPreflight,
 ) executionResult {
+	return handler.executeAttempt(
+		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
+		func(beginContext context.Context) (quota.Attempt, bool, error) {
+			return handler.quotas.BeginAttempt(beginContext, reservation)
+		},
+	)
+}
+
+func (handler *Handler) executeRetry(
+	ctx context.Context,
+	writer http.ResponseWriter,
+	incoming *http.Request,
+	endpoint endpointMatch,
+	authorization session.Authorization,
+	decision policy.Decision,
+	previous quota.Attempt,
+	retry quota.RetryAttemptInput,
+	inputPreflight *protocol.TrustedInputPreflight,
+) executionResult {
+	return handler.executeAttempt(
+		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
+		func(beginContext context.Context) (quota.Attempt, bool, error) {
+			return handler.quotas.BeginRetryAttempt(beginContext, previous, retry)
+		},
+	)
+}
+
+type beginExecutionAttempt func(context.Context) (quota.Attempt, bool, error)
+
+func (handler *Handler) executeAttempt(
+	ctx context.Context,
+	writer http.ResponseWriter,
+	incoming *http.Request,
+	endpoint endpointMatch,
+	authorization session.Authorization,
+	decision policy.Decision,
+	inputPreflight *protocol.TrustedInputPreflight,
+	begin beginExecutionAttempt,
+) executionResult {
 	if !validTargetTimeouts(decision.Upstream.Timeouts) {
 		return executionResult{err: errTargetConfiguration}
+	}
+	if begin == nil {
+		return executionResult{err: errInvalidConfiguration}
 	}
 	if inputPreflight != nil {
 		if err := verifyAndRebindPreflightBody(incoming, *inputPreflight); err != nil {
@@ -526,7 +769,7 @@ func (handler *Handler) executeReserved(
 	authentication := decision.Upstream.Authentication
 	switch authentication.Type {
 	case "none":
-		return handler.dispatchReserved(executionContext, writer, endpoint.adapter, decision, reservation, dispatch)
+		return handler.dispatchAttempt(executionContext, writer, endpoint.adapter, decision, begin, dispatch)
 	case "bearer", "header":
 		var result executionResult
 		callbackCalled := false
@@ -546,8 +789,8 @@ func (handler *Handler) executeReserved(
 					executionContext, prepared, authentication.HeaderName, credential, beforeRoundTrip, consume,
 				)
 			}
-			result = handler.dispatchReserved(
-				executionContext, writer, endpoint.adapter, decision, reservation, credentialDispatch,
+			result = handler.dispatchAttempt(
+				executionContext, writer, endpoint.adapter, decision, begin, credentialDispatch,
 			)
 			// Never return a transport or observer error through the secret
 			// boundary; Store.Use intentionally collapses callback errors.
@@ -577,12 +820,12 @@ func protocolForwardedHeaders(protocolID string) []string {
 	return []string{"Content-Type"}
 }
 
-func (handler *Handler) dispatchReserved(
+func (handler *Handler) dispatchAttempt(
 	ctx context.Context,
 	writer http.ResponseWriter,
 	adapter protocol.Adapter,
 	decision policy.Decision,
-	reservation quota.Reservation,
+	begin beginExecutionAttempt,
 	dispatch func(func() error, func(*upstream.DispatchedResponse) error) error,
 ) executionResult {
 	result := executionResult{}
@@ -592,7 +835,7 @@ func (handler *Handler) dispatchReserved(
 			return result.err
 		}
 		result.beginInvoked = true
-		attempt, owner, err := handler.quotas.BeginAttempt(ctx, reservation)
+		attempt, owner, err := begin(ctx)
 		result.attempt = attempt
 		result.dispatchOwner = owner
 		if err != nil {
@@ -672,6 +915,15 @@ type validatedDecision struct {
 	rules               []quota.Rule
 	defaultOutputTokens int64
 	maximumOutputTokens int64
+}
+
+type validatedExecutionCandidate struct {
+	decision  policy.Decision
+	validated validatedDecision
+}
+
+type validatedExecutionPlan struct {
+	candidates []validatedExecutionCandidate
 }
 
 // configuredPricing is captured once from the immutable active snapshot and
@@ -1015,7 +1267,8 @@ func calculateConfiguredCost(
 func validateDecision(featureID string, decision policy.Decision, endpointProtocol string) (validatedDecision, error) {
 	requiredUpstreamType, knownProtocol := protocol.RequiredUpstreamType(endpointProtocol)
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
-		len(decision.Route.FallbackOn) != 0 || decision.Model.ID == "" ||
+		!validFallbackPolicy(decision.Route.FallbackOn) || !validRetryPolicy(decision.Route.RetryPolicy) ||
+		decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
 		endpointProtocol == "" || decision.Feature.Protocol != endpointProtocol ||
 		!protocol.ProtocolExecutable(endpointProtocol) || !knownProtocol ||
@@ -1032,12 +1285,15 @@ func validateDecisionPlan(
 	featureID string,
 	plan policy.DecisionPlan,
 	endpointProtocol string,
-) (policy.Decision, validatedDecision, error) {
+) (validatedExecutionPlan, error) {
 	if len(plan.Candidates) == 0 || len(plan.Candidates) > 32 {
-		return policy.Decision{}, validatedDecision{}, policy.ErrConfiguration
+		return validatedExecutionPlan{}, policy.ErrConfiguration
 	}
-	var primary policy.Decision
+	validatedPlan := validatedExecutionPlan{
+		candidates: make([]validatedExecutionCandidate, 0, len(plan.Candidates)),
+	}
 	var primaryValidation validatedDecision
+	seenRoutes := make(map[string]struct{}, len(plan.Candidates))
 	for index, candidate := range plan.Candidates {
 		decision := policy.Decision{
 			Feature: plan.Feature, LimitPlan: plan.LimitPlan,
@@ -1045,18 +1301,22 @@ func validateDecisionPlan(
 		}
 		validated, err := validateDecision(featureID, decision, endpointProtocol)
 		if err != nil {
-			return policy.Decision{}, validatedDecision{}, err
+			return validatedExecutionPlan{}, err
 		}
+		if _, duplicate := seenRoutes[decision.Route.ID]; duplicate {
+			return validatedExecutionPlan{}, policy.ErrConfiguration
+		}
+		seenRoutes[decision.Route.ID] = struct{}{}
 		if index == 0 {
-			primary = decision
 			primaryValidation = validated
-			continue
+		} else if !reflect.DeepEqual(primaryValidation, validated) {
+			return validatedExecutionPlan{}, policy.ErrConfiguration
 		}
-		if !reflect.DeepEqual(primaryValidation, validated) {
-			return policy.Decision{}, validatedDecision{}, policy.ErrConfiguration
-		}
+		validatedPlan.candidates = append(validatedPlan.candidates, validatedExecutionCandidate{
+			decision: decision, validated: validated,
+		})
 	}
-	return primary, primaryValidation, nil
+	return validatedPlan, nil
 }
 
 // validateFeatureLimitPlan is the shared capability gate for protected
@@ -1224,15 +1484,16 @@ func (handler *Handler) releaseReservation(reservation quota.Reservation, failur
 	return handler.quotas.ReleaseBeforeDispatch(ctx, reservation, failure)
 }
 
-func (handler *Handler) settleAttempt(
-	attempt quota.Attempt,
-	relay upstream.RelayOutcome,
-	cost quota.Cost,
-	executionErr error,
-) error {
+func (handler *Handler) settleForRetry(attempt quota.Attempt, outcome quota.Outcome) error {
 	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
 	defer cancel()
-	return handler.quotas.Settle(ctx, attempt, quotaOutcome(relay, cost, executionErr))
+	return handler.quotas.SettleForRetry(ctx, attempt, outcome)
+}
+
+func (handler *Handler) settleFinalAttempt(attempt quota.Attempt, outcome quota.Outcome) error {
+	ctx, cancel := context.WithTimeout(context.Background(), handler.persistenceTimeout)
+	defer cancel()
+	return handler.quotas.SettleFinalAttempt(ctx, attempt, outcome)
 }
 
 func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr error) quota.Outcome {
@@ -1257,7 +1518,7 @@ func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr err
 	case errors.Is(executionErr, context.Canceled):
 		status = quota.AttemptCancelled
 		code = "client_cancelled"
-	case errors.Is(executionErr, context.DeadlineExceeded), errors.Is(executionErr, upstream.ErrResponseIdleTimeout):
+	case isUpstreamTimeout(executionErr):
 		status = quota.AttemptTimedOut
 		code = "upstream_timeout"
 	}
@@ -1266,7 +1527,7 @@ func quotaOutcome(relay upstream.RelayOutcome, cost quota.Cost, executionErr err
 
 func failureCode(err error) string {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, upstream.ErrResponseIdleTimeout):
+	case isUpstreamTimeout(err):
 		return "upstream_timeout"
 	case errors.Is(err, context.Canceled):
 		return "client_cancelled"
@@ -1314,7 +1575,7 @@ func (handler *Handler) writeMappedError(writer http.ResponseWriter, requestID, 
 
 func errorCode(err error, now time.Time) (string, int) {
 	var protocolError *protocol.Error
-	var exceeded *quota.ExceededError
+	var exceeded interface{ RetryAt() time.Time }
 	switch {
 	case errors.As(err, &protocolError):
 		if protocolError.Code == "request_invalid" || protocolError.Code == "upstream_protocol_error" {
@@ -1355,8 +1616,11 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "configuration_invalid", 0
 	case errors.Is(err, quota.ErrConcurrencyExceeded):
 		return "concurrency_exceeded", 0
-	case errors.As(err, &exceeded):
-		return "quota_exceeded", quotaRetryAfterSeconds(exceeded.RetryAt(), now)
+	case errors.Is(err, quota.ErrExceeded):
+		if errors.As(err, &exceeded) {
+			return "quota_exceeded", quotaRetryAfterSeconds(exceeded.RetryAt(), now)
+		}
+		return "quota_exceeded", 0
 	case errors.Is(err, quota.ErrDependency), errors.Is(err, quota.ErrInvalidState),
 		errors.Is(err, quota.ErrNotFound), errors.Is(err, quota.ErrExpired),
 		errors.Is(err, quota.ErrFinalized), errors.Is(err, configuration.ErrInvalid),
@@ -1364,7 +1628,7 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "server_not_ready", 0
 	case errors.Is(err, secrets.ErrUnavailable):
 		return "upstream_unavailable", 0
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, upstream.ErrResponseIdleTimeout):
+	case isUpstreamTimeout(err):
 		return "upstream_timeout", 0
 	case errors.Is(err, upstream.ErrInvalidResponseRelay), errors.Is(err, upstream.ErrResponseBodyTooLarge):
 		return "upstream_protocol_error", 0

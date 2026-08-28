@@ -145,6 +145,25 @@ func TestResolverWeightedSelectionIsStableAndDefensive(t *testing.T) {
 	}
 }
 
+func TestCloneRouteDeepCopiesRetryPolicy(t *testing.T) {
+	t.Parallel()
+
+	original := configuration.Route{
+		ID: "primary", FallbackOn: []string{"status_503"},
+		RetryPolicy: &configuration.RetryPolicy{
+			MaxAttempts: 3, RetryOn: []string{"connect_error", "status_503"},
+		},
+	}
+	cloned := cloneRoute(original)
+	cloned.FallbackOn[0] = "changed"
+	cloned.RetryPolicy.RetryOn[0] = "changed"
+	cloned.RetryPolicy.MaxAttempts = 8
+	if original.FallbackOn[0] != "status_503" || original.RetryPolicy == nil ||
+		original.RetryPolicy.RetryOn[0] != "connect_error" || original.RetryPolicy.MaxAttempts != 3 {
+		t.Fatalf("route retry policy was not defensively cloned: original=%+v clone=%+v", original, cloned)
+	}
+}
+
 func TestResolverPlanOrdersEveryMatchedRouteDeterministicallyAndDetached(t *testing.T) {
 	t.Parallel()
 

@@ -149,7 +149,10 @@ func policyEngineInput(
 type QuotaStore interface {
 	Reserve(context.Context, quota.ReserveInput) (quota.Reservation, error)
 	BeginAttempt(context.Context, quota.Reservation) (quota.Attempt, bool, error)
+	BeginRetryAttempt(context.Context, quota.Attempt, quota.RetryAttemptInput) (quota.Attempt, bool, error)
 	MarkFirstByte(context.Context, quota.Attempt) error
+	SettleForRetry(context.Context, quota.Attempt, quota.Outcome) error
+	SettleFinalAttempt(context.Context, quota.Attempt, quota.Outcome) error
 	Settle(context.Context, quota.Attempt, quota.Outcome) error
 	ReleaseBeforeDispatch(context.Context, quota.Reservation, string) error
 }

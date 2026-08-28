@@ -499,7 +499,7 @@ func (store *Store) BeginRetryAttempt(
 		return Attempt{}, false, err
 	}
 	if err := reserveRetryAllocations(
-		ctx, tx, targetEntries, materialized.plans, allocationByMetric,
+		ctx, tx, reservation.logicalRequestID, targetEntries, materialized.plans, allocationByMetric,
 		materialized.newEntries, now,
 	); err != nil {
 		return Attempt{}, false, err
@@ -1043,7 +1043,7 @@ func validateRetryInputPreflight(
 	if hasCost && input.Pricing.CatalogID == "" {
 		return ErrInvalidInput
 	}
-	requires := hasInput || hasTotal || hasCost
+	requires := hasInput || hasTotal || (hasCost && input.InputNanoUSDPerMillion != 0)
 	if input.InputPreflight == nil {
 		if requires {
 			return ErrInvalidInput
@@ -1166,6 +1166,7 @@ func attemptQuotaAllocationsMatch(
 func reserveRetryAllocations(
 	ctx context.Context,
 	tx pgx.Tx,
+	logicalRequestID string,
 	entries []lockedEntry,
 	plans []plannedBucket,
 	allocations map[string]int64,
@@ -1175,8 +1176,16 @@ func reserveRetryAllocations(
 	if len(entries) != len(plans) {
 		return ErrInvalidState
 	}
+	type retryAllocationReservation struct {
+		allocated         bool
+		newlyMaterialized bool
+		units             int64
+		tokenState        tokenBucketState
+	}
+	reservations := make([]retryAllocationReservation, len(entries))
+	exceeded := make([]int, 0, len(entries))
 	for index, entry := range entries {
-		plan := plans[index]
+		plan := &plans[index]
 		if entry.bucketID != plan.bucketID || entry.metric != plan.rule.Metric ||
 			entry.algorithm != plan.rule.Algorithm {
 			return ErrInvalidState
@@ -1186,6 +1195,10 @@ func reserveRetryAllocations(
 			continue
 		}
 		_, newlyMaterialized := newEntries[entry.id]
+		reservation := &reservations[index]
+		reservation.allocated = true
+		reservation.newlyMaterialized = newlyMaterialized
+		reservation.units = units
 		outstanding := entry.reservedUnits - entry.settledUnits - entry.releasedUnits
 		if (!newlyMaterialized && outstanding != 0) ||
 			(newlyMaterialized && (outstanding != units || entry.initialReservedUnits != units)) ||
@@ -1204,30 +1217,56 @@ func reserveRetryAllocations(
 			if err != nil {
 				return err
 			}
+			plan.tokenState = reconciled
+			plan.retryAt, err = tokenRetryAt(reconciled, units, now)
+			if err != nil {
+				return err
+			}
 			reserved, accepted, err := reserveTokenBalance(reconciled, units)
 			if err != nil {
 				return err
 			}
+			reservation.tokenState = reserved
 			if !accepted {
-				return ErrExceeded
-			}
-			if err := persistTokenBucketEntry(
-				ctx, tx, entry, reserved, now, "reserve retry token allocation",
-			); err != nil {
-				return err
+				exceeded = append(exceeded, index)
 			}
 		} else {
 			maximum := plan.rule.Maximum
 			if entry.hardMaximum == nil || maximum <= 0 || entry.bucketUsed < 0 ||
 				entry.bucketReserved < 0 || entry.bucketUsed > maximum ||
-				entry.bucketReserved > maximum-entry.bucketUsed ||
-				units > maximum-entry.bucketUsed-entry.bucketReserved {
-				return ErrExceeded
+				entry.bucketReserved > maximum-entry.bucketUsed {
+				return ErrInvalidState
 			}
+			plan.locked = lockedBucket{
+				id: entry.bucketID, hardMaximum: entry.hardMaximum,
+				used: entry.bucketUsed, reserved: entry.bucketReserved,
+			}
+			if units > maximum-entry.bucketUsed-entry.bucketReserved {
+				exceeded = append(exceeded, index)
+			}
+		}
+	}
+	if len(exceeded) != 0 {
+		return exceededError(logicalRequestID, plans, exceeded)
+	}
+	for index, entry := range entries {
+		reservation := reservations[index]
+		if !reservation.allocated {
+			continue
+		}
+		plan := plans[index]
+		if entry.algorithm == TokenBucketAlgorithm {
+			if err := persistTokenBucketEntry(
+				ctx, tx, entry, reservation.tokenState, now, "reserve retry token allocation",
+			); err != nil {
+				return err
+			}
+		} else {
+			maximum := plan.rule.Maximum
 			command, err := tx.Exec(ctx, `
-				UPDATE quota_buckets
-				SET hard_maximum = $2,
-				    reserved_units = reserved_units + $3::bigint,
+					UPDATE quota_buckets
+					SET hard_maximum = $2,
+					    reserved_units = reserved_units + $3::bigint,
 				    version = version + 1,
 				    updated_at = GREATEST(updated_at, $4)
 				WHERE quota_bucket_id = $1
@@ -1237,7 +1276,7 @@ func reserveRetryAllocations(
 				      ))
 				  AND $2 >= used_units
 				  AND $3::bigint <= $2 - used_units - reserved_units
-			`, entry.bucketID, maximum, units, now, entry.bucketUsed, entry.bucketReserved)
+				`, entry.bucketID, maximum, reservation.units, now, entry.bucketUsed, entry.bucketReserved)
 			if err != nil {
 				return persistenceFailure("reserve retry calendar allocation", err)
 			}
@@ -1245,7 +1284,7 @@ func reserveRetryAllocations(
 				return ErrInvalidState
 			}
 		}
-		if newlyMaterialized {
+		if reservation.newlyMaterialized {
 			continue
 		}
 		command, err := tx.Exec(ctx, `
@@ -1256,7 +1295,7 @@ func reserveRetryAllocations(
 			  AND reserved_units = $4
 			  AND settled_units = $5
 			  AND released_units = $6
-		`, entry.id, units, entry.initialReservedUnits, entry.reservedUnits,
+		`, entry.id, reservation.units, entry.initialReservedUnits, entry.reservedUnits,
 			entry.settledUnits, entry.releasedUnits)
 		if err != nil {
 			return persistenceFailure("extend retry quota reservation entry", err)
@@ -1801,9 +1840,6 @@ func attemptInputAccountingMatchesQuota(
 		case CostNanoUSDMetric:
 			if !pricing.present() {
 				return false
-			}
-			if attempt.number > 1 {
-				requiresProof = true
 			}
 		default:
 			return false

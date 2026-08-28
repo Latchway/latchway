@@ -3,6 +3,7 @@ package configuration
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -23,6 +24,17 @@ var (
 	runtimeSecretRefPattern  = regexp.MustCompile(`^secret/[a-z][a-z0-9_-]{0,62}$`)
 	runtimeHeaderNamePattern = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 )
+
+var runtimeRetryConditions = []string{
+	"connect_error",
+	"timeout_before_headers",
+	"status_408",
+	"status_429",
+	"status_500",
+	"status_502",
+	"status_503",
+	"status_504",
+}
 
 const (
 	maximumInputAccountingProfiles = 256
@@ -340,13 +352,14 @@ type compiledFeature struct {
 		AbsoluteMaximumTokens int64 `json:"absoluteMaximumTokens"`
 	} `json:"output"`
 	Routes []struct {
-		ID         string   `json:"id"`
-		When       string   `json:"when"`
-		ModelID    string   `json:"model"`
-		Priority   int64    `json:"priority"`
-		Weight     int64    `json:"weight"`
-		StickyBy   string   `json:"stickyBy"`
-		FallbackOn []string `json:"fallbackOn"`
+		ID          string               `json:"id"`
+		When        string               `json:"when"`
+		ModelID     string               `json:"model"`
+		Priority    int64                `json:"priority"`
+		Weight      int64                `json:"weight"`
+		StickyBy    string               `json:"stickyBy"`
+		FallbackOn  []string             `json:"fallbackOn"`
+		RetryPolicy *compiledRetryPolicy `json:"retryPolicy"`
 	} `json:"routes"`
 	OpaqueHTTP *struct {
 		AllowedMethods        []string `json:"allowedMethods"`
@@ -354,6 +367,14 @@ type compiledFeature struct {
 		MaximumBodyBytes      int64    `json:"maxBodyBytes"`
 		AllowedRequestHeaders []string `json:"allowedRequestHeaders"`
 	} `json:"opaqueHttp"`
+}
+
+type compiledRetryPolicy struct {
+	MaxAttempts                int64    `json:"maxAttempts"`
+	InitialBackoffMilliseconds int64    `json:"initialBackoffMilliseconds"`
+	MaximumBackoffMilliseconds int64    `json:"maximumBackoffMilliseconds"`
+	JitterRatio                float64  `json:"jitterRatio"`
+	RetryOn                    []string `json:"retryOn"`
 }
 
 func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
@@ -796,20 +817,18 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		if !ok || !slices.Contains(model.Capabilities, raw.Protocol) {
 			return Feature{}, ErrInvalid
 		}
-		seenFallback := make(map[string]struct{}, len(rawRoute.FallbackOn))
-		for _, fallback := range rawRoute.FallbackOn {
-			if !slices.Contains([]string{"connect_error", "timeout_before_headers", "status_429", "status_500", "status_502", "status_503", "status_504"}, fallback) {
-				return Feature{}, ErrInvalid
-			}
-			if _, duplicate := seenFallback[fallback]; duplicate {
-				return Feature{}, ErrInvalid
-			}
-			seenFallback[fallback] = struct{}{}
+		if !runtimeRetryConditionsValid(rawRoute.FallbackOn, false) {
+			return Feature{}, ErrInvalid
+		}
+		retryPolicy, err := runtimeRetryPolicy(rawRoute.RetryPolicy)
+		if err != nil {
+			return Feature{}, ErrInvalid
 		}
 		feature.Routes = append(feature.Routes, Route{
 			ID: rawRoute.ID, When: rawRoute.When, ModelID: rawRoute.ModelID,
 			Priority: rawRoute.Priority, Weight: rawRoute.Weight, StickyBy: rawRoute.StickyBy,
-			FallbackOn: append([]string(nil), rawRoute.FallbackOn...),
+			FallbackOn:  append([]string(nil), rawRoute.FallbackOn...),
+			RetryPolicy: retryPolicy,
 		})
 	}
 	if raw.OpaqueHTTP != nil {
@@ -830,6 +849,48 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		return Feature{}, ErrInvalid
 	}
 	return feature, nil
+}
+
+func runtimeRetryPolicy(raw *compiledRetryPolicy) (*RetryPolicy, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	if raw.MaxAttempts < 2 || raw.MaxAttempts > 8 ||
+		raw.InitialBackoffMilliseconds < 0 || raw.InitialBackoffMilliseconds > 60_000 ||
+		raw.MaximumBackoffMilliseconds < raw.InitialBackoffMilliseconds ||
+		raw.MaximumBackoffMilliseconds > 60_000 ||
+		math.IsNaN(raw.JitterRatio) || math.IsInf(raw.JitterRatio, 0) ||
+		raw.JitterRatio < 0 || raw.JitterRatio > 1 ||
+		!runtimeRetryConditionsValid(raw.RetryOn, true) {
+		return nil, ErrInvalid
+	}
+	if raw.InitialBackoffMilliseconds == 0 && raw.MaximumBackoffMilliseconds != 0 {
+		return nil, ErrInvalid
+	}
+	return &RetryPolicy{
+		MaxAttempts:    raw.MaxAttempts,
+		InitialBackoff: time.Duration(raw.InitialBackoffMilliseconds) * time.Millisecond,
+		MaximumBackoff: time.Duration(raw.MaximumBackoffMilliseconds) * time.Millisecond,
+		JitterRatio:    raw.JitterRatio,
+		RetryOn:        append([]string(nil), raw.RetryOn...),
+	}, nil
+}
+
+func runtimeRetryConditionsValid(conditions []string, requireOne bool) bool {
+	if (requireOne && len(conditions) == 0) || len(conditions) > len(runtimeRetryConditions) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(conditions))
+	for _, condition := range conditions {
+		if !slices.Contains(runtimeRetryConditions, condition) {
+			return false
+		}
+		if _, duplicate := seen[condition]; duplicate {
+			return false
+		}
+		seen[condition] = struct{}{}
+	}
+	return true
 }
 
 func protocolRequiresOutputPolicy(protocol string) bool {

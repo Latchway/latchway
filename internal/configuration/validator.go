@@ -397,6 +397,11 @@ func applyDefaults(root map[string]any) {
 			setDefault(route, "weight", json.Number("1"))
 			setDefault(route, "stickyBy", "none")
 			setDefault(route, "fallbackOn", []any{})
+			if retryPolicy, ok := route["retryPolicy"].(map[string]any); ok {
+				setDefault(retryPolicy, "initialBackoffMilliseconds", json.Number("0"))
+				setDefault(retryPolicy, "maximumBackoffMilliseconds", json.Number("0"))
+				setDefault(retryPolicy, "jitterRatio", json.Number("0"))
+			}
 		}
 	}
 	session := ensureObject(spec, "session")
