@@ -73,21 +73,36 @@ func (fake *fakeJWKSProvider) PublicJWKS(context.Context) (JWKS, error) {
 	return fake.result, fake.err
 }
 
+type fakeFeatureQuotaProvider struct {
+	result FeatureQuotaResult
+	err    error
+	inputs []FeatureQuotaInput
+}
+
+func (fake *fakeFeatureQuotaProvider) FeatureQuota(_ context.Context, input FeatureQuotaInput) (FeatureQuotaResult, error) {
+	fake.inputs = append(fake.inputs, input)
+	return fake.result, fake.err
+}
+
 func TestNewValidatesDependenciesAndCanonicalPublicOrigin(t *testing.T) {
 	t.Parallel()
 
 	coordinator := &fakeCoordinator{}
+	quotas := &fakeFeatureQuotaProvider{}
 	keys := &fakeJWKSProvider{}
 	var nilCoordinator *fakeCoordinator
+	var nilQuotas *fakeFeatureQuotaProvider
 	var nilKeys *fakeJWKSProvider
 	tests := []struct {
 		name   string
 		config Config
 	}{
-		{name: "missing coordinator", config: Config{JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
-		{name: "typed nil coordinator", config: Config{Coordinator: nilCoordinator, JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
-		{name: "missing jwks", config: Config{Coordinator: coordinator, PublicOrigin: "https://gateway.example.test"}},
-		{name: "typed nil jwks", config: Config{Coordinator: coordinator, JWKS: nilKeys, PublicOrigin: "https://gateway.example.test"}},
+		{name: "missing coordinator", config: Config{FeatureQuotas: quotas, JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
+		{name: "typed nil coordinator", config: Config{Coordinator: nilCoordinator, FeatureQuotas: quotas, JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
+		{name: "missing feature quotas", config: Config{Coordinator: coordinator, JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
+		{name: "typed nil feature quotas", config: Config{Coordinator: coordinator, FeatureQuotas: nilQuotas, JWKS: keys, PublicOrigin: "https://gateway.example.test"}},
+		{name: "missing jwks", config: Config{Coordinator: coordinator, FeatureQuotas: quotas, PublicOrigin: "https://gateway.example.test"}},
+		{name: "typed nil jwks", config: Config{Coordinator: coordinator, FeatureQuotas: quotas, JWKS: nilKeys, PublicOrigin: "https://gateway.example.test"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -107,7 +122,7 @@ func TestNewValidatesDependenciesAndCanonicalPublicOrigin(t *testing.T) {
 		origin := origin
 		t.Run("invalid origin "+origin, func(t *testing.T) {
 			t.Parallel()
-			if _, err := New(Config{Coordinator: coordinator, JWKS: keys, PublicOrigin: origin}); err == nil {
+			if _, err := New(Config{Coordinator: coordinator, FeatureQuotas: quotas, JWKS: keys, PublicOrigin: origin}); err == nil {
 				t.Fatalf("New() accepted public origin %q", origin)
 			}
 		})
@@ -116,7 +131,7 @@ func TestNewValidatesDependenciesAndCanonicalPublicOrigin(t *testing.T) {
 		origin := origin
 		t.Run("valid origin "+origin, func(t *testing.T) {
 			t.Parallel()
-			if _, err := New(Config{Coordinator: coordinator, JWKS: keys, PublicOrigin: origin}); err != nil {
+			if _, err := New(Config{Coordinator: coordinator, FeatureQuotas: quotas, JWKS: keys, PublicOrigin: origin}); err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 		})
@@ -128,9 +143,10 @@ func TestHandlerRejectsClientHintWithoutServerLogicalIdentity(t *testing.T) {
 
 	coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
 	api, err := New(Config{
-		Coordinator:  coordinator,
-		JWKS:         &fakeJWKSProvider{result: validJWKS()},
-		PublicOrigin: "https://gateway.example.test",
+		Coordinator:   coordinator,
+		FeatureQuotas: &fakeFeatureQuotaProvider{},
+		JWKS:          &fakeJWKSProvider{result: validJWKS()},
+		PublicOrigin:  "https://gateway.example.test",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -595,8 +611,12 @@ func TestSensitiveValuesAndEvidenceAreOpaqueAndDefensivelyCopied(t *testing.T) {
 }
 
 func newTestHandler(t *testing.T, coordinator Coordinator, keys JWKSProvider, origin string) http.Handler {
+	return newTestHandlerWithFeatureQuotas(t, coordinator, &fakeFeatureQuotaProvider{}, keys, origin)
+}
+
+func newTestHandlerWithFeatureQuotas(t *testing.T, coordinator Coordinator, quotas FeatureQuotaProvider, keys JWKSProvider, origin string) http.Handler {
 	t.Helper()
-	api, err := New(Config{Coordinator: coordinator, JWKS: keys, PublicOrigin: origin})
+	api, err := New(Config{Coordinator: coordinator, FeatureQuotas: quotas, JWKS: keys, PublicOrigin: origin})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

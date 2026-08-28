@@ -23,28 +23,35 @@ import (
 )
 
 const (
-	challengePath = "/client/v1/session-challenges"
-	exchangePath  = "/client/v1/sessions"
-	refreshPath   = "/client/v1/sessions/refresh"
-	revokePath    = "/client/v1/installations/current"
-	jwksPath      = "/.well-known/jwks.json"
-	discoveryPath = "/.well-known/latchway"
+	challengePath             = "/client/v1/session-challenges"
+	exchangePath              = "/client/v1/sessions"
+	refreshPath               = "/client/v1/sessions/refresh"
+	revokePath                = "/client/v1/installations/current"
+	featureQuotaPrefix        = "/client/v1/features/"
+	featureQuotaSuffix        = "/quota"
+	jwksPath                  = "/.well-known/jwks.json"
+	discoveryPath             = "/.well-known/latchway"
+	maximumFeatureQuotaLimits = 128
+	maximumSafeJSONInteger    = int64(1<<53 - 1)
 )
 
 type Config struct {
-	Coordinator  Coordinator
-	JWKS         JWKSProvider
-	PublicOrigin string
+	Coordinator   Coordinator
+	FeatureQuotas FeatureQuotaProvider
+	JWKS          JWKSProvider
+	PublicOrigin  string
 }
 
 type API struct {
-	coordinator Coordinator
-	jwks        JWKSProvider
-	targets     map[string]url.URL
+	coordinator   Coordinator
+	featureQuotas FeatureQuotaProvider
+	jwks          JWKSProvider
+	origin        url.URL
+	targets       map[string]url.URL
 }
 
 func New(config Config) (*API, error) {
-	if nilDependency(config.Coordinator) || nilDependency(config.JWKS) {
+	if nilDependency(config.Coordinator) || nilDependency(config.FeatureQuotas) || nilDependency(config.JWKS) {
 		return nil, errors.New("client API dependency is nil")
 	}
 	origin, err := canonicalPublicOrigin(config.PublicOrigin)
@@ -55,7 +62,10 @@ func New(config Config) (*API, error) {
 	for _, path := range []string{challengePath, exchangePath, refreshPath, revokePath} {
 		targets[path] = url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: path}
 	}
-	return &API{coordinator: config.Coordinator, jwks: config.JWKS, targets: targets}, nil
+	return &API{
+		coordinator: config.Coordinator, featureQuotas: config.FeatureQuotas,
+		jwks: config.JWKS, origin: origin, targets: targets,
+	}, nil
 }
 
 func nilDependency(value any) bool {
@@ -117,6 +127,14 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.writeViolation(w, correlationID, invalidAt("query", "Query parameters are not supported by this endpoint."))
 		return
 	}
+	if feature, ok := featureFromQuotaPath(path); ok {
+		if r.Method != http.MethodGet {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.getFeatureQuota(w, r, correlationID, logicalID, feature)
+		return
+	}
 
 	switch path {
 	case challengePath:
@@ -158,6 +176,17 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 	}
+}
+
+func featureFromQuotaPath(path string) (string, bool) {
+	if !strings.HasPrefix(path, featureQuotaPrefix) || !strings.HasSuffix(path, featureQuotaSuffix) {
+		return "", false
+	}
+	feature := strings.TrimSuffix(strings.TrimPrefix(path, featureQuotaPrefix), featureQuotaSuffix)
+	if !identifierPattern.MatchString(feature) {
+		return "", false
+	}
+	return feature, true
 }
 
 func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
@@ -282,6 +311,50 @@ func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestID string, logicalRequestID requestidentity.LogicalID, feature string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	path := featureQuotaPrefix + feature + featureQuotaSuffix
+	target := url.URL{Scheme: api.origin.Scheme, Host: api.origin.Host, Path: path}
+	input := FeatureQuotaInput{
+		Metadata: RequestMetadata{
+			RequestID: logicalRequestID.String(), SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
+			HTTPMethod: http.MethodGet, TargetURL: target, DPoPProof: proof,
+		},
+		LogicalRequestID: logicalRequestID,
+		AccessToken:      accessToken,
+		Feature:          feature,
+	}
+	result, err := api.featureQuotas.FeatureQuota(r.Context(), input)
+	if err != nil {
+		api.writeFeatureDependencyFailure(w, requestID, feature, err)
+		return
+	}
+	document, err := featureQuotaDocumentFor(result, feature)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
+}
+
 func (api *API) publicJWKS(w http.ResponseWriter, r *http.Request, requestID string) {
 	if violation := ensureBodyless(r); violation != nil {
 		api.writeViolation(w, requestID, violation)
@@ -338,8 +411,16 @@ func (api *API) writeViolation(w http.ResponseWriter, requestID string, violatio
 }
 
 func (api *API) writeDependencyFailure(w http.ResponseWriter, requestID string, err error) {
+	api.writeDependencyFailureForFeature(w, requestID, "", err)
+}
+
+func (api *API) writeFeatureDependencyFailure(w http.ResponseWriter, requestID, feature string, err error) {
+	api.writeDependencyFailureForFeature(w, requestID, feature, err)
+}
+
+func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestID, feature string, err error) {
 	var failure *DependencyError
-	if !errors.As(err, &failure) || failure == nil || !allowedDependencyCode(failure.Code) || failure.RetryAfterSeconds < 0 || failure.RetryAfterSeconds > 86400 {
+	if !errors.As(err, &failure) || failure == nil || !allowedDependencyCodeForOperation(failure.Code, feature != "") || failure.RetryAfterSeconds < 0 || failure.RetryAfterSeconds > 86400 {
 		api.internal(w, requestID)
 		return
 	}
@@ -362,10 +443,25 @@ func (api *API) writeDependencyFailure(w http.ResponseWriter, requestID string, 
 		Code: failure.Code, Detail: safeFailureDetail(failure.Code),
 		RetryAfterSeconds: failure.RetryAfterSeconds,
 	}
+	if problemIncludesFeature(failure.Code) {
+		value.Feature = feature
+	}
 	if failure.Code == "protocol_version_unsupported" {
 		value.SupportedProtocolVersions = []int{1}
 	}
 	api.writeProblem(w, requestID, value)
+}
+
+func allowedDependencyCodeForOperation(code string, featureOperation bool) bool {
+	if allowedDependencyCode(code) {
+		return true
+	}
+	switch code {
+	case "feature_not_found", "feature_not_allowed", "route_not_found", "configuration_invalid":
+		return featureOperation
+	default:
+		return false
+	}
 }
 
 func allowedDependencyCode(code string) bool {
@@ -376,6 +472,15 @@ func allowedDependencyCode(code string) bool {
 		"dpop_missing", "dpop_invalid", "dpop_replayed", "dpop_nonce_required",
 		"session_expired", "session_revoked", "refresh_token_reused", "installation_revoked",
 		"server_not_ready", "protocol_version_unsupported", "conflict", "internal_error":
+		return true
+	default:
+		return false
+	}
+}
+
+func problemIncludesFeature(code string) bool {
+	switch code {
+	case "feature_not_found", "feature_not_allowed", "route_not_found":
 		return true
 	default:
 		return false
@@ -420,6 +525,14 @@ func safeFailureDetail(code string) string {
 		return "Refresh-token reuse was detected and the token family is no longer active."
 	case "installation_revoked":
 		return "The installation is no longer active."
+	case "feature_not_found":
+		return "The requested application feature is not configured."
+	case "feature_not_allowed":
+		return "The current principal is not allowed to use this feature."
+	case "route_not_found":
+		return "No configured upstream route is available."
+	case "configuration_invalid":
+		return "The active data-plane configuration cannot be enforced."
 	case "server_not_ready":
 		return "The gateway is not ready to complete this session operation."
 	case "protocol_version_unsupported":
@@ -470,6 +583,91 @@ func selectCorrelationID(r *http.Request) string {
 
 func validRequestID(value string) bool {
 	return len(value) >= 8 && len(value) <= 128 && requestIDPattern.MatchString(value)
+}
+
+type featureQuotaDocument struct {
+	Feature    string                      `json:"feature"`
+	ObservedAt time.Time                   `json:"observed_at"`
+	Limits     []featureQuotaLimitDocument `json:"limits"`
+}
+
+type featureQuotaLimitDocument struct {
+	Metric    string     `json:"metric"`
+	Maximum   *int64     `json:"maximum,omitempty"`
+	Used      *int64     `json:"used,omitempty"`
+	Reserved  *int64     `json:"reserved,omitempty"`
+	Remaining *int64     `json:"remaining,omitempty"`
+	ResetsAt  *time.Time `json:"resets_at,omitempty"`
+	Hard      bool       `json:"hard"`
+}
+
+func featureQuotaDocumentFor(result FeatureQuotaResult, expectedFeature string) (featureQuotaDocument, error) {
+	if !identifierPattern.MatchString(expectedFeature) || result.Feature != expectedFeature ||
+		result.ObservedAt.IsZero() || result.ObservedAt.Location() != time.UTC ||
+		len(result.Limits) > maximumFeatureQuotaLimits {
+		return featureQuotaDocument{}, errors.New("invalid feature quota result")
+	}
+
+	limits := make([]featureQuotaLimitDocument, len(result.Limits))
+	for index, limit := range result.Limits {
+		if !supportedFeatureQuotaMetric(limit.Metric) || !limit.Hard {
+			return featureQuotaDocument{}, errors.New("invalid feature quota limit")
+		}
+		maximum, err := safeJSONInteger(limit.Maximum)
+		if err != nil {
+			return featureQuotaDocument{}, err
+		}
+		used, err := safeJSONInteger(limit.Used)
+		if err != nil {
+			return featureQuotaDocument{}, err
+		}
+		reserved, err := safeJSONInteger(limit.Reserved)
+		if err != nil {
+			return featureQuotaDocument{}, err
+		}
+		remaining, err := safeJSONInteger(limit.Remaining)
+		if err != nil {
+			return featureQuotaDocument{}, err
+		}
+		var resetsAt *time.Time
+		if limit.ResetsAt != nil {
+			if limit.ResetsAt.IsZero() || limit.ResetsAt.Location() != time.UTC || !limit.ResetsAt.After(result.ObservedAt) {
+				return featureQuotaDocument{}, errors.New("invalid feature quota reset time")
+			}
+			resetCopy := *limit.ResetsAt
+			resetsAt = &resetCopy
+		}
+		limits[index] = featureQuotaLimitDocument{
+			Metric: limit.Metric, Maximum: maximum, Used: used, Reserved: reserved,
+			Remaining: remaining, ResetsAt: resetsAt, Hard: true,
+		}
+	}
+	return featureQuotaDocument{
+		Feature: result.Feature, ObservedAt: result.ObservedAt, Limits: limits,
+	}, nil
+}
+
+func supportedFeatureQuotaMetric(metric string) bool {
+	switch metric {
+	case "logical_requests", "output_tokens", "concurrent_requests", "concurrent_streams":
+		return true
+	default:
+		return false
+	}
+}
+
+func safeJSONInteger(value *int64) (*int64, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if *value < 0 {
+		return nil, errors.New("negative feature quota counter")
+	}
+	if *value > maximumSafeJSONInteger {
+		return nil, nil
+	}
+	copy := *value
+	return &copy, nil
 }
 
 type challengeDocument struct {

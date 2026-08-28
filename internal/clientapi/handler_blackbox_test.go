@@ -60,12 +60,32 @@ func (blackBoxKeys) PublicJWKS(context.Context) (clientapi.JWKS, error) {
 	}}}, nil
 }
 
+type blackBoxFeatureQuotas struct {
+	input clientapi.FeatureQuotaInput
+}
+
+func (fake *blackBoxFeatureQuotas) FeatureQuota(_ context.Context, input clientapi.FeatureQuotaInput) (clientapi.FeatureQuotaResult, error) {
+	fake.input = input
+	maximum := int64(100)
+	used := int64(25)
+	remaining := int64(75)
+	reset := time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)
+	return clientapi.FeatureQuotaResult{
+		Feature: "assistant", ObservedAt: time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC),
+		Limits: []clientapi.FeatureQuotaLimit{{
+			Metric: "logical_requests", Maximum: &maximum, Used: &used,
+			Remaining: &remaining, ResetsAt: &reset, Hard: true,
+		}},
+	}, nil
+}
+
 func TestExportedHandlerBlackBox(t *testing.T) {
 	t.Parallel()
 
 	coordinator := &blackBoxCoordinator{}
+	quotas := &blackBoxFeatureQuotas{}
 	api, err := clientapi.New(clientapi.Config{
-		Coordinator: coordinator, JWKS: blackBoxKeys{}, PublicOrigin: "https://public.example.test",
+		Coordinator: coordinator, FeatureQuotas: quotas, JWKS: blackBoxKeys{}, PublicOrigin: "https://public.example.test",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -122,6 +142,34 @@ func TestExportedHandlerBlackBox(t *testing.T) {
 	}
 	if coordinator.revoke.Metadata.TargetURL.String() != "https://public.example.test/client/v1/installations/current" || coordinator.revoke.AccessToken.Reveal() != strings.Repeat("access-", 12) {
 		t.Fatalf("revoke input = %#v", coordinator.revoke)
+	}
+
+	quota := httptest.NewRequest(http.MethodGet, "/client/v1/features/assistant/quota", nil)
+	quota.Header.Set("X-Latchway-Protocol-Version", "1")
+	quota.Header.Set("X-Latchway-SDK", "javascript")
+	quota.Header.Set("X-Latchway-SDK-Version", "1.2.3")
+	quota.Header.Set("X-Latchway-Request-ID", "client-correlation-hint")
+	quota.Header.Set("Authorization", "DPoP "+strings.Repeat("quota-access-", 8))
+	quota.Header.Set("DPoP", "quota.header.signature")
+	quota.Host = "untrusted.invalid"
+	quota.Header.Set("Forwarded", "host=untrusted.invalid;proto=http")
+	quotaResponse := httptest.NewRecorder()
+	handler.ServeHTTP(quotaResponse, quota)
+	assertBlackBoxStatus(t, quotaResponse, http.StatusOK)
+	if quotas.input.Feature != "assistant" || quotas.input.AccessToken.Reveal() != strings.Repeat("quota-access-", 8) ||
+		quotas.input.Metadata.DPoPProof.Reveal() != "quota.header.signature" || quotas.input.Metadata.TargetURL.String() != "https://public.example.test/client/v1/features/assistant/quota" ||
+		quotas.input.LogicalRequestID.String() == "" || quotas.input.LogicalRequestID.String() != quotas.input.Metadata.RequestID || quotas.input.LogicalRequestID.String() == "client-correlation-hint" {
+		t.Fatalf("quota input = %#v", quotas.input)
+	}
+	if quotaResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("quota Cache-Control = %q", quotaResponse.Header().Get("Cache-Control"))
+	}
+	var quotaDocument map[string]any
+	if err := json.Unmarshal(quotaResponse.Body.Bytes(), &quotaDocument); err != nil {
+		t.Fatalf("invalid quota JSON response: %v", err)
+	}
+	if quotaDocument["feature"] != "assistant" || len(quotaDocument["limits"].([]any)) != 1 {
+		t.Fatalf("quota document = %#v", quotaDocument)
 	}
 
 	jwksResponse := httptest.NewRecorder()

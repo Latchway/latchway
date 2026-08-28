@@ -1,4 +1,4 @@
-// Package clientapi implements the public session and signing-key HTTP
+// Package clientapi implements the public client and signing-key HTTP
 // contract. Security-sensitive verification and persistence are supplied by a
 // coordinator so the transport cannot manufacture a successful session.
 package clientapi
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/requestidentity"
 )
 
 // SensitiveString carries a credential or proof without exposing it through
@@ -152,6 +153,46 @@ type RevokeInstallationInput struct {
 	AccessToken SensitiveString
 }
 
+// FeatureQuotaInput contains the authenticated credential and canonical
+// server-owned request identity needed to resolve one feature's effective
+// quota. LogicalRequestID remains opaque so callers cannot substitute a
+// client correlation hint for the authoritative request identity.
+type FeatureQuotaInput struct {
+	Metadata         RequestMetadata
+	LogicalRequestID requestidentity.LogicalID
+	AccessToken      SensitiveString
+	Feature          string
+}
+
+// FeatureQuotaLimit is one safe, effective hard-limit projection. Optional
+// counters use pointers so absence remains distinct from zero.
+type FeatureQuotaLimit struct {
+	Metric    string
+	Maximum   *int64
+	Used      *int64
+	Reserved  *int64
+	Remaining *int64
+	ResetsAt  *time.Time
+	Hard      bool
+}
+
+// FeatureQuotaResult is the provider-owned snapshot returned to the client
+// transport. The transport validates and defensively copies it before JSON
+// encoding.
+type FeatureQuotaResult struct {
+	Feature    string
+	ObservedAt time.Time
+	Limits     []FeatureQuotaLimit
+}
+
+// FeatureQuotaProvider authenticates the DPoP-bound session and returns only
+// the effective quota projection safe for the current principal. It is kept
+// separate from Coordinator because quota reads are data-plane operations,
+// not session lifecycle operations.
+type FeatureQuotaProvider interface {
+	FeatureQuota(context.Context, FeatureQuotaInput) (FeatureQuotaResult, error)
+}
+
 type AttestationRequirement struct {
 	Provider        string
 	Mode            string
@@ -221,8 +262,9 @@ type JWKSProvider interface {
 	PublicJWKS(context.Context) (JWKS, error)
 }
 
-// DependencyError lets a coordinator select a registered, redaction-safe
-// client problem. Detail text is intentionally not dependency-controlled.
+// DependencyError lets a trusted dependency select a registered,
+// redaction-safe client problem. Detail text is intentionally not
+// dependency-controlled.
 type DependencyError struct {
 	Code              string
 	RetryAfterSeconds int
