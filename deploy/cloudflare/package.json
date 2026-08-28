@@ -9,9 +9,13 @@
     "pnpm": ">=10.1.0"
   },
   "scripts": {
-    "check": "pnpm types:check && tsc --noEmit",
+    "check": "pnpm types:check && tsc --noEmit && pnpm test",
     "deploy": "wrangler deploy",
     "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler-dist",
+    "release:config": "node scripts/prepare-release-config.mjs",
+    "release:deploy": "node scripts/prepare-release-config.mjs --check wrangler.release.jsonc && wrangler deploy --config wrangler.release.jsonc",
+    "release:dry-run": "node scripts/prepare-release-config.mjs --check wrangler.release.jsonc && wrangler deploy --config wrangler.release.jsonc --dry-run --outdir .wrangler-dist/release",
+    "test": "node --test scripts/*.test.mjs",
     "types": "wrangler types worker-configuration.d.ts",
     "types:check": "wrangler types --check worker-configuration.d.ts"
   },

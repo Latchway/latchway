@@ -42,10 +42,26 @@ release must deploy the already verified `linux/amd64` release image, not
 rebuild mutable source. Cloudflare Containers can pull prebuilt images from
 Cloudflare Registry, Docker Hub, Amazon ECR, or Google Artifact Registry; GHCR
 is not a direct source. If the canonical release is only in GHCR, copy its
-verified amd64 manifest into Cloudflare Registry without rebuilding it, replace
-`containers[0].image` with the returned immutable registry reference, remove
-`image_build_context`, and retain both source and mirror digests in the
-deployment evidence. Do not use `latest` or a tag-only reference as release
+verified amd64 manifest into Cloudflare Registry without rebuilding it and
+verify that the source and mirror config/layer digests match.
+
+Generate the ignored production-only configuration from an immutable mirror
+digest. The generator rejects tag-only references, unsupported registries,
+GHCR, a mutable Dockerfile build, and a source template that has drifted from
+the reviewed shape:
+
+```bash
+pnpm release:config -- \
+  --image registry.cloudflare.com/ACCOUNT/latchway@sha256:REPLACE_WITH_MIRROR_DIGEST
+pnpm release:dry-run
+pnpm release:deploy
+```
+
+Retain the signed multi-architecture release index digest, its verified amd64
+child digest, and the content-equivalent mirror digest in deployment evidence.
+The cross-repository release record continues to identify the canonical signed
+release index; the platform artifact additionally proves which child and mirror
+Cloudflare executed. Never use `latest` or a tag-only reference as release
 evidence.
 
 Cloudflare updates Worker code before it finishes the container rollout. Treat
@@ -101,8 +117,13 @@ master-key, and worker-heartbeat readiness.
 
 ## Rollout and rollback
 
-The checked-in rollout advances 10%, 50%, then 100%, with 35 seconds for active
-requests to drain. Verify `/readyz`, a non-streaming request, and a long-lived
-SSE request at each step. `wrangler versions list` shows deployable versions;
-use `wrangler rollback VERSION_ID` for application rollback. Database
-migrations are forward-only, so restore a tested backup for a schema rollback.
+The checked-in rollout advances 10%, 50%, then 100%. Its 35-second active grace
+period makes a recently connected container ineligible for replacement until
+that connection reaches the configured age; it is not a request-drain
+guarantee. After Cloudflare selects an instance for replacement it sends
+`SIGTERM` and applies its separate platform shutdown bound. Verify `/readyz`, a
+non-streaming request, and a long-lived SSE request through the rollout, and
+wait for rollout completion before recording evidence. `wrangler versions
+list` shows deployable versions; use `wrangler rollback VERSION_ID` for
+application rollback. Database migrations are forward-only, so restore a
+tested backup for a schema rollback.
