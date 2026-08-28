@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "scenario_id": "replace-with-external-scenario-id",
+  "status": "passed",
+  "commit": "replace-with-exact-40-character-core-commit",
+  "started_at": "2026-08-29T00:00:00Z",
+  "finished_at": "2026-08-29T00:05:00Z",
+  "environment": {
+    "image_digest": "ghcr.io/latchway/latchway@sha256:replace",
+    "platform": "replace",
+    "postgresql": "replace",
+    "fault_tool": "replace",
+    "operator": "replace"
+  },
+  "assertions": [
+    {
+      "name": "replace-with-machine-checked-assertion",
+      "passed": true,
+      "detail": "replace-with-bounded-result-and-threshold"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "artifacts/replace-with-log.json",
+      "sha256": "replace-with-64-lowercase-hex-characters"
+    }
+  ]
+}
