@@ -22,7 +22,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
+	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
+	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
 	"github.com/latchway/latchway/internal/policy"
@@ -90,9 +93,9 @@ type Config struct {
 	Policies      PolicyDecisionEngine
 	Quotas        QuotaStore
 	Secrets       SecretStore
-	// Adapter is the compatibility injection point for the currently executable
-	// single-protocol slice. Adapters is the bounded multi-protocol registry
-	// input; callers must set at most one of them.
+	// Adapter replaces one matching built-in adapter for focused tests and
+	// compatibility injection. Adapters supplies the complete bounded registry;
+	// callers must set at most one of these fields.
 	Adapter  protocol.Adapter
 	Adapters []protocol.Adapter
 	Targets  TargetFactory
@@ -106,9 +109,8 @@ type Config struct {
 	Now                      func() time.Time
 }
 
-// Handler serves the bounded protected endpoint registry. In this build only
-// OpenAI Chat Completions is executable. It must be mounted behind
-// requestidentity middleware.
+// Handler serves the bounded protected structured-protocol endpoint registry.
+// It must be mounted behind requestidentity middleware.
 type Handler struct {
 	accessTokens  AccessTokenVerifier
 	sessions      SessionAuthorizer
@@ -144,11 +146,21 @@ func New(config Config) (*Handler, error) {
 		return nil, errInvalidConfiguration
 	}
 	adapters := append([]protocol.Adapter(nil), config.Adapters...)
-	if !nilDependency(config.Adapter) {
-		adapters = []protocol.Adapter{config.Adapter}
-	}
 	if len(adapters) == 0 {
-		adapters = []protocol.Adapter{openaichat.Adapter{MaximumBodyBytes: config.MaximumRequestBodyBytes}}
+		adapters = defaultProtocolAdapters(config.MaximumRequestBodyBytes)
+		if !nilDependency(config.Adapter) {
+			replaced := false
+			for index := range adapters {
+				if adapters[index].ID() == config.Adapter.ID() {
+					adapters[index] = config.Adapter
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				return nil, errInvalidConfiguration
+			}
+		}
 	}
 	endpoints, err := newEndpointRegistry(origin, adapters)
 	if err != nil {
@@ -192,6 +204,15 @@ func New(config Config) (*Handler, error) {
 		clientWriteTimeout:  config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
 		now: config.Now, ownedTargets: ownedTargets,
 	}, nil
+}
+
+func defaultProtocolAdapters(maximumBodyBytes int64) []protocol.Adapter {
+	return []protocol.Adapter{
+		openairesponses.Adapter{MaximumBodyBytes: maximumBodyBytes},
+		openaichat.Adapter{MaximumBodyBytes: maximumBodyBytes},
+		openaiembeddings.Adapter{MaximumBodyBytes: maximumBodyBytes},
+		anthropicmessages.Adapter{MaximumBodyBytes: maximumBodyBytes},
+	}
 }
 
 func (handler *Handler) Handler() http.Handler { return handler }
@@ -453,7 +474,7 @@ func (handler *Handler) executeReserved(
 	}
 	defer lease.Release()
 	prepared, err := lease.Prepare(
-		incoming, endpoint.providerPath, []string{"Content-Type"}, decision.Upstream.StaticHeaders,
+		incoming, endpoint.providerPath, protocolForwardedHeaders(endpoint.protocolID), decision.Upstream.StaticHeaders,
 	)
 	if err != nil {
 		return executionResult{err: fmt.Errorf("%w: prepare request", errTargetConfiguration)}
@@ -511,6 +532,13 @@ func (handler *Handler) executeReserved(
 	default:
 		return executionResult{err: fmt.Errorf("%w: authentication", errTargetConfiguration)}
 	}
+}
+
+func protocolForwardedHeaders(protocolID string) []string {
+	if protocolID == protocol.AnthropicMessagesID {
+		return []string{"Content-Type", "Anthropic-Version"}
+	}
+	return []string{"Content-Type"}
 }
 
 func (handler *Handler) dispatchReserved(
@@ -949,13 +977,14 @@ func calculateConfiguredCost(
 }
 
 func validateDecision(featureID string, decision policy.Decision, endpointProtocol string) (validatedDecision, error) {
+	requiredUpstreamType, knownProtocol := protocol.RequiredUpstreamType(endpointProtocol)
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
 		len(decision.Route.FallbackOn) != 0 || decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
 		endpointProtocol == "" || decision.Feature.Protocol != endpointProtocol ||
-		!protocol.ProtocolExecutable(endpointProtocol) ||
+		!protocol.ProtocolExecutable(endpointProtocol) || !knownProtocol ||
 		!slices.Contains(decision.Model.Capabilities, endpointProtocol) ||
-		decision.Upstream.ID == "" || decision.Upstream.Type != "openai_compatible" ||
+		decision.Upstream.ID == "" || decision.Upstream.Type != requiredUpstreamType ||
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
 		!validTargetTimeouts(decision.Upstream.Timeouts) {
 		return validatedDecision{}, policy.ErrConfiguration
@@ -1003,20 +1032,27 @@ func validateFeatureLimitPlan(
 	feature configuration.Feature,
 	limitPlan configuration.LimitPlan,
 ) (validatedDecision, error) {
-	if feature.ID != featureID || feature.Protocol != openaichat.ID || feature.Output == nil ||
-		feature.OpaqueHTTP != nil || feature.Output.DefaultMaximumTokens <= 0 ||
-		feature.Output.AbsoluteMaximumTokens <= 0 ||
-		feature.Output.DefaultMaximumTokens > feature.Output.AbsoluteMaximumTokens ||
+	requiresOutput := protocolUsesOutputTokens(feature.Protocol)
+	if feature.ID != featureID || !protocol.ProtocolExecutable(feature.Protocol) ||
+		feature.OpaqueHTTP != nil ||
+		(requiresOutput && (feature.Output == nil || feature.Output.DefaultMaximumTokens <= 0 ||
+			feature.Output.AbsoluteMaximumTokens <= 0 ||
+			feature.Output.DefaultMaximumTokens > feature.Output.AbsoluteMaximumTokens)) ||
+		(!requiresOutput && feature.Output != nil) ||
 		limitPlan.ID == "" || len(limitPlan.Limits) == 0 ||
 		len(limitPlan.Limits) > maximumDecisionLimitRules {
 		return validatedDecision{}, policy.ErrConfiguration
 	}
 	rules := make([]quota.Rule, 0, len(limitPlan.Limits))
 	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(limitPlan.Limits))
-	effectiveMaximum := feature.Output.AbsoluteMaximumTokens
+	effectiveMaximum := int64(0)
+	if requiresOutput {
+		effectiveMaximum = feature.Output.AbsoluteMaximumTokens
+	}
 	for _, limit := range limitPlan.Limits {
 		scope, ok := canonicalDecisionScope(limit.Scope)
-		if !limit.Hard || !ok || !supportedDecisionLimit(limit) {
+		if !limit.Hard || !ok || !supportedDecisionLimit(limit) ||
+			!protocolSupportsLimitMetric(feature.Protocol, limit.Metric) {
 			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		identity := decisionLimitIdentity{
@@ -1043,10 +1079,30 @@ func validateFeatureLimitPlan(
 			}
 		}
 	}
-	effectiveDefault := min(feature.Output.DefaultMaximumTokens, effectiveMaximum)
+	effectiveDefault := int64(0)
+	if requiresOutput {
+		effectiveDefault = min(feature.Output.DefaultMaximumTokens, effectiveMaximum)
+	}
 	return validatedDecision{
 		rules: rules, defaultOutputTokens: effectiveDefault, maximumOutputTokens: effectiveMaximum,
 	}, nil
+}
+
+func protocolUsesOutputTokens(protocolID string) bool {
+	return slices.Contains([]string{
+		protocol.OpenAIResponsesID, protocol.OpenAIChatID, protocol.AnthropicMessagesID,
+	}, protocolID)
+}
+
+func protocolSupportsLimitMetric(protocolID, metric string) bool {
+	switch metric {
+	case quota.InputTokensMetric, quota.TotalTokensMetric:
+		return protocolID == protocol.OpenAIChatID
+	case quota.OutputTokensMetric, quota.ConcurrentStreamsMetric:
+		return protocolUsesOutputTokens(protocolID)
+	default:
+		return true
+	}
 }
 
 func supportedDecisionLimit(limit configuration.Limit) bool {

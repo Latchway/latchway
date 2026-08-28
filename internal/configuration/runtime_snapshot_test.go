@@ -433,6 +433,20 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "server-owned Anthropic version as static header",
+			mutate: func(spec map[string]any) {
+				objectArray(spec, "upstreams")[0]["staticHeaders"] = map[string]any{"Anthropic-Version": "2099-01-01"}
+			},
+		},
+		{
+			name: "server-owned Anthropic version as credential header",
+			mutate: func(spec map[string]any) {
+				objectArray(spec, "upstreams")[0]["authentication"] = map[string]any{
+					"type": "header", "secretRef": "secret/present", "headerName": "Anthropic-Version",
+				}
+			},
+		},
+		{
 			name: "enabled application identifier without durable verifier binding",
 			mutate: func(spec map[string]any) {
 				selection := objectValue(objectValue(objectArray(spec, "attestationPolicies")[0], "platforms"), "ios")
@@ -478,6 +492,18 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 				feature["opaqueHttp"] = map[string]any{
 					"allowedMethods": []any{"POST"}, "pathPrefixes": []any{"/v1"},
 					"maxBodyBytes": json.Number("1024"), "allowedRequestHeaders": []any{"DPoP"},
+				}
+				objectArray(spec, "models")[0]["capabilities"] = []any{"opaque_http"}
+			},
+		},
+		{
+			name: "server-owned Anthropic version allowed by opaque policy",
+			mutate: func(spec map[string]any) {
+				feature := objectArray(spec, "features")[0]
+				feature["protocol"] = "opaque_http"
+				feature["opaqueHttp"] = map[string]any{
+					"allowedMethods": []any{"POST"}, "pathPrefixes": []any{"/v1"},
+					"maxBodyBytes": json.Number("1024"), "allowedRequestHeaders": []any{"Anthropic-Version"},
 				}
 				objectArray(spec, "models")[0]["capabilities"] = []any{"opaque_http"}
 			},

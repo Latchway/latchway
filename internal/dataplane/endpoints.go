@@ -69,13 +69,24 @@ func newEndpointRegistry(origin url.URL, adapters []protocol.Adapter) (endpointR
 }
 
 func adapterCapabilitiesValid(protocolID string, capabilities protocol.Capabilities) bool {
+	var expected protocol.Capabilities
 	switch protocolID {
 	case protocol.OpenAIChatID:
-		return capabilities.Streaming && capabilities.ModelRewrite &&
-			capabilities.OutputTokenClamp
+		expected = protocol.Capabilities{
+			Streaming: true, ModelRewrite: true, OutputTokenClamp: true,
+			ProviderUsage: true, TrustedInputPreflight: true,
+		}
+	case protocol.OpenAIResponsesID, protocol.AnthropicMessagesID:
+		expected = protocol.Capabilities{
+			Streaming: true, ModelRewrite: true, OutputTokenClamp: true,
+			ProviderUsage: true,
+		}
+	case protocol.OpenAIEmbeddingsID:
+		expected = protocol.Capabilities{ModelRewrite: true, ProviderUsage: true}
 	default:
 		return false
 	}
+	return capabilities == expected
 }
 
 func (registry endpointRegistry) match(request *http.Request) (endpointMatch, *violation) {

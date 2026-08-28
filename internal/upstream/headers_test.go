@@ -31,6 +31,27 @@ func TestForwardHeadersStripsCredentialsAndHopByHop(t *testing.T) {
 	}
 }
 
+func TestAnthropicVersionCanOnlyFlowThroughTrustedForwarding(t *testing.T) {
+	t.Parallel()
+
+	incoming := http.Header{"Anthropic-Version": {"2023-06-01"}}
+	forwarded, err := ForwardHeaders(incoming, []string{"Anthropic-Version"})
+	if err != nil || forwarded.Get("Anthropic-Version") != "2023-06-01" {
+		t.Fatalf("trusted Anthropic version forwarding = %#v, err=%v", forwarded, err)
+	}
+	if err := ApplyStaticHeaders(http.Header{}, map[string]string{"Anthropic-Version": "2099-01-01"}); err == nil {
+		t.Fatal("administrator static Anthropic version override accepted")
+	}
+	if err := withHeaderCredential(http.Header{}, "Anthropic-Version", []byte("secret"), func() error { return nil }); err == nil {
+		t.Fatal("Anthropic version accepted as a credential header")
+	}
+	if _, err := ForwardHeaders(http.Header{
+		"Anthropic-Version": {"2023-06-01"}, "anthropic-version": {"2099-01-01"},
+	}, []string{"Anthropic-Version"}); err == nil {
+		t.Fatal("duplicate case-variant Anthropic versions accepted")
+	}
+}
+
 func TestBearerCredentialScopeIsEphemeralAndRejectsIncomingValue(t *testing.T) {
 	t.Parallel()
 
@@ -84,8 +105,10 @@ func TestApplyConfiguredHeadersFailClosed(t *testing.T) {
 		{name: "static control", headers: map[string]string{"X-Latchway-Route": "override"}},
 		{name: "static accept", headers: map[string]string{"Accept": "application/json"}},
 		{name: "static content type", headers: map[string]string{"Content-Type": "application/json"}},
+		{name: "static Anthropic version", headers: map[string]string{"Anthropic-Version": "2099-01-01"}},
 		{name: "static line break", headers: map[string]string{"X-Provider-Tenant": "bad\nvalue"}},
 		{name: "header control", credential: []byte("secret"), headerName: "Content-Type"},
+		{name: "header Anthropic version", credential: []byte("secret"), headerName: "Anthropic-Version"},
 		{name: "header invalid name", credential: []byte("secret"), headerName: "X Provider Key"},
 		{name: "credential line break", credential: []byte("bad\nsecret"), headerName: "X-Provider-Key"},
 	} {
@@ -143,6 +166,7 @@ func TestForwardHeadersRejectsDuplicateSingletonSemantics(t *testing.T) {
 		{name: "content type case variants", incoming: http.Header{"Content-Type": {"application/json"}, "content-type": {"text/plain"}}, allowlist: []string{"Content-Type"}},
 		{name: "authorization even when stripped", incoming: http.Header{"Authorization": {"DPoP one", "DPoP two"}}},
 		{name: "dpop even when stripped", incoming: http.Header{"Dpop": {"one", "two"}}},
+		{name: "Anthropic version", incoming: http.Header{"Anthropic-Version": {"2023-06-01", "2099-01-01"}}, allowlist: []string{"Anthropic-Version"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

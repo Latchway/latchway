@@ -67,7 +67,7 @@ func validCredentialHeaderName(name string) bool {
 		return false
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return false

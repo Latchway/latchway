@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
@@ -85,6 +86,82 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	}
 	if fixture.target.preparedBody == "" || strings.Contains(fixture.target.preparedBody, "client-model") || !strings.Contains(fixture.target.preparedBody, "provider-model") {
 		t.Fatalf("provider body was not rewritten: %q", fixture.target.preparedBody)
+	}
+}
+
+func TestHandlerExecutesEveryStructuredProtocolWithExactProviderMapping(t *testing.T) {
+	tests := []struct {
+		name             string
+		protocolID       string
+		publicPath       string
+		providerPath     string
+		upstreamType     string
+		body             string
+		requiresOutput   bool
+		anthropicVersion bool
+	}{
+		{
+			name: "OpenAI Responses", protocolID: protocol.OpenAIResponsesID,
+			publicPath: protocol.OpenAIResponsesPublicPath, providerPath: protocol.OpenAIResponsesProviderPath,
+			upstreamType: "openai_compatible", body: `{"model":"client-model","input":"hello"}`, requiresOutput: true,
+		},
+		{
+			name: "OpenAI Chat", protocolID: protocol.OpenAIChatID,
+			publicPath: protocol.OpenAIChatPublicPath, providerPath: protocol.OpenAIChatProviderPath,
+			upstreamType: "openai_compatible", body: `{"model":"client-model","messages":[{"role":"user","content":"hello"}]}`, requiresOutput: true,
+		},
+		{
+			name: "OpenAI Embeddings", protocolID: protocol.OpenAIEmbeddingsID,
+			publicPath: protocol.OpenAIEmbeddingsPublicPath, providerPath: protocol.OpenAIEmbeddingsProviderPath,
+			upstreamType: "openai_compatible", body: `{"model":"client-model","input":"hello"}`,
+		},
+		{
+			name: "Anthropic Messages", protocolID: protocol.AnthropicMessagesID,
+			publicPath: protocol.AnthropicMessagesPublicPath, providerPath: protocol.AnthropicMessagesProviderPath,
+			upstreamType: "anthropic", body: `{"model":"client-model","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`,
+			requiresOutput: true, anthropicVersion: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHandlerFixture(t)
+			fixture.decision.Feature.Protocol = test.protocolID
+			fixture.decision.Model.Capabilities = []string{test.protocolID}
+			fixture.decision.Upstream.Type = test.upstreamType
+			if !test.requiresOutput {
+				fixture.decision.Feature.Output = nil
+			}
+			fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK, ClientStarted: true}
+			fixture.relayer.body = `{}`
+			handler := fixture.handler(t)
+
+			request := fixture.request(t)
+			request.URL.Path = test.publicPath
+			request.Body = io.NopCloser(strings.NewReader(test.body))
+			request.ContentLength = int64(len(test.body))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusOK || fixture.target.preparePath != test.providerPath ||
+				fixture.quotas.reserveInput.Protocol != test.protocolID {
+				t.Fatalf("response/path/protocol = %d/%q/%q body=%s", response.Code,
+					fixture.target.preparePath, fixture.quotas.reserveInput.Protocol, response.Body.String())
+			}
+			if strings.Contains(fixture.target.preparedBody, "client-model") ||
+				!strings.Contains(fixture.target.preparedBody, "provider-model") {
+				t.Fatalf("provider body was not model-rewritten: %q", fixture.target.preparedBody)
+			}
+			gotVersion := fixture.target.preparedRequest.Header.Get("Anthropic-Version")
+			if test.anthropicVersion {
+				if gotVersion != anthropicmessages.CanonicalAPIVersion ||
+					!slices.Contains(fixture.target.forwardedHeaders, "Anthropic-Version") {
+					t.Fatalf("Anthropic version/allowlist = %q/%v", gotVersion, fixture.target.forwardedHeaders)
+				}
+			} else if gotVersion != "" || slices.Contains(fixture.target.forwardedHeaders, "Anthropic-Version") {
+				t.Fatalf("unexpected Anthropic version/allowlist = %q/%v", gotVersion, fixture.target.forwardedHeaders)
+			}
+		})
 	}
 }
 
@@ -584,9 +661,6 @@ func TestHandlerRejectsCanonicalPathAndDeclarationFailuresBeforeAuthentication(t
 		{name: "query", edit: func(request *http.Request) { request.URL.RawQuery = "debug=true" }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "force query", edit: func(request *http.Request) { request.URL.ForceQuery = true }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "raw path", edit: func(request *http.Request) { request.URL.RawPath = "/v1/%63hat/completions" }, code: "request_invalid", status: http.StatusBadRequest},
-		{name: "unavailable responses", edit: func(request *http.Request) { request.URL.Path = "/v1/responses" }, code: "resource_not_found", status: http.StatusNotFound},
-		{name: "unavailable embeddings", edit: func(request *http.Request) { request.URL.Path = "/v1/embeddings" }, code: "resource_not_found", status: http.StatusNotFound},
-		{name: "unavailable messages", edit: func(request *http.Request) { request.URL.Path = "/v1/messages" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "unavailable bounded proxy", edit: func(request *http.Request) { request.URL.Path = "/proxy/weather/v2/current" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "unknown path", edit: func(request *http.Request) { request.URL.Path = "/v1/unknown" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "duplicate protocol", edit: func(request *http.Request) { request.Header.Add("X-Latchway-Protocol-Version", "1") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
@@ -2612,6 +2686,7 @@ func (lease *fakeTargetLease) Release() {
 type fakeDispatchTarget struct {
 	prepareCalls         int
 	preparePath          string
+	forwardedHeaders     []string
 	preparedBody         string
 	preparedRequest      *http.Request
 	prepareErr           error
@@ -2628,9 +2703,10 @@ type fakeDispatchTarget struct {
 	dispatchInsideSecret bool
 }
 
-func (fake *fakeDispatchTarget) Prepare(request *http.Request, path string, _ []string, _ map[string]string) (ProviderRequest, error) {
+func (fake *fakeDispatchTarget) Prepare(request *http.Request, path string, forwarded []string, _ map[string]string) (ProviderRequest, error) {
 	fake.prepareCalls++
 	fake.preparePath = path
+	fake.forwardedHeaders = append([]string(nil), forwarded...)
 	fake.preparedRequest = request
 	if request != nil && request.Body != nil {
 		body, _ := io.ReadAll(request.Body)

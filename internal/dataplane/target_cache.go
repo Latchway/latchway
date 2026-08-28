@@ -293,7 +293,7 @@ func (lease *cachedTargetLease) WithHeaderDispatchWithBeforeRoundTrip(
 }
 
 func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
-	if !identifierPattern.MatchString(config.ID) || config.Type != "openai_compatible" ||
+	if !identifierPattern.MatchString(config.ID) || !validProtectedUpstreamType(config.Type) ||
 		config.BaseURL == "" || !validTargetTimeouts(config.Timeouts) ||
 		config.DestinationPolicy.AllowRedirects || config.DestinationPolicy.AllowPrivateNetworks ||
 		!config.DestinationPolicy.DNSPinning || len(config.DestinationPolicy.AllowedPorts) == 0 {
@@ -345,4 +345,13 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 		connectTimeout: config.Timeouts.Connect, firstByteTimeout: config.Timeouts.FirstByte,
 		idleTimeout: config.Timeouts.Idle, totalTimeout: config.Timeouts.Total,
 	}, nil
+}
+
+func validProtectedUpstreamType(value string) bool {
+	switch value {
+	case "openai_compatible", "anthropic", "generic":
+		return true
+	default:
+		return false
+	}
 }

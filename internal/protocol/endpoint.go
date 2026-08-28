@@ -78,7 +78,8 @@ func (endpoint Endpoint) AllowedMethods() []string {
 var endpointCatalog = [...]Endpoint{
 	{
 		Protocol: OpenAIResponsesID, PublicPath: OpenAIResponsesPublicPath,
-		ProviderPath: OpenAIResponsesProviderPath, methods: endpointMethodPost,
+		ProviderPath: OpenAIResponsesProviderPath, Executable: true,
+		methods: endpointMethodPost,
 	},
 	{
 		Protocol: OpenAIChatID, PublicPath: OpenAIChatPublicPath,
@@ -87,11 +88,13 @@ var endpointCatalog = [...]Endpoint{
 	},
 	{
 		Protocol: OpenAIEmbeddingsID, PublicPath: OpenAIEmbeddingsPublicPath,
-		ProviderPath: OpenAIEmbeddingsProviderPath, methods: endpointMethodPost,
+		ProviderPath: OpenAIEmbeddingsProviderPath, Executable: true,
+		methods: endpointMethodPost,
 	},
 	{
 		Protocol: AnthropicMessagesID, PublicPath: AnthropicMessagesPublicPath,
-		ProviderPath: AnthropicMessagesProviderPath, methods: endpointMethodPost,
+		ProviderPath: AnthropicMessagesProviderPath, Executable: true,
+		methods: endpointMethodPost,
 	},
 	{
 		Protocol: OpaqueHTTPID, PublicPath: OpaqueHTTPPublicPrefix, Prefix: true,
@@ -123,6 +126,22 @@ func EndpointForProtocol(protocolID string) (Endpoint, bool) {
 func ProtocolExecutable(protocolID string) bool {
 	endpoint, ok := EndpointForProtocol(protocolID)
 	return ok && endpoint.Executable
+}
+
+// RequiredUpstreamType returns the only server-owned upstream family that may
+// execute protocolID. Keeping this mapping beside the immutable endpoint
+// catalog prevents configuration validation and dispatch from drifting apart.
+func RequiredUpstreamType(protocolID string) (string, bool) {
+	switch protocolID {
+	case OpenAIResponsesID, OpenAIChatID, OpenAIEmbeddingsID:
+		return "openai_compatible", true
+	case AnthropicMessagesID:
+		return "anthropic", true
+	case OpaqueHTTPID:
+		return "generic", true
+	default:
+		return "", false
+	}
 }
 
 func endpointMethodMask(method string) endpointMethodSet {

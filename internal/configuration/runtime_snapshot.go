@@ -384,8 +384,15 @@ func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 		if err != nil || !insertUnique(snapshot.models, model.ID, model) {
 			return errorsCorruptSnapshot("model")
 		}
-		if _, ok := snapshot.upstreams[model.UpstreamID]; !ok {
+		upstream, ok := snapshot.upstreams[model.UpstreamID]
+		if !ok {
 			return errorsCorruptSnapshot("model upstream reference")
+		}
+		for _, capability := range model.Capabilities {
+			requiredType, known := protocol.RequiredUpstreamType(capability)
+			if !known || upstream.Type != requiredType {
+				return errorsCorruptSnapshot("model upstream protocol family")
+			}
 		}
 		if model.InputAccountingRef != "" {
 			profile, ok := snapshot.inputAccounting[model.InputAccountingRef]
@@ -755,6 +762,9 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		Routes: make([]Route, 0, len(raw.Routes)),
 	}
 	if raw.Output != nil {
+		if !protocolRequiresOutputPolicy(raw.Protocol) {
+			return Feature{}, ErrInvalid
+		}
 		if raw.Output.DefaultMaximumTokens <= 0 || raw.Output.AbsoluteMaximumTokens <= 0 || raw.Output.DefaultMaximumTokens > raw.Output.AbsoluteMaximumTokens {
 			return Feature{}, ErrInvalid
 		}
@@ -889,7 +899,7 @@ func runtimeForwardHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept-Encoding", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept-Encoding", "Anthropic-Version", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
@@ -905,7 +915,7 @@ func runtimeStaticHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Authorization", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host",
 		"Keep-Alive", "Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Api-Key", "Api-Key", "Openai-Api-Key", "Openai-Organization", "Anthropic-Api-Key", "X-Auth-Token", "X-Goog-Api-Key",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
@@ -921,7 +931,7 @@ func runtimeCredentialHeaderForbidden(name string) bool {
 		return true
 	}
 	switch canonical {
-	case "Accept", "Accept-Encoding", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
+	case "Accept", "Accept-Encoding", "Anthropic-Version", "Connection", "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Dpop", "Dpop-Nonce", "Expect", "Forwarded", "Host", "Keep-Alive",
 		"Proxy-Authorization", "Proxy-Connection", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto":
 		return true

@@ -133,6 +133,27 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 	}
 }
 
+func TestProtectedTargetKeyAcceptsOnlyConfiguredUpstreamFamilies(t *testing.T) {
+	t.Parallel()
+
+	base := cacheTestUpstream("provider")
+	for _, upstreamType := range []string{"openai_compatible", "anthropic", "generic"} {
+		candidate := cloneCacheTestUpstream(base)
+		candidate.Type = upstreamType
+		key, err := protectedTargetKey(candidate)
+		if err != nil || key.upstreamType != upstreamType {
+			t.Fatalf("protectedTargetKey(%q) = %#v, %v", upstreamType, key, err)
+		}
+	}
+	for _, upstreamType := range []string{"", "generic_http", "OpenAI", "unknown"} {
+		candidate := cloneCacheTestUpstream(base)
+		candidate.Type = upstreamType
+		if _, err := protectedTargetKey(candidate); err == nil {
+			t.Fatalf("unsupported upstream type %q accepted", upstreamType)
+		}
+	}
+}
+
 func TestTargetCacheRejectsInvalidConfigurationBeforeLookupOrConstruction(t *testing.T) {
 	cache, builder := newTargetCacheHarness(t, 2)
 	base := cacheTestUpstream("primary")

@@ -49,7 +49,7 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	}
 }
 
-func TestValidatorKeepsFutureProtocolsSchemaValidButRejectsRuntimeActivation(t *testing.T) {
+func TestValidatorActivatesStructuredProtocolsButKeepsOpaqueFailClosed(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -65,6 +65,12 @@ func TestValidatorKeepsFutureProtocolsSchemaValidButRejectsRuntimeActivation(t *
 			feature := objectArray(spec, "features")[0]
 			feature["protocol"] = protocolID
 			objectArray(spec, "models")[0]["capabilities"] = []any{protocolID}
+			if protocolID == "openai_embeddings" {
+				delete(feature, "output")
+			}
+			if protocolID == "anthropic_messages" {
+				objectArray(spec, "upstreams")[0]["type"] = "anthropic"
+			}
 			if protocolID == "opaque_http" {
 				delete(feature, "output")
 				feature["opaqueHttp"] = map[string]any{
@@ -77,12 +83,15 @@ func TestValidatorKeepsFutureProtocolsSchemaValidButRejectsRuntimeActivation(t *
 				t.Fatal(marshalErr)
 			}
 			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
-				t.Fatalf("future-protocol draft is not schema-valid: %+v", issues)
+				t.Fatalf("protocol configuration is not schema-valid: %+v", issues)
 			}
 			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-			if report.Valid || compiled != nil ||
-				!hasIssue(report.Issues, "protocol_endpoint_unavailable") {
-				t.Fatalf("future protocol activated: report=%+v compiled=%s", report, compiled)
+			if protocolID == "opaque_http" {
+				if report.Valid || compiled != nil || !hasIssue(report.Issues, "protocol_endpoint_unavailable") {
+					t.Fatalf("opaque protocol activated: report=%+v compiled=%s", report, compiled)
+				}
+			} else if !report.Valid || len(compiled) == 0 {
+				t.Fatalf("structured protocol did not activate: report=%+v compiled=%s", report, compiled)
 			}
 
 			// Independently exercise the persisted compiled-snapshot boundary.
@@ -92,10 +101,63 @@ func TestValidatorKeepsFutureProtocolsSchemaValidButRejectsRuntimeActivation(t *
 			if marshalErr != nil {
 				t.Fatal(marshalErr)
 			}
-			if _, snapshotErr := newActiveSnapshot(
+			_, snapshotErr := newActiveSnapshot(
 				"validation", "validation", encoded, compiled,
-			); snapshotErr == nil {
-				t.Fatal("future protocol loaded as an active runtime snapshot")
+			)
+			if protocolID == "opaque_http" && snapshotErr == nil {
+				t.Fatal("opaque protocol loaded as an active runtime snapshot")
+			}
+			if protocolID != "opaque_http" && snapshotErr != nil {
+				t.Fatalf("structured protocol failed runtime snapshot load: %v", snapshotErr)
+			}
+		})
+	}
+}
+
+func TestValidatorBindsStructuredProtocolsToUpstreamFamiliesAndOutputPolicies(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		protocolID string
+		upstream   string
+		code       string
+	}{
+		{
+			name: "Anthropic over OpenAI upstream", protocolID: "anthropic_messages",
+			upstream: "openai_compatible", code: "model_upstream_protocol_mismatch",
+		},
+		{
+			name: "OpenAI over Anthropic upstream", protocolID: "openai_responses",
+			upstream: "anthropic", code: "model_upstream_protocol_mismatch",
+		},
+		{
+			name: "Embeddings with output policy", protocolID: "openai_embeddings",
+			upstream: "openai_compatible", code: "output_policy_unexpected",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			spec := objectValue(document, "spec")
+			feature := objectArray(spec, "features")[0]
+			feature["protocol"] = test.protocolID
+			objectArray(spec, "models")[0]["capabilities"] = []any{test.protocolID}
+			objectArray(spec, "upstreams")[0]["type"] = test.upstream
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+				t.Fatalf("unsafe combination was not schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("unsafe combination activated: report=%+v compiled=%s", report, compiled)
 			}
 		})
 	}

@@ -5,7 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
+	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
+	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/protocol"
 )
 
@@ -14,7 +17,7 @@ func TestEndpointRegistryDerivesExactPublicBindingSeparatelyFromProviderPath(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := newEndpointRegistry(origin, []protocol.Adapter{openaichat.Adapter{}})
+	registry, err := newEndpointRegistry(origin, structuredEndpointAdapters())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,10 +50,12 @@ func TestEndpointRegistryRejectsUnsupportedAdapterActivation(t *testing.T) {
 	}); err == nil {
 		t.Fatal("future protocol adapter activated without an executable endpoint capability")
 	}
-	if _, err := newEndpointRegistry(origin, []protocol.Adapter{
-		openaichat.Adapter{}, openaichat.Adapter{},
-	}); err == nil {
+	duplicate := append(structuredEndpointAdapters(), openaichat.Adapter{})
+	if _, err := newEndpointRegistry(origin, duplicate); err == nil {
 		t.Fatal("duplicate protocol adapters activated")
+	}
+	if _, err := newEndpointRegistry(origin, structuredEndpointAdapters()[:3]); err == nil {
+		t.Fatal("incomplete executable adapter registry activated")
 	}
 }
 
@@ -59,7 +64,7 @@ func TestEndpointRegistryRejectsAnotherMethodBeforeAdapterDispatch(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := newEndpointRegistry(origin, []protocol.Adapter{openaichat.Adapter{}})
+	registry, err := newEndpointRegistry(origin, structuredEndpointAdapters())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +80,7 @@ func TestEndpointRegistryBoundsAndCanonicalizesOpaqueShapeBeforeAvailability(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := newEndpointRegistry(origin, []protocol.Adapter{openaichat.Adapter{}})
+	registry, err := newEndpointRegistry(origin, structuredEndpointAdapters())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,3 +110,12 @@ type futureProtocolAdapter struct {
 }
 
 func (futureProtocolAdapter) ID() string { return protocol.OpenAIResponsesID }
+
+func structuredEndpointAdapters() []protocol.Adapter {
+	return []protocol.Adapter{
+		openairesponses.Adapter{},
+		openaichat.Adapter{},
+		openaiembeddings.Adapter{},
+		anthropicmessages.Adapter{},
+	}
+}

@@ -406,8 +406,21 @@ func modelSemanticIssues(models, upstreams, pricing, inputAccounting map[string]
 				"A model must name one bounded physical model without surrounding whitespace or Unicode control characters.",
 			))
 		}
-		if _, ok := upstreams[stringValue(model, "upstream")]; !ok {
+		upstream, ok := upstreams[stringValue(model, "upstream")]
+		if !ok {
 			issues = append(issues, errorIssue("upstream_reference_missing", base+"/upstream", "The referenced upstream does not exist."))
+		} else {
+			for _, capability := range stringArray(model, "capabilities") {
+				requiredType, known := protocol.RequiredUpstreamType(capability)
+				if !known || stringValue(upstream, "type") != requiredType {
+					issues = append(issues, errorIssue(
+						"model_upstream_protocol_mismatch",
+						base+"/capabilities",
+						"Every model capability must use its matching OpenAI-compatible, Anthropic, or generic upstream family.",
+					))
+					break
+				}
+			}
 		}
 		if pricingRef := stringValue(model, "pricingRef"); pricingRef != "" {
 			catalog, ok := pricing[pricingRef]
@@ -570,6 +583,9 @@ func (validator *Validator) featureSemanticIssues(
 			issues = append(issues, errorIssue("opaque_http_policy_unexpected", base+"/opaqueHttp", "Opaque HTTP policy is valid only for opaque HTTP features."))
 		}
 		if output, ok := feature["output"].(map[string]any); ok {
+			if !protocolRequiresOutputPolicy(protocolID) {
+				issues = append(issues, errorIssue("output_policy_unexpected", base+"/output", "Non-generative protocols cannot configure output-token limits."))
+			}
 			defaultMaximum, _ := integerField(output, "defaultMaximumTokens")
 			absoluteMaximum, _ := integerField(output, "absoluteMaximumTokens")
 			if defaultMaximum > absoluteMaximum {
