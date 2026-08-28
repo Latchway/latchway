@@ -5,6 +5,12 @@
     "cpu": "2 vCPU",
     "memory": "2 GiB",
     "postgresql": "replace-with-version-and-network-location",
+    "postgresql_cpu_millicores": 4000,
+    "postgresql_memory_bytes": 4294967296,
+    "postgresql_memory_swap_bytes": 4294967296,
+    "postgresql_max_connections": 100,
+    "postgresql_network": "replace-with-measured-low-latency-network-placement",
+    "gateway_db_pool_max_connections": 32,
     "body_logging_disabled": true,
     "warm_configuration_cache": true
   },
@@ -86,6 +92,50 @@
     "non_stream_snapshot_path": "/client/v1/features/load/quota",
     "stream_snapshot_path": "/client/v1/features/stream-load/quota",
     "contention_snapshot_path": "/client/v1/features/contention/quota",
+    "non_stream_terminal_limits": [
+      {
+        "metric": "logical_requests",
+        "maximum": 10000,
+        "used": 7021,
+        "reserved": 0,
+        "remaining": 2979,
+        "hard": true
+      },
+      {
+        "metric": "input_tokens",
+        "maximum": 1000000,
+        "used": 77231,
+        "reserved": 0,
+        "remaining": 922769,
+        "hard": true
+      },
+      {
+        "metric": "output_tokens",
+        "maximum": 100000,
+        "used": 49147,
+        "reserved": 0,
+        "remaining": 50853,
+        "hard": true
+      },
+      {
+        "metric": "total_tokens",
+        "maximum": 1100000,
+        "used": 126378,
+        "reserved": 0,
+        "remaining": 973622,
+        "hard": true
+      }
+    ],
+    "stream_terminal_limits": [
+      {
+        "metric": "concurrent_streams",
+        "maximum": 600,
+        "used": 0,
+        "reserved": 0,
+        "remaining": 600,
+        "hard": true
+      }
+    ],
     "contention_request": {
       "method": "POST",
       "path": "/v1/chat/completions",
@@ -111,7 +161,20 @@
     },
     "contention_metric": "logical_requests",
     "contention_attempts": 128,
-    "denial_status": 429
+    "denial_status": 429,
+    "denial_problem_code": "quota_exceeded",
+    "fixture": {
+      "protected_preflight_requests": 1,
+      "overhead_warmup_requests": 20,
+      "overhead_sample_requests": 1000,
+      "non_stream_load_requests": 6000,
+      "settled_input_tokens_per_request": 11,
+      "settled_output_tokens_per_request": 7,
+      "settled_total_tokens_per_request": 18,
+      "input_reservation_per_request": 140,
+      "output_reservation_per_request": 8,
+      "total_reservation_per_request": 148
+    }
   },
   "targets": {
     "overhead_samples": 1000,

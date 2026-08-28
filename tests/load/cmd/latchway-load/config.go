@@ -29,12 +29,18 @@ type config struct {
 }
 
 type environment struct {
-	Label               string `json:"label"`
-	CPU                 string `json:"cpu"`
-	Memory              string `json:"memory"`
-	PostgreSQL          string `json:"postgresql"`
-	BodyLoggingDisabled bool   `json:"body_logging_disabled"`
-	WarmConfigCache     bool   `json:"warm_configuration_cache"`
+	Label                       string `json:"label"`
+	CPU                         string `json:"cpu"`
+	Memory                      string `json:"memory"`
+	PostgreSQL                  string `json:"postgresql"`
+	PostgreSQLCPUMillicores     int64  `json:"postgresql_cpu_millicores"`
+	PostgreSQLMemoryBytes       int64  `json:"postgresql_memory_bytes"`
+	PostgreSQLMemorySwapBytes   int64  `json:"postgresql_memory_swap_bytes"`
+	PostgreSQLMaxConnections    int    `json:"postgresql_max_connections"`
+	PostgreSQLNetwork           string `json:"postgresql_network"`
+	GatewayDBPoolMaxConnections int    `json:"gateway_db_pool_max_connections"`
+	BodyLoggingDisabled         bool   `json:"body_logging_disabled"`
+	WarmConfigCache             bool   `json:"warm_configuration_cache"`
 }
 
 type evidenceMetadata struct {
@@ -73,13 +79,39 @@ type baselineConfig struct {
 }
 
 type quotaConfig struct {
-	NonStreamSnapshotPath  string        `json:"non_stream_snapshot_path"`
-	StreamSnapshotPath     string        `json:"stream_snapshot_path"`
-	ContentionSnapshotPath string        `json:"contention_snapshot_path"`
-	ContentionRequest      requestConfig `json:"contention_request"`
-	ContentionMetric       string        `json:"contention_metric"`
-	ContentionAttempts     int           `json:"contention_attempts"`
-	DenialStatus           int           `json:"denial_status"`
+	NonStreamSnapshotPath   string                  `json:"non_stream_snapshot_path"`
+	StreamSnapshotPath      string                  `json:"stream_snapshot_path"`
+	ContentionSnapshotPath  string                  `json:"contention_snapshot_path"`
+	NonStreamTerminalLimits []quotaLimitExpectation `json:"non_stream_terminal_limits"`
+	StreamTerminalLimits    []quotaLimitExpectation `json:"stream_terminal_limits"`
+	ContentionRequest       requestConfig           `json:"contention_request"`
+	ContentionMetric        string                  `json:"contention_metric"`
+	ContentionAttempts      int                     `json:"contention_attempts"`
+	DenialStatus            int                     `json:"denial_status"`
+	DenialProblemCode       string                  `json:"denial_problem_code"`
+	Fixture                 quotaFixtureFacts       `json:"fixture"`
+}
+
+type quotaFixtureFacts struct {
+	ProtectedPreflightRequests    int64 `json:"protected_preflight_requests"`
+	OverheadWarmupRequests        int64 `json:"overhead_warmup_requests"`
+	OverheadSampleRequests        int64 `json:"overhead_sample_requests"`
+	NonStreamLoadRequests         int64 `json:"non_stream_load_requests"`
+	SettledInputTokensPerRequest  int64 `json:"settled_input_tokens_per_request"`
+	SettledOutputTokensPerRequest int64 `json:"settled_output_tokens_per_request"`
+	SettledTotalTokensPerRequest  int64 `json:"settled_total_tokens_per_request"`
+	InputReservationPerRequest    int64 `json:"input_reservation_per_request"`
+	OutputReservationPerRequest   int64 `json:"output_reservation_per_request"`
+	TotalReservationPerRequest    int64 `json:"total_reservation_per_request"`
+}
+
+type quotaLimitExpectation struct {
+	Metric    string `json:"metric"`
+	Maximum   int64  `json:"maximum"`
+	Used      int64  `json:"used"`
+	Reserved  int64  `json:"reserved"`
+	Remaining int64  `json:"remaining"`
+	Hard      bool   `json:"hard"`
 }
 
 type targetConfig struct {
@@ -133,16 +165,24 @@ func (cfg *config) validate(baseDir string) error {
 	if cfg.SchemaVersion != 1 {
 		return fmt.Errorf("schema_version must be 1, got %d", cfg.SchemaVersion)
 	}
-	if cfg.Environment.Label == "" || cfg.Environment.CPU == "" || cfg.Environment.Memory == "" || cfg.Environment.PostgreSQL == "" {
-		return errors.New("environment label, cpu, memory, and postgresql are required")
+	if cfg.Environment.Label == "" || cfg.Environment.CPU == "" || cfg.Environment.Memory == "" ||
+		cfg.Environment.PostgreSQL == "" || cfg.Environment.PostgreSQLNetwork == "" {
+		return errors.New("environment label, gateway resources, PostgreSQL identity, and PostgreSQL network are required")
 	}
 	for name, value := range map[string]string{
 		"environment.label": cfg.Environment.Label, "environment.cpu": cfg.Environment.CPU,
 		"environment.memory": cfg.Environment.Memory, "environment.postgresql": cfg.Environment.PostgreSQL,
+		"environment.postgresql_network": cfg.Environment.PostgreSQLNetwork,
 	} {
 		if placeholder(value) {
 			return fmt.Errorf("%s still contains a placeholder", name)
 		}
+	}
+	if cfg.Environment.PostgreSQLCPUMillicores < 1000 || cfg.Environment.PostgreSQLMemoryBytes < 1<<30 ||
+		cfg.Environment.PostgreSQLMemorySwapBytes < cfg.Environment.PostgreSQLMemoryBytes ||
+		cfg.Environment.PostgreSQLMaxConnections < 2 || cfg.Environment.PostgreSQLMaxConnections > 500 ||
+		cfg.Environment.GatewayDBPoolMaxConnections < 2 || cfg.Environment.GatewayDBPoolMaxConnections > cfg.Environment.PostgreSQLMaxConnections {
+		return errors.New("load evidence requires PostgreSQL >=1 CPU/1 GiB, 2-500 server connections, and a gateway DB pool within that server limit")
 	}
 	if !cfg.Environment.BodyLoggingDisabled || !cfg.Environment.WarmConfigCache {
 		return errors.New("release load evidence requires body logging disabled and a warm configuration cache")
@@ -206,6 +246,22 @@ func (cfg *config) validate(baseDir string) error {
 	if cfg.Quota.DenialStatus == 0 {
 		cfg.Quota.DenialStatus = 429
 	}
+	if cfg.Quota.DenialStatus < 400 || cfg.Quota.DenialStatus > 599 {
+		return errors.New("quota.denial_status must be an HTTP error status")
+	}
+	if !validEvidenceCode(cfg.Quota.DenialProblemCode) {
+		return errors.New("quota.denial_problem_code must be one bounded stable problem code")
+	}
+	if err := validateQuotaLimitExpectations(
+		cfg.Quota.NonStreamTerminalLimits, "quota.non_stream_terminal_limits",
+	); err != nil {
+		return err
+	}
+	if err := validateQuotaLimitExpectations(
+		cfg.Quota.StreamTerminalLimits, "quota.stream_terminal_limits",
+	); err != nil {
+		return err
+	}
 	if cfg.Targets.OverheadSamples < 20 || cfg.Targets.OverheadWarmup < 1 ||
 		cfg.Targets.P50Milliseconds <= 0 || cfg.Targets.P95Milliseconds <= 0 || cfg.Targets.P99Milliseconds <= 0 ||
 		cfg.Targets.P50Milliseconds > cfg.Targets.P95Milliseconds || cfg.Targets.P95Milliseconds > cfg.Targets.P99Milliseconds {
@@ -224,6 +280,11 @@ func (cfg *config) validate(baseDir string) error {
 	if cfg.Targets.RequestTimeoutSeconds < 1 {
 		return errors.New("request_timeout_seconds must be positive")
 	}
+	if err := cfg.Quota.Fixture.validate(
+		cfg.Targets, cfg.Quota.NonStreamTerminalLimits, cfg.Quota.StreamTerminalLimits,
+	); err != nil {
+		return err
+	}
 	for key, value := range map[string]string{
 		"deployment": cfg.Metadata.Deployment,
 		"operator":   cfg.Metadata.Operator,
@@ -236,6 +297,135 @@ func (cfg *config) validate(baseDir string) error {
 		return err
 	}
 	return nil
+}
+
+func (facts quotaFixtureFacts) validate(
+	targets targetConfig,
+	nonStream, stream []quotaLimitExpectation,
+) error {
+	loadRequests, ok := checkedPositiveProduct(
+		int64(targets.NonStreamRPS), int64(targets.NonStreamDurationSeconds),
+	)
+	if !ok || facts.ProtectedPreflightRequests != 1 ||
+		facts.OverheadWarmupRequests != int64(targets.OverheadWarmup) ||
+		facts.OverheadSampleRequests != int64(targets.OverheadSamples) ||
+		facts.NonStreamLoadRequests != loadRequests {
+		return errors.New("quota.fixture request counts must exactly match one protected preflight and the configured overhead/load targets")
+	}
+	if facts.SettledInputTokensPerRequest <= 0 || facts.SettledOutputTokensPerRequest <= 0 ||
+		facts.SettledTotalTokensPerRequest != facts.SettledInputTokensPerRequest+facts.SettledOutputTokensPerRequest ||
+		facts.InputReservationPerRequest < facts.SettledInputTokensPerRequest ||
+		facts.OutputReservationPerRequest < facts.SettledOutputTokensPerRequest ||
+		facts.TotalReservationPerRequest != facts.InputReservationPerRequest+facts.OutputReservationPerRequest {
+		return errors.New("quota.fixture token settlement and reservation units are inconsistent")
+	}
+	settledBeforeLoad, ok := checkedPositiveSum(
+		facts.ProtectedPreflightRequests,
+		facts.OverheadWarmupRequests,
+		facts.OverheadSampleRequests,
+	)
+	if !ok {
+		return errors.New("quota.fixture request arithmetic overflows int64")
+	}
+	terminalRequests, ok := checkedPositiveSum(settledBeforeLoad, facts.NonStreamLoadRequests)
+	if !ok {
+		return errors.New("quota.fixture terminal request arithmetic overflows int64")
+	}
+	requiredMaximum := map[string]int64{"logical_requests": terminalRequests}
+	terminalUsed := map[string]int64{"logical_requests": terminalRequests}
+	for _, metric := range []struct {
+		name        string
+		settled     int64
+		reservation int64
+	}{
+		{name: "input_tokens", settled: facts.SettledInputTokensPerRequest, reservation: facts.InputReservationPerRequest},
+		{name: "output_tokens", settled: facts.SettledOutputTokensPerRequest, reservation: facts.OutputReservationPerRequest},
+		{name: "total_tokens", settled: facts.SettledTotalTokensPerRequest, reservation: facts.TotalReservationPerRequest},
+	} {
+		minimum, reservationOK := checkedPositiveProduct(terminalRequests, metric.reservation)
+		used, usedOK := checkedPositiveProduct(terminalRequests, metric.settled)
+		if !reservationOK || !usedOK {
+			return errors.New("quota.fixture token arithmetic overflows int64")
+		}
+		requiredMaximum[metric.name] = minimum
+		terminalUsed[metric.name] = used
+	}
+	if len(nonStream) != len(requiredMaximum) {
+		return errors.New("quota.non_stream_terminal_limits must contain exactly the four load-fixture metrics")
+	}
+	seen := make(map[string]bool, len(nonStream))
+	for _, expectation := range nonStream {
+		minimum, known := requiredMaximum[expectation.Metric]
+		if !known || seen[expectation.Metric] || expectation.Maximum < minimum ||
+			expectation.Used != terminalUsed[expectation.Metric] || expectation.Reserved != 0 ||
+			expectation.Remaining != expectation.Maximum-expectation.Used || !expectation.Hard {
+			return fmt.Errorf(
+				"quota.non_stream_terminal_limits metric %q does not prove exact terminal use and worst-case in-flight capacity",
+				expectation.Metric,
+			)
+		}
+		seen[expectation.Metric] = true
+	}
+	if len(stream) != 1 || stream[0].Metric != "concurrent_streams" || !stream[0].Hard ||
+		stream[0].Maximum < int64(targets.SSEConcurrency) || stream[0].Used != 0 ||
+		stream[0].Reserved != 0 || stream[0].Remaining != stream[0].Maximum {
+		return errors.New("quota.stream_terminal_limits must prove an empty concurrent_streams limit covering the configured SSE concurrency")
+	}
+	return nil
+}
+
+func checkedPositiveProduct(left, right int64) (int64, bool) {
+	if left < 0 || right < 0 || (left != 0 && right > int64(^uint64(0)>>1)/left) {
+		return 0, false
+	}
+	return left * right, true
+}
+
+func checkedPositiveSum(values ...int64) (int64, bool) {
+	result := int64(0)
+	for _, value := range values {
+		if value < 0 || value > int64(^uint64(0)>>1)-result {
+			return 0, false
+		}
+		result += value
+	}
+	return result, true
+}
+
+func validateQuotaLimitExpectations(expectations []quotaLimitExpectation, field string) error {
+	if len(expectations) == 0 || len(expectations) > 32 {
+		return fmt.Errorf("%s must contain 1-32 exact hard-limit expectations", field)
+	}
+	seen := make(map[string]struct{}, len(expectations))
+	for _, expectation := range expectations {
+		if !validEvidenceCode(expectation.Metric) {
+			return fmt.Errorf("%s contains an invalid metric", field)
+		}
+		if _, duplicate := seen[expectation.Metric]; duplicate {
+			return fmt.Errorf("%s contains duplicate metric %q", field, expectation.Metric)
+		}
+		seen[expectation.Metric] = struct{}{}
+		if !expectation.Hard || expectation.Maximum < 0 || expectation.Used < 0 ||
+			expectation.Reserved < 0 || expectation.Remaining < 0 ||
+			expectation.Used > expectation.Maximum-expectation.Reserved ||
+			expectation.Remaining != expectation.Maximum-expectation.Used-expectation.Reserved {
+			return fmt.Errorf("%s metric %q has an inconsistent exact hard-limit state", field, expectation.Metric)
+		}
+	}
+	return nil
+}
+
+func validEvidenceCode(value string) bool {
+	if len(value) < 2 || len(value) > 64 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func (metadata evidenceMetadata) validateImageEvidence() error {

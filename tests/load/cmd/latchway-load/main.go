@@ -62,7 +62,8 @@ func main() {
 	}
 	result := report{
 		SchemaVersion: 1, Kind: "latchway_load_evidence", StartedAt: time.Now().UTC(),
-		Commit: commit, Environment: cfg.Environment, Metadata: cfg.Metadata,
+		Commit: commit, Environment: cfg.Environment, QuotaFixture: cfg.Quota.Fixture,
+		Metadata:          cfg.Metadata,
 		ProcessExecutable: executable, WorktreeClean: clean, CompleteSuite: complete,
 	}
 	ctx, cancel := context.WithCancel(context.Background())

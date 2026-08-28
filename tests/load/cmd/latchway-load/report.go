@@ -10,18 +10,19 @@ import (
 )
 
 type report struct {
-	SchemaVersion     int              `json:"schema_version"`
-	Kind              string           `json:"kind"`
-	StartedAt         time.Time        `json:"started_at"`
-	FinishedAt        time.Time        `json:"finished_at"`
-	Commit            string           `json:"commit,omitempty"`
-	Environment       environment      `json:"environment"`
-	Metadata          evidenceMetadata `json:"metadata"`
-	ProcessExecutable string           `json:"observed_process_executable"`
-	WorktreeClean     bool             `json:"worktree_clean"`
-	Gates             []gateResult     `json:"gates"`
-	CompleteSuite     bool             `json:"complete_suite"`
-	LoadTargetsPassed bool             `json:"load_targets_passed"`
+	SchemaVersion     int               `json:"schema_version"`
+	Kind              string            `json:"kind"`
+	StartedAt         time.Time         `json:"started_at"`
+	FinishedAt        time.Time         `json:"finished_at"`
+	Commit            string            `json:"commit,omitempty"`
+	Environment       environment       `json:"environment"`
+	QuotaFixture      quotaFixtureFacts `json:"quota_fixture"`
+	Metadata          evidenceMetadata  `json:"metadata"`
+	ProcessExecutable string            `json:"observed_process_executable"`
+	WorktreeClean     bool              `json:"worktree_clean"`
+	Gates             []gateResult      `json:"gates"`
+	CompleteSuite     bool              `json:"complete_suite"`
+	LoadTargetsPassed bool              `json:"load_targets_passed"`
 }
 
 type gateResult struct {

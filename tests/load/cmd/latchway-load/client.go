@@ -44,7 +44,8 @@ type privateJWK struct {
 type requestResult struct {
 	Status      int
 	Latency     time.Duration
-	Body        []byte
+	Body        []byte `json:"-"`
+	ProblemCode string
 	FirstByteAt time.Time
 	Err         error
 }
@@ -221,7 +222,10 @@ func (client *protectedClient) execute(ctx context.Context, specification reques
 	if len(body) > maximumResponseBytes {
 		return requestResult{Status: response.StatusCode, Latency: latency, Err: errors.New("response exceeds 4 MiB evidence bound")}
 	}
-	return requestResult{Status: response.StatusCode, Latency: latency, Body: body}
+	return requestResult{
+		Status: response.StatusCode, Latency: latency, Body: body,
+		ProblemCode: stableProblemCode(response.StatusCode, body),
+	}
 }
 
 func executeBaseline(ctx context.Context, httpClient *http.Client, cfg config) requestResult {
@@ -242,7 +246,23 @@ func executeBaseline(ctx context.Context, httpClient *http.Client, cfg config) r
 	if err == nil && len(body) > maximumResponseBytes {
 		err = errors.New("direct upstream response exceeds 4 MiB evidence bound")
 	}
-	return requestResult{Status: response.StatusCode, Latency: time.Since(started), Body: body, Err: err}
+	return requestResult{
+		Status: response.StatusCode, Latency: time.Since(started), Body: body,
+		ProblemCode: stableProblemCode(response.StatusCode, body), Err: err,
+	}
+}
+
+func stableProblemCode(status int, body []byte) string {
+	if status < http.StatusBadRequest || len(body) == 0 {
+		return ""
+	}
+	var problem struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &problem); err != nil || !validEvidenceCode(problem.Code) {
+		return ""
+	}
+	return problem.Code
 }
 
 func validateExpectedJSON(result requestResult, expectedStatus int) error {

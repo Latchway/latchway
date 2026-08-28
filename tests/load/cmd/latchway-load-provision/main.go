@@ -43,6 +43,25 @@ const (
 	identityAudience        = "latchway-load-client"
 	debugKeyID              = "load-debug-key-v1"
 	upstreamModel           = "fixture-model"
+
+	loadOverheadSamples          = 1000
+	loadOverheadWarmup           = 20
+	loadNonStreamRPS             = 100
+	loadNonStreamDurationSeconds = 60
+	loadSSEConcurrency           = 500
+	loadSSEHoldSeconds           = 60
+	loadContentionAttempts       = 128
+	loadContentionMaximum        = int64(64)
+	loadLogicalRequestsMaximum   = int64(10_000)
+	loadInputTokensMaximum       = int64(1_000_000)
+	loadOutputTokensMaximum      = int64(100_000)
+	loadTotalTokensMaximum       = int64(1_100_000)
+	fixtureInputTokens           = int64(11)
+	fixtureOutputTokens          = int64(7)
+	fixtureTotalTokens           = int64(18)
+	loadInputReservation         = int64(140)
+	loadOutputReservation        = int64(8)
+	loadTotalReservation         = int64(148)
 )
 
 type options struct {
@@ -51,6 +70,13 @@ type options struct {
 	outputDir          string
 	localDockerImageID string
 	commit             string
+	postgresIdentity   string
+	postgresNetwork    string
+	postgresCPUMilli   int64
+	postgresMemory     int64
+	postgresMemorySwap int64
+	postgresMaxConns   int
+	gatewayDBPool      int
 	bootstrapEnv       string
 	adminPasswordEnv   string
 }
@@ -123,6 +149,13 @@ func main() {
 	flag.StringVar(&values.outputDir, "output-dir", "", "empty private directory for generated session files")
 	flag.StringVar(&values.localDockerImageID, "local-docker-image-id", "", "immutable local Docker gateway image ID")
 	flag.StringVar(&values.commit, "commit", "", "exact core commit represented by the image")
+	flag.StringVar(&values.postgresIdentity, "postgres-identity", "", "exact bounded PostgreSQL version/artifact identity")
+	flag.StringVar(&values.postgresNetwork, "postgres-network", "", "exact bounded PostgreSQL network placement")
+	flag.Int64Var(&values.postgresCPUMilli, "postgres-cpu-millicores", 0, "observed PostgreSQL CPU limit in millicores")
+	flag.Int64Var(&values.postgresMemory, "postgres-memory-bytes", 0, "observed PostgreSQL memory limit in bytes")
+	flag.Int64Var(&values.postgresMemorySwap, "postgres-memory-swap-bytes", 0, "observed PostgreSQL memory-plus-swap limit in bytes")
+	flag.IntVar(&values.postgresMaxConns, "postgres-max-connections", 0, "observed PostgreSQL max_connections")
+	flag.IntVar(&values.gatewayDBPool, "gateway-db-pool-max-connections", 0, "configured gateway DB pool maximum")
 	flag.StringVar(&values.bootstrapEnv, "bootstrap-token-env", "LATCHWAY_LOAD_BOOTSTRAP_TOKEN", "environment variable containing the isolated bootstrap token")
 	flag.StringVar(&values.adminPasswordEnv, "admin-password-env", "LATCHWAY_LOAD_ADMIN_PASSWORD", "environment variable containing the isolated owner password")
 	flag.Parse()
@@ -139,6 +172,13 @@ func main() {
 func run(ctx context.Context, values options) error {
 	if values.upstreamURL == "" || values.outputDir == "" || !validLocalDockerImageID(values.localDockerImageID) || !validCommit(values.commit) {
 		return errors.New("-upstream-base-url, -output-dir, one local sha256 Docker image ID, and one 40-character commit are required")
+	}
+	if !validEvidenceText(values.postgresIdentity) || !validEvidenceText(values.postgresNetwork) ||
+		values.postgresCPUMilli < 1000 || values.postgresMemory < 1<<30 ||
+		values.postgresMemorySwap < values.postgresMemory ||
+		values.postgresMaxConns < 2 || values.postgresMaxConns > 500 ||
+		values.gatewayDBPool < 2 || values.gatewayDBPool > values.postgresMaxConns {
+		return errors.New("exact PostgreSQL identity/network/resources and a bounded gateway DB pool are required")
 	}
 	if !validEnvironmentName(values.bootstrapEnv) || !validEnvironmentName(values.adminPasswordEnv) {
 		return errors.New("secret environment variable names are invalid")
@@ -629,10 +669,10 @@ func loadConfiguration(fixtureBaseURL, fixtureCIDR string) map[string]any {
 				map[string]any{
 					"id": "load",
 					"limits": []any{
-						calendarLimit("logical_requests", 20_000),
-						calendarLimit("input_tokens", 500_000),
-						calendarLimit("output_tokens", 500_000),
-						calendarLimit("total_tokens", 1_000_000),
+						calendarLimit("logical_requests", loadLogicalRequestsMaximum),
+						calendarLimit("input_tokens", loadInputTokensMaximum),
+						calendarLimit("output_tokens", loadOutputTokensMaximum),
+						calendarLimit("total_tokens", loadTotalTokensMaximum),
 					},
 				},
 				map[string]any{
@@ -647,7 +687,7 @@ func loadConfiguration(fixtureBaseURL, fixtureCIDR string) map[string]any {
 				},
 				map[string]any{
 					"id":     "contention",
-					"limits": []any{calendarLimit("logical_requests", 64)},
+					"limits": []any{calendarLimit("logical_requests", loadContentionMaximum)},
 				},
 			},
 			"features": []any{
@@ -716,12 +756,18 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 	return map[string]any{
 		"schema_version": 1,
 		"environment": map[string]any{
-			"label":                    "self-contained-local-v1",
-			"cpu":                      "2 vCPU enforced by Docker NanoCPUs=2000000000",
-			"memory":                   "2 GiB enforced by Docker Memory=2147483648",
-			"postgresql":               "PostgreSQL 18.6 Alpine on the same internal-only Docker bridge",
-			"body_logging_disabled":    true,
-			"warm_configuration_cache": true,
+			"label":                           "self-contained-local-v1",
+			"cpu":                             "2 vCPU enforced by Docker NanoCPUs=2000000000",
+			"memory":                          "2 GiB enforced by Docker Memory=2147483648",
+			"postgresql":                      values.postgresIdentity,
+			"postgresql_cpu_millicores":       values.postgresCPUMilli,
+			"postgresql_memory_bytes":         values.postgresMemory,
+			"postgresql_memory_swap_bytes":    values.postgresMemorySwap,
+			"postgresql_max_connections":      values.postgresMaxConns,
+			"postgresql_network":              values.postgresNetwork,
+			"gateway_db_pool_max_connections": values.gatewayDBPool,
+			"body_logging_disabled":           true,
+			"warm_configuration_cache":        true,
 		},
 		"gateway": map[string]any{
 			"base_url":              values.gatewayURL,
@@ -747,25 +793,43 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 			"expected_status": 200,
 		},
 		"quota": map[string]any{
-			"non_stream_snapshot_path": "/client/v1/features/load/quota",
-			"stream_snapshot_path":     "/client/v1/features/stream-load/quota",
-			"contention_snapshot_path": "/client/v1/features/contention/quota",
-			"contention_request":       request("contention", "quota contention fixture", false),
-			"contention_metric":        "logical_requests",
-			"contention_attempts":      128,
-			"denial_status":            429,
+			"non_stream_snapshot_path":   "/client/v1/features/load/quota",
+			"stream_snapshot_path":       "/client/v1/features/stream-load/quota",
+			"contention_snapshot_path":   "/client/v1/features/contention/quota",
+			"non_stream_terminal_limits": loadTerminalLimits(),
+			"stream_terminal_limits": []any{map[string]any{
+				"metric": "concurrent_streams", "maximum": 600, "used": 0,
+				"reserved": 0, "remaining": 600, "hard": true,
+			}},
+			"contention_request":  request("contention", "quota contention fixture", false),
+			"contention_metric":   "logical_requests",
+			"contention_attempts": loadContentionAttempts,
+			"denial_status":       429,
+			"denial_problem_code": "quota_exceeded",
+			"fixture": map[string]any{
+				"protected_preflight_requests":      1,
+				"overhead_warmup_requests":          loadOverheadWarmup,
+				"overhead_sample_requests":          loadOverheadSamples,
+				"non_stream_load_requests":          loadNonStreamRPS * loadNonStreamDurationSeconds,
+				"settled_input_tokens_per_request":  fixtureInputTokens,
+				"settled_output_tokens_per_request": fixtureOutputTokens,
+				"settled_total_tokens_per_request":  fixtureTotalTokens,
+				"input_reservation_per_request":     loadInputReservation,
+				"output_reservation_per_request":    loadOutputReservation,
+				"total_reservation_per_request":     loadTotalReservation,
+			},
 		},
 		"targets": map[string]any{
-			"overhead_samples":                           1000,
-			"overhead_warmup":                            20,
+			"overhead_samples":                           loadOverheadSamples,
+			"overhead_warmup":                            loadOverheadWarmup,
 			"p50_gateway_overhead_ms":                    5,
 			"p95_gateway_overhead_ms":                    15,
 			"p99_gateway_overhead_ms":                    30,
-			"non_stream_rps":                             100,
-			"non_stream_duration_seconds":                60,
+			"non_stream_rps":                             loadNonStreamRPS,
+			"non_stream_duration_seconds":                loadNonStreamDurationSeconds,
 			"maximum_schedule_lag_ms":                    25,
-			"sse_concurrency":                            500,
-			"sse_hold_seconds":                           60,
+			"sse_concurrency":                            loadSSEConcurrency,
+			"sse_hold_seconds":                           loadSSEHoldSeconds,
 			"maximum_stream_memory_growth_mib":           128,
 			"maximum_stream_memory_slope_mib_per_minute": 5,
 			"idle_warmup_seconds":                        10,
@@ -777,6 +841,24 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 			"deployment":            "isolated internal Docker network; gateway --cpus=2 --memory=2g --memory-swap=2g",
 			"operator":              "scripts/run-local-load-gates.sh",
 		},
+	}
+}
+
+func loadTerminalLimits() []any {
+	requestCount := int64(1 + loadOverheadWarmup + loadOverheadSamples +
+		loadNonStreamRPS*loadNonStreamDurationSeconds)
+	return []any{
+		terminalLimit("logical_requests", loadLogicalRequestsMaximum, requestCount),
+		terminalLimit("input_tokens", loadInputTokensMaximum, requestCount*fixtureInputTokens),
+		terminalLimit("output_tokens", loadOutputTokensMaximum, requestCount*fixtureOutputTokens),
+		terminalLimit("total_tokens", loadTotalTokensMaximum, requestCount*fixtureTotalTokens),
+	}
+}
+
+func terminalLimit(metric string, maximum, used int64) map[string]any {
+	return map[string]any{
+		"metric": metric, "maximum": maximum, "used": used,
+		"reserved": 0, "remaining": maximum - used, "hard": true,
 	}
 }
 
@@ -963,6 +1045,11 @@ func validEnvironmentName(value string) bool {
 
 func validSecret(value string, minimum, maximum int) bool {
 	return len(value) >= minimum && len(value) <= maximum && !strings.ContainsAny(value, "\r\n\x00")
+}
+
+func validEvidenceText(value string) bool {
+	return len(value) >= 2 && len(value) <= 512 && strings.TrimSpace(value) == value &&
+		!strings.ContainsAny(value, "\r\n\x00")
 }
 
 func validETag(value string) bool {

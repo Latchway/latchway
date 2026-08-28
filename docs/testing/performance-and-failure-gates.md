@@ -80,6 +80,16 @@ building, runs the gateway by immutable image ID with Docker enforcing exactly
 2 CPUs and 2 GiB, and lets the runner observe PID 1 by sharing only the
 gateway's network and PID namespaces.
 
+The local PostgreSQL fixture is separately limited to 4 CPU cores and 4 GiB
+with swap disabled, advertises 100 server connections, and shares the same
+Docker `--internal` bridge as the gateway. The gateway pool is capped at 32
+connections so it cannot consume the server connection budget or amplify a
+hot-row convoy with the previous 80-connection setting. These PostgreSQL
+resources are not part of the published 2-vCPU/2-GiB gateway target. The
+launcher inspects the PostgreSQL image ID, CPU/memory controls, exact private
+address and `max_connections`, and verifies the gateway pool environment
+entry. `environment.json` and the load report preserve those non-secret facts.
+
 ```bash
 mkdir -p /tmp/latchway-v1-load-evidence
 
@@ -129,6 +139,28 @@ Configure distinct features so one gate cannot invalidate another:
    request to receive the configured denial status, `used + reserved <=
    maximum`, and zero reservations after settlement.
 
+The generated local `load` plan is deliberately capacity-proved rather than
+merely oversized. Before the 100-RPS interval, exactly 1 protected preflight,
+20 warmups, and 1,000 measured gateway requests have settled: 1,021 requests.
+The interval schedules another 6,000 requests. The rewritten deterministic
+request reserves at most 140 input, 8 output, and 148 total tokens; the fixture
+reports exactly 11 input, 7 output, and 18 total tokens. For a stronger bound
+that does not assume an earlier response's settlement is already visible, the
+capacity proof treats all 7,021 requests as simultaneously reserved. Therefore
+the largest possible bucket occupancy is:
+
+- `logical_requests`: `1,021 + 6,000 = 7,021` (maximum 10,000);
+- `input_tokens`: `7,021*140 = 982,940` (maximum 1,000,000);
+- `output_tokens`: `7,021*8 = 56,168` (maximum 100,000);
+- `total_tokens`: `7,021*148 = 1,039,108` (maximum 1,100,000).
+
+After settlement, the exact terminal `used/reserved/remaining` states are
+`7,021/0/2,979`, `77,231/0/922,769`, `49,147/0/50,853`, and
+`126,378/0/973,622`, respectively. The harness validates that the configured
+request counts, reservation bounds, quota maxima, and terminal expectations
+still satisfy this arithmetic; changing a target, prompt, provider fixture, or
+limit without updating the proof fails configuration validation.
+
 Copy and edit
 [`tests/load/config/v1.example.json`](../../tests/load/config/v1.example.json).
 Its 128 MiB stream-growth and 5 MiB/min plateau-slope values are explicit
@@ -174,6 +206,14 @@ The output includes JSON plus JUnit. It fails on:
 - idle RSS at or above 256 MiB;
 - contention accepting anything other than the exact initial remaining hard
   capacity.
+
+Each request-producing gate records only status counts, bounded stable problem
+code counts, request-error counts, and invalid-problem-response counts. Response
+bodies, prompts, DPoP proofs, tokens, and headers are never copied into the
+evidence report. The non-stream and stream gates also record expected versus
+observed quota limits and require the exact feature plus every
+`maximum/used/reserved/remaining/hard` value to match; a merely non-overspent
+snapshot is not a pass.
 
 Gateway overhead is measured as paired client-observed gateway latency minus a
 direct request to the same deterministic upstream, floored at zero. Pair order

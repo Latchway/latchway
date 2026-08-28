@@ -28,8 +28,94 @@ func TestExampleConfigIsStrictAndMeetsContractFloor(t *testing.T) {
 	if cfg.Quota.ContentionRequest.Method != "POST" || cfg.NonStream.Method != "POST" || cfg.Stream.Method != "POST" {
 		t.Fatal("example request methods are not canonical")
 	}
+	if cfg.Environment.PostgreSQLCPUMillicores != 4000 || cfg.Environment.PostgreSQLMemoryBytes != 4<<30 ||
+		cfg.Environment.PostgreSQLMemorySwapBytes != 4<<30 ||
+		cfg.Environment.PostgreSQLMaxConnections != 100 || cfg.Environment.GatewayDBPoolMaxConnections != 32 ||
+		cfg.Quota.Fixture.NonStreamLoadRequests != 6000 {
+		t.Fatalf("example config omitted exact database/pool/quota fixture facts: environment=%+v quota=%+v", cfg.Environment, cfg.Quota.Fixture)
+	}
 	if err := cfg.validate(filepath.Dir(path)); err == nil {
 		t.Fatal("example config placeholders must be replaced before a run")
+	}
+}
+
+func TestQuotaFixtureProvesWorstCaseCapacityAndExactTerminalUse(t *testing.T) {
+	t.Parallel()
+	cfg := validTestConfig(t)
+	cfg.Metadata = evidenceMetadata{
+		LocalDockerImageID: "sha256:" + testImageHash,
+		Deployment:         "isolated evidence environment", Operator: "load-test-runner",
+	}
+	if err := cfg.validate(t.TempDir()); err != nil {
+		t.Fatalf("valid quota fixture rejected: %v", err)
+	}
+
+	for index := range cfg.Quota.NonStreamTerminalLimits {
+		if cfg.Quota.NonStreamTerminalLimits[index].Metric != "input_tokens" {
+			continue
+		}
+		cfg.Quota.NonStreamTerminalLimits[index].Maximum = 851_230
+		cfg.Quota.NonStreamTerminalLimits[index].Remaining =
+			851_230 - cfg.Quota.NonStreamTerminalLimits[index].Used
+	}
+	if err := cfg.validate(t.TempDir()); err == nil || !strings.Contains(err.Error(), "worst-case in-flight capacity") {
+		t.Fatalf("under-capacity input quota validation error = %v", err)
+	}
+}
+
+func TestQuotaFixtureRejectsTerminalOrTargetDrift(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*config)
+	}{
+		{
+			name: "load count",
+			mutate: func(cfg *config) {
+				cfg.Quota.Fixture.NonStreamLoadRequests--
+			},
+		},
+		{
+			name: "settled use",
+			mutate: func(cfg *config) {
+				cfg.Quota.NonStreamTerminalLimits[0].Used--
+				cfg.Quota.NonStreamTerminalLimits[0].Remaining++
+			},
+		},
+		{
+			name: "stream occupancy",
+			mutate: func(cfg *config) {
+				cfg.Quota.StreamTerminalLimits[0].Reserved = 1
+				cfg.Quota.StreamTerminalLimits[0].Remaining--
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validTestConfig(t)
+			cfg.Metadata = evidenceMetadata{
+				LocalDockerImageID: "sha256:" + testImageHash,
+				Deployment:         "isolated evidence environment", Operator: "load-test-runner",
+			}
+			test.mutate(&cfg)
+			if err := cfg.validate(t.TempDir()); err == nil {
+				t.Fatal("drifted quota fixture passed validation")
+			}
+		})
+	}
+}
+
+func TestEnvironmentRejectsGatewayPoolBeyondPostgreSQLBudget(t *testing.T) {
+	t.Parallel()
+	cfg := validTestConfig(t)
+	cfg.Metadata = evidenceMetadata{
+		LocalDockerImageID: "sha256:" + testImageHash,
+		Deployment:         "isolated evidence environment", Operator: "load-test-runner",
+	}
+	cfg.Environment.GatewayDBPoolMaxConnections = cfg.Environment.PostgreSQLMaxConnections + 1
+	if err := cfg.validate(t.TempDir()); err == nil || !strings.Contains(err.Error(), "gateway DB pool") {
+		t.Fatalf("oversized gateway pool validation error = %v", err)
 	}
 }
 
@@ -195,5 +281,6 @@ func validTestConfig(t *testing.T) config {
 	}
 	cfg.Environment.Label = "load-test"
 	cfg.Environment.PostgreSQL = "PostgreSQL 18.6 on isolated network"
+	cfg.Environment.PostgreSQLNetwork = "measured same-zone private network"
 	return cfg
 }

@@ -14,8 +14,40 @@ import (
 	"time"
 )
 
+type resultEvidence struct {
+	Statuses                map[int]int    `json:"statuses"`
+	ProblemCodes            map[string]int `json:"problem_codes"`
+	RequestErrors           int            `json:"request_errors"`
+	InvalidProblemResponses int            `json:"invalid_problem_responses"`
+}
+
+type terminalQuotaCheck struct {
+	Exact           bool                    `json:"exact"`
+	ExpectedFeature string                  `json:"expected_feature"`
+	ObservedFeature string                  `json:"observed_feature"`
+	Expected        []quotaLimitExpectation `json:"expected"`
+	Observed        []quotaLimit            `json:"observed"`
+}
+
+func newResultEvidence() resultEvidence {
+	return resultEvidence{Statuses: make(map[int]int), ProblemCodes: make(map[string]int)}
+}
+
+func (evidence *resultEvidence) observe(result requestResult) {
+	evidence.Statuses[result.Status]++
+	if result.Err != nil {
+		evidence.RequestErrors++
+	}
+	if result.ProblemCode != "" {
+		evidence.ProblemCodes[result.ProblemCode]++
+	} else if result.Status >= http.StatusBadRequest {
+		evidence.InvalidProblemResponses++
+	}
+}
+
 func runPreflight(ctx context.Context, cfg config, client *protectedClient) gateResult {
 	gate := newGate("preflight")
+	results := newResultEvidence()
 	readyURL := client.target(cfg.Gateway.ReadyPath)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, readyURL.String(), nil)
 	if err == nil {
@@ -31,11 +63,12 @@ func runPreflight(ctx context.Context, cfg config, client *protectedClient) gate
 	}
 	if err == nil {
 		result := client.execute(ctx, withRequestID(cfg.NonStream, 0))
+		results.observe(result)
 		if requestErr := validateExpectedJSON(result, cfg.NonStream.ExpectedStatus); requestErr != nil {
 			err = fmt.Errorf("warm protected request: %w", requestErr)
 		}
 	}
-	gate.Metrics = map[string]any{"ready_url": redactedURL(readyURL)}
+	gate.Metrics = map[string]any{"ready_url": redactedURL(readyURL), "protected_results": results}
 	gate.finish(err)
 	return gate
 }
@@ -84,14 +117,18 @@ func runIdleGate(ctx context.Context, cfg config, pid int) gateResult {
 func runOverheadGate(ctx context.Context, cfg config, client *protectedClient) gateResult {
 	gate := newGate("gateway_overhead")
 	baselineClient := &http.Client{Timeout: cfg.timeout()}
+	gatewayResults := newResultEvidence()
+	baselineResults := newResultEvidence()
 	var err error
 	for index := range cfg.Targets.OverheadWarmup {
 		result := executeBaseline(ctx, baselineClient, cfg)
+		baselineResults.observe(result)
 		if requestErr := validateExpectedJSON(result, cfg.Baseline.ExpectedStatus); requestErr != nil {
 			err = fmt.Errorf("baseline warmup %d failed: %v", index, requestErr)
 			break
 		}
 		result = client.execute(ctx, withRequestID(cfg.NonStream, -index-1))
+		gatewayResults.observe(result)
 		if requestErr := validateExpectedJSON(result, cfg.NonStream.ExpectedStatus); requestErr != nil {
 			err = fmt.Errorf("gateway warmup %d failed: %v", index, requestErr)
 			break
@@ -109,6 +146,8 @@ func runOverheadGate(ctx context.Context, cfg config, client *protectedClient) g
 			gateway = client.execute(ctx, withRequestID(cfg.NonStream, index))
 			baseline = executeBaseline(ctx, baselineClient, cfg)
 		}
+		gatewayResults.observe(gateway)
+		baselineResults.observe(baseline)
 		gatewayErr := validateExpectedJSON(gateway, cfg.NonStream.ExpectedStatus)
 		baselineErr := validateExpectedJSON(baseline, cfg.Baseline.ExpectedStatus)
 		if gatewayErr != nil || baselineErr != nil {
@@ -132,7 +171,8 @@ func runOverheadGate(ctx context.Context, cfg config, client *protectedClient) g
 		"p50_overhead_ms": milliseconds(p50), "p95_overhead_ms": milliseconds(p95), "p99_overhead_ms": milliseconds(p99),
 		"p50_gateway_e2e_ms": milliseconds(percentile(gatewaySamples, .50)), "p95_gateway_e2e_ms": milliseconds(percentile(gatewaySamples, .95)), "p99_gateway_e2e_ms": milliseconds(percentile(gatewaySamples, .99)),
 		"p50_direct_upstream_ms": milliseconds(percentile(baselineSamples, .50)), "p95_direct_upstream_ms": milliseconds(percentile(baselineSamples, .95)), "p99_direct_upstream_ms": milliseconds(percentile(baselineSamples, .99)),
-		"targets_ms": map[string]float64{"p50": cfg.Targets.P50Milliseconds, "p95": cfg.Targets.P95Milliseconds, "p99": cfg.Targets.P99Milliseconds},
+		"targets_ms":      map[string]float64{"p50": cfg.Targets.P50Milliseconds, "p95": cfg.Targets.P95Milliseconds, "p99": cfg.Targets.P99Milliseconds},
+		"gateway_results": gatewayResults, "direct_upstream_results": baselineResults,
 	}
 	if err == nil && (milliseconds(p50) >= cfg.Targets.P50Milliseconds || milliseconds(p95) >= cfg.Targets.P95Milliseconds || milliseconds(p99) >= cfg.Targets.P99Milliseconds) {
 		err = fmt.Errorf("gateway overhead thresholds failed: p50=%.3f p95=%.3f p99=%.3f ms", milliseconds(p50), milliseconds(p95), milliseconds(p99))
@@ -172,14 +212,14 @@ func runNonStreamGate(ctx context.Context, cfg config, client *protectedClient) 
 			results <- scheduledResult{requestResult: client.execute(requestCtx, specification), startLag: actualStartLag}
 		}()
 	}
-	statuses := make(map[int]int)
+	resultCounts := newResultEvidence()
 	successful := 0
 	failed := 0
 	latencies := make([]time.Duration, 0, total)
 	for range total {
 		result := <-results
 		maximumStartLag = max(maximumStartLag, result.startLag)
-		statuses[result.Status]++
+		resultCounts.observe(result.requestResult)
 		latencies = append(latencies, result.Latency)
 		if validateExpectedJSON(result.requestResult, cfg.NonStream.ExpectedStatus) == nil {
 			successful++
@@ -188,18 +228,22 @@ func runNonStreamGate(ctx context.Context, cfg config, client *protectedClient) 
 		}
 	}
 	completionElapsed := time.Since(started)
-	snapshot, snapshotErr := client.quotaSnapshot(ctx, cfg.Quota.NonStreamSnapshotPath, cfg.NonStream)
-	quotaErr := validateSettledHardLimits(snapshot)
+	snapshot, snapshotErr := waitForSettledSnapshot(
+		ctx, cfg, client, cfg.Quota.NonStreamSnapshotPath, cfg.NonStream,
+	)
+	terminalCheck, quotaErr := exactTerminalQuotaCheck(
+		snapshot, requestFeature(cfg.NonStream), cfg.Quota.NonStreamTerminalLimits,
+	)
 	if snapshotErr != nil {
 		quotaErr = snapshotErr
 	}
 	gate.Metrics = map[string]any{
 		"target_rps": cfg.Targets.NonStreamRPS, "duration_seconds": cfg.Targets.NonStreamDurationSeconds,
-		"scheduled": total, "successful": successful, "failed": failed, "statuses": statuses,
+		"scheduled": total, "successful": successful, "failed": failed, "results": resultCounts,
 		"maximum_scheduler_lag_ms": milliseconds(maximumSchedulerLag), "maximum_request_start_lag_ms": milliseconds(maximumStartLag), "schedule_lag_target_ms": cfg.Targets.MaximumScheduleLagMilliseconds,
 		"completion_elapsed_seconds": completionElapsed.Seconds(),
 		"p50_e2e_ms":                 milliseconds(percentile(latencies, .50)), "p95_e2e_ms": milliseconds(percentile(latencies, .95)), "p99_e2e_ms": milliseconds(percentile(latencies, .99)),
-		"quota_snapshot": snapshot,
+		"terminal_quota_check": terminalCheck,
 	}
 	var err error
 	if failed != 0 || successful != total {
@@ -248,14 +292,15 @@ func runContentionGate(ctx context.Context, cfg config, client *protectedClient)
 	accepted := int64(0)
 	denied := 0
 	unexpected := 0
-	statuses := make(map[int]int)
+	resultCounts := newResultEvidence()
 	for range cfg.Quota.ContentionAttempts {
 		result := <-results
-		statuses[result.Status]++
+		resultCounts.observe(result)
 		switch {
 		case validateExpectedJSON(result, cfg.Quota.ContentionRequest.ExpectedStatus) == nil:
 			accepted++
-		case result.Err == nil && result.Status == cfg.Quota.DenialStatus:
+		case result.Err == nil && result.Status == cfg.Quota.DenialStatus &&
+			result.ProblemCode == cfg.Quota.DenialProblemCode:
 			denied++
 		default:
 			unexpected++
@@ -276,10 +321,13 @@ func runContentionGate(ctx context.Context, cfg config, client *protectedClient)
 	if expectedAccepted > int64(cfg.Quota.ContentionAttempts) {
 		expectedAccepted = int64(cfg.Quota.ContentionAttempts)
 	}
+	expectedDenied := cfg.Quota.ContentionAttempts - int(expectedAccepted)
 	gate.Metrics = map[string]any{
 		"metric": cfg.Quota.ContentionMetric, "attempts": cfg.Quota.ContentionAttempts,
-		"accepted": accepted, "expected_accepted": expectedAccepted, "denied": denied, "unexpected": unexpected,
-		"statuses": statuses, "before": before, "after": after,
+		"accepted": accepted, "expected_accepted": expectedAccepted,
+		"denied": denied, "expected_denied": expectedDenied, "unexpected": unexpected,
+		"expected_denial_problem_code": cfg.Quota.DenialProblemCode,
+		"results":                      resultCounts, "before": before, "after": after,
 	}
 	if err == nil && unexpected != 0 {
 		err = fmt.Errorf("contention returned %d unexpected results", unexpected)
@@ -287,8 +335,11 @@ func runContentionGate(ctx context.Context, cfg config, client *protectedClient)
 	if err == nil && accepted != expectedAccepted {
 		err = fmt.Errorf("contention accepted %d requests, want exact remaining capacity %d", accepted, expectedAccepted)
 	}
-	if err == nil && (afterLimit.Maximum == nil || afterLimit.Used == nil || afterLimit.Reserved == nil || *afterLimit.Used+*afterLimit.Reserved > *afterLimit.Maximum || *afterLimit.Reserved != 0) {
-		err = errors.New("post-contention quota state overspent its maximum or retained reservations")
+	if err == nil && denied != expectedDenied {
+		err = fmt.Errorf("contention denied %d requests, want exact exhausted-capacity count %d", denied, expectedDenied)
+	}
+	if err == nil {
+		err = validateExactContentionTransition(limit, afterLimit, accepted)
 	}
 	gate.finish(err)
 	return gate
@@ -305,6 +356,7 @@ func runSSEGate(ctx context.Context, cfg config, client *protectedClient, pid in
 	defer cancelStreams()
 	established := make(chan requestResult, cfg.Targets.SSEConcurrency)
 	completed := make(chan requestResult, cfg.Targets.SSEConcurrency)
+	establishmentResults := newResultEvidence()
 	for index := range cfg.Targets.SSEConcurrency {
 		specification := withRequestID(cfg.Stream, 200_000+index)
 		go openStream(streamCtx, client, specification, established, completed)
@@ -316,6 +368,7 @@ func runSSEGate(ctx context.Context, cfg config, client *protectedClient, pid in
 	for establishedCount < cfg.Targets.SSEConcurrency && err == nil {
 		select {
 		case result := <-established:
+			establishmentResults.observe(result)
 			if result.Err != nil || result.Status != cfg.Stream.ExpectedStatus {
 				err = fmt.Errorf("stream establishment failed: status=%d error=%v", result.Status, result.Err)
 				break
@@ -393,7 +446,7 @@ func runSSEGate(ctx context.Context, cfg config, client *protectedClient, pid in
 		"baseline_rss_mib": baselineRSS, "peak_rss_mib": peak, "growth_mib": growth,
 		"growth_target_mib":            cfg.Targets.MaximumStreamGrowthMiB,
 		"plateau_slope_mib_per_minute": slope, "slope_target_mib_per_minute": cfg.Targets.MaximumStreamSlopeMiBPerMinute,
-		"rss_samples": samples,
+		"rss_samples": samples, "establishment_results": establishmentResults,
 	}
 	if err == nil && establishedCount != cfg.Targets.SSEConcurrency {
 		err = fmt.Errorf("established %d streams, want %d", establishedCount, cfg.Targets.SSEConcurrency)
@@ -402,12 +455,24 @@ func runSSEGate(ctx context.Context, cfg config, client *protectedClient, pid in
 	} else if err == nil && slope >= cfg.Targets.MaximumStreamSlopeMiBPerMinute {
 		err = fmt.Errorf("stream RSS slope %.2f MiB/min reached %.2f bound", slope, cfg.Targets.MaximumStreamSlopeMiBPerMinute)
 	}
+	terminalCheck := terminalQuotaCheck{
+		ExpectedFeature: requestFeature(cfg.Stream), Expected: cfg.Quota.StreamTerminalLimits,
+	}
 	if err == nil {
-		_, settleErr := waitForSettledSnapshot(ctx, cfg, client, cfg.Quota.StreamSnapshotPath, cfg.Stream)
+		snapshot, settleErr := waitForSettledSnapshot(ctx, cfg, client, cfg.Quota.StreamSnapshotPath, cfg.Stream)
 		if settleErr != nil {
 			err = settleErr
+		} else {
+			var exactErr error
+			terminalCheck, exactErr = exactTerminalQuotaCheck(
+				snapshot, requestFeature(cfg.Stream), cfg.Quota.StreamTerminalLimits,
+			)
+			if exactErr != nil {
+				err = exactErr
+			}
 		}
 	}
+	gate.Metrics["terminal_quota_check"] = terminalCheck
 	gate.finish(err)
 	return gate
 }
@@ -519,6 +584,98 @@ func validateSettledHardLimits(snapshot quotaSnapshot) error {
 		}
 	}
 	return nil
+}
+
+func exactTerminalQuotaCheck(
+	snapshot quotaSnapshot,
+	expectedFeature string,
+	expected []quotaLimitExpectation,
+) (terminalQuotaCheck, error) {
+	check := terminalQuotaCheck{
+		ExpectedFeature: expectedFeature, ObservedFeature: snapshot.Feature,
+		Expected: expected, Observed: snapshot.Limits,
+	}
+	if expectedFeature == "" || snapshot.Feature != expectedFeature {
+		return check, fmt.Errorf(
+			"terminal quota snapshot feature %q does not match expected feature %q",
+			snapshot.Feature, expectedFeature,
+		)
+	}
+	if err := validateSettledHardLimits(snapshot); err != nil {
+		return check, err
+	}
+	if len(snapshot.Limits) != len(expected) {
+		return check, fmt.Errorf(
+			"terminal quota snapshot contains %d limits, want exactly %d",
+			len(snapshot.Limits), len(expected),
+		)
+	}
+	observed := make(map[string]quotaLimit, len(snapshot.Limits))
+	for _, limit := range snapshot.Limits {
+		if _, duplicate := observed[limit.Metric]; duplicate {
+			return check, fmt.Errorf("terminal quota snapshot contains duplicate metric %q", limit.Metric)
+		}
+		observed[limit.Metric] = limit
+	}
+	for _, want := range expected {
+		got, ok := observed[want.Metric]
+		if !ok {
+			return check, fmt.Errorf("terminal quota snapshot omitted metric %q", want.Metric)
+		}
+		if got.Maximum == nil || got.Used == nil || got.Reserved == nil || got.Remaining == nil ||
+			*got.Maximum != want.Maximum || *got.Used != want.Used ||
+			*got.Reserved != want.Reserved || *got.Remaining != want.Remaining ||
+			got.Hard != want.Hard {
+			return check, fmt.Errorf(
+				"terminal %s quota maximum/used/reserved/remaining/hard = %s, want %d/%d/%d/%d/%t",
+				want.Metric, quotaLimitState(got), want.Maximum, want.Used,
+				want.Reserved, want.Remaining, want.Hard,
+			)
+		}
+	}
+	check.Exact = true
+	return check, nil
+}
+
+func requestFeature(request requestConfig) string {
+	for key, value := range request.Headers {
+		if strings.EqualFold(key, "X-Latchway-Feature") {
+			return value
+		}
+	}
+	return ""
+}
+
+func validateExactContentionTransition(before, after quotaLimit, accepted int64) error {
+	if before.Maximum == nil || before.Used == nil || before.Reserved == nil || before.Remaining == nil ||
+		after.Maximum == nil || after.Used == nil || after.Reserved == nil || after.Remaining == nil ||
+		!before.Hard || !after.Hard {
+		return errors.New("contention transition requires complete hard-limit states")
+	}
+	if *before.Reserved != 0 || *after.Reserved != 0 || *after.Maximum != *before.Maximum ||
+		*after.Used != *before.Used+accepted || *after.Remaining != *before.Remaining-accepted ||
+		*after.Used+*after.Reserved > *after.Maximum ||
+		(before.ResetsAt == nil) != (after.ResetsAt == nil) ||
+		(before.ResetsAt != nil && !before.ResetsAt.Equal(*after.ResetsAt)) {
+		return fmt.Errorf(
+			"contention terminal quota did not make the exact accepted transition: before=%s after=%s accepted=%d",
+			quotaLimitState(before), quotaLimitState(after), accepted,
+		)
+	}
+	return nil
+}
+
+func quotaLimitState(limit quotaLimit) string {
+	value := func(number *int64) string {
+		if number == nil {
+			return "null"
+		}
+		return fmt.Sprintf("%d", *number)
+	}
+	return fmt.Sprintf(
+		"%s/%s/%s/%s/%t",
+		value(limit.Maximum), value(limit.Used), value(limit.Reserved), value(limit.Remaining), limit.Hard,
+	)
 }
 
 func uniqueLimit(snapshot quotaSnapshot, metric string) (quotaLimit, error) {

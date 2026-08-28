@@ -59,6 +59,12 @@ tools_tag="latchway-load-tools:$suffix"
 network_created=false
 gateway_image_created=false
 tools_image_created=false
+postgres_cpu_millicores=4000
+postgres_nano_cpus=4000000000
+postgres_memory_bytes=4294967296
+postgres_memory_swap_bytes=4294967296
+postgres_max_connections=100
+gateway_db_pool_max_connections=32
 
 cleanup() {
   status=$?
@@ -131,14 +137,16 @@ docker run --detach \
   --name "$postgres" \
   --network "$network" \
   --ip "$postgres_ip" \
-  --cpus 1 \
-  --memory 1g \
-  --pids-limit 512 \
+  --cpus 4 \
+  --memory 4g \
+  --memory-swap 4g \
+  --pids-limit 2048 \
   --security-opt no-new-privileges:true \
   --env POSTGRES_DB \
   --env POSTGRES_USER \
   --env POSTGRES_PASSWORD \
-  postgres:18.6-alpine >/dev/null
+  postgres:18.6-alpine \
+  -c "max_connections=$postgres_max_connections" >/dev/null
 
 postgres_ready=false
 attempt=0
@@ -152,6 +160,26 @@ while [ "$attempt" -lt 90 ]; do
 done
 if [ "$postgres_ready" != true ]; then
   echo "isolated PostgreSQL did not become ready" >&2
+  exit 1
+fi
+
+postgres_image_id=$(docker inspect --format '{{.Image}}' "$postgres")
+postgres_observed_nano_cpus=$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$postgres")
+postgres_observed_memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$postgres")
+postgres_observed_memory_swap_bytes=$(docker inspect --format '{{.HostConfig.MemorySwap}}' "$postgres")
+postgres_observed_ip=$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$postgres")
+postgres_observed_max_connections=$(docker exec --user postgres "$postgres" \
+  psql --username latchway --dbname latchway --tuples-only --no-align --command 'SHOW max_connections')
+case "$postgres_image_id" in
+  sha256:????????????????????????????????????????????????????????????????) ;;
+  *) echo "PostgreSQL did not resolve to an immutable sha256 image ID" >&2; exit 1 ;;
+esac
+if [ "$postgres_observed_nano_cpus" != "$postgres_nano_cpus" ] || \
+   [ "$postgres_observed_memory_bytes" != "$postgres_memory_bytes" ] || \
+   [ "$postgres_observed_memory_swap_bytes" != "$postgres_memory_swap_bytes" ] || \
+   [ "$postgres_observed_ip" != "$postgres_ip" ] || \
+   [ "$postgres_observed_max_connections" != "$postgres_max_connections" ]; then
+  echo "PostgreSQL resource, network, or connection settings do not match the isolated load fixture" >&2
   exit 1
 fi
 
@@ -183,7 +211,7 @@ export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=$bootstrap_token
 export LATCHWAY_ROLE=all
 export LATCHWAY_LOG_LEVEL=info
 export LATCHWAY_MIGRATE_ON_START=true
-export LATCHWAY_DB_MAX_CONNECTIONS=80
+export LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections
 export LATCHWAY_SHUTDOWN_TIMEOUT=30s
 docker run --detach \
   --name "$gateway" \
@@ -211,7 +239,10 @@ nano_cpus=$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$gateway")
 memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$gateway")
 memory_swap_bytes=$(docker inspect --format '{{.HostConfig.MemorySwap}}' "$gateway")
 observed_image=$(docker inspect --format '{{.Image}}' "$gateway")
-if [ "$nano_cpus" != 2000000000 ] || [ "$memory_bytes" != 2147483648 ] || [ "$memory_swap_bytes" != 2147483648 ] || [ "$observed_image" != "$gateway_image_id" ]; then
+gateway_pool_env=$(docker inspect --format "{{range .Config.Env}}{{if eq . \"LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections\"}}{{.}}{{end}}{{end}}" "$gateway")
+if [ "$nano_cpus" != 2000000000 ] || [ "$memory_bytes" != 2147483648 ] || \
+   [ "$memory_swap_bytes" != 2147483648 ] || [ "$observed_image" != "$gateway_image_id" ] || \
+   [ "$gateway_pool_env" != "LATCHWAY_DB_MAX_CONNECTIONS=$gateway_db_pool_max_connections" ]; then
   echo "gateway resource or image identity does not match the required 2 CPU / 2 GiB candidate" >&2
   exit 1
 fi
@@ -228,8 +259,16 @@ printf '%s\n' \
   "  \"gateway_nano_cpus\": $nano_cpus," \
   "  \"gateway_memory_bytes\": $memory_bytes," \
   "  \"gateway_memory_swap_bytes\": $memory_swap_bytes," \
+  "  \"gateway_db_pool_max_connections\": $gateway_db_pool_max_connections," \
   '  "gateway_expected_pid_in_shared_namespace": 1,' \
   '  "postgres_image": "postgres:18.6-alpine",' \
+  "  \"postgres_local_docker_image_id\": \"$postgres_image_id\"," \
+  "  \"postgres_cpu_millicores\": $postgres_cpu_millicores," \
+  "  \"postgres_nano_cpus\": $postgres_observed_nano_cpus," \
+  "  \"postgres_memory_bytes\": $postgres_observed_memory_bytes," \
+  "  \"postgres_memory_swap_bytes\": $postgres_observed_memory_swap_bytes," \
+  "  \"postgres_max_connections\": $postgres_observed_max_connections," \
+  "  \"postgres_network_ip\": \"$postgres_observed_ip\"," \
   '  "network_internal": true,' \
   "  \"network_subnet\": \"$subnet\"," \
   '  "trust_mode": "debug-non-production"' \
@@ -254,7 +293,14 @@ docker run --rm \
   -upstream-base-url "http://$fixture_ip:19090/v1" \
   -output-dir /evidence/runtime \
   -local-docker-image-id "$gateway_image_id" \
-  -commit "$commit"
+  -commit "$commit" \
+  -postgres-identity "PostgreSQL 18.6 Alpine local Docker image $postgres_image_id" \
+  -postgres-network "same internal-only Docker bridge $network ($subnet); PostgreSQL address $postgres_observed_ip" \
+  -postgres-cpu-millicores "$postgres_cpu_millicores" \
+  -postgres-memory-bytes "$postgres_observed_memory_bytes" \
+  -postgres-memory-swap-bytes "$postgres_observed_memory_swap_bytes" \
+  -postgres-max-connections "$postgres_observed_max_connections" \
+  -gateway-db-pool-max-connections "$gateway_db_pool_max_connections"
 
 cp "$run_dir/runtime/provision.json" "$evidence_dir/provision.json"
 cp "$run_dir/runtime/load-config.json" "$evidence_dir/load-config.json"
