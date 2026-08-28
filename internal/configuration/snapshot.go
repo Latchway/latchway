@@ -119,13 +119,23 @@ func runtimeAttestationSelection(platform string, selection PlatformAttestation)
 		(selection.Mode == "required" && selection.MinimumTrustLevel == "none") ||
 		(selection.SecretRef != "" && !runtimeSecretRefPattern.MatchString(selection.SecretRef)) ||
 		(selection.Provider == "debug" && selection.Mode != "disabled" && selection.SecretRef == "") ||
-		(selection.Mode != "disabled" && (len(selection.ApplicationIdentifiers) != 0 || len(selection.AllowedOrigins) != 0)) ||
+		(selection.Mode != "disabled" && len(selection.ApplicationIdentifiers) != 0) ||
 		!runtimeAttestationProviderConfiguration(selection) ||
-		!runtimeAttestationTrustCapability(selection) {
+		!runtimeAttestationTrustCapability(platform, selection) ||
+		!runtimeAttestationAllowedOrigins(platform, selection) {
 		return false
 	}
-	return runtimeAttestationStrings(selection.ApplicationIdentifiers, 256, false) &&
-		runtimeAttestationStrings(selection.AllowedOrigins, 0, true)
+	return runtimeAttestationStrings(selection.ApplicationIdentifiers, 256, false)
+}
+
+func runtimeAttestationAllowedOrigins(platform string, selection PlatformAttestation) bool {
+	enabledWeb := selection.Mode != "disabled" && platform == "web"
+	if !enabledWeb {
+		return len(selection.AllowedOrigins) == 0
+	}
+	return len(selection.AllowedOrigins) > 0 &&
+		len(selection.AllowedOrigins) <= maximumConfiguredWebOrigins &&
+		runtimeAttestationStrings(selection.AllowedOrigins, maximumConfiguredWebOriginBytes, true)
 }
 
 func runtimeAttestationPlatform(platform string) bool {
@@ -156,7 +166,7 @@ func runtimeAttestationStrings(values []string, maximumLength int, origins bool)
 		if value == "" || (maximumLength > 0 && utf8.RuneCountInString(value) > maximumLength) {
 			return false
 		}
-		if origins && !canonicalIdentityHTTPSOrigin(value) {
+		if origins && !canonicalBrowserHTTPSOrigin(value) {
 			return false
 		}
 		if _, exists := seen[value]; exists {

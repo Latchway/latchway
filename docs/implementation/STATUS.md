@@ -1,5 +1,26 @@
 # Implementation status
 
+## Local working-tree update — web and cross-platform attestation configuration (2026-08-29)
+
+The uncommitted working tree now has typed, fail-closed configuration and
+active-snapshot validation for Firebase App Check on iOS, Android, React
+Native iOS/Android, and web, plus Cloudflare Turnstile on web. Firebase pins a
+strict positive decimal project number and a bounded unique app-ID allow-list
+without a secret reference. Turnstile pins bounded unique canonical hostnames
+and an exact action and requires a server-side secret reference while enabled.
+Provider/platform/configuration coexistence and trust capabilities are checked
+both during validation and again when an active snapshot is loaded.
+
+Every enabled web selection now requires a bounded allow-list of exact
+canonical HTTPS browser Origin serializations, shared with request-time CORS
+and authorization parsing; origins are forbidden for native, Node, and
+disabled selections. Firebase is capped at `app_verified` on native platforms
+and `web_risk_verified` on web, while Turnstile is capped at
+`web_risk_verified` and debug at `debug`. Focused configuration normal/race
+tests, configuration vet, and contract validation pass. This is local
+configuration/runtime-boundary evidence, not physical-device attestation,
+external-provider canary, deployment, or release evidence.
+
 ## Local working-tree update — restricted opaque HTTP (2026-08-29)
 
 The uncommitted working tree now contains an executable restricted opaque HTTP

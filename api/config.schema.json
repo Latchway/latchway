@@ -328,13 +328,23 @@
         },
         "allowedOrigins": {
           "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
           "uniqueItems": true,
-          "items": { "type": "string", "format": "uri", "pattern": "^https://" }
+          "items": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 2048,
+            "format": "uri",
+            "pattern": "^https://"
+          }
         },
         "secretRef": { "$ref": "#/$defs/SecretRef" },
         "dangerousAllowInProduction": { "type": "boolean", "default": false },
         "appAttest": { "$ref": "#/$defs/AppAttestConfiguration" },
-        "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" }
+        "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" },
+        "firebaseAppCheck": { "$ref": "#/$defs/FirebaseAppCheckConfiguration" },
+        "turnstile": { "$ref": "#/$defs/TurnstileConfiguration" }
       },
       "allOf": [
         {
@@ -343,7 +353,14 @@
             "required": ["provider"]
           },
           "then": {
-            "not": { "anyOf": [{ "required": ["playIntegrity"] }, { "required": ["secretRef"] }] }
+            "not": {
+              "anyOf": [
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] },
+                { "required": ["secretRef"] }
+              ]
+            }
           }
         },
         {
@@ -351,7 +368,62 @@
             "properties": { "provider": { "const": "play_integrity" } },
             "required": ["provider"]
           },
-          "then": { "not": { "required": ["appAttest"] } }
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "firebase_app_check" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["turnstile"] },
+                { "required": ["secretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "turnstile" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "debug" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] }
+              ]
+            }
+          }
         },
         {
           "if": {
@@ -376,6 +448,36 @@
         {
           "if": {
             "properties": {
+              "provider": { "const": "firebase_app_check" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["firebaseAppCheck"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "turnstile" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["turnstile", "secretRef"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "turnstile" },
+              "mode": { "const": "disabled" }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "not": { "required": ["secretRef"] } }
+        },
+        {
+          "if": {
+            "properties": {
               "playIntegrity": {
                 "properties": { "credentialSource": { "const": "metadata" } },
                 "required": ["credentialSource"]
@@ -396,17 +498,6 @@
             "required": ["playIntegrity"]
           },
           "then": { "required": ["secretRef"] }
-        },
-        {
-          "if": {
-            "properties": {
-              "provider": { "enum": ["firebase_app_check", "turnstile", "debug"] }
-            },
-            "required": ["provider"]
-          },
-          "then": {
-            "not": { "anyOf": [{ "required": ["appAttest"] }, { "required": ["playIntegrity"] }] }
-          }
         }
       ]
     },
@@ -485,6 +576,54 @@
         "minimumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "maximumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "credentialSource": { "enum": ["metadata", "service_account"] }
+      }
+    },
+    "FirebaseAppCheckConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectNumber", "allowedAppIds"],
+      "properties": {
+        "projectNumber": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "allowedAppIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 256,
+            "pattern": "^[!-~]+$"
+          }
+        }
+      }
+    },
+    "TurnstileConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedHostnames", "expectedAction"],
+      "properties": {
+        "allowedHostnames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$"
+          }
+        },
+        "expectedAction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
       }
     },
     "Upstream": {

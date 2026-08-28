@@ -172,15 +172,17 @@ func (provider IdentityProvider) clone() IdentityProvider {
 // PlatformAttestation is a compiled provider selection for one client
 // platform. Its SecretRef names server-side material but never contains it.
 type PlatformAttestation struct {
-	Provider                   string                      `json:"provider"`
-	Mode                       string                      `json:"mode"`
-	MinimumTrustLevel          string                      `json:"minimumTrustLevel,omitempty"`
-	ApplicationIdentifiers     []string                    `json:"applicationIdentifiers,omitempty"`
-	AllowedOrigins             []string                    `json:"allowedOrigins,omitempty"`
-	SecretRef                  string                      `json:"secretRef,omitempty"`
-	DangerousAllowInProduction bool                        `json:"dangerousAllowInProduction"`
-	AppAttest                  *AppAttestConfiguration     `json:"appAttest,omitempty"`
-	PlayIntegrity              *PlayIntegrityConfiguration `json:"playIntegrity,omitempty"`
+	Provider                   string                         `json:"provider"`
+	Mode                       string                         `json:"mode"`
+	MinimumTrustLevel          string                         `json:"minimumTrustLevel,omitempty"`
+	ApplicationIdentifiers     []string                       `json:"applicationIdentifiers,omitempty"`
+	AllowedOrigins             []string                       `json:"allowedOrigins,omitempty"`
+	SecretRef                  string                         `json:"secretRef,omitempty"`
+	DangerousAllowInProduction bool                           `json:"dangerousAllowInProduction"`
+	AppAttest                  *AppAttestConfiguration        `json:"appAttest,omitempty"`
+	PlayIntegrity              *PlayIntegrityConfiguration    `json:"playIntegrity,omitempty"`
+	FirebaseAppCheck           *FirebaseAppCheckConfiguration `json:"firebaseAppCheck,omitempty"`
+	Turnstile                  *TurnstileConfiguration        `json:"turnstile,omitempty"`
 }
 
 func (selection PlatformAttestation) clone() PlatformAttestation {
@@ -196,6 +198,16 @@ func (selection PlatformAttestation) clone() PlatformAttestation {
 		configuration := *selection.PlayIntegrity
 		configuration.CertificateSHA256Digests = append([]string(nil), configuration.CertificateSHA256Digests...)
 		selection.PlayIntegrity = &configuration
+	}
+	if selection.FirebaseAppCheck != nil {
+		configuration := *selection.FirebaseAppCheck
+		configuration.AllowedAppIDs = append([]string(nil), configuration.AllowedAppIDs...)
+		selection.FirebaseAppCheck = &configuration
+	}
+	if selection.Turnstile != nil {
+		configuration := *selection.Turnstile
+		configuration.AllowedHostnames = append([]string(nil), configuration.AllowedHostnames...)
+		selection.Turnstile = &configuration
 	}
 	return selection
 }
@@ -223,6 +235,22 @@ type PlayIntegrityConfiguration struct {
 	MinimumVersionCode       int64    `json:"minimumVersionCode"`
 	MaximumVersionCode       int64    `json:"maximumVersionCode"`
 	CredentialSource         string   `json:"credentialSource"`
+}
+
+// FirebaseAppCheckConfiguration pins the fixed Firebase project and exact app
+// identities accepted by one App Check verifier. App Check uses Google's
+// public keys and therefore never carries a server-side secret reference.
+type FirebaseAppCheckConfiguration struct {
+	ProjectNumber string   `json:"projectNumber"`
+	AllowedAppIDs []string `json:"allowedAppIds"`
+}
+
+// TurnstileConfiguration pins the hostnames and widget action accepted by one
+// web verifier. The corresponding server-side secret remains a SecretRef on
+// PlatformAttestation and never enters an active snapshot as plaintext.
+type TurnstileConfiguration struct {
+	AllowedHostnames []string `json:"allowedHostnames"`
+	ExpectedAction   string   `json:"expectedAction"`
 }
 
 // AttestationPolicy is an immutable typed policy indexed by platform.

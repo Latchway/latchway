@@ -15,6 +15,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"github.com/latchway/latchway/internal/protocol"
 	upstreamtarget "github.com/latchway/latchway/internal/upstream"
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 var (
@@ -227,6 +228,14 @@ func canonicalIdentityHTTPSOrigin(raw string) bool {
 	return parsed.String() == strings.TrimSuffix(raw, "/")
 }
 
+// canonicalBrowserHTTPSOrigin accepts only the exact serialization browsers
+// place in the Origin header. Exact storage is security-significant because
+// request-time enforcement uses byte-for-byte membership rather than URL
+// equivalence or normalization.
+func canonicalBrowserHTTPSOrigin(raw string) bool {
+	return weborigin.Canonical(raw)
+}
+
 func attestationSemanticIssues(policies map[string]map[string]any, environmentKind string) []Issue {
 	issues := make([]Issue, 0)
 	requiredPolicyByPlatform := make(map[string]string)
@@ -265,7 +274,7 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			}
 			if !typedSelectionOK || !runtimeAttestationProviderConfiguration(typedSelection) {
 				issues = append(issues, errorIssue("attestation_provider_configuration_invalid", selectionPath, "The attestation provider configuration is missing, mismatched, or invalid."))
-			} else if mode != "disabled" && !runtimeAttestationTrustCapability(typedSelection) {
+			} else if mode != "disabled" && !runtimeAttestationTrustCapability(platform, typedSelection) {
 				issues = append(issues, errorIssue("attestation_trust_unreachable", selectionPath+"/minimumTrustLevel", "The selected provider configuration cannot produce the required minimum trust level."))
 			}
 			if typedSelectionOK && provider == "app_attest" && typedSelection.AppAttest != nil &&
@@ -279,15 +288,24 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			if mode == "required" && stringValue(selection, "minimumTrustLevel") == "none" {
 				issues = append(issues, errorIssue("attestation_trust_too_weak", selectionPath+"/minimumTrustLevel", "Required attestation must require a verified trust level."))
 			}
-			// The current verifier set does not bind either value into durable
-			// attestation evidence. Reject enabled constraints at validation time so
-			// an activated policy cannot place every client into a permanent
-			// request-time step-up loop.
+			// Generic application identifiers are not yet bound into durable
+			// verifier evidence. Provider-specific app identities live in their
+			// typed configuration instead.
 			if mode != "disabled" && len(stringArray(selection, "applicationIdentifiers")) != 0 {
 				issues = append(issues, errorIssue("attestation_application_identifiers_unsupported", selectionPath+"/applicationIdentifiers", "Application identifier constraints are not supported until the selected verifier binds them into durable attestation evidence."))
 			}
-			if mode != "disabled" && len(stringArray(selection, "allowedOrigins")) != 0 {
-				issues = append(issues, errorIssue("attestation_allowed_origins_unsupported", selectionPath+"/allowedOrigins", "Allowed-origin constraints are not supported until the selected verifier binds them into durable attestation evidence."))
+			origins := stringArray(selection, "allowedOrigins")
+			if mode != "disabled" && platform == "web" {
+				if len(origins) == 0 {
+					issues = append(issues, errorIssue("attestation_allowed_origins_required", selectionPath+"/allowedOrigins", "Enabled web attestation requires at least one exact allowed HTTPS origin."))
+				}
+				for index, origin := range origins {
+					if !canonicalBrowserHTTPSOrigin(origin) {
+						issues = append(issues, errorIssue("attestation_allowed_origin_invalid", fmt.Sprintf("%s/allowedOrigins/%d", selectionPath, index), "Allowed web origins must use exact canonical HTTPS Origin serialization."))
+					}
+				}
+			} else if len(origins) != 0 {
+				issues = append(issues, errorIssue("attestation_allowed_origins_forbidden", selectionPath+"/allowedOrigins", "Allowed origins are permitted only for enabled web attestation selections."))
 			}
 		}
 	}

@@ -1639,6 +1639,10 @@ func TestValidatorRequiresUnambiguousPlatformAttestationAndSupportsDebugNode(t *
 	invalidNodePolicies := objectArray(objectValue(invalidNode, "spec"), "attestationPolicies")
 	objectValue(invalidNodePolicies[0], "platforms")["node"] = map[string]any{
 		"provider": "turnstile", "mode": "required", "minimumTrustLevel": "web_risk_verified",
+		"secretRef": "secret/present",
+		"turnstile": map[string]any{
+			"allowedHostnames": []any{"app.example.test"}, "expectedAction": "latchway_session",
+		},
 	}
 	encoded, _ = json.Marshal(invalidNode)
 	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
@@ -1689,7 +1693,7 @@ func TestValidatorRejectsUnverifiableEnabledAttestationApplicationConstraints(t 
 		{
 			name: "preferred web origin", mode: "preferred",
 			field: "allowedOrigins", value: []any{"https://app.example.test"},
-			code: "attestation_allowed_origins_unsupported",
+			code: "attestation_allowed_origins_forbidden",
 		},
 	}
 	for _, test := range tests {

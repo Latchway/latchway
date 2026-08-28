@@ -344,7 +344,7 @@ func applyDefaults(root map[string]any) {
 				continue
 			}
 			setDefault(selection, "dangerousAllowInProduction", false)
-			minimumTrust := defaultTrustLevel(stringValue(selection, "provider"))
+			minimumTrust := defaultTrustLevel(stringValue(selection, "provider"), platform)
 			if playIntegrity := objectValue(selection, "playIntegrity"); len(playIntegrity) != 0 {
 				if stringValue(playIntegrity, "minimumDeviceIntegrity") == "strong" {
 					minimumTrust = "strong_device_verified"
@@ -453,9 +453,14 @@ func inferredLimitAlgorithm(limit map[string]any) string {
 	return "calendar"
 }
 
-func defaultTrustLevel(provider string) string {
+func defaultTrustLevel(provider, platform string) string {
 	switch provider {
-	case "app_attest", "play_integrity", "firebase_app_check":
+	case "app_attest", "play_integrity":
+		return "app_verified"
+	case "firebase_app_check":
+		if platform == "web" {
+			return "web_risk_verified"
+		}
 		return "app_verified"
 	case "turnstile":
 		return "web_risk_verified"
