@@ -2195,6 +2195,21 @@ func TestPolicyEngineRejectsUnsealedAuthorizationBeforeCELResolution(t *testing.
 	if resolver.calls != 0 {
 		t.Fatal("unsealed authorization reached CEL resolution")
 	}
+
+	_, err = engine.ResolvePlan(
+		ctx,
+		configuration.ActiveSnapshot{},
+		"assistant",
+		session.Authorization{},
+		logicalID,
+		protocol.RequestMetadata{},
+	)
+	if !errors.Is(err, session.ErrSessionInvalid) {
+		t.Fatalf("unsealed authorization plan error = %v", err)
+	}
+	if resolver.calls != 0 {
+		t.Fatal("unsealed authorization reached CEL route-plan resolution")
+	}
 }
 
 type handlerFixture struct {
@@ -2395,6 +2410,11 @@ func (fake *fakePolicyResolver) Resolve(context.Context, policy.Snapshot, string
 	return policy.Decision{}, nil
 }
 
+func (fake *fakePolicyResolver) ResolvePlan(context.Context, policy.Snapshot, string, policy.Input) (policy.DecisionPlan, error) {
+	fake.calls++
+	return policy.DecisionPlan{}, nil
+}
+
 func (fake *fakePolicyEngine) Resolve(
 	_ context.Context,
 	_ configuration.ActiveSnapshot,
@@ -2409,6 +2429,27 @@ func (fake *fakePolicyEngine) Resolve(
 	fake.logicalID = logicalID
 	fake.metadata = metadata
 	return fake.decision, fake.err
+}
+
+func (fake *fakePolicyEngine) ResolvePlan(
+	ctx context.Context,
+	snapshot configuration.ActiveSnapshot,
+	feature string,
+	authorization session.Authorization,
+	logicalID requestidentity.LogicalID,
+	metadata protocol.RequestMetadata,
+) (policy.DecisionPlan, error) {
+	decision, err := fake.Resolve(ctx, snapshot, feature, authorization, logicalID, metadata)
+	if err != nil {
+		return policy.DecisionPlan{}, err
+	}
+	return policy.DecisionPlan{
+		Feature:   decision.Feature,
+		LimitPlan: decision.LimitPlan,
+		Candidates: []policy.RouteDecision{{
+			Route: decision.Route, Model: decision.Model, Upstream: decision.Upstream,
+		}},
+	}, nil
 }
 
 type fakeQuotaStore struct {

@@ -47,11 +47,20 @@ type PolicyDecisionEngine interface {
 		requestidentity.LogicalID,
 		protocol.RequestMetadata,
 	) (policy.Decision, error)
+	ResolvePlan(
+		context.Context,
+		configuration.ActiveSnapshot,
+		string,
+		session.Authorization,
+		requestidentity.LogicalID,
+		protocol.RequestMetadata,
+	) (policy.DecisionPlan, error)
 }
 
 // PolicyResolver is the bounded CEL resolver surface used by PolicyEngine.
 type PolicyResolver interface {
 	Resolve(context.Context, policy.Snapshot, string, policy.Input) (policy.Decision, error)
+	ResolvePlan(context.Context, policy.Snapshot, string, policy.Input) (policy.DecisionPlan, error)
 }
 
 // QuotaProjectionResolver resolves the request-shape-independent feature and
@@ -93,16 +102,46 @@ func (engine *PolicyEngine) Resolve(
 	if engine == nil || nilDependency(engine.resolver) {
 		return policy.Decision{}, errInvalidConfiguration
 	}
-	input, err := policy.NewInput(
+	input, err := policyEngineInput(authorization, logicalID, metadata)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	return engine.resolver.Resolve(ctx, snapshot, featureID, input)
+}
+
+// ResolvePlan preserves the same sealed authorization boundary as Resolve
+// while returning every deterministic physical candidate from one policy
+// evaluation. Production fallback must use this method; it must never resolve
+// each attempt independently against mutable request or configuration state.
+func (engine *PolicyEngine) ResolvePlan(
+	ctx context.Context,
+	snapshot configuration.ActiveSnapshot,
+	featureID string,
+	authorization session.Authorization,
+	logicalID requestidentity.LogicalID,
+	metadata protocol.RequestMetadata,
+) (policy.DecisionPlan, error) {
+	if engine == nil || nilDependency(engine.resolver) {
+		return policy.DecisionPlan{}, errInvalidConfiguration
+	}
+	input, err := policyEngineInput(authorization, logicalID, metadata)
+	if err != nil {
+		return policy.DecisionPlan{}, err
+	}
+	return engine.resolver.ResolvePlan(ctx, snapshot, featureID, input)
+}
+
+func policyEngineInput(
+	authorization session.Authorization,
+	logicalID requestidentity.LogicalID,
+	metadata protocol.RequestMetadata,
+) (policy.Input, error) {
+	return policy.NewInput(
 		authorization,
 		logicalID,
 		policy.ProtocolRequestMetadata{Streaming: metadata.Streaming},
 		policy.EnvironmentFacts{Kind: authorization.EnvironmentKind},
 	)
-	if err != nil {
-		return policy.Decision{}, err
-	}
-	return engine.resolver.Resolve(ctx, snapshot, featureID, input)
 }
 
 // QuotaStore owns the durable reserve/execute/settle lifecycle. The concrete
