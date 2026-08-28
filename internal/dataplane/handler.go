@@ -645,25 +645,39 @@ func calculateConfiguredCost(
 }
 
 func validateDecision(featureID string, decision policy.Decision) (validatedDecision, error) {
-	feature := decision.Feature
-	if feature.ID != featureID || feature.Protocol != openaichat.ID || feature.Output == nil ||
-		feature.OpaqueHTTP != nil || feature.Output.DefaultMaximumTokens <= 0 ||
-		feature.Output.AbsoluteMaximumTokens <= 0 ||
-		feature.Output.DefaultMaximumTokens > feature.Output.AbsoluteMaximumTokens ||
-		decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
+	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
 		len(decision.Route.FallbackOn) != 0 || decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
 		!slices.Contains(decision.Model.Capabilities, openaichat.ID) ||
 		decision.Upstream.ID == "" || decision.Upstream.Type != "openai_compatible" ||
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
-		!validTargetTimeouts(decision.Upstream.Timeouts) || decision.LimitPlan.ID == "" ||
-		len(decision.LimitPlan.Limits) == 0 || len(decision.LimitPlan.Limits) > maximumDecisionLimitRules {
+		!validTargetTimeouts(decision.Upstream.Timeouts) {
 		return validatedDecision{}, policy.ErrConfiguration
 	}
-	rules := make([]quota.Rule, 0, len(decision.LimitPlan.Limits))
-	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(decision.LimitPlan.Limits))
+	return validateFeatureLimitPlan(featureID, decision.Feature, decision.LimitPlan)
+}
+
+// validateFeatureLimitPlan is the shared capability gate for protected
+// request enforcement and the public quota projection. It intentionally does
+// not accept route, model, or upstream state: callers that need physical
+// dispatch must validate those separately before using the returned rules.
+func validateFeatureLimitPlan(
+	featureID string,
+	feature configuration.Feature,
+	limitPlan configuration.LimitPlan,
+) (validatedDecision, error) {
+	if feature.ID != featureID || feature.Protocol != openaichat.ID || feature.Output == nil ||
+		feature.OpaqueHTTP != nil || feature.Output.DefaultMaximumTokens <= 0 ||
+		feature.Output.AbsoluteMaximumTokens <= 0 ||
+		feature.Output.DefaultMaximumTokens > feature.Output.AbsoluteMaximumTokens ||
+		limitPlan.ID == "" || len(limitPlan.Limits) == 0 ||
+		len(limitPlan.Limits) > maximumDecisionLimitRules {
+		return validatedDecision{}, policy.ErrConfiguration
+	}
+	rules := make([]quota.Rule, 0, len(limitPlan.Limits))
+	seenIdentities := make(map[decisionLimitIdentity]struct{}, len(limitPlan.Limits))
 	effectiveMaximum := feature.Output.AbsoluteMaximumTokens
-	for _, limit := range decision.LimitPlan.Limits {
+	for _, limit := range limitPlan.Limits {
 		scope, ok := canonicalDecisionScope(limit.Scope)
 		if !limit.Hard || !ok || !supportedDecisionLimit(limit) {
 			return validatedDecision{}, errUnsupportedLimitPlan

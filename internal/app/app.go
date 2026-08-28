@@ -162,12 +162,6 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client JWKS provider: %w", err)
 	}
-	clientAPI, err := clientapi.New(clientapi.Config{
-		Coordinator: coordinator, JWKS: jwks, PublicOrigin: cfg.PublicOrigin,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("construct client API: %w", err)
-	}
 	policyResolver, err := policy.NewResolver()
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct data-plane policy resolver: %w", err)
@@ -175,6 +169,21 @@ func newAPIRuntime(
 	policyEngine, err := dataplane.NewPolicyEngine(policyResolver)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct data-plane policy engine: %w", err)
+	}
+	featureQuotas, err := dataplane.NewFeatureQuotaProvider(dataplane.FeatureQuotaConfig{
+		AccessTokens: accessVerifier, Sessions: sessionStore,
+		Configuration: configurationStore, Policies: policyResolver,
+		Quotas: quotaStore, PublicOrigin: cfg.PublicOrigin,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct feature quota provider: %w", err)
+	}
+	clientAPI, err := clientapi.New(clientapi.Config{
+		Coordinator: coordinator, FeatureQuotas: featureQuotas,
+		JWKS: jwks, PublicOrigin: cfg.PublicOrigin,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct client API: %w", err)
 	}
 	targetCache := dataplane.NewTargetCache()
 	dataPlane, err := dataplane.New(dataplane.Config{

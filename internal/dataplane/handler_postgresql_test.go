@@ -308,8 +308,29 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct client JWKS provider: %v", err)
 	}
+	resolver, err := policy.NewResolver()
+	if err != nil {
+		t.Fatalf("construct policy resolver: %v", err)
+	}
+	policyEngine, err := NewPolicyEngine(resolver)
+	if err != nil {
+		t.Fatalf("construct data-plane policy engine: %v", err)
+	}
+	quotaStore, err := quota.NewStore(quota.StoreConfig{Pool: pool})
+	if err != nil {
+		t.Fatalf("construct quota store: %v", err)
+	}
+	featureQuotas, err := NewFeatureQuotaProvider(FeatureQuotaConfig{
+		AccessTokens: accessVerifier, Sessions: sessionStore,
+		Configuration: configurationStore, Policies: resolver,
+		Quotas: quotaStore, PublicOrigin: dataPlaneE2EOrigin,
+	})
+	if err != nil {
+		t.Fatalf("construct feature quota provider: %v", err)
+	}
 	clientAPI, err := clientapi.New(clientapi.Config{
-		Coordinator: coordinator, JWKS: publicKeys, PublicOrigin: dataPlaneE2EOrigin,
+		Coordinator: coordinator, FeatureQuotas: featureQuotas,
+		JWKS: publicKeys, PublicOrigin: dataPlaneE2EOrigin,
 	})
 	if err != nil {
 		t.Fatalf("construct client HTTP API: %v", err)
@@ -363,18 +384,6 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		t.Fatal("debug-attested session grant violated the client contract")
 	}
 
-	resolver, err := policy.NewResolver()
-	if err != nil {
-		t.Fatalf("construct policy resolver: %v", err)
-	}
-	policyEngine, err := NewPolicyEngine(resolver)
-	if err != nil {
-		t.Fatalf("construct data-plane policy engine: %v", err)
-	}
-	quotaStore, err := quota.NewStore(quota.StoreConfig{Pool: pool})
-	if err != nil {
-		t.Fatalf("construct quota store: %v", err)
-	}
 	replayingQuotaStore := &dataPlaneE2EReplayingQuotaStore{Store: quotaStore}
 	targets := &dataPlaneE2EPrivateTargetFactory{
 		configuredBaseURL: dataPlaneE2EConfiguredUpstream,
@@ -941,6 +950,78 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		dataPlaneE2EOutputTokenBucketDenied,
 		dataPlaneE2EOutputTokenBucketThird,
 	)
+
+	quotaPath := "/client/v1/features/" + dataPlaneE2EOutputTokenBucketFeature + "/quota"
+	quotaTarget := mustDataPlaneE2EURL(t, dataPlaneE2EOrigin+quotaPath)
+	quotaProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodGet, quotaTarget,
+		now, "dataplane-e2e-output-token-quota", grant.AccessToken,
+	)
+	baselineReplays := countDataPlaneE2EDPoPReplays(t, ctx, pool)
+	invalidQuotaResponse := getDataPlaneE2EFeatureQuota(
+		t, clientHandler, grant.AccessToken, quotaProof, quotaPath+"?untrusted=1",
+	)
+	assertDataPlaneE2EClientProblem(
+		t, invalidQuotaResponse, http.StatusBadRequest, "request_invalid",
+	)
+	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != baselineReplays {
+		t.Fatalf("query rejection consumed DPoP proof: replay rows=%d, want %d", got, baselineReplays)
+	}
+
+	quotaStateBeforeRead := readDataPlaneE2EOutputTokenBucketState(t, ctx, pool)
+	quotaResponse := getDataPlaneE2EFeatureQuota(
+		t, clientHandler, grant.AccessToken, quotaProof, quotaPath,
+	)
+	if quotaResponse.Code != http.StatusOK ||
+		quotaResponse.Header().Get("Content-Type") != "application/json" ||
+		quotaResponse.Header().Get("Cache-Control") != "no-store" ||
+		quotaResponse.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("feature quota response status=%d headers=%#v body=%s",
+			quotaResponse.Code, quotaResponse.Header(), quotaResponse.Body.String())
+	}
+	var quotaDocument dataPlaneE2EQuotaDocument
+	if err := json.NewDecoder(quotaResponse.Body).Decode(&quotaDocument); err != nil {
+		t.Fatalf("decode feature quota response: %v", err)
+	}
+	if quotaDocument.Feature != dataPlaneE2EOutputTokenBucketFeature ||
+		quotaDocument.ObservedAt.IsZero() || quotaDocument.ObservedAt.Location() != time.UTC ||
+		len(quotaDocument.Limits) != 1 {
+		t.Fatalf("feature quota envelope = %+v", quotaDocument)
+	}
+	limit := quotaDocument.Limits[0]
+	if limit.Metric != quota.OutputTokensMetric || !limit.Hard ||
+		limit.Maximum == nil || *limit.Maximum != 8 ||
+		limit.Used == nil || *limit.Used != 7 ||
+		limit.Reserved == nil || *limit.Reserved != 0 ||
+		limit.Remaining == nil || *limit.Remaining != 1 || limit.ResetsAt != nil {
+		t.Fatalf("feature quota token limit = %+v", limit)
+	}
+	quotaStateAfterRead := readDataPlaneE2EOutputTokenBucketState(t, ctx, pool)
+	if !reflect.DeepEqual(quotaStateAfterRead, quotaStateBeforeRead) {
+		t.Fatalf("feature quota read mutated bucket\nbefore=%+v\nafter=%+v",
+			quotaStateBeforeRead, quotaStateAfterRead)
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 13, reservations: 9, reservationEntries: 12,
+		buckets: 6, attempts: 9, usageRecords: 45, deniedRequests: 4,
+	})
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 9 {
+		t.Fatalf("feature quota read reached provider: requests=%d err=%v", len(providerRequests), captureErr)
+	}
+	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != baselineReplays+1 {
+		t.Fatalf("authorized quota replay rows=%d, want %d", got, baselineReplays+1)
+	}
+
+	replayedQuotaResponse := getDataPlaneE2EFeatureQuota(
+		t, clientHandler, grant.AccessToken, quotaProof, quotaPath,
+	)
+	assertDataPlaneE2EClientProblem(
+		t, replayedQuotaResponse, http.StatusUnauthorized, "dpop_replayed",
+	)
+	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != baselineReplays+1 {
+		t.Fatalf("replayed quota proof changed replay rows=%d, want %d", got, baselineReplays+1)
+	}
 }
 
 type dataPlaneE2ETenant struct {
@@ -1303,6 +1384,20 @@ type dataPlaneE2EGrantDocument struct {
 	} `json:"trust"`
 }
 
+type dataPlaneE2EQuotaDocument struct {
+	Feature    string    `json:"feature"`
+	ObservedAt time.Time `json:"observed_at"`
+	Limits     []struct {
+		Metric    string     `json:"metric"`
+		Maximum   *int64     `json:"maximum"`
+		Used      *int64     `json:"used"`
+		Reserved  *int64     `json:"reserved"`
+		Remaining *int64     `json:"remaining"`
+		ResetsAt  *time.Time `json:"resets_at"`
+		Hard      bool       `json:"hard"`
+	} `json:"limits"`
+}
+
 func postDataPlaneE2EJSON(t *testing.T, handler http.Handler, path, proof string, body any, wantStatus int, output any) {
 	t.Helper()
 	encoded, err := json.Marshal(body)
@@ -1334,6 +1429,55 @@ func setDataPlaneE2EProtectedHeaders(request *http.Request, proof string) {
 	request.Header.Set("X-Latchway-SDK", "ios")
 	request.Header.Set("X-Latchway-SDK-Version", "1.2.3")
 	request.Header.Set("DPoP", proof)
+}
+
+func getDataPlaneE2EFeatureQuota(
+	t *testing.T,
+	handler http.Handler,
+	accessToken, proof, path string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	setDataPlaneE2EProtectedHeaders(request, proof)
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func assertDataPlaneE2EClientProblem(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	wantStatus int,
+	wantCode string,
+) {
+	t.Helper()
+	var document struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+		t.Fatalf("decode client problem: %v", err)
+	}
+	if response.Code != wantStatus || document.Code != wantCode ||
+		response.Header().Get("Content-Type") != "application/problem+json" ||
+		response.Header().Get("Cache-Control") != "no-store" ||
+		response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("client problem status/code=%d/%q headers=%#v, want %d/%q",
+			response.Code, document.Code, response.Header(), wantStatus, wantCode)
+	}
+}
+
+func countDataPlaneE2EDPoPReplays(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+) int64 {
+	t.Helper()
+	var count int64
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dpop_replay_entries`).Scan(&count); err != nil {
+		t.Fatalf("count DPoP replay entries: %v", err)
+	}
+	return count
 }
 
 func postDataPlaneE2EChat(t *testing.T, handler http.Handler, accessToken, proof, clientRequestID string, body any) *dataPlaneE2EResponseRecorder {

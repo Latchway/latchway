@@ -54,6 +54,21 @@ type PolicyResolver interface {
 	Resolve(context.Context, policy.Snapshot, string, policy.Input) (policy.Decision, error)
 }
 
+// QuotaProjectionResolver resolves the request-shape-independent feature and
+// limit plan used by the public quota endpoint. Production wiring uses the
+// same bounded policy resolver as protected request dispatch, but does not
+// select a physical route.
+type QuotaProjectionResolver interface {
+	ResolveQuota(
+		context.Context,
+		policy.Snapshot,
+		string,
+		session.Authorization,
+		requestidentity.LogicalID,
+		policy.EnvironmentFacts,
+	) (policy.QuotaProjection, error)
+}
+
 // PolicyEngine converts sealed authorization and allowlisted request metadata
 // into the opaque policy activation before invoking the bounded resolver.
 type PolicyEngine struct {
@@ -98,6 +113,12 @@ type QuotaStore interface {
 	MarkFirstByte(context.Context, quota.Attempt) error
 	Settle(context.Context, quota.Attempt, quota.Outcome) error
 	ReleaseBeforeDispatch(context.Context, quota.Reservation, string) error
+}
+
+// QuotaSnapshotStore reads the effective counters for one already-resolved
+// principal, feature, and limit plan without creating reservation state.
+type QuotaSnapshotStore interface {
+	Snapshot(context.Context, quota.SnapshotInput) (quota.Snapshot, error)
 }
 
 // SecretStore exposes plaintext only to one synchronous callback.

@@ -146,7 +146,8 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatalf("construct client JWKS provider: %v", err)
 	}
 	api, err := clientapi.New(clientapi.Config{
-		Coordinator: coordinator, JWKS: publicKeys, PublicOrigin: clientHTTPOrigin,
+		Coordinator: coordinator, FeatureQuotas: clientHTTPUnusedFeatureQuotas{},
+		JWKS: publicKeys, PublicOrigin: clientHTTPOrigin,
 	})
 	if err != nil {
 		t.Fatalf("construct client HTTP API: %v", err)
@@ -365,6 +366,18 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatalf("persisted revoked session state = active:%d rotated:%d revoked:%d grants:%d revoked_grants:%d",
 			activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants)
 	}
+}
+
+// This integration test owns only the session lifecycle. The feature-quota
+// dependency is required by the complete client transport but must remain
+// unreachable in this fixture.
+type clientHTTPUnusedFeatureQuotas struct{}
+
+func (clientHTTPUnusedFeatureQuotas) FeatureQuota(
+	context.Context,
+	clientapi.FeatureQuotaInput,
+) (clientapi.FeatureQuotaResult, error) {
+	return clientapi.FeatureQuotaResult{}, &clientapi.DependencyError{Code: "server_not_ready"}
 }
 
 type clientHTTPChallengeDocument struct {
