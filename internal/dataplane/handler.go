@@ -315,54 +315,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	selectedPricing, err := resolveConfiguredPricing(snapshot, decision.Model, handler.now())
-	if err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
-	attemptRequest, err := replay.New(request.Context())
-	if err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
-	appliedOutputMaximum, err := endpoint.adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, protocol.FeatureDecision{
-		PhysicalModel:       decision.Model.UpstreamModel,
-		DefaultOutputTokens: validated.defaultOutputTokens,
-		MaximumOutputTokens: validated.maximumOutputTokens,
-	})
-	if err != nil {
-		handler.writeMappedError(writer, requestID, declaration.feature, err)
-		return
-	}
-	if !validAppliedOutputMaximum(endpoint.adapter.Capabilities(), validated, appliedOutputMaximum) {
-		handler.writeMappedError(writer, requestID, declaration.feature, errInvalidConfiguration)
-		return
-	}
-	var inputPreflight *protocol.TrustedInputPreflight
-	if trustedInputPreflightRequired(validated.rules, selectedPricing) {
-		profile, profileErr := resolveTrustedInputProfile(snapshot, decision)
-		preflighter, supportsPreflight := endpoint.adapter.(protocol.InputPreflighter)
-		if profileErr != nil || !supportsPreflight || !endpoint.adapter.Capabilities().TrustedInputPreflight {
-			handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
-			return
-		}
-		preflight, preflightErr := preflighter.PreflightInput(attemptRequest.Context(), attemptRequest, profile)
-		if preflightErr != nil {
-			handler.writeMappedError(writer, requestID, declaration.feature, preflightErr)
-			return
-		}
-		if validateErr := validateTrustedInputPreflight(profile, decision, appliedOutputMaximum, preflight); validateErr != nil {
-			handler.writeMappedError(writer, requestID, declaration.feature, validateErr)
-			return
-		}
-		if integrityErr := verifyAndRebindPreflightBody(attemptRequest, preflight); integrityErr != nil {
-			handler.writeMappedError(writer, requestID, declaration.feature, integrityErr)
-			return
-		}
-		inputPreflight = &preflight
-	}
-	hardCost, err := assignDecisionReservationUnits(
-		validated.rules, selectedPricing, appliedOutputMaximum, inputPreflight,
+	prepared, err := handler.prepareExecutionAttempt(
+		request.Context(), replay, endpoint.adapter, snapshot, decision, validated,
 	)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -374,12 +328,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		OrganizationID:   authorization.OrganizationID, ApplicationID: authorization.ApplicationID,
 		EnvironmentID: authorization.EnvironmentID, ApplicationUserID: authorization.ApplicationUserID,
 		InstallationID: authorization.InstallationID, SessionGrantID: authorization.SessionGrantID,
-		ConfigRevisionID: snapshot.PolicyRevision(), FeatureKey: decision.Feature.ID,
-		Protocol: decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
-		LimitPlanKey: decision.LimitPlan.ID, RouteKey: decision.Route.ID,
-		UpstreamKey: decision.Upstream.ID, ModelKey: decision.Model.ID,
-		PhysicalModel: decision.Model.UpstreamModel, Pricing: selectedPricing.quotaSelection,
-		InputPreflight: quotaInputPreflightBinding(inputPreflight),
+		ConfigRevisionID: snapshot.PolicyRevision(), FeatureKey: prepared.decision.Feature.ID,
+		Protocol: prepared.decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
+		LimitPlanKey: prepared.decision.LimitPlan.ID, RouteKey: prepared.decision.Route.ID,
+		UpstreamKey: prepared.decision.Upstream.ID, ModelKey: prepared.decision.Model.ID,
+		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
+		InputPreflight: quotaInputPreflightBinding(prepared.inputPreflight),
 		Streaming:      metadata.Streaming, Rules: validated.rules,
 	})
 	if err != nil {
@@ -388,7 +342,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 
 	result := handler.executeReserved(
-		attemptRequest.Context(), writer, attemptRequest, endpoint, authorization, decision, reservation, inputPreflight,
+		prepared.request.Context(), writer, prepared.request, endpoint, authorization,
+		prepared.decision, reservation, prepared.inputPreflight,
 	)
 	if !result.beginInvoked {
 		if result.err == nil {
@@ -412,7 +367,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		result.err = errDispatchNotConsumed
 	}
 	providerUsageOverBound := providerUsageExceedsTrustedBounds(
-		result.relay.Usage, appliedOutputMaximum, inputPreflight,
+		result.relay.Usage, prepared.appliedOutputMaximum, prepared.inputPreflight,
 	)
 	if providerUsageOverBound {
 		result.err = fmt.Errorf(
@@ -427,9 +382,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	var calculatedCost quota.Cost
 	if !providerUsageOverBound {
-		calculatedCost, result.err = calculateConfiguredCost(selectedPricing, result.relay.Usage, result.err)
+		calculatedCost, result.err = calculateConfiguredCost(prepared.pricing, result.relay.Usage, result.err)
 	}
-	calculatedCost = boundedSettlementCost(calculatedCost, hardCost)
+	calculatedCost = boundedSettlementCost(calculatedCost, prepared.hardCost)
 
 	settlementErr := handler.settleAttempt(result.attempt, result.relay, calculatedCost, result.err)
 	if result.relay.ClientStarted {
@@ -455,6 +410,77 @@ type executionResult struct {
 	err           error
 	beginInvoked  bool
 	dispatchOwner bool
+}
+
+type preparedExecutionAttempt struct {
+	request              *http.Request
+	decision             policy.Decision
+	pricing              configuredPricing
+	appliedOutputMaximum int64
+	inputPreflight       *protocol.TrustedInputPreflight
+	hardCost             hardCostReservation
+}
+
+func (handler *Handler) prepareExecutionAttempt(
+	ctx context.Context,
+	replay replayableRequest,
+	adapter protocol.Adapter,
+	snapshot configuration.ActiveSnapshot,
+	decision policy.Decision,
+	validated validatedDecision,
+) (preparedExecutionAttempt, error) {
+	if ctx == nil || nilDependency(adapter) {
+		return preparedExecutionAttempt{}, errInvalidConfiguration
+	}
+	selectedPricing, err := resolveConfiguredPricing(snapshot, decision.Model, handler.now())
+	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	attemptRequest, err := replay.New(ctx)
+	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	appliedOutputMaximum, err := adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, protocol.FeatureDecision{
+		PhysicalModel:       decision.Model.UpstreamModel,
+		DefaultOutputTokens: validated.defaultOutputTokens,
+		MaximumOutputTokens: validated.maximumOutputTokens,
+	})
+	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	if !validAppliedOutputMaximum(adapter.Capabilities(), validated, appliedOutputMaximum) {
+		return preparedExecutionAttempt{}, errInvalidConfiguration
+	}
+	var inputPreflight *protocol.TrustedInputPreflight
+	if trustedInputPreflightRequired(validated.rules, selectedPricing) {
+		profile, profileErr := resolveTrustedInputProfile(snapshot, decision)
+		preflighter, supportsPreflight := adapter.(protocol.InputPreflighter)
+		if profileErr != nil || !supportsPreflight || !adapter.Capabilities().TrustedInputPreflight {
+			return preparedExecutionAttempt{}, policy.ErrConfiguration
+		}
+		preflight, preflightErr := preflighter.PreflightInput(attemptRequest.Context(), attemptRequest, profile)
+		if preflightErr != nil {
+			return preparedExecutionAttempt{}, preflightErr
+		}
+		if err := validateTrustedInputPreflight(profile, decision, appliedOutputMaximum, preflight); err != nil {
+			return preparedExecutionAttempt{}, err
+		}
+		if err := verifyAndRebindPreflightBody(attemptRequest, preflight); err != nil {
+			return preparedExecutionAttempt{}, err
+		}
+		inputPreflight = &preflight
+	}
+	hardCost, err := assignDecisionReservationUnits(
+		validated.rules, selectedPricing, appliedOutputMaximum, inputPreflight,
+	)
+	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	return preparedExecutionAttempt{
+		request: attemptRequest, decision: decision, pricing: selectedPricing,
+		appliedOutputMaximum: appliedOutputMaximum, inputPreflight: inputPreflight,
+		hardCost: hardCost,
+	}, nil
 }
 
 func (handler *Handler) executeReserved(
