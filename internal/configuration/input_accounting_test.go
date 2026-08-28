@@ -10,7 +10,7 @@ import (
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
 
-func TestValidatorActivatesTrustedInputAndTotalTokenCalendars(t *testing.T) {
+func TestValidatorActivatesTrustedInputAndTotalTokenAlgorithms(t *testing.T) {
 	t.Parallel()
 
 	validator, err := NewValidator()
@@ -19,6 +19,21 @@ func TestValidatorActivatesTrustedInputAndTotalTokenCalendars(t *testing.T) {
 	}
 	documentObject := configurationObject(t)
 	configureInputAccountingFixture(documentObject, "input_tokens", "total_tokens")
+	planObject := objectArray(objectValue(documentObject, "spec"), "limitPlans")[0]
+	limits := planObject["limits"].([]any)
+	for _, metric := range []string{"input_tokens", "total_tokens"} {
+		limits = append(limits,
+			map[string]any{
+				"metric": metric, "algorithm": "token_bucket", "scope": []any{"user", "feature"},
+				"capacity": json.Number("1000000"), "refillPerSecond": json.Number("3.5"), "hard": true,
+			},
+			map[string]any{
+				"metric": metric, "algorithm": "per_request", "scope": []any{"user", "feature"},
+				"perRequestMaximum": json.Number("1000000"), "hard": true,
+			},
+		)
+	}
+	planObject["limits"] = limits
 	profile := objectArray(objectValue(documentObject, "spec"), "inputAccountingProfiles")[0]
 	profile["maximumFramingTokensPerRequest"] = json.Number("7.0")
 	profile["maximumFramingTokensPerMessage"] = json.Number("4e0")
@@ -62,10 +77,67 @@ func TestValidatorActivatesTrustedInputAndTotalTokenCalendars(t *testing.T) {
 		t.Fatalf("compiled model input accounting ref = %+v ok=%t", model, ok)
 	}
 	plan, ok := snapshot.LimitPlan("free")
-	if !ok || len(plan.Limits) != 2 || plan.Limits[0].Metric != "input_tokens" ||
-		plan.Limits[1].Metric != "total_tokens" || plan.Limits[0].Algorithm != "calendar" ||
-		plan.Limits[1].Algorithm != "calendar" {
+	if !ok || len(plan.Limits) != 6 {
 		t.Fatalf("compiled input/total plan = %+v ok=%t", plan, ok)
+	}
+	wantShapes := map[string]bool{
+		"input_tokens/calendar":     true,
+		"total_tokens/calendar":     true,
+		"input_tokens/token_bucket": true,
+		"total_tokens/token_bucket": true,
+		"input_tokens/per_request":  true,
+		"total_tokens/per_request":  true,
+	}
+	for _, limit := range plan.Limits {
+		key := limit.Metric + "/" + limit.Algorithm
+		if !wantShapes[key] {
+			t.Fatalf("unexpected compiled input/total shape %q: %+v", key, plan.Limits)
+		}
+		delete(wantShapes, key)
+	}
+	if len(wantShapes) != 0 {
+		t.Fatalf("missing compiled input/total shapes: %+v", wantShapes)
+	}
+}
+
+func TestValidatorTrustedTokenBucketAndPerRequestLimitsFailClosedWithoutAccounting(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		metric, algorithm string
+	}{
+		{metric: "input_tokens", algorithm: "token_bucket"},
+		{metric: "total_tokens", algorithm: "token_bucket"},
+		{metric: "input_tokens", algorithm: "per_request"},
+		{metric: "total_tokens", algorithm: "per_request"},
+	} {
+		test := test
+		t.Run(test.metric+"_"+test.algorithm, func(t *testing.T) {
+			document := configurationObject(t)
+			limit := map[string]any{
+				"metric": test.metric, "algorithm": test.algorithm,
+				"scope": []any{"user", "feature"}, "hard": true,
+			}
+			if test.algorithm == "token_bucket" {
+				limit["capacity"] = json.Number("100")
+				limit["refillPerSecond"] = json.Number("1")
+			} else {
+				limit["perRequestMaximum"] = json.Number("100")
+			}
+			objectArray(objectValue(document, "spec"), "limitPlans")[0]["limits"] = []any{limit}
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil ||
+				!hasIssue(report.Issues, "input_accounting_required_for_token_limit") {
+				t.Fatalf("unaccounted %s/%s activated: %+v", test.metric, test.algorithm, report.Issues)
+			}
+		})
 	}
 }
 

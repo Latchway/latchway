@@ -6,30 +6,19 @@ import (
 	"time"
 )
 
-func TestPrepareSnapshotAcceptsOnlyCalendarInputAndTotalTokenRules(t *testing.T) {
+func TestPrepareSnapshotAcceptsAllProductionInputAndTotalTokenRules(t *testing.T) {
 	t.Parallel()
 
 	for _, metric := range []string{InputTokensMetric, TotalTokensMetric} {
 		metric := metric
 		t.Run(metric, func(t *testing.T) {
 			t.Parallel()
-			input := validSnapshotInput(t)
-			input.Rules = []Rule{{
-				Metric: metric, Algorithm: CalendarAlgorithm,
-				Scope: []string{"user", "feature"}, Window: "1d",
-				Maximum: 100, Hard: true,
-			}}
-			prepared, err := prepareSnapshot(input)
-			if err != nil {
-				t.Fatalf("prepare %s calendar snapshot: %v", metric, err)
-			}
-			if len(prepared.rules) != 1 || !prepared.rules[0].stateful ||
-				prepared.rules[0].Metric != metric ||
-				prepared.rules[0].Algorithm != CalendarAlgorithm {
-				t.Fatalf("prepared %s rule = %#v", metric, prepared.rules)
-			}
-
 			for _, rule := range []Rule{
+				{
+					Metric: metric, Algorithm: CalendarAlgorithm,
+					Scope: []string{"user", "feature"}, Window: "1d",
+					Maximum: 100, Hard: true,
+				},
 				{
 					Metric: metric, Algorithm: TokenBucketAlgorithm,
 					Scope: []string{"user"}, Capacity: 100,
@@ -40,10 +29,75 @@ func TestPrepareSnapshotAcceptsOnlyCalendarInputAndTotalTokenRules(t *testing.T)
 					Scope: []string{"user"}, PerRequestMaximum: 100, Hard: true,
 				},
 			} {
+				input := validSnapshotInput(t)
 				input.Rules = []Rule{rule}
-				if _, err := prepareSnapshot(input); !errors.Is(err, ErrInvalidInput) {
-					t.Errorf("%s/%s snapshot = %v, want ErrInvalidInput", metric, rule.Algorithm, err)
+				prepared, err := prepareSnapshot(input)
+				if err != nil {
+					t.Errorf("prepare %s/%s snapshot: %v", metric, rule.Algorithm, err)
+					continue
 				}
+				wantStateful := rule.Algorithm != PerRequestAlgorithm
+				if len(prepared.rules) != 1 || prepared.rules[0].stateful != wantStateful ||
+					prepared.rules[0].Metric != metric || prepared.rules[0].Algorithm != rule.Algorithm {
+					t.Errorf("prepared %s/%s rule = %#v", metric, rule.Algorithm, prepared.rules)
+				}
+			}
+		})
+	}
+}
+
+func TestLimitSnapshotProjectsInputAndTotalTokenBucketAndPerRequestState(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.August, 28, 9, 1, 2, 0, time.UTC)
+	for _, metric := range []string{InputTokensMetric, TotalTokensMetric} {
+		metric := metric
+		t.Run(metric, func(t *testing.T) {
+			t.Parallel()
+			input := validSnapshotInput(t)
+			input.Rules = []Rule{{
+				Metric: metric, Algorithm: TokenBucketAlgorithm, Scope: []string{"user"},
+				Capacity: 100, RefillNumerator: 1, RefillDenominator: 1, Hard: true,
+			}}
+			prepared, err := prepareSnapshot(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans, err := snapshotPlansAt(prepared.rules, observedAt)
+			if err != nil || len(plans) != 1 {
+				t.Fatalf("token plan = (%#v, %v)", plans, err)
+			}
+			maximum, available, numerator, denominator := int64(100), int64(75)*tokenBalanceScale, int64(1), int64(1)
+			refilledAt := observedAt
+			plans[0].bucket = &lockedBucket{
+				id: "qbk_00000000000000000000000001", hardMaximum: &maximum,
+				available: &available, refillNumerator: &numerator, refillDenominator: &denominator,
+				refilledAt: &refilledAt, scopeType: plans[0].rule.scopeType,
+				scopeDimensions: plans[0].rule.scopeDimensions,
+			}
+			limit, err := limitSnapshotAt(plans[0], observedAt)
+			if err != nil || limit.Maximum == nil || *limit.Maximum != 100 ||
+				limit.Used == nil || *limit.Used != 25 || limit.Reserved == nil || *limit.Reserved != 0 ||
+				limit.Remaining == nil || *limit.Remaining != 75 || limit.ResetsAt != nil {
+				t.Fatalf("%s token snapshot = (%#v, %v)", metric, limit, err)
+			}
+
+			input.Rules = []Rule{{
+				Metric: metric, Algorithm: PerRequestAlgorithm, Scope: []string{"user"},
+				PerRequestMaximum: 64, Hard: true,
+			}}
+			prepared, err = prepareSnapshot(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans, err = snapshotPlansAt(prepared.rules, observedAt)
+			if err != nil || len(plans) != 1 {
+				t.Fatalf("per-request plan = (%#v, %v)", plans, err)
+			}
+			limit, err = limitSnapshotAt(plans[0], observedAt)
+			if err != nil || limit.Maximum == nil || *limit.Maximum != 64 ||
+				limit.Used != nil || limit.Reserved != nil || limit.Remaining != nil || limit.ResetsAt != nil {
+				t.Fatalf("%s per-request snapshot = (%#v, %v)", metric, limit, err)
 			}
 		})
 	}

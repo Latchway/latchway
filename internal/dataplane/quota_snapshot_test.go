@@ -88,6 +88,64 @@ func TestFeatureQuotaProviderAuthenticatesAndProjectsEffectiveRules(t *testing.T
 	}
 }
 
+func TestFeatureQuotaProviderProjectsTrustedInputAndTotalTokenAlgorithms(t *testing.T) {
+	fixture := newFeatureQuotaFixture(t)
+	fixture.policies.projection.LimitPlan.Limits = []configuration.Limit{
+		{
+			Metric: quota.InputTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 100,
+			RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 10}, Hard: true,
+		},
+		{
+			Metric: quota.TotalTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 200,
+			RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 10}, Hard: true,
+		},
+		{
+			Metric: quota.InputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 64, Hard: true,
+		},
+		{
+			Metric: quota.TotalTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 128, Hard: true,
+		},
+	}
+	inputMaximum, inputUsed, inputReserved, inputRemaining := int64(100), int64(20), int64(0), int64(80)
+	totalMaximum, totalUsed, totalReserved, totalRemaining := int64(200), int64(35), int64(0), int64(165)
+	inputPerRequest, totalPerRequest := int64(64), int64(128)
+	fixture.quotas.snapshot.Limits = []quota.LimitSnapshot{
+		{Metric: quota.InputTokensMetric, Maximum: &inputMaximum, Used: &inputUsed, Reserved: &inputReserved, Remaining: &inputRemaining, Hard: true},
+		{Metric: quota.TotalTokensMetric, Maximum: &totalMaximum, Used: &totalUsed, Reserved: &totalReserved, Remaining: &totalRemaining, Hard: true},
+		{Metric: quota.InputTokensMetric, Maximum: &inputPerRequest, Hard: true},
+		{Metric: quota.TotalTokensMetric, Maximum: &totalPerRequest, Hard: true},
+	}
+
+	result, err := fixture.provider(t).FeatureQuota(context.Background(), fixture.input)
+	if err != nil || len(result.Limits) != 4 || fixture.quotas.calls != 1 {
+		t.Fatalf("trusted token FeatureQuota() = %+v calls=%d error=%v", result, fixture.quotas.calls, err)
+	}
+	captured := fixture.quotas.input
+	if len(captured.Rules) != 4 {
+		t.Fatalf("trusted token snapshot rules = %+v", captured.Rules)
+	}
+	want := map[string]bool{
+		quota.InputTokensMetric + "/" + quota.TokenBucketAlgorithm: true,
+		quota.TotalTokensMetric + "/" + quota.TokenBucketAlgorithm: true,
+		quota.InputTokensMetric + "/" + quota.PerRequestAlgorithm:  true,
+		quota.TotalTokensMetric + "/" + quota.PerRequestAlgorithm:  true,
+	}
+	for _, rule := range captured.Rules {
+		identity := rule.Metric + "/" + rule.Algorithm
+		if !want[identity] || rule.ReservedUnits != 0 {
+			t.Fatalf("unexpected trusted token snapshot rule: %+v", rule)
+		}
+		delete(want, identity)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing trusted token snapshot rules: %+v", want)
+	}
+}
+
 func TestFeatureQuotaProviderFailsClosedBeforeQuotaRead(t *testing.T) {
 	tests := []struct {
 		name string

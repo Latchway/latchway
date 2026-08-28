@@ -70,13 +70,16 @@ of the following conditions hold:
   digests, and all three bounds into the logical-request fingerprint and
   requires every input/output/total reservation to equal its bound.
 
-With that proof, production configuration permits hard UTC-calendar
-`input_tokens` and `total_tokens` rules and may reserve a hard cost limit using
-a nonzero configured input-token price. Known provider usage above any trusted
-bound is treated as an upstream protocol anomaly: usage becomes unknown and
-the full conservative reservation is retained. Input/total token buckets and
-per-request rules remain unsupported until their capacity,
-impossible-request, and recovery semantics are specified and implemented.
+With that proof, production configuration permits hard UTC-calendar, rolling
+token-bucket, and per-request `input_tokens` and `total_tokens` rules and may
+reserve a hard cost limit using a nonzero configured input-token price. Known
+provider usage above any trusted bound is treated as an upstream protocol
+anomaly: usage becomes unknown and the full conservative reservation is
+retained. A request whose trusted bound is above a token-bucket capacity or
+per-request maximum is a quota denial that creates no bucket, reservation, or
+attempt and is stable under exact replay. Token-bucket reservation, settlement,
+refund, expiry, and retry reuse the existing metric-generic durable lifecycle;
+per-request limits are stateless request-local gates.
 
 ## Alternatives
 
@@ -118,11 +121,13 @@ No database migration or client wire change is required because existing
 bucket, reservation-entry, usage, and snapshot representations are
 metric-generic. The new operator-facing accounting profile and model reference
 are a contract-`0.4.0` configuration change; wire protocol `1` and database
-schema `11` remain unchanged. Input/total per-request support may need a schema
-change so entryless reservations retain enough information for crash
-recovery.
+schema `11` remain unchanged. Per-request-only reservations remain entryless;
+their trusted bounds are request-local gates, while dispatched attempt recovery
+retains the previously documented entryless limitation.
 
 ## Status
 
 Accepted for wire version 1 on 2026-08-28; restricted OpenAI Chat activation
-implemented for draft contract `0.4.0` on 2026-08-28.
+implemented for draft contract `0.4.0` on 2026-08-28. Hard input/total
+token-bucket and per-request algorithms were implemented behind the same proof
+on 2026-08-29 without a wire or schema change.

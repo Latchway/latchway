@@ -1428,7 +1428,7 @@ func TestHandlerRunsDurableLifecycleForPerRequestOnlyPlan(t *testing.T) {
 	}
 }
 
-func TestSupportedDecisionOutputTokenBucketValidatesDetachedShapeAndBounds(t *testing.T) {
+func TestSupportedDecisionTokenBucketsValidateDetachedShapeAndBounds(t *testing.T) {
 	t.Parallel()
 
 	valid := configuration.Limit{
@@ -1442,11 +1442,18 @@ func TestSupportedDecisionOutputTokenBucketValidatesDetachedShapeAndBounds(t *te
 	if !supportedDecisionLimit(valid) {
 		t.Fatal("valid detached output-token bucket was rejected")
 	}
+	for _, metric := range []string{quota.InputTokensMetric, quota.TotalTokensMetric} {
+		candidate := valid
+		candidate.Metric = metric
+		if !supportedDecisionLimit(candidate) {
+			t.Fatalf("valid detached %s bucket was rejected", metric)
+		}
+	}
 	tests := []struct {
 		name   string
 		mutate func(*configuration.Limit)
 	}{
-		{name: "future metric", mutate: func(limit *configuration.Limit) { limit.Metric = "input_tokens" }},
+		{name: "future metric", mutate: func(limit *configuration.Limit) { limit.Metric = "future_tokens" }},
 		{name: "window", mutate: func(limit *configuration.Limit) { limit.Window = "1m" }},
 		{name: "maximum", mutate: func(limit *configuration.Limit) { limit.Maximum = 1 }},
 		{name: "per request maximum", mutate: func(limit *configuration.Limit) { limit.PerRequestMaximum = 1 }},
@@ -1480,6 +1487,21 @@ func TestSupportedDecisionOutputTokenBucketValidatesDetachedShapeAndBounds(t *te
 				t.Fatalf("invalid detached output-token bucket accepted: %+v", candidate)
 			}
 		})
+	}
+}
+
+func TestSupportedDecisionTrustedTokenPerRequestShapes(t *testing.T) {
+	t.Parallel()
+	for _, metric := range []string{
+		quota.InputTokensMetric, quota.OutputTokensMetric, quota.TotalTokensMetric,
+	} {
+		limit := configuration.Limit{
+			Metric: metric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"user"}, PerRequestMaximum: 128, Hard: true,
+		}
+		if !supportedDecisionLimit(limit) {
+			t.Fatalf("valid detached %s per-request limit was rejected", metric)
+		}
 	}
 }
 
@@ -1539,7 +1561,7 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 				plan.Limits[index].Window = "1d"
 			}
 		}},
-		{name: "future metric", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Metric = "input_tokens" }},
+		{name: "future metric", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Metric = "future_tokens" }},
 		{name: "token bucket with calendar fields", mutate: func(plan *configuration.LimitPlan) {
 			plan.Limits[0].Algorithm = quota.TokenBucketAlgorithm
 		}},
@@ -1557,12 +1579,6 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 			limit := tokenLimit(quota.OutputTokensMetric)
 			limit.Capacity = maximumDecisionTokenBucketCapacity + 1
 			plan.Limits = []configuration.Limit{limit}
-		}},
-		{name: "input token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
-			plan.Limits = []configuration.Limit{tokenLimit("input_tokens")}
-		}},
-		{name: "total token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
-			plan.Limits = []configuration.Limit{tokenLimit("total_tokens")}
 		}},
 		{name: "cost token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
 			plan.Limits = []configuration.Limit{tokenLimit(quota.CostNanoUSDMetric)}

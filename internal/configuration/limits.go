@@ -63,14 +63,16 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "token_bucket":
-		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens") || limit.Window != "" ||
+		if (limit.Metric != "logical_requests" && limit.Metric != "input_tokens" &&
+			limit.Metric != "output_tokens" && limit.Metric != "total_tokens") || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity <= 0 || limit.Capacity > maximumExecutableTokenBucketCapacity ||
 			!executableTokenBucketRefillRate(limit.RefillPerSecond) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":
-		if limit.Metric != "output_tokens" || limit.Window != "" ||
+		if (limit.Metric != "input_tokens" && limit.Metric != "output_tokens" &&
+			limit.Metric != "total_tokens") || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum <= 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false

@@ -109,6 +109,140 @@ func TestStorePostgreSQLInputAndTotalCalendarSnapshot(t *testing.T) {
 	}
 }
 
+func TestStorePostgreSQLInputAndTotalTokenBucketAndPerRequestSnapshot(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+	activateQuotaSnapshotRevision(t, fixture)
+
+	reserveInput := trustedTokenShapeInput(t, fixture, "snapshot-input-total-modern", []Rule{
+		{
+			Metric: InputTokensMetric, Algorithm: TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 100,
+			RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+			ReservedUnits: 20, Hard: true,
+		},
+		{
+			Metric: TotalTokensMetric, Algorithm: TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 250,
+			RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+			ReservedUnits: 35, Hard: true,
+		},
+		{
+			Metric: InputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 64,
+			ReservedUnits: 20, Hard: true,
+		},
+		{
+			Metric: TotalTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 128,
+			ReservedUnits: 35, Hard: true,
+		},
+	}, 20, 15)
+	snapshotInput := snapshotInputFromReserve(reserveInput)
+	for index := range snapshotInput.Rules {
+		snapshotInput.Rules[index].ReservedUnits = 0
+	}
+
+	beforeCount := fixture.count(t, `SELECT count(*) FROM quota_buckets`)
+	pristine, err := fixture.store.Snapshot(fixture.ctx, snapshotInput)
+	if err != nil {
+		t.Fatalf("read pristine token/per-request snapshot: %v", err)
+	}
+	assertModernInputTotalSnapshot(t, pristine, 0, 0)
+	if afterCount := fixture.count(t, `SELECT count(*) FROM quota_buckets`); afterCount != beforeCount {
+		t.Fatalf("pristine modern snapshot materialized buckets: before=%d after=%d", beforeCount, afterCount)
+	}
+
+	reservation, err := fixture.store.Reserve(fixture.ctx, reserveInput)
+	if err != nil {
+		t.Fatalf("reserve modern snapshot counters: %v", err)
+	}
+	rows, err := fixture.pool.Query(fixture.ctx, `
+		SELECT quota_bucket_id
+		FROM quota_buckets
+		WHERE environment_id = $1 AND algorithm = 'token_bucket'
+		  AND metric IN ('input_tokens', 'total_tokens')
+	`, reserveInput.EnvironmentID)
+	if err != nil {
+		t.Fatalf("list modern snapshot buckets: %v", err)
+	}
+	var bucketIDs []string
+	for rows.Next() {
+		var bucketID string
+		if err := rows.Scan(&bucketID); err != nil {
+			rows.Close()
+			t.Fatalf("scan modern snapshot bucket: %v", err)
+		}
+		bucketIDs = append(bucketIDs, bucketID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("iterate modern snapshot buckets: %v", err)
+	}
+	rows.Close()
+	if len(bucketIDs) != 2 {
+		t.Fatalf("modern snapshot bucket IDs = %#v", bucketIDs)
+	}
+	beforeRows := make(map[string]quotaSnapshotFootprint, len(bucketIDs))
+	for _, bucketID := range bucketIDs {
+		beforeRows[bucketID] = readQuotaSnapshotFootprint(t, fixture, bucketID)
+	}
+
+	populated, err := fixture.store.Snapshot(fixture.ctx, snapshotInput)
+	if err != nil {
+		t.Fatalf("read populated token/per-request snapshot: %v", err)
+	}
+	assertModernInputTotalSnapshot(t, populated, 20, 35)
+	for _, bucketID := range bucketIDs {
+		if after := readQuotaSnapshotFootprint(t, fixture, bucketID); !reflect.DeepEqual(after, beforeRows[bucketID]) {
+			t.Fatalf("modern snapshot mutated bucket %s\nbefore=%#v\nafter=%#v",
+				bucketID, beforeRows[bucketID], after)
+		}
+	}
+	if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "snapshot_done"); err != nil {
+		t.Fatalf("release modern snapshot reservation: %v", err)
+	}
+}
+
+func assertModernInputTotalSnapshot(t *testing.T, snapshot Snapshot, inputUsed, totalUsed int64) {
+	t.Helper()
+	if snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.Location() != time.UTC || len(snapshot.Limits) != 4 {
+		t.Fatalf("modern input/total snapshot envelope = %#v", snapshot)
+	}
+	type expectedLimit struct {
+		metric              string
+		maximum, used, left int64
+		stateful            bool
+	}
+	want := map[int64]expectedLimit{
+		100: {metric: InputTokensMetric, maximum: 100, used: inputUsed, left: 100 - inputUsed, stateful: true},
+		250: {metric: TotalTokensMetric, maximum: 250, used: totalUsed, left: 250 - totalUsed, stateful: true},
+		64:  {metric: InputTokensMetric, maximum: 64},
+		128: {metric: TotalTokensMetric, maximum: 128},
+	}
+	for _, limit := range snapshot.Limits {
+		if limit.Maximum == nil {
+			t.Fatalf("modern limit omitted maximum: %#v", limit)
+		}
+		expected, ok := want[*limit.Maximum]
+		if !ok || limit.Metric != expected.metric || !limit.Hard || limit.ResetsAt != nil {
+			t.Fatalf("unexpected modern limit: %#v", limit)
+		}
+		delete(want, *limit.Maximum)
+		if expected.stateful {
+			if limit.Used == nil || *limit.Used != expected.used ||
+				limit.Reserved == nil || *limit.Reserved != 0 ||
+				limit.Remaining == nil || *limit.Remaining != expected.left {
+				t.Fatalf("stateful modern limit = %#v, want %+v", limit, expected)
+			}
+		} else if limit.Used != nil || limit.Reserved != nil || limit.Remaining != nil {
+			t.Fatalf("per-request modern limit exposed counters: %#v", limit)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing modern limits: %+v", want)
+	}
+}
+
 type calendarSnapshotCounters struct {
 	maximum  int64
 	used     int64

@@ -112,8 +112,9 @@ const (
 // store. A cost reservation may also be zero when trusted configured pricing
 // proves that the request is free. Capacity and the reduced
 // RefillNumerator/RefillDenominator are populated only for a token_bucket
-// rule. PerRequestMaximum is populated only for output_tokens/per_request
-// metadata, which is fingerprinted but does not create a durable bucket.
+// rule. PerRequestMaximum is populated only for input/output/total-token
+// per_request metadata, which is fingerprinted but does not create a durable
+// bucket.
 type Rule struct {
 	Metric            string
 	Algorithm         string
@@ -538,9 +539,10 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 			stateful = true
-		case rule.Metric == OutputTokensMetric && rule.Algorithm == TokenBucketAlgorithm:
+		case (rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
+			rule.Metric == TotalTokensMetric) && rule.Algorithm == TokenBucketAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
-				!tokenReserved || rule.ReservedUnits > rule.Capacity ||
+				!tokenReserved ||
 				validateTokenBucketPolicy(
 					rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
 				) != nil {
@@ -553,9 +555,10 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 			stateful = true
-		case rule.Metric == OutputTokensMetric && rule.Algorithm == PerRequestAlgorithm:
+		case (rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
+			rule.Metric == TotalTokensMetric) && rule.Algorithm == PerRequestAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
-				!tokenReserved || rule.ReservedUnits > rule.PerRequestMaximum ||
+				!tokenReserved ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
@@ -676,6 +679,52 @@ func validTokenReservationRelationship(reservations map[string]int64) bool {
 		return true
 	}
 	return input <= math.MaxInt64-output && total == input+output
+}
+
+// requestBoundExceededRules returns hard request-local bounds that the trusted
+// reservation can never satisfy. A per-request maximum has no mutable state,
+// and a token reservation larger than its bucket capacity cannot become
+// admissible through refill. Treat both as quota decisions rather than
+// malformed input so the store can durably deny the initial logical request.
+func requestBoundExceededRules(rules []preparedRule) []preparedRule {
+	exceeded := make([]preparedRule, 0, len(rules))
+	for _, rule := range rules {
+		switch rule.Algorithm {
+		case PerRequestAlgorithm:
+			if rule.ReservedUnits > rule.PerRequestMaximum {
+				exceeded = append(exceeded, rule)
+			}
+		case TokenBucketAlgorithm:
+			if rule.Metric != LogicalRequestsMetric && rule.ReservedUnits > rule.Capacity {
+				exceeded = append(exceeded, rule)
+			}
+		}
+	}
+	return exceeded
+}
+
+func requestBoundExceededError(logicalRequestID string, exceeded []preparedRule) *ExceededError {
+	selected := exceeded[0]
+	selectedMaximum := selected.PerRequestMaximum
+	if selected.Algorithm == TokenBucketAlgorithm {
+		selectedMaximum = selected.Capacity
+	}
+	for _, candidate := range exceeded[1:] {
+		candidateMaximum := candidate.PerRequestMaximum
+		if candidate.Algorithm == TokenBucketAlgorithm {
+			candidateMaximum = candidate.Capacity
+		}
+		if candidateMaximum < selectedMaximum ||
+			(candidateMaximum == selectedMaximum &&
+				(candidate.ruleKey < selected.ruleKey ||
+					(candidate.ruleKey == selected.ruleKey && candidate.scopeKey < selected.scopeKey))) {
+			selected, selectedMaximum = candidate, candidateMaximum
+		}
+	}
+	return &ExceededError{
+		logicalRequestID: logicalRequestID,
+		maximum:          selectedMaximum,
+	}
 }
 
 func clonePreparedRules(preparedRules []preparedRule) []Rule {
@@ -1088,7 +1137,8 @@ func (reservation Reservation) validate() error {
 				entry.metric == OutputTokensMetric || entry.metric == TotalTokensMetric ||
 				entry.metric == CostNanoUSDMetric)
 		tokenBucket := entry.algorithm == TokenBucketAlgorithm &&
-			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
+			(entry.metric == LogicalRequestsMetric || entry.metric == InputTokensMetric ||
+				entry.metric == OutputTokensMetric || entry.metric == TotalTokensMetric)
 		if id.Validate(entry.bucketID, id.QuotaBucket) != nil ||
 			id.Validate(entry.entryID, id.QuotaEntry) != nil ||
 			(!calendar && !entry.resetAt.IsZero()) || (calendar && entry.resetAt.IsZero()) ||
@@ -1173,7 +1223,8 @@ func isStatefulRule(metric, algorithm string) bool {
 			metric == OutputTokensMetric || metric == TotalTokensMetric ||
 			metric == CostNanoUSDMetric) ||
 		algorithm == TokenBucketAlgorithm &&
-			(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
+			(metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+				metric == OutputTokensMetric || metric == TotalTokensMetric) ||
 		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)
 }
 

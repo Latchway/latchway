@@ -445,6 +445,11 @@ func (store *Store) BeginRetryAttempt(
 			number:      nextNumber,
 		}, false, nil
 	}
+	if requestBoundsExceeded := requestBoundExceededRules(prepared.rules); len(requestBoundsExceeded) != 0 {
+		return Attempt{}, false, requestBoundExceededError(
+			reservation.logicalRequestID, requestBoundsExceeded,
+		)
+	}
 	materializedAt, err := transactionTime(ctx, tx)
 	if err != nil {
 		return Attempt{}, false, err

@@ -15,6 +15,14 @@ published compatibility evidence remains open. The immutable contract `0.4.0`
 checkpoint below remains historical evidence until the broader `0.5.0`
 compatibility record is consolidated.
 
+The same working tree also extends the already-defined input/total quota
+metrics to hard rolling token-bucket and per-request algorithms behind the
+existing exact-model Chat preflight. It adds no client wire field, database
+migration, or SDK fixture: the existing generic limit, reservation, usage, and
+snapshot representations carry the new algorithm combinations. Unsupported
+protocols and accounting contexts remain fail-closed. This is local server
+capability evidence, not a published compatibility promise.
+
 ## Last consolidated immutable contract
 
 | Field | Value |
@@ -31,7 +39,7 @@ compatibility record is consolidated.
 
 Contract `0.4.0` adds bounded operator-owned input-accounting profiles and exact model bindings for `utf8_byte_bpe_declared_framing_v1`. The implementation activates hard UTC-calendar input/total-token limits and nonzero input-priced hard cost only for a restricted text-only OpenAI Chat request after exact physical-model selection and rewriting. Its proof binds the accounting method, protocol, profile digest, model, rewritten-body digest and length, message count, and checked input/output/total bounds. Unsupported body shapes and accounting contexts fail closed. Client session endpoints, headers, DPoP, attestation binding, database schema, and wire semantics do not change, so schema `11` and wire protocol `1` remain current. All four SDK locks and shared fixtures are synchronized to the immutable core checkpoint and pass their repository-local gates. That proves contract bookkeeping and local implementation consistency, not live server compatibility, publication, or physical-device attestation.
 
-The core checkpoint passes full PostgreSQL normal/race suites, vet, all ten fuzz-smoke targets, contract and console gates, deterministic bundle generation, byte-exact generated SQL, authenticated exact/altered replay, malicious underbound and same-length post-reservation body-tamper proof, and independent P0-P2 review. Provider usage above a trusted bound becomes unknown and retains the conservative reservation. Input/total token buckets and per-request shapes, broader protocols, multi-attempt accounting, fallback and retries remain unsupported.
+The core checkpoint passes full PostgreSQL normal/race suites, vet, all ten fuzz-smoke targets, contract and console gates, deterministic bundle generation, byte-exact generated SQL, authenticated exact/altered replay, malicious underbound and same-length post-reservation body-tamper proof, and independent P0-P2 review. Provider usage above a trusted bound becomes unknown and retains the conservative reservation. At that immutable checkpoint, input/total token buckets and per-request shapes, broader protocols, multi-attempt accounting, fallback and retries remained unsupported; the working-tree note above supersedes only the first two server capability gaps.
 
 Contract `0.3.0` was the preceding write-only secret-lifecycle checkpoint. Its historical bundle and SDK commit evidence remains recorded below and must not be confused with the current contract.
 

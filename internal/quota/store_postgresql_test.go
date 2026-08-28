@@ -3543,11 +3543,22 @@ func TestStorePostgreSQLOutputTokenBucket(t *testing.T) {
 		invalid := fixture.outputTokenBucketInput(
 			t, "output-token-cost-over-cap", 100, 1, tokenRateDecimalScale, 101,
 		)
-		if _, err := fixture.store.Reserve(fixture.ctx, invalid); !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("over-cap output cost=%v", err)
+		_, err := fixture.store.Reserve(fixture.ctx, invalid)
+		var impossible *ExceededError
+		if !errors.As(err, &impossible) || impossible.Maximum() != 100 ||
+			!impossible.RetryAt().IsZero() {
+			t.Fatalf("over-cap output denial=%#v: %v", impossible, err)
 		}
-		if got := fixture.count(t, `SELECT count(*) FROM logical_requests WHERE logical_request_id = $1`, invalid.LogicalRequestID.String()); got != 0 {
-			t.Fatalf("over-cap output logical rows=%d", got)
+		if got := fixture.count(t, `
+			SELECT count(*) FROM logical_requests
+			WHERE logical_request_id = $1 AND status = 'denied'
+			  AND failure_code = 'quota_exceeded'
+		`, invalid.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("over-cap output durable denial rows=%d", got)
+		}
+		if _, replayErr := fixture.store.Reserve(fixture.ctx, invalid); !errors.As(replayErr, &impossible) ||
+			!impossible.RetryAt().IsZero() {
+			t.Fatalf("over-cap output denial replay=%#v: %v", impossible, replayErr)
 		}
 
 		input := fixture.outputTokenBucketInput(

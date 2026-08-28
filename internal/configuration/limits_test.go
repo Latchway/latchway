@@ -41,7 +41,7 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 }
 
-func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenCostAndConcurrencyRules(t *testing.T) {
+func TestNormalizeExecutableLimitAcceptsBoundedProductionRules(t *testing.T) {
 	t.Parallel()
 
 	inputScope := []string{
@@ -118,6 +118,19 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenCost
 	if outputTokenBucketIdentity == tokenBucketIdentity {
 		t.Fatal("logical-request and output-token buckets shared an immutable identity")
 	}
+	for _, metric := range []string{"input_tokens", "total_tokens"} {
+		normalized, identity, ok := normalizeExecutableLimit(Limit{
+			Metric: metric, Algorithm: "token_bucket", Scope: []string{"feature", "user"},
+			Capacity: 100, RefillPerSecond: RefillRate{Numerator: 3, Denominator: 4}, Hard: true,
+		})
+		if !ok || normalized.Metric != metric || normalized.Capacity != 100 ||
+			!slices.Equal(normalized.Scope, []string{"user", "feature"}) {
+			t.Fatalf("%s token bucket = %+v ok=%t", metric, normalized, ok)
+		}
+		if identity == tokenBucketIdentity || identity == outputTokenBucketIdentity {
+			t.Fatalf("%s token bucket shared another metric's identity", metric)
+		}
+	}
 	_, changedOutputTokenBucketIdentity, ok := normalizeExecutableLimit(Limit{
 		Metric: "output_tokens", Algorithm: "token_bucket", Scope: []string{"user", "feature"},
 		Capacity: 1, RefillPerSecond: RefillRate{Numerator: 1, Denominator: 2}, Hard: true,
@@ -163,6 +176,19 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenCost
 	}
 	if outputCalendarIdentity == outputPerRequestIdentity {
 		t.Fatal("calendar and per-request output-token rules shared an immutable identity")
+	}
+	for _, metric := range []string{"input_tokens", "total_tokens"} {
+		normalized, identity, ok := normalizeExecutableLimit(Limit{
+			Metric: metric, Algorithm: "per_request", Scope: []string{"model", "user"},
+			PerRequestMaximum: math.MaxInt64, Hard: true,
+		})
+		if !ok || normalized.PerRequestMaximum != math.MaxInt64 ||
+			!slices.Equal(normalized.Scope, []string{"user", "model"}) {
+			t.Fatalf("%s per-request rule = %+v ok=%t", metric, normalized, ok)
+		}
+		if identity == outputPerRequestIdentity {
+			t.Fatalf("%s per-request rule shared output identity", metric)
+		}
 	}
 	costCalendar, costCalendarIdentity, ok := normalizeExecutableLimit(Limit{
 		Metric: "cost_nano_usd", Algorithm: "calendar", Scope: []string{"feature", "user"},
@@ -235,10 +261,6 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 	}{
 		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
 		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
-		{name: "input token bucket", limit: withLimitMetric(tokenBucket, "input_tokens")},
-		{name: "total token bucket", limit: withLimitMetric(tokenBucket, "total_tokens")},
-		{name: "input token per request", limit: withLimitMetric(perRequest, "input_tokens")},
-		{name: "total token per request", limit: withLimitMetric(perRequest, "total_tokens")},
 		{name: "soft input token calendar", limit: withLimitHard(withLimitMetric(calendar, "input_tokens"), false)},
 		{name: "soft total token calendar", limit: withLimitHard(withLimitMetric(calendar, "total_tokens"), false)},
 		{name: "cost token bucket", limit: withLimitMetric(tokenBucket, "cost_nano_usd")},

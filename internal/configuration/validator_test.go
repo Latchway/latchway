@@ -358,20 +358,6 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 		limit map[string]any
 	}{
 		{
-			name: "input token bucket",
-			limit: map[string]any{
-				"metric": "input_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
-				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
-			},
-		},
-		{
-			name: "total token bucket",
-			limit: map[string]any{
-				"metric": "total_tokens", "algorithm": "token_bucket", "scope": []any{"user"},
-				"capacity": json.Number("10"), "refillPerSecond": json.Number("1"),
-			},
-		},
-		{
 			name: "cost token bucket",
 			limit: map[string]any{
 				"metric": "cost_nano_usd", "algorithm": "token_bucket", "scope": []any{"user"},
@@ -474,14 +460,11 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			}
 			for _, issue := range report.Issues {
 				if issue.Code == "limit_capability_unsupported" &&
-					(!strings.Contains(issue.Message, "logical_requests token_bucket") ||
-						!strings.Contains(issue.Message, "output_tokens token_bucket") ||
+					(!strings.Contains(issue.Message, "logical_requests/input_tokens/output_tokens/total_tokens token_bucket") ||
 						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
 						!strings.Contains(issue.Message, "through 1000000") ||
-						!strings.Contains(issue.Message, "output_tokens calendar") ||
-						!strings.Contains(issue.Message, "input_tokens calendar") ||
-						!strings.Contains(issue.Message, "total_tokens calendar") ||
-						!strings.Contains(issue.Message, "output_tokens per_request") ||
+						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens calendar") ||
+						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens per_request") ||
 						!strings.Contains(issue.Message, "cost_nano_usd calendar") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)

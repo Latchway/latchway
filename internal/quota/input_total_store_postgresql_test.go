@@ -709,6 +709,348 @@ func TestStorePostgreSQLInputAndTotalTokenQuota(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLInputAndTotalTokenBucketAndPerRequestQuota(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+
+	t.Run("impossible trusted bounds are durable mutation-free quota denials", func(t *testing.T) {
+		for _, test := range []struct {
+			name, metric, algorithm string
+			maximum                 int64
+			reserved                int64
+		}{
+			{name: "input bucket", metric: InputTokensMetric, algorithm: TokenBucketAlgorithm, maximum: 7, reserved: 8},
+			{name: "total bucket", metric: TotalTokensMetric, algorithm: TokenBucketAlgorithm, maximum: 14, reserved: 15},
+			{name: "input per request", metric: InputTokensMetric, algorithm: PerRequestAlgorithm, maximum: 7, reserved: 8},
+			{name: "total per request", metric: TotalTokensMetric, algorithm: PerRequestAlgorithm, maximum: 14, reserved: 15},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				input := fixture.input(t, "request-bound-"+test.metric+"-"+test.algorithm, 1)
+				rule := Rule{
+					Metric: test.metric, Algorithm: test.algorithm, Scope: []string{"user", "feature"},
+					ReservedUnits: test.reserved, Hard: true,
+				}
+				if test.algorithm == TokenBucketAlgorithm {
+					rule.Capacity = test.maximum
+					rule.RefillNumerator, rule.RefillDenominator = 1, tokenRateDecimalScale
+				} else {
+					rule.PerRequestMaximum = test.maximum
+				}
+				input.Rules = []Rule{rule}
+				input.InputPreflight = trustedInputPreflight(input, 8, 7)
+
+				for attempt := 0; attempt < 2; attempt++ {
+					_, err := fixture.store.Reserve(fixture.ctx, cloneReserveInput(input))
+					var denial *ExceededError
+					if !errors.As(err, &denial) || denial.LogicalRequestID() != input.LogicalRequestID.String() ||
+						denial.Maximum() != test.maximum || !denial.RetryAt().IsZero() {
+						t.Fatalf("request-bound denial %d = %#v, %v", attempt, denial, err)
+					}
+				}
+				if got := fixture.count(t, `
+					SELECT count(*) FROM quota_buckets
+					WHERE environment_id = $1 AND metric = $2
+				`, input.EnvironmentID, test.metric); got != 0 {
+					t.Fatalf("request-bound denial materialized %d %s buckets", got, test.metric)
+				}
+				if got := fixture.count(t, `
+					SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1
+				`, input.LogicalRequestID.String()); got != 0 {
+					t.Fatalf("request-bound denial created %d reservations", got)
+				}
+				if got := fixture.count(t, `
+					SELECT count(*) FROM logical_requests
+					WHERE logical_request_id = $1 AND status = 'denied'
+					  AND failure_code = 'quota_exceeded'
+				`, input.LogicalRequestID.String()); got != 1 {
+					t.Fatalf("durable request-bound denial rows = %d, want 1", got)
+				}
+			})
+		}
+	})
+
+	t.Run("known settlement refunds input and total token buckets independently", func(t *testing.T) {
+		input := trustedTokenShapeInput(t, fixture, "bucket-known", []Rule{
+			{
+				Metric: InputTokensMetric, Algorithm: TokenBucketAlgorithm,
+				Scope: []string{"user", "feature"}, Capacity: 100,
+				RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+				ReservedUnits: 20, Hard: true,
+			},
+			{
+				Metric: TotalTokensMetric, Algorithm: TokenBucketAlgorithm,
+				Scope: []string{"user", "feature"}, Capacity: 100,
+				RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+				ReservedUnits: 35, Hard: true,
+			},
+		}, 20, 15)
+		_, attempt := reserveAndBeginTokenAttempt(t, fixture, input)
+		outcome := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200,
+			Usage: Usage{
+				InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+				Known: true, Provenance: ProviderReportedProvenance,
+			},
+		}
+		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
+			t.Fatalf("settle known token buckets: %v", err)
+		}
+		assertTokenBucketWholeBalance(t, fixture, input, InputTokensMetric, 89)
+		assertTokenBucketWholeBalance(t, fixture, input, TotalTokensMetric, 82)
+	})
+
+	t.Run("unknown settlement retains the full input and total bucket debit", func(t *testing.T) {
+		input := trustedTokenShapeInput(t, fixture, "bucket-unknown", []Rule{
+			{
+				Metric: InputTokensMetric, Algorithm: TokenBucketAlgorithm,
+				Scope: []string{"user", "feature"}, Capacity: 100,
+				RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+				ReservedUnits: 20, Hard: true,
+			},
+			{
+				Metric: TotalTokensMetric, Algorithm: TokenBucketAlgorithm,
+				Scope: []string{"user", "feature"}, Capacity: 100,
+				RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+				ReservedUnits: 35, Hard: true,
+			},
+		}, 20, 15)
+		_, attempt := reserveAndBeginTokenAttempt(t, fixture, input)
+		if err := fixture.store.Settle(fixture.ctx, attempt, Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200,
+			Usage: Usage{Provenance: UnknownUsageProvenance},
+		}); err != nil {
+			t.Fatalf("settle unknown token buckets: %v", err)
+		}
+		assertTokenBucketWholeBalance(t, fixture, input, InputTokensMetric, 80)
+		assertTokenBucketWholeBalance(t, fixture, input, TotalTokensMetric, 65)
+	})
+
+	t.Run("mixed token-bucket contention is atomic and cannot overspend", func(t *testing.T) {
+		const callers = 8
+		inputs := make([]ReserveInput, callers)
+		for index := range inputs {
+			inputs[index] = trustedTokenShapeInput(t, fixture, "bucket-contention", []Rule{
+				{
+					Metric: InputTokensMetric, Algorithm: TokenBucketAlgorithm,
+					Scope: []string{"user", "feature"}, Capacity: 12,
+					RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+					ReservedUnits: 3, Hard: true,
+				},
+				{
+					Metric: TotalTokensMetric, Algorithm: TokenBucketAlgorithm,
+					Scope: []string{"user", "feature"}, Capacity: 16,
+					RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+					ReservedUnits: 4, Hard: true,
+				},
+			}, 3, 1)
+		}
+		start := make(chan struct{})
+		accepted := make(chan Reservation, callers)
+		failed := make(chan error, callers)
+		var wait sync.WaitGroup
+		for _, input := range inputs {
+			wait.Add(1)
+			go func(input ReserveInput) {
+				defer wait.Done()
+				<-start
+				reservation, err := fixture.store.Reserve(fixture.ctx, input)
+				if err != nil {
+					failed <- err
+					return
+				}
+				accepted <- reservation
+			}(input)
+		}
+		close(start)
+		wait.Wait()
+		close(accepted)
+		close(failed)
+		reservations := make([]Reservation, 0, 4)
+		for reservation := range accepted {
+			reservations = append(reservations, reservation)
+		}
+		denied := 0
+		for err := range failed {
+			if !errors.Is(err, ErrExceeded) {
+				t.Errorf("contention failure = %v, want ErrExceeded", err)
+			}
+			denied++
+		}
+		if len(reservations) != 4 || denied != 4 {
+			t.Fatalf("mixed contention accepted=%d denied=%d, want 4/4", len(reservations), denied)
+		}
+		assertTokenBucketWholeBalance(t, fixture, inputs[0], InputTokensMetric, 0)
+		assertTokenBucketWholeBalance(t, fixture, inputs[0], TotalTokensMetric, 0)
+		for _, reservation := range reservations {
+			if err := fixture.store.ReleaseBeforeDispatch(fixture.ctx, reservation, "contention_done"); err != nil {
+				t.Fatalf("release mixed contention reservation: %v", err)
+			}
+		}
+		assertTokenBucketWholeBalance(t, fixture, inputs[0], InputTokensMetric, 12)
+		assertTokenBucketWholeBalance(t, fixture, inputs[0], TotalTokensMetric, 16)
+	})
+
+	t.Run("retry reserves fresh trusted bucket bounds and settles independently", func(t *testing.T) {
+		input := trustedTokenShapeInput(t, fixture, "bucket-retry", trustedRetryTokenRules(), 5, 5)
+		input.LimitPlanKey = "bucket-retry"
+		reservation, first := reserveAndBeginTokenAttempt(t, fixture, input)
+		firstOutcome := Outcome{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "provider_busy"}
+		if err := fixture.store.SettleForRetry(fixture.ctx, first, firstOutcome); err != nil {
+			t.Fatalf("settle first bucket attempt for retry: %v", err)
+		}
+		proofInput := input
+		proofInput.PhysicalModel = "provider/model-v2"
+		retry := RetryAttemptInput{
+			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
+			PhysicalModel:  proofInput.PhysicalModel,
+			InputPreflight: trustedInputPreflight(proofInput, 4, 6),
+			Allocations: []AttemptAllocation{
+				{Metric: InputTokensMetric, Units: 4},
+				{Metric: TotalTokensMetric, Units: 10},
+			},
+		}
+		second, owner, err := fixture.store.BeginRetryAttempt(fixture.ctx, first, retry)
+		if err != nil || !owner {
+			t.Fatalf("begin trusted token-bucket retry owner=%t: %v", owner, err)
+		}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, second, Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200,
+			Usage: Usage{
+				InputTokens: 3, OutputTokens: 4, TotalTokens: 7,
+				Known: true, Provenance: ProviderReportedProvenance,
+			},
+		}); err != nil {
+			t.Fatalf("settle trusted token-bucket retry: %v", err)
+		}
+		assertTokenBucketWholeBalance(t, fixture, input, InputTokensMetric, 92)
+		assertTokenBucketWholeBalance(t, fixture, input, TotalTokensMetric, 183)
+		if got := fixture.count(t, `
+			SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); got != 2 {
+			t.Fatalf("trusted token-bucket retry attempts = %d, want 2", got)
+		}
+		if replay, err := fixture.store.Reserve(fixture.ctx, input); err != nil || replay.ID() != reservation.ID() {
+			t.Fatalf("terminal trusted token-bucket retry replay = %#v, %v", replay, err)
+		}
+	})
+
+	t.Run("retry per-request over-bound fails before another attempt", func(t *testing.T) {
+		input := trustedTokenShapeInput(t, fixture, "per-request-retry-denial", trustedRetryTokenRules(), 5, 5)
+		input.LimitPlanKey = "per-request-retry-denial"
+		_, first := reserveAndBeginTokenAttempt(t, fixture, input)
+		firstOutcome := Outcome{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "provider_busy"}
+		if err := fixture.store.SettleForRetry(fixture.ctx, first, firstOutcome); err != nil {
+			t.Fatalf("settle first per-request denial attempt: %v", err)
+		}
+		proofInput := input
+		proofInput.PhysicalModel = "provider/model-v2"
+		retry := RetryAttemptInput{
+			RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "model-v2",
+			PhysicalModel:  proofInput.PhysicalModel,
+			InputPreflight: trustedInputPreflight(proofInput, 60, 6),
+			Allocations: []AttemptAllocation{
+				{Metric: InputTokensMetric, Units: 60},
+				{Metric: TotalTokensMetric, Units: 66},
+			},
+		}
+		_, owner, err := fixture.store.BeginRetryAttempt(fixture.ctx, first, retry)
+		var denial *ExceededError
+		if owner || !errors.As(err, &denial) || denial.Maximum() != 50 || !denial.RetryAt().IsZero() {
+			t.Fatalf("retry per-request denial owner=%t denial=%#v err=%v", owner, denial, err)
+		}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, first, firstOutcome); err != nil {
+			t.Fatalf("finalize prior attempt after retry denial: %v", err)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); got != 1 {
+			t.Fatalf("per-request retry denial attempts = %d, want 1", got)
+		}
+		assertTokenBucketWholeBalance(t, fixture, input, InputTokensMetric, 95)
+		assertTokenBucketWholeBalance(t, fixture, input, TotalTokensMetric, 190)
+	})
+}
+
+func trustedRetryTokenRules() []Rule {
+	return []Rule{
+		{
+			Metric: InputTokensMetric, Algorithm: TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 100,
+			RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+			ReservedUnits: 5, Hard: true,
+		},
+		{
+			Metric: TotalTokensMetric, Algorithm: TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 200,
+			RefillNumerator: 1, RefillDenominator: tokenRateDecimalScale,
+			ReservedUnits: 10, Hard: true,
+		},
+		{
+			Metric: InputTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 50,
+			ReservedUnits: 5, Hard: true,
+		},
+		{
+			Metric: TotalTokensMetric, Algorithm: PerRequestAlgorithm,
+			Scope: []string{"user", "feature"}, PerRequestMaximum: 50,
+			ReservedUnits: 10, Hard: true,
+		},
+	}
+}
+
+func trustedTokenShapeInput(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	feature string,
+	rules []Rule,
+	inputTokens int64,
+	outputTokens int64,
+) ReserveInput {
+	t.Helper()
+	input := fixture.input(t, feature, 1)
+	input.Rules = append([]Rule(nil), rules...)
+	for index := range input.Rules {
+		input.Rules[index].Scope = append([]string(nil), input.Rules[index].Scope...)
+	}
+	input.InputPreflight = trustedInputPreflight(input, inputTokens, outputTokens)
+	return input
+}
+
+func assertTokenBucketWholeBalance(
+	t *testing.T,
+	fixture quotaPostgreSQLFixture,
+	input ReserveInput,
+	metric string,
+	want int64,
+) {
+	t.Helper()
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare %s token-bucket lookup: %v", metric, err)
+	}
+	var ruleKey, scopeKey string
+	for _, rule := range prepared.rules {
+		if rule.Metric == metric && rule.Algorithm == TokenBucketAlgorithm {
+			ruleKey, scopeKey = rule.ruleKey, rule.scopeKey
+			break
+		}
+	}
+	if ruleKey == "" || scopeKey == "" {
+		t.Fatalf("prepared request has no %s token bucket", metric)
+	}
+	var available int64
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT available_units
+		FROM quota_buckets
+		WHERE environment_id = $1 AND limit_plan_key = $2 AND metric = $3
+		  AND algorithm = 'token_bucket' AND rule_key = $4 AND scope_key = $5
+	`, input.EnvironmentID, input.LimitPlanKey, metric, ruleKey, scopeKey).Scan(&available); err != nil {
+		t.Fatalf("read %s token-bucket balance: %v", metric, err)
+	}
+	if got := available / tokenBalanceScale; got != want {
+		t.Fatalf("%s whole-token balance = %d (raw %d), want %d", metric, got, available, want)
+	}
+}
+
 func (fixture quotaPostgreSQLFixture) calendarTokenInput(
 	t *testing.T,
 	feature string,

@@ -75,7 +75,90 @@ func TestPrepareRequestSupportsHardInputAndTotalTokenCalendars(t *testing.T) {
 	}
 }
 
-func TestPrepareRequestRejectsUnsupportedInputAndTotalTokenShapes(t *testing.T) {
+func TestPrepareRequestSupportsInputAndTotalTokenBucketsAndPerRequestLimits(t *testing.T) {
+	t.Parallel()
+	for _, metric := range []string{InputTokensMetric, TotalTokensMetric} {
+		metric := metric
+		t.Run(metric, func(t *testing.T) {
+			t.Parallel()
+			reserved := int64(8)
+			if metric == TotalTokensMetric {
+				reserved = 15
+			}
+			for _, rule := range []Rule{
+				{
+					Metric: metric, Algorithm: TokenBucketAlgorithm, Scope: []string{"user"},
+					Capacity: 100, RefillNumerator: 1, RefillDenominator: 2,
+					ReservedUnits: reserved, Hard: true,
+				},
+				{
+					Metric: metric, Algorithm: PerRequestAlgorithm, Scope: []string{"user"},
+					PerRequestMaximum: 100, ReservedUnits: reserved, Hard: true,
+				},
+			} {
+				input := validReserveInput(t)
+				input.Rules = []Rule{rule}
+				input.InputPreflight = trustedInputPreflight(input, 8, 7)
+				prepared, err := prepareRequest(input)
+				if err != nil {
+					t.Fatalf("prepare %s/%s: %v", metric, rule.Algorithm, err)
+				}
+				if len(prepared.rules) != 1 ||
+					prepared.rules[0].stateful != (rule.Algorithm == TokenBucketAlgorithm) {
+					t.Fatalf("prepared %s/%s = %#v", metric, rule.Algorithm, prepared.rules)
+				}
+			}
+		})
+	}
+}
+
+func TestPrepareRequestClassifiesImpossibleTrustedTokenBoundsAsQuotaDenials(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, metric, algorithm string
+		maximum                 int64
+		reserved                int64
+	}{
+		{name: "input bucket", metric: InputTokensMetric, algorithm: TokenBucketAlgorithm, maximum: 7, reserved: 8},
+		{name: "total bucket", metric: TotalTokensMetric, algorithm: TokenBucketAlgorithm, maximum: 14, reserved: 15},
+		{name: "input per request", metric: InputTokensMetric, algorithm: PerRequestAlgorithm, maximum: 7, reserved: 8},
+		{name: "total per request", metric: TotalTokensMetric, algorithm: PerRequestAlgorithm, maximum: 14, reserved: 15},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			input := validReserveInput(t)
+			rule := Rule{
+				Metric: test.metric, Algorithm: test.algorithm, Scope: []string{"user"},
+				ReservedUnits: test.reserved, Hard: true,
+			}
+			if test.algorithm == TokenBucketAlgorithm {
+				rule.Capacity = test.maximum
+				rule.RefillNumerator, rule.RefillDenominator = 1, 1
+			} else {
+				rule.PerRequestMaximum = test.maximum
+			}
+			input.Rules = []Rule{rule}
+			input.InputPreflight = trustedInputPreflight(input, 8, 7)
+			prepared, err := prepareRequest(input)
+			if err != nil {
+				t.Fatalf("prepare impossible trusted bound: %v", err)
+			}
+			exceeded := requestBoundExceededRules(prepared.rules)
+			if len(exceeded) != 1 {
+				t.Fatalf("exceeded rules = %#v", exceeded)
+			}
+			denial := requestBoundExceededError(input.LogicalRequestID.String(), exceeded)
+			if denial.LogicalRequestID() != input.LogicalRequestID.String() ||
+				denial.Maximum() != test.maximum || denial.Used() != 0 ||
+				denial.Reserved() != 0 || !denial.RetryAt().IsZero() {
+				t.Fatalf("request-bound denial = %#v", denial)
+			}
+		})
+	}
+}
+
+func TestPrepareRequestRejectsInvalidInputAndTotalTokenShapes(t *testing.T) {
 	t.Parallel()
 	for _, metric := range []string{InputTokensMetric, TotalTokensMetric} {
 		metric := metric
@@ -103,14 +186,6 @@ func TestPrepareRequestRejectsUnsupportedInputAndTotalTokenShapes(t *testing.T) 
 				{name: "capacity field", mutate: func(rule *Rule) { rule.Capacity = 8 }},
 				{name: "refill field", mutate: func(rule *Rule) {
 					rule.RefillNumerator, rule.RefillDenominator = 1, 1
-				}},
-				{name: "token bucket", mutate: func(rule *Rule) {
-					rule.Algorithm, rule.Window, rule.Maximum = TokenBucketAlgorithm, "", 0
-					rule.Capacity, rule.RefillNumerator, rule.RefillDenominator = 100, 1, 1
-				}},
-				{name: "per request", mutate: func(rule *Rule) {
-					rule.Algorithm, rule.Window, rule.Maximum = PerRequestAlgorithm, "", 0
-					rule.PerRequestMaximum = 100
 				}},
 			}
 			for _, test := range tests {
@@ -479,18 +554,18 @@ func TestInputAndTotalTokenFingerprintBindingsPreserveOutputSerialization(t *tes
 	}
 }
 
-func TestInputAndTotalTokenCalendarStateValidation(t *testing.T) {
+func TestInputAndTotalTokenStateValidation(t *testing.T) {
 	t.Parallel()
 	for _, metric := range []string{InputTokensMetric, TotalTokensMetric} {
 		if !isStatefulMetric(metric) || !isStatefulRule(metric, CalendarAlgorithm) {
 			t.Fatalf("%s calendar is not stateful", metric)
 		}
-		if isStatefulRule(metric, TokenBucketAlgorithm) || isStatefulRule(metric, PerRequestAlgorithm) {
-			t.Fatalf("%s accepted a non-calendar stateful algorithm", metric)
+		if !isStatefulRule(metric, TokenBucketAlgorithm) || isStatefulRule(metric, PerRequestAlgorithm) {
+			t.Fatalf("%s stateful algorithm classification is wrong", metric)
 		}
 		if !validReservationEntryUnits(metric, CalendarAlgorithm, 1) ||
 			validReservationEntryUnits(metric, CalendarAlgorithm, 0) ||
-			validReservationEntryUnits(metric, TokenBucketAlgorithm, 1) ||
+			!validReservationEntryUnits(metric, TokenBucketAlgorithm, 1) ||
 			validReservationEntryUnits(metric, PerRequestAlgorithm, 1) {
 			t.Fatalf("%s reservation entry validation accepted an unsafe shape", metric)
 		}

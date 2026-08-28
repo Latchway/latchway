@@ -308,7 +308,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		trustedProfile.MaximumFramingTokensPerMessage != dataPlaneE2ETrustedMessageFraming ||
 		trustedProfile.MaximumContextTokens != 4096 ||
 		trustedModel.InputAccountingRef != dataPlaneE2ETrustedInputProfile ||
-		len(trustedPlan.Limits) != 4 || trustedPrice != (configuration.PricingEntry{
+		len(trustedPlan.Limits) != 8 || trustedPrice != (configuration.PricingEntry{
 		ModelID: dataPlaneE2ETrustedInputModel, InputNanoUSDPerMillion: 2_000_000,
 		OutputNanoUSDPerMillion: 1_000_000, RequestNanoUSD: 5,
 	}) {
@@ -1297,8 +1297,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			replayingQuotaStore.rejectedTrustedMutations.Load())
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 16, reservations: 11, reservationEntries: 17,
-		buckets: 11, attempts: 11, usageRecords: 55, deniedRequests: 5,
+		logicalRequests: 16, reservations: 11, reservationEntries: 19,
+		buckets: 13, attempts: 11, usageRecords: 55, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETrustedInputPrompt)
 
@@ -1359,8 +1359,8 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		t.Fatalf("post-reserve tamper durable state = %q/%q", tamperedStatus, tamperedFailure)
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 17, reservations: 12, reservationEntries: 21,
-		buckets: 11, attempts: 11, usageRecords: 55, deniedRequests: 5,
+		logicalRequests: 17, reservations: 12, reservationEntries: 25,
+		buckets: 13, attempts: 11, usageRecords: 55, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETamperedInputPrompt)
 }
@@ -1629,6 +1629,24 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 						map[string]any{
 							"metric": quota.TotalTokensMetric, "algorithm": quota.CalendarAlgorithm,
 							"scope": []any{"feature", "user"}, "window": "1d", "maximum": int64(200_000), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.InputTokensMetric, "algorithm": quota.TokenBucketAlgorithm,
+							"scope": []any{"feature", "user"}, "capacity": int64(4096),
+							"refillPerSecond": json.Number("0.000001"), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.TotalTokensMetric, "algorithm": quota.TokenBucketAlgorithm,
+							"scope": []any{"feature", "user"}, "capacity": int64(4096),
+							"refillPerSecond": json.Number("0.000001"), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.InputTokensMetric, "algorithm": quota.PerRequestAlgorithm,
+							"scope": []any{"feature", "user"}, "perRequestMaximum": int64(4096), "hard": true,
+						},
+						map[string]any{
+							"metric": quota.TotalTokensMetric, "algorithm": quota.PerRequestAlgorithm,
+							"scope": []any{"feature", "user"}, "perRequestMaximum": int64(4096), "hard": true,
 						},
 						map[string]any{
 							"metric": quota.CostNanoUSDMetric, "algorithm": quota.CalendarAlgorithm,
@@ -2943,7 +2961,7 @@ func assertDataPlaneE2ETrustedInputSuccess(
 		billedCost != dataPlaneE2ETrustedActualCost || currency != quota.USDCurrency ||
 		persistedPriceRevision != priceRevision || pricingSource != dataPlaneE2ETrustedInputPricing ||
 		costConfidence != quota.CalculatedCostConfidence || !firstByte ||
-		reservations != 1 || entries != 4 || attempts != 1 || usageRecords != 5 {
+		reservations != 1 || entries != 6 || attempts != 1 || usageRecords != 5 {
 		t.Fatalf("trusted input success = logical:%q/%s feature/revision:%s/%s reservation:%s/count:%d entries:%d attempt:%q/%s/%d/%s/count:%d price:%d/%s/%s/%s/%s first_byte:%t usage:%d",
 			logicalID, logicalStatus, featureKey, configRevision,
 			reservationStatus, reservations, entries, attemptID, attemptStatus,
@@ -2960,10 +2978,25 @@ func assertDataPlaneE2ETrustedInputSuccess(
 	totalBound := inputBound + outputBound
 	costBound := inputBound*2 + outputBound + 5
 	expected := map[string]expectedEntry{
-		quota.InputTokensMetric:  {reserved: inputBound, settled: 11, released: inputBound - 11},
-		quota.OutputTokensMetric: {reserved: outputBound, settled: 7, released: 1},
-		quota.TotalTokensMetric:  {reserved: totalBound, settled: 18, released: totalBound - 18},
-		quota.CostNanoUSDMetric:  {reserved: costBound, settled: dataPlaneE2ETrustedActualCost, released: costBound - dataPlaneE2ETrustedActualCost},
+		quota.InputTokensMetric + "/" + quota.CalendarAlgorithm: {
+			reserved: inputBound, settled: 11, released: inputBound - 11,
+		},
+		quota.InputTokensMetric + "/" + quota.TokenBucketAlgorithm: {
+			reserved: inputBound, settled: 11, released: inputBound - 11,
+		},
+		quota.OutputTokensMetric + "/" + quota.CalendarAlgorithm: {
+			reserved: outputBound, settled: 7, released: 1,
+		},
+		quota.TotalTokensMetric + "/" + quota.CalendarAlgorithm: {
+			reserved: totalBound, settled: 18, released: totalBound - 18,
+		},
+		quota.TotalTokensMetric + "/" + quota.TokenBucketAlgorithm: {
+			reserved: totalBound, settled: 18, released: totalBound - 18,
+		},
+		quota.CostNanoUSDMetric + "/" + quota.CalendarAlgorithm: {
+			reserved: costBound, settled: dataPlaneE2ETrustedActualCost,
+			released: costBound - dataPlaneE2ETrustedActualCost,
+		},
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT bucket.metric, bucket.limit_plan_key, bucket.algorithm,
@@ -2987,17 +3020,19 @@ func assertDataPlaneE2ETrustedInputSuccess(
 		if err := rows.Scan(&metric, &planKey, &algorithm, &windowKey, &reserved, &settled, &released); err != nil {
 			t.Fatalf("scan trusted input entry: %v", err)
 		}
-		want, ok := expected[metric]
-		if !ok || planKey != dataPlaneE2ETrustedInputPlan || algorithm != quota.CalendarAlgorithm ||
-			!strings.HasPrefix(windowKey, "utc:v1:1d:") ||
+		identity := metric + "/" + algorithm
+		want, ok := expected[identity]
+		validWindow := algorithm == quota.TokenBucketAlgorithm && windowKey == "rolling" ||
+			algorithm == quota.CalendarAlgorithm && strings.HasPrefix(windowKey, "utc:v1:1d:")
+		if !ok || planKey != dataPlaneE2ETrustedInputPlan || !validWindow ||
 			reserved != want.reserved || settled != want.settled || released != want.released {
 			t.Fatalf("trusted input entry = metric:%s plan:%s algorithm:%s window:%s units:%d/%d/%d want:%+v",
 				metric, planKey, algorithm, windowKey, reserved, settled, released, want)
 		}
-		if _, duplicate := seen[metric]; duplicate {
-			t.Fatalf("trusted input entry repeated metric %q", metric)
+		if _, duplicate := seen[identity]; duplicate {
+			t.Fatalf("trusted input entry repeated identity %q", identity)
 		}
-		seen[metric] = struct{}{}
+		seen[identity] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate trusted input entries: %v", err)

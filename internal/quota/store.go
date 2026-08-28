@@ -170,9 +170,13 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	if err != nil {
 		return Reservation{}, err
 	}
-	plans, err := plannedBucketsAt(prepared, requestedAt)
-	if err != nil {
-		return Reservation{}, err
+	requestBoundsExceeded := requestBoundExceededRules(prepared.rules)
+	var plans []plannedBucket
+	if len(requestBoundsExceeded) == 0 {
+		plans, err = plannedBucketsAt(prepared, requestedAt)
+		if err != nil {
+			return Reservation{}, err
+		}
 	}
 
 	command, err := tx.Exec(ctx, `
@@ -198,6 +202,34 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	}
 	if command.RowsAffected() != 1 {
 		return Reservation{}, ErrInvalidState
+	}
+	if len(requestBoundsExceeded) != 0 {
+		decisionAt, timeErr := statementTime(ctx, tx)
+		if timeErr != nil {
+			return Reservation{}, timeErr
+		}
+		command, updateErr := tx.Exec(ctx, `
+			UPDATE logical_requests
+			SET status = 'denied', completed_at = GREATEST(requested_at, $2),
+			    failure_code = 'quota_exceeded'
+			WHERE logical_request_id = $1 AND status = 'reserved'
+		`, logicalRequestID, decisionAt)
+		if updateErr != nil {
+			return Reservation{}, persistenceFailure("record request-bound quota denial", updateErr)
+		}
+		if command.RowsAffected() != 1 {
+			return Reservation{}, ErrInvalidState
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Reservation{}, persistenceFailure("commit request-bound quota denial", err)
+		}
+		if store.onDenial != nil {
+			store.onDenial(ctx, DenialObservation{
+				ApplicationID: prepared.ApplicationID, EnvironmentID: prepared.EnvironmentID,
+				Feature: prepared.FeatureKey, LimitPlan: prepared.LimitPlanKey,
+			})
+		}
+		return Reservation{}, requestBoundExceededError(logicalRequestID, requestBoundsExceeded)
 	}
 
 	identifiers, err := store.newReserveIDs(len(plans), concurrencyPlanCount(plans))
@@ -532,9 +564,13 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logical.fingerprint == nil || *logical.fingerprint != fingerprint {
 		return Reservation{}, ErrInvalidInput
 	}
-	plans, err := plannedBucketsAt(prepared, logical.requestedAt.UTC())
-	if err != nil {
-		return Reservation{}, ErrInvalidState
+	requestBoundsExceeded := requestBoundExceededRules(prepared.rules)
+	var plans []plannedBucket
+	if len(requestBoundsExceeded) == 0 {
+		plans, err = plannedBucketsAt(prepared, logical.requestedAt.UTC())
+		if err != nil {
+			return Reservation{}, ErrInvalidState
+		}
 	}
 	attempts, err := loadAttemptsForUpdate(ctx, tx, prepared.LogicalRequestID.String())
 	if err != nil {
@@ -542,11 +578,22 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 	}
 
 	if logical.status == "denied" {
-		if reservationErr == nil || len(plans) == 0 {
+		if reservationErr == nil || len(attempts) != 0 {
 			return Reservation{}, ErrInvalidState
 		}
 		if logical.failureCode == nil ||
 			(*logical.failureCode != "quota_exceeded" && *logical.failureCode != "concurrency_exceeded") {
+			return Reservation{}, ErrInvalidState
+		}
+		if len(requestBoundsExceeded) != 0 {
+			if *logical.failureCode != "quota_exceeded" {
+				return Reservation{}, ErrInvalidState
+			}
+			return Reservation{}, requestBoundExceededError(
+				prepared.LogicalRequestID.String(), requestBoundsExceeded,
+			)
+		}
+		if len(plans) == 0 {
 			return Reservation{}, ErrInvalidState
 		}
 		if err := lockPlannedBuckets(ctx, tx, prepared, plans); err != nil {
@@ -632,6 +679,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		return Reservation{}, concurrencyExceededError(
 			prepared.LogicalRequestID.String(), plans, concurrencyExceeded,
 		)
+	}
+	if len(requestBoundsExceeded) != 0 {
+		return Reservation{}, ErrInvalidState
 	}
 	if reservationErr != nil {
 		return Reservation{}, ErrInvalidState

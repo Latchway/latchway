@@ -1589,7 +1589,8 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
-	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.OutputTokensMetric) &&
+	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.InputTokensMetric ||
+		limit.Metric == quota.OutputTokensMetric || limit.Metric == quota.TotalTokensMetric) &&
 		limit.Algorithm == quota.TokenBucketAlgorithm:
 		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
 			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
@@ -1601,7 +1602,8 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 	case limit.Metric == quota.CostNanoUSDMetric && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
-	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm:
+	case (limit.Metric == quota.InputTokensMetric || limit.Metric == quota.OutputTokensMetric ||
+		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.PerRequestAlgorithm:
 		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&
 			limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.ConcurrentRequestsMetric || limit.Metric == quota.ConcurrentStreamsMetric) &&

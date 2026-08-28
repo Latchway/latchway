@@ -429,7 +429,6 @@ func TestPrepareRequestRejectsUnsafeOutputReservations(t *testing.T) {
 	}{
 		{name: "missing calendar units", mutate: func(input *ReserveInput) { input.Rules[0].ReservedUnits = 0 }},
 		{name: "mismatched trusted cap", mutate: func(input *ReserveInput) { input.Rules[1].ReservedUnits = 63 }},
-		{name: "per request cap exceeded", mutate: func(input *ReserveInput) { input.Rules[1].ReservedUnits = 129; input.Rules[0].ReservedUnits = 129 }},
 		{name: "calendar per request maximum", mutate: func(input *ReserveInput) { input.Rules[0].PerRequestMaximum = 128 }},
 		{name: "per request window", mutate: func(input *ReserveInput) { input.Rules[1].Window = "1d" }},
 		{name: "per request calendar maximum", mutate: func(input *ReserveInput) { input.Rules[1].Maximum = 1000 }},
@@ -442,6 +441,13 @@ func TestPrepareRequestRejectsUnsafeOutputReservations(t *testing.T) {
 				t.Fatalf("unsafe output reservation returned %v", err)
 			}
 		})
+	}
+	overBound := cloneReserveInput(base)
+	overBound.Rules[0].ReservedUnits = 129
+	overBound.Rules[1].ReservedUnits = 129
+	prepared, err := prepareRequest(overBound)
+	if err != nil || len(requestBoundExceededRules(prepared.rules)) != 1 {
+		t.Fatalf("per-request output over-bound classification = (%#v, %v)", prepared.rules, err)
 	}
 	logical := validReserveInput(t)
 	logical.Rules[0].ReservedUnits = 1
@@ -789,7 +795,6 @@ func TestPrepareRequestRejectsUnsafeOutputTokenBuckets(t *testing.T) {
 		mutate func(*Rule)
 	}{
 		{name: "missing units", mutate: func(rule *Rule) { rule.ReservedUnits = 0 }},
-		{name: "units above capacity", mutate: func(rule *Rule) { rule.ReservedUnits = 101 }},
 		{name: "capacity overflow", mutate: func(rule *Rule) {
 			rule.Capacity = maximumTokenCapacity + 1
 			rule.ReservedUnits = maximumTokenCapacity + 1
@@ -807,6 +812,12 @@ func TestPrepareRequestRejectsUnsafeOutputTokenBuckets(t *testing.T) {
 				t.Fatalf("unsafe output token bucket returned %v", err)
 			}
 		})
+	}
+	overBound := cloneReserveInput(base)
+	overBound.Rules[0].ReservedUnits = 101
+	prepared, err := prepareRequest(overBound)
+	if err != nil || len(requestBoundExceededRules(prepared.rules)) != 1 {
+		t.Fatalf("token-bucket output over-bound classification = (%#v, %v)", prepared.rules, err)
 	}
 
 	mismatched := cloneReserveInput(base)
