@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -42,6 +43,7 @@ const (
 	// values fail closed before reaching durable reservation state.
 	maximumDecisionTokenBucketCapacity        = int64(9_223_372)
 	maximumDecisionTokenBucketRefillPerSecond = int64(1_000_000)
+	maximumQuotaRetryAfterSeconds             = math.MaxInt32
 )
 
 var (
@@ -681,9 +683,13 @@ func validateDecision(featureID string, decision policy.Decision) (validatedDeci
 			RefillNumerator:   limit.RefillPerSecond.Numerator,
 			RefillDenominator: limit.RefillPerSecond.Denominator, Hard: limit.Hard,
 		})
-		if limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm &&
-			limit.PerRequestMaximum < effectiveMaximum {
-			effectiveMaximum = limit.PerRequestMaximum
+		if limit.Metric == quota.OutputTokensMetric {
+			switch limit.Algorithm {
+			case quota.PerRequestAlgorithm:
+				effectiveMaximum = min(effectiveMaximum, limit.PerRequestMaximum)
+			case quota.TokenBucketAlgorithm:
+				effectiveMaximum = min(effectiveMaximum, limit.Capacity)
+			}
 		}
 	}
 	effectiveDefault := min(feature.Output.DefaultMaximumTokens, effectiveMaximum)
@@ -698,7 +704,8 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
-	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.TokenBucketAlgorithm:
+	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.OutputTokensMetric) &&
+		limit.Algorithm == quota.TokenBucketAlgorithm:
 		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
 			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
 			validDecisionTokenBucketRefill(limit.RefillPerSecond)
@@ -900,12 +907,7 @@ func errorCode(err error, now time.Time) (string, int) {
 	case errors.Is(err, quota.ErrConcurrencyExceeded):
 		return "concurrency_exceeded", 0
 	case errors.As(err, &exceeded):
-		delay := exceeded.RetryAt().Sub(now.UTC())
-		seconds := int((delay + time.Second - 1) / time.Second)
-		if seconds < 1 {
-			seconds = 1
-		}
-		return "quota_exceeded", seconds
+		return "quota_exceeded", quotaRetryAfterSeconds(exceeded.RetryAt(), now)
 	case errors.Is(err, quota.ErrDependency), errors.Is(err, quota.ErrInvalidState),
 		errors.Is(err, quota.ErrNotFound), errors.Is(err, quota.ErrExpired),
 		errors.Is(err, quota.ErrFinalized), errors.Is(err, configuration.ErrInvalid),
@@ -930,6 +932,26 @@ func errorCode(err error, now time.Time) (string, int) {
 	default:
 		return "server_not_ready", 0
 	}
+}
+
+func quotaRetryAfterSeconds(retryAt, now time.Time) int {
+	now = now.UTC()
+	if !retryAt.After(now) {
+		return 1
+	}
+	maximumDelay := time.Duration(maximumQuotaRetryAfterSeconds) * time.Second
+	if !retryAt.Before(now.Add(maximumDelay)) {
+		return maximumQuotaRetryAfterSeconds
+	}
+	delay := retryAt.Sub(now)
+	seconds := delay / time.Second
+	if delay%time.Second != 0 {
+		seconds++
+	}
+	if seconds < 1 {
+		return 1
+	}
+	return int(seconds)
 }
 
 func writeProblem(writer http.ResponseWriter, requestID, code, feature string, retryAfter int) {

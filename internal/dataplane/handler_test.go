@@ -756,6 +756,9 @@ func TestHandlerTranslatesLogicalRequestTokenBucketBeforeReservation(t *testing.
 		t.Fatalf("token-bucket status/reserve/rules = %d/%d/%#v",
 			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules)
 	}
+	if !strings.Contains(fixture.target.preparedBody, `"max_completion_tokens":128`) {
+		t.Fatalf("logical-request token bucket changed provider output cap: %s", fixture.target.preparedBody)
+	}
 	tokenRule := fixture.quotas.reserveInput.Rules[0]
 	if tokenRule.Metric != quota.LogicalRequestsMetric ||
 		tokenRule.Algorithm != quota.TokenBucketAlgorithm ||
@@ -809,6 +812,156 @@ func TestHandlerTranslatesMaximumLogicalRequestTokenBucketBoundary(t *testing.T)
 		rule.RefillNumerator != maximumRate.Numerator ||
 		rule.RefillDenominator != maximumRate.Denominator || !rule.Hard {
 		t.Fatalf("translated maximum logical-request token bucket = %#v", rule)
+	}
+}
+
+func TestHandlerClampsOutputTokenBucketsAndReservesExactAppliedMaximum(t *testing.T) {
+	limits := []configuration.Limit{
+		{
+			Metric: quota.OutputTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"model", "environment"}, Capacity: 96,
+			RefillPerSecond: configuration.RefillRate{Numerator: 1, Denominator: 2}, Hard: true,
+		},
+		{
+			Metric: quota.OutputTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+			Scope: []string{"user", "feature"}, Capacity: 40,
+			RefillPerSecond: configuration.RefillRate{Numerator: 333_333, Denominator: 1_000_000}, Hard: true,
+		},
+		{
+			Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
+			Scope: []string{"organization", "model"}, PerRequestMaximum: 64, Hard: true,
+		},
+	}
+	requests := []struct {
+		name           string
+		body           string
+		wantField      string
+		forbiddenField string
+		wantApplied    int64
+	}{
+		{
+			name: "missing client cap", body: `{"model":"client-model","messages":[{"role":"user","content":"hello"}]}`,
+			wantField: "max_completion_tokens", forbiddenField: "max_tokens", wantApplied: 40,
+		},
+		{
+			name: "legacy cap below capacity", body: `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`,
+			wantField: "max_tokens", forbiddenField: "max_completion_tokens", wantApplied: 20,
+		},
+		{
+			name: "completion cap above capacity", body: `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":99}`,
+			wantField: "max_completion_tokens", forbiddenField: "max_tokens", wantApplied: 40,
+		},
+	}
+	for _, reverse := range []bool{false, true} {
+		orderName := "configured order"
+		if reverse {
+			orderName = "reversed order"
+		}
+		t.Run(orderName, func(t *testing.T) {
+			for _, requestCase := range requests {
+				t.Run(requestCase.name, func(t *testing.T) {
+					fixture := newHandlerFixture(t)
+					fixture.decision.LimitPlan.Limits = append([]configuration.Limit(nil), limits...)
+					if reverse {
+						slices.Reverse(fixture.decision.LimitPlan.Limits)
+					}
+					handler := fixture.handler(t)
+					request := fixture.request(t)
+					request.Body = io.NopCloser(strings.NewReader(requestCase.body))
+					request.ContentLength = int64(len(requestCase.body))
+
+					response := httptest.NewRecorder()
+					handler.ServeHTTP(response, request)
+
+					if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+						len(fixture.quotas.reserveInput.Rules) != len(limits) {
+						t.Fatalf("output-token bucket status/reserve/rules = %d/%d/%#v",
+							response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules)
+					}
+					var prepared map[string]any
+					decoder := json.NewDecoder(strings.NewReader(fixture.target.preparedBody))
+					decoder.UseNumber()
+					if err := decoder.Decode(&prepared); err != nil {
+						t.Fatalf("decode prepared provider request: %v", err)
+					}
+					written, ok := prepared[requestCase.wantField].(json.Number)
+					if !ok || written.String() != fmt.Sprint(requestCase.wantApplied) {
+						t.Fatalf("prepared %s = %#v, want %d; body=%s",
+							requestCase.wantField, prepared[requestCase.wantField], requestCase.wantApplied,
+							fixture.target.preparedBody)
+					}
+					if _, present := prepared[requestCase.forbiddenField]; present {
+						t.Fatalf("prepared request retained %s: %s", requestCase.forbiddenField, fixture.target.preparedBody)
+					}
+					for _, rule := range fixture.quotas.reserveInput.Rules {
+						if rule.Metric != quota.OutputTokensMetric || rule.Window != "" || rule.Maximum != 0 ||
+							rule.ReservedUnits != requestCase.wantApplied || !rule.Hard {
+							t.Fatalf("translated output-token bucket = %#v", rule)
+						}
+						switch {
+						case rule.Algorithm == quota.TokenBucketAlgorithm && rule.Capacity == 96:
+							if rule.PerRequestMaximum != 0 ||
+								rule.RefillNumerator != 1 || rule.RefillDenominator != 2 ||
+								!slices.Equal(rule.Scope, []string{"environment", "model"}) {
+								t.Fatalf("translated capacity-96 rule = %#v", rule)
+							}
+						case rule.Algorithm == quota.TokenBucketAlgorithm && rule.Capacity == 40:
+							if rule.PerRequestMaximum != 0 ||
+								rule.RefillNumerator != 333_333 || rule.RefillDenominator != 1_000_000 ||
+								!slices.Equal(rule.Scope, []string{"user", "feature"}) {
+								t.Fatalf("translated capacity-40 rule = %#v", rule)
+							}
+						case rule.Algorithm == quota.PerRequestAlgorithm:
+							if rule.PerRequestMaximum != 64 || rule.Capacity != 0 ||
+								rule.RefillNumerator != 0 || rule.RefillDenominator != 0 ||
+								!slices.Equal(rule.Scope, []string{"organization", "model"}) {
+								t.Fatalf("translated per-request rule = %#v", rule)
+							}
+						default:
+							t.Fatalf("unexpected translated output-token rule: %#v", rule)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHandlerTranslatesMaximumOutputTokenBucketBoundary(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Feature.Output = &configuration.OutputPolicy{
+		DefaultMaximumTokens:  maximumDecisionTokenBucketCapacity + 1,
+		AbsoluteMaximumTokens: maximumDecisionTokenBucketCapacity + 2,
+	}
+	maximumRate := configuration.RefillRate{
+		Numerator: maximumDecisionTokenBucketRefillPerSecond, Denominator: 1,
+	}
+	fixture.decision.LimitPlan.Limits = []configuration.Limit{{
+		Metric: quota.OutputTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+		Scope: []string{"feature", "user"}, Capacity: maximumDecisionTokenBucketCapacity,
+		RefillPerSecond: maximumRate, Hard: true,
+	}}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 ||
+		len(fixture.quotas.reserveInput.Rules) != 1 ||
+		!strings.Contains(fixture.target.preparedBody,
+			`"max_completion_tokens":`+fmt.Sprint(maximumDecisionTokenBucketCapacity)) {
+		t.Fatalf("maximum output-token status/reserve/rules/body = %d/%d/%#v/%s",
+			response.Code, fixture.quotas.reserveCalls, fixture.quotas.reserveInput.Rules,
+			fixture.target.preparedBody)
+	}
+	rule := fixture.quotas.reserveInput.Rules[0]
+	if rule.Metric != quota.OutputTokensMetric || rule.Algorithm != quota.TokenBucketAlgorithm ||
+		rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
+		rule.ReservedUnits != maximumDecisionTokenBucketCapacity ||
+		rule.Capacity != maximumDecisionTokenBucketCapacity ||
+		rule.RefillNumerator != maximumRate.Numerator ||
+		rule.RefillDenominator != maximumRate.Denominator || !rule.Hard {
+		t.Fatalf("translated maximum output-token bucket = %#v", rule)
 	}
 }
 
@@ -904,6 +1057,61 @@ func TestHandlerRunsDurableLifecycleForPerRequestOnlyPlan(t *testing.T) {
 	}
 }
 
+func TestSupportedDecisionOutputTokenBucketValidatesDetachedShapeAndBounds(t *testing.T) {
+	t.Parallel()
+
+	valid := configuration.Limit{
+		Metric: quota.OutputTokensMetric, Algorithm: quota.TokenBucketAlgorithm,
+		Scope: []string{"user"}, Capacity: maximumDecisionTokenBucketCapacity,
+		RefillPerSecond: configuration.RefillRate{
+			Numerator: maximumDecisionTokenBucketRefillPerSecond, Denominator: 1,
+		},
+		Hard: true,
+	}
+	if !supportedDecisionLimit(valid) {
+		t.Fatal("valid detached output-token bucket was rejected")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*configuration.Limit)
+	}{
+		{name: "future metric", mutate: func(limit *configuration.Limit) { limit.Metric = "input_tokens" }},
+		{name: "window", mutate: func(limit *configuration.Limit) { limit.Window = "1m" }},
+		{name: "maximum", mutate: func(limit *configuration.Limit) { limit.Maximum = 1 }},
+		{name: "per request maximum", mutate: func(limit *configuration.Limit) { limit.PerRequestMaximum = 1 }},
+		{name: "zero capacity", mutate: func(limit *configuration.Limit) { limit.Capacity = 0 }},
+		{name: "capacity above bound", mutate: func(limit *configuration.Limit) {
+			limit.Capacity = maximumDecisionTokenBucketCapacity + 1
+		}},
+		{name: "missing refill", mutate: func(limit *configuration.Limit) {
+			limit.RefillPerSecond = configuration.RefillRate{}
+		}},
+		{name: "unreduced refill", mutate: func(limit *configuration.Limit) {
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 2, Denominator: 4}
+		}},
+		{name: "refill above bound", mutate: func(limit *configuration.Limit) {
+			limit.RefillPerSecond = configuration.RefillRate{
+				Numerator: maximumDecisionTokenBucketRefillPerSecond + 1, Denominator: 1,
+			}
+		}},
+		{name: "fractional refill above bound", mutate: func(limit *configuration.Limit) {
+			limit.RefillPerSecond = configuration.RefillRate{
+				Numerator: 1_000_000_000_001, Denominator: 1_000_000,
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			test.mutate(&candidate)
+			if supportedDecisionLimit(candidate) {
+				t.Fatalf("invalid detached output-token bucket accepted: %+v", candidate)
+			}
+		})
+	}
+}
+
 func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *testing.T) {
 	tokenLimit := func(metric string) configuration.Limit {
 		return configuration.Limit{
@@ -930,8 +1138,20 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 		{name: "token bucket with calendar fields", mutate: func(plan *configuration.LimitPlan) {
 			plan.Limits[0].Algorithm = quota.TokenBucketAlgorithm
 		}},
-		{name: "output token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
-			plan.Limits = []configuration.Limit{tokenLimit(quota.OutputTokensMetric)}
+		{name: "soft output token bucket", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.OutputTokensMetric)
+			limit.Hard = false
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "output token bucket missing scope", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.OutputTokensMetric)
+			limit.Scope = nil
+			plan.Limits = []configuration.Limit{limit}
+		}},
+		{name: "output token bucket capacity above precision bound", mutate: func(plan *configuration.LimitPlan) {
+			limit := tokenLimit(quota.OutputTokensMetric)
+			limit.Capacity = maximumDecisionTokenBucketCapacity + 1
+			plan.Limits = []configuration.Limit{limit}
 		}},
 		{name: "input token bucket remains gated", mutate: func(plan *configuration.LimitPlan) {
 			plan.Limits = []configuration.Limit{tokenLimit("input_tokens")}
@@ -1132,6 +1352,14 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 		{name: "duplicate token bucket identity", mutate: func(plan *configuration.LimitPlan) {
 			first := tokenLimit(quota.LogicalRequestsMetric)
 			second := tokenLimit(quota.LogicalRequestsMetric)
+			second.Scope = []string{"user", "feature"}
+			second.Capacity = 20
+			second.RefillPerSecond = configuration.RefillRate{Numerator: 3, Denominator: 4}
+			plan.Limits = []configuration.Limit{first, second}
+		}},
+		{name: "duplicate output token bucket identity", mutate: func(plan *configuration.LimitPlan) {
+			first := tokenLimit(quota.OutputTokensMetric)
+			second := tokenLimit(quota.OutputTokensMetric)
 			second.Scope = []string{"user", "feature"}
 			second.Capacity = 20
 			second.RefillPerSecond = configuration.RefillRate{Numerator: 3, Denominator: 4}
@@ -1464,6 +1692,51 @@ func TestPricingUnavailableUsesStableRetryableFeatureProblem(t *testing.T) {
 	}
 	if document.Code != "pricing_unavailable" || document.Feature != "assistant" || !document.Retryable {
 		t.Fatalf("pricing problem = %+v", document)
+	}
+}
+
+func TestQuotaRetryAfterSecondsRoundsAndCapsWithoutOverflow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 28, 3, 0, 0, 0, time.UTC)
+	maximumDelay := time.Duration(maximumQuotaRetryAfterSeconds) * time.Second
+	tests := []struct {
+		name    string
+		retryAt time.Time
+		want    int
+	}{
+		{name: "past", retryAt: now.Add(-time.Second), want: 1},
+		{name: "same instant", retryAt: now, want: 1},
+		{name: "subsecond ceiling", retryAt: now.Add(time.Nanosecond), want: 1},
+		{name: "fractional second ceiling", retryAt: now.Add(time.Second + time.Nanosecond), want: 2},
+		{name: "exact seconds", retryAt: now.Add(3 * time.Second), want: 3},
+		{name: "exact advisory maximum", retryAt: now.Add(maximumDelay), want: maximumQuotaRetryAfterSeconds},
+		{name: "beyond advisory maximum", retryAt: now.AddDate(1_000, 0, 0), want: maximumQuotaRetryAfterSeconds},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := quotaRetryAfterSeconds(test.retryAt, now); got != test.want {
+				t.Fatalf("quotaRetryAfterSeconds(%s) = %d, want %d", test.retryAt, got, test.want)
+			}
+		})
+	}
+
+	recorder := httptest.NewRecorder()
+	writeProblem(recorder, "request_retry_cap", "quota_exceeded", "assistant", maximumQuotaRetryAfterSeconds)
+	if recorder.Code != http.StatusTooManyRequests ||
+		recorder.Header().Get("Retry-After") != fmt.Sprint(maximumQuotaRetryAfterSeconds) {
+		t.Fatalf("capped quota problem status/header = %d/%q",
+			recorder.Code, recorder.Header().Get("Retry-After"))
+	}
+	var document struct {
+		RetryAfter string `json:"retry_after"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
+		t.Fatalf("decode capped quota problem: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, document.RetryAfter); err != nil {
+		t.Fatalf("capped retry_after = %q: %v", document.RetryAfter, err)
 	}
 }
 
