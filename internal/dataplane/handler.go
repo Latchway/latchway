@@ -292,10 +292,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, errInvalidConfiguration)
 		return
 	}
-	for index := range validated.rules {
-		if validated.rules[index].Metric == quota.OutputTokensMetric {
-			validated.rules[index].ReservedUnits = appliedOutputMaximum
-		}
+	hardCost, err := assignDecisionReservationUnits(
+		validated.rules, selectedPricing, appliedOutputMaximum,
+	)
+	if err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
 	}
 
 	reservation, err := handler.quotas.Reserve(request.Context(), quota.ReserveInput{
@@ -337,14 +339,24 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if result.err == nil && !result.relay.ClientStarted {
 		result.err = errDispatchNotConsumed
 	}
-	if result.relay.Usage.Known && result.relay.Usage.OutputTokens > appliedOutputMaximum {
+	providerUsageOverCap := result.relay.Usage.Known &&
+		result.relay.Usage.OutputTokens > appliedOutputMaximum
+	if providerUsageOverCap {
 		result.err = fmt.Errorf(
 			"%w: provider-reported output tokens exceed the applied request maximum",
 			errUpstreamProtocol,
 		)
+		// The provider measurement cannot be reconciled with the exact request
+		// bound. Settle every stateful reservation conservatively instead of
+		// passing an impossible output measurement that would leave the durable
+		// reservation pending.
+		result.relay.Usage = protocol.Usage{}
 	}
 	var calculatedCost quota.Cost
-	calculatedCost, result.err = calculateConfiguredCost(selectedPricing, result.relay.Usage, result.err)
+	if !providerUsageOverCap {
+		calculatedCost, result.err = calculateConfiguredCost(selectedPricing, result.relay.Usage, result.err)
+	}
+	calculatedCost = boundedSettlementCost(calculatedCost, hardCost)
 
 	settlementErr := handler.settleAttempt(result.attempt, result.relay, calculatedCost, result.err)
 	if result.relay.ClientStarted {
@@ -550,6 +562,67 @@ type configuredPricing struct {
 	source         pricing.Source
 }
 
+// hardCostReservation records the exact conservative nano-USD reservation
+// shared by every applicable hard-cost rule. active distinguishes a genuine
+// zero-cost reservation from a request without a hard-cost policy.
+type hardCostReservation struct {
+	active  bool
+	nanoUSD int64
+}
+
+func assignDecisionReservationUnits(
+	rules []quota.Rule,
+	selected configuredPricing,
+	appliedOutputMaximum int64,
+) (hardCostReservation, error) {
+	if appliedOutputMaximum <= 0 {
+		return hardCostReservation{}, policy.ErrConfiguration
+	}
+	hasCostRule := false
+	for _, rule := range rules {
+		if rule.Metric == quota.CostNanoUSDMetric {
+			hasCostRule = true
+			break
+		}
+	}
+	var bound hardCostReservation
+	if hasCostRule {
+		if !selected.configured || selected.rates.InputNanoUSDPerMillion != 0 {
+			return hardCostReservation{}, policy.ErrConfiguration
+		}
+		calculated, err := pricing.Calculate(
+			selected.rates,
+			pricing.Usage{OutputTokens: appliedOutputMaximum},
+			selected.source,
+		)
+		if err != nil || !calculated.Known() {
+			return hardCostReservation{}, fmt.Errorf(
+				"%w: calculate hard cost reservation", errPricingUnavailable,
+			)
+		}
+		bound = hardCostReservation{active: true, nanoUSD: calculated.CostNanoUSD()}
+	}
+	for index := range rules {
+		switch rules[index].Metric {
+		case quota.OutputTokensMetric:
+			rules[index].ReservedUnits = appliedOutputMaximum
+		case quota.CostNanoUSDMetric:
+			rules[index].ReservedUnits = bound.nanoUSD
+		}
+	}
+	return bound, nil
+}
+
+func boundedSettlementCost(cost quota.Cost, bound hardCostReservation) quota.Cost {
+	if bound.active && cost.Known && cost.NanoUSD > bound.nanoUSD {
+		// A provider measurement above the pre-dispatch conservative bound is
+		// not a charge this request can safely reconcile. Unknown cost makes the
+		// quota store retain the full reservation and still terminalize it.
+		return quota.Cost{}
+	}
+	return cost
+}
+
 func resolveConfiguredPricing(
 	snapshot configuration.ActiveSnapshot,
 	model configuration.Model,
@@ -724,6 +797,9 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
 			validDecisionTokenBucketRefill(limit.RefillPerSecond)
 	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.CalendarAlgorithm:
+		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
+	case limit.Metric == quota.CostNanoUSDMetric && limit.Algorithm == quota.CalendarAlgorithm:
 		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case limit.Metric == quota.OutputTokensMetric && limit.Algorithm == quota.PerRequestAlgorithm:

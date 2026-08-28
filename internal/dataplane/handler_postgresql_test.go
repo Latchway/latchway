@@ -87,6 +87,17 @@ const (
 	dataPlaneE2EOutputTokenBucketFirstRequestID        = "client-request-dataplane-e2e-output-token-first-01"
 	dataPlaneE2EOutputTokenBucketDeniedRequestID       = "client-request-dataplane-e2e-output-token-denied-01"
 	dataPlaneE2EOutputTokenBucketThirdRequestID        = "client-request-dataplane-e2e-output-token-third-01"
+	dataPlaneE2ECostFeature                            = "cost_guard"
+	dataPlaneE2ECostPlan                               = "cost_guard"
+	dataPlaneE2ECostModel                              = "cost_fast"
+	dataPlaneE2ECostPricingCatalog                     = "cost_guard_price"
+	dataPlaneE2ECostPrompt                             = "prompt-marker-dataplane-e2e-cost-first-01"
+	dataPlaneE2ECostDeniedPrompt                       = "prompt-marker-dataplane-e2e-cost-denied-01"
+	dataPlaneE2ECostRequestID                          = "client-request-dataplane-e2e-cost-first-01"
+	dataPlaneE2ECostDeniedRequestID                    = "client-request-dataplane-e2e-cost-denied-01"
+	dataPlaneE2ECostMaximum                      int64 = 17
+	dataPlaneE2ECostReservation                  int64 = 10
+	dataPlaneE2EActualCost                       int64 = 9
 	dataPlaneE2ETokenBalanceScale                int64 = 1_000_000_000_000
 	dataPlaneE2ETokenRefillInterval                    = 100 * time.Second
 	dataPlaneE2EOutputTokenRefillInterval              = 700 * time.Second
@@ -235,6 +246,18 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if !ok || !reflect.DeepEqual(outputTokenBucketPlan, wantOutputTokenBucketPlan) {
 		t.Fatalf("active output-token bucket limit plan = %+v ok=%t", outputTokenBucketPlan, ok)
 	}
+	costPlan, ok := snapshot.LimitPlan(dataPlaneE2ECostPlan)
+	wantCostPlan := configuration.LimitPlan{
+		ID: dataPlaneE2ECostPlan,
+		Limits: []configuration.Limit{{
+			Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
+			Scope: []string{"user", "feature"}, Window: "1mo",
+			Maximum: dataPlaneE2ECostMaximum, Hard: true,
+		}},
+	}
+	if !ok || !reflect.DeepEqual(costPlan, wantCostPlan) {
+		t.Fatalf("active hard-cost limit plan = %+v ok=%t", costPlan, ok)
+	}
 	pricingCatalog, ok := snapshot.PricingCatalog(dataPlaneE2EPricingCatalog)
 	pricingEntry, entryOK := snapshot.PricingEntry(dataPlaneE2EPricingCatalog, "fast")
 	if !ok || !entryOK || pricingCatalog.ID != dataPlaneE2EPricingCatalog ||
@@ -245,6 +268,17 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	}) {
 		t.Fatalf("active configured pricing = catalog:%+v entry:%+v ok=%t/%t",
 			pricingCatalog, pricingEntry, ok, entryOK)
+	}
+	costCatalog, ok := snapshot.PricingCatalog(dataPlaneE2ECostPricingCatalog)
+	costEntry, costEntryOK := snapshot.PricingEntry(dataPlaneE2ECostPricingCatalog, dataPlaneE2ECostModel)
+	if !ok || !costEntryOK || costCatalog.ID != dataPlaneE2ECostPricingCatalog ||
+		costCatalog.Currency != quota.USDCurrency || costCatalog.EffectiveAt == nil ||
+		!costCatalog.EffectiveAt.Before(now) || costEntry != (configuration.PricingEntry{
+		ModelID: dataPlaneE2ECostModel, InputNanoUSDPerMillion: 0,
+		OutputNanoUSDPerMillion: 1_000_000, RequestNanoUSD: 2,
+	}) {
+		t.Fatalf("active hard-cost pricing = catalog:%+v entry:%+v ok=%t/%t",
+			costCatalog, costEntry, ok, costEntryOK)
 	}
 
 	secretStore, err := secrets.NewStore(secrets.StoreConfig{
@@ -1022,6 +1056,110 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != baselineReplays+1 {
 		t.Fatalf("replayed quota proof changed replay rows=%d, want %d", got, baselineReplays+1)
 	}
+
+	costFirstProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-cost-first", grant.AccessToken,
+	)
+	costFirstResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, costFirstProof,
+		dataPlaneE2ECostFeature, dataPlaneE2ECostRequestID,
+		concurrencyBody(dataPlaneE2ECostPrompt, false),
+	)
+	if costFirstResponse.Code != http.StatusOK {
+		t.Fatalf("first hard-cost request = %d, body=%s",
+			costFirstResponse.Code, costFirstResponse.Body.String())
+	}
+	if targets.acquisitions.Load() != 10 || targets.releases.Load() != 10 ||
+		len(mock.Observations()) != 10 {
+		t.Fatalf("hard-cost success acquisitions/releases/observations=%d/%d/%d, want 10/10/10",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EHardCostSuccess(t, ctx, pool, dataPlaneE2ECostRequestID, revisionID)
+	costStateAfterSuccess := readDataPlaneE2ECostBucketState(t, ctx, pool)
+	assertDataPlaneE2ECostBucketState(t, costStateAfterSuccess)
+	providerRequests, captureErr = capture.snapshot()
+	if captureErr != nil || len(providerRequests) != 10 {
+		t.Fatalf("hard-cost provider capture = requests:%d err:%v, want ten dispatches",
+			len(providerRequests), captureErr)
+	}
+	assertDataPlaneE2EProviderChatRequestWithOutputCap(
+		t, providerRequests[9], privateTargetAuthority, dataPlaneE2ECostPrompt, false, 8,
+	)
+
+	costDeniedProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-cost-denied", grant.AccessToken,
+	)
+	costDeniedResponse := postDataPlaneE2EFeatureChat(
+		t, protectedHandler, grant.AccessToken, costDeniedProof,
+		dataPlaneE2ECostFeature, dataPlaneE2ECostDeniedRequestID,
+		concurrencyBody(dataPlaneE2ECostDeniedPrompt, false),
+	)
+	assertDataPlaneE2EProblem(t, costDeniedResponse, http.StatusTooManyRequests, "quota_exceeded")
+	if targets.acquisitions.Load() != 10 || targets.releases.Load() != 10 ||
+		len(mock.Observations()) != 10 {
+		t.Fatalf("hard-cost denial reached target/provider: acquisitions=%d releases=%d observations=%d",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+	assertDataPlaneE2EHardCostDenial(t, ctx, pool, dataPlaneE2ECostDeniedRequestID)
+	if costStateAfterDenial := readDataPlaneE2ECostBucketState(t, ctx, pool); !reflect.DeepEqual(
+		costStateAfterDenial, costStateAfterSuccess,
+	) {
+		t.Fatalf("hard-cost denial mutated the accepted bucket\nbefore=%+v\nafter=%+v",
+			costStateAfterSuccess, costStateAfterDenial)
+	}
+
+	costQuotaPath := "/client/v1/features/" + dataPlaneE2ECostFeature + "/quota"
+	costQuotaTarget := mustDataPlaneE2EURL(t, dataPlaneE2EOrigin+costQuotaPath)
+	costQuotaProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodGet, costQuotaTarget,
+		now, "dataplane-e2e-cost-quota", grant.AccessToken,
+	)
+	costQuotaBaselineReplays := countDataPlaneE2EDPoPReplays(t, ctx, pool)
+	costQuotaResponse := getDataPlaneE2EFeatureQuota(
+		t, clientHandler, grant.AccessToken, costQuotaProof, costQuotaPath,
+	)
+	if costQuotaResponse.Code != http.StatusOK ||
+		costQuotaResponse.Header().Get("Content-Type") != "application/json" ||
+		costQuotaResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("hard-cost quota response status=%d headers=%#v body=%s",
+			costQuotaResponse.Code, costQuotaResponse.Header(), costQuotaResponse.Body.String())
+	}
+	var costQuotaDocument dataPlaneE2EQuotaDocument
+	if err := json.NewDecoder(costQuotaResponse.Body).Decode(&costQuotaDocument); err != nil {
+		t.Fatalf("decode hard-cost quota response: %v", err)
+	}
+	if costQuotaDocument.Feature != dataPlaneE2ECostFeature ||
+		costQuotaDocument.ObservedAt.IsZero() || costQuotaDocument.ObservedAt.Location() != time.UTC ||
+		len(costQuotaDocument.Limits) != 1 {
+		t.Fatalf("hard-cost quota envelope = %+v", costQuotaDocument)
+	}
+	costLimit := costQuotaDocument.Limits[0]
+	if costLimit.Metric != quota.CostNanoUSDMetric || !costLimit.Hard ||
+		costLimit.Maximum == nil || *costLimit.Maximum != dataPlaneE2ECostMaximum ||
+		costLimit.Used == nil || *costLimit.Used != dataPlaneE2EActualCost ||
+		costLimit.Reserved == nil || *costLimit.Reserved != 0 ||
+		costLimit.Remaining == nil || *costLimit.Remaining != dataPlaneE2ECostMaximum-dataPlaneE2EActualCost ||
+		costLimit.ResetsAt == nil || !costLimit.ResetsAt.After(costQuotaDocument.ObservedAt) ||
+		costLimit.ResetsAt.Location() != time.UTC {
+		t.Fatalf("hard-cost quota limit = %+v", costLimit)
+	}
+	if costStateAfterSnapshot := readDataPlaneE2ECostBucketState(t, ctx, pool); !reflect.DeepEqual(
+		costStateAfterSnapshot, costStateAfterSuccess,
+	) {
+		t.Fatalf("hard-cost quota snapshot mutated the bucket\nbefore=%+v\nafter=%+v",
+			costStateAfterSuccess, costStateAfterSnapshot)
+	}
+	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != costQuotaBaselineReplays+1 {
+		t.Fatalf("hard-cost quota replay rows=%d, want %d", got, costQuotaBaselineReplays+1)
+	}
+	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
+		logicalRequests: 15, reservations: 10, reservationEntries: 13,
+		buckets: 7, attempts: 10, usageRecords: 50, deniedRequests: 5,
+	})
+	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
+		dataPlaneE2ECostPrompt, dataPlaneE2ECostDeniedPrompt)
 }
 
 type dataPlaneE2ETenant struct {
@@ -1174,18 +1312,34 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 				"staticHeaders":  map[string]any{"X-Provider-Tenant": "tenant-e2e"},
 				"timeouts":       map[string]any{"connect": "2s", "firstByte": "30s", "idle": "2s", "total": "45s"},
 			}},
-			"models": []any{map[string]any{
-				"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
-				"pricingRef": dataPlaneE2EPricingCatalog, "capabilities": []any{"openai_chat"},
-			}},
-			"pricingCatalogs": []any{map[string]any{
-				"id": dataPlaneE2EPricingCatalog, "currency": quota.USDCurrency,
-				"effectiveAt": "2020-01-01T00:00:00Z",
-				"entries": []any{map[string]any{
-					"model": "fast", "inputNanoUsdPerMillion": int64(2_000_000_001),
-					"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
-				}},
-			}},
+			"models": []any{
+				map[string]any{
+					"id": "fast", "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2EPricingCatalog, "capabilities": []any{"openai_chat"},
+				},
+				map[string]any{
+					"id": dataPlaneE2ECostModel, "upstream": "primary", "upstreamModel": dataPlaneE2EProviderModel,
+					"pricingRef": dataPlaneE2ECostPricingCatalog, "capabilities": []any{"openai_chat"},
+				},
+			},
+			"pricingCatalogs": []any{
+				map[string]any{
+					"id": dataPlaneE2EPricingCatalog, "currency": quota.USDCurrency,
+					"effectiveAt": "2020-01-01T00:00:00Z",
+					"entries": []any{map[string]any{
+						"model": "fast", "inputNanoUsdPerMillion": int64(2_000_000_001),
+						"outputNanoUsdPerMillion": int64(6_000_000_001), "requestNanoUsd": int64(1_234),
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2ECostPricingCatalog, "currency": quota.USDCurrency,
+					"effectiveAt": "2020-01-01T00:00:00Z",
+					"entries": []any{map[string]any{
+						"model": dataPlaneE2ECostModel, "inputNanoUsdPerMillion": int64(0),
+						"outputNanoUsdPerMillion": int64(1_000_000), "requestNanoUsd": int64(2),
+					}},
+				},
+			},
 			"limitPlans": []any{
 				map[string]any{
 					"id": "free", "limits": []any{
@@ -1227,6 +1381,13 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 						"refillPerSecond": json.Number("0.01"), "hard": true,
 					}},
 				},
+				map[string]any{
+					"id": dataPlaneE2ECostPlan, "limits": []any{map[string]any{
+						"metric": quota.CostNanoUSDMetric, "algorithm": quota.CalendarAlgorithm,
+						"scope": []any{"feature", "user"}, "window": "1mo",
+						"maximum": dataPlaneE2ECostMaximum, "hard": true,
+					}},
+				},
 			},
 			"features": []any{
 				map[string]any{
@@ -1263,6 +1424,15 @@ func activateDataPlaneE2EConfiguration(t *testing.T, ctx context.Context, store 
 					"output":    map[string]any{"defaultMaximumTokens": 32, "absoluteMaximumTokens": 64},
 					"routes": []any{map[string]any{
 						"id": "primary", "when": "true", "model": "fast", "priority": 10,
+					}},
+				},
+				map[string]any{
+					"id": dataPlaneE2ECostFeature, "protocol": "openai_chat", "attestationPolicy": "native",
+					"access":    map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+					"limitPlan": map[string]any{"expression": "'" + dataPlaneE2ECostPlan + "'"},
+					"output":    map[string]any{"defaultMaximumTokens": 8, "absoluteMaximumTokens": 8},
+					"routes": []any{map[string]any{
+						"id": "cost_primary", "when": "true", "model": dataPlaneE2ECostModel, "priority": 10,
 					}},
 				},
 			},
@@ -2231,12 +2401,144 @@ func assertDataPlaneE2EOutputTokenBucketSuccess(
 	assertDataPlaneE2EUsage(t, ctx, pool, logicalID, attemptID, priceRevision)
 }
 
+func assertDataPlaneE2EHardCostSuccess(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID, priceRevision string,
+) {
+	t.Helper()
+	var logicalID, logicalStatus, featureKey, configRevision string
+	var reservationStatus, attemptID, attemptStatus, physicalModel string
+	var currency, persistedPriceRevision, pricingSource, costConfidence string
+	var entryID, bucketID, planKey, metric, algorithm, windowKey string
+	var billedCost, reservations, entries, attempts, usageRecords int64
+	var entryReserved, entrySettled, entryReleased int64
+	var httpStatus int
+	var firstByte bool
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.status, request.feature_key,
+		       request.config_revision_id, reservation.status,
+		       attempt.upstream_attempt_id, attempt.status, attempt.http_status,
+		       attempt.physical_model, attempt.billed_cost_nano_usd,
+		       attempt.currency, attempt.price_revision, attempt.pricing_source,
+		       attempt.cost_confidence, attempt.first_byte_at IS NOT NULL,
+		       entry.quota_reservation_entry_id, bucket.quota_bucket_id,
+		       bucket.limit_plan_key, bucket.metric, bucket.algorithm,
+		       bucket.window_key, entry.reserved_units,
+		       entry.settled_units, entry.released_units,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM quota_reservation_entries AS counted
+		        WHERE counted.quota_reservation_id = reservation.quota_reservation_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		JOIN quota_reservations AS reservation USING (logical_request_id)
+		JOIN upstream_attempts AS attempt USING (logical_request_id)
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &logicalStatus, &featureKey, &configRevision,
+		&reservationStatus, &attemptID, &attemptStatus, &httpStatus,
+		&physicalModel, &billedCost, &currency, &persistedPriceRevision,
+		&pricingSource, &costConfidence, &firstByte,
+		&entryID, &bucketID, &planKey, &metric, &algorithm, &windowKey,
+		&entryReserved, &entrySettled, &entryReleased,
+		&reservations, &entries, &attempts, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read hard-cost success %q: %v", clientRequestID, err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil ||
+		id.Validate(attemptID, id.UpstreamAttempt) != nil || id.Validate(entryID, id.QuotaEntry) != nil ||
+		id.Validate(bucketID, id.QuotaBucket) != nil || logicalStatus != "succeeded" ||
+		featureKey != dataPlaneE2ECostFeature || configRevision != priceRevision ||
+		reservationStatus != "settled" || attemptStatus != quota.AttemptSucceeded ||
+		httpStatus != http.StatusOK || physicalModel != dataPlaneE2EProviderModel ||
+		billedCost != dataPlaneE2EActualCost || currency != quota.USDCurrency ||
+		persistedPriceRevision != priceRevision || pricingSource != dataPlaneE2ECostPricingCatalog ||
+		costConfidence != quota.CalculatedCostConfidence || !firstByte ||
+		planKey != dataPlaneE2ECostPlan || metric != quota.CostNanoUSDMetric ||
+		algorithm != quota.CalendarAlgorithm || !strings.HasPrefix(windowKey, "utc:v1:1mo:") ||
+		entryReserved != dataPlaneE2ECostReservation || entrySettled != dataPlaneE2EActualCost ||
+		entryReleased != dataPlaneE2ECostReservation-dataPlaneE2EActualCost ||
+		reservations != 1 || entries != 1 || attempts != 1 || usageRecords != 5 {
+		t.Fatalf("hard-cost success %q = logical:%q/%s feature/revision:%s/%s reservation:%s/count:%d entries:%d attempt:%q/%s/%d/%s/count:%d price:%d/%s/%s/%s/%s first_byte:%t entry:%q bucket:%q plan/metric/algorithm/window:%s/%s/%s/%s units:%d/%d/%d usage:%d",
+			clientRequestID, logicalID, logicalStatus, featureKey, configRevision,
+			reservationStatus, reservations, entries, attemptID, attemptStatus,
+			httpStatus, physicalModel, attempts, billedCost, currency,
+			persistedPriceRevision, pricingSource, costConfidence, firstByte,
+			entryID, bucketID, planKey, metric, algorithm, windowKey,
+			entryReserved, entrySettled, entryReleased, usageRecords)
+	}
+	assertDataPlaneE2EPricedUsage(
+		t, ctx, pool, logicalID, attemptID, priceRevision,
+		dataPlaneE2EActualCost, dataPlaneE2ECostPricingCatalog,
+	)
+}
+
+func assertDataPlaneE2EHardCostDenial(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID string,
+) {
+	t.Helper()
+	var logicalID, featureKey, status, failureCode string
+	var reservations, attempts, usageRecords int64
+	err := pool.QueryRow(ctx, `
+		SELECT request.logical_request_id, request.feature_key,
+		       request.status, request.failure_code,
+		       (SELECT count(*) FROM quota_reservations AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM upstream_attempts AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id),
+		       (SELECT count(*) FROM usage_records AS counted
+		        WHERE counted.logical_request_id = request.logical_request_id)
+		FROM logical_requests AS request
+		WHERE request.client_request_id = $1
+	`, clientRequestID).Scan(
+		&logicalID, &featureKey, &status, &failureCode,
+		&reservations, &attempts, &usageRecords,
+	)
+	if err != nil {
+		t.Fatalf("read hard-cost denial %q: %v", clientRequestID, err)
+	}
+	if id.Validate(logicalID, id.LogicalRequest) != nil ||
+		featureKey != dataPlaneE2ECostFeature || status != "denied" ||
+		failureCode != "quota_exceeded" || reservations != 0 || attempts != 0 || usageRecords != 0 {
+		t.Fatalf("hard-cost denial %q = request:%q feature:%q status:%q failure:%q reservations:%d attempts:%d usage:%d",
+			clientRequestID, logicalID, featureKey, status, failureCode,
+			reservations, attempts, usageRecords)
+	}
+}
+
 func assertDataPlaneE2EUsage(
 	t *testing.T,
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	logicalID, attemptID string,
 	priceRevision string,
+) {
+	t.Helper()
+	assertDataPlaneE2EPricedUsage(
+		t, ctx, pool, logicalID, attemptID, priceRevision,
+		dataPlaneE2ECalculatedCost, dataPlaneE2EPricingCatalog,
+	)
+}
+
+func assertDataPlaneE2EPricedUsage(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	logicalID, attemptID string,
+	priceRevision string,
+	expectedCost int64,
+	expectedPricingSource string,
 ) {
 	t.Helper()
 	type expectedUsage struct {
@@ -2267,7 +2569,7 @@ func assertDataPlaneE2EUsage(
 			attemptScoped: true,
 		},
 		quota.CostNanoUSDMetric: {
-			units: dataPlaneE2ECalculatedCost, confidence: quota.CalculatedCostConfidence,
+			units: expectedCost, confidence: quota.CalculatedCostConfidence,
 			provenance:    "configured_flat_rate:" + attemptID,
 			attemptScoped: true,
 			costed:        true,
@@ -2305,10 +2607,10 @@ func assertDataPlaneE2EUsage(
 		costMatches := !want.costed && costNanoUSD == nil && currency == nil &&
 			persistedPriceRevision == nil && pricingSource == nil
 		if want.costed {
-			costMatches = costNanoUSD != nil && *costNanoUSD == dataPlaneE2ECalculatedCost &&
+			costMatches = costNanoUSD != nil && *costNanoUSD == expectedCost &&
 				currency != nil && *currency == quota.USDCurrency &&
 				persistedPriceRevision != nil && *persistedPriceRevision == priceRevision &&
-				pricingSource != nil && *pricingSource == dataPlaneE2EPricingCatalog
+				pricingSource != nil && *pricingSource == expectedPricingSource
 		}
 		if id.Validate(usageID, id.UsageRecord) != nil || !ok || !attemptMatches ||
 			!costMatches || units != want.units || confidence != want.confidence || provenance != want.provenance {
@@ -2520,6 +2822,49 @@ func backdateDataPlaneE2EOutputTokenBucket(
 			before, after, want)
 	}
 	return after
+}
+
+func readDataPlaneE2ECostBucketState(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+) dataPlaneE2EQuotaBucketState {
+	t.Helper()
+	var state dataPlaneE2EQuotaBucketState
+	var bucketCount int64
+	err := pool.QueryRow(ctx, `
+		SELECT quota_bucket_id, limit_plan_key, metric, scope_type,
+		       scope_dimensions, algorithm, window_key, hard_maximum,
+		       used_units, reserved_units, version, count(*) OVER ()
+		FROM quota_buckets
+		WHERE limit_plan_key = $1 AND metric = $2 AND algorithm = $3
+	`, dataPlaneE2ECostPlan, quota.CostNanoUSDMetric, quota.CalendarAlgorithm).Scan(
+		&state.bucketID, &state.limitPlanKey, &state.metric, &state.scopeType,
+		&state.scopeDimensions, &state.algorithm, &state.windowKey, &state.hardMaximum,
+		&state.used, &state.reserved, &state.version, &bucketCount,
+	)
+	if err != nil {
+		t.Fatalf("read hard-cost bucket state: %v", err)
+	}
+	if bucketCount != 1 {
+		t.Fatalf("hard-cost buckets = %d, want 1", bucketCount)
+	}
+	state.scopeDimensions = append([]string(nil), state.scopeDimensions...)
+	return state
+}
+
+func assertDataPlaneE2ECostBucketState(t *testing.T, state dataPlaneE2EQuotaBucketState) {
+	t.Helper()
+	if id.Validate(state.bucketID, id.QuotaBucket) != nil ||
+		state.limitPlanKey != dataPlaneE2ECostPlan || state.metric != quota.CostNanoUSDMetric ||
+		state.scopeType != "composite" ||
+		!reflect.DeepEqual(state.scopeDimensions, []string{"user", "feature"}) ||
+		state.algorithm != quota.CalendarAlgorithm ||
+		!strings.HasPrefix(state.windowKey, "utc:v1:1mo:") ||
+		state.hardMaximum != dataPlaneE2ECostMaximum ||
+		state.used != dataPlaneE2EActualCost || state.reserved != 0 || state.version != 2 {
+		t.Fatalf("hard-cost bucket violated exact calendar state: %+v", state)
+	}
 }
 
 func readDataPlaneE2EQuotaBuckets(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []dataPlaneE2EQuotaBucketState {

@@ -649,7 +649,7 @@ func featureQuotaDocumentFor(result FeatureQuotaResult, expectedFeature string) 
 
 func supportedFeatureQuotaMetric(metric string) bool {
 	switch metric {
-	case "logical_requests", "output_tokens", "concurrent_requests", "concurrent_streams":
+	case "logical_requests", "output_tokens", "concurrent_requests", "concurrent_streams", "cost_nano_usd":
 		return true
 	default:
 		return false

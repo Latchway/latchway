@@ -1112,6 +1112,40 @@ func TestSupportedDecisionOutputTokenBucketValidatesDetachedShapeAndBounds(t *te
 	}
 }
 
+func TestSupportedDecisionHardCostCalendarValidatesDetachedShape(t *testing.T) {
+	t.Parallel()
+
+	valid := configuration.Limit{
+		Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
+		Scope: []string{"user", "feature"}, Window: "1mo", Maximum: math.MaxInt64, Hard: true,
+	}
+	if !supportedDecisionLimit(valid) {
+		t.Fatal("valid detached hard-cost calendar was rejected")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*configuration.Limit)
+	}{
+		{name: "token bucket", mutate: func(limit *configuration.Limit) { limit.Algorithm = quota.TokenBucketAlgorithm }},
+		{name: "missing window", mutate: func(limit *configuration.Limit) { limit.Window = "" }},
+		{name: "zero maximum", mutate: func(limit *configuration.Limit) { limit.Maximum = 0 }},
+		{name: "per request maximum", mutate: func(limit *configuration.Limit) { limit.PerRequestMaximum = 1 }},
+		{name: "capacity", mutate: func(limit *configuration.Limit) { limit.Capacity = 1 }},
+		{name: "refill", mutate: func(limit *configuration.Limit) {
+			limit.RefillPerSecond = configuration.RefillRate{Numerator: 1, Denominator: 1}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := valid
+			test.mutate(&candidate)
+			if supportedDecisionLimit(candidate) {
+				t.Fatalf("invalid hard-cost shape accepted: %+v", candidate)
+			}
+		})
+	}
+}
+
 func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *testing.T) {
 	tokenLimit := func(metric string) configuration.Limit {
 		return configuration.Limit{
@@ -1507,6 +1541,108 @@ func TestConfiguredPricingCaptureAndCostCalculation(t *testing.T) {
 	}
 }
 
+func TestAssignDecisionReservationUnitsUsesExactSharedHardCostBound(t *testing.T) {
+	t.Parallel()
+	source, err := pricing.NewSource("standard", id.Must(id.ConfigRevision))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := configuredPricing{
+		configured: true,
+		rates: pricing.Rates{
+			OutputNanoUSDPerMillion: 2_500_001,
+			RequestNanoUSD:          7,
+		},
+		source: source,
+	}
+	rules := []quota.Rule{
+		{Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm, Scope: []string{"user"}, Window: "1d", Maximum: 100, Hard: true},
+		{Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm, Scope: []string{"user"}, PerRequestMaximum: 8, Hard: true},
+		{Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm, Scope: []string{"feature"}, Window: "1mo", Maximum: 200, Hard: true},
+	}
+	bound, err := assignDecisionReservationUnits(rules, selected, 3)
+	if err != nil {
+		t.Fatalf("assign hard-cost reservation: %v", err)
+	}
+	// 7 fixed + ceil(3 * 2,500,001 / 1,000,000) = 15 nano-USD.
+	if !bound.active || bound.nanoUSD != 15 || rules[0].ReservedUnits != 15 ||
+		rules[1].ReservedUnits != 3 || rules[2].ReservedUnits != 15 {
+		t.Fatalf("assigned reservations = bound:%+v rules:%+v", bound, rules)
+	}
+
+	zeroRules := []quota.Rule{{
+		Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
+		Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true,
+	}}
+	zeroBound, err := assignDecisionReservationUnits(
+		zeroRules,
+		configuredPricing{configured: true, source: source},
+		3,
+	)
+	if err != nil || !zeroBound.active || zeroBound.nanoUSD != 0 || zeroRules[0].ReservedUnits != 0 {
+		t.Fatalf("zero hard-cost reservation = bound:%+v rules:%+v err:%v", zeroBound, zeroRules, err)
+	}
+}
+
+func TestAssignDecisionReservationUnitsRejectsUnsafeHardCostPricingBeforeMutation(t *testing.T) {
+	t.Parallel()
+	source, err := pricing.NewSource("standard", id.Must(id.ConfigRevision))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRules := []quota.Rule{{
+		Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
+		Scope: []string{"user"}, Window: "1d", Maximum: math.MaxInt64, Hard: true,
+	}}
+	tests := []struct {
+		name     string
+		selected configuredPricing
+		applied  int64
+		want     error
+	}{
+		{name: "missing pricing", applied: 1, want: policy.ErrConfiguration},
+		{
+			name: "input-priced model", applied: 1, want: policy.ErrConfiguration,
+			selected: configuredPricing{
+				configured: true, source: source,
+				rates: pricing.Rates{InputNanoUSDPerMillion: 1},
+			},
+		},
+		{
+			name: "overflow", applied: math.MaxInt64, want: errPricingUnavailable,
+			selected: configuredPricing{
+				configured: true, source: source,
+				rates: pricing.Rates{OutputNanoUSDPerMillion: math.MaxInt64},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rules := append([]quota.Rule(nil), baseRules...)
+			_, assignErr := assignDecisionReservationUnits(rules, test.selected, test.applied)
+			if !errors.Is(assignErr, test.want) || rules[0].ReservedUnits != 0 {
+				t.Fatalf("unsafe reservation = rules:%+v err:%v want:%v", rules, assignErr, test.want)
+			}
+		})
+	}
+}
+
+func TestBoundedSettlementCostNeverExceedsHardCostReservation(t *testing.T) {
+	t.Parallel()
+	bound := hardCostReservation{active: true, nanoUSD: 15}
+	equal := quota.Cost{NanoUSD: 15, Known: true, Confidence: quota.CalculatedCostConfidence}
+	if got := boundedSettlementCost(equal, bound); got != equal {
+		t.Fatalf("equal bounded cost = %+v", got)
+	}
+	over := quota.Cost{NanoUSD: 16, Known: true, Confidence: quota.CalculatedCostConfidence}
+	if got := boundedSettlementCost(over, bound); got != (quota.Cost{}) {
+		t.Fatalf("over-bound cost = %+v, want unknown", got)
+	}
+	if got := boundedSettlementCost(over, hardCostReservation{}); got != over {
+		t.Fatalf("unbounded attribution cost = %+v", got)
+	}
+}
+
 func TestConfiguredPricingDistinguishesZeroUnknownAndUnpricedCost(t *testing.T) {
 	t.Parallel()
 	source, err := pricing.NewSource("free", id.Must(id.ConfigRevision))
@@ -1812,12 +1948,10 @@ func TestHandlerClassifiesProviderUsageAboveAppliedMaximumWithoutRewritingClient
 		fixture.quotas.settleOutcome.FailureCode != "upstream_protocol_error" {
 		t.Fatalf("over-reported settlement classification = %#v", fixture.quotas.settleOutcome)
 	}
-	wantUsage := quota.Usage{
-		InputTokens: 2, OutputTokens: 9, TotalTokens: 11,
-		Known: true, Provenance: quota.ProviderReportedProvenance,
-	}
+	wantUsage := unknownQuotaUsage()
 	if fixture.quotas.settleOutcome.Usage != wantUsage {
-		t.Fatalf("over-reported measured usage = %#v, want %#v", fixture.quotas.settleOutcome.Usage, wantUsage)
+		t.Fatalf("over-reported usage was not conservatively normalized = %#v, want %#v",
+			fixture.quotas.settleOutcome.Usage, wantUsage)
 	}
 	if len(fixture.quotas.reserveInput.Rules) != 1 || fixture.quotas.reserveInput.Rules[0].ReservedUnits != 8 {
 		t.Fatalf("over-reported request reservation = %#v, want conservative full cap 8",

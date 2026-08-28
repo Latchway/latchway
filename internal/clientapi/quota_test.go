@@ -22,6 +22,10 @@ func TestFeatureQuotaUsesCanonicalAuthenticatedInputAndExactSafeWireShape(t *tes
 	used := int64(25)
 	reserved := int64(5)
 	remaining := int64(70)
+	costMaximum := int64(17)
+	costUsed := int64(9)
+	costReserved := int64(0)
+	costRemaining := int64(8)
 	unsafe := maximumSafeJSONInteger + 1
 	reset := testInstant.Add(12 * time.Hour)
 	provider := &fakeFeatureQuotaProvider{result: FeatureQuotaResult{
@@ -36,6 +40,10 @@ func TestFeatureQuotaUsesCanonicalAuthenticatedInputAndExactSafeWireShape(t *tes
 				Reserved: &unsafe, Remaining: &unsafe, Hard: true,
 			},
 			{Metric: "concurrent_streams", Hard: true},
+			{
+				Metric: "cost_nano_usd", Maximum: &costMaximum, Used: &costUsed,
+				Reserved: &costReserved, Remaining: &costRemaining, ResetsAt: &reset, Hard: true,
+			},
 		},
 	}}
 	handler := newTestHandlerWithFeatureQuotas(
@@ -83,7 +91,7 @@ func TestFeatureQuotaUsesCanonicalAuthenticatedInputAndExactSafeWireShape(t *tes
 		t.Fatalf("quota snapshot identity = %#v", document)
 	}
 	limits, ok := document["limits"].([]any)
-	if !ok || len(limits) != 3 {
+	if !ok || len(limits) != 4 {
 		t.Fatalf("limits = %#v", document["limits"])
 	}
 	first := limits[0].(map[string]any)
@@ -99,6 +107,14 @@ func TestFeatureQuotaUsesCanonicalAuthenticatedInputAndExactSafeWireShape(t *tes
 	}
 	nilLimit := limits[2].(map[string]any)
 	assertExactKeys(t, nilLimit, "metric", "hard")
+	costLimit := limits[3].(map[string]any)
+	assertExactKeys(t, costLimit, "metric", "maximum", "used", "reserved", "remaining", "resets_at", "hard")
+	if costLimit["metric"] != "cost_nano_usd" || costLimit["maximum"] != float64(17) ||
+		costLimit["used"] != float64(9) || costLimit["reserved"] != float64(0) ||
+		costLimit["remaining"] != float64(8) || costLimit["resets_at"] != reset.Format(time.RFC3339) ||
+		costLimit["hard"] != true {
+		t.Fatalf("hard-cost quota projection = %#v", costLimit)
+	}
 	if strings.Contains(response.Body.String(), validQuotaAccessToken) || strings.Contains(response.Body.String(), validProof) || strings.Contains(response.Body.String(), "attacker.invalid") {
 		t.Fatalf("quota response leaked transport input: %s", response.Body.String())
 	}
@@ -283,7 +299,7 @@ func TestFeatureQuotaRejectsInvalidProviderResults(t *testing.T) {
 				result.Limits[index] = FeatureQuotaLimit{Metric: "logical_requests", Hard: true}
 			}
 		}},
-		{name: "unsupported metric", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Metric = "cost_nano_usd" }},
+		{name: "unsupported metric", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Metric = "input_tokens" }},
 		{name: "soft limit", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Hard = false }},
 		{name: "negative maximum", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Maximum = int64Pointer(-1) }},
 		{name: "negative used", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Used = int64Pointer(-1) }},

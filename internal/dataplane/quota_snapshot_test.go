@@ -27,8 +27,13 @@ func TestFeatureQuotaProviderAuthenticatesAndProjectsEffectiveRules(t *testing.T
 		t.Fatalf("FeatureQuota() error = %v", err)
 	}
 	if result.Feature != fixture.input.Feature || !result.ObservedAt.Equal(fixture.observedAt) ||
-		len(result.Limits) != 3 {
+		len(result.Limits) != 4 {
 		t.Fatalf("FeatureQuota() = %+v", result)
+	}
+	if cost := result.Limits[3]; cost.Metric != quota.CostNanoUSDMetric ||
+		cost.Maximum == nil || *cost.Maximum != 1_000 || cost.Used == nil || *cost.Used != 300 ||
+		cost.Reserved == nil || *cost.Reserved != 200 || cost.Remaining == nil || *cost.Remaining != 500 {
+		t.Fatalf("hard-cost quota projection = %+v", cost)
 	}
 	if fixture.verifier.calls != 1 || fixture.sessions.calls != 1 ||
 		fixture.snapshots.calls != 1 || fixture.policies.calls != 1 || fixture.quotas.calls != 1 {
@@ -62,7 +67,7 @@ func TestFeatureQuotaProviderAuthenticatesAndProjectsEffectiveRules(t *testing.T
 		captured.ConfigRevisionID != fixture.authorization.PolicyRevisionID ||
 		captured.FeatureKey != "assistant" || captured.LimitPlanKey != "starter" ||
 		captured.RouteKey != "" || captured.UpstreamKey != "" || captured.ModelKey != "" ||
-		len(captured.Rules) != 3 {
+		len(captured.Rules) != 4 {
 		t.Fatalf("quota snapshot input = %+v", captured)
 	}
 	for _, rule := range captured.Rules {
@@ -120,6 +125,13 @@ func TestFeatureQuotaProviderFailsClosedBeforeQuotaRead(t *testing.T) {
 			name: "physical scope",
 			edit: func(fixture *featureQuotaFixture) {
 				fixture.policies.projection.LimitPlan.Limits[0].Scope = []string{"user", "model"}
+			},
+			code: "configuration_invalid",
+		},
+		{
+			name: "physical cost scope",
+			edit: func(fixture *featureQuotaFixture) {
+				fixture.policies.projection.LimitPlan.Limits[3].Scope = []string{"user", "model"}
 			},
 			code: "configuration_invalid",
 		},
@@ -212,18 +224,25 @@ func newFeatureQuotaFixture(t *testing.T) *featureQuotaFixture {
 				Metric: quota.ConcurrentStreamsMetric, Algorithm: quota.ConcurrencyAlgorithm,
 				Scope: []string{"environment", "feature"}, Maximum: 3, Hard: true,
 			},
+			{
+				Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
+				Scope: []string{"user", "feature"}, Window: "1mo", Maximum: 1_000, Hard: true,
+			},
 		}},
 	}
 	observedAt := time.Date(2026, 8, 28, 5, 0, 0, 0, time.UTC)
 	maximum, used, reserved, remaining := int64(3), int64(0), int64(1), int64(2)
 	perRequestMaximum, bucketMaximum, bucketUsed, bucketReserved, bucketRemaining :=
 		int64(32), int64(32), int64(7), int64(0), int64(25)
+	costMaximum, costUsed, costReserved, costRemaining := int64(1_000), int64(300), int64(200), int64(500)
+	costReset := observedAt.Add(24 * time.Hour)
 	quotaSnapshot := quota.Snapshot{
 		Feature: "assistant", ObservedAt: observedAt,
 		Limits: []quota.LimitSnapshot{
 			{Metric: quota.ConcurrentStreamsMetric, Maximum: &maximum, Used: &used, Reserved: &reserved, Remaining: &remaining, Hard: true},
 			{Metric: quota.OutputTokensMetric, Maximum: &perRequestMaximum, Hard: true},
 			{Metric: quota.OutputTokensMetric, Maximum: &bucketMaximum, Used: &bucketUsed, Reserved: &bucketReserved, Remaining: &bucketRemaining, Hard: true},
+			{Metric: quota.CostNanoUSDMetric, Maximum: &costMaximum, Used: &costUsed, Reserved: &costReserved, Remaining: &costRemaining, ResetsAt: &costReset, Hard: true},
 		},
 	}
 	input := clientapi.FeatureQuotaInput{
