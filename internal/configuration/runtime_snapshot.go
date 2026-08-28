@@ -17,6 +17,7 @@ import (
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/protocol"
+	upstreamtarget "github.com/latchway/latchway/internal/upstream"
 )
 
 var (
@@ -61,10 +62,11 @@ type compiledUpstream struct {
 		Total     string `json:"total"`
 	} `json:"timeouts"`
 	DestinationPolicy struct {
-		AllowedPorts         []int `json:"allowedPorts"`
-		AllowRedirects       bool  `json:"allowRedirects"`
-		AllowPrivateNetworks bool  `json:"allowPrivateNetworks"`
-		DNSPinning           bool  `json:"dnsPinning"`
+		AllowedPorts         []int    `json:"allowedPorts"`
+		AllowRedirects       bool     `json:"allowRedirects"`
+		AllowPrivateNetworks bool     `json:"allowPrivateNetworks"`
+		AllowedCIDRs         []string `json:"allowedCidrs"`
+		DNSPinning           bool     `json:"dnsPinning"`
 	} `json:"destinationPolicy"`
 	StaticHeaders map[string]string `json:"staticHeaders"`
 }
@@ -669,7 +671,19 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		AllowPrivateNetworks: raw.DestinationPolicy.AllowPrivateNetworks,
 		DNSPinning:           raw.DestinationPolicy.DNSPinning,
 	}
-	if policy.AllowRedirects || policy.AllowPrivateNetworks || !policy.DNSPinning || len(policy.AllowedPorts) == 0 {
+	privateCIDRs, err := configuredPrivateCIDRs(
+		policy.AllowPrivateNetworks,
+		append([]string(nil), raw.DestinationPolicy.AllowedCIDRs...),
+	)
+	if err != nil {
+		return Upstream{}, ErrInvalid
+	}
+	policy.AllowedCIDRs = privateCIDRs
+	if policy.AllowRedirects || !policy.DNSPinning || len(policy.AllowedPorts) == 0 ||
+		upstreamtarget.ValidateDestination(raw.BaseURL, upstreamtarget.DestinationPolicy{
+			AllowPrivate: policy.AllowPrivateNetworks,
+			AllowedCIDRs: policy.AllowedCIDRs,
+		}) != nil {
 		return Upstream{}, ErrInvalid
 	}
 	seenPorts := make(map[int]struct{}, len(policy.AllowedPorts))

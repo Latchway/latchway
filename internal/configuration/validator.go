@@ -366,6 +366,7 @@ func applyDefaults(root map[string]any) {
 		setDefault(destination, "allowedPorts", []any{json.Number(defaultPort(stringValue(upstream, "baseUrl")))})
 		setDefault(destination, "allowRedirects", false)
 		setDefault(destination, "allowPrivateNetworks", false)
+		setDefault(destination, "allowedCidrs", []any{})
 		setDefault(destination, "dnsPinning", true)
 	}
 	upstreamTypes := make(map[string]string)

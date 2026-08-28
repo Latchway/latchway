@@ -42,6 +42,10 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	if got := stringArray(model, "capabilities"); len(got) != 3 || got[0] != "openai_responses" {
 		t.Fatalf("inferred model capabilities = %v", got)
 	}
+	destination := objectValue(objectArray(spec, "upstreams")[0], "destinationPolicy")
+	if destination["allowPrivateNetworks"] != false || len(stringArray(destination, "allowedCidrs")) != 0 {
+		t.Fatalf("default private destination policy = %#v", destination)
+	}
 	limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
 	if stringValue(limit, "algorithm") != "calendar" || limit["hard"] != true ||
 		!slices.Equal(stringArray(limit, "scope"), []string{"user", "feature"}) {

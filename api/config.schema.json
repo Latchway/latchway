@@ -696,9 +696,31 @@
           "default": [443]
         },
         "allowRedirects": { "type": "boolean", "default": false },
-        "allowPrivateNetworks": { "const": false },
+        "allowPrivateNetworks": { "type": "boolean", "default": false },
+        "allowedCidrs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 8, "maxLength": 43 },
+          "default": []
+        },
         "dnsPinning": { "type": "boolean", "default": true }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["allowPrivateNetworks"],
+            "properties": { "allowPrivateNetworks": { "const": true } }
+          },
+          "then": {
+            "required": ["allowedCidrs"],
+            "properties": { "allowedCidrs": { "minItems": 1 } }
+          },
+          "else": {
+            "properties": { "allowedCidrs": { "maxItems": 0 } }
+          }
+        }
+      ]
     },
     "Model": {
       "type": "object",

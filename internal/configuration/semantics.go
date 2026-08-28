@@ -3,7 +3,6 @@ package configuration
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -344,6 +343,16 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 	for _, upstreamID := range sortedMapKeys(upstreams) {
 		upstream := upstreams[upstreamID]
 		base := "/spec/upstreams/" + pointerToken(upstreamID)
+		destinationPolicy := objectValue(upstream, "destinationPolicy")
+		allowPrivate, _ := destinationPolicy["allowPrivateNetworks"].(bool)
+		privateCIDRs, cidrErr := configuredPrivateCIDRs(allowPrivate, stringArray(destinationPolicy, "allowedCidrs"))
+		if cidrErr != nil {
+			issues = append(issues, errorIssue(
+				"upstream_private_cidrs_invalid",
+				base+"/destinationPolicy/allowedCidrs",
+				"Private destination CIDRs must be distinct, non-overlapping canonical subnets of RFC 1918 IPv4 space or IPv6 ULA space and require the explicit private-network opt-in.",
+			))
+		}
 		parsed, urlIssues := validateUpstreamURL(stringValue(upstream, "baseUrl"), base+"/baseUrl")
 		issues = append(issues, urlIssues...)
 		if parsed != nil {
@@ -358,8 +367,17 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 			if !numberArrayContains(objectValue(upstream, "destinationPolicy"), "allowedPorts", port) {
 				issues = append(issues, errorIssue("upstream_port_not_allowed", base+"/destinationPolicy/allowedPorts", "The upstream base URL port must be explicitly allowed."))
 			}
+			if cidrErr == nil && upstreamtarget.ValidateDestination(
+				stringValue(upstream, "baseUrl"),
+				upstreamtarget.DestinationPolicy{AllowPrivate: allowPrivate, AllowedCIDRs: privateCIDRs},
+			) != nil {
+				issues = append(issues, errorIssue(
+					"upstream_private_destination",
+					base+"/baseUrl",
+					"A literal private upstream address must be contained by an explicit private destination CIDR; special-use destinations are always forbidden.",
+				))
+			}
 		}
-		destinationPolicy := objectValue(upstream, "destinationPolicy")
 		if allowRedirects, _ := destinationPolicy["allowRedirects"].(bool); allowRedirects {
 			issues = append(issues, errorIssue("upstream_redirects_unsupported", base+"/destinationPolicy/allowRedirects", "Upstream redirects are not supported because each destination must be selected and validated by configuration."))
 		}
@@ -398,9 +416,6 @@ func validateUpstreamURL(raw, path string) (*url.URL, []Issue) {
 	}
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
 	if hostname == "localhost" || strings.HasSuffix(hostname, ".localhost") || strings.HasSuffix(hostname, ".local") || strings.HasSuffix(hostname, ".internal") || strings.HasSuffix(hostname, ".home.arpa") {
-		return nil, []Issue{errorIssue("upstream_private_destination", path, "Private and local upstream destinations are not permitted.")}
-	}
-	if address := net.ParseIP(hostname); address != nil && (address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsUnspecified() || address.IsMulticast()) {
 		return nil, []Issue{errorIssue("upstream_private_destination", path, "Private and local upstream destinations are not permitted.")}
 	}
 	return parsed, nil

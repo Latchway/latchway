@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/netip"
 	"reflect"
 	"regexp"
 	"slices"
@@ -1120,6 +1121,9 @@ func cloneModel(model configuration.Model) configuration.Model {
 func cloneUpstream(upstream configuration.Upstream) configuration.Upstream {
 	upstream.DestinationPolicy.AllowedPorts = append(
 		[]int(nil), upstream.DestinationPolicy.AllowedPorts...,
+	)
+	upstream.DestinationPolicy.AllowedCIDRs = append(
+		[]netip.Prefix(nil), upstream.DestinationPolicy.AllowedCIDRs...,
 	)
 	if upstream.StaticHeaders != nil {
 		headers := make(map[string]string, len(upstream.StaticHeaders))

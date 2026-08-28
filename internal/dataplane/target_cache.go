@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -49,6 +50,7 @@ type targetCacheKey struct {
 	allowPrivate     bool
 	dnsPinning       bool
 	allowedPorts     string
+	allowedCIDRs     string
 	connectTimeout   time.Duration
 	firstByteTimeout time.Duration
 	idleTimeout      time.Duration
@@ -295,11 +297,15 @@ func (lease *cachedTargetLease) WithHeaderDispatchWithBeforeRoundTrip(
 func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 	if !identifierPattern.MatchString(config.ID) || !validProtectedUpstreamType(config.Type) ||
 		config.BaseURL == "" || !validTargetTimeouts(config.Timeouts) ||
-		config.DestinationPolicy.AllowRedirects || config.DestinationPolicy.AllowPrivateNetworks ||
+		config.DestinationPolicy.AllowRedirects ||
 		!config.DestinationPolicy.DNSPinning || len(config.DestinationPolicy.AllowedPorts) == 0 {
 		return targetCacheKey{}, errTargetConfiguration
 	}
-	if err := upstream.ValidateBaseURL(config.BaseURL); err != nil {
+	destinationPolicy := upstream.DestinationPolicy{
+		AllowPrivate: config.DestinationPolicy.AllowPrivateNetworks,
+		AllowedCIDRs: append([]netip.Prefix(nil), config.DestinationPolicy.AllowedCIDRs...),
+	}
+	if err := upstream.ValidateDestination(config.BaseURL, destinationPolicy); err != nil {
 		return targetCacheKey{}, errTargetConfiguration
 	}
 	parsed, err := url.Parse(config.BaseURL)
@@ -334,6 +340,16 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 		encodedPorts.WriteString(strconv.Itoa(allowed))
 		encodedPorts.WriteByte(',')
 	}
+	privateCIDRs := make([]string, len(destinationPolicy.AllowedCIDRs))
+	for index, prefix := range destinationPolicy.AllowedCIDRs {
+		privateCIDRs[index] = prefix.String()
+	}
+	sort.Strings(privateCIDRs)
+	var encodedCIDRs strings.Builder
+	for _, prefix := range privateCIDRs {
+		encodedCIDRs.WriteString(prefix)
+		encodedCIDRs.WriteByte(',')
+	}
 
 	return targetCacheKey{
 		upstreamID: config.ID, upstreamType: config.Type, baseURL: config.BaseURL,
@@ -342,6 +358,7 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 		allowPrivate:   config.DestinationPolicy.AllowPrivateNetworks,
 		dnsPinning:     config.DestinationPolicy.DNSPinning,
 		allowedPorts:   encodedPorts.String(),
+		allowedCIDRs:   encodedCIDRs.String(),
 		connectTimeout: config.Timeouts.Connect, firstByteTimeout: config.Timeouts.FirstByte,
 		idleTimeout: config.Timeouts.Idle, totalTimeout: config.Timeouts.Total,
 	}, nil

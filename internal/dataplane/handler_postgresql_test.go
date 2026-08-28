@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"reflect"
@@ -2793,7 +2794,19 @@ func (factory *dataPlaneE2EPrivateTargetFactory) Acquire(config configuration.Up
 		config.Authentication.SecretRef != "secret/provider-credential" || factory.privateBaseURL == "" {
 		return nil, errTargetConfiguration
 	}
-	target, err := upstream.NewTarget(factory.privateBaseURL, upstream.DestinationPolicy{AllowPrivate: true}, upstream.Timeouts{
+	privateURL, err := url.Parse(factory.privateBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	privateAddress, err := netip.ParseAddr(privateURL.Hostname())
+	if err != nil {
+		return nil, err
+	}
+	privateAddress = privateAddress.Unmap()
+	target, err := upstream.NewTarget(factory.privateBaseURL, upstream.DestinationPolicy{
+		AllowPrivate: true,
+		AllowedCIDRs: []netip.Prefix{netip.PrefixFrom(privateAddress, privateAddress.BitLen())},
+	}, upstream.Timeouts{
 		Connect: config.Timeouts.Connect, TLSHandshake: config.Timeouts.Connect,
 		ResponseHeader: config.Timeouts.FirstByte, IdleConnection: config.Timeouts.Idle,
 	}, nil)

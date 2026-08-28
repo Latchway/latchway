@@ -871,11 +871,15 @@ func TestProductionRelayTruncatedProviderBodySettlesUnavailable(t *testing.T) {
 	provider.Start()
 	defer provider.Close()
 
-	nativeTarget, err := upstream.NewTarget(provider.URL, upstream.DestinationPolicy{AllowPrivate: true}, upstream.Timeouts{
+	privateAddress := netip.MustParseAddr(provider.Listener.Addr().(*net.TCPAddr).IP.String()).Unmap()
+	nativeTarget, err := upstream.NewTarget(provider.URL, upstream.DestinationPolicy{
+		AllowPrivate: true,
+		AllowedCIDRs: []netip.Prefix{netip.PrefixFrom(privateAddress, privateAddress.BitLen())},
+	}, upstream.Timeouts{
 		Connect: time.Second, TLSHandshake: time.Second, ResponseHeader: time.Second, IdleConnection: time.Second,
 	}, nil)
 	if err != nil {
-		t.Fatalf("construct loopback upstream target: %v", err)
+		t.Fatalf("construct private upstream target: %v", err)
 	}
 	fixture := newHandlerFixture(t)
 	fixture.targets.target = &protectedDispatchTarget{target: nativeTarget}

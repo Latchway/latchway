@@ -5,6 +5,7 @@ package configuration
 import (
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,17 +279,19 @@ type UpstreamTimeouts struct {
 }
 
 // UpstreamDestinationPolicy contains the validated, server-owned SSRF policy.
-// Version 1 keeps private-network access disabled even if persisted state is
-// corrupted; explicit CIDR exceptions are not part of the current contract.
+// Private-network access is bounded to explicit canonical RFC 1918 or IPv6 ULA
+// prefixes and is revalidated again when the production transport is built.
 type UpstreamDestinationPolicy struct {
 	AllowedPorts         []int
 	AllowRedirects       bool
 	AllowPrivateNetworks bool
+	AllowedCIDRs         []netip.Prefix
 	DNSPinning           bool
 }
 
 func (policy UpstreamDestinationPolicy) clone() UpstreamDestinationPolicy {
 	policy.AllowedPorts = append([]int(nil), policy.AllowedPorts...)
+	policy.AllowedCIDRs = append([]netip.Prefix(nil), policy.AllowedCIDRs...)
 	return policy
 }
 

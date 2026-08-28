@@ -51,6 +51,10 @@ func NewTarget(rawBaseURL string, policy DestinationPolicy, timeouts Timeouts, r
 	if err != nil {
 		return nil, err
 	}
+	policy.AllowedCIDRs = append([]netip.Prefix(nil), policy.AllowedCIDRs...)
+	if err := validateDestination(baseURL, policy); err != nil {
+		return nil, err
+	}
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
@@ -103,6 +107,74 @@ func NewTarget(rawBaseURL string, policy DestinationPolicy, timeouts Timeouts, r
 func ValidateBaseURL(rawBaseURL string) error {
 	_, err := parseBaseURL(rawBaseURL)
 	return err
+}
+
+// ValidateDestination applies the complete construction-time URL and private
+// network policy checks without constructing a transport or resolving DNS.
+// Hostname answers are independently checked by the protected dialer on every
+// connection, which keeps this validation safe against DNS rebinding.
+func ValidateDestination(rawBaseURL string, policy DestinationPolicy) error {
+	baseURL, err := parseBaseURL(rawBaseURL)
+	if err != nil {
+		return err
+	}
+	return validateDestination(baseURL, policy)
+}
+
+// ValidateDestinationPolicy accepts only explicit, non-overlapping subnets of
+// the RFC 1918 IPv4 ranges or the IPv6 unique-local range. An allowlist cannot
+// exist independently of the opt-in flag, and the flag cannot be enabled
+// without at least one bounded exception.
+func ValidateDestinationPolicy(policy DestinationPolicy) error {
+	if !policy.AllowPrivate {
+		if len(policy.AllowedCIDRs) != 0 {
+			return errors.New("private destination CIDRs require the private-network opt-in")
+		}
+		return nil
+	}
+	if len(policy.AllowedCIDRs) == 0 || len(policy.AllowedCIDRs) > 32 {
+		return errors.New("private-network access requires between one and 32 CIDRs")
+	}
+	for index, prefix := range policy.AllowedCIDRs {
+		if !validPrivateDestinationPrefix(prefix) {
+			return fmt.Errorf("private destination CIDR %d is not a canonical RFC 1918 or IPv6 ULA subnet", index)
+		}
+		for prior := 0; prior < index; prior++ {
+			if prefixesOverlap(prefix, policy.AllowedCIDRs[prior]) {
+				return fmt.Errorf("private destination CIDRs %d and %d overlap", prior, index)
+			}
+		}
+	}
+	return nil
+}
+
+func validateDestination(baseURL *url.URL, policy DestinationPolicy) error {
+	if err := ValidateDestinationPolicy(policy); err != nil {
+		return err
+	}
+	host := strings.TrimSuffix(baseURL.Hostname(), ".")
+	if address, err := netip.ParseAddr(host); err == nil && !policy.allowed(address.Unmap()) {
+		return errors.New("upstream address is blocked by destination policy")
+	}
+	return nil
+}
+
+func validPrivateDestinationPrefix(prefix netip.Prefix) bool {
+	if !prefix.IsValid() || prefix != prefix.Masked() || prefix.Addr().Is4In6() {
+		return false
+	}
+	for _, privateRange := range privateDestinationPrefixes {
+		if prefix.Addr().BitLen() == privateRange.Addr().BitLen() &&
+			prefix.Bits() >= privateRange.Bits() && privateRange.Contains(prefix.Addr()) {
+			return true
+		}
+	}
+	return false
+}
+
+func prefixesOverlap(first, second netip.Prefix) bool {
+	return first.IsValid() && second.IsValid() &&
+		(first.Contains(second.Addr()) || second.Contains(first.Addr()))
 }
 
 func parseBaseURL(rawBaseURL string) (*url.URL, error) {
@@ -242,33 +314,49 @@ func (d *protectedDialer) resolve(ctx context.Context, host string) ([]netip.Add
 }
 
 func (p DestinationPolicy) allowed(address netip.Addr) bool {
-	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() {
+	address = address.Unmap()
+	if hardBlockedDestination(address) {
 		return false
 	}
-	if len(p.AllowedCIDRs) > 0 {
-		for _, prefix := range p.AllowedCIDRs {
-			if prefix.Contains(address) {
-				return true
-			}
-		}
-		return false
-	}
-	if p.AllowPrivate {
+	if isPublicDestination(address) {
 		return true
 	}
-	return isPublicDestination(address)
+	if !p.AllowPrivate || !address.IsPrivate() {
+		return false
+	}
+	for _, prefix := range p.AllowedCIDRs {
+		if validPrivateDestinationPrefix(prefix) && prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 func isPublicDestination(address netip.Addr) bool {
-	if !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || address.IsUnspecified() {
+	if hardBlockedDestination(address) || address.IsPrivate() {
 		return false
+	}
+	return address.IsGlobalUnicast()
+}
+
+func hardBlockedDestination(address netip.Addr) bool {
+	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() ||
+		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() {
+		return true
 	}
 	for _, prefix := range additionalBlockedPrefixes {
 		if prefix.Contains(address) {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+var privateDestinationPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"),
 }
 
 var additionalBlockedPrefixes = []netip.Prefix{
@@ -279,4 +367,6 @@ var additionalBlockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("fd00:ec2::254/128"),
 }

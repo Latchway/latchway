@@ -3,6 +3,7 @@ package dataplane
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strings"
 	"time"
@@ -19,7 +20,10 @@ func buildProtectedTarget(config configuration.Upstream) (cachedDispatchTarget, 
 	}
 	target, err := upstream.NewTarget(
 		config.BaseURL,
-		upstream.DestinationPolicy{AllowPrivate: false},
+		upstream.DestinationPolicy{
+			AllowPrivate: config.DestinationPolicy.AllowPrivateNetworks,
+			AllowedCIDRs: append([]netip.Prefix(nil), config.DestinationPolicy.AllowedCIDRs...),
+		},
 		upstream.Timeouts{
 			Connect: config.Timeouts.Connect, TLSHandshake: config.Timeouts.Connect,
 			ResponseHeader: config.Timeouts.FirstByte, IdleConnection: config.Timeouts.Idle,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -74,6 +75,11 @@ func TestTargetCacheConcurrentAcquireReusesSingleConstruction(t *testing.T) {
 func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testing.T) {
 	base := cacheTestUpstream("primary")
 	base.DestinationPolicy.AllowedPorts = []int{8443, 443}
+	base.DestinationPolicy.AllowPrivateNetworks = true
+	base.DestinationPolicy.AllowedCIDRs = []netip.Prefix{
+		netip.MustParsePrefix("fd12:3456::/48"),
+		netip.MustParsePrefix("10.20.30.40/32"),
+	}
 	key, err := protectedTargetKey(base)
 	if err != nil {
 		t.Fatalf("protectedTargetKey() error = %v", err)
@@ -83,6 +89,7 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 		key.allowRedirects != base.DestinationPolicy.AllowRedirects ||
 		key.allowPrivate != base.DestinationPolicy.AllowPrivateNetworks ||
 		key.dnsPinning != base.DestinationPolicy.DNSPinning || key.allowedPorts != "443,8443," ||
+		key.allowedCIDRs != "10.20.30.40/32,fd12:3456::/48," ||
 		key.connectTimeout != base.Timeouts.Connect || key.firstByteTimeout != base.Timeouts.FirstByte ||
 		key.idleTimeout != base.Timeouts.Idle || key.totalTimeout != base.Timeouts.Total {
 		t.Fatalf("cache key omitted a transport field: %#v", key)
@@ -90,6 +97,10 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 
 	reordered := cloneCacheTestUpstream(base)
 	reordered.DestinationPolicy.AllowedPorts = []int{443, 8443}
+	reordered.DestinationPolicy.AllowedCIDRs = []netip.Prefix{
+		netip.MustParsePrefix("10.20.30.40/32"),
+		netip.MustParsePrefix("fd12:3456::/48"),
+	}
 	reorderedKey, err := protectedTargetKey(reordered)
 	if err != nil || reorderedKey != key {
 		t.Fatalf("port ordering changed canonical key: %#v err=%v", reorderedKey, err)
@@ -113,6 +124,9 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 		{name: "base URL path", edit: func(value *configuration.Upstream) { value.BaseURL = "https://provider.example/v2" }},
 		{name: "insecure flag", edit: func(value *configuration.Upstream) { value.DangerousAllowInsecureHTTP = true }},
 		{name: "allowed ports", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = []int{443, 9443} }},
+		{name: "allowed CIDRs", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.41/32")}
+		}},
 		{name: "connect timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Connect += time.Millisecond }},
 		{name: "first byte timeout", edit: func(value *configuration.Upstream) { value.Timeouts.FirstByte += time.Millisecond }},
 		{name: "idle timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Idle += time.Millisecond }},
@@ -176,6 +190,32 @@ func TestTargetCacheRejectsInvalidConfigurationBeforeLookupOrConstruction(t *tes
 		}},
 		{name: "redirect", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowRedirects = true }},
 		{name: "private network", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowPrivateNetworks = true }},
+		{name: "CIDR without opt in", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+		}},
+		{name: "private CIDRs missing", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowPrivateNetworks = true
+			value.DestinationPolicy.AllowedCIDRs = nil
+		}},
+		{name: "private CIDR unmasked", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowPrivateNetworks = true
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.40/24")}
+		}},
+		{name: "private CIDR special use", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowPrivateNetworks = true
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("169.254.0.0/16")}
+		}},
+		{name: "private CIDRs overlap", edit: func(value *configuration.Upstream) {
+			value.DestinationPolicy.AllowPrivateNetworks = true
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{
+				netip.MustParsePrefix("10.20.0.0/16"), netip.MustParsePrefix("10.20.30.40/32"),
+			}
+		}},
+		{name: "literal outside private CIDR", edit: func(value *configuration.Upstream) {
+			value.BaseURL = "https://10.20.30.41/v1"
+			value.DestinationPolicy.AllowPrivateNetworks = true
+			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.40/32")}
+		}},
 		{name: "DNS pinning", edit: func(value *configuration.Upstream) { value.DestinationPolicy.DNSPinning = false }},
 		{name: "ports missing", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = nil }},
 		{name: "ports duplicate", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = []int{443, 443} }},
@@ -204,6 +244,31 @@ func TestTargetCacheRejectsInvalidConfigurationBeforeLookupOrConstruction(t *tes
 	if _, err := newTargetCache(1, nil); err == nil {
 		t.Fatal("nil target builder accepted")
 	}
+}
+
+func TestProductionTargetCacheAcceptsBoundedPrivateDestinations(t *testing.T) {
+	t.Parallel()
+
+	cache := NewTargetCache()
+	t.Cleanup(func() { _ = cache.Close() })
+	private := cacheTestUpstream("private")
+	private.BaseURL = "https://10.20.30.40/v1"
+	private.DestinationPolicy.AllowPrivateNetworks = true
+	private.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.40/32")}
+	lease, err := cache.Acquire(private)
+	if err != nil || lease == nil {
+		t.Fatalf("bounded private target acquisition = (%T, %v)", lease, err)
+	}
+	lease.Release()
+
+	public := cloneCacheTestUpstream(private)
+	public.ID = "public"
+	public.BaseURL = "https://provider.example/v1"
+	publicLease, err := cache.Acquire(public)
+	if err != nil || publicLease == nil {
+		t.Fatalf("public target with private allowlist acquisition = (%T, %v)", publicLease, err)
+	}
+	publicLease.Release()
 }
 
 func TestTargetCacheCapacityUsesLRUAndClosesIdleEvictions(t *testing.T) {
@@ -442,6 +507,7 @@ func cacheTestUpstream(upstreamID string) configuration.Upstream {
 
 func cloneCacheTestUpstream(value configuration.Upstream) configuration.Upstream {
 	value.DestinationPolicy.AllowedPorts = append([]int(nil), value.DestinationPolicy.AllowedPorts...)
+	value.DestinationPolicy.AllowedCIDRs = append([]netip.Prefix(nil), value.DestinationPolicy.AllowedCIDRs...)
 	if value.StaticHeaders != nil {
 		clonedHeaders := make(map[string]string, len(value.StaticHeaders))
 		for name, headerValue := range value.StaticHeaders {
