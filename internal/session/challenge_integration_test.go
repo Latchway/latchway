@@ -1011,7 +1011,7 @@ func sessionTestCompiledSpec(identityProviders, attestationPolicies []any) map[s
 		}},
 		"models": []any{map[string]any{
 			"id": "fast", "upstream": "primary", "upstreamModel": "configured-fast-model",
-			"capabilities": []any{"openai_responses"},
+			"capabilities": []any{"openai_chat"},
 		}},
 		"limitPlans": []any{map[string]any{
 			"id": "free", "limits": []any{map[string]any{
@@ -1020,7 +1020,7 @@ func sessionTestCompiledSpec(identityProviders, attestationPolicies []any) map[s
 			}},
 		}},
 		"features": []any{map[string]any{
-			"id": "assistant", "protocol": "openai_responses", "attestationPolicy": policyID,
+			"id": "assistant", "protocol": "openai_chat", "attestationPolicy": policyID,
 			"access":    map[string]any{"expression": "principal.authenticated"},
 			"limitPlan": map[string]any{"expression": "'free'"},
 			"output":    map[string]any{"defaultMaximumTokens": 800, "absoluteMaximumTokens": 1500},

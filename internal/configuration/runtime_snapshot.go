@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/protocol"
 )
 
 var (
@@ -738,8 +739,7 @@ func runtimeLimitPlan(raw compiledLimitPlan) (LimitPlan, error) {
 }
 
 func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, error) {
-	protocols := []string{"openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"}
-	if !runtimeIdentifierPattern.MatchString(raw.ID) || !slices.Contains(protocols, raw.Protocol) ||
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || !protocol.ProtocolExecutable(raw.Protocol) ||
 		!runtimeIdentifierPattern.MatchString(raw.AttestationPolicyID) ||
 		len(raw.Access.Expression) == 0 || len(raw.Access.Expression) > 4096 ||
 		len(raw.LimitPlan.Expression) == 0 || len(raw.LimitPlan.Expression) > 4096 ||

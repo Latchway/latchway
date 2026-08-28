@@ -938,13 +938,13 @@ func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 		{
 			name: "feature route capability mismatch",
 			mutate: func(spec map[string]any) {
-				objectArray(spec, "models")[0]["capabilities"] = []any{"openai_chat"}
+				objectArray(spec, "models")[0]["capabilities"] = []any{"openai_responses"}
 			},
 		},
 		{
 			name: "duplicate model capability",
 			mutate: func(spec map[string]any) {
-				objectArray(spec, "models")[0]["capabilities"] = []any{"openai_responses", "openai_responses"}
+				objectArray(spec, "models")[0]["capabilities"] = []any{"openai_chat", "openai_chat"}
 			},
 		},
 		{

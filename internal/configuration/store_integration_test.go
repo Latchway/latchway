@@ -169,6 +169,29 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	if _, err := store.ActivateRevision(ctx, principal, invalid.ID, invalid.ETag); !errors.Is(err, ErrConfigurationInvalid) {
 		t.Fatalf("ActivateRevision(invalid policy) error = %v", err)
 	}
+
+	futureDocument := configurationObject(t)
+	futureSpec := objectValue(futureDocument, "spec")
+	objectArray(futureSpec, "features")[0]["protocol"] = "openai_responses"
+	objectArray(futureSpec, "models")[0]["capabilities"] = []any{"openai_responses"}
+	futureJSON, _ := json.Marshal(futureDocument)
+	if issues := store.validator.SchemaIssues(futureJSON); len(issues) != 0 {
+		t.Fatalf("future-protocol draft is not schema-valid: %+v", issues)
+	}
+	future, err := store.CreateRevision(ctx, principal, CreateInput{
+		EnvironmentID: scope.EnvironmentID, Document: futureJSON,
+		Description: "future protocol without executable adapter",
+	})
+	if err != nil {
+		t.Fatalf("CreateRevision(future protocol) error = %v", err)
+	}
+	futureReport, err := store.ValidateRevision(ctx, principal, future.ID)
+	if err != nil || futureReport.Valid || !hasIssue(futureReport.Issues, "protocol_endpoint_unavailable") {
+		t.Fatalf("future protocol report=%+v error=%v", futureReport, err)
+	}
+	if _, err := store.ActivateRevision(ctx, principal, future.ID, future.ETag); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("ActivateRevision(future protocol) error = %v", err)
+	}
 	activeBeforeRollback, err := store.GetActiveRevision(ctx, principal, scope.EnvironmentID)
 	if err != nil || activeBeforeRollback.ID != current.ID {
 		t.Fatalf("active revision before rollback=%+v error=%v", activeBeforeRollback, err)

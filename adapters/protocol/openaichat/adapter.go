@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	ID                      = "openai_chat"
+	ID                      = protocol.OpenAIChatID
 	defaultMaximumBody      = int64(1 << 20)
 	maximumObservedResponse = int64(4 << 20)
 	maximumSSEEvent         = 1 << 20

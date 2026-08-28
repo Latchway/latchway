@@ -8,12 +8,13 @@ import (
 	"strings"
 
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/session"
 )
 
 const (
-	chatCompletionsPath = "/v1/chat/completions"
-	providerChatPath    = "/chat/completions"
+	chatCompletionsPath = protocol.OpenAIChatPublicPath
+	providerChatPath    = protocol.OpenAIChatProviderPath
 	protocolVersion     = "1"
 
 	maximumAccessTokenBytes = 16 << 10
@@ -48,26 +49,6 @@ func requestViolation(path, message string) *violation {
 		detail: "The request does not match the Latchway client protocol.",
 		fields: []problem.FieldError{{Path: path, Message: message}},
 	}
-}
-
-func validateEndpoint(request *http.Request) *violation {
-	if request == nil || request.URL == nil {
-		return requestViolation("request", "A valid HTTP request is required.")
-	}
-	if request.Method != http.MethodPost {
-		result := requestViolation("method", "POST is required by this endpoint.")
-		result.allowValue = http.MethodPost
-		return result
-	}
-	if request.URL.Opaque != "" || request.URL.User != nil || request.URL.Fragment != "" ||
-		request.URL.RawFragment != "" || request.URL.Path != chatCompletionsPath ||
-		request.URL.RawPath != "" || request.URL.EscapedPath() != chatCompletionsPath {
-		return requestViolation("path", "The canonical /v1/chat/completions path is required.")
-	}
-	if request.URL.RawQuery != "" || request.URL.ForceQuery {
-		return requestViolation("query", "Query parameters are not supported by this endpoint.")
-	}
-	return nil
 }
 
 func parseDeclaration(request *http.Request) (declaration, *violation) {

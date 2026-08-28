@@ -469,14 +469,48 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 	t.Cleanup(func() { _ = dataPlaneHandler.Close() })
 	protectedHandler := withDataPlaneE2ERequestIdentity(t, dataPlaneHandler.Handler())
 	dataTarget := mustDataPlaneE2EURL(t, dataPlaneE2EOrigin+chatCompletionsPath)
-	accessProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
-		now, "dataplane-e2e-chat", grant.AccessToken)
-
 	chatBody := map[string]any{
 		"model":                 "untrusted-client-model",
 		"messages":              []any{map[string]any{"role": "user", "content": dataPlaneE2EPromptMarker}},
 		"max_completion_tokens": 9999,
 	}
+
+	// The protected request binding comes from the exact endpoint registry
+	// match, never the inbound Host or a hard-coded Chat URI. Proofs for a
+	// neighboring endpoint or another method must fail before quota or target
+	// state is touched.
+	proofBaseline := countDataPlaneE2EDPoPReplays(t, ctx, pool)
+	responsesTarget := mustDataPlaneE2EURL(
+		t, dataPlaneE2EOrigin+protocol.OpenAIResponsesPublicPath,
+	)
+	wrongEndpointProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodPost, responsesTarget,
+		now, "dataplane-e2e-wrong-endpoint", grant.AccessToken,
+	)
+	wrongEndpointResponse := postDataPlaneE2EChat(
+		t, protectedHandler, grant.AccessToken, wrongEndpointProof,
+		"client-wrong-endpoint-123", chatBody,
+	)
+	assertDataPlaneE2EProblem(t, wrongEndpointResponse, http.StatusUnauthorized, "dpop_invalid")
+	wrongMethodProof := signDataPlaneE2EDPoP(
+		t, dpopPrivateKey, http.MethodGet, dataTarget,
+		now, "dataplane-e2e-wrong-method", grant.AccessToken,
+	)
+	wrongMethodResponse := postDataPlaneE2EChat(
+		t, protectedHandler, grant.AccessToken, wrongMethodProof,
+		"client-wrong-method-123", chatBody,
+	)
+	assertDataPlaneE2EProblem(t, wrongMethodResponse, http.StatusUnauthorized, "dpop_invalid")
+	if got := countDataPlaneE2EDPoPReplays(t, ctx, pool); got != proofBaseline {
+		t.Fatalf("invalid endpoint proofs consumed replay state: got %d want %d", got, proofBaseline)
+	}
+	if targets.acquisitions.Load() != 0 || targets.releases.Load() != 0 || len(mock.Observations()) != 0 {
+		t.Fatalf("invalid endpoint proofs reached dispatch: acquisitions=%d releases=%d observations=%d",
+			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
+	}
+
+	accessProof := signDataPlaneE2EDPoP(t, dpopPrivateKey, http.MethodPost, dataTarget,
+		now, "dataplane-e2e-chat", grant.AccessToken)
 	chatResponse := postDataPlaneE2EChat(t, protectedHandler, grant.AccessToken, accessProof,
 		dataPlaneE2EClientRequestID, chatBody)
 	if chatResponse.Code != http.StatusOK {

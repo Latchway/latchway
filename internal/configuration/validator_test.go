@@ -49,6 +49,58 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 	}
 }
 
+func TestValidatorKeepsFutureProtocolsSchemaValidButRejectsRuntimeActivation(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, protocolID := range []string{
+		"openai_responses", "openai_embeddings", "anthropic_messages", "opaque_http",
+	} {
+		t.Run(protocolID, func(t *testing.T) {
+			document := configurationObject(t)
+			spec := objectValue(document, "spec")
+			feature := objectArray(spec, "features")[0]
+			feature["protocol"] = protocolID
+			objectArray(spec, "models")[0]["capabilities"] = []any{protocolID}
+			if protocolID == "opaque_http" {
+				delete(feature, "output")
+				feature["opaqueHttp"] = map[string]any{
+					"allowedMethods": []any{"POST"}, "pathPrefixes": []any{"/safe"},
+					"maxBodyBytes": json.Number("1024"),
+				}
+			}
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+				t.Fatalf("future-protocol draft is not schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil ||
+				!hasIssue(report.Issues, "protocol_endpoint_unavailable") {
+				t.Fatalf("future protocol activated: report=%+v compiled=%s", report, compiled)
+			}
+
+			// Independently exercise the persisted compiled-snapshot boundary.
+			normalized := deepClone(document).(map[string]any)
+			applyDefaults(normalized)
+			compiled, marshalErr = json.Marshal(normalized)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if _, snapshotErr := newActiveSnapshot(
+				"validation", "validation", encoded, compiled,
+			); snapshotErr == nil {
+				t.Fatal("future protocol loaded as an active runtime snapshot")
+			}
+		})
+	}
+}
+
 func TestValidatorRejectsPathologicalNumberLexemesBeforeSchemaArithmetic(t *testing.T) {
 	t.Parallel()
 
@@ -1651,7 +1703,7 @@ func TestActiveSnapshotLookupsAreDeepCopies(t *testing.T) {
 		t.Fatalf("limit plan snapshot was mutable: %+v", planAgain)
 	}
 	feature, ok := snapshot.Feature("assistant")
-	if !ok || feature.Protocol != "openai_responses" || feature.Output == nil || feature.Output.DefaultMaximumTokens != 800 || feature.Output.AbsoluteMaximumTokens != 1500 || len(feature.Routes) != 1 || !slices.Equal(feature.Routes[0].FallbackOn, []string{"status_503"}) {
+	if !ok || feature.Protocol != "openai_chat" || feature.Output == nil || feature.Output.DefaultMaximumTokens != 800 || feature.Output.AbsoluteMaximumTokens != 1500 || len(feature.Routes) != 1 || !slices.Equal(feature.Routes[0].FallbackOn, []string{"status_503"}) {
 		t.Fatalf("feature snapshot = %+v ok=%t", feature, ok)
 	}
 	feature.Output.DefaultMaximumTokens = 1
@@ -1717,7 +1769,7 @@ func configurationObject(t *testing.T) map[string]any {
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
 			"models":[{"id":"fast","upstream":"primary","upstreamModel":"configured-fast-model"}],
 			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","scope":["user","feature"],"window":"1d","maximum":5}]}],
-			"features":[{"id":"assistant","protocol":"openai_responses","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"output":{"defaultMaximumTokens":800,"absoluteMaximumTokens":1500},"routes":[{"id":"primary","when":"true","model":"fast","priority":10}]}]
+			"features":[{"id":"assistant","protocol":"openai_chat","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"output":{"defaultMaximumTokens":800,"absoluteMaximumTokens":1500},"routes":[{"id":"primary","when":"true","model":"fast","priority":10}]}]
 		}
 	}`))
 	if err != nil {

@@ -100,9 +100,6 @@ func TestClientAPIIsMountedAtUnstrippedPathsAheadOfConsoleFallback(t *testing.T)
 	for _, path := range []string{
 		"/client/v1/session-challenges",
 		"/client/v1/not-a-real-endpoint",
-		"/v1/responses",
-		"/v1/not-a-real-endpoint",
-		"/proxy/configured-route/remaining/path",
 		"/.well-known/jwks.json",
 		"/.well-known/latchway",
 		"/.well-known/not-a-real-endpoint",
@@ -118,11 +115,11 @@ func TestClientAPIIsMountedAtUnstrippedPathsAheadOfConsoleFallback(t *testing.T)
 	}
 }
 
-func TestDataPlaneOwnsOnlyTheExactChatCompletionsRoute(t *testing.T) {
+func TestDataPlaneOwnsTheReservedBoundedProtocolSpaces(t *testing.T) {
 	t.Parallel()
 
-	seenDataPlane := make(chan string, 4)
-	seenClientAPI := make(chan string, 3)
+	seenDataPlane := make(chan string, 16)
+	seenClientAPI := make(chan string, 4)
 	dataPlane := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := requestidentity.FromContext(r.Context()); !ok {
 			t.Fatal("data-plane request is missing its logical request identity")
@@ -149,13 +146,28 @@ func TestDataPlaneOwnsOnlyTheExactChatCompletionsRoute(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	for _, method := range []string{http.MethodPost, http.MethodGet} {
+	for _, candidate := range []struct {
+		method string
+		target string
+	}{
+		{method: http.MethodPost, target: "/v1/chat/completions"},
+		{method: http.MethodGet, target: "/v1/chat/completions"},
+		{method: http.MethodPost, target: "/v1/responses"},
+		{method: http.MethodPost, target: "/v1/embeddings"},
+		{method: http.MethodPost, target: "/v1/messages"},
+		{method: http.MethodPost, target: "/proxy/weather/v2/current"},
+		{method: http.MethodPost, target: "/v1/not-a-real-endpoint"},
+		{method: http.MethodPost, target: "/proxy/not-a-real-endpoint"},
+	} {
 		recorder := httptest.NewRecorder()
-		server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(method, "/v1/chat/completions", nil))
+		server.httpServer.Handler.ServeHTTP(
+			recorder, httptest.NewRequest(candidate.method, candidate.target, nil),
+		)
 		if recorder.Code != http.StatusAccepted {
-			t.Fatalf("exact data-plane route status = %d, want %d", recorder.Code, http.StatusAccepted)
+			t.Fatalf("reserved data-plane target %q status = %d, want %d",
+				candidate.target, recorder.Code, http.StatusAccepted)
 		}
-		if got := <-seenDataPlane; got != method+" /v1/chat/completions" {
+		if got := <-seenDataPlane; got != candidate.method+" "+candidate.target {
 			t.Fatalf("data-plane request = %q", got)
 		}
 	}
@@ -173,7 +185,7 @@ func TestDataPlaneOwnsOnlyTheExactChatCompletionsRoute(t *testing.T) {
 		}
 	}
 
-	for _, path := range []string{"/v1/chat/completions/", "/v1/chat/completions/extra", "/v1/responses"} {
+	for _, path := range []string{"/client/v1/sessions", "/.well-known/latchway"} {
 		recorder := httptest.NewRecorder()
 		server.httpServer.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
 		if recorder.Code != http.StatusNoContent {

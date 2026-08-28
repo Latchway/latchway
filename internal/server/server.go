@@ -87,13 +87,16 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	}, nil
 }
 
-// dataPlaneRoute selects by Go's decoded URL path so encoded aliases reach the
-// strict data-plane endpoint validator instead of falling through to a broader
-// client route. The handler itself rejects non-canonical RawPath and queries.
+// dataPlaneRoute reserves the complete AI-compatible /v1 and /proxy spaces for
+// the bounded data-plane endpoint registry. Selecting by Go's decoded URL path
+// ensures encoded aliases reach its strict canonical validator. Known but
+// unimplemented protocols and unknown neighboring paths therefore fail closed
+// in one place instead of falling through to another HTTP surface.
 func dataPlaneRoute(handler http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL != nil && r.URL.Path == "/v1/chat/completions" {
+			if r.URL != nil && (r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") ||
+				r.URL.Path == "/proxy" || strings.HasPrefix(r.URL.Path, "/proxy/")) {
 				handler.ServeHTTP(w, r)
 				return
 			}

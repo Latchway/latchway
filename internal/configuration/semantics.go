@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	"github.com/latchway/latchway/internal/protocol"
 	upstreamtarget "github.com/latchway/latchway/internal/upstream"
 )
 
@@ -540,7 +541,14 @@ func (validator *Validator) featureSemanticIssues(
 	for _, featureID := range sortedMapKeys(features) {
 		feature := features[featureID]
 		base := "/spec/features/" + pointerToken(featureID)
-		protocol := stringValue(feature, "protocol")
+		protocolID := stringValue(feature, "protocol")
+		if !protocol.ProtocolExecutable(protocolID) {
+			issues = append(issues, errorIssue(
+				"protocol_endpoint_unavailable",
+				base+"/protocol",
+				"The selected protocol has no executable adapter and public endpoint in this server build.",
+			))
+		}
 		if _, ok := attestations[stringValue(feature, "attestationPolicy")]; !ok {
 			issues = append(issues, errorIssue("attestation_policy_reference_missing", base+"/attestationPolicy", "The referenced attestation policy does not exist."))
 		}
@@ -554,7 +562,7 @@ func (validator *Validator) featureSemanticIssues(
 				issues = append(issues, errorIssue("limit_plan_reference_missing", base+"/limitPlan/expression", "The constant limit-plan expression references a missing plan."))
 			}
 		}
-		if protocol == "opaque_http" {
+		if protocolID == "opaque_http" {
 			if _, ok := feature["opaqueHttp"]; !ok {
 				issues = append(issues, errorIssue("opaque_http_policy_missing", base+"/opaqueHttp", "Opaque HTTP features require an explicit method, path, and body policy."))
 			}
@@ -567,10 +575,10 @@ func (validator *Validator) featureSemanticIssues(
 			if defaultMaximum > absoluteMaximum {
 				issues = append(issues, errorIssue("output_default_exceeds_absolute", base+"/output/defaultMaximumTokens", "The default output maximum cannot exceed the absolute maximum."))
 			}
-		} else if protocolRequiresOutputPolicy(protocol) {
+		} else if protocolRequiresOutputPolicy(protocolID) {
 			issues = append(issues, errorIssue("output_policy_required", base+"/output", "Token-generating protocols require a server-owned output limit."))
 		}
-		if requiresInputAccounting && protocol != inputAccountingProtocol {
+		if requiresInputAccounting && protocolID != inputAccountingProtocol {
 			issues = append(issues, errorIssue(
 				"input_accounting_protocol_unsupported",
 				base+"/protocol",
@@ -602,7 +610,7 @@ func (validator *Validator) featureSemanticIssues(
 				issues = append(issues, errorIssue("model_reference_missing", routePath+"/model", "The referenced model does not exist."))
 				continue
 			}
-			if !slices.Contains(stringArray(model, "capabilities"), protocol) {
+			if !slices.Contains(stringArray(model, "capabilities"), protocolID) {
 				issues = append(issues, errorIssue("model_protocol_unsupported", routePath+"/model", "The selected model does not advertise this feature protocol."))
 			}
 			inputPriceRequiresProof := false

@@ -1,6 +1,7 @@
 // Package dataplane composes authenticated client requests, immutable policy,
 // quota lifecycle accounting, protected upstream dispatch, and bounded
-// response relay. Opaque HTTP proxying is intentionally outside this package.
+// response relay. Protocols without a registered executable adapter remain
+// unavailable even when their future wire shapes are present in the schema.
 package dataplane
 
 import (
@@ -89,9 +90,13 @@ type Config struct {
 	Policies      PolicyDecisionEngine
 	Quotas        QuotaStore
 	Secrets       SecretStore
-	Adapter       protocol.Adapter
-	Targets       TargetFactory
-	Relayer       ResponseRelayer
+	// Adapter is the compatibility injection point for the currently executable
+	// single-protocol slice. Adapters is the bounded multi-protocol registry
+	// input; callers must set at most one of them.
+	Adapter  protocol.Adapter
+	Adapters []protocol.Adapter
+	Targets  TargetFactory
+	Relayer  ResponseRelayer
 
 	PublicOrigin             string
 	MaximumRequestBodyBytes  int64
@@ -101,8 +106,9 @@ type Config struct {
 	Now                      func() time.Time
 }
 
-// Handler serves only the authenticated OpenAI Chat Completions vertical
-// slice. It must be mounted behind requestidentity middleware.
+// Handler serves the bounded protected endpoint registry. In this build only
+// OpenAI Chat Completions is executable. It must be mounted behind
+// requestidentity middleware.
 type Handler struct {
 	accessTokens  AccessTokenVerifier
 	sessions      SessionAuthorizer
@@ -110,11 +116,10 @@ type Handler struct {
 	policies      PolicyDecisionEngine
 	quotas        QuotaStore
 	secrets       SecretStore
-	adapter       protocol.Adapter
+	endpoints     endpointRegistry
 	targets       TargetFactory
 	relayer       ResponseRelayer
 
-	publicRequestURL    url.URL
 	maximumResponseBody int64
 	clientWriteTimeout  time.Duration
 	persistenceTimeout  time.Duration
@@ -135,12 +140,19 @@ func New(config Config) (*Handler, error) {
 	if config.MaximumRequestBodyBytes < 0 || config.MaximumRequestBodyBytes > maximumRequestBodyLimit {
 		return nil, errInvalidConfiguration
 	}
-	if nilDependency(config.Adapter) {
-		config.Adapter = openaichat.Adapter{MaximumBodyBytes: config.MaximumRequestBodyBytes}
-	}
-	if config.Adapter.ID() != openaichat.ID || !config.Adapter.Capabilities().Streaming ||
-		!config.Adapter.Capabilities().ModelRewrite || !config.Adapter.Capabilities().OutputTokenClamp {
+	if !nilDependency(config.Adapter) && len(config.Adapters) != 0 {
 		return nil, errInvalidConfiguration
+	}
+	adapters := append([]protocol.Adapter(nil), config.Adapters...)
+	if !nilDependency(config.Adapter) {
+		adapters = []protocol.Adapter{config.Adapter}
+	}
+	if len(adapters) == 0 {
+		adapters = []protocol.Adapter{openaichat.Adapter{MaximumBodyBytes: config.MaximumRequestBodyBytes}}
+	}
+	endpoints, err := newEndpointRegistry(origin, adapters)
+	if err != nil {
+		return nil, err
 	}
 	var ownedTargets *TargetCache
 	if nilDependency(config.Targets) {
@@ -171,14 +183,13 @@ func New(config Config) (*Handler, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	publicRequestURL := url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: chatCompletionsPath}
 	return &Handler{
 		accessTokens: config.AccessTokens, sessions: config.Sessions,
 		configuration: config.Configuration, policies: config.Policies,
-		quotas: config.Quotas, secrets: config.Secrets, adapter: config.Adapter,
+		quotas: config.Quotas, secrets: config.Secrets, endpoints: endpoints,
 		targets: config.Targets, relayer: config.Relayer,
-		publicRequestURL: publicRequestURL, maximumResponseBody: config.MaximumResponseBodyBytes,
-		clientWriteTimeout: config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
+		maximumResponseBody: config.MaximumResponseBodyBytes,
+		clientWriteTimeout:  config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
 		now: config.Now, ownedTargets: ownedTargets,
 	}, nil
 }
@@ -207,7 +218,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeProblem(writer, requestID, "server_not_ready", "", 0)
 		return
 	}
-	if violation := validateEndpoint(request); violation != nil {
+	endpoint, violation := handler.endpoints.match(request)
+	if violation != nil {
 		handler.writeViolation(writer, requestID, violation)
 		return
 	}
@@ -231,8 +243,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		AccessToken: declaration.accessToken,
 		Principal:   principal,
 		DPoPProof:   declaration.dpopProof,
-		HTTPMethod:  http.MethodPost,
-		RequestURI:  cloneURL(handler.publicRequestURL),
+		HTTPMethod:  endpoint.publicMethod,
+		RequestURI:  cloneURL(endpoint.publicURL),
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
@@ -260,7 +272,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	metadata, err := handler.adapter.InspectRequest(request.Context(), request)
+	metadata, err := endpoint.adapter.InspectRequest(request.Context(), request)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
@@ -272,7 +284,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	validated, err := validateDecision(declaration.feature, decision)
+	validated, err := validateDecision(declaration.feature, decision, endpoint.protocolID)
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
@@ -282,7 +294,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
-	appliedOutputMaximum, err := handler.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
+	appliedOutputMaximum, err := endpoint.adapter.ApplyFeature(request.Context(), request, protocol.FeatureDecision{
 		PhysicalModel:       decision.Model.UpstreamModel,
 		DefaultOutputTokens: validated.defaultOutputTokens,
 		MaximumOutputTokens: validated.maximumOutputTokens,
@@ -298,8 +310,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	var inputPreflight *protocol.TrustedInputPreflight
 	if trustedInputPreflightRequired(validated.rules, selectedPricing) {
 		profile, profileErr := resolveTrustedInputProfile(snapshot, decision)
-		preflighter, supportsPreflight := handler.adapter.(protocol.InputPreflighter)
-		if profileErr != nil || !supportsPreflight || !handler.adapter.Capabilities().TrustedInputPreflight {
+		preflighter, supportsPreflight := endpoint.adapter.(protocol.InputPreflighter)
+		if profileErr != nil || !supportsPreflight || !endpoint.adapter.Capabilities().TrustedInputPreflight {
 			handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
 			return
 		}
@@ -344,7 +356,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	result := handler.executeReserved(request.Context(), writer, request, authorization, decision, reservation, inputPreflight)
+	result := handler.executeReserved(
+		request.Context(), writer, request, endpoint, authorization, decision, reservation, inputPreflight,
+	)
 	if !result.beginInvoked {
 		if result.err == nil {
 			result.err = errDispatchNotConsumed
@@ -416,6 +430,7 @@ func (handler *Handler) executeReserved(
 	ctx context.Context,
 	writer http.ResponseWriter,
 	incoming *http.Request,
+	endpoint endpointMatch,
 	authorization session.Authorization,
 	decision policy.Decision,
 	reservation quota.Reservation,
@@ -438,7 +453,7 @@ func (handler *Handler) executeReserved(
 	}
 	defer lease.Release()
 	prepared, err := lease.Prepare(
-		incoming, providerChatPath, []string{"Content-Type"}, decision.Upstream.StaticHeaders,
+		incoming, endpoint.providerPath, []string{"Content-Type"}, decision.Upstream.StaticHeaders,
 	)
 	if err != nil {
 		return executionResult{err: fmt.Errorf("%w: prepare request", errTargetConfiguration)}
@@ -454,7 +469,7 @@ func (handler *Handler) executeReserved(
 	authentication := decision.Upstream.Authentication
 	switch authentication.Type {
 	case "none":
-		return handler.dispatchReserved(executionContext, writer, decision, reservation, dispatch)
+		return handler.dispatchReserved(executionContext, writer, endpoint.adapter, decision, reservation, dispatch)
 	case "bearer", "header":
 		var result executionResult
 		callbackCalled := false
@@ -474,7 +489,9 @@ func (handler *Handler) executeReserved(
 					executionContext, prepared, authentication.HeaderName, credential, beforeRoundTrip, consume,
 				)
 			}
-			result = handler.dispatchReserved(executionContext, writer, decision, reservation, credentialDispatch)
+			result = handler.dispatchReserved(
+				executionContext, writer, endpoint.adapter, decision, reservation, credentialDispatch,
+			)
 			// Never return a transport or observer error through the secret
 			// boundary; Store.Use intentionally collapses callback errors.
 			return nil
@@ -499,6 +516,7 @@ func (handler *Handler) executeReserved(
 func (handler *Handler) dispatchReserved(
 	ctx context.Context,
 	writer http.ResponseWriter,
+	adapter protocol.Adapter,
 	decision policy.Decision,
 	reservation quota.Reservation,
 	dispatch func(func() error, func(*upstream.DispatchedResponse) error) error,
@@ -531,7 +549,9 @@ func (handler *Handler) dispatchReserved(
 			result.err = errDispatchNotConsumed
 			return result.err
 		}
-		result.relay, result.err = handler.consumeResponse(ctx, writer, decision, result.attempt, response)
+		result.relay, result.err = handler.consumeResponse(
+			ctx, writer, adapter, decision, result.attempt, response,
+		)
 		return result.err
 	})
 	if result.err == nil && dispatchErr != nil {
@@ -546,6 +566,7 @@ func (handler *Handler) dispatchReserved(
 func (handler *Handler) consumeResponse(
 	ctx context.Context,
 	writer http.ResponseWriter,
+	adapter protocol.Adapter,
 	decision policy.Decision,
 	attempt quota.Attempt,
 	response *upstream.DispatchedResponse,
@@ -554,7 +575,10 @@ func (handler *Handler) consumeResponse(
 		return upstream.RelayOutcome{}, errDispatchNotConsumed
 	}
 	defer response.Close()
-	observer, err := handler.adapter.ObserveResponse(ctx, response.Response)
+	if nilDependency(adapter) {
+		return upstream.RelayOutcome{StatusCode: response.StatusCode}, errInvalidConfiguration
+	}
+	observer, err := adapter.ObserveResponse(ctx, response.Response)
 	if err != nil {
 		return upstream.RelayOutcome{StatusCode: response.StatusCode}, fmt.Errorf("%w: %w", errUpstreamProtocol, err)
 	}
@@ -911,11 +935,13 @@ func calculateConfiguredCost(
 	}, executionErr
 }
 
-func validateDecision(featureID string, decision policy.Decision) (validatedDecision, error) {
+func validateDecision(featureID string, decision policy.Decision, endpointProtocol string) (validatedDecision, error) {
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
 		len(decision.Route.FallbackOn) != 0 || decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
-		!slices.Contains(decision.Model.Capabilities, openaichat.ID) ||
+		endpointProtocol == "" || decision.Feature.Protocol != endpointProtocol ||
+		!protocol.ProtocolExecutable(endpointProtocol) ||
+		!slices.Contains(decision.Model.Capabilities, endpointProtocol) ||
 		decision.Upstream.ID == "" || decision.Upstream.Type != "openai_compatible" ||
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
 		!validTargetTimeouts(decision.Upstream.Timeouts) {

@@ -491,7 +491,7 @@ func activateClientHTTPConfiguration(t *testing.T, ctx context.Context, pool *pg
 				}},
 			}},
 			"features": []any{map[string]any{
-				"id": "assistant", "protocol": "openai_responses", "attestationPolicy": "native",
+				"id": "assistant", "protocol": "openai_chat", "attestationPolicy": "native",
 				"access":    map[string]any{"expression": "principal.authenticated"},
 				"limitPlan": map[string]any{"expression": "'free'"},
 				"output": map[string]any{
