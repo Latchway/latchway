@@ -41,7 +41,7 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 }
 
-func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenAndConcurrencyRules(t *testing.T) {
+func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenCostAndConcurrencyRules(t *testing.T) {
 	t.Parallel()
 
 	inputScope := []string{
@@ -144,6 +144,17 @@ func TestNormalizeExecutableLimitAcceptsBoundedRequestTokenBucketOutputTokenAndC
 	if outputCalendarIdentity == outputPerRequestIdentity {
 		t.Fatal("calendar and per-request output-token rules shared an immutable identity")
 	}
+	costCalendar, costCalendarIdentity, ok := normalizeExecutableLimit(Limit{
+		Metric: "cost_nano_usd", Algorithm: "calendar", Scope: []string{"feature", "user"},
+		Window: "1d", Maximum: math.MaxInt64, Hard: true,
+	})
+	if !ok || costCalendar.Maximum != math.MaxInt64 ||
+		!slices.Equal(costCalendar.Scope, []string{"user", "feature"}) {
+		t.Fatalf("cost calendar rule = %+v ok=%t", costCalendar, ok)
+	}
+	if costCalendarIdentity == outputCalendarIdentity {
+		t.Fatal("cost and output-token calendar rules shared an immutable identity")
+	}
 	_, changedPerRequestIdentity, ok := normalizeExecutableLimit(Limit{
 		Metric: "output_tokens", Algorithm: "per_request", Scope: []string{"user", "model"},
 		PerRequestMaximum: 1, Hard: true,
@@ -204,7 +215,6 @@ func TestNormalizeExecutableLimitRejectsUnsupportedMetricsAlgorithmsAndFieldShap
 	}{
 		{name: "input token calendar", limit: withLimitMetric(calendar, "input_tokens")},
 		{name: "total token calendar", limit: withLimitMetric(calendar, "total_tokens")},
-		{name: "cost calendar", limit: withLimitMetric(calendar, "cost_nano_usd")},
 		{name: "logical request concurrency", limit: withLimitMetric(concurrency, "logical_requests")},
 		{name: "concurrent request calendar", limit: Limit{Metric: "concurrent_requests", Algorithm: "calendar", Scope: []string{"user"}, Window: "1d", Maximum: 1, Hard: true}},
 		{name: "input token bucket", limit: withLimitMetric(tokenBucket, "input_tokens")},

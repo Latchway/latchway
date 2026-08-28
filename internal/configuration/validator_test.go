@@ -265,13 +265,6 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 			},
 		},
 		{
-			name: "cost metric",
-			limit: map[string]any{
-				"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
-				"window": "1d", "maximum": json.Number("100"),
-			},
-		},
-		{
 			name: "soft request limit",
 			limit: map[string]any{
 				"metric": "logical_requests", "algorithm": "calendar", "scope": []any{"user"},
@@ -310,9 +303,173 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 						!strings.Contains(issue.Message, "through 1000000") ||
 						!strings.Contains(issue.Message, "output_tokens calendar") ||
 						!strings.Contains(issue.Message, "output_tokens per_request") ||
+						!strings.Contains(issue.Message, "cost_nano_usd calendar") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)
 				}
+			}
+		})
+	}
+}
+
+func TestValidatorActivatesBoundedHardCostCalendarWithZeroInputPricing(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	objectArray(spec, "models")[0]["pricingRef"] = "standard"
+	spec["pricingCatalogs"] = []any{map[string]any{
+		"id": "standard", "currency": "USD",
+		"entries": []any{map[string]any{
+			"model": "fast", "inputNanoUsdPerMillion": json.Number("0"),
+			"outputNanoUsdPerMillion": json.Number("2500000"),
+			"requestNanoUsd":          json.Number("100"),
+		}},
+	}}
+	objectArray(spec, "limitPlans")[0]["limits"] = []any{map[string]any{
+		"metric": "cost_nano_usd", "algorithm": "calendar",
+		"scope": []any{"feature", "user"}, "window": "1d",
+		"maximum": json.Number("1000000000"), "hard": true,
+	}}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("bounded hard cost configuration rejected: %+v", report.Issues)
+	}
+	snapshot, err := newActiveSnapshot(
+		"rev_00000000000000000000000000", "env_00000000000000000000000000", encoded, compiled,
+	)
+	if err != nil {
+		t.Fatalf("load bounded hard cost snapshot: %v", err)
+	}
+	plan, ok := snapshot.LimitPlan("free")
+	if !ok || len(plan.Limits) != 1 || plan.Limits[0].Metric != "cost_nano_usd" ||
+		plan.Limits[0].Algorithm != "calendar" || plan.Limits[0].Maximum != 1_000_000_000 {
+		t.Fatalf("active hard cost plan = %+v ok=%t", plan, ok)
+	}
+}
+
+func TestValidatorScopesHardCostPricingGateToApplicableFeatures(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	models := objectArray(spec, "models")
+	costModel := models[0]
+	costModel["pricingRef"] = "standard"
+	nonCostModel := deepClone(costModel).(map[string]any)
+	nonCostModel["id"] = "legacy"
+	nonCostModel["upstreamModel"] = "configured-legacy-model"
+	spec["models"] = append(models, nonCostModel)
+	spec["pricingCatalogs"] = []any{map[string]any{
+		"id": "standard", "currency": "USD",
+		"entries": []any{
+			map[string]any{
+				"model": "fast", "inputNanoUsdPerMillion": json.Number("0"),
+				"outputNanoUsdPerMillion": json.Number("1"), "requestNanoUsd": json.Number("0"),
+			},
+			map[string]any{
+				"model": "legacy", "inputNanoUsdPerMillion": json.Number("1000"),
+				"outputNanoUsdPerMillion": json.Number("2000"), "requestNanoUsd": json.Number("0"),
+			},
+		},
+	}}
+	plans := objectArray(spec, "limitPlans")
+	plans[0]["limits"] = []any{map[string]any{
+		"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
+		"window": "1d", "maximum": json.Number("1000"), "hard": true,
+	}}
+	nonCostPlan := map[string]any{
+		"id": "requests",
+		"limits": []any{map[string]any{
+			"metric": "logical_requests", "algorithm": "calendar", "scope": []any{"user"},
+			"window": "1d", "maximum": json.Number("10"), "hard": true,
+		}},
+	}
+	spec["limitPlans"] = append(plans, nonCostPlan)
+	features := objectArray(spec, "features")
+	nonCostFeature := deepClone(features[0]).(map[string]any)
+	nonCostFeature["id"] = "legacy_assistant"
+	objectValue(nonCostFeature, "limitPlan")["expression"] = "'requests'"
+	route := objectArray(nonCostFeature, "routes")[0]
+	route["id"] = "legacy"
+	route["model"] = "legacy"
+	spec["features"] = append(features, nonCostFeature)
+
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("non-cost feature was incorrectly subjected to the hard-cost pricing gate: %+v", report.Issues)
+	}
+
+	objectValue(nonCostFeature, "limitPlan")["expression"] =
+		"principal.authenticated ? 'requests' : 'free'"
+	dynamic, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamicReport, dynamicCompiled := validator.Validate(dynamic, testEnvironment(), time.Now())
+	if dynamicReport.Valid || dynamicCompiled != nil ||
+		!hasIssue(dynamicReport.Issues, "input_pricing_unsupported_for_cost_limit") {
+		t.Fatalf("dynamic plan selection bypassed conservative cost pricing gate: %+v", dynamicReport.Issues)
+	}
+}
+
+func TestValidatorRejectsHardCostWithoutConservativeConfiguredInputPrice(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		pricingRef string
+		inputRate  json.Number
+		code       string
+	}{
+		{name: "missing pricing", code: "pricing_required_for_cost_limit"},
+		{name: "input priced", pricingRef: "standard", inputRate: json.Number("1"), code: "input_pricing_unsupported_for_cost_limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := configurationObject(t)
+			spec := objectValue(document, "spec")
+			objectArray(spec, "limitPlans")[0]["limits"] = []any{map[string]any{
+				"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("100"), "hard": true,
+			}}
+			if test.pricingRef != "" {
+				objectArray(spec, "models")[0]["pricingRef"] = test.pricingRef
+				spec["pricingCatalogs"] = []any{map[string]any{
+					"id": test.pricingRef, "currency": "USD",
+					"entries": []any{map[string]any{
+						"model": "fast", "inputNanoUsdPerMillion": test.inputRate,
+						"outputNanoUsdPerMillion": json.Number("0"), "requestNanoUsd": json.Number("0"),
+					}},
+				}}
+			}
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, test.code) {
+				t.Fatalf("unsafe hard cost configuration activated: report=%+v compiled=%q", report, compiled)
 			}
 		})
 	}

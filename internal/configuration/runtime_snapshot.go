@@ -273,10 +273,65 @@ func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
 			return errorsCorruptSnapshot("feature")
 		}
 	}
+	if !snapshot.runtimeHardCostPricingValid() {
+		return errorsCorruptSnapshot("hard cost pricing")
+	}
 	if len(snapshot.upstreams) == 0 || len(snapshot.models) == 0 || len(snapshot.limitPlans) == 0 || len(snapshot.features) == 0 {
 		return errorsCorruptSnapshot("data-plane configuration")
 	}
 	return nil
+}
+
+// runtimeHardCostPricingValid independently rechecks the activation gate on
+// persisted compiled snapshots. Limit-plan selection can depend on trusted
+// runtime facts, so a dynamic selection is conservatively allowed to reach
+// any plan while a constant selection is scoped to its exact plan. Every model
+// routed by an applicable feature must carry conservative configured pricing.
+// OpenAI Chat cannot preflight all billable input (for example, remote file
+// identifiers), therefore this bounded slice permits only a zero input rate.
+func (snapshot ActiveSnapshot) runtimeHardCostPricingValid() bool {
+	for _, feature := range snapshot.features {
+		if !runtimeFeatureCanSelectCostLimit(feature, snapshot.limitPlans) {
+			continue
+		}
+		for _, route := range feature.Routes {
+			model, ok := snapshot.models[route.ModelID]
+			if !ok || model.PricingRef == "" {
+				return false
+			}
+			catalog, ok := snapshot.pricing[model.PricingRef]
+			if !ok {
+				return false
+			}
+			entry, ok := catalog.Entry(model.ID)
+			if !ok || entry.InputNanoUSDPerMillion != 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func runtimeFeatureCanSelectCostLimit(feature Feature, plans map[string]LimitPlan) bool {
+	if matches := constantIdentifierExpression.FindStringSubmatch(strings.TrimSpace(feature.LimitPlanExpression)); len(matches) == 2 {
+		plan, ok := plans[matches[1]]
+		return ok && runtimeLimitPlanHasCost(plan)
+	}
+	for _, plan := range plans {
+		if runtimeLimitPlanHasCost(plan) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeLimitPlanHasCost(plan LimitPlan) bool {
+	for _, limit := range plan.Limits {
+		if limit.Metric == "cost_nano_usd" {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeUpstream(raw compiledUpstream) (Upstream, error) {

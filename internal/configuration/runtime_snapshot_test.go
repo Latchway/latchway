@@ -70,6 +70,73 @@ func TestCompiledLimitRejectsDuplicateJSONMembers(t *testing.T) {
 	}
 }
 
+func TestActiveSnapshotRejectsCorruptHardCostPricingGate(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentObject := configurationObject(t)
+	spec := objectValue(documentObject, "spec")
+	objectArray(spec, "models")[0]["pricingRef"] = "standard"
+	spec["pricingCatalogs"] = []any{map[string]any{
+		"id": "standard", "currency": "USD",
+		"entries": []any{map[string]any{
+			"model": "fast", "inputNanoUsdPerMillion": json.Number("0"),
+			"outputNanoUsdPerMillion": json.Number("1000"), "requestNanoUsd": json.Number("1"),
+		}},
+	}}
+	objectArray(spec, "limitPlans")[0]["limits"] = []any{map[string]any{
+		"metric": "cost_nano_usd", "algorithm": "calendar", "scope": []any{"user"},
+		"window": "1d", "maximum": json.Number("1000000"), "hard": true,
+	}}
+	document, err := json.Marshal(documentObject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(document, testEnvironment(), time.Now())
+	if !report.Valid {
+		t.Fatalf("valid hard cost configuration rejected: %+v", report.Issues)
+	}
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "input price becomes nonzero",
+			mutate: func(spec map[string]any) {
+				objectArray(objectArray(spec, "pricingCatalogs")[0], "entries")[0]["inputNanoUsdPerMillion"] = json.Number("1")
+			},
+		},
+		{
+			name: "routed model loses pricing reference",
+			mutate: func(spec map[string]any) {
+				delete(objectArray(spec, "models")[0], "pricingRef")
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, decodeErr := jsonsafe.Decode(compiled)
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			root := decoded.(map[string]any)
+			test.mutate(objectValue(root, "spec"))
+			corrupt, marshalErr := json.Marshal(root)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if _, snapshotErr := newActiveSnapshot(
+				"rev_00000000000000000000000000", "env_00000000000000000000000000", document, corrupt,
+			); snapshotErr == nil {
+				t.Fatal("corrupt hard cost pricing gate was accepted")
+			}
+		})
+	}
+}
+
 func TestActiveSnapshotRejectsCorruptRuntimeConfiguration(t *testing.T) {
 	t.Parallel()
 

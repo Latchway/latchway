@@ -455,7 +455,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits, hard logical_requests token_bucket limits, hard output_tokens token_bucket limits, hard output_tokens calendar limits, hard output_tokens per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
+					"This release can activate only hard logical_requests calendar limits, hard logical_requests token_bucket limits, hard output_tokens token_bucket limits, hard output_tokens calendar limits, hard output_tokens per_request limits, hard cost_nano_usd calendar limits, or hard concurrent_requests/concurrent_streams concurrency limits; token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
@@ -475,14 +475,6 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 
 func (validator *Validator) featureSemanticIssues(features, models, attestations, limitPlans, pricing map[string]map[string]any) []Issue {
 	issues := make([]Issue, 0)
-	costLimits := false
-	for _, plan := range limitPlans {
-		for _, limit := range objectArray(plan, "limits") {
-			if stringValue(limit, "metric") == "cost_nano_usd" {
-				costLimits = true
-			}
-		}
-	}
 	for _, featureID := range sortedMapKeys(features) {
 		feature := features[featureID]
 		base := "/spec/features/" + pointerToken(featureID)
@@ -494,6 +486,7 @@ func (validator *Validator) featureSemanticIssues(features, models, attestations
 		issues = append(issues, validator.celIssues(validator.policyCEL, stringValue(access, "expression"), base+"/access/expression", cel.BoolType)...)
 		limitPlan := objectValue(feature, "limitPlan")
 		limitExpression := stringValue(limitPlan, "expression")
+		costLimits := rawFeatureCanSelectCostLimit(limitExpression, limitPlans)
 		issues = append(issues, validator.celIssues(validator.policyCEL, limitExpression, base+"/limitPlan/expression", cel.StringType)...)
 		if matches := constantIdentifierExpression.FindStringSubmatch(strings.TrimSpace(limitExpression)); len(matches) == 2 {
 			if _, ok := limitPlans[matches[1]]; !ok {
@@ -546,14 +539,56 @@ func (validator *Validator) featureSemanticIssues(features, models, attestations
 			}
 			if costLimits && stringValue(model, "pricingRef") == "" {
 				issues = append(issues, errorIssue("pricing_required_for_cost_limit", routePath+"/model", "Every routed model requires pricing when a cost limit is configured."))
+			} else if costLimits {
+				pricingRef := stringValue(model, "pricingRef")
+				if catalog, exists := pricing[pricingRef]; exists {
+					for _, entry := range objectArray(catalog, "entries") {
+						if stringValue(entry, "model") != modelID {
+							continue
+						}
+						inputRate, ok := integerField(entry, "inputNanoUsdPerMillion")
+						if ok && inputRate != 0 {
+							issues = append(issues, errorIssue(
+								"input_pricing_unsupported_for_cost_limit",
+								routePath+"/model",
+								"Hard cost limits require a zero configured input-token rate because this release cannot conservatively bound every OpenAI Chat input before dispatch.",
+							))
+						}
+						break
+					}
+				}
 			}
 		}
 		if !hasFallback {
 			issues = append(issues, warningIssue("route_fallback_missing", base+"/routes", "No unconditional route exists; some valid requests may have no route."))
 		}
 	}
-	_ = pricing
 	return issues
+}
+
+func rawFeatureCanSelectCostLimit(expression string, plans map[string]map[string]any) bool {
+	if matches := constantIdentifierExpression.FindStringSubmatch(strings.TrimSpace(expression)); len(matches) == 2 {
+		plan, ok := plans[matches[1]]
+		return ok && rawLimitPlanHasCost(plan)
+	}
+	// A dynamic CEL expression can select any configured plan. Requiring safe
+	// pricing for every route of that feature keeps activation conservative
+	// without penalizing unrelated features whose constant plan has no cost.
+	for _, plan := range plans {
+		if rawLimitPlanHasCost(plan) {
+			return true
+		}
+	}
+	return false
+}
+
+func rawLimitPlanHasCost(plan map[string]any) bool {
+	for _, limit := range objectArray(plan, "limits") {
+		if stringValue(limit, "metric") == "cost_nano_usd" {
+			return true
+		}
+	}
+	return false
 }
 
 func (validator *Validator) celIssues(environment *cel.Env, expression, path string, expected *cel.Type) []Issue {

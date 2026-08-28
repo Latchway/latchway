@@ -54,7 +54,8 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 	}
 	switch limit.Algorithm {
 	case "calendar":
-		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens") ||
+		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens" &&
+			limit.Metric != "cost_nano_usd") ||
 			limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) ||
 			!executableCalendarWindow(limit.Window) {
