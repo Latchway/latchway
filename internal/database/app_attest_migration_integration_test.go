@@ -114,7 +114,7 @@ func TestMigratorPostgreSQLUpgradeV12AppAttestKeyPersistence(t *testing.T) {
 		t.Fatalf("upgrade through App Attest key persistence: %v", err)
 	}
 	current, available, err := NewMigrator(pool).Status(ctx)
-	if err != nil || current != 13 || available != 13 {
+	if err != nil || current != 14 || available != 14 {
 		t.Fatalf("migration status current=%d available=%d err=%v", current, available, err)
 	}
 
