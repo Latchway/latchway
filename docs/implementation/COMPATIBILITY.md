@@ -6,15 +6,15 @@
 | --- | --- |
 | Contract version | `0.3.0` |
 | Wire protocol version | `1` |
-| Status | Draft and unreleased; Admin secret-lifecycle contract, no compatibility promise |
-| Latest immutable passing core implementation | `c56612b3d9828b3e02ca6b14a33da95afa04e006`; newer fully green secret checkpoint commit pending |
-| Last synchronized SDK baseline core | `68fa1ba28a80cd3fb1e50dffdefc7de935da9f4c` (`0.2.0`; intentionally stale until checkpoint commit) |
+| Status | Draft and unreleased; synchronized local lock baseline, no released compatibility promise |
+| Latest immutable passing core implementation | `05f88b41813c210a23a459519abd3f7a9c3e45fa` |
+| Last synchronized SDK baseline core | `05f88b41813c210a23a459519abd3f7a9c3e45fa` (`0.3.0`) |
 | Current deterministic bundle SHA-256 | `ea265cfa750df8faeeaeac7bc60c04c4d907384205b5bf4d78a22a79dfc4d24c` |
 | Database schema version | `11` |
 | Minimum released server | None |
 | Previous wire version supported | None; version 1 is the initial draft |
 
-Contract `0.3.0` adds canonical write-only secret metadata/list/create/rotate/delete shapes to the Admin API, a normative 1 MiB valid-UTF-8 value bound, an `operation_indeterminate` Problem whose `operation_id` is required exactly for that code, and the `indeterminate` audit result. Database migrations 10 and 11 install the canonical secret-name constraint and audit outcome. Client session endpoints, headers, DPoP, attestation binding, and wire semantics do not change, so wire protocol version `1` remains current. The four SDKs still pin the last synchronized `0.2.0` baseline while the fully tested core working tree awaits its immutable checkpoint; no `0.3.0` compatibility claim exists until those locks, fixtures, and repository gates are synchronized.
+Contract `0.3.0` adds canonical write-only secret metadata/list/create/rotate/delete shapes to the Admin API, a normative 1 MiB valid-UTF-8 value bound, an `operation_indeterminate` Problem whose `operation_id` is required exactly for that code, and the `indeterminate` audit result. Database migrations 10 and 11 install the canonical secret-name constraint and audit outcome. Client session endpoints, headers, DPoP, attestation binding, and wire semantics do not change, so wire protocol version `1` remains current. All four SDK locks and shared fixtures are synchronized to the immutable core checkpoint and pass their repository-local gates. That proves contract bookkeeping and local implementation consistency, not live server compatibility, publication, or physical-device attestation.
 
 Contract `0.2.0` was the preceding Admin-only user-override correction. Its historical bundle and lock evidence remains recorded below and must not be confused with the current contract.
 
@@ -30,7 +30,7 @@ The bounded user-limit-override implementation is split across isolated Admin co
 
 Schema version 9 has a bounded recovery limitation: an expired per-request-only entryless attempt cannot reconstruct its applied cap or add an unknown-output usage row. That rule shape has no durable capacity to recover or mutate; normal known settlement persists provider usage. This limitation is not a compatibility claim or a release exception.
 
-All four SDK repositories currently pin contract `0.2.0`, wire protocol `1`, its isolated contract commit, and its historical bundle hash. They are therefore explicitly unsynchronized with the current `0.3.0` core contract. After the core checkpoint receives an immutable revision, each SDK must pin that revision and the current bundle and pass its full repository gate; shared vectors, current-core live server conformance, published dependency resolution where applicable, and externally blocked device gates remain required before compatibility is reported.
+All four SDK repositories pin contract `0.3.0`, wire protocol `1`, core `05f88b41813c210a23a459519abd3f7a9c3e45fa`, and bundle `ea265cfa750df8faeeaeac7bc60c04c4d907384205b5bf4d78a22a79dfc4d24c`. Shared vectors, current-core live server conformance, published dependency resolution where applicable, and externally blocked device gates remain required before compatibility is reported.
 
 ## Required client declaration
 
@@ -59,23 +59,23 @@ The optional `X-Latchway-Request-ID` is a client correlation hint, not an author
 
 | Component | Intended package | Current implementation evidence | Synchronized lock commit | Remaining compatibility evidence |
 | --- | --- | --- | --- | --- |
-| Server and CLI | `github.com/latchway/latchway` | Current fully green working tree adds contract-`0.3.0` write-only secret lifecycle and schema 11 to the prior authenticated quota/proxy vertical; full PostgreSQL normal/race, vet, contract, eight fuzz, console, deterministic-bundle and independent review gates pass; immutable checkpoint pending | Source of truth | SDK `0.3.0` lock sync, production input/total preflight, broader protocols/routing, native attestation, live conformance, operations, deployment and release gates |
-| JavaScript | `@latchway/client` | Contract verification, Node 24/pnpm 10 lint/type/build, 22 tests, examples, package validation, and reproducibility pass | `14d45bc5e343eb15f74d0fa35e7ab694b145b044` | Live current-core conformance and publication evidence |
-| Swift | `Latchway` | Contract/bundle validation and all 48 Swift package tests pass | `e58426a704677f6c184b180b5512020204f1fc13` | Live current-core conformance, published dependency proof, and physical App Attest validation |
-| Android | `dev.latchway:latchway-*` | Exact fixture checks, all 19 core JVM tests, and Android lint pass with the installed API 37 SDK without new license acceptance | `de458c21206c6d6732b95f503101a632969b6848` | Live current-core conformance, publication, and Play-distributed Integrity validation |
-| React Native | `@latchway/react-native` | Contract, lint/type/test/codegen/native-boundary/example/build/reproducibility/podspec/package-content gates pass; 19 tests pass | `8e837d1f6f3df5686046a9a7e6b9a5b5f5cb5861` | Pinned Node/pnpm wrapper evidence, native-consumer/published-dependency gates, live current-core conformance, and physical-device validation |
+| Server and CLI | `github.com/latchway/latchway` | Contract-`0.3.0` write-only secret lifecycle and schema 11; full PostgreSQL normal/race, vet, contract, eight fuzz, console, deterministic-bundle and independent review gates pass | Source of truth at `05f88b41813c210a23a459519abd3f7a9c3e45fa` | Production input/total preflight, broader protocols/routing, native attestation, live conformance, operations, deployment and release gates |
+| JavaScript | `@latchway/client` | Contract verification, Node/pnpm lint/type/build, 24 tests, examples, exports, package validation, and reproducibility pass | `79dee67fcacad2fc78bca56682ddacca12bba383` | Live current-core conformance and publication evidence |
+| Swift | `Latchway` | Contract/bundle validation, package/build, deterministic bundle, and all 49 Swift tests pass | `173b5d7d53222160b5f7d835d238b4f04eb1e04e` | Live current-core conformance, published dependency proof, and physical App Attest validation |
+| Android | `dev.latchway:latchway-*` | Exact fixtures, hardened process-wide session/key lifecycle, 68 tests, and all 670 test/assemble/lint tasks pass with the installed API 37 SDK | `a732120575b3c844abe926cc007678665a8b7b80` | Live current-core conformance, publication, and Play-distributed Integrity validation |
+| React Native | `@latchway/react-native` | Contract, lint/type/test/codegen/native-boundary/example/build/reproducibility/podspec/package-content gates pass; 19 tests pass | `548e2b79e6ad96b574c431d3ca1abee360f9a0cc` | Native-consumer/published-dependency gates, live current-core conformance, and physical-device validation |
 
 ## Last synchronized lock fields
 
-Each SDK's existing lock serialization still records these historical `0.2.0` values. They are not the current core contract and must be replaced after the pending core checkpoint:
+Each SDK's committed lock serialization records these synchronized `0.3.0` values:
 
 | Field | Synchronized value |
 | --- | --- |
-| Contract version | `0.2.0` |
-| Core commit | `68fa1ba28a80cd3fb1e50dffdefc7de935da9f4c` |
-| Bundle SHA-256 | `a4b320906d1bb02712451224c2111d3a673b4df24631c2f1de01ca5dfbfd0059` |
+| Contract version | `0.3.0` |
+| Core commit | `05f88b41813c210a23a459519abd3f7a9c3e45fa` |
+| Bundle SHA-256 | `ea265cfa750df8faeeaeac7bc60c04c4d907384205b5bf4d78a22a79dfc4d24c` |
 | Wire protocol | `1` |
-| Declared minimum server version | `0.2.0` |
-| Declared maximum tested server series | `0.2.x` |
+| Declared minimum server version | `0.3.0` |
+| Declared maximum tested server series | `0.3.x` |
 
 The field name for wire protocol is repository-specific (`wire_protocol` or `wire_protocol_version`). Release-label metadata is also repository-specific and is not evidence that a server or SDK release exists. No release tag, registry publication, or minimum compatible released pair is claimed by this document.
