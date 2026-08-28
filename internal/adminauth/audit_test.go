@@ -75,6 +75,28 @@ func TestAuditMutationValidationAndDefensiveCopies(t *testing.T) {
 	}
 }
 
+func TestAuditMutationAcceptsEveryCanonicalOutcome(t *testing.T) {
+	t.Parallel()
+	change, err := NewSensitiveAuditChange("credential", AuditSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []AuditOutcome{AuditSucceeded, AuditDenied, AuditFailed, AuditIndeterminate} {
+		outcome := outcome
+		t.Run(string(outcome), func(t *testing.T) {
+			t.Parallel()
+			mutation, err := NewAuditMutation(
+				mustIdentifier(t, id.AuditEvent), "", "", SystemActor(),
+				"admin.secret_rotate", "admin_request", mustIdentifier(t, id.AdminRequest),
+				outcome, mustIdentifier(t, id.AdminRequest), time.Now().UTC(), []AuditChange{change},
+			)
+			if err != nil || mutation.Outcome() != outcome {
+				t.Fatalf("outcome=%q mutation=%+v err=%v", outcome, mutation, err)
+			}
+		})
+	}
+}
+
 func TestAuditMutationRejectsUnsafeInput(t *testing.T) {
 	t.Parallel()
 

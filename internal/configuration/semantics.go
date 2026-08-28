@@ -642,29 +642,33 @@ func privacySemanticIssues(privacy map[string]any) []Issue {
 
 func secretReferenceIssues(root map[string]any, secretNames map[string]struct{}) []Issue {
 	issues := make([]Issue, 0)
-	var visit func(any, string)
-	visit = func(value any, path string) {
-		switch current := value.(type) {
-		case map[string]any:
-			for _, key := range sortedObjectKeys(current) {
-				childPath := path + "/" + pointerToken(key)
-				child := current[key]
-				if strings.HasSuffix(strings.ToLower(key), "secretref") {
-					reference, _ := child.(string)
-					name := strings.TrimPrefix(reference, "secret/")
-					if _, ok := secretNames[name]; !ok {
-						issues = append(issues, errorIssue("secret_reference_missing", childPath, "The referenced server-side secret does not exist in this environment."))
-					}
-				}
-				visit(child, childPath)
-			}
-		case []any:
-			for index, child := range current {
-				visit(child, fmt.Sprintf("%s/%d", path, index))
-			}
+	check := func(reference, path string) {
+		if reference == "" {
+			return
+		}
+		name := strings.TrimPrefix(reference, "secret/")
+		if _, ok := secretNames[name]; !ok {
+			issues = append(issues, errorIssue("secret_reference_missing", path, "The referenced server-side secret does not exist in this environment."))
 		}
 	}
-	visit(root, "")
+
+	spec := objectValue(root, "spec")
+	for index, provider := range objectArray(spec, "identityProviders") {
+		base := fmt.Sprintf("/spec/identityProviders/%d", index)
+		check(stringValue(provider, "staticPublicKeySecretRef"), base+"/staticPublicKeySecretRef")
+		check(stringValue(provider, "symmetricSecretRef"), base+"/symmetricSecretRef")
+	}
+	for index, policy := range objectArray(spec, "attestationPolicies") {
+		platforms := objectValue(policy, "platforms")
+		for _, platform := range sortedObjectKeys(platforms) {
+			selection := objectValue(platforms, platform)
+			check(stringValue(selection, "secretRef"), fmt.Sprintf("/spec/attestationPolicies/%d/platforms/%s/secretRef", index, pointerToken(platform)))
+		}
+	}
+	for index, upstream := range objectArray(spec, "upstreams") {
+		authentication := objectValue(upstream, "authentication")
+		check(stringValue(authentication, "secretRef"), fmt.Sprintf("/spec/upstreams/%d/authentication/secretRef", index))
+	}
 	return issues
 }
 

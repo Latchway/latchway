@@ -43,5 +43,6 @@ var Registry = map[string]Definition{
 	"etag_mismatch":                      {412, "ETag mismatch", false},
 	"bootstrap_disabled":                 {409, "Bootstrap disabled", false},
 	"rate_limited":                       {429, "Rate limited", true},
+	"operation_indeterminate":            {503, "Operation outcome indeterminate", true},
 	"internal_error":                     {500, "Internal server error", false},
 }

@@ -22,7 +22,7 @@ func TestStoreUseAuthenticatesAndClearsPlaintext(t *testing.T) {
 	provider := testEnvironmentMasterKey(t, 0x41)
 	record := testSecretRecord(t, provider, scope, "identity-key", 1, []byte("provider credential"), now)
 	loader := &fakeSecretRecordLoader{record: record}
-	store, err := newStore(loader, provider, provider.KeyID(), func() time.Time { return now })
+	store, err := newStore(loader, provider, provider.KeyID())
 	if err != nil {
 		t.Fatalf("construct secret store: %v", err)
 	}
@@ -38,8 +38,8 @@ func TestStoreUseAuthenticatesAndClearsPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("use active secret: %v", err)
 	}
-	if loader.name != "identity-key" || loader.scope != scope || !loader.now.Equal(now) {
-		t.Fatalf("loader received scope=%+v name=%q now=%s", loader.scope, loader.name, loader.now)
+	if loader.name != "identity-key" || loader.scope != scope {
+		t.Fatalf("loader received scope=%+v name=%q", loader.scope, loader.name)
 	}
 	if len(callbackBuffer) == 0 || !allZero(callbackBuffer) {
 		t.Fatalf("callback plaintext buffer was retained after use: %x", callbackBuffer)
@@ -114,7 +114,7 @@ func TestStoreUseFailsClosedForCryptographicMismatch(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			selectedProvider := test.provider(t)
-			store, err := newStore(&fakeSecretRecordLoader{record: test.record(t)}, selectedProvider, provider.KeyID(), func() time.Time { return now })
+			store, err := newStore(&fakeSecretRecordLoader{record: test.record(t)}, selectedProvider, provider.KeyID())
 			if err != nil {
 				t.Fatalf("construct secret store: %v", err)
 			}
@@ -142,7 +142,7 @@ func TestStoreUseRejectsInvalidRequestsAndRecords(t *testing.T) {
 	base := testSecretRecord(t, provider, scope, "attestation-key", 1, []byte("attestation credential"), now)
 
 	validStore := func(record secretRecord) *Store {
-		store, err := newStore(&fakeSecretRecordLoader{record: record}, provider, provider.KeyID(), func() time.Time { return now })
+		store, err := newStore(&fakeSecretRecordLoader{record: record}, provider, provider.KeyID())
 		if err != nil {
 			t.Fatalf("construct secret store: %v", err)
 		}
@@ -193,7 +193,6 @@ func TestStoreUseRejectsInvalidRequestsAndRecords(t *testing.T) {
 		{name: "short nonce", edit: func(record *secretRecord) { record.nonce = record.nonce[:11] }, want: ErrInvalid},
 		{name: "short ciphertext", edit: func(record *secretRecord) { record.ciphertext = record.ciphertext[:16] }, want: ErrInvalid},
 		{name: "zero creation time", edit: func(record *secretRecord) { record.createdAt = time.Time{} }, want: ErrInvalid},
-		{name: "future creation time", edit: func(record *secretRecord) { record.createdAt = now.Add(time.Second) }, want: ErrInvalid},
 		{name: "rotated version", edit: func(record *secretRecord) { record.rotatedAt = &rotatedAt }, want: ErrUnavailable},
 		{name: "destroyed version", edit: func(record *secretRecord) { record.destroyedAt = &destroyedAt }, want: ErrUnavailable},
 		{name: "disabled organization", edit: func(record *secretRecord) { record.organizationStatus = "disabled" }, want: ErrUnavailable},
@@ -225,7 +224,7 @@ func TestStoreErrorsAndFormattingAreRedacted(t *testing.T) {
 	record := testSecretRecord(t, provider, scope, "provider-key", 1, []byte("plaintext-for-redaction-test"), now)
 
 	for _, loaderError := range []error{pgx.ErrNoRows, errors.New("database error containing plaintext-for-redaction-test")} {
-		store, err := newStore(&fakeSecretRecordLoader{err: loaderError}, provider, provider.KeyID(), func() time.Time { return now })
+		store, err := newStore(&fakeSecretRecordLoader{err: loaderError}, provider, provider.KeyID())
 		if err != nil {
 			t.Fatalf("construct secret store: %v", err)
 		}
@@ -234,7 +233,7 @@ func TestStoreErrorsAndFormattingAreRedacted(t *testing.T) {
 		}
 	}
 
-	store, err := newStore(&fakeSecretRecordLoader{record: record}, provider, provider.KeyID(), func() time.Time { return now })
+	store, err := newStore(&fakeSecretRecordLoader{record: record}, provider, provider.KeyID())
 	if err != nil {
 		t.Fatalf("construct secret store: %v", err)
 	}
@@ -283,7 +282,7 @@ func TestStoreClearsPlaintextReturnedWithDecryptError(t *testing.T) {
 	record := testSecretRecord(t, provider, scope, "provider-key", 1, []byte("encrypted fixture"), now)
 	leaked := []byte("provider returned plaintext with error")
 	broken := &plaintextOnErrorProvider{keyID: provider.KeyID(), plaintext: leaked}
-	store, err := newStore(&fakeSecretRecordLoader{record: record}, broken, broken.KeyID(), func() time.Time { return now })
+	store, err := newStore(&fakeSecretRecordLoader{record: record}, broken, broken.KeyID())
 	if err != nil {
 		t.Fatalf("construct secret store: %v", err)
 	}
@@ -300,13 +299,11 @@ type fakeSecretRecordLoader struct {
 	err    error
 	scope  Scope
 	name   string
-	now    time.Time
 }
 
-func (loader *fakeSecretRecordLoader) load(_ context.Context, scope Scope, name string, now time.Time) (secretRecord, error) {
+func (loader *fakeSecretRecordLoader) load(_ context.Context, scope Scope, name string) (secretRecord, error) {
 	loader.scope = scope
 	loader.name = name
-	loader.now = now
 	return loader.record, loader.err
 }
 

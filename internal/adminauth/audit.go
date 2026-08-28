@@ -33,6 +33,9 @@ const (
 	AuditSucceeded AuditOutcome = "succeeded"
 	AuditDenied    AuditOutcome = "denied"
 	AuditFailed    AuditOutcome = "failed"
+	// AuditIndeterminate means the database commit acknowledgement was lost,
+	// so the caller cannot truthfully assert either success or failure.
+	AuditIndeterminate AuditOutcome = "indeterminate"
 )
 
 // AuditOperation describes how a field changed without recording its value.
@@ -233,7 +236,7 @@ func NewAuditMutation(
 		return AuditMutation{}, fmt.Errorf("%w: resource ID", ErrInvalidAuditMutation)
 	}
 	switch outcome {
-	case AuditSucceeded, AuditDenied, AuditFailed:
+	case AuditSucceeded, AuditDenied, AuditFailed, AuditIndeterminate:
 	default:
 		return AuditMutation{}, fmt.Errorf("%w: outcome", ErrInvalidAuditMutation)
 	}

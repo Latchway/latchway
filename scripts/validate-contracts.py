@@ -159,8 +159,13 @@ def schema_errors(schema_path: Path, schema: Any, instance: Any, location: str =
         matches = sum(not schema_errors(schema_path, sub, instance, location) for sub in schema["oneOf"])
         if matches != 1:
             errors.append(f"{location}: satisfies {matches} oneOf branches, expected exactly one")
-    if "if" in schema and not schema_errors(schema_path, schema["if"], instance, location):
-        errors.extend(schema_errors(schema_path, schema.get("then", {}), instance, location))
+    if "not" in schema and not schema_errors(schema_path, schema["not"], instance, location):
+        errors.append(f"{location}: satisfies forbidden schema")
+    if "if" in schema:
+        if not schema_errors(schema_path, schema["if"], instance, location):
+            errors.extend(schema_errors(schema_path, schema.get("then", {}), instance, location))
+        else:
+            errors.extend(schema_errors(schema_path, schema.get("else", {}), instance, location))
 
     expected_type = schema.get("type")
     if expected_type is not None:
@@ -315,6 +320,85 @@ def validate_admin_user_override_contract(path: Path, spec: dict[str, Any]) -> N
         raise ValueError(f"{path}: UserLimitOverride properties drifted")
 
 
+def validate_admin_secret_contract(path: Path, spec: dict[str, Any]) -> None:
+    schemas = spec.get("components", {}).get("schemas", {})
+    secret_value = schemas.get("SecretValue", {})
+    expected = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1048576,
+        "writeOnly": True,
+        "x-latchway-max-utf8-bytes": 1048576,
+    }
+    for key, value in expected.items():
+        if secret_value.get(key) != value:
+            raise ValueError(f"{path}: SecretValue {key} must be {value!r}")
+    if "UTF-8" not in secret_value.get("description", ""):
+        raise ValueError(f"{path}: SecretValue must document its UTF-8 byte bound")
+    write_value = schemas.get("WriteSecretRequest", {}).get("properties", {}).get("value", {})
+    rotate_value = (
+        spec.get("paths", {})
+        .get("/admin/v1/secrets/{secretId}/rotate", {})
+        .get("post", {})
+        .get("requestBody", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+        .get("properties", {})
+        .get("value", {})
+    )
+    expected_ref = "#/components/schemas/SecretValue"
+    if write_value.get("$ref") != expected_ref or rotate_value.get("$ref") != expected_ref:
+        raise ValueError(f"{path}: secret writes must share the normative SecretValue schema")
+
+
+def validate_problem_operation_id_contract(path: Path, spec: dict[str, Any]) -> None:
+    problem = spec.get("components", {}).get("schemas", {}).get("Problem", {})
+    base = {
+        "type": "https://latchway.dev/problems/conflict",
+        "title": "Resource conflict",
+        "status": 409,
+        "detail": "The operation conflicts with current state.",
+        "code": "conflict",
+        "request_id": "req_00000000000000000000000000",
+        "retryable": False,
+    }
+    operation_id = "arq_00000000000000000000000000"
+    cases = [
+        ("ordinary without operation ID", base, True),
+        ("ordinary with operation ID", {**base, "operation_id": operation_id}, False),
+        (
+            "indeterminate without operation ID",
+            {
+                **base,
+                "type": "https://latchway.dev/problems/operation_indeterminate",
+                "title": "Operation outcome indeterminate",
+                "status": 503,
+                "code": "operation_indeterminate",
+                "retryable": True,
+            },
+            False,
+        ),
+        (
+            "indeterminate with operation ID",
+            {
+                **base,
+                "type": "https://latchway.dev/problems/operation_indeterminate",
+                "title": "Operation outcome indeterminate",
+                "status": 503,
+                "code": "operation_indeterminate",
+                "retryable": True,
+                "operation_id": operation_id,
+            },
+            True,
+        ),
+    ]
+    for label, document, should_validate in cases:
+        valid = not schema_errors(path, problem, document, f"Problem.{label}")
+        if valid != should_validate:
+            raise ValueError(f"{path}: Problem operation_id conditional failed for {label}")
+
+
 def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
@@ -426,7 +510,7 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "0.2.0" or manifest["wire_protocol"]["current"] != 1:
+    if contract_version != "0.3.0" or manifest["wire_protocol"]["current"] != 1:
         raise ValueError("unexpected contract or wire protocol version")
 
     client_path = API / "client.openapi.yaml"
@@ -435,11 +519,17 @@ def main() -> None:
     admin = load_document(admin_path)
     validate_openapi(client_path, client, contract_version)
     validate_openapi(admin_path, admin, contract_version)
+    validate_problem_operation_id_contract(client_path, client)
+    validate_problem_operation_id_contract(admin_path, admin)
     validate_admin_user_override_contract(admin_path, admin)
+    validate_admin_secret_contract(admin_path, admin)
 
     registry = load_document(API / "error-codes.yaml")
     if registry["contract_version"] != contract_version:
         raise ValueError("error registry contract version mismatch")
+    operation_rule = registry.get("fields", {}).get("conditional", {}).get("operation_id", {})
+    if operation_rule != {"required_for": ["operation_indeterminate"], "forbidden_otherwise": True}:
+        raise ValueError("error registry operation_id conditional drift")
     for code, definition in registry["codes"].items():
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,127}", code):
             raise ValueError(f"invalid error code {code}")

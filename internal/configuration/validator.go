@@ -15,7 +15,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.2.0/environment-config.schema.json"
+const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.3.0/environment-config.schema.json"
 
 const (
 	// Configuration numbers ultimately fit int64 or the six-decimal refill

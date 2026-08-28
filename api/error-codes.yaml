@@ -1,9 +1,10 @@
 registry_version: 1
-contract_version: 0.2.0
+contract_version: 0.3.0
 problem_media_type: application/problem+json
 fields:
   required: [type, title, status, detail, code, request_id, retryable]
-  optional: [instance, retry_after, feature, supported_protocol_versions, errors]
+  optional: [instance, retry_after, operation_id, feature, supported_protocol_versions, errors]
+  conditional: { operation_id: { required_for: [operation_indeterminate], forbidden_otherwise: true } }
 codes:
   request_invalid:
     status: 400
@@ -205,6 +206,11 @@ codes:
     title: Rate limited
     retryable: true
     guidance: Retry after retry_after.
+  operation_indeterminate:
+    status: 503
+    title: Operation outcome indeterminate
+    retryable: true
+    guidance: Preserve operation_id. Only a correlated succeeded audit event proves the original request committed; current state or a later conflict is insufficient. Reconcile the audit result before retrying, except for an explicitly documented idempotent operation.
   internal_error:
     status: 500
     title: Internal server error

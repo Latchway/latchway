@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 0.2.0
+  version: 0.3.0
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -437,7 +437,8 @@ paths:
     post:
       tags: [Secrets]
       operationId: rotateSecret
-      summary: Store a new encrypted version of a secret.
+      summary: Store a new encrypted version using the current version ID.
+      description: A superseded version ID is stale and returns `409 conflict`.
       parameters:
         - $ref: '#/components/parameters/SecretID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -450,24 +451,28 @@ paths:
               additionalProperties: false
               required: [value]
               properties:
-                value: { type: string, minLength: 1, maxLength: 1048576, writeOnly: true }
+                value: { $ref: '#/components/schemas/SecretValue' }
       responses:
         '200':
           description: Rotated secret metadata.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SecretMetadata' }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/secrets/{secretId}:
     delete:
       tags: [Secrets]
       operationId: deleteSecret
-      summary: Mark an unreferenced secret unavailable.
+      summary: Mark an unreferenced secret unavailable using its current version ID.
+      description: |
+        A superseded version ID is stale and returns `409 conflict`. Repeating
+        deletion with the exact ID that was current when tombstoned is idempotent.
       parameters:
         - $ref: '#/components/parameters/SecretID'
         - $ref: '#/components/parameters/CSRFToken'
       responses:
-        '204': { description: Secret deleted or tombstoned. }
+        '204': { description: Secret tombstoned, or the exact tombstoned current-version deletion was repeated. }
         '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/api-tokens:
@@ -1186,13 +1191,24 @@ components:
       properties:
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
         name: { $ref: '#/components/schemas/Identifier' }
-        value: { type: string, minLength: 1, maxLength: 1048576, writeOnly: true }
+        value: { $ref: '#/components/schemas/SecretValue' }
+    SecretValue:
+      type: string
+      minLength: 1
+      maxLength: 1048576
+      writeOnly: true
+      description: |
+        Write-only UTF-8 plaintext. In addition to the JSON Schema code-point
+        bound, its encoded UTF-8 representation must be at most 1,048,576 bytes.
+      x-latchway-max-utf8-bytes: 1048576
     SecretMetadata:
       type: object
       additionalProperties: false
       required: [id, environment_id, name, version, algorithm, master_key_id, created_at]
       properties:
-        id: { $ref: '#/components/schemas/SecretID' }
+        id:
+          $ref: '#/components/schemas/SecretID'
+          description: Version-specific record ID; only the current ID may initiate rotation or deletion.
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
         name: { $ref: '#/components/schemas/Identifier' }
         version: { type: integer, minimum: 1 }
@@ -1378,7 +1394,7 @@ components:
         actor: { type: string }
         action: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
         target: { type: string }
-        result: { type: string, enum: [succeeded, denied, failed] }
+        result: { type: string, enum: [succeeded, denied, failed, indeterminate] }
         request_id: { type: string }
         summary: { type: object, additionalProperties: true, description: Redaction-safe structured change summary. }
     AuditPage:
@@ -1424,7 +1440,7 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.2.0 }
+        contract_version: { type: string, const: 0.3.0 }
         protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
@@ -1444,4 +1460,15 @@ components:
         request_id: { type: string, minLength: 8, maxLength: 128 }
         retryable: { type: boolean }
         retry_after: { type: string, format: date-time }
+        operation_id: { type: string, pattern: '^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
         errors: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ValidationIssue' } }
+      allOf:
+        - if:
+            properties:
+              code: { const: operation_indeterminate }
+            required: [code]
+          then:
+            required: [operation_id]
+          else:
+            not:
+              required: [operation_id]

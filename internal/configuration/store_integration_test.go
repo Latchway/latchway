@@ -3,6 +3,7 @@ package configuration
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/id"
+	secretstore "github.com/latchway/latchway/internal/secrets"
 )
 
 var configurationIntegrationSchemaPattern = regexp.MustCompile(`^latchway_configuration_test_[0-9]+$`)
@@ -344,6 +347,138 @@ func TestStorePostgreSQLActiveUserOverridePlanGuards(t *testing.T) {
 	assertActive(afterExpiry.ID)
 }
 
+func TestStorePostgreSQLSecretValidationDestroySerialization(t *testing.T) {
+	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("LATCHWAY_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := isolatedConfigurationPool(t, ctx, databaseURL)
+	principal, scope := seedConfigurationTenant(t, ctx, pool)
+	store, err := NewStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := secretstore.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xd7}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := secretstore.NewManager(secretstore.ManagerConfig{Pool: pool, Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	createSecretAndDraft := func(name string) (secretstore.Metadata, Revision) {
+		t.Helper()
+		metadata, createErr := manager.Create(ctx, principal, secretstore.CreateInput{
+			EnvironmentID: scope.EnvironmentID, Name: name, Value: []byte("value-for-" + name),
+		})
+		if createErr != nil {
+			t.Fatalf("create secret %s: %v", name, createErr)
+		}
+		revision, createErr := store.CreateRevision(ctx, principal, CreateInput{
+			EnvironmentID: scope.EnvironmentID, Document: configurationDocumentWithSecret(t, name),
+		})
+		if createErr != nil {
+			t.Fatalf("create referencing draft %s: %v", name, createErr)
+		}
+		return metadata, revision
+	}
+
+	// When validation queues first, it makes the immutable revision usable
+	// before deletion checks references, so deletion must fail closed.
+	firstSecret, firstDraft := createSecretAndDraft("validation-first")
+	blocker := lockConfigurationEnvironment(t, ctx, pool, scope.EnvironmentID)
+	type validationResult struct {
+		report ValidationReport
+		err    error
+	}
+	validated := make(chan validationResult, 1)
+	go func() {
+		report, validationErr := store.ValidateRevision(ctx, principal, firstDraft.ID)
+		validated <- validationResult{report: report, err: validationErr}
+	}()
+	waitForConfigurationSecretLockWaiters(t, ctx, pool, 1)
+	deleted := make(chan error, 1)
+	go func() {
+		deleted <- manager.Destroy(ctx, principal, secretstore.DestroyInput{SecretID: firstSecret.ID})
+	}()
+	waitForConfigurationSecretLockWaiters(t, ctx, pool, 2)
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatalf("release validation-first blocker: %v", err)
+	}
+	validation := <-validated
+	if validation.err != nil || !validation.report.Valid {
+		t.Fatalf("validation-first report=%+v err=%v", validation.report, validation.err)
+	}
+	if err := <-deleted; !errors.Is(err, secretstore.ErrReferenced) {
+		t.Fatalf("validation-first Destroy() error=%v", err)
+	}
+
+	// When deletion queues first, validation observes the tombstone after it
+	// acquires the same row and must keep the revision unusable.
+	secondSecret, secondDraft := createSecretAndDraft("deletion-first")
+	blocker = lockConfigurationEnvironment(t, ctx, pool, scope.EnvironmentID)
+	deleted = make(chan error, 1)
+	go func() {
+		deleted <- manager.Destroy(ctx, principal, secretstore.DestroyInput{SecretID: secondSecret.ID})
+	}()
+	waitForConfigurationSecretLockWaiters(t, ctx, pool, 1)
+	validated = make(chan validationResult, 1)
+	go func() {
+		report, validationErr := store.ValidateRevision(ctx, principal, secondDraft.ID)
+		validated <- validationResult{report: report, err: validationErr}
+	}()
+	waitForConfigurationSecretLockWaiters(t, ctx, pool, 2)
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatalf("release deletion-first blocker: %v", err)
+	}
+	if err := <-deleted; err != nil {
+		t.Fatalf("deletion-first Destroy() error=%v", err)
+	}
+	validation = <-validated
+	if validation.err != nil || validation.report.Valid || !hasIssue(validation.report.Issues, "secret_reference_missing") {
+		t.Fatalf("deletion-first report=%+v err=%v", validation.report, validation.err)
+	}
+}
+
+func lockConfigurationEnvironment(t *testing.T, ctx context.Context, pool *pgxpool.Pool, environmentID string) pgx.Tx {
+	t.Helper()
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatalf("begin environment blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM environments WHERE environment_id = $1 FOR UPDATE`, environmentID); err != nil {
+		t.Fatalf("lock environment blocker: %v", err)
+	}
+	return tx
+}
+
+func waitForConfigurationSecretLockWaiters(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND application_name = current_setting('application_name')
+			  AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND query LIKE '%FOR UPDATE OF environment%'
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect configuration/secret lock waiters: %v", err)
+		}
+		if waiting >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("environment lock waiters never reached %d", want)
+}
+
 func isolatedConfigurationPool(t *testing.T, ctx context.Context, databaseURL string) *pgxpool.Pool {
 	t.Helper()
 	adminPool, err := pgxpool.New(ctx, databaseURL)
@@ -369,6 +504,7 @@ func isolatedConfigurationPool(t *testing.T, ctx context.Context, databaseURL st
 	}
 	query := parsedURL.Query()
 	query.Set("search_path", schema)
+	query.Set("application_name", schema)
 	parsedURL.RawQuery = query.Encode()
 	pool, err := database.Open(ctx, parsedURL.String(), 8)
 	if err != nil {
@@ -437,6 +573,18 @@ func configurationDocumentWithPremiumPlan(t *testing.T, description string) json
 			"window": "1d", "maximum": 100,
 		}},
 	})
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func configurationDocumentWithSecret(t *testing.T, name string) json.RawMessage {
+	t.Helper()
+	document := configurationObject(t)
+	upstream := objectArray(objectValue(document, "spec"), "upstreams")[0]
+	upstream["authentication"] = map[string]any{"type": "bearer", "secretRef": "secret/" + name}
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)

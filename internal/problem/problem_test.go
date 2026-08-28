@@ -3,6 +3,7 @@ package problem
 import (
 	"bufio"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"regexp"
@@ -88,6 +89,34 @@ func TestWriteRegisteredProblem(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, retryAfter); err != nil {
 		t.Fatalf("retry_after is not RFC 3339: %v", err)
+	}
+}
+
+func TestWriteIndeterminateOperationRequiresCanonicalOperationID(t *testing.T) {
+	operationID := "arq_00000000000000000000000000"
+	recorder := httptest.NewRecorder()
+	Write(recorder, "req_test", Error{
+		Code: "operation_indeterminate", Detail: "Inspect state before retrying.", OperationID: operationID,
+	})
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["operation_id"] != operationID || body["retryable"] != true {
+		t.Fatalf("indeterminate body=%v", body)
+	}
+
+	for _, invalidOperationID := range []string{"", "arq_invalid"} {
+		invalid := httptest.NewRecorder()
+		Write(invalid, "req_test", Error{
+			Code: "operation_indeterminate", Detail: "untrusted indeterminate detail", OperationID: invalidOperationID,
+		})
+		if invalid.Code != http.StatusInternalServerError || strings.Contains(invalid.Body.String(), "untrusted indeterminate detail") {
+			t.Fatalf("invalid operation ID %q status=%d body=%s", invalidOperationID, invalid.Code, invalid.Body.String())
+		}
 	}
 }
 

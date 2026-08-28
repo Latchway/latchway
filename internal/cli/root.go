@@ -23,6 +23,7 @@ import (
 type options struct {
 	output          string
 	server          string
+	stdin           io.Reader
 	stdout          io.Writer
 	stderr          io.Writer
 	adminHTTPClient *http.Client
@@ -37,6 +38,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 func executeWithOptions(ctx context.Context, args []string, opts *options) error {
 	root := newRootCommand(opts)
 	root.SetArgs(args)
+	if opts.stdin != nil {
+		root.SetIn(opts.stdin)
+	}
 	root.SetOut(opts.stdout)
 	root.SetErr(opts.stderr)
 	root.SilenceUsage = true
@@ -64,7 +68,7 @@ func newRootCommand(opts *options) *cobra.Command {
 		}
 		return nil
 	}
-	root.AddCommand(newServeCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newVersionCommand(opts), newAdminCommand(opts))
+	root.AddCommand(newServeCommand(opts), newMigrateCommand(opts), newDoctorCommand(opts), newVersionCommand(opts), newAdminCommand(opts), newSecretCommand(opts))
 	root.InitDefaultCompletionCmd()
 	return root
 }

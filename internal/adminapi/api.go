@@ -42,6 +42,7 @@ type API struct {
 	control         *controlplane.Store
 	configurations  *configuration.Store
 	overrides       *useroverride.Store
+	secretManager   secretManager
 	hasher          *adminauth.PasswordHasher
 	dummyHash       adminauth.PasswordHash
 	publicOrigin    string
@@ -50,7 +51,10 @@ type API struct {
 	loginLimiter    *failureLimiter
 }
 
-func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger) (*API, error) {
+func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger, manager secretManager) (*API, error) {
+	if manager == nil {
+		return nil, errors.New("admin API secret manager is nil")
+	}
 	auth, err := adminauth.NewStore(pool)
 	if err != nil {
 		return nil, err
@@ -75,12 +79,14 @@ func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration,
 	if err != nil {
 		return nil, fmt.Errorf("create login equalization hash: %w", err)
 	}
-	return &API{
+	api := &API{
 		auth: auth, control: control, configurations: configurations, overrides: overrides,
-		hasher: hasher, dummyHash: dummyHash,
+		secretManager: manager,
+		hasher:        hasher, dummyHash: dummyHash,
 		publicOrigin: strings.TrimSuffix(publicOrigin, "/"), sessionLifetime: sessionLifetime,
 		logger: logger, loginLimiter: newFailureLimiter(5, 5*time.Minute),
-	}, nil
+	}
+	return api, nil
 }
 
 // InitializeBootstrap installs the configured one-time secret. A consumed
@@ -125,6 +131,10 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/plan", api.planConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/config-revisions/{revisionID}/activate", api.activateConfigurationRevision)
 		protected.With(api.mutationProtection).Post("/environments/{environmentID}/rollback", api.rollbackEnvironmentConfiguration)
+		protected.Get("/secrets", api.secrets)
+		protected.With(api.mutationProtection).Post("/secrets", api.createSecret)
+		protected.With(api.mutationProtection).Post("/secrets/{secretID}/rotate", api.rotateSecret)
+		protected.With(api.mutationProtection).Delete("/secrets/{secretID}", api.deleteSecret)
 		protected.Get("/api-tokens", api.apiTokens)
 		protected.With(api.mutationProtection).Post("/api-tokens", api.createAPIToken)
 		protected.With(api.mutationProtection).Delete("/api-tokens/{tokenID}", api.revokeAPIToken)
@@ -915,19 +925,28 @@ func principalFromIssued(result adminauth.BootstrapResult, issued adminauth.Issu
 }
 
 func decodeJSON[T any](r *http.Request) (T, error) {
+	return decodeJSONLimited[T](r, maxAdminBody)
+}
+
+func decodeJSONLimited[T any](r *http.Request, maximumBytes int64) (T, error) {
 	var zero T
+	if maximumBytes < 1 {
+		return zero, errors.New("JSON body limit is invalid")
+	}
 	if media := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); media != "application/json" {
 		return zero, errors.New("content type must be application/json")
 	}
-	value, err := jsonsafe.DecodeReader(r.Body, maxAdminBody)
+	value, err := jsonsafe.DecodeReader(r.Body, maximumBytes)
 	if err != nil {
 		return zero, err
 	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
+	var canonical bytes.Buffer
+	encoder := json.NewEncoder(&canonical)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
 		return zero, err
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(canonical)))
+	decoder := json.NewDecoder(bytes.NewReader(canonical.Bytes()))
 	decoder.DisallowUnknownFields()
 	var result T
 	if err := decoder.Decode(&result); err != nil {
@@ -1041,7 +1060,9 @@ func requestID(ctx context.Context) string {
 }
 
 type rejectedMutationAuditState struct {
-	principal *adminauth.Principal
+	principal     *adminauth.Principal
+	operationID   string
+	indeterminate bool
 }
 
 type rejectedMutationAuditContextKey struct{}
@@ -1052,9 +1073,14 @@ func (api *API) recordRejectedMutation(
 	resourceType string,
 	principal *adminauth.Principal,
 	outcome adminauth.AuditOutcome,
+	operationID string,
 ) error {
 	eventID, eventErr := id.New(id.AuditEvent)
-	requestID, requestErr := id.New(id.AdminRequest)
+	requestID := operationID
+	var requestErr error
+	if id.Validate(requestID, id.AdminRequest) != nil {
+		requestID, requestErr = id.New(id.AdminRequest)
+	}
 	change, changeErr := adminauth.NewSensitiveAuditChange("credential", adminauth.AuditSet)
 	if eventErr != nil || requestErr != nil || changeErr != nil {
 		return errors.New("construct rejected mutation audit")
@@ -1098,14 +1124,11 @@ func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
 		next.ServeHTTP(wrapped, r)
 		if wrapped.Status() >= http.StatusBadRequest {
 			action, resourceType := rejectedMutationDescriptor(r.Method, r.URL.Path)
-			outcome := adminauth.AuditDenied
-			if wrapped.Status() >= http.StatusInternalServerError {
-				outcome = adminauth.AuditFailed
-			}
+			outcome := rejectedMutationOutcome(wrapped.Status(), state.indeterminate)
 			auditContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
 			defer cancel()
 			if err := api.recordRejectedMutation(
-				auditContext, action, resourceType, state.principal, outcome,
+				auditContext, action, resourceType, state.principal, outcome, state.operationID,
 			); err != nil {
 				api.logger.ErrorContext(
 					r.Context(), "record rejected Admin API mutation",
@@ -1114,6 +1137,33 @@ func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
 			}
 		}
 	})
+}
+
+func rejectedMutationOutcome(status int, indeterminate bool) adminauth.AuditOutcome {
+	if indeterminate {
+		return adminauth.AuditIndeterminate
+	}
+	if status >= http.StatusInternalServerError {
+		return adminauth.AuditFailed
+	}
+	return adminauth.AuditDenied
+}
+
+func newMutationOperationID(ctx context.Context) (string, error) {
+	operationID, err := id.New(id.AdminRequest)
+	if err != nil {
+		return "", err
+	}
+	if state, ok := ctx.Value(rejectedMutationAuditContextKey{}).(*rejectedMutationAuditState); ok {
+		state.operationID = operationID
+	}
+	return operationID, nil
+}
+
+func markMutationIndeterminate(ctx context.Context) {
+	if state, ok := ctx.Value(rejectedMutationAuditContextKey{}).(*rejectedMutationAuditState); ok {
+		state.indeterminate = true
+	}
 }
 
 func rejectedMutationDescriptor(method, path string) (string, string) {
@@ -1142,6 +1192,12 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.configuration_activate", "admin_request"
 	case strings.HasSuffix(path, "/rollback"):
 		return "admin.configuration_rollback", "admin_request"
+	case strings.HasSuffix(path, "/secrets") && method == http.MethodPost:
+		return "admin.secret_create", "admin_request"
+	case strings.HasSuffix(path, "/rotate") && strings.Contains(path, "/secrets/"):
+		return "admin.secret_rotate", "admin_request"
+	case strings.Contains(path, "/secrets/") && method == http.MethodDelete:
+		return "admin.secret_delete", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodPost:
 		return "admin.api_token_create", "admin_request"
 	case strings.Contains(path, "/api-tokens") && method == http.MethodDelete:

@@ -330,6 +330,8 @@ type LogicalRequest struct {
 	DispatchedAt      pgtype.Timestamptz `db:"dispatched_at" json:"dispatched_at"`
 	CompletedAt       pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
 	FailureCode       *string            `db:"failure_code" json:"failure_code"`
+	// Unpadded base64url SHA-256 of the canonical server-trusted request and resolved quota/routing decision. NULL is reserved for rows created before schema version 9 and cannot authorize a replay.
+	TrustedDecisionFingerprint *string `db:"trusted_decision_fingerprint" json:"trusted_decision_fingerprint"`
 }
 
 type Organization struct {
@@ -343,12 +345,13 @@ type Organization struct {
 }
 
 type QuotaBucket struct {
-	QuotaBucketID     string             `db:"quota_bucket_id" json:"quota_bucket_id"`
-	OrganizationID    string             `db:"organization_id" json:"organization_id"`
-	ApplicationID     string             `db:"application_id" json:"application_id"`
-	EnvironmentID     string             `db:"environment_id" json:"environment_id"`
-	Metric            string             `db:"metric" json:"metric"`
-	ScopeType         string             `db:"scope_type" json:"scope_type"`
+	QuotaBucketID  string `db:"quota_bucket_id" json:"quota_bucket_id"`
+	OrganizationID string `db:"organization_id" json:"organization_id"`
+	ApplicationID  string `db:"application_id" json:"application_id"`
+	EnvironmentID  string `db:"environment_id" json:"environment_id"`
+	Metric         string `db:"metric" json:"metric"`
+	ScopeType      string `db:"scope_type" json:"scope_type"`
+	// Unpadded base64url SHA-256 of a domain-separated canonical encoding of server-owned values for scope_dimensions; never a client-supplied key.
 	ScopeKey          string             `db:"scope_key" json:"scope_key"`
 	Algorithm         string             `db:"algorithm" json:"algorithm"`
 	WindowKey         string             `db:"window_key" json:"window_key"`
@@ -362,6 +365,12 @@ type QuotaBucket struct {
 	Version           int64              `db:"version" json:"version"`
 	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	// Canonical 1-63 character identifier of the server-selected configuration limit plan.
+	LimitPlanKey string `db:"limit_plan_key" json:"limit_plan_key"`
+	// Unpadded base64url SHA-256 of the canonical rule identity; mutable maximum and capacity values are excluded so policy changes do not reset usage.
+	RuleKey string `db:"rule_key" json:"rule_key"`
+	// Unique configuration dimension names whose server-owned values form this bucket scope.
+	ScopeDimensions []string `db:"scope_dimensions" json:"scope_dimensions"`
 }
 
 type QuotaReservation struct {

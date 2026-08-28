@@ -89,11 +89,6 @@ func newAPIRuntime(
 	pool *pgxpool.Pool,
 	quotaStore *quota.Store,
 ) (*server.Server, *dataplane.TargetCache, error) {
-	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger)
-	if err != nil {
-		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
-	}
-
 	envelope, err := secrets.NewEnvironmentMasterKeyFromEnv()
 	if err != nil {
 		return nil, nil, fmt.Errorf("load runtime master key: %w", err)
@@ -104,6 +99,14 @@ func newAPIRuntime(
 	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret store: %w", err)
+	}
+	secretManager, err := secrets.NewManager(secrets.ManagerConfig{Pool: pool, Provider: envelope})
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct secret manager: %w", err)
+	}
+	adminAPI, err := adminapi.New(pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager)
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
 	}
 	configurationStore, err := configuration.NewStore(pool)
 	if err != nil {

@@ -25,7 +25,7 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pool := isolatedAdminAPIPool(t, ctx, databaseURL)
-	api, err := New(pool, "https://console.example.test", 12*time.Hour, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	api, err := New(pool, "https://console.example.test", 12*time.Hour, slog.New(slog.NewJSONHandler(io.Discard, nil)), testAdminSecretManager(t, pool))
 	if err != nil {
 		t.Fatal(err)
 	}

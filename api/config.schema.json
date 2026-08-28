@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/config/0.2.0/environment-config.schema.json",
+  "$id": "https://latchway.dev/schemas/config/0.3.0/environment-config.schema.json",
   "title": "Latchway EnvironmentConfig",
   "description": "Immutable, revisioned configuration for one Latchway application environment.",
   "type": "object",

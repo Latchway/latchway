@@ -42,7 +42,6 @@ type Scope struct {
 type StoreConfig struct {
 	Pool     *pgxpool.Pool
 	Provider Provider
-	Now      func() time.Time
 }
 
 // Store resolves active configuration secret references. It intentionally has
@@ -55,7 +54,6 @@ type storeMaterial struct {
 	loader        secretRecordLoader
 	provider      Provider
 	providerKeyID string
-	now           func() time.Time
 }
 
 // NewStore constructs a PostgreSQL-backed encrypted secret reader.
@@ -63,21 +61,18 @@ func NewStore(config StoreConfig) (*Store, error) {
 	if config.Pool == nil || config.Provider == nil {
 		return nil, ErrInvalid
 	}
-	if config.Now == nil {
-		config.Now = time.Now
-	}
 	providerKeyID := config.Provider.KeyID()
 	if !masterKeyIdentifierPattern.MatchString(providerKeyID) {
 		return nil, ErrInvalid
 	}
-	return newStore(postgresSecretRecordLoader{pool: config.Pool}, config.Provider, providerKeyID, config.Now)
+	return newStore(postgresSecretRecordLoader{pool: config.Pool}, config.Provider, providerKeyID)
 }
 
-func newStore(loader secretRecordLoader, provider Provider, providerKeyID string, now func() time.Time) (*Store, error) {
-	if loader == nil || provider == nil || now == nil || !masterKeyIdentifierPattern.MatchString(providerKeyID) {
+func newStore(loader secretRecordLoader, provider Provider, providerKeyID string) (*Store, error) {
+	if loader == nil || provider == nil || !masterKeyIdentifierPattern.MatchString(providerKeyID) {
 		return nil, ErrInvalid
 	}
-	return &Store{storeMaterial: &storeMaterial{loader: loader, provider: provider, providerKeyID: providerKeyID, now: now}}, nil
+	return &Store{storeMaterial: &storeMaterial{loader: loader, provider: provider, providerKeyID: providerKeyID}}, nil
 }
 
 // Use resolves reference at its current active version, authenticates and
@@ -92,15 +87,11 @@ func (store *Store) Use(ctx context.Context, scope Scope, reference string, cons
 		return ErrInvalid
 	}
 	name := strings.TrimPrefix(reference, "secret/")
-	now := store.now().UTC()
-	if now.IsZero() {
-		return ErrInvalid
-	}
-	record, err := store.loader.load(ctx, scope, name, now)
+	record, err := store.loader.load(ctx, scope, name)
 	if err != nil {
 		return ErrUnavailable
 	}
-	if err := record.validate(scope, name, store.providerKeyID, now); err != nil {
+	if err := record.validate(scope, name, store.providerKeyID); err != nil {
 		return err
 	}
 
@@ -170,7 +161,7 @@ type secretRecordMaterial struct {
 	environmentStatus  string
 }
 
-func (record secretRecord) validate(scope Scope, name, providerKeyID string, now time.Time) error {
+func (record secretRecord) validate(scope Scope, name, providerKeyID string) error {
 	if record.secretRecordMaterial == nil ||
 		id.Validate(record.id, id.SecretRecord) != nil ||
 		id.Validate(record.organizationID, id.Organization) != nil ||
@@ -186,7 +177,7 @@ func (record secretRecord) validate(scope Scope, name, providerKeyID string, now
 		!masterKeyIdentifierPattern.MatchString(record.masterKeyID) ||
 		len(record.nonce) != 12 ||
 		len(record.ciphertext) < 17 ||
-		record.createdAt.IsZero() || record.createdAt.After(now) {
+		record.createdAt.IsZero() {
 		return ErrInvalid
 	}
 	if record.organizationStatus != "active" || record.applicationStatus != "active" || record.environmentStatus != "active" ||
@@ -203,14 +194,14 @@ func (secretRecord) Format(state fmt.State, _ rune) {
 }
 
 type secretRecordLoader interface {
-	load(context.Context, Scope, string, time.Time) (secretRecord, error)
+	load(context.Context, Scope, string) (secretRecord, error)
 }
 
 type postgresSecretRecordLoader struct {
 	pool *pgxpool.Pool
 }
 
-func (loader postgresSecretRecordLoader) load(ctx context.Context, scope Scope, name string, now time.Time) (secretRecord, error) {
+func (loader postgresSecretRecordLoader) load(ctx context.Context, scope Scope, name string) (secretRecord, error) {
 	record := secretRecord{secretRecordMaterial: &secretRecordMaterial{}}
 	err := loader.pool.QueryRow(ctx, `
 		SELECT secret.secret_record_id,
@@ -244,7 +235,6 @@ func (loader postgresSecretRecordLoader) load(ctx context.Context, scope Scope, 
 		  AND secret.application_id = $2
 		  AND secret.environment_id = $3
 		  AND secret.name = $4
-		  AND secret.created_at <= $5
 		  AND secret.rotated_at IS NULL
 		  AND secret.destroyed_at IS NULL
 		  AND organization.status = 'active'
@@ -253,10 +243,7 @@ func (loader postgresSecretRecordLoader) load(ctx context.Context, scope Scope, 
 		  AND organization.disabled_at IS NULL
 		  AND application.disabled_at IS NULL
 		  AND environment.disabled_at IS NULL
-		  AND organization.created_at <= $5
-		  AND application.created_at <= $5
-		  AND environment.created_at <= $5
-	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, name, now).Scan(
+	`, scope.OrganizationID, scope.ApplicationID, scope.EnvironmentID, name).Scan(
 		&record.id,
 		&record.organizationID,
 		&record.applicationID,

@@ -816,6 +816,8 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 7, name: "000007_identity_provider_identifier_bounds.sql"},
 		{version: 8, name: "000008_quota_request_identity.sql"},
 		{version: 9, name: "000009_logical_request_fingerprint.sql"},
+		{version: 10, name: "000010_secret_name_contract.sql"},
+		{version: 11, name: "000011_audit_indeterminate_outcome.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break

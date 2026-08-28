@@ -218,7 +218,11 @@ func (store *Store) ValidateRevision(ctx context.Context, principal adminauth.Pr
 	if revision.storedState != StateDraft && revision.storedState != StateInvalid {
 		return ValidationReport{}, ErrConflict
 	}
-	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, false)
+	// Validation is the transition that makes a document capable of retaining
+	// a secret reference indefinitely. Serialize it with secret lifecycle
+	// writes on the shared environment row so destruction cannot race a draft
+	// into the valid state after the reference check.
+	environment, _, err := store.environment(ctx, tx, principal.OrganizationID, revision.EnvironmentID, true)
 	if err != nil {
 		return ValidationReport{}, err
 	}

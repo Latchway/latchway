@@ -80,9 +80,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		"debug-attestation-public-keys", debugPublicKeyDocument, now.Add(-time.Minute))
 	revisionID := activateClientHTTPConfiguration(t, ctx, pool, fixture, adminUserID, now)
 
-	secretStore, err := secrets.NewStore(secrets.StoreConfig{
-		Pool: pool, Provider: envelope, Now: func() time.Time { return now },
-	})
+	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
 	if err != nil {
 		t.Fatalf("construct encrypted secret store: %v", err)
 	}

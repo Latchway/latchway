@@ -3,6 +3,7 @@ package adminapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/database"
+	"github.com/latchway/latchway/internal/problem"
+	secretstore "github.com/latchway/latchway/internal/secrets"
 )
 
 var adminAPIIntegrationSchemaPattern = regexp.MustCompile(`^latchway_adminapi_test_[0-9]+$`)
@@ -83,7 +87,7 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 	pool := isolatedAdminAPIPool(t, ctx, databaseURL)
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	api, err := New(pool, "https://console.example.test", 12*time.Hour, logger)
+	api, err := New(pool, "https://console.example.test", 12*time.Hour, logger, testAdminSecretManager(t, pool))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -229,6 +233,53 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 	assertAdministrativePersistence(t, ctx, pool, bootstrapToken, bootstrapBody["password"], createdToken.Token)
 }
 
+func TestAuditRejectedMutationPostgreSQLIndeterminateCorrelation(t *testing.T) {
+	databaseURL := testDatabaseURL(t)
+	if databaseURL == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := isolatedAdminAPIPool(t, ctx, databaseURL)
+	api, err := New(
+		pool, "https://console.example.test", 12*time.Hour,
+		slog.New(slog.NewJSONHandler(io.Discard, nil)), testAdminSecretManager(t, pool),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationIDs := make(chan string, 1)
+	handler := api.auditRejectedMutation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		operationID, operationErr := newMutationOperationID(r.Context())
+		if operationErr != nil {
+			t.Fatalf("create operation ID: %v", operationErr)
+		}
+		markMutationIndeterminate(r.Context())
+		operationIDs <- operationID
+		api.writeProblem(w, r, problem.Error{
+			Code: "operation_indeterminate", OperationID: operationID,
+			Detail: "The commit acknowledgement was lost.",
+		})
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/admin/v1/secrets", nil))
+	operationID := <-operationIDs
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var outcome, requestID, resourceID string
+	if err := pool.QueryRow(ctx, `
+		SELECT outcome, request_id, resource_id
+		FROM audit_events
+		WHERE action = 'admin.secret_create'
+	`).Scan(&outcome, &requestID, &resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != string(adminauth.AuditIndeterminate) || requestID != operationID || resourceID != operationID {
+		t.Fatalf("audit outcome=%q request_id=%q resource_id=%q operation_id=%q", outcome, requestID, resourceID, operationID)
+	}
+}
+
 func isolatedAdminAPIPool(t *testing.T, ctx context.Context, databaseURL string) *pgxpool.Pool {
 	t.Helper()
 	adminPool, err := pgxpool.New(ctx, databaseURL)
@@ -266,6 +317,19 @@ func isolatedAdminAPIPool(t *testing.T, ctx context.Context, databaseURL string)
 		t.Fatalf("apply migrations: %v", err)
 	}
 	return pool
+}
+
+func testAdminSecretManager(t *testing.T, pool *pgxpool.Pool) *secretstore.Manager {
+	t.Helper()
+	provider, err := secretstore.NewEnvironmentMasterKey(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xc7}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := secretstore.NewManager(secretstore.ManagerConfig{Pool: pool, Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
 }
 
 func performJSON(t *testing.T, handler http.Handler, method, path string, body any, cookie *http.Cookie, csrf, origin string) *httptest.ResponseRecorder {

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/latchway/latchway/internal/id"
 )
 
 // Definition is generated conceptually from api/error-codes.yaml. Contract
@@ -23,6 +25,7 @@ type Error struct {
 	Code                      string
 	Detail                    string
 	RetryAfterSeconds         int
+	OperationID               string
 	Feature                   string
 	SupportedProtocolVersions []int
 	Fields                    []FieldError
@@ -54,6 +57,7 @@ type document struct {
 	RequestID                 string  `json:"request_id"`
 	Retryable                 bool    `json:"retryable"`
 	RetryAfter                *string `json:"retry_after,omitempty"`
+	OperationID               string  `json:"operation_id,omitempty"`
 	Feature                   string  `json:"feature,omitempty"`
 	SupportedProtocolVersions []int   `json:"supported_protocol_versions,omitempty"`
 	Errors                    any     `json:"errors,omitempty"`
@@ -62,7 +66,10 @@ type document struct {
 // Write emits one registered problem. Unknown codes become internal_error.
 func Write(w http.ResponseWriter, requestID string, value Error) {
 	definition, ok := Registry[value.Code]
-	if !ok || (len(value.Fields) > 0 && len(value.ValidationIssues) > 0) {
+	operationIDValid := value.OperationID == "" || id.Validate(value.OperationID, id.AdminRequest) == nil
+	operationIDRequired := value.Code == "operation_indeterminate"
+	if !ok || (len(value.Fields) > 0 && len(value.ValidationIssues) > 0) ||
+		!operationIDValid || operationIDRequired != (value.OperationID != "") {
 		value = Error{Code: "internal_error", Detail: "The request could not be completed."}
 		definition = Registry[value.Code]
 	}
@@ -99,6 +106,7 @@ func Write(w http.ResponseWriter, requestID string, value Error) {
 		RequestID:                 requestID,
 		Retryable:                 definition.Retryable,
 		RetryAfter:                retryAfter,
+		OperationID:               value.OperationID,
 		Feature:                   value.Feature,
 		SupportedProtocolVersions: value.SupportedProtocolVersions,
 		Errors:                    responseErrors,

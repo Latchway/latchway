@@ -281,9 +281,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			costCatalog, costEntry, ok, costEntryOK)
 	}
 
-	secretStore, err := secrets.NewStore(secrets.StoreConfig{
-		Pool: pool, Provider: envelope, Now: func() time.Time { return now },
-	})
+	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
 	if err != nil {
 		t.Fatalf("construct encrypted secret store: %v", err)
 	}

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -90,7 +91,7 @@ func TestMigratorPostgreSQLQuotaIdentityUpgradeFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repaired quota migration status: %v", err)
 	}
-	if current != 9 || available != 9 {
+	if current != 11 || available != 11 {
 		t.Fatalf("schema versions after repaired upgrade current=%d available=%d", current, available)
 	}
 }
@@ -187,8 +188,131 @@ func TestMigratorPostgreSQLLogicalRequestFingerprintUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fingerprint migration status: %v", err)
 	}
-	if current != 9 || available != 9 {
+	if current != 11 || available != 11 {
 		t.Fatalf("fingerprint schema versions current=%d available=%d", current, available)
+	}
+}
+
+func TestMigratorPostgreSQLSecretNameContractUpgrade(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 9)
+	seedQuotaMigrationTenant(t, ctx, pool)
+	seedQuotaMigrationRequestDependencies(t, ctx, pool)
+
+	insert := func(recordID, name string) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO secret_records (
+				secret_record_id, organization_id, application_id, environment_id,
+				name, version, encryption_format_version, algorithm,
+				master_key_identifier, ciphertext, nonce, created_by_admin_user_id
+			) VALUES ($1, $2, $3, $4, $5, 1, 1, 'aes-256-gcm',
+			          'env_test-key', $6, $7, 'adm_00000000000000000000000001')
+		`, recordID, quotaMigrationOrganizationID, quotaMigrationApplicationID,
+			quotaMigrationEnvironmentID, name, bytes.Repeat([]byte{0x51}, 17), bytes.Repeat([]byte{0x52}, 12))
+		return err
+	}
+	if err := insert("sec_00000000000000000000000001", "legacy.name"); err != nil {
+		t.Fatalf("insert legacy broader secret name: %v", err)
+	}
+	if err := insert("sec_00000000000000000000000002", "a"); err == nil {
+		t.Fatal("schema v9 unexpectedly accepted the one-character contract name")
+	} else {
+		expectPostgreSQLConstraintError(t, err, "23514", "secret_records_name_check")
+	}
+
+	migrator := NewMigrator(pool)
+	if err := migrator.Up(ctx); err == nil {
+		t.Fatal("secret-name contract migration accepted an unmanageable legacy row")
+	} else {
+		expectPostgreSQLConstraintError(t, err, "23514", "secret_records_name_check")
+	}
+	current, available, err := migrator.Status(ctx)
+	if err != nil {
+		t.Fatalf("read rejected secret-name migration status: %v", err)
+	}
+	if current != 9 || available != 11 {
+		t.Fatalf("rejected secret-name migration status current=%d available=%d", current, available)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE secret_records SET name = 'legacy-name'
+		WHERE secret_record_id = 'sec_00000000000000000000000001'
+	`); err != nil {
+		t.Fatalf("repair legacy secret name under schema v9: %v", err)
+	}
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("apply secret-name contract migration after repair: %v", err)
+	}
+	if err := insert("sec_00000000000000000000000002", "a"); err != nil {
+		t.Fatalf("schema v10 rejected one-character contract name: %v", err)
+	}
+	if err := insert("sec_00000000000000000000000003", "new.name"); err == nil {
+		t.Fatal("schema v10 accepted a noncanonical new secret name")
+	} else {
+		expectPostgreSQLConstraintError(t, err, "23514", "secret_records_name_check")
+	}
+	var repairedRows int
+	var validated bool
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM secret_records WHERE name = 'legacy-name'`).Scan(&repairedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT convalidated FROM pg_constraint
+		WHERE conrelid = 'secret_records'::regclass
+		  AND conname = 'secret_records_name_check'
+	`).Scan(&validated); err != nil {
+		t.Fatal(err)
+	}
+	if repairedRows != 1 || !validated {
+		t.Fatalf("repaired rows=%d constraint validated=%t", repairedRows, validated)
+	}
+	current, available, err = migrator.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != 11 || available != 11 {
+		t.Fatalf("secret-name schema versions current=%d available=%d", current, available)
+	}
+}
+
+func TestMigratorPostgreSQLAuditIndeterminateOutcomeUpgrade(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 10)
+
+	insert := func(eventID, outcome string) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO audit_events (
+				audit_event_id, actor_kind, action, resource_type,
+				resource_id, outcome, request_id, occurred_at
+			) VALUES ($1, 'system', 'admin.secret_rotate', 'admin_request',
+			          'arq_00000000000000000000000001', $2,
+			          'arq_00000000000000000000000001', clock_timestamp())
+		`, eventID, outcome)
+		return err
+	}
+	if err := insert("aud_00000000000000000000000001", "indeterminate"); err == nil {
+		t.Fatal("schema v10 unexpectedly accepted an indeterminate audit outcome")
+	} else {
+		expectPostgreSQLConstraintError(t, err, "23514", "audit_events_outcome_check")
+	}
+
+	migrator := NewMigrator(pool)
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("apply indeterminate audit-outcome migration: %v", err)
+	}
+	if err := insert("aud_00000000000000000000000001", "indeterminate"); err != nil {
+		t.Fatalf("schema v11 rejected indeterminate audit outcome: %v", err)
+	}
+	if err := insert("aud_00000000000000000000000002", "unknown"); err == nil {
+		t.Fatal("schema v11 accepted an unknown audit outcome")
+	} else {
+		expectPostgreSQLConstraintError(t, err, "23514", "audit_events_outcome_check")
+	}
+	current, available, err := migrator.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != 11 || available != 11 {
+		t.Fatalf("audit-outcome schema versions current=%d available=%d", current, available)
 	}
 }
 

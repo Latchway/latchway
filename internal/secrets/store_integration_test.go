@@ -49,8 +49,7 @@ func TestStorePostgreSQLActiveRotationAndIsolation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	scope, adminUserID := insertSecretTenant(t, ctx, pool, now.Add(-time.Hour))
 	provider := testEnvironmentMasterKey(t, 0xb1)
-	observedNow := now
-	store, err := NewStore(StoreConfig{Pool: pool, Provider: provider, Now: func() time.Time { return observedNow }})
+	store, err := NewStore(StoreConfig{Pool: pool, Provider: provider})
 	if err != nil {
 		t.Fatalf("construct PostgreSQL secret store: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestStorePostgreSQLActiveRotationAndIsolation(t *testing.T) {
 	}
 	clear(value)
 
-	wrongMasterStore, err := NewStore(StoreConfig{Pool: pool, Provider: testEnvironmentMasterKey(t, 0xb2), Now: func() time.Time { return observedNow }})
+	wrongMasterStore, err := NewStore(StoreConfig{Pool: pool, Provider: testEnvironmentMasterKey(t, 0xb2)})
 	if err != nil {
 		t.Fatalf("construct wrong-master store: %v", err)
 	}
@@ -139,13 +138,12 @@ func TestStorePostgreSQLActiveRotationAndIsolation(t *testing.T) {
 	}
 }
 
-func TestStorePostgreSQLLifecycleWindowsFailClosed(t *testing.T) {
+func TestStorePostgreSQLLifecycleStateIsAuthoritative(t *testing.T) {
 	pool, ctx := isolatedSecretPool(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	scope, adminUserID := insertSecretTenant(t, ctx, pool, now.Add(-time.Hour))
 	provider := testEnvironmentMasterKey(t, 0xc1)
-	observedNow := now
-	store, err := NewStore(StoreConfig{Pool: pool, Provider: provider, Now: func() time.Time { return observedNow }})
+	store, err := NewStore(StoreConfig{Pool: pool, Provider: provider})
 	if err != nil {
 		t.Fatalf("construct PostgreSQL secret store: %v", err)
 	}
@@ -170,13 +168,9 @@ func TestStorePostgreSQLLifecycleWindowsFailClosed(t *testing.T) {
 
 	insertEncryptedSecret(t, ctx, pool, provider, scope, adminUserID, "future-key", 1,
 		[]byte("future"), now.Add(time.Minute), "", provider.KeyID())
-	if err := store.Use(ctx, scope, "secret/future-key", func([]byte) error { return nil }); err != ErrUnavailable {
-		t.Fatalf("future record error = %v", err)
-	}
-	observedNow = now.Add(2 * time.Minute)
 	value, retained, err := captureSecret(ctx, store, scope, "secret/future-key")
 	if err != nil || string(value) != "future" || !allZero(retained) {
-		t.Fatalf("matured future record value=%q retained=%x err=%v", value, retained, err)
+		t.Fatalf("committed future-timestamp record value=%q retained=%x err=%v", value, retained, err)
 	}
 	clear(value)
 
@@ -184,7 +178,7 @@ func TestStorePostgreSQLLifecycleWindowsFailClosed(t *testing.T) {
 		UPDATE environments
 		SET status = 'disabled', disabled_at = $2, updated_at = $2
 		WHERE environment_id = $1
-	`, scope.EnvironmentID, observedNow); err != nil {
+	`, scope.EnvironmentID, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("disable environment: %v", err)
 	}
 	if err := store.Use(ctx, scope, "secret/future-key", func([]byte) error { return nil }); err != ErrUnavailable {

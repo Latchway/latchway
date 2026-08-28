@@ -1026,6 +1026,37 @@ func TestValidatorRejectsSchemaReferencesAndBadPolicy(t *testing.T) {
 	}
 }
 
+func TestSecretReferenceIssuesInspectOnlySchemaDefinedReferenceFields(t *testing.T) {
+	t.Parallel()
+	root := map[string]any{
+		"description": "secret/not-a-reference",
+		"spec": map[string]any{
+			"identityProviders": []any{map[string]any{
+				"staticPublicKeySecretRef": "secret/missing-a",
+				"symmetricSecretRef":       "secret/present",
+			}},
+			"attestationPolicies": []any{map[string]any{
+				"platforms": map[string]any{"ios": map[string]any{"secretRef": "secret/missing-b"}},
+			}},
+			"upstreams": []any{map[string]any{
+				"authentication": map[string]any{"secretRef": "secret/missing-c"},
+				"staticHeaders":  map[string]any{"secretRef": "secret/not-a-reference"},
+			}},
+		},
+	}
+	issues := secretReferenceIssues(root, map[string]struct{}{"present": {}})
+	if len(issues) != 3 || !hasIssue(issues, "secret_reference_missing") {
+		t.Fatalf("schema-defined secret reference issues = %+v", issues)
+	}
+	for _, issue := range issues {
+		if issue.Path != "/spec/identityProviders/0/staticPublicKeySecretRef" &&
+			issue.Path != "/spec/attestationPolicies/0/platforms/ios/secretRef" &&
+			issue.Path != "/spec/upstreams/0/authentication/secretRef" {
+			t.Fatalf("ordinary text treated as a secret reference: %+v", issues)
+		}
+	}
+}
+
 func TestValidatorRejectsUnsupportedUpstreamDestinationRelaxation(t *testing.T) {
 	t.Parallel()
 

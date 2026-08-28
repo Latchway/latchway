@@ -8,7 +8,7 @@ var (
 )
 
 const (
-	ContractVersion = "0.2.0"
+	ContractVersion = "0.3.0"
 	ProtocolVersion = "1"
 )
 
