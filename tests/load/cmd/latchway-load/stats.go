@@ -2,17 +2,26 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+)
+
+const (
+	maximumProcArgv0Bytes   = 4096
+	maximumProcessNameBytes = 255
 )
 
 func percentile(samples []time.Duration, percentile float64) time.Duration {
@@ -113,9 +122,12 @@ func processExecutable(pid int) (string, error) {
 		return "", errors.New("invalid gateway pid")
 	}
 	if runtime.GOOS == "linux" {
-		if target, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil && target != "" {
-			return filepath.Base(target), nil
+		file, err := os.Open(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err != nil {
+			return "", fmt.Errorf("read gateway executable identity: %w", err)
 		}
+		defer file.Close()
+		return processExecutableFromProcCmdline(file)
 	}
 	output, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
@@ -124,6 +136,40 @@ func processExecutable(pid int) (string, error) {
 	name := filepath.Base(strings.TrimSpace(string(output)))
 	if name == "" {
 		return "", errors.New("gateway executable identity is empty")
+	}
+	return name, nil
+}
+
+func processExecutableFromProcCmdline(reader io.Reader) (string, error) {
+	if reader == nil {
+		return "", errors.New("gateway executable cmdline is unavailable")
+	}
+	contents, err := io.ReadAll(io.LimitReader(reader, maximumProcArgv0Bytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read gateway executable cmdline: %w", err)
+	}
+	delimiter := bytes.IndexByte(contents, 0)
+	if delimiter < 0 {
+		if len(contents) > maximumProcArgv0Bytes {
+			return "", errors.New("gateway executable argv0 exceeds the procfs bound")
+		}
+		return "", errors.New("gateway executable cmdline is not NUL-delimited")
+	}
+	if delimiter == 0 {
+		return "", errors.New("gateway executable argv0 is empty")
+	}
+	argv0 := contents[:delimiter]
+	if !utf8.Valid(argv0) {
+		return "", errors.New("gateway executable argv0 is not valid UTF-8")
+	}
+	for _, character := range argv0 {
+		if character < 0x20 || character == 0x7f {
+			return "", errors.New("gateway executable argv0 contains control characters")
+		}
+	}
+	name := path.Base(string(argv0))
+	if name == "" || name == "." || name == "/" || len(name) > maximumProcessNameBytes {
+		return "", errors.New("gateway executable argv0 has an invalid basename")
 	}
 	return name, nil
 }

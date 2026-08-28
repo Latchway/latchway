@@ -143,7 +143,11 @@ automatically.
 Write the gateway PID to the configured PID file (or set an exact `pid` in the
 config). `process_name_contains` must match the executable resolved for that
 PID; this prevents an unrelated low-memory process from satisfying the RSS
-gate. Then run:
+gate. On Linux the runner resolves the basename of bounded, NUL-delimited
+`argv[0]` from `/proc/<pid>/cmdline`; this remains readable when the runner and
+gateway share a PID namespace but not a mount namespace. Missing, oversized,
+or malformed procfs identity fails closed. Other platforms use their native
+`ps` executable-name lookup. Then run:
 
 ```bash
 export LATCHWAY_LOAD_ACCESS_TOKEN="<dedicated DPoP access token>"
