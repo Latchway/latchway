@@ -4,11 +4,12 @@
 // durable token-bucket logical-request rules, hard calendar and durable
 // token-bucket output-token rules, hard concurrent-request and
 // concurrent-stream leases, hard per-request output-token enforcement
-// metadata, and immutable
-// configured-price attribution. One request may resolve to multiple rules,
-// which are reserved and finalized atomically. The package does not accept
-// client supplied counters, bucket keys, rule hashes, usage totals, costs, or
-// timestamps.
+// metadata, and immutable configured-price attribution. The model also
+// recognizes dormant hard UTC-calendar input-token and total-token lifecycle
+// shapes; configuration and data-plane activation remain deliberately gated.
+// One request may resolve to multiple rules, which are reserved and finalized
+// atomically. The package does not accept client supplied counters, bucket
+// keys, rule hashes, usage totals, costs, or timestamps.
 package quota
 
 import (
@@ -16,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"math"
 	"regexp"
 	"slices"
 	"sort"
@@ -31,7 +33,9 @@ import (
 
 const (
 	LogicalRequestsMetric    = "logical_requests"
+	InputTokensMetric        = "input_tokens"
 	OutputTokensMetric       = "output_tokens"
+	TotalTokensMetric        = "total_tokens"
 	ConcurrentRequestsMetric = "concurrent_requests"
 	ConcurrentStreamsMetric  = "concurrent_streams"
 	CostNanoUSDMetric        = "cost_nano_usd"
@@ -94,10 +98,10 @@ const (
 )
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
-// output-token cap or cost reservation applied to the provider request. It is
-// zero for logical-request and concurrency rules, whose one unit is derived by
-// the store. A cost reservation may also be zero when trusted configured
-// pricing proves that the request is free. Capacity and the reduced
+// token or cost reservation applied to the provider request. It is zero for
+// logical-request and concurrency rules, whose one unit is derived by the
+// store. A cost reservation may also be zero when trusted configured pricing
+// proves that the request is free. Capacity and the reduced
 // RefillNumerator/RefillDenominator are populated only for a token_bucket
 // rule. PerRequestMaximum is populated only for output_tokens/per_request
 // metadata, which is fingerprinted but does not create a durable bucket.
@@ -369,7 +373,7 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		return nil, ErrInvalidInput
 	}
 	preparedRules := make([]preparedRule, 0, len(input))
-	var outputReservation int64
+	tokenReservations := make(map[string]int64, 3)
 	var costReservation int64
 	costReservationSet := false
 	for _, rule := range input {
@@ -382,9 +386,9 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 		}
-		outputReserved := rule.ReservedUnits > 0
+		tokenReserved := rule.ReservedUnits > 0
 		if mode == snapshotRulePreparation {
-			outputReserved = rule.ReservedUnits == 0
+			tokenReserved = rule.ReservedUnits == 0
 		}
 		stateful := false
 		switch {
@@ -404,7 +408,7 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == TokenBucketAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum != 0 ||
-				!outputReserved || rule.ReservedUnits > rule.Capacity ||
+				!tokenReserved || rule.ReservedUnits > rule.Capacity ||
 				validateTokenBucketPolicy(
 					rule.Capacity, rule.RefillNumerator, rule.RefillDenominator,
 				) != nil {
@@ -412,17 +416,24 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == CalendarAlgorithm:
-			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !outputReserved ||
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !tokenReserved ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
 			stateful = true
 		case rule.Metric == OutputTokensMetric && rule.Algorithm == PerRequestAlgorithm:
 			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
-				!outputReserved || rule.ReservedUnits > rule.PerRequestMaximum ||
+				!tokenReserved || rule.ReservedUnits > rule.PerRequestMaximum ||
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
+		case (rule.Metric == InputTokensMetric || rule.Metric == TotalTokensMetric) &&
+			rule.Algorithm == CalendarAlgorithm:
+			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !tokenReserved ||
+				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
+				return nil, ErrInvalidInput
+			}
+			stateful = true
 		case rule.Metric == CostNanoUSDMetric && rule.Algorithm == CalendarAlgorithm:
 			costReserved := rule.ReservedUnits >= 0
 			if mode == snapshotRulePreparation {
@@ -444,12 +455,14 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		default:
 			return nil, ErrInvalidInput
 		}
-		if mode == reserveRulePreparation && rule.Metric == OutputTokensMetric {
-			if outputReservation == 0 {
-				outputReservation = rule.ReservedUnits
-			} else if outputReservation != rule.ReservedUnits {
+		if mode == reserveRulePreparation &&
+			(rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
+				rule.Metric == TotalTokensMetric) {
+			reservation, found := tokenReservations[rule.Metric]
+			if found && reservation != rule.ReservedUnits {
 				return nil, ErrInvalidInput
 			}
+			tokenReservations[rule.Metric] = rule.ReservedUnits
 		}
 		if mode == reserveRulePreparation && rule.Metric == CostNanoUSDMetric {
 			if !costReservationSet {
@@ -493,6 +506,9 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 			stateful:        stateful,
 		})
 	}
+	if !validTokenReservationRelationship(tokenReservations) {
+		return nil, ErrInvalidInput
+	}
 	sort.Slice(preparedRules, func(left, right int) bool {
 		if preparedRules[left].ruleKey != preparedRules[right].ruleKey {
 			return preparedRules[left].ruleKey < preparedRules[right].ruleKey
@@ -506,6 +522,28 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		}
 	}
 	return preparedRules, nil
+}
+
+// validTokenReservationRelationship checks every relationship the generic
+// quota model can prove without a separate post-route preflight record. A
+// total reservation cannot be smaller than a component that is present. When
+// both components are present, the total must be their exact checked sum.
+// Total-only and one-component shapes still require the future data-plane
+// activation boundary to bind the hidden component explicitly.
+func validTokenReservationRelationship(reservations map[string]int64) bool {
+	total, hasTotal := reservations[TotalTokensMetric]
+	if !hasTotal {
+		return true
+	}
+	input, hasInput := reservations[InputTokensMetric]
+	output, hasOutput := reservations[OutputTokensMetric]
+	if hasInput && total < input || hasOutput && total < output {
+		return false
+	}
+	if !hasInput || !hasOutput {
+		return true
+	}
+	return input <= math.MaxInt64-output && total == input+output
 }
 
 func clonePreparedRules(preparedRules []preparedRule) []Rule {
@@ -589,9 +627,10 @@ func requestFingerprint(prepared preparedRequest) string {
 			)
 		}
 		// Preserve the exact historical logical_requests/calendar serialization.
-		// New output-token and cost shapes bind both their configured per-request
-		// maximum and the exact cap applied to this provider request.
-		if rule.Metric == OutputTokensMetric || rule.Metric == CostNanoUSDMetric {
+		// Token and cost reservation shapes bind both their configured per-request
+		// maximum and the exact reservation applied to this provider request.
+		if rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
+			rule.Metric == TotalTokensMetric || rule.Metric == CostNanoUSDMetric {
 			parts = append(parts,
 				strconv.FormatInt(rule.PerRequestMaximum, 10),
 				strconv.FormatInt(rule.ReservedUnits, 10),
@@ -664,8 +703,11 @@ func (usage Usage) validate() error {
 		return nil
 	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 ||
-		usage.TotalTokens < usage.InputTokens || usage.TotalTokens < usage.OutputTokens ||
 		usage.Provenance != ProviderReportedProvenance {
+		return ErrInvalidInput
+	}
+	if usage.InputTokens > math.MaxInt64-usage.OutputTokens ||
+		usage.TotalTokens != usage.InputTokens+usage.OutputTokens {
 		return ErrInvalidInput
 	}
 	return nil
@@ -770,10 +812,12 @@ func (reservation Reservation) validate() error {
 	leaseIDs := make(map[string]struct{}, len(reservation.entries))
 	var costReservation int64
 	costReservationSet := false
+	tokenReservations := make(map[string]int64, 3)
 	for index, entry := range reservation.entries {
 		concurrency := entry.algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(entry.metric)
 		calendar := entry.algorithm == CalendarAlgorithm &&
-			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric ||
+			(entry.metric == LogicalRequestsMetric || entry.metric == InputTokensMetric ||
+				entry.metric == OutputTokensMetric || entry.metric == TotalTokensMetric ||
 				entry.metric == CostNanoUSDMetric)
 		tokenBucket := entry.algorithm == TokenBucketAlgorithm &&
 			(entry.metric == LogicalRequestsMetric || entry.metric == OutputTokensMetric)
@@ -791,6 +835,14 @@ func (reservation Reservation) validate() error {
 			return ErrInvalidInput
 		}
 		entryIDs[entry.entryID] = struct{}{}
+		if entry.metric == InputTokensMetric || entry.metric == OutputTokensMetric ||
+			entry.metric == TotalTokensMetric {
+			reservedUnits, found := tokenReservations[entry.metric]
+			if found && reservedUnits != entry.reservedUnits {
+				return ErrInvalidInput
+			}
+			tokenReservations[entry.metric] = entry.reservedUnits
+		}
 		if entry.metric == CostNanoUSDMetric {
 			if !costReservationSet {
 				costReservation = entry.reservedUnits
@@ -809,7 +861,8 @@ func (reservation Reservation) validate() error {
 			maximumReset = entry.resetAt
 		}
 	}
-	if !reservation.windowResetAt.Equal(maximumReset) {
+	if !validTokenReservationRelationship(tokenReservations) ||
+		!reservation.windowResetAt.Equal(maximumReset) {
 		return ErrInvalidInput
 	}
 	return nil
@@ -820,13 +873,16 @@ func isConcurrencyMetric(metric string) bool {
 }
 
 func isStatefulMetric(metric string) bool {
-	return metric == LogicalRequestsMetric || metric == OutputTokensMetric ||
+	return metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+		metric == OutputTokensMetric || metric == TotalTokensMetric ||
 		metric == CostNanoUSDMetric || isConcurrencyMetric(metric)
 }
 
 func isStatefulRule(metric, algorithm string) bool {
 	return algorithm == CalendarAlgorithm &&
-		(metric == LogicalRequestsMetric || metric == OutputTokensMetric || metric == CostNanoUSDMetric) ||
+		(metric == LogicalRequestsMetric || metric == InputTokensMetric ||
+			metric == OutputTokensMetric || metric == TotalTokensMetric ||
+			metric == CostNanoUSDMetric) ||
 		algorithm == TokenBucketAlgorithm &&
 			(metric == LogicalRequestsMetric || metric == OutputTokensMetric) ||
 		algorithm == ConcurrencyAlgorithm && isConcurrencyMetric(metric)

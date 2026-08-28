@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"reflect"
@@ -426,8 +427,10 @@ func normalizedUsage(usage protocol.Usage) (protocol.Usage, error) {
 		}
 		return protocol.Usage{Known: false, Provenance: "unknown"}, nil
 	}
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < usage.InputTokens ||
-		usage.TotalTokens < usage.OutputTokens || !validUsageProvenance(usage.Provenance) || usage.Provenance == "unknown" {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 ||
+		usage.InputTokens > math.MaxInt64-usage.OutputTokens ||
+		usage.TotalTokens != usage.InputTokens+usage.OutputTokens ||
+		!validUsageProvenance(usage.Provenance) || usage.Provenance == "unknown" {
 		return protocol.Usage{}, fmt.Errorf("%w: observer returned invalid normalized usage", ErrInvalidResponseRelay)
 	}
 	return usage, nil

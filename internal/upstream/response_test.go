@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -186,6 +187,46 @@ func TestRelayResponseRejectsInvalidNormalizedUsageBeforeEmptyResponseStarts(t *
 	}
 	if body.closeCalls.Load() != 1 || observer.finalizeCalls != 1 {
 		t.Fatalf("calls: close=%d finalize=%d", body.closeCalls.Load(), observer.finalizeCalls)
+	}
+}
+
+func TestNormalizedUsageRequiresOverflowSafeExactTokenTotal(t *testing.T) {
+	t.Parallel()
+
+	for _, usage := range []protocol.Usage{
+		{Known: true, Provenance: "provider_reported"},
+		{
+			InputTokens: math.MaxInt64 - 1, OutputTokens: 1,
+			TotalTokens: math.MaxInt64, Known: true, Provenance: "provider_reported",
+		},
+		{
+			OutputTokens: math.MaxInt64, TotalTokens: math.MaxInt64,
+			Known: true, Provenance: "provider_reported",
+		},
+	} {
+		got, err := normalizedUsage(usage)
+		if err != nil || got != usage {
+			t.Fatalf("valid exact usage %#v normalized to %#v, %v", usage, got, err)
+		}
+	}
+
+	for _, usage := range []protocol.Usage{
+		{
+			InputTokens: 2, OutputTokens: 3, TotalTokens: 4,
+			Known: true, Provenance: "provider_reported",
+		},
+		{
+			InputTokens: 2, OutputTokens: 3, TotalTokens: 6,
+			Known: true, Provenance: "provider_reported",
+		},
+		{
+			InputTokens: math.MaxInt64, OutputTokens: 1,
+			TotalTokens: math.MaxInt64, Known: true, Provenance: "provider_reported",
+		},
+	} {
+		if _, err := normalizedUsage(usage); !errors.Is(err, ErrInvalidResponseRelay) {
+			t.Fatalf("inconsistent or overflowing usage %#v returned %v", usage, err)
+		}
 	}
 }
 

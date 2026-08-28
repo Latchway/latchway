@@ -299,7 +299,7 @@ func TestFeatureQuotaRejectsInvalidProviderResults(t *testing.T) {
 				result.Limits[index] = FeatureQuotaLimit{Metric: "logical_requests", Hard: true}
 			}
 		}},
-		{name: "unsupported metric", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Metric = "input_tokens" }},
+		{name: "unsupported metric", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Metric = "future_tokens" }},
 		{name: "soft limit", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Hard = false }},
 		{name: "negative maximum", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Maximum = int64Pointer(-1) }},
 		{name: "negative used", mutate: func(result *FeatureQuotaResult) { result.Limits[0].Used = int64Pointer(-1) }},

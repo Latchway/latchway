@@ -783,6 +783,15 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			if !terminalCostEntriesMatch(lockedEntries, cost) {
 				return Reservation{}, ErrInvalidState
 			}
+			tokenEntriesMatch, tokenErr := terminalStoredTokenEntriesMatch(
+				ctx, tx, replayed, storedAttempt, lockedEntries,
+			)
+			if tokenErr != nil {
+				return Reservation{}, tokenErr
+			}
+			if !tokenEntriesMatch {
+				return Reservation{}, ErrInvalidState
+			}
 		}
 	}
 	return Reservation{
@@ -1311,6 +1320,15 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 				!terminalCostEntriesMatch(entries, cost) {
 				return Attempt{}, false, ErrInvalidState
 			}
+			tokenEntriesMatch, tokenErr := terminalStoredTokenEntriesMatch(
+				ctx, tx, lockedReservation, existing, entries,
+			)
+			if tokenErr != nil {
+				return Attempt{}, false, tokenErr
+			}
+			if !tokenEntriesMatch {
+				return Attempt{}, false, ErrInvalidState
+			}
 		default:
 			return Attempt{}, false, ErrInvalidState
 		}
@@ -1496,10 +1514,13 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 		if matchErr != nil {
 			return matchErr
 		}
-		if matches {
-			return nil
+		if !matches {
+			return ErrFinalized
 		}
-		return ErrFinalized
+		if !terminalTokenEntriesMatch(entries, outcome) {
+			return ErrInvalidState
+		}
+		return nil
 	}
 	if reservation.status != "pending" {
 		return ErrFinalized
@@ -1519,12 +1540,12 @@ func (store *Store) Settle(ctx context.Context, attempt Attempt, outcome Outcome
 	if err != nil {
 		return err
 	}
-	_, hasOutputReservation, err := lockedOutputReservationUnits(entries)
+	tokenReservations, err := lockedTokenReservationUnits(entries)
 	if err != nil {
 		return err
 	}
-	usageIDs, err := store.newSettlementUsageIDs(
-		outcome.Usage, hasOutputReservation, outcome.Cost, reservation.pricing,
+	usageIDs, err := store.newSettlementUsageIDsForTokenMetrics(
+		outcome.Usage, tokenReservations, outcome.Cost, reservation.pricing,
 	)
 	if err != nil {
 		return err
@@ -1707,12 +1728,12 @@ func (store *Store) expireOne(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		_, hasOutputReservation, outputErr := lockedOutputReservationUnits(entries)
-		if outputErr != nil {
-			return false, outputErr
+		tokenReservations, tokenErr := lockedTokenReservationUnits(entries)
+		if tokenErr != nil {
+			return false, tokenErr
 		}
-		generatedUsageIDs, idErr := store.newSettlementUsageIDs(
-			recoveredOutcome.Usage, hasOutputReservation, recoveredOutcome.Cost,
+		generatedUsageIDs, idErr := store.newSettlementUsageIDsForTokenMetrics(
+			recoveredOutcome.Usage, tokenReservations, recoveredOutcome.Cost,
 			lockedReservation.pricing,
 		)
 		if idErr != nil {
@@ -2176,13 +2197,43 @@ type settlementUsageIDs struct {
 	providerInput  string
 	providerOutput string
 	providerTotal  string
+	unknownInput   string
 	unknownOutput  string
+	unknownTotal   string
 	cost           string
+}
+
+type reservedTokenMetric struct {
+	metric string
+	units  int64
+}
+
+// This order fixes unknown-usage identifier allocation independently of
+// bucket identifier order. Skipping absent metrics keeps output-only
+// settlements byte-for-byte compatible with their historical sequence.
+var reservedTokenMetricOrder = [...]string{
+	InputTokensMetric,
+	OutputTokensMetric,
+	TotalTokensMetric,
 }
 
 func (store *Store) newSettlementUsageIDs(
 	usage Usage,
 	hasOutputReservation bool,
+	cost Cost,
+	pricing selectedPricing,
+) (settlementUsageIDs, error) {
+	// Retain the historical helper contract for output-only callers and tests.
+	var reservations []reservedTokenMetric
+	if hasOutputReservation {
+		reservations = []reservedTokenMetric{{metric: OutputTokensMetric, units: 1}}
+	}
+	return store.newSettlementUsageIDsForTokenMetrics(usage, reservations, cost, pricing)
+}
+
+func (store *Store) newSettlementUsageIDsForTokenMetrics(
+	usage Usage,
+	reservations []reservedTokenMetric,
 	cost Cost,
 	pricing selectedPricing,
 ) (settlementUsageIDs, error) {
@@ -2206,9 +2257,18 @@ func (store *Store) newSettlementUsageIDs(
 				return settlementUsageIDs{}, err
 			}
 		}
-	} else if hasOutputReservation {
-		if err := generate(&result.unknownOutput); err != nil {
-			return settlementUsageIDs{}, err
+	} else {
+		if !validReservedTokenMetrics(reservations) {
+			return settlementUsageIDs{}, ErrInvalidState
+		}
+		for _, reservation := range reservations {
+			destination, ok := result.unknownTokenDestination(reservation.metric)
+			if !ok {
+				return settlementUsageIDs{}, ErrInvalidState
+			}
+			if err := generate(destination); err != nil {
+				return settlementUsageIDs{}, err
+			}
 		}
 	}
 	// Preserve all historical usage-ID generation sequences. A configured,
@@ -2224,21 +2284,78 @@ func (store *Store) newSettlementUsageIDs(
 	return result, nil
 }
 
-func lockedOutputReservationUnits(entries []lockedEntry) (int64, bool, error) {
-	var units int64
-	found := false
-	for _, entry := range entries {
-		if entry.metric != OutputTokensMetric {
-			continue
-		}
-		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
-			found && entry.reservedUnits != units {
-			return 0, false, ErrInvalidState
-		}
-		units = entry.reservedUnits
-		found = true
+func (identifiers *settlementUsageIDs) unknownTokenDestination(metric string) (*string, bool) {
+	switch metric {
+	case InputTokensMetric:
+		return &identifiers.unknownInput, true
+	case OutputTokensMetric:
+		return &identifiers.unknownOutput, true
+	case TotalTokensMetric:
+		return &identifiers.unknownTotal, true
+	default:
+		return nil, false
 	}
-	return units, found, nil
+}
+
+func (identifiers settlementUsageIDs) unknownToken(metric string) (string, bool) {
+	switch metric {
+	case InputTokensMetric:
+		return identifiers.unknownInput, true
+	case OutputTokensMetric:
+		return identifiers.unknownOutput, true
+	case TotalTokensMetric:
+		return identifiers.unknownTotal, true
+	default:
+		return "", false
+	}
+}
+
+func validReservedTokenMetrics(reservations []reservedTokenMetric) bool {
+	if len(reservations) > len(reservedTokenMetricOrder) {
+		return false
+	}
+	orderIndex := 0
+	for _, reservation := range reservations {
+		for orderIndex < len(reservedTokenMetricOrder) &&
+			reservedTokenMetricOrder[orderIndex] != reservation.metric {
+			orderIndex++
+		}
+		if orderIndex == len(reservedTokenMetricOrder) || reservation.units <= 0 {
+			return false
+		}
+		orderIndex++
+	}
+	byMetric := make(map[string]int64, len(reservations))
+	for _, reservation := range reservations {
+		byMetric[reservation.metric] = reservation.units
+	}
+	return validTokenReservationRelationship(byMetric)
+}
+
+func lockedTokenReservationUnits(entries []lockedEntry) ([]reservedTokenMetric, error) {
+	reservations := make([]reservedTokenMetric, 0, len(reservedTokenMetricOrder))
+	for _, metric := range reservedTokenMetricOrder {
+		var units int64
+		found := false
+		for _, entry := range entries {
+			if entry.metric != metric {
+				continue
+			}
+			if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+				found && entry.reservedUnits != units {
+				return nil, ErrInvalidState
+			}
+			units = entry.reservedUnits
+			found = true
+		}
+		if found {
+			reservations = append(reservations, reservedTokenMetric{metric: metric, units: units})
+		}
+	}
+	if !validReservedTokenMetrics(reservations) {
+		return nil, ErrInvalidState
+	}
+	return reservations, nil
 }
 
 func lockedCostReservationUnits(entries []lockedEntry) (int64, bool, error) {
@@ -2290,21 +2407,63 @@ func terminalCostEntriesMatch(entries []lockedEntry, cost Cost) bool {
 	return true
 }
 
-func reservationOutputReservationUnits(entries []reservationEntry) (int64, bool, error) {
-	var units int64
-	found := false
+func reservationTokenReservationUnits(entries []reservationEntry) ([]reservedTokenMetric, error) {
+	reservations := make([]reservedTokenMetric, 0, len(reservedTokenMetricOrder))
+	for _, metric := range reservedTokenMetricOrder {
+		var units int64
+		found := false
+		for _, entry := range entries {
+			if entry.metric != metric {
+				continue
+			}
+			if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
+				found && entry.reservedUnits != units {
+				return nil, ErrInvalidState
+			}
+			units = entry.reservedUnits
+			found = true
+		}
+		if found {
+			reservations = append(reservations, reservedTokenMetric{metric: metric, units: units})
+		}
+	}
+	if !validReservedTokenMetrics(reservations) {
+		return nil, ErrInvalidState
+	}
+	return reservations, nil
+}
+
+func tokenMetricUsageUnits(usage Usage, metric string) (int64, bool) {
+	switch metric {
+	case InputTokensMetric:
+		return usage.InputTokens, true
+	case OutputTokensMetric:
+		return usage.OutputTokens, true
+	case TotalTokensMetric:
+		return usage.TotalTokens, true
+	default:
+		return 0, false
+	}
+}
+
+func terminalTokenEntriesMatch(entries []lockedEntry, outcome Outcome) bool {
 	for _, entry := range entries {
-		if entry.metric != OutputTokensMetric {
+		actual, tokenMetric := tokenMetricUsageUnits(outcome.Usage, entry.metric)
+		if !tokenMetric {
 			continue
 		}
-		if !validReservationEntryUnits(entry.metric, entry.algorithm, entry.reservedUnits) ||
-			found && entry.reservedUnits != units {
-			return 0, false, ErrInvalidState
+		settled := entry.reservedUnits
+		if outcome.Status == AttemptSucceeded && outcome.Usage.Known {
+			if actual < 0 || actual > entry.reservedUnits {
+				return false
+			}
+			settled = actual
 		}
-		units = entry.reservedUnits
-		found = true
+		if entry.settledUnits != settled || entry.releasedUnits != entry.reservedUnits-settled {
+			return false
+		}
 	}
-	return units, found, nil
+	return true
 }
 
 func insertSettlementUsage(
@@ -2372,9 +2531,9 @@ func insertSettlementUsage(
 			metric string
 			units  int64
 		}{
-			{id: identifiers.providerInput, metric: "input_tokens", units: outcome.Usage.InputTokens},
+			{id: identifiers.providerInput, metric: InputTokensMetric, units: outcome.Usage.InputTokens},
 			{id: identifiers.providerOutput, metric: OutputTokensMetric, units: outcome.Usage.OutputTokens},
-			{id: identifiers.providerTotal, metric: "total_tokens", units: outcome.Usage.TotalTokens},
+			{id: identifiers.providerTotal, metric: TotalTokensMetric, units: outcome.Usage.TotalTokens},
 		}
 		for _, record := range records {
 			if err := insert(
@@ -2385,19 +2544,36 @@ func insertSettlementUsage(
 			}
 		}
 	} else {
-		outputUnits, hasOutputReservation, outputErr := lockedOutputReservationUnits(entries)
-		if outputErr != nil {
-			return outputErr
+		reservations, reservationErr := lockedTokenReservationUnits(entries)
+		if reservationErr != nil {
+			return reservationErr
 		}
-		if hasOutputReservation {
+		seen := make(map[string]struct{}, len(reservations))
+		for _, tokenReservation := range reservations {
+			usageID, ok := identifiers.unknownToken(tokenReservation.metric)
+			if !ok || usageID == "" {
+				return ErrInvalidState
+			}
 			if err := insert(
-				identifiers.unknownOutput, attempt.id, OutputTokensMetric, outputUnits,
+				usageID, attempt.id, tokenReservation.metric, tokenReservation.units,
 				priceFields{}, UnknownCostConfidence,
-				unknownOutputUsageProvenanceKey(reservation.reservationID),
+				unknownTokenUsageProvenanceKey(reservation.reservationID, tokenReservation.metric),
 			); err != nil {
 				return err
 			}
-		} else if identifiers.unknownOutput != "" {
+			seen[tokenReservation.metric] = struct{}{}
+		}
+		for _, metric := range reservedTokenMetricOrder {
+			usageID, ok := identifiers.unknownToken(metric)
+			if !ok {
+				return ErrInvalidState
+			}
+			if _, expected := seen[metric]; (usageID != "") != expected {
+				return ErrInvalidState
+			}
+		}
+		if identifiers.providerInput != "" || identifiers.providerOutput != "" ||
+			identifiers.providerTotal != "" {
 			return ErrInvalidState
 		}
 	}
@@ -2433,6 +2609,19 @@ func unknownOutputUsageProvenanceKey(reservationID string) string {
 	return "quota-reservation:" + reservationID + ":unknown-output"
 }
 
+func unknownTokenUsageProvenanceKey(reservationID, metric string) string {
+	switch metric {
+	case InputTokensMetric:
+		return "quota-reservation:" + reservationID + ":unknown-input"
+	case OutputTokensMetric:
+		return unknownOutputUsageProvenanceKey(reservationID)
+	case TotalTokensMetric:
+		return "quota-reservation:" + reservationID + ":unknown-total"
+	default:
+		return ""
+	}
+}
+
 func configuredCostProvenanceKey(attemptID string) string {
 	return "configured_flat_rate:" + attemptID
 }
@@ -2447,7 +2636,7 @@ func terminalSettlementMatches(
 	if !terminalAttemptMatches(attempt, outcome, reservation.pricing) {
 		return false, nil
 	}
-	outputUnits, hasOutputReservation, err := reservationOutputReservationUnits(reservation.entries)
+	tokenReservations, err := reservationTokenReservationUnits(reservation.entries)
 	if err != nil {
 		return false, err
 	}
@@ -2472,18 +2661,23 @@ func terminalSettlementMatches(
 			metric string
 			units  int64
 		}{
-			{metric: "input_tokens", units: outcome.Usage.InputTokens},
+			{metric: InputTokensMetric, units: outcome.Usage.InputTokens},
 			{metric: OutputTokensMetric, units: outcome.Usage.OutputTokens},
-			{metric: "total_tokens", units: outcome.Usage.TotalTokens},
+			{metric: TotalTokensMetric, units: outcome.Usage.TotalTokens},
 		} {
 			expected[providerUsageProvenanceKey(attempt.id, record.metric)] = expectedUsage{
 				attemptID: &attemptID, metric: record.metric, units: record.units, confidence: "reported",
 			}
 		}
-	} else if hasOutputReservation {
+	} else {
 		attemptID := attempt.id
-		expected[unknownOutputUsageProvenanceKey(reservation.reservationID)] = expectedUsage{
-			attemptID: &attemptID, metric: OutputTokensMetric, units: outputUnits, confidence: "unknown",
+		for _, tokenReservation := range tokenReservations {
+			expected[unknownTokenUsageProvenanceKey(
+				reservation.reservationID, tokenReservation.metric,
+			)] = expectedUsage{
+				attemptID: &attemptID, metric: tokenReservation.metric,
+				units: tokenReservation.units, confidence: "unknown",
+			}
 		}
 	}
 	if outcome.Cost.Known {
@@ -2545,6 +2739,119 @@ func terminalSettlementMatches(
 		return false, persistenceFailure("iterate terminal quota usage", err)
 	}
 	return len(seen) == len(expected), nil
+}
+
+func terminalStoredTokenEntriesMatch(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservation lockedReservation,
+	attempt storedAttempt,
+	entries []lockedEntry,
+) (bool, error) {
+	// BeginAttempt and Reserve replays do not carry the original Outcome. The
+	// exact terminal usage rows are the durable source for reconstructing the
+	// token settlement split and detecting entry tampering.
+	tokenReservations, err := lockedTokenReservationUnits(entries)
+	if err != nil {
+		return false, err
+	}
+	if len(tokenReservations) == 0 {
+		return true, nil
+	}
+	reservedByMetric := make(map[string]int64, len(tokenReservations))
+	for _, tokenReservation := range tokenReservations {
+		reservedByMetric[tokenReservation.metric] = tokenReservation.units
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT usage_record_id, upstream_attempt_id, metric, units,
+		       cost_nano_usd, currency, price_revision, pricing_source,
+		       confidence, provenance_key
+		FROM usage_records
+		WHERE environment_id = $1 AND logical_request_id = $2
+		  AND metric = ANY($3::text[])
+		ORDER BY metric COLLATE "C", provenance_key COLLATE "C"
+	`, reservation.environmentID, reservation.logicalRequestID, reservedTokenMetricOrder[:])
+	if err != nil {
+		return false, persistenceFailure("load stored terminal token usage", err)
+	}
+	defer rows.Close()
+	mode := ""
+	reported := make(map[string]int64, len(reservedTokenMetricOrder))
+	unknown := make(map[string]struct{}, len(tokenReservations))
+	for rows.Next() {
+		var usageID, metric, confidence, provenanceKey string
+		var attemptID *string
+		var units int64
+		var costNanoUSD *int64
+		var currency, priceRevision, pricingSource *string
+		if err := rows.Scan(
+			&usageID, &attemptID, &metric, &units, &costNanoUSD, &currency,
+			&priceRevision, &pricingSource, &confidence, &provenanceKey,
+		); err != nil {
+			return false, persistenceFailure("scan stored terminal token usage", err)
+		}
+		if id.Validate(usageID, id.UsageRecord) != nil || attemptID == nil || *attemptID != attempt.id || units < 0 ||
+			costNanoUSD != nil || currency != nil || priceRevision != nil || pricingSource != nil {
+			return false, nil
+		}
+		switch confidence {
+		case "reported":
+			if mode == "unknown" || provenanceKey != providerUsageProvenanceKey(attempt.id, metric) {
+				return false, nil
+			}
+			mode = "reported"
+			if _, duplicate := reported[metric]; duplicate {
+				return false, nil
+			}
+			reported[metric] = units
+		case UnknownCostConfidence:
+			reserved, expected := reservedByMetric[metric]
+			if mode == "reported" || !expected || units != reserved ||
+				provenanceKey != unknownTokenUsageProvenanceKey(reservation.reservationID, metric) {
+				return false, nil
+			}
+			mode = "unknown"
+			if _, duplicate := unknown[metric]; duplicate {
+				return false, nil
+			}
+			unknown[metric] = struct{}{}
+		default:
+			return false, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, persistenceFailure("iterate stored terminal token usage", err)
+	}
+	var usage Usage
+	switch mode {
+	case "reported":
+		if len(reported) != len(reservedTokenMetricOrder) {
+			return false, nil
+		}
+		var ok bool
+		if usage.InputTokens, ok = reported[InputTokensMetric]; !ok {
+			return false, nil
+		}
+		if usage.OutputTokens, ok = reported[OutputTokensMetric]; !ok {
+			return false, nil
+		}
+		if usage.TotalTokens, ok = reported[TotalTokensMetric]; !ok {
+			return false, nil
+		}
+		usage.Known = true
+		usage.Provenance = ProviderReportedProvenance
+		if usage.validate() != nil {
+			return false, nil
+		}
+	case "unknown":
+		if len(unknown) != len(tokenReservations) {
+			return false, nil
+		}
+		usage = Usage{Provenance: UnknownUsageProvenance}
+	default:
+		return false, nil
+	}
+	return terminalTokenEntriesMatch(entries, Outcome{Status: attempt.status, Usage: usage}), nil
 }
 
 func terminalEntriesMatch(
@@ -2702,8 +3009,8 @@ func settleLocked(
 			if settled > entry.reservedUnits {
 				return ErrInvalidInput
 			}
-		} else if entry.metric == OutputTokensMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
-			settled = outcome.Usage.OutputTokens
+		} else if actual, tokenMetric := tokenMetricUsageUnits(outcome.Usage, entry.metric); tokenMetric && outcome.Status == AttemptSucceeded && outcome.Usage.Known {
+			settled = actual
 			if settled > entry.reservedUnits {
 				return ErrInvalidInput
 			}
@@ -2861,6 +3168,9 @@ func releaseLocked(
 		return ErrInvalidState
 	}
 	if _, _, err := lockedCostReservationUnits(entries); err != nil {
+		return err
+	}
+	if _, err := lockedTokenReservationUnits(entries); err != nil {
 		return err
 	}
 	for _, entry := range entries {
