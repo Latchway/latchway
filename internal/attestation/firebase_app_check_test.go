@@ -79,6 +79,13 @@ func TestFirebaseAppCheckVerifierAcceptsExactOfficialJWT(t *testing.T) {
 	if _, err := verifier.Verify(context.Background(), evidence, binding); err != nil || requests.Load() != 1 {
 		t.Fatalf("fresh JWKS was not cached: requests=%d err=%v", requests.Load(), err)
 	}
+	webResult, err := verifier.Verify(context.Background(), evidence, appCheckBinding("web", appCheckTestNow))
+	if err != nil {
+		t.Fatalf("verify web App Check token: %v", err)
+	}
+	if webResult.TrustLevel != "web_risk_verified" {
+		t.Fatalf("web App Check trust level = %q", webResult.TrustLevel)
+	}
 	for _, rendered := range []string{fmt.Sprint(verifier), fmt.Sprintf("%#v", verifier), fmt.Sprintf("%+v", *verifier)} {
 		if strings.Contains(rendered, token) || !strings.Contains(rendered, "REDACTED") {
 			t.Fatalf("App Check verifier formatting was unsafe: %q", rendered)

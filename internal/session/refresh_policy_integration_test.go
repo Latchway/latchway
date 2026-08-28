@@ -115,7 +115,9 @@ func TestRefreshUsesCurrentActivePolicyPostgreSQL(t *testing.T) {
 			name:                "minimum trust tightened",
 			identityProviders:   refreshIdentityProviders("firebase"),
 			attestationPolicies: refreshAttestationPolicies(refreshDebugPolicy("native", "10m", "strong_device_verified")),
-			wantErr:             ErrAttestationStepUpRequired,
+			// Debug evidence is deliberately incomparable with production trust.
+			// The active snapshot rejects this unreachable policy before refresh.
+			wantErr: ErrSessionScope,
 		},
 		{
 			name:                "maximum age tightened",

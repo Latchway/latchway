@@ -96,12 +96,6 @@ type clientEnvironment struct {
 }
 
 func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input clientapi.ChallengeInput) (clientapi.ChallengeResult, error) {
-	// Browser sessions need a separate configured Origin/CORS authority check in
-	// addition to the trusted DPoP target. Fail closed until that boundary is
-	// implemented; native and server-side SDKs do not use browser authority.
-	if input.Platform == "web" {
-		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
-	}
 	environment, err := coordinator.resolveEnvironment(ctx, input.ApplicationID, input.Environment)
 	if err != nil {
 		return clientapi.ChallengeResult{}, clientFailure(mapChallengeScopeError(err))
@@ -113,6 +107,13 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 	})
 	if err != nil {
 		return clientapi.ChallengeResult{}, clientFailure("server_not_ready")
+	}
+	policy, selection, ok := snapshot.RequiredAttestationForPlatform(input.Platform)
+	if !ok || policy.ID == "" || selection.Mode != "required" {
+		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
+	}
+	if !platformOriginAllowed(selection, input.Platform, input.Metadata.Origin) {
+		return clientapi.ChallengeResult{}, clientFailure("attestation_invalid")
 	}
 	proof, err := dpop.Validate(input.Metadata.DPoPProof.Reveal(), dpop.Options{
 		Method:       input.Metadata.HTTPMethod,
@@ -142,10 +143,6 @@ func (coordinator *clientCoordinator) CreateChallenge(ctx context.Context, input
 	}
 	if principal.ProviderID != provider.ID {
 		return clientapi.ChallengeResult{}, clientFailure("identity_token_invalid")
-	}
-	policy, selection, ok := snapshot.RequiredAttestationForPlatform(input.Platform)
-	if !ok || policy.ID == "" || selection.Mode != "required" {
-		return clientapi.ChallengeResult{}, clientFailure("attestation_unsupported")
 	}
 	if err := coordinator.preflightAttestationVerifier(ctx, environment, snapshot, policy, selection, input.Platform); err != nil {
 		return clientapi.ChallengeResult{}, clientFailure("server_not_ready")
@@ -222,6 +219,9 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 	if !ok || selection.Provider != challenge.Attestation.Provider || selection.Mode != "required" {
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
+	if !platformOriginAllowed(selection, challenge.Binding.Platform, input.Metadata.Origin) {
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
 	payload, err := input.Attestation.Payload.Object()
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
@@ -260,6 +260,7 @@ func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input 
 	issued, err := coordinator.sessions.Rotate(ctx, RotateInput{
 		RefreshToken: refresh, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
 	})
 	if err != nil {
 		return clientapi.GrantResult{}, clientFailure(mapSessionError(err))
@@ -283,6 +284,7 @@ func (coordinator *clientCoordinator) RevokeCurrentInstallation(ctx context.Cont
 	err = coordinator.sessions.RevokeCurrentInstallation(ctx, AccessRequestInput{
 		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
 	})
 	if err != nil {
 		return clientFailure(mapAccessRequestError(err))
@@ -791,7 +793,9 @@ func mapAttestationError(err error) string {
 		return "attestation_unsupported"
 	case errors.Is(err, attestation.ErrConfiguration),
 		errors.Is(err, attestation.ErrPlayIntegrityService),
-		errors.Is(err, attestation.ErrAppAttestKeyStore):
+		errors.Is(err, attestation.ErrAppAttestKeyStore),
+		errors.Is(err, attestation.ErrFirebaseAppCheckService),
+		errors.Is(err, attestation.ErrTurnstileService):
 		return "server_not_ready"
 	default:
 		return "attestation_invalid"

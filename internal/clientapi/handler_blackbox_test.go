@@ -102,31 +102,34 @@ func TestExportedHandlerBlackBox(t *testing.T) {
 
 	challenge := blackBoxRequest("/client/v1/session-challenges", `{"application_id":"app_public","environment":"production","identity_provider":"firebase","identity_token":"identity-token-123","platform":"web","sdk_version":"1.2.3"}`)
 	challenge.Header.Set("X-Latchway-SDK", "javascript")
+	challenge.Header.Set("Origin", "https://app.example.test")
 	challenge.Host = "untrusted.invalid"
 	challenge.Header.Set("Forwarded", "host=untrusted.invalid;proto=http")
 	challengeResponse := httptest.NewRecorder()
 	handler.ServeHTTP(challengeResponse, challenge)
 	assertBlackBoxStatus(t, challengeResponse, http.StatusCreated)
-	if coordinator.challenge.Metadata.TargetURL.String() != "https://public.example.test/client/v1/session-challenges" || coordinator.challenge.Metadata.SDK != "javascript" {
+	if coordinator.challenge.Metadata.TargetURL.String() != "https://public.example.test/client/v1/session-challenges" || coordinator.challenge.Metadata.SDK != "javascript" || coordinator.challenge.Metadata.Origin != "https://app.example.test" {
 		t.Fatalf("challenge metadata = %#v", coordinator.challenge.Metadata)
 	}
 
 	exchange := blackBoxRequest("/client/v1/sessions", `{"challenge_id":"chl_01K3NQ7M8P9RSTVWXYZABCDE12","attestation":{"provider":"debug","evidence":{"proof":"opaque"}},"installation":{"app_version":"1.0"}}`)
 	exchange.Header.Set("X-Latchway-SDK", "javascript")
+	exchange.Header.Set("Origin", "https://app.example.test")
 	exchangeResponse := httptest.NewRecorder()
 	handler.ServeHTTP(exchangeResponse, exchange)
 	assertBlackBoxStatus(t, exchangeResponse, http.StatusCreated)
-	if coordinator.exchange.Metadata.TargetURL.String() != "https://public.example.test/client/v1/sessions" {
-		t.Fatalf("exchange target = %q", coordinator.exchange.Metadata.TargetURL.String())
+	if coordinator.exchange.Metadata.TargetURL.String() != "https://public.example.test/client/v1/sessions" || coordinator.exchange.Metadata.Origin != "https://app.example.test" {
+		t.Fatalf("exchange metadata = %#v", coordinator.exchange.Metadata)
 	}
 
 	refresh := blackBoxRequest("/client/v1/sessions/refresh", `{"refresh_token":"`+strings.Repeat("r", 48)+`"}`)
 	refresh.Header.Set("X-Latchway-SDK", "javascript")
+	refresh.Header.Set("Origin", "https://app.example.test")
 	refreshResponse := httptest.NewRecorder()
 	handler.ServeHTTP(refreshResponse, refresh)
 	assertBlackBoxStatus(t, refreshResponse, http.StatusOK)
-	if coordinator.refresh.Metadata.TargetURL.String() != "https://public.example.test/client/v1/sessions/refresh" {
-		t.Fatalf("refresh target = %q", coordinator.refresh.Metadata.TargetURL.String())
+	if coordinator.refresh.Metadata.TargetURL.String() != "https://public.example.test/client/v1/sessions/refresh" || coordinator.refresh.Metadata.Origin != "https://app.example.test" {
+		t.Fatalf("refresh metadata = %#v", coordinator.refresh.Metadata)
 	}
 
 	revoke := httptest.NewRequest(http.MethodDelete, "/client/v1/installations/current", nil)

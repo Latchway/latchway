@@ -211,20 +211,196 @@ func (coordinator *clientCoordinator) buildMobileAttestationVerifier(
 			return nil, attestation.ErrConfiguration
 		}
 		return &preparedAttestationVerifier{Verifier: verifier, preflight: preflight}, nil
+	case "firebase_app_check":
+		configuration := selection.FirebaseAppCheck
+		if configuration == nil || selection.AppAttest != nil || selection.PlayIntegrity != nil ||
+			selection.Turnstile != nil || selection.SecretRef != "" ||
+			(platform != "ios" && platform != "android" && platform != "web" &&
+				platform != "react_native_ios" && platform != "react_native_android") {
+			return nil, attestation.ErrConfiguration
+		}
+		expectedTrust := "app_verified"
+		if platform == "web" {
+			expectedTrust = "web_risk_verified"
+		}
+		if selection.MinimumTrustLevel != expectedTrust {
+			return nil, attestation.ErrConfiguration
+		}
+		resultLifetime := policy.MaxAge
+		if resultLifetime > 24*time.Hour {
+			resultLifetime = 24 * time.Hour
+		}
+		verifier, err := attestation.NewFirebaseAppCheckVerifier(attestation.FirebaseAppCheckConfig{
+			ApplicationID: environment.ApplicationID, EnvironmentID: environment.Slug,
+			ProjectNumber: configuration.ProjectNumber,
+			AllowedAppIDs: append([]string(nil), configuration.AllowedAppIDs...),
+			Transport:     coordinator.attestationTransport, Now: coordinator.now,
+			ClockSkew: snapshot.SessionPolicy().MaximumClockSkew, ClockSkewSet: true,
+			ResultLifetime: resultLifetime,
+		})
+		if err != nil {
+			return nil, attestation.ErrConfiguration
+		}
+		return &preparedAttestationVerifier{
+			Verifier: verifier,
+			preflight: func(context.Context) error {
+				return nil
+			},
+		}, nil
+	case "turnstile":
+		configuration := selection.Turnstile
+		if configuration == nil || selection.AppAttest != nil || selection.PlayIntegrity != nil ||
+			selection.FirebaseAppCheck != nil || selection.SecretRef == "" || platform != "web" ||
+			selection.MinimumTrustLevel != "web_risk_verified" ||
+			nilCoordinatorDependency(coordinator.secrets) {
+			return nil, attestation.ErrConfiguration
+		}
+		secret, err := newSecretTurnstileCapability(secretTurnstileCapabilityConfig{
+			Store: coordinator.secrets, Scope: secretScope(environment), SecretRef: selection.SecretRef,
+		})
+		if err != nil {
+			return nil, attestation.ErrConfiguration
+		}
+		maximumAge := policy.MaxAge
+		if maximumAge > 10*time.Minute {
+			maximumAge = 10 * time.Minute
+		}
+		resultLifetime := policy.MaxAge
+		if resultLifetime > time.Hour {
+			resultLifetime = time.Hour
+		}
+		verifier, err := attestation.NewTurnstileVerifier(attestation.TurnstileConfig{
+			ApplicationID: environment.ApplicationID, EnvironmentID: environment.Slug,
+			AllowedHostnames: append([]string(nil), configuration.AllowedHostnames...),
+			ExpectedAction:   configuration.ExpectedAction, Secret: secret,
+			Transport: coordinator.attestationTransport, Now: coordinator.now,
+			MaximumAge: maximumAge,
+			ClockSkew:  snapshot.SessionPolicy().MaximumClockSkew, ClockSkewSet: true,
+			ResultLifetime: resultLifetime,
+		})
+		if err != nil {
+			return nil, attestation.ErrConfiguration
+		}
+		return &preparedAttestationVerifier{Verifier: verifier, preflight: secret.Preflight}, nil
 	default:
 		return nil, attestation.ErrUnsupported
 	}
 }
 
 func attestationProviderOptions(selection configuration.PlatformAttestation) map[string]any {
-	if selection.Provider != "play_integrity" || selection.PlayIntegrity == nil ||
-		selection.PlayIntegrity.CloudProjectNumber <= 0 {
+	switch selection.Provider {
+	case "play_integrity":
+		if selection.PlayIntegrity == nil || selection.PlayIntegrity.CloudProjectNumber <= 0 {
+			return nil
+		}
+		return map[string]any{
+			"cloud_project_number": strconv.FormatInt(selection.PlayIntegrity.CloudProjectNumber, 10),
+		}
+	case "turnstile":
+		if selection.Turnstile == nil || selection.Turnstile.ExpectedAction == "" {
+			return nil
+		}
+		return map[string]any{"action": selection.Turnstile.ExpectedAction}
+	default:
 		return nil
 	}
-	return map[string]any{
-		"cloud_project_number": strconv.FormatInt(selection.PlayIntegrity.CloudProjectNumber, 10),
-	}
 }
+
+type secretTurnstileCapabilityConfig struct {
+	Store     clientSecretStore
+	Scope     secrets.Scope
+	SecretRef string
+}
+
+// secretTurnstileCapability passes the provider secret directly from the
+// encrypted store into one synchronous Siteverify request. It never retains a
+// plaintext or derived copy and all formatting is explicitly redacted.
+type secretTurnstileCapability struct {
+	store     clientSecretStore
+	scope     secrets.Scope
+	secretRef string
+}
+
+func newSecretTurnstileCapability(config secretTurnstileCapabilityConfig) (*secretTurnstileCapability, error) {
+	if nilCoordinatorDependency(config.Store) || config.SecretRef == "" {
+		return nil, attestation.ErrConfiguration
+	}
+	return &secretTurnstileCapability{
+		store: config.Store, scope: config.Scope, secretRef: config.SecretRef,
+	}, nil
+}
+
+func (capability *secretTurnstileCapability) Preflight(ctx context.Context) error {
+	if capability == nil || ctx == nil {
+		return attestation.ErrConfiguration
+	}
+	if err := capability.use(ctx, func([]byte) error { return nil }); err != nil {
+		return attestation.ErrConfiguration
+	}
+	return nil
+}
+
+func (capability *secretTurnstileCapability) Use(ctx context.Context, consume func([]byte) error) error {
+	if err := capability.use(ctx, consume); err != nil {
+		if ctx != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+		}
+		return attestation.ErrTurnstileService
+	}
+	return nil
+}
+
+func (capability *secretTurnstileCapability) use(ctx context.Context, consume func([]byte) error) error {
+	if capability == nil || ctx == nil || consume == nil ||
+		nilCoordinatorDependency(capability.store) || capability.secretRef == "" {
+		return attestation.ErrConfiguration
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	uses := 0
+	var operationErr error
+	storeErr := capability.store.Use(ctx, capability.scope, capability.secretRef, func(material []byte) error {
+		uses++
+		if uses != 1 || !validTurnstileSecretMaterial(material) {
+			operationErr = attestation.ErrConfiguration
+			return nil
+		}
+		operationErr = consume(material)
+		return nil
+	})
+	if storeErr != nil || uses != 1 || operationErr != nil {
+		if operationErr != nil {
+			return operationErr
+		}
+		return attestation.ErrConfiguration
+	}
+	return nil
+}
+
+func validTurnstileSecretMaterial(material []byte) bool {
+	if len(material) < 1 || len(material) > 4096 {
+		return false
+	}
+	for _, value := range material {
+		if value <= ' ' || value > '~' {
+			return false
+		}
+	}
+	return true
+}
+
+func (secretTurnstileCapability) Format(state fmt.State, _ rune) {
+	_, _ = io.WriteString(state, "[REDACTED]")
+}
+
+func (secretTurnstileCapability) LogValue() slog.Value {
+	return slog.StringValue("[REDACTED]")
+}
+
+var _ attestation.TurnstileSecretCapability = (*secretTurnstileCapability)(nil)
 
 type secretServiceAccountTokenSourceConfig struct {
 	Store     clientSecretStore

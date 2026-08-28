@@ -266,6 +266,7 @@ type AccessRequestInput struct {
 	DPoPProof   DPoPProof
 	HTTPMethod  string
 	RequestURI  *url.URL
+	Origin      string
 }
 
 type accessRequestMutation func(context.Context, pgx.Tx, authorizationState, time.Time) error
@@ -357,6 +358,9 @@ func (store *Store) authorizeAccess(ctx context.Context, input AccessRequestInpu
 	}
 	if err := authorizationStateError(state, now, allowRevokedInstallation); err != nil {
 		return authorizationState{}, err
+	}
+	if !snapshotOriginAllowed(snapshot, state.InstallationPlatform, input.Origin) {
+		return authorizationState{}, ErrSessionInvalid
 	}
 	if err := store.replay.accept(ctx, tx, ReplayInput{
 		OrganizationID: state.OrganizationID, ApplicationID: state.ApplicationID,

@@ -20,6 +20,7 @@ import (
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/requestidentity"
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 const (
@@ -110,6 +111,18 @@ func (api *API) Handler() http.Handler { return api }
 func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	correlationID := selectCorrelationID(r)
 	w.Header().Set("X-Latchway-Request-ID", correlationID)
+	browserOrigin, originErr := weborigin.Read(r.Header)
+	if originErr != nil {
+		api.writeViolation(w, correlationID, invalidAt("header.Origin", "Origin must be exactly one canonical HTTPS browser origin."))
+		return
+	}
+	if browserOrigin != "" {
+		weborigin.SetResponseHeaders(w.Header(), browserOrigin)
+	}
+	if r.Method == http.MethodOptions {
+		api.preflight(w, r, correlationID, browserOrigin)
+		return
+	}
 	logicalID, ok := requestidentity.FromContext(r.Context())
 	if !ok {
 		api.writeProblem(w, correlationID, problem.Error{
@@ -205,7 +218,7 @@ func (api *API) createChallenge(w http.ResponseWriter, r *http.Request, requestI
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, challengePath, proof)
+	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, challengePath, proof)
 	result, err := api.coordinator.CreateChallenge(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -235,7 +248,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, exchangePath, proof)
+	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, exchangePath, proof)
 	result, err := api.coordinator.ExchangeSession(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -265,7 +278,7 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 		api.writeViolation(w, requestID, violation)
 		return
 	}
-	input.Metadata = api.metadata(logicalRequestID, declaration, http.MethodPost, refreshPath, proof)
+	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, refreshPath, proof)
 	result, err := api.coordinator.RefreshSession(r.Context(), input)
 	if err != nil {
 		api.writeDependencyFailure(w, requestID, err)
@@ -300,7 +313,7 @@ func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	input := RevokeInstallationInput{
-		Metadata:    api.metadata(logicalRequestID, declaration, http.MethodDelete, revokePath, proof),
+		Metadata:    api.metadata(r, logicalRequestID, declaration, http.MethodDelete, revokePath, proof),
 		AccessToken: accessToken,
 	}
 	if err := api.coordinator.RevokeCurrentInstallation(r.Context(), input); err != nil {
@@ -336,7 +349,7 @@ func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestI
 	input := FeatureQuotaInput{
 		Metadata: RequestMetadata{
 			RequestID: logicalRequestID.String(), SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
-			HTTPMethod: http.MethodGet, TargetURL: target, DPoPProof: proof,
+			HTTPMethod: http.MethodGet, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
 		},
 		LogicalRequestID: logicalRequestID,
 		AccessToken:      accessToken,
@@ -387,12 +400,80 @@ func (api *API) publicDiscovery(w http.ResponseWriter, r *http.Request, requestI
 	})
 }
 
-func (api *API) metadata(requestID string, declaration clientDeclaration, method, path string, proof SensitiveString) RequestMetadata {
+func (api *API) metadata(r *http.Request, requestID string, declaration clientDeclaration, method, path string, proof SensitiveString) RequestMetadata {
 	target := api.targets[path]
 	return RequestMetadata{
 		RequestID: requestID, SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
-		HTTPMethod: method, TargetURL: target, DPoPProof: proof,
+		HTTPMethod: method, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
 	}
+}
+
+func mustBrowserOrigin(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	origin, err := weborigin.Read(r.Header)
+	if err != nil {
+		return ""
+	}
+	return origin
+}
+
+func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, origin string) {
+	if origin == "" || r.URL == nil || r.URL.EscapedPath() != r.URL.Path ||
+		r.URL.RawQuery != "" || r.URL.ForceQuery || !bodylessPreflight(r) {
+		api.writeViolation(w, requestID, invalidAt("header.Origin", "A canonical Origin is required for a CORS preflight."))
+		return
+	}
+	expectedMethod := ""
+	path := r.URL.Path
+	switch {
+	case path == challengePath, path == exchangePath, path == refreshPath:
+		expectedMethod = http.MethodPost
+	case path == revokePath:
+		expectedMethod = http.MethodDelete
+	case path == jwksPath, path == discoveryPath:
+		expectedMethod = http.MethodGet
+	default:
+		if _, ok := featureFromQuotaPath(path); ok {
+			expectedMethod = http.MethodGet
+		}
+	}
+	requestedMethod, err := weborigin.RequestedMethod(r.Header)
+	if err != nil || expectedMethod == "" || requestedMethod != expectedMethod {
+		api.writeViolation(w, requestID, invalidAt("header.Access-Control-Request-Method", "The preflight method is not supported by this client endpoint."))
+		return
+	}
+	requestedHeaders, err := weborigin.RequestedHeaders(r.Header)
+	if err != nil || !allowedClientPreflightHeaders(requestedHeaders) {
+		api.writeViolation(w, requestID, invalidAt("header.Access-Control-Request-Headers", "The preflight requested unsupported client headers."))
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Methods", expectedMethod)
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, DPoP, Idempotency-Key, X-Latchway-Protocol-Version, X-Latchway-Request-ID, X-Latchway-SDK, X-Latchway-SDK-Version")
+	w.Header().Set("Access-Control-Max-Age", "600")
+	w.Header().Set("Cache-Control", "no-store")
+	weborigin.AppendVary(w.Header(), "Access-Control-Request-Method")
+	weborigin.AppendVary(w.Header(), "Access-Control-Request-Headers")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func bodylessPreflight(r *http.Request) bool {
+	return r != nil && r.ContentLength == 0 && len(r.TransferEncoding) == 0
+}
+
+func allowedClientPreflightHeaders(headers []string) bool {
+	allowed := map[string]struct{}{
+		"authorization": {}, "content-type": {}, "dpop": {}, "idempotency-key": {},
+		"x-latchway-protocol-version": {}, "x-latchway-request-id": {},
+		"x-latchway-sdk": {}, "x-latchway-sdk-version": {},
+	}
+	for _, header := range headers {
+		if _, ok := allowed[header]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (api *API) methodNotAllowed(w http.ResponseWriter, requestID string) {

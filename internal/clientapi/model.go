@@ -114,7 +114,11 @@ type RequestMetadata struct {
 	SDKVersion string
 	HTTPMethod string
 	TargetURL  url.URL
-	DPoPProof  SensitiveString
+	// Origin is the exact canonical HTTPS browser Origin header. It is empty
+	// for native and server-side transports and never derives from Host or
+	// forwarding headers.
+	Origin    string
+	DPoPProof SensitiveString
 }
 
 type ChallengeInput struct {

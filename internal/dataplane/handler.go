@@ -38,6 +38,7 @@ import (
 	"github.com/latchway/latchway/internal/secrets"
 	"github.com/latchway/latchway/internal/session"
 	"github.com/latchway/latchway/internal/upstream"
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 const (
@@ -242,6 +243,18 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeProblem(writer, requestID, "server_not_ready", "", 0)
 		return
 	}
+	browserOrigin, originErr := weborigin.Read(request.Header)
+	if originErr != nil {
+		handler.writeViolation(writer, requestID, requestViolation("header.Origin", "Origin must be exactly one canonical HTTPS browser origin."))
+		return
+	}
+	if browserOrigin != "" {
+		weborigin.SetResponseHeaders(writer.Header(), browserOrigin)
+	}
+	if request.Method == http.MethodOptions {
+		handler.servePreflight(writer, request, requestID, browserOrigin)
+		return
+	}
 	endpoint, violation := handler.endpoints.match(request)
 	if violation != nil {
 		handler.writeViolation(writer, requestID, violation)
@@ -276,6 +289,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		DPoPProof:   declaration.dpopProof,
 		HTTPMethod:  endpoint.publicMethod,
 		RequestURI:  cloneURL(endpoint.publicURL),
+		Origin:      browserOrigin,
 	})
 	if err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)

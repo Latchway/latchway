@@ -64,6 +64,7 @@ type RotateInput struct {
 	DPoPProof    DPoPProof
 	HTTPMethod   string
 	RequestURI   *url.URL
+	Origin       string
 }
 
 func (input RotateInput) validate() error {
@@ -93,6 +94,9 @@ func (store *Store) Rotate(ctx context.Context, input RotateInput) (IssuedSessio
 	})
 	if err != nil {
 		return IssuedSession{}, ErrSessionScope
+	}
+	if !snapshotOriginAllowed(snapshot, preflightBinding.Platform, input.Origin) {
+		return IssuedSession{}, ErrSessionInvalid
 	}
 	policy := snapshot.SessionPolicy()
 	validatedProof, err := dpop.Validate(input.DPoPProof.value, dpop.Options{
@@ -356,7 +360,8 @@ func sameRefreshScope(left, right RefreshBinding) bool {
 		left.ApplicationUserID == right.ApplicationUserID &&
 		left.InstallationID == right.InstallationID &&
 		left.SessionGrantID == right.SessionGrantID &&
-		left.DPoPJKT == right.DPoPJKT
+		left.DPoPJKT == right.DPoPJKT &&
+		left.Platform == right.Platform
 }
 
 func (store *Store) commitRevokedRefresh(ctx context.Context, tx pgx.Tx, binding RefreshBinding, now time.Time, reason string, result error) (IssuedSession, error) {

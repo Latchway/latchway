@@ -205,12 +205,30 @@ func mustCoordinatorURL(t *testing.T, raw string) *url.URL {
 	return parsed
 }
 
-func TestCoordinatorRejectsWebUntilOriginPolicyBoundaryExists(t *testing.T) {
-	coordinator := &clientCoordinator{}
-	_, err := coordinator.CreateChallenge(context.Background(), clientapi.ChallengeInput{Platform: "web"})
-	var failure *clientapi.DependencyError
-	if !errors.As(err, &failure) || failure.Code != "attestation_unsupported" {
-		t.Fatalf("web challenge error = %v", err)
+func TestPlatformOriginAuthorityFailsClosed(t *testing.T) {
+	web := configuration.PlatformAttestation{
+		Provider: "turnstile", Mode: "required",
+		AllowedOrigins: []string{"https://app.example.test", "https://admin.example.test:8443"},
+	}
+	if !platformOriginAllowed(web, "web", "https://app.example.test") {
+		t.Fatal("configured exact web origin was rejected")
+	}
+	for _, origin := range []string{"", "https://APP.example.test", "https://app.example.test/", "https://other.example.test"} {
+		if platformOriginAllowed(web, "web", origin) {
+			t.Fatalf("unconfigured or noncanonical web origin %q was accepted", origin)
+		}
+	}
+	native := configuration.PlatformAttestation{Provider: "app_attest", Mode: "required"}
+	if !platformOriginAllowed(native, "ios", "") || platformOriginAllowed(native, "ios", "https://app.example.test") {
+		t.Fatal("native Origin authority did not require absence")
+	}
+	native.AllowedOrigins = []string{"https://app.example.test"}
+	if platformOriginAllowed(native, "ios", "") {
+		t.Fatal("corrupt native allowed-origin policy was accepted")
+	}
+	web.AllowedOrigins = append(web.AllowedOrigins, web.AllowedOrigins[0])
+	if platformOriginAllowed(web, "web", "https://app.example.test") {
+		t.Fatal("duplicate configured web origin was accepted")
 	}
 }
 

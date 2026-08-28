@@ -9,6 +9,7 @@ import (
 
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 const (
@@ -190,6 +191,10 @@ func parseChallengeRequest(r *http.Request, declaration clientDeclaration) (Chal
 	}
 	if !platformCompatible(declaration.sdk, platform) {
 		return ChallengeInput{}, invalidAt("body.platform", "platform is incompatible with X-Latchway-SDK.")
+	}
+	origin, originErr := weborigin.Read(r.Header)
+	if originErr != nil || (platform == "web" && origin == "") || (platform != "web" && origin != "") {
+		return ChallengeInput{}, invalidAt("header.Origin", "Web challenges require exactly one canonical HTTPS Origin and non-web challenges must omit it.")
 	}
 	return ChallengeInput{
 		ApplicationID: applicationID, Environment: environment,

@@ -29,8 +29,9 @@ import (
 func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.T) {
 	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	store := &recordingAppAttestKeyStore{}
+	secretStore := &ephemeralSecretStore{material: []byte("turnstile-secret-material")}
 	coordinator := &clientCoordinator{
-		now: nowClock(now), appAttestKeys: store,
+		now: nowClock(now), appAttestKeys: store, secrets: secretStore,
 		attestationCache: make(map[string]*preparedAttestationVerifier),
 	}
 	environment := clientEnvironment{
@@ -63,6 +64,32 @@ func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.
 	}
 	if options := attestationProviderOptions(selection); options != nil {
 		t.Fatalf("App Attest provider options = %#v", options)
+	}
+
+	firebase := validFirebaseAppCheckSelection("app_verified")
+	firebaseVerifier, err := coordinator.mobileAttestationVerifier(
+		environment, configuration.ActiveSnapshot{RevisionID: "rev_00000000000000000000000000"},
+		policy, firebase, "react_native_ios",
+	)
+	if err != nil || firebaseVerifier.ID() != "firebase_app_check" {
+		t.Fatalf("Firebase App Check verifier = %#v, err = %v", firebaseVerifier, err)
+	}
+
+	turnstile := validTurnstileSelection()
+	turnstileVerifier, err := coordinator.mobileAttestationVerifier(
+		environment, configuration.ActiveSnapshot{RevisionID: "rev_00000000000000000000000000"},
+		policy, turnstile, "web",
+	)
+	if err != nil || turnstileVerifier.ID() != "turnstile" {
+		t.Fatalf("Turnstile verifier = %#v, err = %v", turnstileVerifier, err)
+	}
+	if err := turnstileVerifier.Preflight(context.Background()); err != nil || secretStore.calls.Load() != 1 ||
+		!secretStore.lastCallbackBufferCleared() {
+		t.Fatalf("Turnstile preflight err=%v uses=%d cleared=%t", err, secretStore.calls.Load(), secretStore.lastCallbackBufferCleared())
+	}
+	options = attestationProviderOptions(turnstile)
+	if len(options) != 1 || options["action"] != "session" {
+		t.Fatalf("Turnstile provider options = %#v", options)
 	}
 }
 
@@ -119,6 +146,24 @@ func TestCoordinatorMobileVerifierFailsClosedOnMismatchAndProductionRisk(t *test
 			coordinator: &clientCoordinator{now: nowClock(now),
 				attestationCache: make(map[string]*preparedAttestationVerifier)},
 			selection: validPlayIntegritySelection("metadata"), platform: "ios",
+		},
+		{
+			name: "Firebase native web trust mismatch",
+			coordinator: &clientCoordinator{now: nowClock(now),
+				attestationCache: make(map[string]*preparedAttestationVerifier)},
+			selection: validFirebaseAppCheckSelection("web_risk_verified"), platform: "ios",
+		},
+		{
+			name: "Firebase web native trust mismatch",
+			coordinator: &clientCoordinator{now: nowClock(now),
+				attestationCache: make(map[string]*preparedAttestationVerifier)},
+			selection: validFirebaseAppCheckSelection("app_verified"), platform: "web",
+		},
+		{
+			name: "Turnstile native mismatch",
+			coordinator: &clientCoordinator{now: nowClock(now), secrets: &ephemeralSecretStore{material: []byte("secret")},
+				attestationCache: make(map[string]*preparedAttestationVerifier)},
+			selection: validTurnstileSelection(), platform: "ios",
 		},
 	}
 	for _, test := range tests {
@@ -451,6 +496,25 @@ func validPlayIntegritySelection(source string) configuration.PlatformAttestatio
 			CertificateSHA256Digests: []string{base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, sha256.Size))},
 			MinimumDeviceIntegrity:   "device", RequireLicensed: true,
 			MinimumVersionCode: 1, CredentialSource: source,
+		},
+	}
+}
+
+func validFirebaseAppCheckSelection(trust string) configuration.PlatformAttestation {
+	return configuration.PlatformAttestation{
+		Provider: "firebase_app_check", Mode: "required", MinimumTrustLevel: trust,
+		FirebaseAppCheck: &configuration.FirebaseAppCheckConfiguration{
+			ProjectNumber: "123456789", AllowedAppIDs: []string{"1:123456789:ios:0123456789abcdef"},
+		},
+	}
+}
+
+func validTurnstileSelection() configuration.PlatformAttestation {
+	return configuration.PlatformAttestation{
+		Provider: "turnstile", Mode: "required", MinimumTrustLevel: "web_risk_verified",
+		SecretRef: "secret/turnstile", AllowedOrigins: []string{"https://app.example.test"},
+		Turnstile: &configuration.TurnstileConfiguration{
+			AllowedHostnames: []string{"app.example.test"}, ExpectedAction: "session",
 		},
 	}
 }

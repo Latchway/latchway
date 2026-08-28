@@ -706,7 +706,7 @@ func TestSessionExchangeAttestationPolicyPostgreSQL(t *testing.T) {
 		challengeFailure bool
 	}{
 		{name: "provider mismatch", provider: "app_attest", mode: "required", minimumTrust: "app_verified", maximumAge: "10m"},
-		{name: "insufficient trust", provider: "debug", mode: "required", minimumTrust: "strong_device_verified", maximumAge: "10m"},
+		{name: "unreachable debug trust fails closed", provider: "debug", mode: "required", minimumTrust: "strong_device_verified", maximumAge: "10m", challengeFailure: true},
 		{name: "maximum age exceeded", provider: "debug", mode: "required", minimumTrust: "debug", maximumAge: "1m", exchangeAdvance: 2 * time.Minute},
 		{name: "preferred is ineligible", provider: "debug", mode: "preferred", minimumTrust: "debug", maximumAge: "10m", challengeFailure: true},
 	}

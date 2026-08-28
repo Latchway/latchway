@@ -8,7 +8,9 @@ info:
     Normative draft for wire protocol version 1. Identity, attestation and DPoP
     establish a short-lived installation session. Protected AI requests name an
     application feature; clients cannot select trusted users, routes, prices or
-    upstream credentials.
+    upstream credentials. Browser requests carry one exact canonical HTTPS
+    `Origin`; it is authorized against the active web-attestation selection on
+    every session and protected data-plane operation. Native requests omit it.
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -69,6 +71,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         required: true
         content:
@@ -105,6 +108,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         required: true
         content:
@@ -142,6 +146,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         required: true
         content:
@@ -177,6 +182,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       responses:
         '204':
           description: Installation revoked. No response body is returned.
@@ -198,6 +204,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       responses:
         '200':
           description: Effective counters and reset/availability information; no policy internals.
@@ -224,6 +231,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       responses:
         '200':
           description: Safe diagnostics without tokens, raw evidence, subjects or credentials.
@@ -247,6 +255,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         $ref: '#/components/requestBodies/AIRequest'
       responses:
@@ -268,6 +277,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         $ref: '#/components/requestBodies/AIRequest'
       responses:
@@ -289,6 +299,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         $ref: '#/components/requestBodies/AIRequest'
       responses:
@@ -310,6 +321,7 @@ paths:
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
         - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
         $ref: '#/components/requestBodies/AIRequest'
       responses:
@@ -326,6 +338,7 @@ paths:
       - $ref: '#/components/parameters/SDK'
       - $ref: '#/components/parameters/SDKVersion'
       - $ref: '#/components/parameters/RequestID'
+      - $ref: '#/components/parameters/BrowserOrigin'
     get:
       tags: [AI proxy]
       operationId: proxyRestrictedOpaqueHttpGet
@@ -424,6 +437,21 @@ components:
         minLength: 8
         maxLength: 128
         pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+    BrowserOrigin:
+      name: Origin
+      in: header
+      required: false
+      description: |
+        Browser user agents supply exactly one canonical HTTPS origin. It is
+        required when the session platform is `web`, forbidden for native
+        platforms, and never grants authority without the active policy and
+        DPoP-bound session checks. Cookie credentials are not supported.
+      schema:
+        type: string
+        minLength: 9
+        maxLength: 2048
+        format: uri
+        pattern: '^https://[^/]+$'
     FeatureHeader:
       name: X-Latchway-Feature
       in: header

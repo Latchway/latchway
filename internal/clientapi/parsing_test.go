@@ -149,7 +149,11 @@ func TestAllSDKPlatformPairsAreEnforced(t *testing.T) {
 			coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
 			handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, validClientRequest(http.MethodPost, challengePath, validChallengeBody(pair.platform), pair.sdk, "1.2.3"))
+			request := validClientRequest(http.MethodPost, challengePath, validChallengeBody(pair.platform), pair.sdk, "1.2.3")
+			if pair.platform == "web" {
+				request.Header.Set("Origin", "https://app.example.test")
+			}
+			handler.ServeHTTP(response, request)
 			if response.Code != http.StatusCreated {
 				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 			}

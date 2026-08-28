@@ -99,6 +99,7 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 		DPoPProof:   dpopProof,
 		HTTPMethod:  http.MethodGet,
 		RequestURI:  cloneURL(target),
+		Origin:      input.Metadata.Origin,
 	})
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)

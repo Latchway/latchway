@@ -89,6 +89,45 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	}
 }
 
+func TestDataPlaneCORSPreflightAndOriginPropagationAreBounded(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	handler := fixture.handler(t)
+	preflight := httptest.NewRequest(http.MethodOptions, "https://untrusted.example/v1/chat/completions", nil)
+	preflight.Header.Set("Origin", "https://app.example.test")
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	preflight.Header.Set("Access-Control-Request-Headers", "authorization, content-type, dpop, x-latchway-feature")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, preflight)
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 ||
+		response.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" ||
+		response.Header().Get("Access-Control-Allow-Credentials") != "" ||
+		fixture.verifier.calls != 0 || fixture.sessions.calls != 0 {
+		t.Fatalf("preflight status=%d headers=%#v auth/session=%d/%d body=%s",
+			response.Code, response.Header(), fixture.verifier.calls, fixture.sessions.calls, response.Body.String())
+	}
+
+	fixture.authorization.InstallationPlatform = "web"
+	handler = fixture.handler(t)
+	request := fixture.request(t)
+	request.Header.Set("X-Latchway-SDK", "javascript")
+	request.Header.Set("Origin", "https://app.example.test")
+	actual := httptest.NewRecorder()
+	handler.ServeHTTP(actual, request)
+	if actual.Code != http.StatusOK || fixture.sessions.input.Origin != "https://app.example.test" ||
+		actual.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" {
+		t.Fatalf("actual status=%d origin=%q headers=%#v body=%s",
+			actual.Code, fixture.sessions.input.Origin, actual.Header(), actual.Body.String())
+	}
+
+	unsafe := httptest.NewRequest(http.MethodOptions, "https://untrusted.example/v1/chat/completions", nil)
+	unsafe.Header.Set("Origin", "https://app.example.test")
+	unsafe.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	unsafe.Header.Set("Access-Control-Request-Headers", "cookie")
+	unsafeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unsafeResponse, unsafe)
+	assertProblemCode(t, unsafeResponse, "request_invalid", http.StatusBadRequest)
+}
+
 func TestHandlerExecutesEveryStructuredProtocolWithExactProviderMapping(t *testing.T) {
 	tests := []struct {
 		name             string

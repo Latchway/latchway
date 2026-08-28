@@ -219,6 +219,83 @@ func TestCreateChallengeUsesCanonicalOriginAndExactWireShape(t *testing.T) {
 	}
 }
 
+func TestBrowserOriginIsCanonicalPropagatedAndCORSIsCredentialless(t *testing.T) {
+	t.Parallel()
+
+	coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
+	handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+	request := validClientRequest(http.MethodPost, challengePath, validChallengeBody("web"), "javascript", "1.2.3")
+	request.Header.Set("Origin", "https://app.example.test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated || len(coordinator.challengeInputs) != 1 {
+		t.Fatalf("web challenge status=%d body=%s calls=%d", response.Code, response.Body.String(), len(coordinator.challengeInputs))
+	}
+	if coordinator.challengeInputs[0].Metadata.Origin != "https://app.example.test" {
+		t.Fatalf("origin metadata = %q", coordinator.challengeInputs[0].Metadata.Origin)
+	}
+	if response.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" ||
+		response.Header().Get("Access-Control-Allow-Credentials") != "" ||
+		!strings.Contains(response.Header().Get("Access-Control-Expose-Headers"), "DPoP-Nonce") {
+		t.Fatalf("CORS response headers = %#v", response.Header())
+	}
+
+	for _, test := range []struct {
+		name     string
+		platform string
+		sdk      string
+		origin   string
+	}{
+		{name: "web missing origin", platform: "web", sdk: "javascript"},
+		{name: "web noncanonical origin", platform: "web", sdk: "javascript", origin: "https://App.example.test"},
+		{name: "native origin", platform: "ios", sdk: "ios", origin: "https://app.example.test"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolated := &fakeCoordinator{challengeResult: validChallengeResult()}
+			request := validClientRequest(http.MethodPost, challengePath, validChallengeBody(test.platform), test.sdk, "1.2.3")
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			response := httptest.NewRecorder()
+			newTestHandler(t, isolated, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test").ServeHTTP(response, request)
+			assertProblem(t, response, "request_invalid", http.StatusBadRequest)
+			if len(isolated.challengeInputs) != 0 {
+				t.Fatal("invalid Origin reached the coordinator")
+			}
+		})
+	}
+}
+
+func TestClientCORSPreflightIsBoundedAndDoesNotAuthorize(t *testing.T) {
+	t.Parallel()
+	coordinator := &fakeCoordinator{}
+	handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+	request := httptest.NewRequest(http.MethodOptions, challengePath, nil)
+	request.Header.Set("Origin", "https://app.example.test")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type, dpop, x-latchway-sdk")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 ||
+		response.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" ||
+		response.Header().Get("Access-Control-Allow-Methods") != http.MethodPost ||
+		response.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("preflight status=%d headers=%#v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if len(coordinator.challengeInputs) != 0 {
+		t.Fatal("preflight invoked the coordinator")
+	}
+
+	unsafe := httptest.NewRequest(http.MethodOptions, challengePath, nil)
+	unsafe.Header.Set("Origin", "https://app.example.test")
+	unsafe.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	unsafe.Header.Set("Access-Control-Request-Headers", "cookie")
+	unsafeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unsafeResponse, unsafe)
+	assertProblem(t, unsafeResponse, "request_invalid", http.StatusBadRequest)
+}
+
 func TestExchangeAndRefreshUseExactRequestAndResponseShapes(t *testing.T) {
 	t.Parallel()
 

@@ -244,10 +244,16 @@ func (verifier *FirebaseAppCheckVerifier) Verify(
 	}
 	// A standard App Check JWT authenticates the configured Firebase app ID but
 	// has no clientDataHash-style claim. The sealed Result is scoped to the
-	// atomically consumed Latchway binding and deliberately claims app trust,
-	// never device or hardware-backed trust.
+	// atomically consumed Latchway binding and deliberately claims app trust on
+	// native clients, never device or hardware-backed trust. On the web App
+	// Check is a browser risk signal and must not be promoted to native app
+	// identity trust.
+	trustLevel := "app_verified"
+	if binding.Platform == "web" {
+		trustLevel = "web_risk_verified"
+	}
 	return newResult(
-		firebaseAppCheckProvider, "app_verified", now, expiresAt, signals,
+		firebaseAppCheckProvider, trustLevel, now, expiresAt, signals,
 		firebaseAppCheckEvidenceHash(token), bindingHash,
 	)
 }
