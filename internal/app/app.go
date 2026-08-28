@@ -135,6 +135,10 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret manager: %w", err)
 	}
+	configurationStore, err := configuration.NewStore(pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("construct configuration store: %w", err)
+	}
 	targetCache := dataplane.NewTargetCache()
 	keepTargetCache := false
 	defer func() {
@@ -145,14 +149,11 @@ func newAPIRuntime(
 	adminAPI, err := adminapi.New(
 		pool, cfg.PublicOrigin, cfg.AdminSessionLifetime, logger, secretManager,
 		adminapi.WithRole(string(cfg.Role)),
+		adminapi.WithConfigurationStore(configurationStore),
 		adminapi.WithCredentialSelfTests(secretStore, targetCache),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)
-	}
-	configurationStore, err := configuration.NewStore(pool)
-	if err != nil {
-		return nil, nil, fmt.Errorf("construct configuration store: %w", err)
 	}
 	keyManager, err := session.NewSigningKeyManager(session.SigningKeyManagerConfig{
 		Pool: pool, Envelope: envelope,

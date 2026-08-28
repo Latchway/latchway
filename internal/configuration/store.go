@@ -528,14 +528,14 @@ func (store *Store) ActiveSnapshot(ctx context.Context, scope TenantScope) (Acti
 	}
 
 	for {
-		snapshot, refreshErr := store.activeSnapshots.refresh(ctx, cacheKey, func() (ActiveSnapshot, error) {
+		snapshot, refreshErr := store.activeSnapshots.refresh(ctx, cacheKey, func(refreshCtx context.Context) (ActiveSnapshot, error) {
 			latest, latestHit := store.activeSnapshots.get(cacheKey)
 			loadedAt := store.now().UTC()
 			if latestHit && latest.snapshot.PolicyRevision() == revisionID &&
 				activeSnapshotCacheEntryIsFresh(latest, loadedAt) {
 				return latest.snapshot, nil
 			}
-			loaded, loadErr := store.loadActiveSnapshot(ctx, scope)
+			loaded, loadErr := store.loadActiveSnapshot(refreshCtx, scope)
 			if loadErr != nil {
 				return ActiveSnapshot{}, loadErr
 			}

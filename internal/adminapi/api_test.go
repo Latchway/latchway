@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/problem"
 	secretstore "github.com/latchway/latchway/internal/secrets"
@@ -54,6 +55,22 @@ func TestDecodeJSONRejectsUnsafeOrAmbiguousInput(t *testing.T) {
 				t.Fatal("decodeJSON() accepted unsafe or ambiguous input")
 			}
 		})
+	}
+}
+
+func TestWithConfigurationStore(t *testing.T) {
+	t.Parallel()
+
+	api := &API{}
+	store := new(configuration.Store)
+	if err := WithConfigurationStore(store)(api); err != nil {
+		t.Fatalf("WithConfigurationStore() error = %v", err)
+	}
+	if api.configurations != store {
+		t.Fatal("WithConfigurationStore() did not retain the supplied store")
+	}
+	if err := WithConfigurationStore(nil)(api); err == nil {
+		t.Fatal("WithConfigurationStore(nil) succeeded")
 	}
 }
 

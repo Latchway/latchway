@@ -10,11 +10,14 @@ import (
 var errActiveSnapshotRefreshIncomplete = errors.New("active configuration refresh did not complete")
 
 const (
-	activeSnapshotCacheCapacity              = 1024
-	activeSnapshotCacheMaximumEstimatedBytes = int64(32 << 20)
+	activeSnapshotCacheCapacity = 1024
+	// The budget is per Store. A role=all process retains one shared API/admin
+	// Store and one worker Store, for a conservative 48 MiB process ceiling.
+	activeSnapshotCacheMaximumEstimatedBytes = int64(24 << 20)
 	activeSnapshotCacheEntryBaseBytes        = int64(16 << 10)
 	activeSnapshotCacheExpansionFactor       = int64(8)
 	activeSnapshotFullReconciliationInterval = 30 * time.Second
+	activeSnapshotRefreshTimeout             = 5 * time.Second
 )
 
 type activeSnapshotCacheKey struct {
@@ -108,8 +111,11 @@ func estimateActiveSnapshotBytes(snapshot ActiveSnapshot) int64 {
 func (cache *activeSnapshotCache) refresh(
 	ctx context.Context,
 	key activeSnapshotCacheKey,
-	load func() (ActiveSnapshot, error),
+	load func(context.Context) (ActiveSnapshot, error),
 ) (ActiveSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return ActiveSnapshot{}, err
+	}
 	cache.mu.Lock()
 	if cache.refreshes == nil {
 		cache.refreshes = make(map[activeSnapshotCacheKey]*activeSnapshotRefresh)
@@ -117,12 +123,7 @@ func (cache *activeSnapshotCache) refresh(
 	if existing, ok := cache.refreshes[key]; ok {
 		existing.waiters++
 		cache.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return ActiveSnapshot{}, ctx.Err()
-		case <-existing.done:
-			return existing.snapshot, existing.err
-		}
+		return waitForActiveSnapshotRefresh(ctx, existing)
 	}
 	refresh := &activeSnapshotRefresh{
 		done: make(chan struct{}), err: errActiveSnapshotRefreshIncomplete,
@@ -130,16 +131,39 @@ func (cache *activeSnapshotCache) refresh(
 	cache.refreshes[key] = refresh
 	cache.mu.Unlock()
 
-	func() {
+	refreshCtx, cancelRefresh := context.WithTimeout(context.WithoutCancel(ctx), activeSnapshotRefreshTimeout)
+	go func() {
+		completed := false
 		defer func() {
+			_ = recover()
+			cancelRefresh()
+			if !completed {
+				refresh.snapshot = ActiveSnapshot{}
+				refresh.err = errActiveSnapshotRefreshIncomplete
+			}
 			cache.mu.Lock()
-			delete(cache.refreshes, key)
+			if cache.refreshes[key] == refresh {
+				delete(cache.refreshes, key)
+			}
 			close(refresh.done)
 			cache.mu.Unlock()
 		}()
-		refresh.snapshot, refresh.err = load()
+		refresh.snapshot, refresh.err = load(refreshCtx)
+		completed = true
 	}()
-	return refresh.snapshot, refresh.err
+	return waitForActiveSnapshotRefresh(ctx, refresh)
+}
+
+func waitForActiveSnapshotRefresh(
+	ctx context.Context,
+	refresh *activeSnapshotRefresh,
+) (ActiveSnapshot, error) {
+	select {
+	case <-ctx.Done():
+		return ActiveSnapshot{}, ctx.Err()
+	case <-refresh.done:
+		return refresh.snapshot, refresh.err
+	}
 }
 
 func activeSnapshotCacheEntryIsFresh(entry activeSnapshotCacheEntry, now time.Time) bool {

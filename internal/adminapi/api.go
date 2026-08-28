@@ -73,6 +73,19 @@ func WithRole(role string) Option {
 	}
 }
 
+// WithConfigurationStore shares the process configuration store with the
+// control plane. In api/all roles this keeps activation cache warming and its
+// memory budget unified with session and data-plane reads.
+func WithConfigurationStore(store *configuration.Store) Option {
+	return func(api *API) error {
+		if store == nil {
+			return errors.New("admin API configuration store is nil")
+		}
+		api.configurations = store
+		return nil
+	}
+}
+
 func New(pool *pgxpool.Pool, publicOrigin string, sessionLifetime time.Duration, logger *slog.Logger, manager secretManager, options ...Option) (*API, error) {
 	if manager == nil {
 		return nil, errors.New("admin API secret manager is nil")

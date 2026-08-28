@@ -84,34 +84,35 @@ func TestActiveSnapshotCacheCoalescesRefreshByScope(t *testing.T) {
 	want := ActiveSnapshot{RevisionID: "revision"}
 	loaderStarted := make(chan struct{})
 	releaseLoader := make(chan struct{})
-	leaderResult := make(chan ActiveSnapshot, 1)
 	leaderError := make(chan error, 1)
 	var loaderCalls atomic.Int32
+	leaderContext, cancelLeader := context.WithCancel(context.Background())
 	go func() {
-		snapshot, err := cache.refresh(context.Background(), key, func() (ActiveSnapshot, error) {
+		_, err := cache.refresh(leaderContext, key, func(refreshCtx context.Context) (ActiveSnapshot, error) {
 			loaderCalls.Add(1)
+			deadline, hasDeadline := refreshCtx.Deadline()
+			if !hasDeadline || time.Until(deadline) <= 0 || time.Until(deadline) > activeSnapshotRefreshTimeout {
+				return ActiveSnapshot{}, errors.New("shared refresh context is not independently bounded")
+			}
 			close(loaderStarted)
 			<-releaseLoader
+			if err := refreshCtx.Err(); err != nil {
+				return ActiveSnapshot{}, fmt.Errorf("shared refresh inherited leader cancellation: %w", err)
+			}
 			return want, nil
 		})
-		leaderResult <- snapshot
 		leaderError <- err
 	}()
 	<-loaderStarted
-
-	cancelledContext, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := cache.refresh(cancelledContext, key, func() (ActiveSnapshot, error) {
-		t.Fatal("cancelled waiter invoked the coalesced loader")
-		return ActiveSnapshot{}, nil
-	}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled refresh error = %v, want context cancellation", err)
+	cancelLeader()
+	if err := <-leaderError; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled leader error = %v, want context cancellation", err)
 	}
 
 	waiterResult := make(chan ActiveSnapshot, 1)
 	waiterError := make(chan error, 1)
 	go func() {
-		snapshot, err := cache.refresh(context.Background(), key, func() (ActiveSnapshot, error) {
+		snapshot, err := cache.refresh(context.Background(), key, func(context.Context) (ActiveSnapshot, error) {
 			loaderCalls.Add(1)
 			return ActiveSnapshot{RevisionID: "unexpected-second-load"}, nil
 		})
@@ -127,7 +128,7 @@ func TestActiveSnapshotCacheCoalescesRefreshByScope(t *testing.T) {
 			waiters = refresh.waiters
 		}
 		cache.mu.RUnlock()
-		if waiters >= 2 {
+		if waiters >= 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -137,12 +138,6 @@ func TestActiveSnapshotCacheCoalescesRefreshByScope(t *testing.T) {
 	}
 	close(releaseLoader)
 
-	if err := <-leaderError; err != nil {
-		t.Fatalf("leader refresh error = %v", err)
-	}
-	if got := <-leaderResult; got.PolicyRevision() != want.PolicyRevision() {
-		t.Fatalf("leader revision = %q, want %q", got.PolicyRevision(), want.PolicyRevision())
-	}
 	if err := <-waiterError; err != nil {
 		t.Fatalf("waiter refresh error = %v", err)
 	}
@@ -151,6 +146,28 @@ func TestActiveSnapshotCacheCoalescesRefreshByScope(t *testing.T) {
 	}
 	if calls := loaderCalls.Load(); calls != 1 {
 		t.Fatalf("refresh loader calls = %d, want 1", calls)
+	}
+}
+
+func TestActiveSnapshotCacheContainsLoaderPanic(t *testing.T) {
+	t.Parallel()
+	var cache activeSnapshotCache
+	key := activeSnapshotCacheKey{environmentID: "environment"}
+
+	if _, err := cache.refresh(context.Background(), key, func(context.Context) (ActiveSnapshot, error) {
+		panic("loader panic")
+	}); !errors.Is(err, errActiveSnapshotRefreshIncomplete) {
+		t.Fatalf("panicking refresh error = %v, want incomplete refresh", err)
+	}
+	want := ActiveSnapshot{RevisionID: "recovered"}
+	got, err := cache.refresh(context.Background(), key, func(context.Context) (ActiveSnapshot, error) {
+		return want, nil
+	})
+	if err != nil {
+		t.Fatalf("refresh after panic error = %v", err)
+	}
+	if got.PolicyRevision() != want.PolicyRevision() {
+		t.Fatalf("revision after panic = %q, want %q", got.PolicyRevision(), want.PolicyRevision())
 	}
 }
 
