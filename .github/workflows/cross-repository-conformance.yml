@@ -1,0 +1,148 @@
+name: Cross-repository conformance evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Evidence scope; release additionally requires every external domain
+        required: true
+        default: source
+        type: choice
+        options:
+          - source
+          - release
+      core_ref:
+        description: Immutable core commit or annotated tag
+        required: true
+        default: main
+        type: string
+      javascript_ref:
+        description: Immutable JavaScript SDK commit or annotated tag
+        required: true
+        default: main
+        type: string
+      ios_ref:
+        description: Immutable iOS SDK commit or annotated tag
+        required: true
+        default: main
+        type: string
+      android_ref:
+        description: Immutable Android SDK commit or annotated tag
+        required: true
+        default: main
+        type: string
+      react_native_ref:
+        description: Immutable React Native SDK commit or annotated tag
+        required: true
+        default: main
+        type: string
+      core_release_tag:
+        description: Required canonical core tag when scope is release
+        required: false
+        type: string
+      external_evidence_run_id:
+        description: Optional run ID containing the combined external evidence artifact
+        required: false
+        type: string
+      external_evidence_artifact:
+        description: Artifact name in the supplied run ID
+        required: false
+        default: latchway-v1-external-evidence
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: cross-repository-conformance-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact core source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.core_ref }}
+          path: latchway
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact JavaScript SDK source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-js
+          ref: ${{ inputs.javascript_ref }}
+          path: latchway-js
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact iOS SDK source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-ios-sdk
+          ref: ${{ inputs.ios_ref }}
+          path: latchway-ios-sdk
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact Android SDK source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-android
+          ref: ${{ inputs.android_ref }}
+          path: latchway-android
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact React Native SDK source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-react-native-sdk
+          ref: ${{ inputs.react_native_ref }}
+          path: latchway-react-native-sdk
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download independently produced external evidence
+        if: inputs.scope == 'release' && inputs.external_evidence_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.external_evidence_artifact }}
+          path: ${{ runner.temp }}/latchway-external-evidence
+          run-id: ${{ inputs.external_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Produce source or release evidence
+        shell: bash
+        env:
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+          CORE_RELEASE_TAG: ${{ inputs.core_release_tag }}
+          EXTERNAL_EVIDENCE_RUN_ID: ${{ inputs.external_evidence_run_id }}
+        run: |
+          arguments=(
+            --workspace-root "$GITHUB_WORKSPACE"
+            --core-repo "$GITHUB_WORKSPACE/latchway"
+            --javascript-repo "$GITHUB_WORKSPACE/latchway-js"
+            --ios-repo "$GITHUB_WORKSPACE/latchway-ios-sdk"
+            --android-repo "$GITHUB_WORKSPACE/latchway-android"
+            --react-native-repo "$GITHUB_WORKSPACE/latchway-react-native-sdk"
+            --scope "$EVIDENCE_SCOPE"
+            --output "$RUNNER_TEMP/latchway-cross-repository.json"
+          )
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            arguments+=(--release-tag "$CORE_RELEASE_TAG")
+            if [[ -n "$EXTERNAL_EVIDENCE_RUN_ID" ]]; then
+              arguments+=(--external-evidence-dir "$RUNNER_TEMP/latchway-external-evidence")
+            fi
+          fi
+          python3 latchway/scripts/cross-repo-conformance.py "${arguments[@]}"
+      - name: Retain deterministic JSON and JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-cross-repository-${{ inputs.scope }}
+          path: |
+            ${{ runner.temp }}/latchway-cross-repository.json
+            ${{ runner.temp }}/latchway-cross-repository.json.junit.xml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

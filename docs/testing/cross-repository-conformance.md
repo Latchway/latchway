@@ -1,0 +1,214 @@
+# Cross-repository conformance and release evidence
+
+`scripts/cross-repo-conformance.py` is the offline, fail-closed evidence
+orchestrator for the core repository and all four SDK repositories. It reads
+only local Git checkouts and an optional directory of independently produced
+external evidence. It never fetches a default branch, queries a registry,
+creates a tag, contacts a device or cloud, or publishes an artifact.
+
+## Evidence scopes
+
+`source` scope proves local source alignment. It requires:
+
+- five explicit, distinct, clean Git worktrees;
+- every SDK `contract.lock` to name the exact local core commit, contract
+  version, wire version, server range, core release label, and generated bundle
+  SHA-256;
+- two fresh core bundle builds to be byte-identical, safe to extract, complete,
+  internally checksummed, and byte-identical to the canonical `api/` sources;
+- the DPoP, attestation-binding, and protocol fixtures in every SDK to be
+  byte-identical to the bundle;
+- core, JavaScript, Swift/CocoaPods, Android/Maven, and React Native package
+  version declarations to agree with their public source constants; and
+- React Native's compatibility manifest and native/JavaScript coordinates to
+  pin the exact local dependency commits and versions.
+
+A passing source report deliberately records release tags, public artifacts,
+live SDK/server behavior, physical devices, a live provider, and cloud
+deployments as `unverified`. Source alignment is necessary release input; it is
+not a publication, runtime compatibility, or hardware-trust claim.
+
+`release` scope repeats every source check and additionally requires:
+
+- a canonical core release tag matching the core and console versions;
+- released contract metadata and an exact `core_release` in every SDK lock;
+- clean release trees, release changelog entries, and annotated tags pointing
+  to each exact local repository commit;
+- no tracked local build output or credential-shaped release files; and
+- valid, artifact-hash-bound evidence for every external domain listed below.
+
+An absent external document is `unverified` and release-blocking. A malformed,
+wrong-commit, wrong-version, failed-claim, unsafe-path, or digest-mismatched
+document is `failed`. The command never upgrades either result to a pass.
+
+## Repository discovery and source run
+
+The default workspace layout is the five sibling directories from the project
+plan. Discovery is local and deterministic; no remote URL is followed:
+
+```text
+<workspace>/latchway
+<workspace>/latchway-js
+<workspace>/latchway-ios-sdk
+<workspace>/latchway-android
+<workspace>/latchway-react-native-sdk
+```
+
+Run from any directory, naming the workspace and an output outside every source
+checkout:
+
+```bash
+python3 latchway/scripts/cross-repo-conformance.py \
+  --workspace-root /path/to/workspace \
+  --scope source \
+  --output /tmp/latchway-cross-repo-source.json
+```
+
+The JUnit report defaults to
+`/tmp/latchway-cross-repo-source.json.junit.xml`. Use `--junit-output` to choose
+another path. `--core-repo`, `--javascript-repo`, `--ios-repo`,
+`--android-repo`, and `--react-native-repo` can replace individual defaults.
+Absolute developer paths are never written to either report.
+
+The output must be outside all five repositories. This prevents evidence
+creation from making a previously clean candidate dirty after the clean-tree
+check.
+
+## External release evidence
+
+Release scope expects this fixed directory shape:
+
+```text
+external-evidence/
+├── live_sdk_conformance.json
+├── public_tags.json
+├── public_registries.json
+├── physical_devices.json
+├── live_provider.json
+├── cloud_deployments.json
+├── operational_resilience.json
+├── supply_chain.json
+└── artifacts/
+    └── ... bounded raw reports referenced by SHA-256 ...
+```
+
+Each JSON document has the exact following top-level shape:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "latchway_cross_repository_external_evidence",
+  "domain": "public_tags",
+  "status": "passed",
+  "started_at": "2026-08-29T00:00:00Z",
+  "finished_at": "2026-08-29T00:10:00Z",
+  "core_commit": "<40 lowercase hexadecimal characters>",
+  "core_release": "v1.0.0",
+  "contract_version": "1.0.0",
+  "bundle_sha256": "<64 lowercase hexadecimal characters>",
+  "oci_image_digest": "ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>",
+  "repositories": {
+    "core": {"commit": "...", "tag": "v1.0.0", "version": "1.0.0"},
+    "javascript": {"commit": "...", "tag": "v1.0.0", "version": "1.0.0"},
+    "ios": {"commit": "...", "tag": "v1.0.0", "version": "1.0.0"},
+    "android": {"commit": "...", "tag": "v1.0.0", "version": "1.0.0"},
+    "react_native": {"commit": "...", "tag": "v1.0.0", "version": "1.0.0"}
+  },
+  "claims": {
+    "remote_annotated_tags_verified": true,
+    "github_releases_verified": true
+  },
+  "artifacts": [
+    {"path": "artifacts/public-tags.json", "sha256": "..."}
+  ]
+}
+```
+
+Repository tags and versions need not all be equal; they must equal the exact
+coordinates derived from the five local candidates. The example uses 1.0.0 for
+readability.
+
+Documents are accepted only when their timestamps are ordered and span no more
+than seven days, their repository map exactly matches the candidates, all
+domain-specific claims are present and literally `true`, and every referenced
+regular file is inside the evidence directory with the declared SHA-256. Every
+domain must name the same canonical immutable
+`ghcr.io/latchway/latchway@sha256:...` image; a syntactically valid but
+different digest is rejected.
+Symlinks, traversal, duplicate artifacts, unknown fields, and oversized files
+are rejected. The fixed claim names are defined beside `EXTERNAL_DOMAINS` in
+the orchestrator and cover:
+
+- all four SDKs and both React Native platforms against the exact released
+  image, including DPoP, errors, refresh, revocation, streaming, quota, and
+  protocol rejection;
+- remote annotated tags and GitHub releases;
+- the OCI digest, both npm packages, Swift/CocoaPods, and Maven Central;
+- production App Attest, Play-distributed Play Integrity, and both React Native
+  device paths;
+- bounded OpenRouter non-streaming/streaming, usage, clamping, and error proof;
+  and
+- Compose, Cloud Run, AWS, Fly.io, and Cloudflare Containers using the release
+  image;
+- v1 load targets, destructive live failure injection, multiple replicas,
+  backup/restore, and released-version upgrade plus rollback; and
+- the multi-architecture image, vulnerability and license scans, SBOM,
+  signature, and provenance.
+
+These documents must be exported by the responsible authenticated platform
+workflows together with their raw reports. Hand-writing `status: passed` is not
+platform evidence; the orchestrator only validates identity, completeness, and
+artifact integrity so that evidence from another system cannot be silently
+substituted.
+
+Run the final offline aggregation with:
+
+```bash
+python3 latchway/scripts/cross-repo-conformance.py \
+  --workspace-root /path/to/workspace \
+  --scope release \
+  --release-tag v1.0.0 \
+  --external-evidence-dir /path/to/external-evidence \
+  --output /tmp/latchway-cross-repo-release.json
+```
+
+Exit status is zero only when every required check passes. JSON and JUnit are
+still written when a verification check fails. CLI usage or evidence-write
+errors use exit status 2.
+
+## Report safety and determinism
+
+Reports contain repository IDs, public package versions, commits, release tags,
+contract hashes, fixed reason codes, claim names, artifact hashes, and counts.
+They do not contain absolute paths, environment values, Git stderr, registry
+credentials, attestation payloads, provider responses, device identifiers, or
+cloud secrets. Dirty trees report only the repository ID and entry count, not
+filenames.
+
+For unchanged inputs, JSON and JUnit bytes are stable: no wall-clock time,
+duration, host identity, temporary path, or output path is embedded. Files are
+atomically written with mode `0600`.
+
+## GitHub workflow
+
+`.github/workflows/cross-repository-conformance.yml` is a read-only manual
+workflow. Supply immutable commit or tag refs for all five repositories. In
+release scope, also supply the core tag and, when available, a run ID and
+artifact name containing the external evidence directory. The workflow checks
+out exactly those refs, runs this command, and retains JSON/JUnit even when the
+verdict fails. It has no package, registry, release, environment, or
+attestation-publishing permission.
+
+The workflow does not dispatch SDK updates or publish releases. Those remain
+separate, explicitly authorized operations after a passing evidence report.
+
+## Test the orchestrator
+
+```bash
+python3 -m unittest -v scripts/test_cross_repo_conformance.py
+```
+
+The tests create five isolated Git repositories and cover a complete source
+pass, byte determinism, dirty-tree redaction, lock/fixture drift, missing
+external release evidence, valid hash-bound release evidence, artifact tamper,
+cross-domain OCI digest substitution, and output-path safety.
