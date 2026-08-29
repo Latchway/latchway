@@ -1367,16 +1367,15 @@ func TestValidatorNeverEmitsAnUnloadableRuntimeSnapshot(t *testing.T) {
 	document := configurationObject(t)
 	upstream := objectArray(objectValue(document, "spec"), "upstreams")[0]
 	authentication := objectValue(upstream, "authentication")
-	// The canonical schema permits this irrelevant member for a "none"
-	// strategy. Runtime compilation rejects it so activation cannot create an
-	// active revision that every data-plane snapshot load would reject.
+	// Authentication variants are now exact at the schema boundary: a member
+	// from another strategy cannot reach runtime compilation.
 	authentication["headerName"] = "X-Provider-Key"
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
 	}
 	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
-	if report.Valid || compiled != nil || !hasIssue(report.Issues, "runtime_configuration_invalid") {
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "schema_oneof") {
 		t.Fatalf("unloadable configuration compiled: report=%+v compiled=%s", report, compiled)
 	}
 
