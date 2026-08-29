@@ -414,6 +414,71 @@ func TestRuntimeExecutesDurableIdentityKeyRefresh(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutesDistinctBoundedConcurrencyRecoveryLane(t *testing.T) {
+	t.Parallel()
+	quota := &recordingDurableQuota{concurrencyResults: []batchResult{{count: 3}, {count: 1}}}
+	runtime := &Runtime{quotas: quota, maxBatches: 2, quotaBatchSize: 3}
+	processed, err := runtime.executeJob(context.Background(), Job{Type: "release_expired_concurrency_leases"})
+	if err != nil || processed != 4 {
+		t.Fatalf("concurrency recovery processed=%d err=%v, want 4 nil", processed, err)
+	}
+	if quota.concurrencyCalls != 2 || quota.undispatchedCalls != 0 || quota.reconcileCalls != 0 {
+		t.Fatalf("quota lane calls concurrency=%d undispatched=%d reconcile=%d",
+			quota.concurrencyCalls, quota.undispatchedCalls, quota.reconcileCalls)
+	}
+}
+
+func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
+	t.Parallel()
+	types := scheduledDurableJobTypes()
+	if len(types) != len(supportedJobTypes) {
+		t.Fatalf("scheduled jobs=%d supported=%d", len(types), len(supportedJobTypes))
+	}
+	seen := make(map[string]struct{}, len(types))
+	for _, jobType := range types {
+		if _, duplicate := seen[jobType]; duplicate {
+			t.Fatalf("duplicate scheduled job %q", jobType)
+		}
+		seen[jobType] = struct{}{}
+		if _, supported := supportedJobTypes[jobType]; !supported {
+			t.Fatalf("scheduled job %q has no executable queue contract", jobType)
+		}
+	}
+	if _, ok := seen["release_expired_concurrency_leases"]; !ok {
+		t.Fatal("concurrency recovery lane is absent")
+	}
+	if _, unsafe := seen["run_scheduled_self_test"]; unsafe {
+		t.Fatal("scheduled self-test became executable without a persisted authorization contract")
+	}
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	runtime := &Runtime{
+		quotas: durableQuotaStub{},
+		replays: replayCleanerFunc(func(context.Context, time.Time, int) (int64, error) {
+			return 0, nil
+		}),
+		attestations: attestationCleanerFunc(func(context.Context, time.Time, int) (int64, error) {
+			return 0, nil
+		}),
+		challenges: challengeCleanerFunc(func(context.Context, time.Time, int) (int64, error) {
+			return 0, nil
+		}),
+		signingKeys: signingKeyMaintainerFunc(func(context.Context) (int64, error) { return 0, nil }),
+		identityKeys: identityKeyMaintainerFunc(func(context.Context) (int64, error) {
+			return 0, nil
+		}),
+		operations: operationalJobsStub{}, quotaBatchSize: 1, replayBatchSize: 1,
+		attestationBatchSize: 1, maxBatches: 1, now: func() time.Time { return now },
+	}
+	for _, jobType := range types {
+		if _, err := runtime.executeJob(context.Background(), Job{Type: jobType, ScheduledAt: now}); err != nil {
+			t.Fatalf("scheduled job %q is not executable: %v", jobType, err)
+		}
+	}
+	if _, err := runtime.executeJob(context.Background(), Job{Type: "run_scheduled_self_test", ScheduledAt: now}); err == nil {
+		t.Fatal("scheduled self-test executed without a persisted authorization contract")
+	}
+}
+
 func newTestRuntime(t *testing.T, config Config) *Runtime {
 	t.Helper()
 	if config.Logger == nil {
@@ -478,7 +543,41 @@ func (durableQuotaStub) ExpirePendingBatch(context.Context, int) (int64, error) 
 func (durableQuotaStub) ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error) {
 	return 0, nil
 }
+func (durableQuotaStub) ReleaseExpiredConcurrencyLeasesBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
 func (durableQuotaStub) ReconcilePendingUsageBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
+
+type recordingDurableQuota struct {
+	concurrencyResults []batchResult
+	concurrencyCalls   int
+	undispatchedCalls  int
+	reconcileCalls     int
+}
+
+func (quota *recordingDurableQuota) ExpirePendingBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
+
+func (quota *recordingDurableQuota) ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error) {
+	quota.undispatchedCalls++
+	return 0, nil
+}
+
+func (quota *recordingDurableQuota) ReleaseExpiredConcurrencyLeasesBatch(context.Context, int) (int64, error) {
+	quota.concurrencyCalls++
+	if len(quota.concurrencyResults) == 0 {
+		return 0, nil
+	}
+	result := quota.concurrencyResults[0]
+	quota.concurrencyResults = quota.concurrencyResults[1:]
+	return result.count, result.err
+}
+
+func (quota *recordingDurableQuota) ReconcilePendingUsageBatch(context.Context, int) (int64, error) {
+	quota.reconcileCalls++
 	return 0, nil
 }
 
@@ -486,6 +585,32 @@ type identityKeyMaintainerFunc func(context.Context) (int64, error)
 
 func (maintainer identityKeyMaintainerFunc) MaintainIdentityKeys(ctx context.Context) (int64, error) {
 	return maintainer(ctx)
+}
+
+type signingKeyMaintainerFunc func(context.Context) (int64, error)
+
+func (maintainer signingKeyMaintainerFunc) MaintainSigningKeys(ctx context.Context) (int64, error) {
+	return maintainer(ctx)
+}
+
+type challengeCleanerFunc func(context.Context, time.Time, int) (int64, error)
+
+func (cleaner challengeCleanerFunc) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return cleaner(ctx, before, limit)
+}
+
+type operationalJobsStub struct{}
+
+func (operationalJobsStub) AggregateHourlyUsage(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (operationalJobsStub) AggregateDailyUsage(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (operationalJobsStub) EnforceRetention(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
 }
 
 type fakeQuotaExpirer struct {

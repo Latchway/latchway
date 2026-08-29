@@ -104,6 +104,84 @@ func TestQueueClaimsScheduledJobsExactlyOnceAcrossReplicasPostgreSQL(t *testing.
 	}
 }
 
+func TestQueueSchedulesEveryExecutableJobExactlyOnceAcrossReplicasPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedWorkerPool(t)
+	first := mustWorkerQueue(t, pool, "runtime-ALLJOBSAAAAAAAAA", "worker")
+	second := mustWorkerQueue(t, pool, "runtime-ALLJOBSBBBBBBBBB", "all")
+	for _, queue := range []*Queue{first, second} {
+		if err := queue.Heartbeat(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	jobTypes := scheduledDurableJobTypes()
+	if err := first.Schedule(ctx, now, jobTypes); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Schedule(ctx, now, jobTypes); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Schedule(ctx, now, []string{"run_scheduled_self_test"}); err == nil {
+		t.Fatal("unsafe scheduled self-test was accepted without a persisted authorization contract")
+	}
+
+	start := make(chan struct{})
+	claimed := make(chan Job, len(jobTypes))
+	errorsChannel := make(chan error, 2)
+	var wait sync.WaitGroup
+	for _, queue := range []*Queue{first, second} {
+		queue := queue
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			for {
+				job, found, err := queue.Claim(ctx, 30*time.Second)
+				if err != nil {
+					errorsChannel <- err
+					return
+				}
+				if !found {
+					return
+				}
+				if err := queue.Complete(ctx, job); err != nil {
+					errorsChannel <- err
+					return
+				}
+				claimed <- job
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(claimed)
+	close(errorsChannel)
+	for err := range errorsChannel {
+		if err != nil {
+			t.Fatalf("claim/complete all jobs: %v", err)
+		}
+	}
+	seen := make(map[string]int, len(jobTypes))
+	for job := range claimed {
+		seen[job.Type]++
+	}
+	if len(seen) != len(jobTypes) {
+		t.Fatalf("claimed job types=%v, want all %v", seen, jobTypes)
+	}
+	for _, jobType := range jobTypes {
+		if seen[jobType] != 1 {
+			t.Fatalf("job %q claims=%d, want exactly one", jobType, seen[jobType])
+		}
+	}
+	var total, succeeded int
+	if err := pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status = 'succeeded') FROM jobs`).Scan(&total, &succeeded); err != nil {
+		t.Fatal(err)
+	}
+	if total != len(jobTypes) || succeeded != len(jobTypes) {
+		t.Fatalf("all-job totals=%d/%d, want %d/%d", total, succeeded, len(jobTypes), len(jobTypes))
+	}
+}
+
 func TestQueueRecoversJobAfterWorkerHeartbeatFailurePostgreSQL(t *testing.T) {
 	pool, ctx := isolatedWorkerPool(t)
 	lost := mustWorkerQueue(t, pool, "runtime-CCCCCCCCCCCCCCCC", "worker")

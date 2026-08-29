@@ -25,12 +25,46 @@ type Store struct {
 	pool            *pgxpool.Pool
 	validator       *Validator
 	now             func() time.Time
+	onActivation    func(context.Context, ActivationObservation)
 	activeSnapshots activeSnapshotCache
+}
+
+// ActivationOperation is the closed set of successful active-pointer
+// mutations. Observers receive it only after the database transaction commits.
+type ActivationOperation string
+
+const (
+	ActivationOperationActivate ActivationOperation = "activated"
+	ActivationOperationRollback ActivationOperation = "rolled_back"
+)
+
+// ActivationObservation contains only the bounded resource dimensions that
+// are safe for operational metrics. Revision and administrator identifiers are
+// deliberately absent.
+type ActivationObservation struct {
+	ApplicationID string
+	EnvironmentID string
+	Operation     ActivationOperation
+}
+
+// StoreOption configures process-local behavior without changing the durable
+// configuration contract.
+type StoreOption func(*Store) error
+
+// WithActivationObserver receives successful activation and rollback commits.
+func WithActivationObserver(observer func(context.Context, ActivationObservation)) StoreOption {
+	return func(store *Store) error {
+		if observer == nil {
+			return errors.New("configuration activation observer is nil")
+		}
+		store.onActivation = observer
+		return nil
+	}
 }
 
 // NewStore constructs the configuration store and compiles the canonical
 // validation assets before accepting traffic.
-func NewStore(pool *pgxpool.Pool) (*Store, error) {
+func NewStore(pool *pgxpool.Pool, options ...StoreOption) (*Store, error) {
 	if pool == nil {
 		return nil, errors.New("configuration database pool is nil")
 	}
@@ -38,7 +72,16 @@ func NewStore(pool *pgxpool.Pool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{pool: pool, validator: validator, now: time.Now}, nil
+	store := &Store{pool: pool, validator: validator, now: time.Now}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("configuration store option is nil")
+		}
+		if err := option(store); err != nil {
+			return nil, err
+		}
+	}
+	return store, nil
 }
 
 // CreateRevision creates a mutable draft from an explicit document or the
@@ -371,6 +414,10 @@ func (store *Store) ActivateRevision(ctx context.Context, principal adminauth.Pr
 	store.activeSnapshots.put(newActiveSnapshotCacheKey(environment.TenantScope), candidate, now)
 	revision.State = StateActive
 	revision.ActivatedAt = &now
+	store.observeActivation(ctx, ActivationObservation{
+		ApplicationID: environment.ApplicationID, EnvironmentID: environment.EnvironmentID,
+		Operation: ActivationOperationActivate,
+	})
 	return revision, nil
 }
 
@@ -442,7 +489,17 @@ func (store *Store) Rollback(ctx context.Context, principal adminauth.Principal,
 	}
 	store.activeSnapshots.put(newActiveSnapshotCacheKey(environment.TenantScope), targetSnapshot, now)
 	target.State = StateActive
+	store.observeActivation(ctx, ActivationObservation{
+		ApplicationID: environment.ApplicationID, EnvironmentID: environment.EnvironmentID,
+		Operation: ActivationOperationRollback,
+	})
 	return target, nil
+}
+
+func (store *Store) observeActivation(ctx context.Context, observation ActivationObservation) {
+	if store != nil && store.onActivation != nil {
+		store.onActivation(ctx, observation)
+	}
 }
 
 // GetRevision returns one tenant-scoped revision.

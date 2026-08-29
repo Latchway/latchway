@@ -25,6 +25,13 @@ import (
 const instrumentationName = "github.com/latchway/latchway"
 
 const (
+	AttestationOutcomeSucceeded   = "succeeded"
+	AttestationOutcomeRejected    = "rejected"
+	AttestationOutcomeUnavailable = "unavailable"
+
+	ConfigurationActivationOutcomeActivated  = "activated"
+	ConfigurationActivationOutcomeRolledBack = "rolled_back"
+
 	RouteAttemptConditionNone                 = "none"
 	RouteAttemptConditionConnectError         = "connect_error"
 	RouteAttemptConditionTimeoutBeforeHeaders = "timeout_before_headers"
@@ -402,9 +409,22 @@ func (registry *Registry) RecordIdentityFailure(ctx context.Context, labels Labe
 }
 
 func (registry *Registry) RecordAttestationResult(ctx context.Context, labels Labels) {
-	if registry != nil {
-		registry.attestationResults.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
+	if registry == nil {
+		return
 	}
+	// Attestation telemetry has a deliberately smaller vocabulary than the
+	// general request label set. Provider payloads, policy identifiers, and
+	// installation/user identifiers can therefore never become dimensions,
+	// even if a future caller accidentally supplies them in Labels.
+	labels.Feature = ""
+	labels.Route = ""
+	labels.Upstream = ""
+	labels.ModelAlias = ""
+	labels.Plan = ""
+	labels.Platform = safeAttestationPlatform(labels.Platform)
+	labels.AttestationLevel = safeAttestationLevel(labels.AttestationLevel)
+	labels.Outcome = safeAttestationOutcome(labels.Outcome)
+	registry.attestationResults.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
 }
 
 func (registry *Registry) RecordDPoPFailure(ctx context.Context, labels Labels) {
@@ -432,9 +452,21 @@ func (registry *Registry) RecordReservationsReclaimed(ctx context.Context, label
 }
 
 func (registry *Registry) RecordConfigurationActivation(ctx context.Context, labels Labels) {
-	if registry != nil {
-		registry.configActivations.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
+	if registry == nil {
+		return
 	}
+	// Configuration activation is scoped only by the bounded application and
+	// environment resources plus the closed mutation outcome. Revision IDs and
+	// administrator identities are intentionally excluded.
+	labels.Feature = ""
+	labels.Route = ""
+	labels.Upstream = ""
+	labels.ModelAlias = ""
+	labels.Platform = ""
+	labels.AttestationLevel = ""
+	labels.Plan = ""
+	labels.Outcome = safeConfigurationActivationOutcome(labels.Outcome)
+	registry.configActivations.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
 }
 
 func (registry *Registry) RecordWorkerJob(ctx context.Context, job, outcome string, duration time.Duration) {
@@ -473,6 +505,43 @@ func safeMetricLabel(_ string, value string) string {
 	return value
 }
 
+func safeAttestationPlatform(platform string) string {
+	switch platform {
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+		return platform
+	default:
+		return "invalid"
+	}
+}
+
+func safeAttestationLevel(level string) string {
+	switch level {
+	case "none", "identity_only", "web_risk_verified", "app_verified",
+		"device_verified", "strong_device_verified", "debug":
+		return level
+	default:
+		return "invalid"
+	}
+}
+
+func safeAttestationOutcome(outcome string) string {
+	switch outcome {
+	case AttestationOutcomeSucceeded, AttestationOutcomeRejected, AttestationOutcomeUnavailable:
+		return outcome
+	default:
+		return "invalid"
+	}
+}
+
+func safeConfigurationActivationOutcome(outcome string) string {
+	switch outcome {
+	case ConfigurationActivationOutcomeActivated, ConfigurationActivationOutcomeRolledBack:
+		return outcome
+	default:
+		return "invalid"
+	}
+}
+
 func sensitiveLabelValue(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.HasPrefix(lower, "bearer") || strings.Contains(lower, "authorization=") ||
@@ -483,7 +552,8 @@ func safeBoundedJob(job string) string {
 	switch job {
 	case "release_expired_reservations", "prune_dpop_replays", "prune_challenges",
 		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
-		"enforce_retention", "reconcile_pending_usage", "worker_heartbeat":
+		"enforce_retention", "reconcile_pending_usage", "release_expired_concurrency_leases",
+		"worker_heartbeat":
 		return job
 	default:
 		return "unknown"

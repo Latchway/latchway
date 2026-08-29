@@ -3760,6 +3760,132 @@ func TestStorePostgreSQLOutputTokenBucket(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLExpiryLanesPartitionConcurrencyAcrossReplicas(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+	second, err := NewStore(StoreConfig{Pool: fixture.pool, ReservationTTL: time.Hour})
+	if err != nil {
+		t.Fatalf("construct second quota replica: %v", err)
+	}
+
+	const concurrencyReservations = 6
+	concurrencyIDs := make([]string, 0, concurrencyReservations)
+	allIDs := make([]string, 0, concurrencyReservations+2)
+	for index := range concurrencyReservations {
+		input := fixture.concurrencyInput(t, "concurrency-expiry-lane", 20, 0, false, false)
+		reservation, reserveErr := fixture.store.Reserve(fixture.ctx, input)
+		if reserveErr != nil {
+			t.Fatalf("reserve concurrency fixture %d: %v", index, reserveErr)
+		}
+		if index%2 == 0 {
+			if _, owner, beginErr := fixture.store.BeginAttempt(fixture.ctx, reservation); beginErr != nil || !owner {
+				t.Fatalf("dispatch concurrency fixture %d owner=%t err=%v", index, owner, beginErr)
+			}
+		}
+		concurrencyIDs = append(concurrencyIDs, reservation.ID())
+		allIDs = append(allIDs, reservation.ID())
+	}
+	undispatchedInput := fixture.input(t, "calendar-undispatched-expiry-lane", 5)
+	undispatched, err := fixture.store.Reserve(fixture.ctx, undispatchedInput)
+	if err != nil {
+		t.Fatalf("reserve non-concurrency undispatched fixture: %v", err)
+	}
+	dispatchedInput := fixture.input(t, "calendar-dispatched-expiry-lane", 5)
+	dispatched, err := fixture.store.Reserve(fixture.ctx, dispatchedInput)
+	if err != nil {
+		t.Fatalf("reserve non-concurrency dispatched fixture: %v", err)
+	}
+	if _, owner, beginErr := fixture.store.BeginAttempt(fixture.ctx, dispatched); beginErr != nil || !owner {
+		t.Fatalf("dispatch non-concurrency fixture owner=%t err=%v", owner, beginErr)
+	}
+	allIDs = append(allIDs, undispatched.ID(), dispatched.ID())
+	backdateConcurrencyReservations(t, fixture, concurrencyIDs...)
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE quota_reservations
+		SET created_at = statement_timestamp() - interval '2 hours',
+		    expires_at = statement_timestamp() - interval '1 hour'
+		WHERE quota_reservation_id = ANY($1::text[])
+	`, []string{undispatched.ID(), dispatched.ID()}); err != nil {
+		t.Fatalf("backdate non-concurrency reservations: %v", err)
+	}
+
+	type laneResult struct {
+		lane      string
+		processed int64
+		err       error
+	}
+	start := make(chan struct{})
+	results := make(chan laneResult, 4)
+	run := func(lane string, operation func(context.Context, int) (int64, error)) {
+		<-start
+		processed, operationErr := operation(fixture.ctx, 20)
+		results <- laneResult{lane: lane, processed: processed, err: operationErr}
+	}
+	go run("undispatched", fixture.store.ReleaseExpiredUndispatchedBatch)
+	go run("reconcile", second.ReconcilePendingUsageBatch)
+	go run("concurrency", fixture.store.ReleaseExpiredConcurrencyLeasesBatch)
+	go run("concurrency", second.ReleaseExpiredConcurrencyLeasesBatch)
+	close(start)
+	totals := map[string]int64{}
+	for range 4 {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("%s expiry lane: %v", result.lane, result.err)
+		}
+		totals[result.lane] += result.processed
+	}
+	if totals["undispatched"] != 1 || totals["reconcile"] != 1 ||
+		totals["concurrency"] != concurrencyReservations {
+		t.Fatalf("expiry lane totals=%v, want undispatched=1 reconcile=1 concurrency=%d",
+			totals, concurrencyReservations)
+	}
+	for lane, operation := range map[string]func(context.Context, int) (int64, error){
+		"undispatched": fixture.store.ReleaseExpiredUndispatchedBatch,
+		"reconcile":    fixture.store.ReconcilePendingUsageBatch,
+		"concurrency":  fixture.store.ReleaseExpiredConcurrencyLeasesBatch,
+	} {
+		processed, replayErr := operation(fixture.ctx, 20)
+		if replayErr != nil || processed != 0 {
+			t.Fatalf("%s replay processed=%d err=%v, want 0 nil", lane, processed, replayErr)
+		}
+	}
+	var pendingReservations, activeLeases, outstandingConcurrencyEntries int
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT
+		  count(*) FILTER (WHERE reservation.status = 'pending'),
+		  count(*) FILTER (
+		    WHERE lease.concurrency_lease_id IS NOT NULL AND lease.released_at IS NULL
+		  ),
+		  count(*) FILTER (
+		    WHERE bucket.algorithm = 'concurrency'
+		      AND (entry.settled_units <> 0 OR entry.released_units <> entry.reserved_units)
+		  )
+		FROM quota_reservations AS reservation
+		JOIN quota_reservation_entries AS entry USING (quota_reservation_id)
+		JOIN quota_buckets AS bucket USING (quota_bucket_id)
+		LEFT JOIN concurrency_leases AS lease
+		  ON lease.logical_request_id = reservation.logical_request_id
+		 AND lease.quota_bucket_id = bucket.quota_bucket_id
+		WHERE reservation.quota_reservation_id = ANY($1::text[])
+	`, allIDs).Scan(&pendingReservations, &activeLeases, &outstandingConcurrencyEntries); err != nil {
+		t.Fatalf("inspect partitioned expiry state: %v", err)
+	}
+	if pendingReservations != 0 || activeLeases != 0 || outstandingConcurrencyEntries != 0 {
+		t.Fatalf("partitioned expiry state pending=%d active_leases=%d outstanding_concurrency=%d",
+			pendingReservations, activeLeases, outstandingConcurrencyEntries)
+	}
+	var concurrencyBucketReserved int64
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT reserved_units FROM quota_buckets
+		WHERE environment_id = $1 AND limit_plan_key = 'concurrency-expiry-lane'
+		  AND metric = 'concurrent_requests'
+	`, quotaTestEnvironmentID).Scan(&concurrencyBucketReserved); err != nil {
+		t.Fatalf("read recovered concurrency bucket: %v", err)
+	}
+	if concurrencyBucketReserved != 0 {
+		t.Fatalf("recovered concurrency reserved units=%d, want 0", concurrencyBucketReserved)
+	}
+}
+
 func newQuotaPostgreSQLFixture(t *testing.T) quotaPostgreSQLFixture {
 	t.Helper()
 	databaseURL := os.Getenv("LATCHWAY_TEST_DATABASE_URL")

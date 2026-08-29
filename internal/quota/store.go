@@ -1936,18 +1936,26 @@ func (store *Store) ExpirePendingBatch(ctx context.Context, limit int) (int64, e
 }
 
 // ReleaseExpiredUndispatchedBatch releases reservations that expired before
-// any upstream dispatch. Separating this queue lane from reconciliation keeps
-// multi-replica workers from repeatedly selecting work another lane cannot
-// process.
+// any upstream dispatch and do not own concurrency capacity. Separating this
+// queue lane from reconciliation and concurrency recovery keeps multi-replica
+// workers from repeatedly selecting work another lane owns.
 func (store *Store) ReleaseExpiredUndispatchedBatch(ctx context.Context, limit int) (int64, error) {
 	return store.expirePendingBatch(ctx, limit, pendingExpiryUndispatched)
 }
 
 // ReconcilePendingUsageBatch conservatively settles expired dispatched
-// reservations according to the configured unknown-usage policy, preventing
-// client disconnects from bypassing hard budgets.
+// non-concurrency reservations according to the configured unknown-usage
+// policy, preventing client disconnects from bypassing hard budgets.
 func (store *Store) ReconcilePendingUsageBatch(ctx context.Context, limit int) (int64, error) {
 	return store.expirePendingBatch(ctx, limit, pendingExpiryDispatched)
+}
+
+// ReleaseExpiredConcurrencyLeasesBatch recovers expired reservations that own
+// concurrency capacity. The reservation, bucket entries, attempt accounting,
+// and every lease are finalized in the same transaction; the job never frees
+// a lease independently of the durable reservation lifecycle.
+func (store *Store) ReleaseExpiredConcurrencyLeasesBatch(ctx context.Context, limit int) (int64, error) {
+	return store.expirePendingBatch(ctx, limit, pendingExpiryConcurrency)
 }
 
 type pendingExpiryMode string
@@ -1956,13 +1964,15 @@ const (
 	pendingExpiryAny          pendingExpiryMode = "any"
 	pendingExpiryUndispatched pendingExpiryMode = "undispatched"
 	pendingExpiryDispatched   pendingExpiryMode = "dispatched"
+	pendingExpiryConcurrency  pendingExpiryMode = "concurrency"
 )
 
 func (store *Store) expirePendingBatch(ctx context.Context, limit int, mode pendingExpiryMode) (int64, error) {
 	if store == nil || store.pool == nil || store.newID == nil || ctx == nil || limit < 1 || limit > maximumExpiryBatch {
 		return 0, ErrInvalidInput
 	}
-	if mode != pendingExpiryAny && mode != pendingExpiryUndispatched && mode != pendingExpiryDispatched {
+	if mode != pendingExpiryAny && mode != pendingExpiryUndispatched &&
+		mode != pendingExpiryDispatched && mode != pendingExpiryConcurrency {
 		return 0, ErrInvalidInput
 	}
 	var processed int64
@@ -1992,18 +2002,56 @@ func (store *Store) expireOne(ctx context.Context, mode pendingExpiryMode) (bool
 	var selected Reservation
 	var selectedIdempotencyKey string
 	err = tx.QueryRow(ctx, `
-		SELECT organization_id, application_id, environment_id,
-		       logical_request_id, quota_reservation_id, idempotency_key, expires_at
-		FROM quota_reservations
-		WHERE status = 'pending' AND expires_at <= $1
+		SELECT reservation.organization_id, reservation.application_id,
+		       reservation.environment_id, reservation.logical_request_id,
+		       reservation.quota_reservation_id, reservation.idempotency_key,
+		       reservation.expires_at
+		FROM quota_reservations AS reservation
+		WHERE reservation.status = 'pending' AND reservation.expires_at <= $1
 		  AND (
 		    $2 = 'any'
-		    OR ($2 = 'dispatched') = EXISTS (
-		      SELECT 1 FROM upstream_attempts
-		      WHERE upstream_attempts.logical_request_id = quota_reservations.logical_request_id
+		    OR (
+		      $2 = 'concurrency' AND EXISTS (
+		          SELECT 1
+		          FROM quota_reservation_entries AS entry
+		          JOIN quota_buckets AS bucket
+		            ON bucket.organization_id = entry.organization_id
+		           AND bucket.application_id = entry.application_id
+		           AND bucket.environment_id = entry.environment_id
+		           AND bucket.quota_bucket_id = entry.quota_bucket_id
+		          WHERE entry.organization_id = reservation.organization_id
+		            AND entry.application_id = reservation.application_id
+		            AND entry.environment_id = reservation.environment_id
+		            AND entry.quota_reservation_id = reservation.quota_reservation_id
+		            AND bucket.algorithm = 'concurrency'
+		      )
+		    )
+		    OR (
+		      $2 IN ('undispatched', 'dispatched')
+		      AND NOT EXISTS (
+		        SELECT 1
+		        FROM quota_reservation_entries AS entry
+		        JOIN quota_buckets AS bucket
+		          ON bucket.organization_id = entry.organization_id
+		         AND bucket.application_id = entry.application_id
+		         AND bucket.environment_id = entry.environment_id
+		         AND bucket.quota_bucket_id = entry.quota_bucket_id
+		        WHERE entry.organization_id = reservation.organization_id
+		          AND entry.application_id = reservation.application_id
+		          AND entry.environment_id = reservation.environment_id
+		          AND entry.quota_reservation_id = reservation.quota_reservation_id
+		          AND bucket.algorithm = 'concurrency'
+		      )
+		      AND ($2 = 'dispatched') = EXISTS (
+		        SELECT 1 FROM upstream_attempts AS attempt
+		        WHERE attempt.organization_id = reservation.organization_id
+		          AND attempt.application_id = reservation.application_id
+		          AND attempt.environment_id = reservation.environment_id
+		          AND attempt.logical_request_id = reservation.logical_request_id
+		      )
 		    )
 		  )
-		ORDER BY expires_at, quota_reservation_id
+		ORDER BY reservation.expires_at, reservation.quota_reservation_id
 		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 	`, now, string(mode)).Scan(

@@ -34,7 +34,13 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	defer cancel()
 	pool := isolatedConfigurationPool(t, ctx, databaseURL)
 	principal, scope := seedConfigurationTenant(t, ctx, pool)
-	store, err := NewStore(pool)
+	var observationMu sync.Mutex
+	observations := make([]ActivationObservation, 0, 3)
+	store, err := NewStore(pool, WithActivationObserver(func(_ context.Context, observation ActivationObservation) {
+		observationMu.Lock()
+		defer observationMu.Unlock()
+		observations = append(observations, observation)
+	}))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -50,6 +56,9 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	initialReport, err := store.ValidateRevision(ctx, principal, initial.ID)
 	if err != nil || !initialReport.Valid {
 		t.Fatalf("ValidateRevision(initial) report=%+v error=%v", initialReport, err)
+	}
+	if _, err := store.ActivateRevision(ctx, principal, initial.ID, `"stale-strong-etag"`); !errors.Is(err, ErrETagMismatch) {
+		t.Fatalf("ActivateRevision(stale ETag) error=%v, want ErrETagMismatch", err)
 	}
 	initial, err = store.ActivateRevision(ctx, principal, initial.ID, initial.ETag)
 	if err != nil || initial.State != StateActive {
@@ -203,6 +212,9 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	if err != nil || activeBeforeRollback.ID != current.ID {
 		t.Fatalf("active revision before rollback=%+v error=%v", activeBeforeRollback, err)
 	}
+	if _, err := store.Rollback(ctx, principal, scope.EnvironmentID, initial.ID, `"stale-strong-etag"`); !errors.Is(err, ErrETagMismatch) {
+		t.Fatalf("Rollback(stale ETag) error=%v, want ErrETagMismatch", err)
+	}
 
 	rolledBack, err := store.Rollback(ctx, principal, scope.EnvironmentID, initial.ID, activeBeforeRollback.ETag)
 	if err != nil || rolledBack.ID != initial.ID || rolledBack.State != StateActive {
@@ -233,6 +245,21 @@ func TestStorePostgreSQLRevisionRacesValidationActivationAndRollback(t *testing.
 	}
 	if activationAudits != 2 || rollbackAudits != 1 {
 		t.Fatalf("activation audits=%d rollback audits=%d", activationAudits, rollbackAudits)
+	}
+	observationMu.Lock()
+	defer observationMu.Unlock()
+	if len(observations) != 3 {
+		t.Fatalf("successful activation observations=%v, want exactly three committed mutations", observations)
+	}
+	operations := map[ActivationOperation]int{}
+	for _, observation := range observations {
+		if observation.ApplicationID != scope.ApplicationID || observation.EnvironmentID != scope.EnvironmentID {
+			t.Fatalf("activation observation escaped bounded tenant scope: %+v", observation)
+		}
+		operations[observation.Operation]++
+	}
+	if operations[ActivationOperationActivate] != 2 || operations[ActivationOperationRollback] != 1 {
+		t.Fatalf("activation observation operations=%v, want activated=2 rolled_back=1", operations)
 	}
 }
 

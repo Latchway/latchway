@@ -26,6 +26,7 @@ type QuotaExpirer interface {
 
 type operationalQuota interface {
 	ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error)
+	ReleaseExpiredConcurrencyLeasesBatch(context.Context, int) (int64, error)
 	ReconcilePendingUsageBatch(context.Context, int) (int64, error)
 }
 
@@ -261,11 +262,7 @@ func (runtime *Runtime) runDurablePass(ctx context.Context) {
 		}
 		return
 	}
-	jobTypes := []string{
-		"release_expired_reservations", "prune_dpop_replays", "prune_challenges",
-		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
-		"enforce_retention", "reconcile_pending_usage",
-	}
+	jobTypes := scheduledDurableJobTypes()
 	scheduleCtx, scheduleCancel := context.WithTimeout(ctx, runtime.runTimeout)
 	err = runtime.queue.Schedule(scheduleCtx, now, jobTypes)
 	scheduleCancel()
@@ -294,6 +291,14 @@ func (runtime *Runtime) runDurablePass(ctx context.Context) {
 	finalCancel()
 }
 
+func scheduledDurableJobTypes() []string {
+	return []string{
+		"release_expired_reservations", "prune_dpop_replays", "prune_challenges",
+		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
+		"enforce_retention", "reconcile_pending_usage", "release_expired_concurrency_leases",
+	}
+}
+
 func (runtime *Runtime) executeDurableJob(ctx context.Context, job Job) {
 	started := runtime.now()
 	runCtx, cancel := context.WithTimeout(ctx, runtime.runTimeout)
@@ -313,7 +318,8 @@ func (runtime *Runtime) executeDurableJob(ctx context.Context, job Job) {
 			)
 			if runtime.telemetry != nil {
 				runtime.telemetry.RecordWorkerJob(ctx, job.Type, "succeeded", duration)
-				if job.Type == "release_expired_reservations" || job.Type == "reconcile_pending_usage" {
+				if job.Type == "release_expired_reservations" || job.Type == "reconcile_pending_usage" ||
+					job.Type == "release_expired_concurrency_leases" {
 					runtime.telemetry.RecordReservationsReclaimed(ctx, telemetry.Labels{Outcome: "reclaimed"}, processed)
 				}
 			}
@@ -337,6 +343,10 @@ func (runtime *Runtime) executeJob(ctx context.Context, job Job) (int64, error) 
 	case "release_expired_reservations":
 		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
 			return quotaJobs.ReleaseExpiredUndispatchedBatch(ctx, runtime.quotaBatchSize)
+		})
+	case "release_expired_concurrency_leases":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
+			return quotaJobs.ReleaseExpiredConcurrencyLeasesBatch(ctx, runtime.quotaBatchSize)
 		})
 	case "reconcile_pending_usage":
 		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {

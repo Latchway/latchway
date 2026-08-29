@@ -321,6 +321,27 @@ func TestCoordinatorMapsSafeDependencyErrors(t *testing.T) {
 	}
 }
 
+func TestAttestationTelemetryOutcomeIsClosed(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "invalid evidence", err: attestation.ErrInvalid, want: "rejected"},
+		{name: "unsupported evidence", err: attestation.ErrUnsupported, want: "rejected"},
+		{name: "configuration", err: attestation.ErrConfiguration, want: "unavailable"},
+		{name: "provider outage", err: fmt.Errorf("redacted wrapper: %w", attestation.ErrPlayIntegrityService), want: "unavailable"},
+		{name: "store outage", err: fmt.Errorf("redacted wrapper: %w", attestation.ErrAppAttestKeyStore), want: "unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := attestationTelemetryOutcome(test.err); got != test.want {
+				t.Fatalf("outcome=%q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func signedIdentityCredential(t *testing.T, method jwt.SigningMethod, key any, claims jwt.MapClaims) identity.RawIdentityCredential {
 	t.Helper()
 	token := jwt.NewWithClaims(method, claims)

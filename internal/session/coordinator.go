@@ -17,6 +17,7 @@ import (
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/identity"
 	"github.com/latchway/latchway/internal/secrets"
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 const maximumCachedIdentityVerifiers = 256
@@ -40,6 +41,7 @@ type ClientCoordinatorConfig struct {
 	IdentityKeyCache     identity.RemoteKeyDocumentCache
 	AttestationTransport http.RoundTripper
 	AppAttestKeys        attestation.AppAttestKeyStore
+	Telemetry            *telemetry.Registry
 	Now                  func() time.Time
 }
 
@@ -55,6 +57,7 @@ type clientCoordinator struct {
 	identityKeyCache     identity.RemoteKeyDocumentCache
 	attestationTransport http.RoundTripper
 	appAttestKeys        attestation.AppAttestKeyStore
+	telemetry            *telemetry.Registry
 	now                  func() time.Time
 
 	identityMu       sync.Mutex
@@ -84,7 +87,7 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 		challenges: challenges, secrets: config.Secrets,
 		identityHTTP: config.IdentityHTTPClient, identityKeyCache: config.IdentityKeyCache,
 		attestationTransport: config.AttestationTransport,
-		appAttestKeys:        config.AppAttestKeys, now: config.Now,
+		appAttestKeys:        config.AppAttestKeys, telemetry: config.Telemetry, now: config.Now,
 		identityCache:    make(map[string]identity.IdentityVerifier),
 		attestationCache: make(map[string]*preparedAttestationVerifier),
 	}, nil
@@ -196,6 +199,7 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure(mapExchangeChallengeError(err))
 	}
 	if input.Attestation.Provider != challenge.Attestation.Provider {
+		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	environment, err := coordinator.resolveEnvironment(ctx, challenge.Binding.ApplicationID, challenge.Binding.Environment)
@@ -223,20 +227,25 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure("conflict")
 	}
 	if !platformOriginAllowed(selection, challenge.Binding.Platform, input.Metadata.Origin) {
+		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	payload, err := input.Attestation.Payload.Object()
 	if err != nil {
+		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	evidence, err := attestation.NewEvidence(input.Attestation.Provider, payload)
 	if err != nil {
+		coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
 		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
 	}
 	verified, err := coordinator.verifyAttestationEvidence(ctx, environment, snapshot, policy, selection, evidence, challenge.Binding)
 	if err != nil {
+		coordinator.recordAttestationResult(ctx, challenge, attestationTelemetryOutcome(err), "none")
 		return clientapi.GrantResult{}, clientFailure(mapAttestationError(err))
 	}
+	coordinator.recordAttestationResult(ctx, challenge, telemetry.AttestationOutcomeSucceeded, verified.TrustLevel)
 	issued, err := coordinator.sessions.Exchange(ctx, ExchangeInput{
 		ChallengeID: input.ChallengeID, Attestation: verified, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
@@ -246,6 +255,36 @@ func (coordinator *clientCoordinator) ExchangeSession(ctx context.Context, input
 		return clientapi.GrantResult{}, clientFailure(mapSessionError(err))
 	}
 	return clientGrant(issued)
+}
+
+func (coordinator *clientCoordinator) recordAttestationResult(
+	ctx context.Context,
+	challenge Challenge,
+	outcome string,
+	level string,
+) {
+	if coordinator == nil || coordinator.telemetry == nil {
+		return
+	}
+	coordinator.telemetry.RecordAttestationResult(ctx, telemetry.Labels{
+		Application: challenge.Binding.ApplicationID,
+		Environment: challenge.EnvironmentID,
+		Platform:    challenge.Binding.Platform, AttestationLevel: level,
+		Outcome: outcome,
+	})
+}
+
+func attestationTelemetryOutcome(err error) string {
+	switch {
+	case errors.Is(err, attestation.ErrConfiguration),
+		errors.Is(err, attestation.ErrPlayIntegrityService),
+		errors.Is(err, attestation.ErrAppAttestKeyStore),
+		errors.Is(err, attestation.ErrFirebaseAppCheckService),
+		errors.Is(err, attestation.ErrTurnstileService):
+		return telemetry.AttestationOutcomeUnavailable
+	default:
+		return telemetry.AttestationOutcomeRejected
+	}
 }
 
 func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input clientapi.RefreshInput) (clientapi.GrantResult, error) {

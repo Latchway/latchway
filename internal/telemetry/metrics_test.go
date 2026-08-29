@@ -33,6 +33,7 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	}, 12, 8, 900, 50*time.Millisecond)
 	registry.RecordQuotaDenial(ctx, Labels{Feature: "assistant", Outcome: "denied"}, false)
 	registry.RecordWorkerJob(ctx, "enforce_retention", "succeeded", 20*time.Millisecond)
+	registry.RecordWorkerJob(ctx, "release_expired_concurrency_leases", "succeeded", 10*time.Millisecond)
 
 	recorder := httptest.NewRecorder()
 	registry.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
@@ -61,6 +62,9 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("route-attempt metric missing closed observation %q:\n%s", expected, text)
 		}
+	}
+	if !strings.Contains(text, `job="release_expired_concurrency_leases"`) {
+		t.Fatalf("worker metric omitted the closed concurrency job label:\n%s", text)
 	}
 }
 
@@ -92,6 +96,57 @@ func TestRegistryRouteAttemptLabelsRejectValuesOutsideClosedVocabulary(t *testin
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("attempt metric disclosed unbounded value %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestRegistryAttestationAndActivationMetricsUseClosedDimensions(t *testing.T) {
+	t.Parallel()
+
+	registry, err := NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	registry.RecordAttestationResult(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Feature: "must_not_appear", Route: "must_not_appear",
+		Platform: "react_native_ios", AttestationLevel: "app_verified",
+		Outcome: AttestationOutcomeSucceeded,
+	})
+	registry.RecordAttestationResult(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Upstream: "provider-private-value", Platform: "attacker-platform",
+		AttestationLevel: "attacker-verdict", Outcome: "provider-private-outcome",
+	})
+	registry.RecordConfigurationActivation(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Plan: "must_not_appear", Outcome: ConfigurationActivationOutcomeRolledBack,
+	})
+	registry.RecordConfigurationActivation(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Outcome: "administrator-private-action",
+	})
+
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
+	text := recorder.Body.String()
+	for _, expected := range []string{
+		`latchway_attestation_results_total{application="app_mobile",attestation_level="app_verified",environment="env_production",outcome="succeeded",platform="react_native_ios"} 1`,
+		`latchway_attestation_results_total{application="app_mobile",attestation_level="invalid",environment="env_production",outcome="invalid",platform="invalid"} 1`,
+		`latchway_config_revision_activations_total{application="app_mobile",environment="env_production",outcome="rolled_back"} 1`,
+		`latchway_config_revision_activations_total{application="app_mobile",environment="env_production",outcome="invalid"} 1`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("metrics output missing closed series %q:\n%s", expected, text)
+		}
+	}
+	for _, forbidden := range []string{
+		"must_not_appear", "provider-private-value", "attacker-platform",
+		"attacker-verdict", "provider-private-outcome", "administrator-private-action",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("closed metric disclosed %q:\n%s", forbidden, text)
 		}
 	}
 }

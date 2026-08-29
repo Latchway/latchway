@@ -135,7 +135,14 @@ func newAPIRuntime(
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct secret manager: %w", err)
 	}
-	configurationStore, err := configuration.NewStore(pool)
+	configurationStore, err := configuration.NewStore(pool, configuration.WithActivationObserver(
+		func(observationCtx context.Context, observation configuration.ActivationObservation) {
+			observability.RecordConfigurationActivation(observationCtx, telemetry.Labels{
+				Application: observation.ApplicationID, Environment: observation.EnvironmentID,
+				Outcome: string(observation.Operation),
+			})
+		},
+	))
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct configuration store: %w", err)
 	}
@@ -205,6 +212,7 @@ func newAPIRuntime(
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
 		IdentityKeyCache: identityKeyCache, AppAttestKeys: appAttestKeys,
+		Telemetry: observability,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session coordinator: %w", err)

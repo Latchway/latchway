@@ -29,6 +29,7 @@ import (
 	"github.com/latchway/latchway/internal/identity"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/secrets"
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 const (
@@ -42,6 +43,11 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	pool, ctx := isolatedSessionPool(t)
 	now := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
 	fixture := createChallengeFixture(t, ctx, pool)
+	metrics, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = metrics.Shutdown(context.Background()) })
 
 	masterKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x76}, 32))
 	envelope, err := secrets.NewEnvironmentMasterKey(masterKey)
@@ -134,7 +140,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	coordinator, err := NewClientCoordinator(ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier,
-		Secrets: secretStore, Now: func() time.Time { return now },
+		Secrets: secretStore, Telemetry: metrics, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("construct client coordinator: %v", err)
@@ -255,6 +261,21 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	debugSignature := ed25519.Sign(debugPrivateKey, attestation.DebugSigningMessage(bindingHash, attestationExpiresAt))
 
 	exchangeTarget := clientHTTPURL(t, "/client/v1/sessions")
+	invalidExchangeProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, exchangeTarget, now, "client-http-exchange-invalid-attestation")
+	invalidExchange := clientHTTPPostJSONResponse(t, handler, "/client/v1/sessions", invalidExchangeProof, map[string]any{
+		"challenge_id": challenge.ChallengeID,
+		"attestation": map[string]any{
+			"provider": "debug",
+			"evidence": map[string]any{
+				"key_id": debugKeyID, "binding_hash": challenge.Attestation.ClientDataHash,
+				"expires_at": attestationExpiresAt,
+				"signature":  base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.SignatureSize)),
+			},
+		},
+		"installation": map[string]any{"app_version": "1.0.0"},
+	})
+	assertClientHTTPProblem(t, invalidExchange, http.StatusUnauthorized, "attestation_invalid")
+
 	exchangeProof := signedSessionDPoP(t, dpopPrivateKey, http.MethodPost, exchangeTarget, now, "client-http-exchange")
 	var exchanged clientHTTPGrantDocument
 	clientHTTPPostJSON(t, handler, "/client/v1/sessions", exchangeProof, map[string]any{
@@ -363,6 +384,17 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if activeRefresh != 0 || rotatedRefresh != 1 || revokedRefresh != 1 || grantCount != 2 || revokedGrants != 2 {
 		t.Fatalf("persisted revoked session state = active:%d rotated:%d revoked:%d grants:%d revoked_grants:%d",
 			activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants)
+	}
+	metricResponse := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(metricResponse, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	metricText := metricResponse.Body.String()
+	for _, series := range []string{
+		`latchway_attestation_results_total{application="` + fixture.applicationID + `",attestation_level="none",environment="` + fixture.environmentID + `",outcome="rejected",platform="ios"} 1`,
+		`latchway_attestation_results_total{application="` + fixture.applicationID + `",attestation_level="debug",environment="` + fixture.environmentID + `",outcome="succeeded",platform="ios"} 1`,
+	} {
+		if !strings.Contains(metricText, series) {
+			t.Fatalf("attestation metrics missing %q:\n%s", series, metricText)
+		}
 	}
 }
 

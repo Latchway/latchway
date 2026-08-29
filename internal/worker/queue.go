@@ -24,16 +24,22 @@ var (
 )
 
 var supportedJobTypes = map[string]time.Duration{
-	"release_expired_reservations": time.Minute,
-	"prune_dpop_replays":           time.Minute,
-	"prune_challenges":             time.Minute,
-	"rotate_signing_keys":          time.Minute,
-	"refresh_jwks":                 5 * time.Minute,
-	"aggregate_hourly_usage":       time.Hour,
-	"aggregate_daily_usage":        24 * time.Hour,
-	"enforce_retention":            time.Hour,
-	"reconcile_pending_usage":      time.Minute,
+	"release_expired_reservations":       time.Minute,
+	"release_expired_concurrency_leases": time.Minute,
+	"prune_dpop_replays":                 time.Minute,
+	"prune_challenges":                   time.Minute,
+	"rotate_signing_keys":                time.Minute,
+	"refresh_jwks":                       5 * time.Minute,
+	"aggregate_hourly_usage":             time.Hour,
+	"aggregate_daily_usage":              24 * time.Hour,
+	"enforce_retention":                  time.Hour,
+	"reconcile_pending_usage":            time.Minute,
 }
+
+// run_scheduled_self_test is deliberately not executable here. Existing rows
+// of that type are synchronous Admin API self-test history; the durable schema
+// has no persisted schedule, tenant/target selection, authorization actor, or
+// bounded cost policy from which a worker could safely construct a real test.
 
 // Job is the public, payload-free claim passed to bounded built-in handlers.
 // The queue deliberately does not expose arbitrary database payloads to logs.
