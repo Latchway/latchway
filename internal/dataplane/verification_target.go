@@ -80,7 +80,7 @@ func (factory *isolatedVerificationTargetFactory) Acquire(config configuration.U
 		},
 	}, upstream.Timeouts{
 		Connect: config.Timeouts.Connect, TLSHandshake: config.Timeouts.Connect,
-		ResponseHeader: config.Timeouts.FirstByte, IdleConnection: config.Timeouts.Idle,
+		ResponseHeader: config.Timeouts.ResponseHeader, IdleConnection: config.Timeouts.Idle,
 	}, nil)
 	if err != nil {
 		return nil, errTargetConfiguration

@@ -268,14 +268,29 @@ type UpstreamAuthentication struct {
 	Type       string
 	SecretRef  string
 	HeaderName string
+	Username   string
+	Headers    []UpstreamAuthenticationHeader
+}
+
+// UpstreamAuthenticationHeader binds one configured header name to one
+// independently scoped server-side secret reference.
+type UpstreamAuthenticationHeader struct {
+	HeaderName string
+	SecretRef  string
+}
+
+func (authentication UpstreamAuthentication) clone() UpstreamAuthentication {
+	authentication.Headers = append([]UpstreamAuthenticationHeader(nil), authentication.Headers...)
+	return authentication
 }
 
 // UpstreamTimeouts are the fully defaulted transport limits for one target.
 type UpstreamTimeouts struct {
-	Connect   time.Duration
-	FirstByte time.Duration
-	Idle      time.Duration
-	Total     time.Duration
+	Connect        time.Duration
+	ResponseHeader time.Duration
+	FirstByte      time.Duration
+	Idle           time.Duration
+	Total          time.Duration
 }
 
 // UpstreamDestinationPolicy contains the validated, server-owned SSRF policy.
@@ -325,6 +340,7 @@ type Upstream struct {
 }
 
 func (upstream Upstream) clone() Upstream {
+	upstream.Authentication = upstream.Authentication.clone()
 	upstream.DestinationPolicy = upstream.DestinationPolicy.clone()
 	upstream.StaticHeaders = cloneStringMap(upstream.StaticHeaders)
 	return upstream
@@ -524,17 +540,20 @@ func (policy RetryPolicy) clone() RetryPolicy {
 
 // Route is one policy-guarded model choice within a feature.
 type Route struct {
-	ID                   string
-	When                 string
-	ModelID              string
-	Priority             int64
-	Weight               int64
-	StickyBy             string
-	FallbackOn           []string
-	RetryPolicy          *RetryPolicy
-	MaximumResponseBytes int64
-	StreamingAllowed     bool
-	RetryUnsafeMethods   bool
+	ID                        string
+	When                      string
+	ModelID                   string
+	Priority                  int64
+	Weight                    int64
+	StickyBy                  string
+	FallbackOn                []string
+	RetryPolicy               *RetryPolicy
+	MaximumRequestBodyBytes   int64
+	MaximumRequestHeaderBytes int64
+	MaximumResponseBytes      int64
+	Timeouts                  *UpstreamTimeouts
+	StreamingAllowed          bool
+	RetryUnsafeMethods        bool
 }
 
 func (route Route) clone() Route {
@@ -542,6 +561,10 @@ func (route Route) clone() Route {
 	if route.RetryPolicy != nil {
 		cloned := route.RetryPolicy.clone()
 		route.RetryPolicy = &cloned
+	}
+	if route.Timeouts != nil {
+		cloned := *route.Timeouts
+		route.Timeouts = &cloned
 	}
 	return route
 }

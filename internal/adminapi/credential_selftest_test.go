@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -250,6 +251,67 @@ func TestCredentialSelfTestKeyAndStoredResultValidation(t *testing.T) {
 	}
 }
 
+func TestCredentialSelfTestDispatchSupportsBasicAndMultipleHeaders(t *testing.T) {
+	scope := configuration.TenantScope{
+		OrganizationID: id.Must(id.Organization),
+		ApplicationID:  id.Must(id.Application),
+		EnvironmentID:  id.Must(id.Environment),
+	}
+	secretStore := &credentialSelfTestSecretFixture{
+		scope: scope,
+		values: map[string][]byte{
+			"secret/provider_password":     []byte("password"),
+			"secret/provider_key":          []byte("key"),
+			"secret/provider_organization": []byte("organization"),
+		},
+	}
+	targets := &credentialSelfTestTargetFixture{responses: []credentialSelfTestResponseFixture{
+		{path: "/probe", status: http.StatusOK, contentType: "application/json", body: `{}`},
+		{path: "/probe", status: http.StatusOK, contentType: "application/json", body: `{}`},
+	}}
+	runner, err := newProductionCredentialSelfTests(
+		credentialSelfTestSnapshotLoaderFixture{}, secretStore, targets,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, authentication := range []configuration.UpstreamAuthentication{
+		{Type: "basic", Username: "provider-user", SecretRef: "secret/provider_password"},
+		{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key", SecretRef: "secret/provider_key"},
+			{HeaderName: "X-Provider-Organization", SecretRef: "secret/provider_organization"},
+		}},
+	} {
+		request, requestErr := http.NewRequestWithContext(
+			context.Background(), http.MethodGet, "https://latchway.invalid/probe", nil,
+		)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		dispatchErr := runner.dispatch(
+			request.Context(), scope,
+			configuration.Upstream{Authentication: authentication},
+			request, "/probe", []string{"Content-Type"},
+			func(response *upstream.DispatchedResponse) error { return response.Close() },
+		)
+		if dispatchErr != nil {
+			t.Fatalf("dispatch %q: %v", authentication.Type, dispatchErr)
+		}
+	}
+	if secretStore.uses != 3 || !slices.Equal(secretStore.references, []string{
+		"secret/provider_password", "secret/provider_key", "secret/provider_organization",
+	}) {
+		t.Fatalf("secret uses/references = %d/%v", secretStore.uses, secretStore.references)
+	}
+	if !slices.Equal(targets.authentications, []string{"basic", "headers"}) ||
+		!slices.Equal(targets.usernames, []string{"provider-user", ""}) ||
+		len(targets.headerNames) != 2 ||
+		!slices.Equal(targets.headerNames[1], []string{"X-Provider-Key", "X-Provider-Organization"}) {
+		t.Fatalf("self-test authentication dispatch = %v/%v/%v",
+			targets.authentications, targets.usernames, targets.headerNames)
+	}
+}
+
 type credentialSelfTestSnapshotLoaderFixture struct {
 	snapshot credentialSelfTestSnapshot
 	err      error
@@ -296,11 +358,13 @@ func (snapshot credentialSelfTestSnapshotFixture) PricingEntry(catalogID, modelI
 func (snapshot credentialSelfTestSnapshotFixture) PolicyRevision() string { return snapshot.revision }
 
 type credentialSelfTestSecretFixture struct {
-	mu        sync.Mutex
-	scope     configuration.TenantScope
-	reference string
-	value     []byte
-	uses      int
+	mu         sync.Mutex
+	scope      configuration.TenantScope
+	reference  string
+	value      []byte
+	values     map[string][]byte
+	references []string
+	uses       int
 }
 
 func (store *credentialSelfTestSecretFixture) Use(
@@ -314,9 +378,17 @@ func (store *credentialSelfTestSecretFixture) Use(
 	}
 	store.mu.Lock()
 	store.uses++
+	store.references = append(store.references, reference)
 	expectedScope := store.scope
 	expectedReference := store.reference
-	value := append([]byte(nil), store.value...)
+	selected := store.value
+	if mapped, ok := store.values[reference]; ok {
+		selected = mapped
+	} else if store.values != nil {
+		store.mu.Unlock()
+		return secrets.ErrUnavailable
+	}
+	value := append([]byte(nil), selected...)
 	store.mu.Unlock()
 	defer clear(value)
 	if expectedReference != "" && (scope.OrganizationID != expectedScope.OrganizationID ||
@@ -335,9 +407,12 @@ type credentialSelfTestResponseFixture struct {
 }
 
 type credentialSelfTestTargetFixture struct {
-	mu           sync.Mutex
-	responses    []credentialSelfTestResponseFixture
-	acquisitions int
+	mu              sync.Mutex
+	responses       []credentialSelfTestResponseFixture
+	acquisitions    int
+	authentications []string
+	usernames       []string
+	headerNames     [][]string
 }
 
 func (factory *credentialSelfTestTargetFixture) Acquire(configuration.Upstream) (dataplane.TargetLease, error) {
@@ -349,7 +424,7 @@ func (factory *credentialSelfTestTargetFixture) Acquire(configuration.Upstream) 
 	response := factory.responses[0]
 	factory.responses = factory.responses[1:]
 	factory.acquisitions++
-	return &credentialSelfTestLeaseFixture{response: response}, nil
+	return &credentialSelfTestLeaseFixture{response: response, factory: factory}, nil
 }
 
 func (factory *credentialSelfTestTargetFixture) remaining() int {
@@ -362,6 +437,18 @@ type credentialSelfTestLeaseFixture struct {
 	response credentialSelfTestResponseFixture
 	request  *http.Request
 	released bool
+	factory  *credentialSelfTestTargetFixture
+}
+
+func (lease *credentialSelfTestLeaseFixture) recordAuthentication(kind, username string, names []string) {
+	if lease.factory == nil {
+		return
+	}
+	lease.factory.mu.Lock()
+	defer lease.factory.mu.Unlock()
+	lease.factory.authentications = append(lease.factory.authentications, kind)
+	lease.factory.usernames = append(lease.factory.usernames, username)
+	lease.factory.headerNames = append(lease.factory.headerNames, append([]string(nil), names...))
 }
 
 func (lease *credentialSelfTestLeaseFixture) Prepare(
@@ -389,6 +476,7 @@ func (lease *credentialSelfTestLeaseFixture) DispatchWithBeforeRoundTrip(
 	_ dataplane.ProviderRequest,
 	before func() error,
 ) (*upstream.DispatchedResponse, error) {
+	lease.recordAuthentication("none", "", nil)
 	if err := before(); err != nil {
 		return nil, err
 	}
@@ -408,18 +496,68 @@ func (lease *credentialSelfTestLeaseFixture) WithBearerDispatchWithBeforeRoundTr
 	if err := before(); err != nil {
 		return err
 	}
+	lease.recordAuthentication("bearer", "", nil)
 	return consume(lease.dispatched())
 }
 
 func (lease *credentialSelfTestLeaseFixture) WithHeaderDispatchWithBeforeRoundTrip(
-	context.Context,
-	dataplane.ProviderRequest,
-	string,
-	[]byte,
-	func() error,
-	func(*upstream.DispatchedResponse) error,
+	_ context.Context,
+	_ dataplane.ProviderRequest,
+	name string,
+	credential []byte,
+	before func() error,
+	consume func(*upstream.DispatchedResponse) error,
 ) error {
-	return errors.New("unexpected header dispatch")
+	if name == "" || len(credential) == 0 || before == nil || consume == nil {
+		return errors.New("invalid header dispatch")
+	}
+	if err := before(); err != nil {
+		return err
+	}
+	lease.recordAuthentication("header", "", []string{name})
+	return consume(lease.dispatched())
+}
+
+func (lease *credentialSelfTestLeaseFixture) WithBasicDispatchWithBeforeRoundTrip(
+	_ context.Context,
+	_ dataplane.ProviderRequest,
+	username string,
+	credential []byte,
+	before func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	if username == "" || len(credential) == 0 || before == nil || consume == nil {
+		return errors.New("invalid basic dispatch")
+	}
+	if err := before(); err != nil {
+		return err
+	}
+	lease.recordAuthentication("basic", username, nil)
+	return consume(lease.dispatched())
+}
+
+func (lease *credentialSelfTestLeaseFixture) WithHeadersDispatchWithBeforeRoundTrip(
+	_ context.Context,
+	_ dataplane.ProviderRequest,
+	credentials []upstream.HeaderCredential,
+	before func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	if len(credentials) == 0 || before == nil || consume == nil {
+		return errors.New("invalid multi-header dispatch")
+	}
+	names := make([]string, len(credentials))
+	for index, credential := range credentials {
+		if credential.Name == "" || len(credential.Value) == 0 {
+			return errors.New("invalid multi-header dispatch")
+		}
+		names[index] = credential.Name
+	}
+	if err := before(); err != nil {
+		return err
+	}
+	lease.recordAuthentication("headers", "", names)
+	return consume(lease.dispatched())
 }
 
 func (lease *credentialSelfTestLeaseFixture) Release() { lease.released = true }

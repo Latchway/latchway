@@ -26,7 +26,7 @@ func buildProtectedTarget(config configuration.Upstream) (cachedDispatchTarget, 
 		},
 		upstream.Timeouts{
 			Connect: config.Timeouts.Connect, TLSHandshake: config.Timeouts.Connect,
-			ResponseHeader: config.Timeouts.FirstByte, IdleConnection: config.Timeouts.Idle,
+			ResponseHeader: config.Timeouts.ResponseHeader, IdleConnection: config.Timeouts.Idle,
 		},
 		nil,
 	)
@@ -37,26 +37,48 @@ func buildProtectedTarget(config configuration.Upstream) (cachedDispatchTarget, 
 }
 
 func validTargetTimeouts(value configuration.UpstreamTimeouts) bool {
-	return value.Connect > 0 && value.FirstByte > 0 && value.Idle > 0 && value.Total > 0 &&
+	return value.Connect > 0 && value.ResponseHeader > 0 && value.FirstByte > 0 && value.Idle > 0 && value.Total > 0 &&
 		value.Total <= 10*time.Minute && value.Connect <= value.Total &&
-		value.FirstByte <= value.Total && value.Idle <= value.Total
+		value.ResponseHeader <= value.Total && value.FirstByte <= value.Total && value.Idle <= value.Total
 }
 
 func validUpstreamAuthentication(value configuration.UpstreamAuthentication) bool {
 	switch value.Type {
 	case "none":
-		return value.SecretRef == "" && value.HeaderName == ""
+		return value.SecretRef == "" && value.HeaderName == "" && value.Username == "" && len(value.Headers) == 0
 	case "bearer":
-		return secretReferencePattern.MatchString(value.SecretRef) && value.HeaderName == ""
+		return secretReferencePattern.MatchString(value.SecretRef) && value.HeaderName == "" &&
+			value.Username == "" && len(value.Headers) == 0
 	case "header":
-		return secretReferencePattern.MatchString(value.SecretRef) && validCredentialHeaderName(value.HeaderName)
+		return secretReferencePattern.MatchString(value.SecretRef) && validCredentialHeaderName(value.HeaderName) &&
+			value.Username == "" && len(value.Headers) == 0
+	case "basic":
+		return secretReferencePattern.MatchString(value.SecretRef) && value.HeaderName == "" &&
+			validBasicAuthenticationUsername(value.Username) && len(value.Headers) == 0
+	case "headers":
+		if value.SecretRef != "" || value.HeaderName != "" || value.Username != "" ||
+			len(value.Headers) < 1 || len(value.Headers) > 8 {
+			return false
+		}
+		seen := make(map[string]struct{}, len(value.Headers))
+		for _, header := range value.Headers {
+			canonical := http.CanonicalHeaderKey(header.HeaderName)
+			if !secretReferencePattern.MatchString(header.SecretRef) || !validCredentialHeaderName(header.HeaderName) {
+				return false
+			}
+			if _, duplicate := seen[canonical]; duplicate {
+				return false
+			}
+			seen[canonical] = struct{}{}
+		}
+		return true
 	default:
 		return false
 	}
 }
 
 func validCredentialHeaderName(name string) bool {
-	if name == "" || strings.TrimSpace(name) != name {
+	if name == "" || len(name) > 256 || strings.TrimSpace(name) != name {
 		return false
 	}
 	for index := 0; index < len(name); index++ {
@@ -78,6 +100,19 @@ func validCredentialHeaderName(name string) bool {
 	default:
 		return true
 	}
+}
+
+func validBasicAuthenticationUsername(username string) bool {
+	if len(username) == 0 || len(username) > 256 {
+		return false
+	}
+	for index := 0; index < len(username); index++ {
+		character := username[index]
+		if character < 0x21 || character > 0x7e || character == ':' {
+			return false
+		}
+	}
+	return true
 }
 
 type protectedDispatchTarget struct {
@@ -139,6 +174,37 @@ func (target *protectedDispatchTarget) WithHeaderDispatchWithBeforeRoundTrip(
 	}
 	return target.target.WithHeaderDispatchWithBeforeRoundTrip(
 		ctx, request.native, name, credential, beforeRoundTrip, consume,
+	)
+}
+
+func (target *protectedDispatchTarget) WithBasicDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	request ProviderRequest,
+	username string,
+	credential []byte,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	if target == nil || target.target == nil {
+		return errTargetConfiguration
+	}
+	return target.target.WithBasicDispatchWithBeforeRoundTrip(
+		ctx, request.native, username, credential, beforeRoundTrip, consume,
+	)
+}
+
+func (target *protectedDispatchTarget) WithHeadersDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	request ProviderRequest,
+	credentials []upstream.HeaderCredential,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	if target == nil || target.target == nil {
+		return errTargetConfiguration
+	}
+	return target.target.WithHeadersDispatchWithBeforeRoundTrip(
+		ctx, request.native, credentials, beforeRoundTrip, consume,
 	)
 }
 

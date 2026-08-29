@@ -19,6 +19,7 @@ import (
 const (
 	fallbackConnectError         = "connect_error"
 	fallbackTimeoutBeforeHeaders = "timeout_before_headers"
+	fallbackFirstByteTimeout     = "first_byte_timeout"
 	maximumRouteAttempts         = int64(8)
 	maximumLogicalAttempts       = int64(32)
 	maximumRetryBackoff          = 60 * time.Second
@@ -49,6 +50,9 @@ func fallbackCondition(requestContext context.Context, result executionResult) (
 		errors.Is(result.err, upstream.ErrUpstreamNonSuccess) {
 		return condition, true
 	}
+	if errors.Is(result.err, errUpstreamRelay) && errors.Is(result.err, upstream.ErrResponseFirstByteTimeout) {
+		return fallbackFirstByteTimeout, true
+	}
 	if result.relay.StatusCode != 0 || !errors.Is(result.err, errUpstreamDispatch) {
 		return "", false
 	}
@@ -69,7 +73,7 @@ func isPreHeaderTimeout(err error) bool {
 }
 
 func isUpstreamTimeout(err error) bool {
-	return errors.Is(err, upstream.ErrResponseIdleTimeout) ||
+	return errors.Is(err, upstream.ErrResponseIdleTimeout) || errors.Is(err, upstream.ErrResponseFirstByteTimeout) ||
 		(errors.Is(err, errUpstreamDispatch) &&
 			(errors.Is(err, context.DeadlineExceeded) || errorIsTimeout(err))) ||
 		(errors.Is(err, errUpstreamRelay) && errors.Is(err, context.DeadlineExceeded))
@@ -179,12 +183,12 @@ func validRetryConditions(conditions []string, requireOne bool) bool {
 	if requireOne && len(conditions) == 0 {
 		return false
 	}
-	if len(conditions) > len(retryableFallbackStatuses)+2 {
+	if len(conditions) > len(retryableFallbackStatuses)+3 {
 		return false
 	}
 	seen := make(map[string]struct{}, len(conditions))
 	for _, condition := range conditions {
-		if condition != fallbackConnectError && condition != fallbackTimeoutBeforeHeaders {
+		if condition != fallbackConnectError && condition != fallbackTimeoutBeforeHeaders && condition != fallbackFirstByteTimeout {
 			if _, ok := retryableFallbackStatusesCondition(condition); !ok {
 				return false
 			}

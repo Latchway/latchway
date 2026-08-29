@@ -2808,7 +2808,7 @@ func (factory *dataPlaneE2EPrivateTargetFactory) Acquire(config configuration.Up
 		AllowedCIDRs: []netip.Prefix{netip.PrefixFrom(privateAddress, privateAddress.BitLen())},
 	}, upstream.Timeouts{
 		Connect: config.Timeouts.Connect, TLSHandshake: config.Timeouts.Connect,
-		ResponseHeader: config.Timeouts.FirstByte, IdleConnection: config.Timeouts.Idle,
+		ResponseHeader: config.Timeouts.ResponseHeader, IdleConnection: config.Timeouts.Idle,
 	}, nil)
 	if err != nil {
 		return nil, err

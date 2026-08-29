@@ -283,6 +283,122 @@ func TestHandlerExecutesRestrictedOpaqueHTTPWithExactFeatureAndRouteBounds(t *te
 	}
 }
 
+func TestRouteRequestHeaderBoundRejectsBeforeRewriteQuotaAndTarget(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	request := fixture.request(t)
+	measured, err := canonicalRequestHeaderBytes(request)
+	if err != nil || measured <= 1 {
+		t.Fatalf("measure canonical request headers = %d, %v", measured, err)
+	}
+	fixture.decision.Route.MaximumRequestHeaderBytes = measured - 1
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	assertProblemCode(t, response, "request_invalid", http.StatusBadRequest)
+	if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 || fixture.target.prepareCalls != 0 {
+		t.Fatalf("header-bound rejection reached quota/target/prepare = %d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.targets.calls, fixture.target.prepareCalls)
+	}
+}
+
+func TestRouteRequestBodyBoundAppliesAfterProviderRewrite(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	request := fixture.request(t)
+	fixture.decision.Route.MaximumRequestBodyBytes = request.ContentLength
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	assertProblemCode(t, response, "request_invalid", http.StatusBadRequest)
+	if fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 || fixture.target.prepareCalls != 0 {
+		t.Fatalf("post-rewrite body-bound rejection reached quota/target/prepare = %d/%d/%d",
+			fixture.quotas.reserveCalls, fixture.targets.calls, fixture.target.prepareCalls)
+	}
+}
+
+func TestRouteRequestBoundsAllowExactCanonicalHeadersAndRewrittenBody(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	request := fixture.request(t)
+	measured, err := canonicalRequestHeaderBytes(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.decision.Route.MaximumRequestHeaderBytes = measured
+	fixture.decision.Route.MaximumRequestBodyBytes = 1024
+	fixture.relayer.body = `{}`
+	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || fixture.quotas.reserveCalls != 1 || fixture.targets.calls != 1 ||
+		fixture.target.preparedBody == "" || int64(len(fixture.target.preparedBody)) > fixture.decision.Route.MaximumRequestBodyBytes {
+		t.Fatalf("exact route bounds status/quota/target/body = %d/%d/%d/%d",
+			response.Code, fixture.quotas.reserveCalls, fixture.targets.calls, len(fixture.target.preparedBody))
+	}
+	if len(fixture.relayer.configs) != 1 ||
+		fixture.relayer.configs[0].FirstByteTimeout != fixture.decision.Upstream.Timeouts.FirstByte ||
+		fixture.relayer.configs[0].IdleTimeout != fixture.decision.Upstream.Timeouts.Idle {
+		t.Fatalf("relay timeout split = %+v", fixture.relayer.configs)
+	}
+}
+
+func TestCanonicalRequestHeaderBytesRejectsAmbiguousParsedFields(t *testing.T) {
+	valid := httptest.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader("body"))
+	valid.Header = http.Header{"X-Test": []string{"one", "two"}}
+	measured, err := canonicalRequestHeaderBytes(valid)
+	want := int64(len("Host: gateway.example\r\n") + len("Content-Length: 4\r\n") +
+		len("X-Test: one\r\n") + len("X-Test: two\r\n") + len("\r\n"))
+	if err != nil || measured != want {
+		t.Fatalf("canonical header bytes = %d, %v want %d", measured, err, want)
+	}
+	for _, mutate := range []func(*http.Request){
+		func(request *http.Request) { request.Header["Host"] = []string{"alternate.example"} },
+		func(request *http.Request) { request.Header["Content-Length"] = []string{"4"} },
+		func(request *http.Request) { request.Header["Bad Header"] = []string{"value"} },
+		func(request *http.Request) { request.Header["X-Test"] = []string{"value\r\ninjected: true"} },
+		func(request *http.Request) { request.Header["X-Test"] = nil },
+		func(request *http.Request) { request.Host = ""; request.URL.Host = "" },
+	} {
+		request := valid.Clone(valid.Context())
+		requestURL := *valid.URL
+		request.URL = &requestURL
+		request.Header = valid.Header.Clone()
+		mutate(request)
+		if measured, err := canonicalRequestHeaderBytes(request); err == nil {
+			t.Fatalf("ambiguous parsed fields measured as %d: %#v", measured, request)
+		}
+	}
+}
+
+func FuzzCanonicalRequestHeaderBytes(f *testing.F) {
+	f.Add("gateway.example", "X-Test", "value", int64(4))
+	f.Add("", "x-latchway-feature", "assistant", int64(0))
+	f.Add("gateway.example", "Host", "alternate.example", int64(1))
+	f.Fuzz(func(t *testing.T, host, name, value string, contentLength int64) {
+		if len(host)+len(name)+len(value) > 128<<10 {
+			t.Skip()
+		}
+		request := httptest.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", nil)
+		request.Host = host
+		request.Header = http.Header{name: []string{value}}
+		request.ContentLength = contentLength
+		first, firstErr := canonicalRequestHeaderBytes(request)
+		second, secondErr := canonicalRequestHeaderBytes(request.Clone(request.Context()))
+		if (firstErr == nil) != (secondErr == nil) || first != second {
+			t.Fatalf("canonical measurement is nondeterministic: first=%d/%v second=%d/%v",
+				first, firstErr, second, secondErr)
+		}
+		if firstErr == nil && first < 2 {
+			t.Fatalf("successful canonical measurement = %d", first)
+		}
+	})
+}
+
 func TestHandlerSuppressesUnsafeOpaqueReplayUnlessExplicitlyDeclared(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -766,6 +882,97 @@ func TestFixedHeaderCredentialScopeContainsDispatchAndRelay(t *testing.T) {
 	if fixture.quotas.settleInsideSecret || fixture.quotas.settleCalls != 1 || fixture.quotas.releaseCalls != 0 {
 		t.Fatalf("fixed-header settlement scope/calls/release = %t/%d/%d",
 			fixture.quotas.settleInsideSecret, fixture.quotas.settleCalls, fixture.quotas.releaseCalls)
+	}
+}
+
+func TestBasicCredentialScopeContainsDispatchAndRelay(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Upstream.Authentication = configuration.UpstreamAuthentication{
+		Type: "basic", Username: "provider-user", SecretRef: "secret/provider_password",
+	}
+	fixture.secret.invoke = true
+	fixture.target.secret = fixture.secret
+	fixture.quotas.secret = fixture.secret
+	fixture.relayer.secret = fixture.secret
+	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true}
+	fixture.relayer.body = `{}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.target.basicCalls != 1 ||
+		fixture.target.basicUsername != "provider-user" || fixture.target.dispatchCalls != 0 ||
+		fixture.target.bearerCalls != 0 || fixture.target.headerCalls != 0 || fixture.target.headersCalls != 0 {
+		t.Fatalf("basic dispatch response/target = %d/%+v", response.Code, fixture.target)
+	}
+	if !fixture.quotas.beginInsideSecret || !fixture.target.dispatchInsideSecret || !fixture.relayer.insideSecret ||
+		fixture.quotas.settleInsideSecret || fixture.secret.inside {
+		t.Fatalf("basic secret scope begin/dispatch/relay/settle/final = %t/%t/%t/%t/%t",
+			fixture.quotas.beginInsideSecret, fixture.target.dispatchInsideSecret, fixture.relayer.insideSecret,
+			fixture.quotas.settleInsideSecret, fixture.secret.inside)
+	}
+}
+
+func TestMultipleHeaderCredentialsRemainNestedThroughDispatchAndClose(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Upstream.Authentication = configuration.UpstreamAuthentication{
+		Type: "headers",
+		Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key", SecretRef: "secret/provider_key"},
+			{HeaderName: "X-Provider-Organization", SecretRef: "secret/provider_organization"},
+		},
+	}
+	fixture.secret.valuesByReference = map[string][]byte{
+		"secret/provider_key":          []byte("provider-token"),
+		"secret/provider_organization": []byte("provider-organization"),
+	}
+	fixture.target.secret = fixture.secret
+	fixture.quotas.secret = fixture.secret
+	fixture.relayer.secret = fixture.secret
+	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true}
+	fixture.relayer.body = `{}`
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || fixture.target.headersCalls != 1 ||
+		!slices.Equal(fixture.target.headerCredentialNames, []string{"X-Provider-Key", "X-Provider-Organization"}) ||
+		fixture.secret.calls != 2 || fixture.secret.maximumDepth != 2 || fixture.target.dispatchCalls != 0 {
+		t.Fatalf("multi-header dispatch response/target/secret = %d/%+v/%+v", response.Code, fixture.target, fixture.secret)
+	}
+	if !fixture.quotas.beginInsideSecret || !fixture.target.dispatchInsideSecret || !fixture.relayer.insideSecret ||
+		fixture.quotas.settleInsideSecret || fixture.secret.inside || fixture.secret.depth != 0 {
+		t.Fatalf("multi-header secret scope begin/dispatch/relay/settle/final/depth = %t/%t/%t/%t/%t/%d",
+			fixture.quotas.beginInsideSecret, fixture.target.dispatchInsideSecret, fixture.relayer.insideSecret,
+			fixture.quotas.settleInsideSecret, fixture.secret.inside, fixture.secret.depth)
+	}
+}
+
+func TestMultipleHeaderCredentialFailureNeverBeginsDispatch(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.decision.Upstream.Authentication = configuration.UpstreamAuthentication{
+		Type: "headers",
+		Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key", SecretRef: "secret/provider_key"},
+			{HeaderName: "X-Provider-Organization", SecretRef: "secret/provider_organization"},
+		},
+	}
+	fixture.secret.errorsByReference = map[string]error{
+		"secret/provider_organization": secrets.ErrUnavailable,
+	}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "upstream_unavailable", http.StatusServiceUnavailable)
+	if fixture.secret.calls != 2 || fixture.secret.maximumDepth != 1 || fixture.quotas.beginCalls != 0 ||
+		fixture.target.headersCalls != 0 || fixture.target.roundTripCalls != 0 || fixture.quotas.releaseCalls != 1 ||
+		fixture.targets.releaseCalls != 1 || fixture.secret.inside || fixture.secret.depth != 0 {
+		t.Fatalf("partial multi-header failure leaked into dispatch: secret=%+v quota=%+v target=%+v releases=%d",
+			fixture.secret, fixture.quotas, fixture.target, fixture.targets.releaseCalls)
 	}
 }
 
@@ -2064,6 +2271,44 @@ func TestValidateDecisionRejectsForgedProviderReportedCostPolicy(t *testing.T) {
 	}
 }
 
+func TestValidateDecisionRejectsForgedRouteBoundsAndTimeouts(t *testing.T) {
+	t.Parallel()
+
+	valid := testDecision()
+	effective := valid.Upstream.Timeouts
+	valid.Route.Timeouts = &effective
+	if _, err := validateDecision(valid.Feature.ID, valid, protocol.OpenAIChatID); err != nil {
+		t.Fatalf("valid effective route timeout policy: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*policy.Decision)
+	}{
+		{name: "negative body", mutate: func(decision *policy.Decision) { decision.Route.MaximumRequestBodyBytes = -1 }},
+		{name: "oversized body", mutate: func(decision *policy.Decision) { decision.Route.MaximumRequestBodyBytes = maximumRequestBodyLimit + 1 }},
+		{name: "negative headers", mutate: func(decision *policy.Decision) { decision.Route.MaximumRequestHeaderBytes = -1 }},
+		{name: "oversized headers", mutate: func(decision *policy.Decision) {
+			decision.Route.MaximumRequestHeaderBytes = maximumRequestHeaderLimit + 1
+		}},
+		{name: "unapplied route override", mutate: func(decision *policy.Decision) { decision.Route.Timeouts.FirstByte += time.Millisecond }},
+		{name: "invalid effective timeout", mutate: func(decision *policy.Decision) {
+			decision.Route.Timeouts.FirstByte = 0
+			decision.Upstream.Timeouts.FirstByte = 0
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decision := valid
+			clonedTimeouts := *valid.Route.Timeouts
+			decision.Route.Timeouts = &clonedTimeouts
+			test.mutate(&decision)
+			if _, err := validateDecision(decision.Feature.ID, decision, protocol.OpenAIChatID); !errors.Is(err, policy.ErrConfiguration) {
+				t.Fatalf("forged route policy accepted: route=%+v upstream=%+v err=%v",
+					decision.Route, decision.Upstream.Timeouts, err)
+			}
+		})
+	}
+}
+
 func TestAssignDecisionReservationUnitsUsesExactSharedHardCostBound(t *testing.T) {
 	t.Parallel()
 	source, err := pricing.NewSource("standard", id.Must(id.ConfigRevision))
@@ -2870,6 +3115,63 @@ func TestHandlerFallsBackWithFreshTargetRequestAndPerAttemptAccounting(t *testin
 	}
 }
 
+func TestHandlerFallsBackOnFirstBodyByteTimeoutBeforeClientCommit(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	primary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	primary.Route.FallbackOn = []string{fallbackFirstByteTimeout}
+	secondary := policy.RouteDecision{
+		Route: fixture.decision.Route, Model: fixture.decision.Model, Upstream: fixture.decision.Upstream,
+	}
+	secondary.Route.ID = "secondary"
+	fixture.policies.plan = &policy.DecisionPlan{
+		Feature: fixture.decision.Feature, LimitPlan: fixture.decision.LimitPlan,
+		Candidates: []policy.RouteDecision{primary, secondary},
+	}
+	first := &fakeDispatchTarget{response: testDispatchedResponse()}
+	second := &fakeDispatchTarget{response: testDispatchedResponse()}
+	fixture.targets.targets = []DispatchTarget{first, second}
+	fixture.quotas.beginRetryOwner = true
+	fixture.relayer.outcomes = []upstream.RelayOutcome{
+		{StatusCode: http.StatusOK},
+		{StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true},
+	}
+	fixture.relayer.errs = []error{upstream.ErrResponseFirstByteTimeout, nil}
+	fixture.relayer.bodies = []string{"", `{}`}
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{}` || fixture.targets.calls != 2 ||
+		fixture.quotas.beginRetryCalls != 1 || fixture.quotas.settleRetryCalls != 1 || fixture.quotas.settleCalls != 1 {
+		t.Fatalf("first-byte fallback status/body/targets/retry/final = %d/%q/%d/%d/%d/%d",
+			response.Code, response.Body.String(), fixture.targets.calls, fixture.quotas.beginRetryCalls,
+			fixture.quotas.settleRetryCalls, fixture.quotas.settleCalls)
+	}
+	if fixture.quotas.settleRetryOutcome.FailureCode != "upstream_timeout" ||
+		fixture.quotas.settleRetryOutcome.HTTPStatus != http.StatusOK || first.roundTripCalls != 1 || second.roundTripCalls != 1 {
+		t.Fatalf("first-byte fallback outcome/round trips = %+v/%d/%d",
+			fixture.quotas.settleRetryOutcome, first.roundTripCalls, second.roundTripCalls)
+	}
+}
+
+func TestFirstBodyByteTimeoutNeverRetriesAfterClientCommit(t *testing.T) {
+	result := executionResult{
+		beginInvoked: true, dispatchOwner: true,
+		relay: upstream.RelayOutcome{StatusCode: http.StatusOK, ClientStarted: true},
+		err:   fmt.Errorf("%w: %w", errUpstreamRelay, upstream.ErrResponseFirstByteTimeout),
+	}
+	if condition, retryable := fallbackCondition(context.Background(), result); retryable || condition != "" {
+		t.Fatalf("committed first-byte timeout became retryable: %q/%t", condition, retryable)
+	}
+	if !isUpstreamTimeout(result.err) || failureCode(result.err) != "upstream_timeout" {
+		t.Fatalf("first-byte timeout classification = timeout:%t failure:%q",
+			isUpstreamTimeout(result.err), failureCode(result.err))
+	}
+}
+
 func TestHandlerExhaustsSameRouteRetriesBeforeFallbackAndAccountsEveryAttempt(t *testing.T) {
 	fixture := newHandlerFixture(t)
 	primary := policy.RouteDecision{
@@ -3514,7 +3816,8 @@ func testDecision() policy.Decision {
 			ID: "provider", Type: "openai_compatible", BaseURL: "https://provider.example/v1",
 			Authentication: configuration.UpstreamAuthentication{Type: "none"},
 			Timeouts: configuration.UpstreamTimeouts{
-				Connect: time.Second, FirstByte: 2 * time.Second, Idle: 3 * time.Second, Total: time.Minute,
+				Connect: time.Second, ResponseHeader: 2 * time.Second,
+				FirstByte: 2 * time.Second, Idle: 3 * time.Second, Total: time.Minute,
 			},
 			DestinationPolicy: configuration.UpstreamDestinationPolicy{
 				AllowedPorts: []int{443}, DNSPinning: true,
@@ -3762,23 +4065,40 @@ func (fake *fakeQuotaStore) ReleaseBeforeDispatch(_ context.Context, _ quota.Res
 }
 
 type fakeSecretStore struct {
-	calls  int
-	value  []byte
-	err    error
-	invoke bool
-	inside bool
+	calls             int
+	value             []byte
+	valuesByReference map[string][]byte
+	errorsByReference map[string]error
+	references        []string
+	err               error
+	invoke            bool
+	inside            bool
+	depth             int
+	maximumDepth      int
 }
 
-func (fake *fakeSecretStore) Use(_ context.Context, _ secrets.Scope, _ string, consume func([]byte) error) error {
+func (fake *fakeSecretStore) Use(_ context.Context, _ secrets.Scope, reference string, consume func([]byte) error) error {
 	fake.calls++
-	if fake.err != nil && !fake.invoke {
-		return fake.err
+	fake.references = append(fake.references, reference)
+	selectedErr := fake.err
+	if mapped, ok := fake.errorsByReference[reference]; ok {
+		selectedErr = mapped
 	}
+	if selectedErr != nil && !fake.invoke {
+		return selectedErr
+	}
+	value := fake.value
+	if mapped, ok := fake.valuesByReference[reference]; ok {
+		value = mapped
+	}
+	fake.depth++
+	fake.maximumDepth = max(fake.maximumDepth, fake.depth)
 	fake.inside = true
-	consumeErr := consume(append([]byte(nil), fake.value...))
-	fake.inside = false
-	if fake.err != nil {
-		return fake.err
+	consumeErr := consume(append([]byte(nil), value...))
+	fake.depth--
+	fake.inside = fake.depth > 0
+	if selectedErr != nil {
+		return selectedErr
 	}
 	return consumeErr
 }
@@ -3827,23 +4147,27 @@ func (lease *fakeTargetLease) Release() {
 }
 
 type fakeDispatchTarget struct {
-	prepareCalls         int
-	preparePath          string
-	forwardedHeaders     []string
-	preparedBody         string
-	preparedRequest      *http.Request
-	prepareErr           error
-	dispatchCalls        int
-	bearerCalls          int
-	headerCalls          int
-	beforeCalls          int
-	roundTripCalls       int
-	preflightErr         error
-	dispatchErr          error
-	response             *upstream.DispatchedResponse
-	closeCalls           int
-	secret               *fakeSecretStore
-	dispatchInsideSecret bool
+	prepareCalls          int
+	preparePath           string
+	forwardedHeaders      []string
+	preparedBody          string
+	preparedRequest       *http.Request
+	prepareErr            error
+	dispatchCalls         int
+	bearerCalls           int
+	headerCalls           int
+	basicCalls            int
+	headersCalls          int
+	beforeCalls           int
+	roundTripCalls        int
+	preflightErr          error
+	dispatchErr           error
+	response              *upstream.DispatchedResponse
+	closeCalls            int
+	secret                *fakeSecretStore
+	dispatchInsideSecret  bool
+	basicUsername         string
+	headerCredentialNames []string
 }
 
 func (fake *fakeDispatchTarget) Prepare(request *http.Request, path string, forwarded []string, _ map[string]string) (ProviderRequest, error) {
@@ -3893,6 +4217,34 @@ func (fake *fakeDispatchTarget) WithHeaderDispatchWithBeforeRoundTrip(
 	consume func(*upstream.DispatchedResponse) error,
 ) error {
 	fake.headerCalls++
+	return fake.scoped(ctx, beforeRoundTrip, consume)
+}
+
+func (fake *fakeDispatchTarget) WithBasicDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	_ ProviderRequest,
+	username string,
+	_ []byte,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	fake.basicCalls++
+	fake.basicUsername = username
+	return fake.scoped(ctx, beforeRoundTrip, consume)
+}
+
+func (fake *fakeDispatchTarget) WithHeadersDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	_ ProviderRequest,
+	credentials []upstream.HeaderCredential,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	fake.headersCalls++
+	fake.headerCredentialNames = fake.headerCredentialNames[:0]
+	for _, credential := range credentials {
+		fake.headerCredentialNames = append(fake.headerCredentialNames, credential.Name)
+	}
 	return fake.scoped(ctx, beforeRoundTrip, consume)
 }
 

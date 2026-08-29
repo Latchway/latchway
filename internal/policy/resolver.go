@@ -465,6 +465,9 @@ func (resolver *Resolver) ResolvePlan(
 		if !found {
 			return DecisionPlan{}, ErrRouteNotFound
 		}
+		if route.Timeouts != nil {
+			upstream.Timeouts = *route.Timeouts
+		}
 		candidates = append(candidates, RouteDecision{
 			Route: cloneRoute(route), Model: cloneModel(model), Upstream: cloneUpstream(upstream),
 		})
@@ -1178,6 +1181,10 @@ func cloneRoute(route configuration.Route) configuration.Route {
 		cloned.RetryOn = append([]string(nil), route.RetryPolicy.RetryOn...)
 		route.RetryPolicy = &cloned
 	}
+	if route.Timeouts != nil {
+		cloned := *route.Timeouts
+		route.Timeouts = &cloned
+	}
 	return route
 }
 
@@ -1187,6 +1194,9 @@ func cloneModel(model configuration.Model) configuration.Model {
 }
 
 func cloneUpstream(upstream configuration.Upstream) configuration.Upstream {
+	upstream.Authentication.Headers = append(
+		[]configuration.UpstreamAuthenticationHeader(nil), upstream.Authentication.Headers...,
+	)
 	upstream.DestinationPolicy.AllowedPorts = append(
 		[]int(nil), upstream.DestinationPolicy.AllowedPorts...,
 	)

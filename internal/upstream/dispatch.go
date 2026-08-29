@@ -363,7 +363,7 @@ func withHeaderCredentials(headers http.Header, credentials []HeaderCredential, 
 	for index, credential := range credentials {
 		canonical := http.CanonicalHeaderKey(credential.Name)
 		totalBytes += len(canonical) + len(credential.Value)
-		if strings.TrimSpace(credential.Name) != credential.Name || !validHeaderName(credential.Name) ||
+		if len(credential.Name) > 256 || strings.TrimSpace(credential.Name) != credential.Name || !validHeaderName(credential.Name) ||
 			isForbiddenCredentialHeader(canonical) || len(headerValues(headers, canonical)) != 0 ||
 			!validHeaderCredential(credential.Value) || totalBytes > maximumForwardedHeaderBytes {
 			return errors.New("invalid header credential scope")
@@ -402,7 +402,7 @@ var credentialHeaderNames = [...]string{
 
 func withHeaderCredential(headers http.Header, name string, credential []byte, operation func() error) error {
 	canonical := http.CanonicalHeaderKey(name)
-	if headers == nil || operation == nil || strings.TrimSpace(name) != name || !validHeaderName(name) ||
+	if headers == nil || operation == nil || len(name) > 256 || strings.TrimSpace(name) != name || !validHeaderName(name) ||
 		isForbiddenCredentialHeader(canonical) || len(headerValues(headers, canonical)) != 0 || !validHeaderCredential(credential) {
 		return errors.New("invalid header credential scope")
 	}

@@ -70,7 +70,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 	issues = append(issues, pricingSemanticIssues(pricing, models)...)
 	issues = append(issues, limitSemanticIssues(limitPlans)...)
 	issues = append(issues, validator.featureSemanticIssues(
-		features, models, attestations, limitPlans,
+		features, models, upstreams, attestations, limitPlans,
 	)...)
 	issues = append(issues, sessionSemanticIssues(objectValue(spec, "session"))...)
 	issues = append(issues, privacySemanticIssues(objectValue(spec, "privacy"))...)
@@ -388,16 +388,52 @@ func upstreamSemanticIssues(upstreams map[string]map[string]any, environmentKind
 		if environmentKind == "production" && stringValue(authentication, "type") == "none" {
 			issues = append(issues, warningIssue("upstream_authentication_disabled", base+"/authentication/type", "This production upstream has no configured authentication."))
 		}
+		credentialHeaders := make([]string, 0, 8)
+		switch stringValue(authentication, "type") {
+		case "header":
+			credentialHeaders = append(credentialHeaders, stringValue(authentication, "headerName"))
+		case "headers":
+			seen := make(map[string]struct{})
+			for index, header := range objectArray(authentication, "headers") {
+				name := stringValue(header, "headerName")
+				canonical := http.CanonicalHeaderKey(name)
+				if _, duplicate := seen[canonical]; duplicate {
+					issues = append(issues, errorIssue(
+						"upstream_authentication_header_duplicate",
+						fmt.Sprintf("%s/authentication/headers/%d/headerName", base, index),
+						"Configured authentication header names must be unique ignoring case.",
+					))
+				}
+				seen[canonical] = struct{}{}
+				credentialHeaders = append(credentialHeaders, name)
+			}
+		case "basic":
+			if !runtimeBasicUsernameValid(stringValue(authentication, "username")) {
+				issues = append(issues, errorIssue(
+					"upstream_basic_username_invalid", base+"/authentication/username",
+					"A Basic authentication username must be bounded visible ASCII without spaces, controls, or a colon.",
+				))
+			}
+		}
 		if headers, ok := upstream["staticHeaders"].(map[string]any); ok {
 			for _, header := range sortedObjectKeys(headers) {
 				if sensitiveHeader(header) {
 					issues = append(issues, errorIssue("plaintext_credential_header", base+"/staticHeaders/"+pointerToken(header), "Credential-bearing headers must use a server-side secret reference."))
 				}
+				for _, credentialHeader := range credentialHeaders {
+					if strings.EqualFold(header, credentialHeader) {
+						issues = append(issues, errorIssue(
+							"upstream_authentication_header_collision",
+							base+"/staticHeaders/"+pointerToken(header),
+							"A static header cannot replace a scoped authentication header.",
+						))
+					}
+				}
 			}
 		}
 		timeouts := objectValue(upstream, "timeouts")
 		total, totalErr := parseConfigDuration(stringValue(timeouts, "total"))
-		for _, name := range []string{"connect", "firstByte", "idle"} {
+		for _, name := range []string{"connect", "responseHeader", "firstByte", "idle"} {
 			value, err := parseConfigDuration(stringValue(timeouts, name))
 			if err != nil || totalErr != nil || value > total || value <= 0 || total > 10*time.Minute {
 				issues = append(issues, errorIssue("upstream_timeout_invalid", base+"/timeouts/"+name, "Upstream timeouts must be positive, bounded, and no longer than the total timeout."))
@@ -606,7 +642,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 }
 
 func (validator *Validator) featureSemanticIssues(
-	features, models, attestations, limitPlans map[string]map[string]any,
+	features, models, upstreams, attestations, limitPlans map[string]map[string]any,
 ) []Issue {
 	issues := make([]Issue, 0)
 	requiresCostPricing := rawPlansRequireCostPricing(limitPlans)
@@ -710,6 +746,13 @@ func (validator *Validator) featureSemanticIssues(
 			if !slices.Contains(stringArray(model, "capabilities"), protocolID) {
 				issues = append(issues, errorIssue("model_protocol_unsupported", routePath+"/model", "The selected model does not advertise this feature protocol."))
 			}
+			if routeTimeouts, configured := route["timeouts"].(map[string]any); configured {
+				if upstream, exists := upstreams[stringValue(model, "upstream")]; exists {
+					issues = append(issues, routeTimeoutSemanticIssues(
+						routeTimeouts, objectValue(upstream, "timeouts"), routePath+"/timeouts",
+					)...)
+				}
+			}
 			if requiresCostPricing && stringValue(model, "pricingRef") == "" {
 				issues = append(issues, errorIssue("pricing_required_for_cost_limit", routePath+"/model", "Every routed model requires pricing when a cost limit is configured."))
 			}
@@ -719,6 +762,50 @@ func (validator *Validator) featureSemanticIssues(
 		}
 	}
 	return issues
+}
+
+func routeTimeoutSemanticIssues(overrides, inherited map[string]any, base string) []Issue {
+	names := []string{"connect", "responseHeader", "firstByte", "idle", "total"}
+	values := make(map[string]time.Duration, len(names))
+	for _, name := range names {
+		value, err := parseConfigDuration(stringValue(inherited, name))
+		if err != nil || value <= 0 {
+			return []Issue{errorIssue(
+				"route_timeout_invalid", base,
+				"Route timeout overrides require a valid fully defaulted upstream timeout policy.",
+			)}
+		}
+		values[name] = value
+	}
+	for _, name := range names {
+		if _, configured := overrides[name]; !configured {
+			continue
+		}
+		value, err := parseConfigDuration(stringValue(overrides, name))
+		if err != nil || value <= 0 {
+			return []Issue{errorIssue(
+				"route_timeout_invalid", base+"/"+name,
+				"Route timeout overrides must be positive bounded durations.",
+			)}
+		}
+		values[name] = value
+	}
+	total := values["total"]
+	if total > 10*time.Minute {
+		return []Issue{errorIssue(
+			"route_timeout_invalid", base+"/total",
+			"The effective route total timeout cannot exceed ten minutes.",
+		)}
+	}
+	for _, name := range []string{"connect", "responseHeader", "firstByte", "idle"} {
+		if values[name] > total {
+			return []Issue{errorIssue(
+				"route_timeout_invalid", base+"/"+name,
+				"Each effective route timeout must be no longer than the effective total timeout.",
+			)}
+		}
+	}
+	return nil
 }
 
 func opaqueHTTPPolicySemanticIssues(policy map[string]any, base string) []Issue {
@@ -871,6 +958,12 @@ func secretReferenceIssues(root map[string]any, secretNames map[string]struct{})
 	for index, upstream := range objectArray(spec, "upstreams") {
 		authentication := objectValue(upstream, "authentication")
 		check(stringValue(authentication, "secretRef"), fmt.Sprintf("/spec/upstreams/%d/authentication/secretRef", index))
+		for headerIndex, header := range objectArray(authentication, "headers") {
+			check(
+				stringValue(header, "secretRef"),
+				fmt.Sprintf("/spec/upstreams/%d/authentication/headers/%d/secretRef", index, headerIndex),
+			)
+		}
 	}
 	return issues
 }

@@ -202,6 +202,10 @@ func TestCloneRouteDeepCopiesRetryPolicy(t *testing.T) {
 
 	original := configuration.Route{
 		ID: "primary", FallbackOn: []string{"status_503"},
+		Timeouts: &configuration.UpstreamTimeouts{
+			Connect: time.Second, ResponseHeader: 2 * time.Second,
+			FirstByte: 3 * time.Second, Idle: 4 * time.Second, Total: 5 * time.Second,
+		},
 		RetryPolicy: &configuration.RetryPolicy{
 			MaxAttempts: 3, RetryOn: []string{"connect_error", "status_503"},
 		},
@@ -210,9 +214,56 @@ func TestCloneRouteDeepCopiesRetryPolicy(t *testing.T) {
 	cloned.FallbackOn[0] = "changed"
 	cloned.RetryPolicy.RetryOn[0] = "changed"
 	cloned.RetryPolicy.MaxAttempts = 8
+	cloned.Timeouts.Total = 9 * time.Second
 	if original.FallbackOn[0] != "status_503" || original.RetryPolicy == nil ||
-		original.RetryPolicy.RetryOn[0] != "connect_error" || original.RetryPolicy.MaxAttempts != 3 {
+		original.RetryPolicy.RetryOn[0] != "connect_error" || original.RetryPolicy.MaxAttempts != 3 ||
+		original.Timeouts == nil || original.Timeouts.Total != 5*time.Second {
 		t.Fatalf("route retry policy was not defensively cloned: original=%+v clone=%+v", original, cloned)
+	}
+}
+
+func TestResolverAppliesDetachedEffectiveRouteTimeoutsToSelectedUpstream(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := policySnapshot()
+	inherited := configuration.UpstreamTimeouts{
+		Connect: time.Second, ResponseHeader: 2 * time.Second,
+		FirstByte: 3 * time.Second, Idle: 4 * time.Second, Total: 5 * time.Second,
+	}
+	configured := snapshot.upstreams["primary"]
+	configured.Timeouts = inherited
+	snapshot.upstreams["primary"] = configured
+	effective := inherited
+	effective.FirstByte = 1500 * time.Millisecond
+	effective.Total = 6 * time.Second
+	feature := snapshot.features["assistant"]
+	feature.Routes[0].Timeouts = &effective
+	snapshot.features["assistant"] = feature
+
+	decision, err := resolver.Resolve(context.Background(), snapshot, "assistant", policyInput("premium"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Route.Timeouts == nil || *decision.Route.Timeouts != effective || decision.Upstream.Timeouts != effective {
+		t.Fatalf("route/effective upstream timeouts = %+v/%+v want %+v",
+			decision.Route.Timeouts, decision.Upstream.Timeouts, effective)
+	}
+	decision.Route.Timeouts.Total = time.Minute
+	decision.Upstream.Timeouts.Total = time.Minute
+	again, err := resolver.Resolve(context.Background(), snapshot, "assistant", policyInput("premium"))
+	if err != nil || again.Route.Timeouts == nil || *again.Route.Timeouts != effective || again.Upstream.Timeouts != effective {
+		t.Fatalf("caller mutation reached resolved timeout policy: %+v/%+v, %v",
+			again.Route.Timeouts, again.Upstream.Timeouts, err)
+	}
+
+	withoutOverride, err := resolver.Resolve(context.Background(), snapshot, "assistant", policyInput("free"))
+	if err != nil || withoutOverride.Route.Timeouts != nil || withoutOverride.Upstream.Timeouts != inherited {
+		t.Fatalf("unoverridden route timeouts = %+v/%+v, %v",
+			withoutOverride.Route.Timeouts, withoutOverride.Upstream.Timeouts, err)
 	}
 }
 

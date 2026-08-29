@@ -183,6 +183,8 @@ type DispatchTarget interface {
 	DispatchWithBeforeRoundTrip(context.Context, ProviderRequest, func() error) (*upstream.DispatchedResponse, error)
 	WithBearerDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, []byte, func() error, func(*upstream.DispatchedResponse) error) error
 	WithHeaderDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, string, []byte, func() error, func(*upstream.DispatchedResponse) error) error
+	WithBasicDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, string, []byte, func() error, func(*upstream.DispatchedResponse) error) error
+	WithHeadersDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, []upstream.HeaderCredential, func() error, func(*upstream.DispatchedResponse) error) error
 }
 
 // TargetLease keeps a shared protected transport live for one request. Release

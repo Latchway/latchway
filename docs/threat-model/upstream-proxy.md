@@ -12,6 +12,12 @@ Reject ambiguous framing, conflicting content lengths, malformed transfer encodi
 
 Apply route-specific limits for body, headers, connections, first byte, idle, and total duration. Parse SSE incrementally with bounded event and line sizes; do not buffer the response. Do not retry or fall back once any response byte reaches the client. Record each upstream attempt separately while counting the logical request once.
 
+Response-header arrival and the first response-body byte are separate stages.
+Only the configured `first_byte_timeout` condition may retry a response whose
+headers arrived without a body byte, and only while the client response remains
+uncommitted. See [upstream routing](../reference/upstream-routing.md) for the
+exact timeout and request-bound contract.
+
 Opaque HTTP is further restricted to `/proxy/{feature}/{path...}` with exact
 path/header feature equality, no query, a configured method and segment-bound
 path allowlist, a buffered request-body bound, and a per-route response bound.

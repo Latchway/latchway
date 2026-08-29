@@ -671,30 +671,73 @@
       }
     },
     "UpstreamAuthentication": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type"],
-      "properties": {
-        "type": { "enum": ["bearer", "header", "none"] },
-        "secretRef": { "$ref": "#/$defs/SecretRef" },
-        "headerName": { "type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" }
-      },
-      "allOf": [
+      "oneOf": [
         {
-          "if": { "properties": { "type": { "enum": ["bearer", "header"] } }, "required": ["type"] },
-          "then": { "required": ["secretRef"] }
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "none" } }
         },
         {
-          "if": { "properties": { "type": { "const": "header" } }, "required": ["type"] },
-          "then": { "required": ["headerName"] }
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "secretRef"],
+          "properties": {
+            "type": { "const": "bearer" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "headerName", "secretRef"],
+          "properties": {
+            "type": { "const": "header" },
+            "headerName": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "username", "secretRef"],
+          "properties": {
+            "type": { "const": "basic" },
+            "username": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!-9;-~]+$" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "headers"],
+          "properties": {
+            "type": { "const": "headers" },
+            "headers": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": { "$ref": "#/$defs/UpstreamAuthenticationHeader" }
+            }
+          }
         }
       ]
+    },
+    "UpstreamAuthenticationHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headerName", "secretRef"],
+      "properties": {
+        "headerName": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" },
+        "secretRef": { "$ref": "#/$defs/SecretRef" }
+      }
     },
     "Timeouts": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "connect": { "$ref": "#/$defs/Duration" },
+        "responseHeader": { "$ref": "#/$defs/Duration" },
         "firstByte": { "$ref": "#/$defs/Duration" },
         "idle": { "$ref": "#/$defs/Duration" },
         "total": { "$ref": "#/$defs/Duration" }
@@ -958,12 +1001,25 @@
           "items": { "$ref": "#/$defs/RetryCondition" }
         },
         "retryPolicy": { "$ref": "#/$defs/RetryPolicy" },
+        "maxRequestBodyBytes": {
+          "description": "Optional post-rewrite request-body bound for this route. It cannot exceed the server-wide request bound.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 104857600
+        },
+        "maxRequestHeaderBytes": {
+          "description": "Optional bound over the canonical parsed request headers, including Host and Latchway authentication/control fields.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
         "maxResponseBytes": {
           "description": "Required for opaque_http features. The lower of this per-route bound and the server-wide response bound applies.",
           "type": "integer",
           "minimum": 1,
           "maximum": 104857600
         },
+        "timeouts": { "$ref": "#/$defs/RouteTimeouts" },
         "streamingAllowed": {
           "description": "For opaque_http routes, permits text/event-stream responses.",
           "type": "boolean",
@@ -977,7 +1033,19 @@
       }
     },
     "RetryCondition": {
-      "enum": ["connect_error", "timeout_before_headers", "status_408", "status_429", "status_500", "status_502", "status_503", "status_504"]
+      "enum": ["connect_error", "timeout_before_headers", "first_byte_timeout", "status_408", "status_429", "status_500", "status_502", "status_503", "status_504"]
+    },
+    "RouteTimeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "connect": { "$ref": "#/$defs/Duration" },
+        "responseHeader": { "$ref": "#/$defs/Duration" },
+        "firstByte": { "$ref": "#/$defs/Duration" },
+        "idle": { "$ref": "#/$defs/Duration" },
+        "total": { "$ref": "#/$defs/Duration" }
+      }
     },
     "RetryPolicy": {
       "type": "object",

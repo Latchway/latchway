@@ -20,7 +20,7 @@ Protocol contract `0.5.1` uses wire protocol version `1`. Normative artifacts li
 - protocol compatibility metadata;
 - canonical attestation-binding and RFC 9449 DPoP test vectors.
 
-See [`docs/architecture/overview.md`](docs/architecture/overview.md), [`docs/threat-model/overview.md`](docs/threat-model/overview.md), and [`docs/protocol/`](docs/protocol/) before implementing a client or server.
+See [`docs/architecture/overview.md`](docs/architecture/overview.md), [`docs/threat-model/overview.md`](docs/threat-model/overview.md), [`docs/reference/upstream-routing.md`](docs/reference/upstream-routing.md), and [`docs/protocol/`](docs/protocol/) before implementing a client or server.
 
 ## Development
 

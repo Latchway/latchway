@@ -42,19 +42,20 @@ type TargetCache struct {
 }
 
 type targetCacheKey struct {
-	upstreamID       string
-	upstreamType     string
-	baseURL          string
-	insecureHTTP     bool
-	allowRedirects   bool
-	allowPrivate     bool
-	dnsPinning       bool
-	allowedPorts     string
-	allowedCIDRs     string
-	connectTimeout   time.Duration
-	firstByteTimeout time.Duration
-	idleTimeout      time.Duration
-	totalTimeout     time.Duration
+	upstreamID            string
+	upstreamType          string
+	baseURL               string
+	insecureHTTP          bool
+	allowRedirects        bool
+	allowPrivate          bool
+	dnsPinning            bool
+	allowedPorts          string
+	allowedCIDRs          string
+	connectTimeout        time.Duration
+	responseHeaderTimeout time.Duration
+	firstByteTimeout      time.Duration
+	idleTimeout           time.Duration
+	totalTimeout          time.Duration
 }
 
 type targetCacheEntry struct {
@@ -294,9 +295,43 @@ func (lease *cachedTargetLease) WithHeaderDispatchWithBeforeRoundTrip(
 	)
 }
 
+func (lease *cachedTargetLease) WithBasicDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	request ProviderRequest,
+	username string,
+	credential []byte,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	target, err := lease.activeTarget()
+	if err != nil {
+		return err
+	}
+	return target.WithBasicDispatchWithBeforeRoundTrip(
+		ctx, request, username, credential, beforeRoundTrip, consume,
+	)
+}
+
+func (lease *cachedTargetLease) WithHeadersDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	request ProviderRequest,
+	credentials []upstream.HeaderCredential,
+	beforeRoundTrip func() error,
+	consume func(*upstream.DispatchedResponse) error,
+) error {
+	target, err := lease.activeTarget()
+	if err != nil {
+		return err
+	}
+	return target.WithHeadersDispatchWithBeforeRoundTrip(
+		ctx, request, credentials, beforeRoundTrip, consume,
+	)
+}
+
 func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 	if !identifierPattern.MatchString(config.ID) || !validProtectedUpstreamType(config.Type) ||
 		config.BaseURL == "" || !validTargetTimeouts(config.Timeouts) ||
+		!validUpstreamAuthentication(config.Authentication) ||
 		config.DestinationPolicy.AllowRedirects ||
 		!config.DestinationPolicy.DNSPinning || len(config.DestinationPolicy.AllowedPorts) == 0 {
 		return targetCacheKey{}, errTargetConfiguration
@@ -359,8 +394,9 @@ func protectedTargetKey(config configuration.Upstream) (targetCacheKey, error) {
 		dnsPinning:     config.DestinationPolicy.DNSPinning,
 		allowedPorts:   encodedPorts.String(),
 		allowedCIDRs:   encodedCIDRs.String(),
-		connectTimeout: config.Timeouts.Connect, firstByteTimeout: config.Timeouts.FirstByte,
-		idleTimeout: config.Timeouts.Idle, totalTimeout: config.Timeouts.Total,
+		connectTimeout: config.Timeouts.Connect, responseHeaderTimeout: config.Timeouts.ResponseHeader,
+		firstByteTimeout: config.Timeouts.FirstByte,
+		idleTimeout:      config.Timeouts.Idle, totalTimeout: config.Timeouts.Total,
 	}, nil
 }
 

@@ -90,7 +90,8 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 		key.allowPrivate != base.DestinationPolicy.AllowPrivateNetworks ||
 		key.dnsPinning != base.DestinationPolicy.DNSPinning || key.allowedPorts != "443,8443," ||
 		key.allowedCIDRs != "10.20.30.40/32,fd12:3456::/48," ||
-		key.connectTimeout != base.Timeouts.Connect || key.firstByteTimeout != base.Timeouts.FirstByte ||
+		key.connectTimeout != base.Timeouts.Connect || key.responseHeaderTimeout != base.Timeouts.ResponseHeader ||
+		key.firstByteTimeout != base.Timeouts.FirstByte ||
 		key.idleTimeout != base.Timeouts.Idle || key.totalTimeout != base.Timeouts.Total {
 		t.Fatalf("cache key omitted a transport field: %#v", key)
 	}
@@ -128,6 +129,7 @@ func TestProtectedTargetKeyCoversTransportFieldsAndExcludesCredentials(t *testin
 			value.DestinationPolicy.AllowedCIDRs = []netip.Prefix{netip.MustParsePrefix("10.20.30.41/32")}
 		}},
 		{name: "connect timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Connect += time.Millisecond }},
+		{name: "response header timeout", edit: func(value *configuration.Upstream) { value.Timeouts.ResponseHeader += time.Millisecond }},
 		{name: "first byte timeout", edit: func(value *configuration.Upstream) { value.Timeouts.FirstByte += time.Millisecond }},
 		{name: "idle timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Idle += time.Millisecond }},
 		{name: "total timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Total += time.Millisecond }},
@@ -165,6 +167,48 @@ func TestProtectedTargetKeyAcceptsOnlyConfiguredUpstreamFamilies(t *testing.T) {
 		if _, err := protectedTargetKey(candidate); err == nil {
 			t.Fatalf("unsupported upstream type %q accepted", upstreamType)
 		}
+	}
+}
+
+func TestValidUpstreamAuthenticationAcceptsOnlyExactScopedShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value configuration.UpstreamAuthentication
+		valid bool
+	}{
+		{name: "none", value: configuration.UpstreamAuthentication{Type: "none"}, valid: true},
+		{name: "bearer", value: configuration.UpstreamAuthentication{Type: "bearer", SecretRef: "secret/provider"}, valid: true},
+		{name: "header", value: configuration.UpstreamAuthentication{Type: "header", HeaderName: "Authorization", SecretRef: "secret/provider"}, valid: true},
+		{name: "basic", value: configuration.UpstreamAuthentication{Type: "basic", Username: "provider-user", SecretRef: "secret/provider"}, valid: true},
+		{name: "multiple", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key", SecretRef: "secret/provider"},
+			{HeaderName: "Authorization", SecretRef: "secret/provider_auth"},
+		}}, valid: true},
+		{name: "none with secret", value: configuration.UpstreamAuthentication{Type: "none", SecretRef: "secret/provider"}},
+		{name: "bearer with username", value: configuration.UpstreamAuthentication{Type: "bearer", SecretRef: "secret/provider", Username: "user"}},
+		{name: "header missing name", value: configuration.UpstreamAuthentication{Type: "header", SecretRef: "secret/provider"}},
+		{name: "basic colon", value: configuration.UpstreamAuthentication{Type: "basic", Username: "user:name", SecretRef: "secret/provider"}},
+		{name: "basic space", value: configuration.UpstreamAuthentication{Type: "basic", Username: "user name", SecretRef: "secret/provider"}},
+		{name: "multiple duplicate", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key", SecretRef: "secret/provider"},
+			{HeaderName: "x-provider-key", SecretRef: "secret/provider_auth"},
+		}}},
+		{name: "multiple forbidden", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "Content-Type", SecretRef: "secret/provider"},
+		}}},
+		{name: "multiple missing secret", value: configuration.UpstreamAuthentication{Type: "headers", Headers: []configuration.UpstreamAuthenticationHeader{
+			{HeaderName: "X-Provider-Key"},
+		}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := validUpstreamAuthentication(test.value); got != test.valid {
+				t.Fatalf("validUpstreamAuthentication(%+v) = %t want %t", test.value, got, test.valid)
+			}
+		})
 	}
 }
 
@@ -222,6 +266,11 @@ func TestTargetCacheRejectsInvalidConfigurationBeforeLookupOrConstruction(t *tes
 		{name: "port invalid", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = []int{0, 443} }},
 		{name: "base port absent", edit: func(value *configuration.Upstream) { value.DestinationPolicy.AllowedPorts = []int{8443} }},
 		{name: "timeout", edit: func(value *configuration.Upstream) { value.Timeouts.Connect = 0 }},
+		{name: "response header timeout", edit: func(value *configuration.Upstream) { value.Timeouts.ResponseHeader = 0 }},
+		{name: "first byte timeout", edit: func(value *configuration.Upstream) { value.Timeouts.FirstByte = 0 }},
+		{name: "authentication", edit: func(value *configuration.Upstream) {
+			value.Authentication = configuration.UpstreamAuthentication{Type: "basic", Username: "user:name", SecretRef: "secret/provider"}
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -479,6 +528,14 @@ func (*cacheTestTarget) WithHeaderDispatchWithBeforeRoundTrip(context.Context, P
 	return errors.New("cache test target does not dispatch")
 }
 
+func (*cacheTestTarget) WithBasicDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, string, []byte, func() error, func(*upstream.DispatchedResponse) error) error {
+	return errors.New("cache test target does not dispatch")
+}
+
+func (*cacheTestTarget) WithHeadersDispatchWithBeforeRoundTrip(context.Context, ProviderRequest, []upstream.HeaderCredential, func() error, func(*upstream.DispatchedResponse) error) error {
+	return errors.New("cache test target does not dispatch")
+}
+
 func (target *cacheTestTarget) CloseIdleConnections() { target.closes.Add(1) }
 
 func newTargetCacheHarness(t *testing.T, capacity int) (*TargetCache, *cacheTestBuilder) {
@@ -496,7 +553,7 @@ func cacheTestUpstream(upstreamID string) configuration.Upstream {
 		ID: upstreamID, Type: "openai_compatible", BaseURL: "https://provider.example/v1",
 		Authentication: configuration.UpstreamAuthentication{Type: "none"},
 		Timeouts: configuration.UpstreamTimeouts{
-			Connect: time.Second, FirstByte: 2 * time.Second,
+			Connect: time.Second, ResponseHeader: 2 * time.Second, FirstByte: 2 * time.Second,
 			Idle: 3 * time.Second, Total: time.Minute,
 		},
 		DestinationPolicy: configuration.UpstreamDestinationPolicy{

@@ -359,6 +359,7 @@ func applyDefaults(root map[string]any) {
 		setDefault(upstream, "dangerousAllowInsecureHttp", false)
 		timeouts := ensureObject(upstream, "timeouts")
 		setDefault(timeouts, "connect", "5s")
+		setDefault(timeouts, "responseHeader", "30s")
 		setDefault(timeouts, "firstByte", "30s")
 		setDefault(timeouts, "idle", "1m")
 		setDefault(timeouts, "total", "2m")

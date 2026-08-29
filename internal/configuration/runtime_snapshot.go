@@ -29,6 +29,7 @@ var (
 var runtimeRetryConditions = []string{
 	"connect_error",
 	"timeout_before_headers",
+	"first_byte_timeout",
 	"status_408",
 	"status_429",
 	"status_500",
@@ -46,22 +47,13 @@ const (
 )
 
 type compiledUpstream struct {
-	ID                         string `json:"id"`
-	Type                       string `json:"type"`
-	BaseURL                    string `json:"baseUrl"`
-	DangerousAllowInsecureHTTP bool   `json:"dangerousAllowInsecureHttp"`
-	Authentication             struct {
-		Type       string `json:"type"`
-		SecretRef  string `json:"secretRef"`
-		HeaderName string `json:"headerName"`
-	} `json:"authentication"`
-	Timeouts struct {
-		Connect   string `json:"connect"`
-		FirstByte string `json:"firstByte"`
-		Idle      string `json:"idle"`
-		Total     string `json:"total"`
-	} `json:"timeouts"`
-	DestinationPolicy struct {
+	ID                         string                         `json:"id"`
+	Type                       string                         `json:"type"`
+	BaseURL                    string                         `json:"baseUrl"`
+	DangerousAllowInsecureHTTP bool                           `json:"dangerousAllowInsecureHttp"`
+	Authentication             compiledUpstreamAuthentication `json:"authentication"`
+	Timeouts                   compiledUpstreamTimeouts       `json:"timeouts"`
+	DestinationPolicy          struct {
 		AllowedPorts         []int    `json:"allowedPorts"`
 		AllowRedirects       bool     `json:"allowRedirects"`
 		AllowPrivateNetworks bool     `json:"allowPrivateNetworks"`
@@ -73,6 +65,123 @@ type compiledUpstream struct {
 		Source   string `json:"source"`
 		Currency string `json:"currency"`
 	} `json:"providerReportedCost,omitempty"`
+}
+
+type compiledUpstreamAuthentication struct {
+	Type          string
+	SecretRef     string
+	HeaderName    string
+	Username      string
+	Headers       []compiledAuthenticationHeader
+	hasSecretRef  bool
+	hasHeaderName bool
+	hasUsername   bool
+	hasHeaders    bool
+}
+
+type compiledAuthenticationHeader struct {
+	HeaderName string
+	SecretRef  string
+}
+
+func (authentication *compiledUpstreamAuthentication) UnmarshalJSON(encoded []byte) error {
+	*authentication = compiledUpstreamAuthentication{}
+	fields, err := strictRuntimeObject(encoded, map[string]struct{}{
+		"type": {}, "secretRef": {}, "headerName": {}, "username": {}, "headers": {},
+	})
+	if err != nil {
+		return err
+	}
+	if _, ok := fields["type"]; !ok {
+		return ErrInvalid
+	}
+	if authentication.Type, err = compiledJSONString(fields["type"]); err != nil {
+		return err
+	}
+	for name, target := range map[string]*string{
+		"secretRef":  &authentication.SecretRef,
+		"headerName": &authentication.HeaderName,
+		"username":   &authentication.Username,
+	} {
+		raw, ok := fields[name]
+		if !ok {
+			continue
+		}
+		if *target, err = compiledJSONString(raw); err != nil {
+			return err
+		}
+		switch name {
+		case "secretRef":
+			authentication.hasSecretRef = true
+		case "headerName":
+			authentication.hasHeaderName = true
+		case "username":
+			authentication.hasUsername = true
+		}
+	}
+	if raw, ok := fields["headers"]; ok {
+		authentication.hasHeaders = true
+		if err := json.Unmarshal(raw, &authentication.Headers); err != nil || authentication.Headers == nil {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
+func (header *compiledAuthenticationHeader) UnmarshalJSON(encoded []byte) error {
+	*header = compiledAuthenticationHeader{}
+	fields, err := strictRuntimeObject(encoded, map[string]struct{}{"headerName": {}, "secretRef": {}})
+	if err != nil {
+		return err
+	}
+	if len(fields) != 2 {
+		return ErrInvalid
+	}
+	if header.HeaderName, err = compiledJSONString(fields["headerName"]); err != nil {
+		return err
+	}
+	if header.SecretRef, err = compiledJSONString(fields["secretRef"]); err != nil {
+		return err
+	}
+	return nil
+}
+
+type compiledUpstreamTimeouts struct {
+	Connect           string
+	ResponseHeader    string
+	FirstByte         string
+	Idle              string
+	Total             string
+	hasResponseHeader bool
+}
+
+func (timeouts *compiledUpstreamTimeouts) UnmarshalJSON(encoded []byte) error {
+	*timeouts = compiledUpstreamTimeouts{}
+	fields, err := strictRuntimeObject(encoded, map[string]struct{}{
+		"connect": {}, "responseHeader": {}, "firstByte": {}, "idle": {}, "total": {},
+	})
+	if err != nil {
+		return err
+	}
+	for name, target := range map[string]*string{
+		"connect": &timeouts.Connect, "firstByte": &timeouts.FirstByte,
+		"idle": &timeouts.Idle, "total": &timeouts.Total,
+	} {
+		raw, ok := fields[name]
+		if !ok {
+			return ErrInvalid
+		}
+		if *target, err = compiledJSONString(raw); err != nil {
+			return err
+		}
+	}
+	if raw, ok := fields["responseHeader"]; ok {
+		timeouts.hasResponseHeader = true
+		if timeouts.ResponseHeader, err = compiledJSONString(raw); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type compiledModel struct {
@@ -363,17 +472,20 @@ type compiledFeature struct {
 		AbsoluteMaximumTokens int64 `json:"absoluteMaximumTokens"`
 	} `json:"output"`
 	Routes []struct {
-		ID                   string               `json:"id"`
-		When                 string               `json:"when"`
-		ModelID              string               `json:"model"`
-		Priority             int64                `json:"priority"`
-		Weight               int64                `json:"weight"`
-		StickyBy             string               `json:"stickyBy"`
-		FallbackOn           []string             `json:"fallbackOn"`
-		RetryPolicy          *compiledRetryPolicy `json:"retryPolicy"`
-		MaximumResponseBytes int64                `json:"maxResponseBytes"`
-		StreamingAllowed     bool                 `json:"streamingAllowed"`
-		RetryUnsafeMethods   bool                 `json:"retryUnsafeMethods"`
+		ID                        string                 `json:"id"`
+		When                      string                 `json:"when"`
+		ModelID                   string                 `json:"model"`
+		Priority                  int64                  `json:"priority"`
+		Weight                    int64                  `json:"weight"`
+		StickyBy                  string                 `json:"stickyBy"`
+		FallbackOn                []string               `json:"fallbackOn"`
+		RetryPolicy               *compiledRetryPolicy   `json:"retryPolicy"`
+		MaximumRequestBodyBytes   int64                  `json:"maxRequestBodyBytes"`
+		MaximumRequestHeaderBytes int64                  `json:"maxRequestHeaderBytes"`
+		MaximumResponseBytes      int64                  `json:"maxResponseBytes"`
+		Timeouts                  *compiledRouteTimeouts `json:"timeouts"`
+		StreamingAllowed          bool                   `json:"streamingAllowed"`
+		RetryUnsafeMethods        bool                   `json:"retryUnsafeMethods"`
 	} `json:"routes"`
 	OpaqueHTTP *struct {
 		AllowedMethods        []string `json:"allowedMethods"`
@@ -389,6 +501,54 @@ type compiledRetryPolicy struct {
 	MaximumBackoffMilliseconds int64    `json:"maximumBackoffMilliseconds"`
 	JitterRatio                float64  `json:"jitterRatio"`
 	RetryOn                    []string `json:"retryOn"`
+}
+
+type compiledRouteTimeouts struct {
+	Connect           string `json:"connect"`
+	ResponseHeader    string `json:"responseHeader"`
+	FirstByte         string `json:"firstByte"`
+	Idle              string `json:"idle"`
+	Total             string `json:"total"`
+	hasConnect        bool
+	hasResponseHeader bool
+	hasFirstByte      bool
+	hasIdle           bool
+	hasTotal          bool
+}
+
+func (timeouts *compiledRouteTimeouts) UnmarshalJSON(encoded []byte) error {
+	*timeouts = compiledRouteTimeouts{}
+	fields, err := strictRuntimeObject(encoded, map[string]struct{}{
+		"connect": {}, "responseHeader": {}, "firstByte": {}, "idle": {}, "total": {},
+	})
+	if err != nil || len(fields) == 0 {
+		return ErrInvalid
+	}
+	for name, target := range map[string]*string{
+		"connect": &timeouts.Connect, "responseHeader": &timeouts.ResponseHeader,
+		"firstByte": &timeouts.FirstByte, "idle": &timeouts.Idle, "total": &timeouts.Total,
+	} {
+		raw, ok := fields[name]
+		if !ok {
+			continue
+		}
+		if *target, err = compiledJSONString(raw); err != nil {
+			return err
+		}
+		switch name {
+		case "connect":
+			timeouts.hasConnect = true
+		case "responseHeader":
+			timeouts.hasResponseHeader = true
+		case "firstByte":
+			timeouts.hasFirstByte = true
+		case "idle":
+			timeouts.hasIdle = true
+		case "total":
+			timeouts.hasTotal = true
+		}
+	}
+	return nil
 }
 
 func (snapshot *ActiveSnapshot) loadRuntimeConfiguration(
@@ -648,21 +808,44 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 	}
 	authentication := UpstreamAuthentication{
 		Type: raw.Authentication.Type, SecretRef: raw.Authentication.SecretRef,
-		HeaderName: raw.Authentication.HeaderName,
+		HeaderName: raw.Authentication.HeaderName, Username: raw.Authentication.Username,
+	}
+	for _, header := range raw.Authentication.Headers {
+		authentication.Headers = append(authentication.Headers, UpstreamAuthenticationHeader{
+			HeaderName: header.HeaderName, SecretRef: header.SecretRef,
+		})
 	}
 	switch authentication.Type {
 	case "none":
-		if authentication.SecretRef != "" || authentication.HeaderName != "" {
+		if raw.Authentication.hasSecretRef || raw.Authentication.hasHeaderName ||
+			raw.Authentication.hasUsername || raw.Authentication.hasHeaders {
 			return Upstream{}, ErrInvalid
 		}
 	case "bearer":
-		if !runtimeSecretRefPattern.MatchString(authentication.SecretRef) || authentication.HeaderName != "" {
+		if !raw.Authentication.hasSecretRef || raw.Authentication.hasHeaderName ||
+			raw.Authentication.hasUsername || raw.Authentication.hasHeaders ||
+			!runtimeSecretRefPattern.MatchString(authentication.SecretRef) {
 			return Upstream{}, ErrInvalid
 		}
 	case "header":
-		if !runtimeSecretRefPattern.MatchString(authentication.SecretRef) ||
-			!runtimeHeaderNamePattern.MatchString(authentication.HeaderName) ||
+		if !raw.Authentication.hasSecretRef || !raw.Authentication.hasHeaderName ||
+			raw.Authentication.hasUsername || raw.Authentication.hasHeaders ||
+			!runtimeSecretRefPattern.MatchString(authentication.SecretRef) ||
+			len(authentication.HeaderName) > 256 || !runtimeHeaderNamePattern.MatchString(authentication.HeaderName) ||
 			runtimeCredentialHeaderForbidden(authentication.HeaderName) {
+			return Upstream{}, ErrInvalid
+		}
+	case "basic":
+		if !raw.Authentication.hasSecretRef || raw.Authentication.hasHeaderName ||
+			!raw.Authentication.hasUsername || raw.Authentication.hasHeaders ||
+			!runtimeSecretRefPattern.MatchString(authentication.SecretRef) ||
+			!runtimeBasicUsernameValid(authentication.Username) {
+			return Upstream{}, ErrInvalid
+		}
+	case "headers":
+		if raw.Authentication.hasSecretRef || raw.Authentication.hasHeaderName ||
+			raw.Authentication.hasUsername || !raw.Authentication.hasHeaders ||
+			!runtimeAuthenticationHeadersValid(authentication.Headers) {
 			return Upstream{}, ErrInvalid
 		}
 	default:
@@ -724,7 +907,7 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		canonical := http.CanonicalHeaderKey(name)
 		totalHeaderBytes += len(canonical) + len(value)
 		if !runtimeHeaderNamePattern.MatchString(name) || runtimeStaticHeaderForbidden(canonical) ||
-			(authentication.Type == "header" && canonical == http.CanonicalHeaderKey(authentication.HeaderName)) ||
+			runtimeAuthenticationUsesHeader(authentication, canonical) ||
 			!runtimeStaticHeaderValueValid(value) || totalHeaderBytes > 32<<10 {
 			return Upstream{}, ErrInvalid
 		}
@@ -752,19 +935,80 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 }
 
 func runtimeTimeouts(raw compiledUpstream) (UpstreamTimeouts, error) {
-	values := []string{raw.Timeouts.Connect, raw.Timeouts.FirstByte, raw.Timeouts.Idle, raw.Timeouts.Total}
-	parsed := make([]time.Duration, len(values))
-	for index, value := range values {
-		duration, err := parseConfigDuration(value)
-		if err != nil || duration <= 0 {
-			return UpstreamTimeouts{}, ErrInvalid
-		}
-		parsed[index] = duration
-	}
-	if parsed[3] > 10*time.Minute || parsed[0] > parsed[3] || parsed[1] > parsed[3] || parsed[2] > parsed[3] {
+	connect, connectErr := parsePositiveRuntimeDuration(raw.Timeouts.Connect)
+	legacyFirstByte, firstByteErr := parsePositiveRuntimeDuration(raw.Timeouts.FirstByte)
+	idle, idleErr := parsePositiveRuntimeDuration(raw.Timeouts.Idle)
+	total, totalErr := parsePositiveRuntimeDuration(raw.Timeouts.Total)
+	if connectErr != nil || firstByteErr != nil || idleErr != nil || totalErr != nil {
 		return UpstreamTimeouts{}, ErrInvalid
 	}
-	return UpstreamTimeouts{Connect: parsed[0], FirstByte: parsed[1], Idle: parsed[2], Total: parsed[3]}, nil
+	timeouts := UpstreamTimeouts{
+		Connect: connect, FirstByte: legacyFirstByte, Idle: idle, Total: total,
+	}
+	if raw.Timeouts.hasResponseHeader {
+		responseHeader, err := parsePositiveRuntimeDuration(raw.Timeouts.ResponseHeader)
+		if err != nil {
+			return UpstreamTimeouts{}, ErrInvalid
+		}
+		timeouts.ResponseHeader = responseHeader
+	} else {
+		// Compiled revisions created before responseHeader existed used
+		// firstByte for the transport's response-header wait and idle for the
+		// first body read. Preserve that behavior when loading them.
+		timeouts.ResponseHeader = legacyFirstByte
+		timeouts.FirstByte = idle
+	}
+	if !runtimeTimeoutsValid(timeouts) {
+		return UpstreamTimeouts{}, ErrInvalid
+	}
+	return timeouts, nil
+}
+
+func parsePositiveRuntimeDuration(value string) (time.Duration, error) {
+	duration, err := parseConfigDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, ErrInvalid
+	}
+	return duration, nil
+}
+
+func runtimeTimeoutsValid(timeouts UpstreamTimeouts) bool {
+	return timeouts.Connect > 0 && timeouts.ResponseHeader > 0 && timeouts.FirstByte > 0 &&
+		timeouts.Idle > 0 && timeouts.Total > 0 && timeouts.Total <= 10*time.Minute &&
+		timeouts.Connect <= timeouts.Total && timeouts.ResponseHeader <= timeouts.Total &&
+		timeouts.FirstByte <= timeouts.Total && timeouts.Idle <= timeouts.Total
+}
+
+func runtimeRouteTimeouts(raw *compiledRouteTimeouts, inherited UpstreamTimeouts) (*UpstreamTimeouts, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	effective := inherited
+	values := []struct {
+		has    bool
+		raw    string
+		target *time.Duration
+	}{
+		{has: raw.hasConnect, raw: raw.Connect, target: &effective.Connect},
+		{has: raw.hasResponseHeader, raw: raw.ResponseHeader, target: &effective.ResponseHeader},
+		{has: raw.hasFirstByte, raw: raw.FirstByte, target: &effective.FirstByte},
+		{has: raw.hasIdle, raw: raw.Idle, target: &effective.Idle},
+		{has: raw.hasTotal, raw: raw.Total, target: &effective.Total},
+	}
+	for _, value := range values {
+		if !value.has {
+			continue
+		}
+		parsed, err := parsePositiveRuntimeDuration(value.raw)
+		if err != nil {
+			return nil, ErrInvalid
+		}
+		*value.target = parsed
+	}
+	if !runtimeTimeoutsValid(effective) {
+		return nil, ErrInvalid
+	}
+	return &effective, nil
 }
 
 func runtimeModel(raw compiledModel) (Model, error) {
@@ -864,7 +1108,15 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		if !ok || !slices.Contains(model.Capabilities, raw.Protocol) {
 			return Feature{}, ErrInvalid
 		}
+		upstream, ok := snapshot.upstreams[model.UpstreamID]
+		if !ok {
+			return Feature{}, ErrInvalid
+		}
 		if !runtimeRetryConditionsValid(rawRoute.FallbackOn, false) {
+			return Feature{}, ErrInvalid
+		}
+		if rawRoute.MaximumRequestBodyBytes < 0 || rawRoute.MaximumRequestBodyBytes > 100<<20 ||
+			rawRoute.MaximumRequestHeaderBytes < 0 || rawRoute.MaximumRequestHeaderBytes > 32<<10 {
 			return Feature{}, ErrInvalid
 		}
 		if raw.Protocol == "opaque_http" {
@@ -878,14 +1130,21 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		if err != nil {
 			return Feature{}, ErrInvalid
 		}
+		routeTimeouts, err := runtimeRouteTimeouts(rawRoute.Timeouts, upstream.Timeouts)
+		if err != nil {
+			return Feature{}, ErrInvalid
+		}
 		feature.Routes = append(feature.Routes, Route{
 			ID: rawRoute.ID, When: rawRoute.When, ModelID: rawRoute.ModelID,
 			Priority: rawRoute.Priority, Weight: rawRoute.Weight, StickyBy: rawRoute.StickyBy,
-			FallbackOn:           append([]string(nil), rawRoute.FallbackOn...),
-			RetryPolicy:          retryPolicy,
-			MaximumResponseBytes: rawRoute.MaximumResponseBytes,
-			StreamingAllowed:     rawRoute.StreamingAllowed,
-			RetryUnsafeMethods:   rawRoute.RetryUnsafeMethods,
+			FallbackOn:                append([]string(nil), rawRoute.FallbackOn...),
+			RetryPolicy:               retryPolicy,
+			MaximumRequestBodyBytes:   rawRoute.MaximumRequestBodyBytes,
+			MaximumRequestHeaderBytes: rawRoute.MaximumRequestHeaderBytes,
+			MaximumResponseBytes:      rawRoute.MaximumResponseBytes,
+			Timeouts:                  routeTimeouts,
+			StreamingAllowed:          rawRoute.StreamingAllowed,
+			RetryUnsafeMethods:        rawRoute.RetryUnsafeMethods,
 		})
 	}
 	if raw.OpaqueHTTP != nil {
@@ -1044,6 +1303,53 @@ func runtimeStaticHeaderForbidden(name string) bool {
 	default:
 		return false
 	}
+}
+
+func runtimeBasicUsernameValid(username string) bool {
+	if len(username) == 0 || len(username) > 256 {
+		return false
+	}
+	for index := 0; index < len(username); index++ {
+		character := username[index]
+		if character < 0x21 || character > 0x7e || character == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeAuthenticationHeadersValid(headers []UpstreamAuthenticationHeader) bool {
+	if len(headers) < 1 || len(headers) > 8 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		canonical := http.CanonicalHeaderKey(header.HeaderName)
+		if len(header.HeaderName) > 256 || !runtimeHeaderNamePattern.MatchString(header.HeaderName) ||
+			runtimeCredentialHeaderForbidden(canonical) ||
+			!runtimeSecretRefPattern.MatchString(header.SecretRef) {
+			return false
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return false
+		}
+		seen[canonical] = struct{}{}
+	}
+	return true
+}
+
+func runtimeAuthenticationUsesHeader(authentication UpstreamAuthentication, canonical string) bool {
+	if authentication.Type == "header" {
+		return canonical == http.CanonicalHeaderKey(authentication.HeaderName)
+	}
+	if authentication.Type == "headers" {
+		for _, header := range authentication.Headers {
+			if canonical == http.CanonicalHeaderKey(header.HeaderName) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runtimeCredentialHeaderForbidden(name string) bool {

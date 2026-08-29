@@ -46,6 +46,7 @@ import (
 const (
 	defaultMaximumResponseBody            = int64(32 << 20)
 	maximumRequestBodyLimit               = protocol.MaximumMeasuredRequestBytes
+	maximumRequestHeaderLimit             = int64(32 << 10)
 	maximumResponseBodyLimit              = int64(100 << 20)
 	defaultClientWriteTimeout             = 30 * time.Second
 	defaultPersistenceTimeout             = 5 * time.Second
@@ -715,12 +716,18 @@ func (handler *Handler) prepareExecutionAttempt(
 	if err != nil {
 		return preparedExecutionAttempt{}, err
 	}
+	if err := enforceRouteRequestHeaderBound(attemptRequest, decision.Route.MaximumRequestHeaderBytes); err != nil {
+		return preparedExecutionAttempt{}, err
+	}
 	featureDecision, err := protocolFeatureDecision(endpoint, decision, validated)
 	if err != nil {
 		return preparedExecutionAttempt{}, err
 	}
 	appliedOutputMaximum, err := adapter.ApplyFeature(attemptRequest.Context(), attemptRequest, featureDecision)
 	if err != nil {
+		return preparedExecutionAttempt{}, err
+	}
+	if err := enforceRouteRequestBodyBound(attemptRequest, decision.Route.MaximumRequestBodyBytes); err != nil {
 		return preparedExecutionAttempt{}, err
 	}
 	if !validAppliedOutputMaximum(adapter.Capabilities(), validated, appliedOutputMaximum) {
@@ -916,7 +923,7 @@ func (handler *Handler) executeAttempt(
 	switch authentication.Type {
 	case "none":
 		return handler.dispatchAttempt(executionContext, writer, endpoint.adapter, decision, begin, dispatch)
-	case "bearer", "header":
+	case "bearer", "header", "basic":
 		var result executionResult
 		callbackCalled := false
 		secretErr := handler.secrets.Use(executionContext, secrets.Scope{
@@ -926,14 +933,20 @@ func (handler *Handler) executeAttempt(
 		}, authentication.SecretRef, func(credential []byte) error {
 			callbackCalled = true
 			credentialDispatch := func(beforeRoundTrip func() error, consume func(*upstream.DispatchedResponse) error) error {
-				if authentication.Type == "bearer" {
+				switch authentication.Type {
+				case "bearer":
 					return lease.WithBearerDispatchWithBeforeRoundTrip(
 						executionContext, prepared, credential, beforeRoundTrip, consume,
 					)
+				case "basic":
+					return lease.WithBasicDispatchWithBeforeRoundTrip(
+						executionContext, prepared, authentication.Username, credential, beforeRoundTrip, consume,
+					)
+				default:
+					return lease.WithHeaderDispatchWithBeforeRoundTrip(
+						executionContext, prepared, authentication.HeaderName, credential, beforeRoundTrip, consume,
+					)
 				}
-				return lease.WithHeaderDispatchWithBeforeRoundTrip(
-					executionContext, prepared, authentication.HeaderName, credential, beforeRoundTrip, consume,
-				)
 			}
 			result = handler.dispatchAttempt(
 				executionContext, writer, endpoint.adapter, decision, begin, credentialDispatch,
@@ -942,6 +955,40 @@ func (handler *Handler) executeAttempt(
 			// boundary; Store.Use intentionally collapses callback errors.
 			return nil
 		})
+		if secretErr != nil {
+			if !callbackCalled {
+				return executionResult{err: secretErr}
+			}
+			if result.err == nil {
+				result.err = secretErr
+			}
+		}
+		if !callbackCalled && secretErr == nil {
+			return executionResult{err: errDispatchNotConsumed}
+		}
+		return result
+	case "headers":
+		var result executionResult
+		callbackCalled, secretErr := useScopedHeaderCredentials(
+			executionContext,
+			handler.secrets,
+			secrets.Scope{
+				OrganizationID: authorization.OrganizationID,
+				ApplicationID:  authorization.ApplicationID,
+				EnvironmentID:  authorization.EnvironmentID,
+			},
+			authentication.Headers,
+			func(credentials []upstream.HeaderCredential) {
+				credentialDispatch := func(beforeRoundTrip func() error, consume func(*upstream.DispatchedResponse) error) error {
+					return lease.WithHeadersDispatchWithBeforeRoundTrip(
+						executionContext, prepared, credentials, beforeRoundTrip, consume,
+					)
+				}
+				result = handler.dispatchAttempt(
+					executionContext, writer, endpoint.adapter, decision, begin, credentialDispatch,
+				)
+			},
+		)
 		if secretErr != nil {
 			if !callbackCalled {
 				return executionResult{err: secretErr}
@@ -967,6 +1014,179 @@ func protocolForwardedHeaders(protocolID string, feature configuration.Feature) 
 		return []string{"Content-Type", "Anthropic-Version"}
 	}
 	return []string{"Content-Type"}
+}
+
+func enforceRouteRequestHeaderBound(request *http.Request, maximum int64) error {
+	if maximum == 0 {
+		return nil
+	}
+	if maximum < 0 || maximum > maximumRequestHeaderLimit {
+		return errTargetConfiguration
+	}
+	measured, err := canonicalRequestHeaderBytes(request)
+	if err != nil || measured > maximum {
+		return &protocol.Error{Code: "request_invalid", Detail: "request exceeds the configured route header bound"}
+	}
+	return nil
+}
+
+// canonicalRequestHeaderBytes measures a deterministic HTTP/1-style canonical
+// representation of already parsed request metadata. Host and a positive
+// Content-Length are represented from their authoritative request fields;
+// every header value is counted independently, followed by the terminal CRLF.
+func canonicalRequestHeaderBytes(request *http.Request) (int64, error) {
+	if request == nil || request.URL == nil || request.ContentLength < 0 {
+		return 0, errInvalidConfiguration
+	}
+	host := request.Host
+	if host == "" {
+		host = request.URL.Host
+	}
+	if host == "" || !validParsedRequestHeaderValue(host) {
+		return 0, errors.New("invalid parsed request host")
+	}
+
+	canonical := make(map[string][]string, len(request.Header)+2)
+	canonical["Host"] = []string{host}
+	for name, values := range request.Header {
+		if !validParsedRequestHeaderName(name) || len(values) == 0 ||
+			strings.EqualFold(name, "Host") || strings.EqualFold(name, "Content-Length") {
+			return 0, errors.New("invalid parsed request header")
+		}
+		canonicalName := http.CanonicalHeaderKey(name)
+		for _, value := range values {
+			if !validParsedRequestHeaderValue(value) {
+				return 0, errors.New("invalid parsed request header value")
+			}
+			canonical[canonicalName] = append(canonical[canonicalName], value)
+		}
+	}
+	if request.ContentLength > 0 {
+		canonical["Content-Length"] = []string{strconv.FormatInt(request.ContentLength, 10)}
+	}
+
+	names := make([]string, 0, len(canonical))
+	for name := range canonical {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	total := int64(2) // terminal CRLF
+	for _, name := range names {
+		values := append([]string(nil), canonical[name]...)
+		slices.Sort(values)
+		for _, value := range values {
+			lineBytes := int64(len(name) + 2 + len(value) + 2)
+			if lineBytes < 0 || total > math.MaxInt64-lineBytes {
+				return 0, errors.New("parsed request headers overflow")
+			}
+			total += lineBytes
+		}
+	}
+	return total, nil
+}
+
+func validParsedRequestHeaderName(name string) bool {
+	if name == "" || int64(len(name)) > maximumRequestHeaderLimit || strings.TrimSpace(name) != name {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character))) {
+			return false
+		}
+	}
+	return true
+}
+
+func validParsedRequestHeaderValue(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if (value[index] < 0x20 && value[index] != '\t') || value[index] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func enforceRouteRequestBodyBound(request *http.Request, maximum int64) error {
+	if maximum == 0 {
+		return nil
+	}
+	if request == nil || maximum < 0 || maximum > maximumRequestBodyLimit {
+		return errTargetConfiguration
+	}
+	if request.Body == nil || request.Body == http.NoBody {
+		if request.ContentLength != 0 {
+			return &protocol.Error{Code: "request_invalid", Detail: "rewritten request body metadata is invalid"}
+		}
+		reinstallRequestBody(request, nil)
+		return nil
+	}
+	body, readErr := io.ReadAll(io.LimitReader(request.Body, maximum+1))
+	closeErr := request.Body.Close()
+	if readErr != nil || closeErr != nil || int64(len(body)) > maximum {
+		clear(body)
+		return &protocol.Error{Code: "request_invalid", Detail: "request exceeds the configured route body bound"}
+	}
+	reinstallRequestBody(request, body)
+	return nil
+}
+
+// useScopedHeaderCredentials opens every configured secret boundary as a
+// nested synchronous callback. Consequently all plaintext values remain live
+// through dispatch and response close, but no value survives the callback
+// stack or enters target/cache state.
+func useScopedHeaderCredentials(
+	ctx context.Context,
+	store SecretStore,
+	scope secrets.Scope,
+	configured []configuration.UpstreamAuthenticationHeader,
+	consume func([]upstream.HeaderCredential),
+) (bool, error) {
+	if ctx == nil || nilDependency(store) || len(configured) < 1 || len(configured) > 8 || consume == nil {
+		return false, errTargetConfiguration
+	}
+	credentials := make([]upstream.HeaderCredential, len(configured))
+	defer func() {
+		for index := range credentials {
+			credentials[index] = upstream.HeaderCredential{}
+		}
+	}()
+
+	completed := false
+	var dependencyErr error
+	var load func(int)
+	load = func(index int) {
+		if dependencyErr != nil {
+			return
+		}
+		if index == len(configured) {
+			completed = true
+			consume(credentials)
+			return
+		}
+		callbackCalled := false
+		err := store.Use(ctx, scope, configured[index].SecretRef, func(material []byte) error {
+			callbackCalled = true
+			credentials[index] = upstream.HeaderCredential{
+				Name: configured[index].HeaderName, Value: material,
+			}
+			load(index + 1)
+			credentials[index] = upstream.HeaderCredential{}
+			// Store.Use deliberately collapses callback errors. Preserve nested
+			// dependency/transport outcomes out of band and keep this boundary nil.
+			return nil
+		})
+		if err != nil {
+			dependencyErr = err
+			return
+		}
+		if !callbackCalled {
+			dependencyErr = errDispatchNotConsumed
+		}
+	}
+	load(0)
+	return completed, dependencyErr
 }
 
 func (handler *Handler) dispatchAttempt(
@@ -1041,6 +1261,7 @@ func (handler *Handler) consumeResponse(
 	streamCtx, finishStream := handler.startStage(ctx, "streaming observation", attemptTelemetryLabels(decision))
 	var firstByteAt time.Time
 	outcome, err := handler.relayer.Relay(streamCtx, writer, response, observer, upstream.ResponseRelayConfig{
+		FirstByteTimeout:   decision.Upstream.Timeouts.FirstByte,
 		IdleTimeout:        decision.Upstream.Timeouts.Idle,
 		ClientWriteTimeout: handler.clientWriteTimeout,
 		MaxBodyBytes:       handler.maximumResponseBytes(decision),
@@ -1580,6 +1801,7 @@ func validateDecision(featureID string, decision policy.Decision, endpointProtoc
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
 		!validFallbackPolicy(decision.Route.FallbackOn) || !validRetryPolicy(decision.Route.RetryPolicy) ||
 		!validRouteProtocolPolicy(decision.Feature.Protocol, decision.Route) ||
+		!validEffectiveRouteTimeouts(decision.Route, decision.Upstream.Timeouts) ||
 		decision.Model.ID == "" ||
 		decision.Model.UpstreamID != decision.Upstream.ID || decision.Model.UpstreamModel == "" ||
 		endpointProtocol == "" || decision.Feature.Protocol != endpointProtocol ||
@@ -1764,10 +1986,18 @@ func validFeatureProtocolPolicy(feature configuration.Feature) bool {
 }
 
 func validRouteProtocolPolicy(protocolID string, route configuration.Route) bool {
+	if route.MaximumRequestBodyBytes < 0 || route.MaximumRequestBodyBytes > maximumRequestBodyLimit ||
+		route.MaximumRequestHeaderBytes < 0 || route.MaximumRequestHeaderBytes > maximumRequestHeaderLimit {
+		return false
+	}
 	if protocolID == protocol.OpaqueHTTPID {
 		return route.MaximumResponseBytes > 0 && route.MaximumResponseBytes <= maximumResponseBodyLimit
 	}
 	return route.MaximumResponseBytes == 0 && !route.StreamingAllowed && !route.RetryUnsafeMethods
+}
+
+func validEffectiveRouteTimeouts(route configuration.Route, effective configuration.UpstreamTimeouts) bool {
+	return route.Timeouts == nil || validTargetTimeouts(*route.Timeouts) && *route.Timeouts == effective
 }
 
 func protocolUsesOutputTokens(protocolID string) bool {

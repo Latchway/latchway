@@ -606,7 +606,7 @@ func (runner *productionCredentialSelfTests) dispatch(
 			return errors.New("protected upstream dispatch failed")
 		}
 		return consume(response)
-	case "bearer", "header":
+	case "bearer", "header", "basic":
 		callbackCalled := false
 		var consumeErr error
 		var transportErr error
@@ -620,11 +620,16 @@ func (runner *productionCredentialSelfTests) dispatch(
 				consumeErr = consume(response)
 				return nil
 			}
-			if authentication.Type == "bearer" {
+			switch authentication.Type {
+			case "bearer":
 				transportErr = lease.WithBearerDispatchWithBeforeRoundTrip(
 					ctx, prepared, credential, beforeRoundTrip, consumeResponse,
 				)
-			} else {
+			case "basic":
+				transportErr = lease.WithBasicDispatchWithBeforeRoundTrip(
+					ctx, prepared, authentication.Username, credential, beforeRoundTrip, consumeResponse,
+				)
+			default:
 				transportErr = lease.WithHeaderDispatchWithBeforeRoundTrip(
 					ctx, prepared, authentication.HeaderName, credential, beforeRoundTrip, consumeResponse,
 				)
@@ -636,9 +641,85 @@ func (runner *productionCredentialSelfTests) dispatch(
 			return errors.New("server-held upstream credential or dispatch is unavailable")
 		}
 		return nil
+	case "headers":
+		var consumeErr error
+		var transportErr error
+		callbackCalled, secretErr := useSelfTestHeaderCredentials(
+			ctx,
+			runner.secrets,
+			secrets.Scope{
+				OrganizationID: scope.OrganizationID,
+				ApplicationID:  scope.ApplicationID,
+				EnvironmentID:  scope.EnvironmentID,
+			},
+			authentication.Headers,
+			func(credentials []upstream.HeaderCredential) {
+				transportErr = lease.WithHeadersDispatchWithBeforeRoundTrip(
+					ctx, prepared, credentials, beforeRoundTrip, func(response *upstream.DispatchedResponse) error {
+						consumeErr = consume(response)
+						return nil
+					},
+				)
+			},
+		)
+		if secretErr != nil || !callbackCalled || transportErr != nil || consumeErr != nil {
+			return errors.New("server-held upstream credential or dispatch is unavailable")
+		}
+		return nil
 	default:
 		return errors.New("upstream authentication is invalid")
 	}
+}
+
+func useSelfTestHeaderCredentials(
+	ctx context.Context,
+	store dataplane.SecretStore,
+	scope secrets.Scope,
+	configured []configuration.UpstreamAuthenticationHeader,
+	consume func([]upstream.HeaderCredential),
+) (bool, error) {
+	if ctx == nil || isNilSelfTestDependency(store) || len(configured) < 1 || len(configured) > 8 || consume == nil {
+		return false, errors.New("upstream authentication is invalid")
+	}
+	credentials := make([]upstream.HeaderCredential, len(configured))
+	defer func() {
+		for index := range credentials {
+			credentials[index] = upstream.HeaderCredential{}
+		}
+	}()
+
+	completed := false
+	var dependencyErr error
+	var load func(int)
+	load = func(index int) {
+		if dependencyErr != nil {
+			return
+		}
+		if index == len(configured) {
+			completed = true
+			consume(credentials)
+			return
+		}
+		callbackCalled := false
+		err := store.Use(ctx, scope, configured[index].SecretRef, func(material []byte) error {
+			callbackCalled = true
+			credentials[index] = upstream.HeaderCredential{
+				Name: configured[index].HeaderName, Value: material,
+			}
+			load(index + 1)
+			credentials[index] = upstream.HeaderCredential{}
+			return nil
+		})
+		if err != nil {
+			dependencyErr = err
+			return
+		}
+		if !callbackCalled {
+			dependencyErr = errors.New("secret callback was not invoked")
+		}
+	}
+	load(0)
+	return completed, dependencyErr
 }
 
 func failedCredentialSelfTest(checks []selfTestCheck, name, detail string) credentialSelfTestResult {

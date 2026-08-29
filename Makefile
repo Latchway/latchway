@@ -49,6 +49,7 @@ fuzz-smoke:
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzActiveSnapshotCompilation$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzCompiledInputAccountingProfile$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzParseJSONRefillRateCanonicalRoundTrip$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/dataplane -run '^$$' -fuzz '^FuzzCanonicalRequestHeaderBytes$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzInspectAndRewrite$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzTrustedInputPreflight$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzUsageObservers$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)

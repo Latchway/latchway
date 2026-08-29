@@ -160,6 +160,7 @@ func TestMultipleHeaderCredentialScopeIsAtomicEphemeralAndBounded(t *testing.T) 
 		{name: "too many", credentials: nine},
 		{name: "duplicate case variant", credentials: []HeaderCredential{{Name: "X-Provider-Key", Value: []byte("one")}, {Name: "x-provider-key", Value: []byte("two")}}},
 		{name: "forbidden", credentials: []HeaderCredential{{Name: "Content-Type", Value: []byte("secret")}}},
+		{name: "oversized name", credentials: []HeaderCredential{{Name: "X" + strings.Repeat("a", 256), Value: []byte("secret")}}},
 		{name: "malformed value", credentials: []HeaderCredential{{Name: "X-Provider-Key", Value: []byte("secret\nvalue")}}},
 		{name: "preexisting collision", headers: http.Header{"X-Provider-Key": {"static"}}, credentials: []HeaderCredential{{Name: "x-provider-key", Value: []byte("secret")}}},
 		{name: "aggregate too large", credentials: []HeaderCredential{
@@ -228,6 +229,7 @@ func TestApplyConfiguredHeadersFailClosed(t *testing.T) {
 		{name: "header control", credential: []byte("secret"), headerName: "Content-Type"},
 		{name: "header Anthropic version", credential: []byte("secret"), headerName: "Anthropic-Version"},
 		{name: "header invalid name", credential: []byte("secret"), headerName: "X Provider Key"},
+		{name: "header oversized name", credential: []byte("secret"), headerName: "X" + strings.Repeat("a", 256)},
 		{name: "credential line break", credential: []byte("bad\nsecret"), headerName: "X-Provider-Key"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
