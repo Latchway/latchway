@@ -95,6 +95,8 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
   );
+  await page.getByLabel("Input price (nano-USD per million tokens)").fill("250000");
+  await page.getByLabel("Output price (nano-USD per million tokens)").fill("2000000");
   await page.getByRole("button", { name: "Create application and environment" }).click();
   await expect(page.getByRole("heading", { name: "Write-only upstream credential" })).toBeVisible();
   const generated = JSON.parse(await page.getByLabel("Full configuration JSON").inputValue()) as {
@@ -102,6 +104,9 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
       attestationPolicies: Array<{ platforms: Record<string, unknown> }>;
       inputAccountingProfiles: Array<Record<string, unknown>>;
       models: Array<Record<string, unknown>>;
+      pricingCatalogs: Array<Record<string, unknown>>;
+      upstreams: Array<Record<string, unknown>>;
+      limitPlans: Array<{ limits: Array<Record<string, unknown>> }>;
     };
   };
   expect(Object.keys(generated.spec.attestationPolicies[0]?.platforms ?? {}).sort()).toEqual([
@@ -120,8 +125,15 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   });
   expect(generated.spec.models[0]).toMatchObject({
     upstreamModel: "gpt-5-mini", capabilities: ["openai_responses"],
-    inputAccountingRef: "assistant_default_responses_accounting"
+    inputAccountingRef: "assistant_default_responses_accounting", pricingRef: "operator_pricing"
   });
+  expect(generated.spec.upstreams[0]).toMatchObject({ authentication: { type: "bearer", secretRef: "secret/primary_api_key" } });
+  expect(generated.spec.pricingCatalogs[0]).toMatchObject({ entries: [{ model: "assistant_default", inputNanoUsdPerMillion: 250000, outputNanoUsdPerMillion: 2000000 }] });
+  expect(generated.spec.limitPlans[0]?.limits).toEqual(expect.arrayContaining([
+    expect.objectContaining({ metric: "input_tokens", algorithm: "calendar", hard: true }),
+    expect.objectContaining({ metric: "total_tokens", algorithm: "calendar", hard: true }),
+    expect.objectContaining({ metric: "input_tokens", algorithm: "per_request", hard: true })
+  ]));
   const snippets = await page.locator("pre").allTextContents();
   expect(snippets).toHaveLength(3);
   expect(snippets.every((snippet) => snippet.includes(ids.application))).toBe(true);
@@ -138,8 +150,15 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await expect(page.getByLabel("Secret value")).toHaveValue("");
   await page.getByRole("button", { name: "Validate and activate with ETag" }).click();
   await expect(page.getByText(/is active/)).toBeVisible();
-  await page.getByRole("button", { name: "Run local self-test" }).click();
+  await page.getByRole("button", { name: "Run bounded upstream self-test" }).click();
   await expect(page.getByText(/Self-test .*passed/)).toBeVisible();
+  expect(fixture.selfTestBodies).toEqual([{
+    environment_id: ids.environment,
+    kind: "upstream",
+    max_cost_nano_usd: 10_000_000,
+    model: "assistant_default",
+    upstream: "primary"
+  }]);
   expect(fixture.revisionBodies).toHaveLength(1);
   expect(fixture.revisionBodies[0]).toEqual(expect.objectContaining({
     spec: expect.objectContaining({ models: expect.arrayContaining([

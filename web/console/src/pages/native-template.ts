@@ -14,7 +14,14 @@ export interface NativeTemplateInput {
   maximumFramingTokensPerRequest: number;
   maximumFramingTokensPerMessage: number;
   maximumContextTokens: number;
-  secretName?: string;
+  authentication: { type: "bearer"; secretName: string } | { type: "none" };
+  inputNanoUsdPerMillion: number;
+  outputNanoUsdPerMillion: number;
+  requestNanoUsd: number;
+  dailyInputTokenMaximum: number;
+  dailyOutputTokenMaximum: number;
+  dailyTotalTokenMaximum: number;
+  perRequestInputTokenMaximum: number;
 }
 
 export function buildNativeTemplate(input: NativeTemplateInput): string {
@@ -48,7 +55,9 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
       }],
       upstreams: [{
         id: "primary", type: "openai_compatible", baseUrl: input.upstreamURL,
-        authentication: input.secretName ? { type: "bearer", secretRef: `secret/${input.secretName}` } : { type: "none" }
+        authentication: input.authentication.type === "bearer"
+          ? { type: "bearer", secretRef: `secret/${input.authentication.secretName}` }
+          : { type: "none" }
       }],
       inputAccountingProfiles: [{
         id: "assistant_default_responses_accounting",
@@ -59,14 +68,25 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
         maximumFramingTokensPerMessage: input.maximumFramingTokensPerMessage,
         maximumContextTokens: input.maximumContextTokens
       }],
+      pricingCatalogs: [{
+        id: "operator_pricing", currency: "USD", entries: [{
+          model: "assistant_default",
+          inputNanoUsdPerMillion: input.inputNanoUsdPerMillion,
+          outputNanoUsdPerMillion: input.outputNanoUsdPerMillion,
+          requestNanoUsd: input.requestNanoUsd
+        }]
+      }],
       models: [{
         id: "assistant_default", upstream: "primary", upstreamModel: input.physicalModel,
-        capabilities: ["openai_responses"], inputAccountingRef: "assistant_default_responses_accounting"
+        capabilities: ["openai_responses"], inputAccountingRef: "assistant_default_responses_accounting",
+        pricingRef: "operator_pricing"
       }],
       limitPlans: [{ id: "standard", limits: [
         { metric: "logical_requests", algorithm: "calendar", scope: ["user", "feature"], window: "1d", maximum: 100, hard: true },
-        { metric: "output_tokens", algorithm: "calendar", scope: ["user", "feature"], window: "1d", maximum: 100000, hard: true },
-        { metric: "input_tokens", algorithm: "per_request", scope: ["user", "feature"], perRequestMaximum: 20000, hard: true }
+        { metric: "input_tokens", algorithm: "calendar", scope: ["user", "feature"], window: "1d", maximum: input.dailyInputTokenMaximum, hard: true },
+        { metric: "output_tokens", algorithm: "calendar", scope: ["user", "feature"], window: "1d", maximum: input.dailyOutputTokenMaximum, hard: true },
+        { metric: "total_tokens", algorithm: "calendar", scope: ["user", "feature"], window: "1d", maximum: input.dailyTotalTokenMaximum, hard: true },
+        { metric: "input_tokens", algorithm: "per_request", scope: ["user", "feature"], perRequestMaximum: input.perRequestInputTokenMaximum, hard: true }
       ] }],
       features: [{
         id: "assistant", protocol: "openai_responses", attestationPolicy: "native",

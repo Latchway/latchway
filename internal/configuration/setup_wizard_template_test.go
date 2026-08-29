@@ -25,6 +25,7 @@ func TestSetupWizardNativeTemplateIsActivatable(t *testing.T) {
 	}
 	environment := testEnvironment()
 	environment.ApplicationSlug = "mobile-app"
+	environment.SecretNames = map[string]struct{}{"primary_api_key": {}}
 	report, compiled := validator.Validate(document, environment, time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC))
 	if !report.Valid {
 		t.Fatalf("setup-wizard fixture cannot activate: %+v", report.Issues)

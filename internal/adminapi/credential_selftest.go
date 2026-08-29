@@ -14,13 +14,13 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
+	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dataplane"
@@ -144,6 +144,23 @@ func isNilSelfTestDependency(value any) bool {
 	}
 }
 
+func credentialSelfTestProtocol(model configuration.Model, kind string) (string, bool) {
+	capabilities := make(map[string]struct{}, len(model.Capabilities))
+	for _, capability := range model.Capabilities {
+		capabilities[capability] = struct{}{}
+	}
+	if kind == "openrouter" {
+		_, ok := capabilities[protocol.OpenAIChatID]
+		return protocol.OpenAIChatID, ok
+	}
+	for _, candidate := range []string{protocol.OpenAIResponsesID, protocol.OpenAIChatID} {
+		if _, ok := capabilities[candidate]; ok {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
 func (runner *productionCredentialSelfTests) Run(
 	ctx context.Context,
 	input credentialSelfTestInput,
@@ -170,24 +187,27 @@ func (runner *productionCredentialSelfTests) Run(
 		return failedCredentialSelfTest(checks, "selection", "The configured upstream was not found in the active revision.")
 	}
 	model, ok := snapshot.Model(input.ModelID)
-	if !ok || model.UpstreamID != configuredUpstream.ID ||
-		!slices.Contains(model.Capabilities, protocol.OpenAIChatID) {
-		return failedCredentialSelfTest(checks, "selection", "The configured model is not an OpenAI Chat model on the selected upstream.")
+	if !ok || model.UpstreamID != configuredUpstream.ID {
+		return failedCredentialSelfTest(checks, "selection", "The configured model is not on the selected upstream.")
+	}
+	protocolID, ok := credentialSelfTestProtocol(model, input.Kind)
+	if !ok {
+		return failedCredentialSelfTest(checks, "selection", "The configured model does not support a bounded OpenAI Responses or Chat self-test.")
 	}
 	if input.Kind == "openrouter" && !validOpenRouterTarget(configuredUpstream) {
 		return failedCredentialSelfTest(checks, "selection", "The selected target is not the canonical HTTPS OpenRouter API.")
 	}
 	checks = append(checks, passedSelfTestCheck("selection", "The active upstream and physical model selection is valid."))
 
-	profile, rates, source, err := credentialSelfTestAccounting(snapshot, model, runner.now().UTC())
+	profile, rates, source, err := credentialSelfTestAccounting(snapshot, model, protocolID, runner.now().UTC())
 	if err != nil {
 		return failedCredentialSelfTest(checks, "budget", "Trusted input accounting and active configured pricing are required.")
 	}
-	nonStreaming, err := prepareCredentialChatRequest(runCtx, model.UpstreamModel, profile, rates, source, false)
+	nonStreaming, err := prepareCredentialRequest(runCtx, protocolID, model.UpstreamModel, profile, rates, source, false)
 	if err != nil {
 		return failedCredentialSelfTest(checks, "budget", "The non-streaming request could not be bounded before dispatch.")
 	}
-	streaming, err := prepareCredentialChatRequest(runCtx, model.UpstreamModel, profile, rates, source, true)
+	streaming, err := prepareCredentialRequest(runCtx, protocolID, model.UpstreamModel, profile, rates, source, true)
 	if err != nil {
 		return failedCredentialSelfTest(checks, "budget", "The streaming request could not be bounded before dispatch.")
 	}
@@ -204,13 +224,13 @@ func (runner *productionCredentialSelfTests) Run(
 		checks = append(checks, passedSelfTestCheck("key", "OpenRouter accepted the server-held credential and reported sufficient access."))
 	}
 
-	nonStreamingUsage, err := runner.dispatchChat(runCtx, input.Scope, configuredUpstream, nonStreaming)
+	nonStreamingUsage, err := runner.dispatchCredentialRequest(runCtx, input.Scope, configuredUpstream, nonStreaming)
 	if err != nil {
 		return failedCredentialSelfTest(checks, "non_streaming", "The bounded non-streaming provider request failed.")
 	}
 	checks = append(checks, passedSelfTestCheck("non_streaming", "A bounded non-streaming request completed with provider usage."))
 
-	streamingUsage, err := runner.dispatchChat(runCtx, input.Scope, configuredUpstream, streaming)
+	streamingUsage, err := runner.dispatchCredentialRequest(runCtx, input.Scope, configuredUpstream, streaming)
 	if err != nil {
 		return failedCredentialSelfTest(checks, "streaming", "The bounded streaming provider request or final usage frame failed.")
 	}
@@ -231,67 +251,90 @@ func (runner *productionCredentialSelfTests) Run(
 		passedSelfTestCheck("output_clamp", "Both provider requests honored the one-token server clamp."),
 	)
 
-	if err := runner.verifyProviderErrorNormalization(runCtx, input.Scope, configuredUpstream); err != nil {
+	if err := runner.verifyProviderErrorNormalization(
+		runCtx, input.Scope, configuredUpstream, nonStreaming.publicPath, nonStreaming.providerPath,
+	); err != nil {
 		return failedCredentialSelfTest(checks, "error_normalization", "The provider error normalization probe failed.")
 	}
 	checks = append(checks, passedSelfTestCheck("error_normalization", "A malformed provider request was reduced to a body-free safe rejection class."))
 	return credentialSelfTestResult{State: "passed", Checks: checks}
 }
 
-type preparedCredentialChat struct {
+type preparedCredentialRequest struct {
 	request         *http.Request
-	adapter         openaichat.Adapter
+	adapter         protocol.Adapter
+	providerPath    string
+	publicPath      string
 	maximumCostNano int64
 	inputMaximum    int64
 	outputMaximum   int64
 	totalMaximum    int64
 }
 
-func prepareCredentialChatRequest(
+func prepareCredentialRequest(
 	ctx context.Context,
+	protocolID string,
 	physicalModel string,
 	profile protocol.TrustedInputProfile,
 	rates pricing.Rates,
 	source pricing.Source,
 	stream bool,
-) (preparedCredentialChat, error) {
-	body, err := json.Marshal(map[string]any{
-		"model": physicalModel,
-		"messages": []map[string]string{{
-			"role": "user", "content": "Reply with OK.",
-		}},
-		"stream":     stream,
-		"max_tokens": 1,
-	})
+) (preparedCredentialRequest, error) {
+	var bodyValue map[string]any
+	var adapter protocol.Adapter
+	var preflighter protocol.InputPreflighter
+	var publicPath, providerPath string
+	switch protocolID {
+	case protocol.OpenAIResponsesID:
+		value := openairesponses.Adapter{MaximumBodyBytes: 64 << 10}
+		adapter, preflighter = value, value
+		publicPath, providerPath = protocol.OpenAIResponsesPublicPath, protocol.OpenAIResponsesProviderPath
+		bodyValue = map[string]any{
+			"model": physicalModel, "input": "Reply with OK.",
+			"stream": stream, "max_output_tokens": 1,
+		}
+	case protocol.OpenAIChatID:
+		value := openaichat.Adapter{MaximumBodyBytes: 64 << 10}
+		adapter, preflighter = value, value
+		publicPath, providerPath = protocol.OpenAIChatPublicPath, protocol.OpenAIChatProviderPath
+		bodyValue = map[string]any{
+			"model":    physicalModel,
+			"messages": []map[string]string{{"role": "user", "content": "Reply with OK."}},
+			"stream":   stream, "max_tokens": 1,
+		}
+	default:
+		return preparedCredentialRequest{}, errors.New("self-test protocol is unsupported")
+	}
+	body, err := json.Marshal(bodyValue)
 	if err != nil {
-		return preparedCredentialChat{}, err
+		return preparedCredentialRequest{}, err
 	}
 	request, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, "https://latchway.invalid/v1/chat/completions", bytes.NewReader(body),
+		ctx, http.MethodPost, "https://latchway.invalid"+publicPath, bytes.NewReader(body),
 	)
 	if err != nil {
-		return preparedCredentialChat{}, err
+		return preparedCredentialRequest{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	adapter := openaichat.Adapter{MaximumBodyBytes: 64 << 10}
 	applied, err := adapter.ApplyFeature(ctx, request, protocol.FeatureDecision{
 		PhysicalModel: physicalModel, DefaultOutputTokens: 1, MaximumOutputTokens: 1,
 	})
 	if err != nil || applied != 1 {
-		return preparedCredentialChat{}, errors.New("self-test output clamp is unavailable")
+		return preparedCredentialRequest{}, errors.New("self-test output clamp is unavailable")
 	}
-	preflight, err := adapter.PreflightInput(ctx, request, profile)
+	preflight, err := preflighter.PreflightInput(ctx, request, profile)
 	if err != nil || preflight.OutputTokenBound != applied {
-		return preparedCredentialChat{}, errors.New("self-test trusted input preflight failed")
+		return preparedCredentialRequest{}, errors.New("self-test trusted input preflight failed")
 	}
 	worst, err := pricing.Calculate(rates, pricing.Usage{
 		InputTokens: preflight.InputTokenBound, OutputTokens: applied,
 	}, source)
 	if err != nil || !worst.Known() {
-		return preparedCredentialChat{}, errors.New("self-test cost calculation failed")
+		return preparedCredentialRequest{}, errors.New("self-test cost calculation failed")
 	}
-	return preparedCredentialChat{
+	return preparedCredentialRequest{
 		request: request, adapter: adapter, maximumCostNano: worst.CostNanoUSD(),
+		providerPath: providerPath, publicPath: publicPath,
 		inputMaximum: preflight.InputTokenBound, outputMaximum: applied,
 		totalMaximum: preflight.TotalTokenBound,
 	}, nil
@@ -300,13 +343,14 @@ func prepareCredentialChatRequest(
 func credentialSelfTestAccounting(
 	snapshot credentialSelfTestSnapshot,
 	model configuration.Model,
+	protocolID string,
 	now time.Time,
 ) (protocol.TrustedInputProfile, pricing.Rates, pricing.Source, error) {
 	if model.PricingRef == "" || model.InputAccountingRef == "" {
 		return protocol.TrustedInputProfile{}, pricing.Rates{}, pricing.Source{}, errors.New("accounting references are required")
 	}
 	profile, ok := snapshot.InputAccountingProfile(model.InputAccountingRef)
-	if !ok || profile.Protocol != protocol.OpenAIChatID || profile.PhysicalModel != model.UpstreamModel {
+	if !ok || profile.Protocol != protocolID || profile.PhysicalModel != model.UpstreamModel {
 		return protocol.TrustedInputProfile{}, pricing.Rates{}, pricing.Source{}, errors.New("trusted input profile is unavailable")
 	}
 	catalog, ok := snapshot.PricingCatalog(model.PricingRef)
@@ -352,28 +396,28 @@ func validOpenRouterTarget(configured configuration.Upstream) bool {
 	return strings.TrimSuffix(parsed.Path, "/") == "/api/v1"
 }
 
-func (runner *productionCredentialSelfTests) dispatchChat(
+func (runner *productionCredentialSelfTests) dispatchCredentialRequest(
 	ctx context.Context,
 	scope configuration.TenantScope,
 	configured configuration.Upstream,
-	prepared preparedCredentialChat,
+	prepared preparedCredentialRequest,
 ) (protocol.Usage, error) {
 	var usage protocol.Usage
 	err := runner.dispatch(ctx, scope, configured, prepared.request,
-		protocol.OpenAIChatProviderPath, []string{"Content-Type"}, func(response *upstream.DispatchedResponse) error {
-			observed, observeErr := observeCredentialChatResponse(ctx, prepared.adapter, response)
+		prepared.providerPath, []string{"Content-Type"}, func(response *upstream.DispatchedResponse) error {
+			observed, observeErr := observeCredentialResponse(ctx, prepared.adapter, response)
 			usage = observed
 			return observeErr
 		})
 	if err != nil || !validReportedSelfTestUsage(usage) {
-		return protocol.Usage{}, errors.New("credential self-test chat dispatch failed")
+		return protocol.Usage{}, errors.New("credential self-test protocol dispatch failed")
 	}
 	return usage, nil
 }
 
-func observeCredentialChatResponse(
+func observeCredentialResponse(
 	ctx context.Context,
-	adapter openaichat.Adapter,
+	adapter protocol.Adapter,
 	response *upstream.DispatchedResponse,
 ) (protocol.Usage, error) {
 	if response == nil || response.Response == nil || response.Body == nil {
@@ -513,15 +557,20 @@ func (runner *productionCredentialSelfTests) verifyProviderErrorNormalization(
 	ctx context.Context,
 	scope configuration.TenantScope,
 	configured configuration.Upstream,
+	publicPath string,
+	providerPath string,
 ) error {
+	if publicPath == "" || providerPath == "" {
+		return errors.New("provider error normalization path is unavailable")
+	}
 	request, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, "https://latchway.invalid/v1/chat/completions", strings.NewReader(`{"model":}`),
+		ctx, http.MethodPost, "https://latchway.invalid"+publicPath, strings.NewReader(`{"model":}`),
 	)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	return runner.dispatch(ctx, scope, configured, request, protocol.OpenAIChatProviderPath,
+	return runner.dispatch(ctx, scope, configured, request, providerPath,
 		[]string{"Content-Type"}, func(response *upstream.DispatchedResponse) error {
 			if response == nil || response.Response == nil || response.Body == nil {
 				return errors.New("provider error response is unavailable")

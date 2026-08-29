@@ -89,6 +89,68 @@ func TestProductionCredentialSelfTestsOpenRouter(t *testing.T) {
 	}
 }
 
+func TestProductionCredentialSelfTestsOpenAIResponses(t *testing.T) {
+	t.Parallel()
+	scope := configuration.TenantScope{
+		OrganizationID: id.Must(id.Organization),
+		ApplicationID:  id.Must(id.Application),
+		EnvironmentID:  id.Must(id.Environment),
+	}
+	snapshot := credentialSelfTestSnapshotFixture{
+		revision: id.Must(id.ConfigRevision),
+		upstream: configuration.Upstream{
+			ID: "primary", Type: "openai_compatible", BaseURL: "https://api.openai.com/v1",
+			Authentication: configuration.UpstreamAuthentication{Type: "none"},
+		},
+		model: configuration.Model{
+			ID: "assistant_default", UpstreamID: "primary", UpstreamModel: "operator-model",
+			PricingRef: "operator_prices", InputAccountingRef: "responses_input",
+			Capabilities: []string{protocol.OpenAIChatID, protocol.OpenAIResponsesID},
+		},
+		profile: configuration.InputAccountingProfile{
+			ID: "responses_input", Protocol: protocol.OpenAIResponsesID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "operator-model", MaximumFramingTokensPerRequest: 2,
+			MaximumFramingTokensPerMessage: 2, MaximumContextTokens: 4096,
+		},
+		catalog: configuration.PricingCatalog{
+			ID: "operator_prices", Currency: "USD",
+			Entries: []configuration.PricingEntry{{
+				ModelID: "assistant_default", InputNanoUSDPerMillion: 1_000_000,
+				OutputNanoUSDPerMillion: 2_000_000, RequestNanoUSD: 3,
+			}},
+		},
+	}
+	targets := &credentialSelfTestTargetFixture{responses: []credentialSelfTestResponseFixture{
+		{path: "/responses", status: http.StatusOK, contentType: "application/json", body: `{"id":"resp_1","usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}`},
+		{path: "/responses", status: http.StatusOK, contentType: "text/event-stream", body: "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":6,\"output_tokens\":1,\"total_tokens\":7}}}\n\n"},
+		{path: "/responses", status: http.StatusBadRequest, contentType: "application/json", body: `{"error":{"message":"must never enter the result"}}`},
+	}}
+	runner, err := newProductionCredentialSelfTests(
+		credentialSelfTestSnapshotLoaderFixture{snapshot: snapshot},
+		&credentialSelfTestSecretFixture{}, targets,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
+	result := runner.Run(context.Background(), credentialSelfTestInput{
+		Scope: scope, Kind: "upstream", UpstreamID: "primary", ModelID: "assistant_default",
+		MaxCostNano: 10_000_000,
+	})
+	if result.State != "passed" || len(result.Checks) != 8 {
+		t.Fatalf("Run() = %+v", result)
+	}
+	for _, check := range result.Checks {
+		if check.State != "passed" || check.SafeDetail == "" || strings.Contains(check.SafeDetail, "must never") {
+			t.Fatalf("unsafe or failed check: %+v", check)
+		}
+	}
+	if targets.acquisitions != 3 || targets.remaining() != 0 {
+		t.Fatalf("target acquisitions=%d remaining=%d", targets.acquisitions, targets.remaining())
+	}
+}
+
 func TestProductionCredentialSelfTestsFailBeforeDispatch(t *testing.T) {
 	t.Parallel()
 	snapshot := credentialSelfTestSnapshotFixture{

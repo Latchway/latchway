@@ -1,1 +1,146 @@
-{"apiVersion":"latchway.dev/v1alpha1","kind":"EnvironmentConfig","metadata":{"organization":"example","application":"mobile-app","environment":"production","description":"React Native iOS and Android production gateway"},"spec":{"identityProviders":[{"id":"firebase","type":"firebase","projectId":"example-mobile"}],"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required","minimumTrustLevel":"app_verified","appAttest":{"appIdPrefix":"TEAM1234","bundleId":"com.example.mobile","environment":"production","allowedValidationCategories":[1],"allowedBundleVersions":["2.3.4"]}},"android":{"provider":"play_integrity","mode":"required","minimumTrustLevel":"device_verified","playIntegrity":{"packageName":"com.example.mobile","cloudProjectNumber":123456789,"certificateSha256Digests":["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],"minimumDeviceIntegrity":"device","requireLicensed":true,"allowTestingResponses":false,"minimumVersionCode":1,"maximumVersionCode":0,"credentialSource":"metadata"}},"react_native_ios":{"provider":"app_attest","mode":"required","minimumTrustLevel":"app_verified","appAttest":{"appIdPrefix":"TEAM1234","bundleId":"com.example.mobile","environment":"production","allowedValidationCategories":[1],"allowedBundleVersions":["2.3.4"]}},"react_native_android":{"provider":"play_integrity","mode":"required","minimumTrustLevel":"device_verified","playIntegrity":{"packageName":"com.example.mobile","cloudProjectNumber":123456789,"certificateSha256Digests":["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],"minimumDeviceIntegrity":"device","requireLicensed":true,"allowTestingResponses":false,"minimumVersionCode":1,"maximumVersionCode":0,"credentialSource":"metadata"}}}}],"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.openai.com/v1","authentication":{"type":"none"}}],"inputAccountingProfiles":[{"id":"assistant_default_responses_accounting","protocol":"openai_responses","method":"utf8_byte_bpe_declared_framing_v1","physicalModel":"operator-reviewed-model","maximumFramingTokensPerRequest":13,"maximumFramingTokensPerMessage":7,"maximumContextTokens":131072}],"models":[{"id":"assistant_default","upstream":"primary","upstreamModel":"operator-reviewed-model","capabilities":["openai_responses"],"inputAccountingRef":"assistant_default_responses_accounting"}],"limitPlans":[{"id":"standard","limits":[{"metric":"logical_requests","algorithm":"calendar","scope":["user","feature"],"window":"1d","maximum":100,"hard":true},{"metric":"output_tokens","algorithm":"calendar","scope":["user","feature"],"window":"1d","maximum":100000,"hard":true},{"metric":"input_tokens","algorithm":"per_request","scope":["user","feature"],"perRequestMaximum":20000,"hard":true}]}],"features":[{"id":"assistant","protocol":"openai_responses","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'standard'"},"output":{"defaultMaximumTokens":800,"absoluteMaximumTokens":2000},"routes":[{"id":"primary","when":"true","model":"assistant_default","priority":10}]}]}}
+{
+  "apiVersion": "latchway.dev/v1alpha1",
+  "kind": "EnvironmentConfig",
+  "metadata": {
+    "organization": "example",
+    "application": "mobile-app",
+    "environment": "production",
+    "description": "React Native iOS and Android production gateway"
+  },
+  "spec": {
+    "identityProviders": [
+      { "id": "firebase", "type": "firebase", "projectId": "example-mobile" }
+    ],
+    "attestationPolicies": [
+      {
+        "id": "native",
+        "platforms": {
+          "ios": {
+            "provider": "app_attest",
+            "mode": "required",
+            "minimumTrustLevel": "app_verified",
+            "appAttest": {
+              "appIdPrefix": "TEAM1234",
+              "bundleId": "com.example.mobile",
+              "environment": "production",
+              "allowedValidationCategories": [1],
+              "allowedBundleVersions": ["2.3.4"]
+            }
+          },
+          "android": {
+            "provider": "play_integrity",
+            "mode": "required",
+            "minimumTrustLevel": "device_verified",
+            "playIntegrity": {
+              "packageName": "com.example.mobile",
+              "cloudProjectNumber": 123456789,
+              "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
+              "minimumDeviceIntegrity": "device",
+              "requireLicensed": true,
+              "allowTestingResponses": false,
+              "minimumVersionCode": 1,
+              "maximumVersionCode": 0,
+              "credentialSource": "metadata"
+            }
+          },
+          "react_native_ios": {
+            "provider": "app_attest",
+            "mode": "required",
+            "minimumTrustLevel": "app_verified",
+            "appAttest": {
+              "appIdPrefix": "TEAM1234",
+              "bundleId": "com.example.mobile",
+              "environment": "production",
+              "allowedValidationCategories": [1],
+              "allowedBundleVersions": ["2.3.4"]
+            }
+          },
+          "react_native_android": {
+            "provider": "play_integrity",
+            "mode": "required",
+            "minimumTrustLevel": "device_verified",
+            "playIntegrity": {
+              "packageName": "com.example.mobile",
+              "cloudProjectNumber": 123456789,
+              "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
+              "minimumDeviceIntegrity": "device",
+              "requireLicensed": true,
+              "allowTestingResponses": false,
+              "minimumVersionCode": 1,
+              "maximumVersionCode": 0,
+              "credentialSource": "metadata"
+            }
+          }
+        }
+      }
+    ],
+    "upstreams": [
+      {
+        "id": "primary",
+        "type": "openai_compatible",
+        "baseUrl": "https://api.openai.com/v1",
+        "authentication": { "type": "bearer", "secretRef": "secret/primary_api_key" }
+      }
+    ],
+    "inputAccountingProfiles": [
+      {
+        "id": "assistant_default_responses_accounting",
+        "protocol": "openai_responses",
+        "method": "utf8_byte_bpe_declared_framing_v1",
+        "physicalModel": "operator-reviewed-model",
+        "maximumFramingTokensPerRequest": 13,
+        "maximumFramingTokensPerMessage": 7,
+        "maximumContextTokens": 131072
+      }
+    ],
+    "pricingCatalogs": [
+      {
+        "id": "operator_pricing",
+        "currency": "USD",
+        "entries": [
+          {
+            "model": "assistant_default",
+            "inputNanoUsdPerMillion": 250000,
+            "outputNanoUsdPerMillion": 2000000,
+            "requestNanoUsd": 0
+          }
+        ]
+      }
+    ],
+    "models": [
+      {
+        "id": "assistant_default",
+        "upstream": "primary",
+        "upstreamModel": "operator-reviewed-model",
+        "capabilities": ["openai_responses"],
+        "inputAccountingRef": "assistant_default_responses_accounting",
+        "pricingRef": "operator_pricing"
+      }
+    ],
+    "limitPlans": [
+      {
+        "id": "standard",
+        "limits": [
+          { "metric": "logical_requests", "algorithm": "calendar", "scope": ["user", "feature"], "window": "1d", "maximum": 100, "hard": true },
+          { "metric": "input_tokens", "algorithm": "calendar", "scope": ["user", "feature"], "window": "1d", "maximum": 75000, "hard": true },
+          { "metric": "output_tokens", "algorithm": "calendar", "scope": ["user", "feature"], "window": "1d", "maximum": 25000, "hard": true },
+          { "metric": "total_tokens", "algorithm": "calendar", "scope": ["user", "feature"], "window": "1d", "maximum": 100000, "hard": true },
+          { "metric": "input_tokens", "algorithm": "per_request", "scope": ["user", "feature"], "perRequestMaximum": 20000, "hard": true }
+        ]
+      }
+    ],
+    "features": [
+      {
+        "id": "assistant",
+        "protocol": "openai_responses",
+        "attestationPolicy": "native",
+        "access": { "expression": "principal.authenticated" },
+        "limitPlan": { "expression": "'standard'" },
+        "output": { "defaultMaximumTokens": 800, "absoluteMaximumTokens": 2000 },
+        "routes": [
+          { "id": "primary", "when": "true", "model": "assistant_default", "priority": 10 }
+        ]
+      }
+    ]
+  }
+}
