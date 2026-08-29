@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "manifest_version": 1,
   "contract_version": "0.5.1",
-  "contract_status": "draft",
+  "contract_status": "released",
   "wire_protocol": {
     "current": 1,
     "supported": [1],
@@ -65,5 +65,6 @@
     "protocol_version": "X-Latchway-Protocol-Version",
     "request_id": "X-Latchway-Request-ID"
   },
-  "sdk_kinds": ["ios", "android", "javascript", "react-native"]
+  "sdk_kinds": ["ios", "android", "javascript", "react-native"],
+  "released_at": "2026-08-29T07:14:27Z"
 }
