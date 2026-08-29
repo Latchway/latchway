@@ -26,6 +26,7 @@ SPEC.loader.exec_module(MODULE)
 COMMIT = "a" * 40
 HASH = "b" * 64
 DOCUMENT_HASH = "c" * 64
+PROMOTION_HASH = "7" * 64
 TAG = "v1.0.0"
 OCI = f"ghcr.io/latchway/latchway@sha256:{HASH}"
 
@@ -103,8 +104,8 @@ class RenderCompletionReportTests(unittest.TestCase):
             "kind": "latchway_security_command_result",
             "check": "source_race",
             "candidate_commit": COMMIT,
-            "started_at": "2026-08-29T00:01:00Z",
-            "finished_at": "2026-08-29T00:02:00Z",
+            "started_at": "2026-08-29T01:01:00Z",
+            "finished_at": "2026-08-29T01:02:00Z",
             "tool": {"name": "go", "version": "go1.27.0"},
             "argv": ["go", "test", "-race", "-json", "-count=1", "./..."],
             "execution_context": {
@@ -129,11 +130,17 @@ class RenderCompletionReportTests(unittest.TestCase):
                 "commit": COMMIT,
                 "intended_tag": TAG,
                 "version": "1.0.0",
+                "candidate_created_at": "2026-08-29T01:00:00Z",
                 "contract": {"version": "0.5.1", "bundle_sha256": HASH},
                 "image": {
                     "repository": "ghcr.io/latchway/latchway",
                     "index_digest": f"sha256:{HASH}",
                 },
+            },
+            "evidence_window": {
+                "started_at": "2026-08-29T01:01:00Z",
+                "finished_at": "2026-08-29T01:03:00Z",
+                "maximum_age_seconds": 604800,
             },
             "checks": [
                 {
@@ -166,8 +173,16 @@ class RenderCompletionReportTests(unittest.TestCase):
                 "id": identifier,
                 "required": True,
                 "status": "passed",
-                "started_at": "2026-08-29T01:00:00Z",
-                "finished_at": "2026-08-29T01:01:00Z",
+                "started_at": (
+                    "2026-08-29T02:01:00Z"
+                    if identifier in {"public_tags", "public_registries"}
+                    else "2026-08-29T01:00:00Z"
+                ),
+                "finished_at": (
+                    "2026-08-29T02:02:00Z"
+                    if identifier in {"public_tags", "public_registries"}
+                    else "2026-08-29T01:01:00Z"
+                ),
                 "document_sha256": DOCUMENT_HASH,
                 "oci_image_digest": OCI,
                 "artifact_sha256": [HASH],
@@ -195,7 +210,8 @@ class RenderCompletionReportTests(unittest.TestCase):
             "repositories": self.repositories,
             "evidence_window": {
                 "started_at": "2026-08-29T01:00:00Z",
-                "finished_at": "2026-08-29T01:01:00Z",
+                "finished_at": "2026-08-29T02:02:00Z",
+                "maximum_age_seconds": 604800,
             },
             "evidence_domains": domains,
             "checks": [
@@ -216,17 +232,38 @@ class RenderCompletionReportTests(unittest.TestCase):
             "core_commit": COMMIT,
             "core_tag": TAG,
             "tag_object_sha": "9" * 40,
+            "promotion_evidence_sha256": PROMOTION_HASH,
             "github_release": {
                 "id": 42,
                 "url": f"https://github.com/Latchway/latchway/releases/tag/{TAG}",
                 "tag_name": TAG,
+                "name": f"Latchway {TAG}",
+                "body": (
+                    f"Immutable Latchway product release {TAG}.\n\n"
+                    f"Candidate commit: {COMMIT}\n"
+                    "Promotion evidence SHA-256: "
+                ),
                 "draft": False,
                 "prerelease": False,
                 "immutable": True,
                 "published_at": "2026-08-29T02:00:00Z",
                 "release_attestation_sha256": "",
+                "assets": [
+                    {
+                        "id": index + 1,
+                        "name": name,
+                        "size": 1,
+                        "digest": f"sha256:{index:064x}",
+                    }
+                    for index, name in enumerate(
+                        sorted(MODULE.CORE_PRODUCT_RELEASE_ASSETS), start=1
+                    )
+                ],
             },
             "oci_image_digest": OCI,
+            "oci_aliases": MODULE.canonical_oci_aliases(
+                self.repositories, self.candidate["image"]
+            ),
             "registries": MODULE.canonical_registries(self.repositories, OCI),
         }
         self.paths = {}
@@ -256,6 +293,11 @@ class RenderCompletionReportTests(unittest.TestCase):
         )
         self.rewrite("publication", self.publication)
         self.build_durable_evidence()
+        self.publication["github_release"]["body"] += PROMOTION_HASH
+        for asset in self.publication["github_release"]["assets"]:
+            if asset["name"] == "latchway-cross-repository-promotion.json":
+                asset["digest"] = "sha256:" + PROMOTION_HASH
+        self.rewrite("publication", self.publication)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -332,13 +374,58 @@ class RenderCompletionReportTests(unittest.TestCase):
             )
             if domain == "physical_devices":
                 artifacts = self.build_physical_domain_artifacts(external)
+            if domain == "public_registries":
+                compatibility_proofs = {
+                    "artifacts--registry-npm-javascript--tool-output.json": {
+                        "registry": "npm",
+                        "package": "@latchway/client",
+                        "compatibility": {"minimum_node": "24.19.0"},
+                    },
+                    "artifacts--registry-npm-react-native--tool-output.json": {
+                        "registry": "npm",
+                        "package": "@latchway/react-native",
+                        "compatibility": {
+                            "minimum_node": "24.19.0",
+                            "react_native": "0.82.x",
+                            "minimum_ios": "15.0",
+                            "minimum_android_api": 24,
+                        },
+                    },
+                    "artifacts--registry-cocoapods--tool-output.json": {
+                        "registry": "cocoapods",
+                        "compatibility": {"minimum_ios": "15.0"},
+                    },
+                    "artifacts--registry-maven-central--tool-output.json": {
+                        "registry": "maven_central",
+                        "compatibility": {"minimum_android_api": 23},
+                    },
+                }
+                for name, value in compatibility_proofs.items():
+                    path = external / f"artifacts/public-registries/{name}"
+                    self.write_json(path, value)
+                    artifacts.append(
+                        {
+                            "path": path.relative_to(external).as_posix(),
+                            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        }
+                    )
+            started_at = (
+                "2026-08-29T02:01:00Z"
+                if domain in {"public_tags", "public_registries"}
+                else "2026-08-29T01:00:00Z"
+            )
+            finished_at = (
+                "2026-08-29T02:02:00Z"
+                if domain in {"public_tags", "public_registries"}
+                else "2026-08-29T01:01:00Z"
+            )
             document = {
                 "schema_version": 1,
                 "kind": "latchway_cross_repository_external_evidence",
                 "domain": domain,
                 "status": "passed",
-                "started_at": "2026-08-29T01:00:00Z",
-                "finished_at": "2026-08-29T01:01:00Z",
+                "started_at": started_at,
+                "finished_at": finished_at,
                 "core_commit": COMMIT,
                 "core_release": TAG,
                 "contract_version": "0.5.1",
@@ -644,6 +731,103 @@ class RenderCompletionReportTests(unittest.TestCase):
             '{"schema_version":1,"schema_version":1}\n', encoding="utf-8"
         )
         with self.assertRaisesRegex(MODULE.ReportError, "json_duplicate_key"):
+            self.render()
+
+    def test_rejects_impossible_or_reversed_evidence_times(self) -> None:
+        candidate = copy.deepcopy(self.candidate)
+        candidate["created_at"] = "2026-02-30T01:00:00Z"
+        self.rewrite("candidate", candidate)
+        with self.assertRaisesRegex(MODULE.ReportError, "candidate_identity_mismatch"):
+            self.render()
+
+        self.rewrite("candidate", self.candidate)
+        conformance = copy.deepcopy(self.conformance)
+        domain = next(
+            item
+            for item in conformance["evidence_domains"]
+            if item["id"] == "live_provider"
+        )
+        domain["started_at"] = "2026-08-29T01:02:00Z"
+        domain["finished_at"] = "2026-08-29T01:01:00Z"
+        self.rewrite("conformance", conformance)
+        with self.assertRaisesRegex(MODULE.ReportError, "domain_proof_invalid"):
+            self.render()
+
+    def test_rejects_public_registry_evidence_that_predates_publication(self) -> None:
+        conformance = copy.deepcopy(self.conformance)
+        for domain in conformance["evidence_domains"]:
+            if domain["id"] in {"public_tags", "public_registries"}:
+                domain["started_at"] = "2026-08-29T01:50:00Z"
+                domain["finished_at"] = "2026-08-29T01:55:00Z"
+        conformance["evidence_window"]["finished_at"] = "2026-08-29T01:55:00Z"
+        self.rewrite("conformance", conformance)
+        with self.assertRaisesRegex(
+            MODULE.ReportError, "post_publication_evidence_invalid"
+        ):
+            self.render()
+
+    def test_rejects_unproved_compatibility_or_security_prose(self) -> None:
+        metadata_path = self.repository / "docs/release/final-report-metadata.json"
+        retained_path = (
+            self.durable_evidence_root / "source/final-report-metadata.json"
+        )
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["compatibility"]["minimum_platform_versions"][
+            "javascript_sdk"
+        ] = "Node.js 99.0.0"
+        self.write_json(metadata_path, metadata)
+        self.write_json(retained_path, metadata)
+        with self.assertRaisesRegex(
+            MODULE.ReportError, "compatibility_metadata_mismatch"
+        ):
+            self.render()
+
+        canonical = json.loads(
+            (ROOT / "docs/release/final-report-metadata.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        canonical["security_statement"]["prompt_logging_defaults"] = (
+            "Prompts may be logged."
+        )
+        self.write_json(metadata_path, canonical)
+        with self.assertRaisesRegex(MODULE.ReportError, "security_metadata_mismatch"):
+            self.render()
+
+    def test_rejects_product_release_asset_set_substitution(self) -> None:
+        publication = copy.deepcopy(self.publication)
+        publication["github_release"]["assets"].append(
+            {
+                "id": 999,
+                "name": "unexpected.txt",
+                "size": 1,
+                "digest": "sha256:" + "a" * 64,
+            }
+        )
+        self.rewrite("publication", publication)
+        with self.assertRaisesRegex(
+            MODULE.ReportError, "github_release_assets_invalid"
+        ):
+            self.render()
+
+        publication = copy.deepcopy(self.publication)
+        publication["promotion_evidence_sha256"] = "f" * 64
+        publication["github_release"]["body"] = (
+            f"Immutable Latchway product release {TAG}.\n\n"
+            f"Candidate commit: {COMMIT}\n"
+            f"Promotion evidence SHA-256: {'f' * 64}"
+        )
+        self.rewrite("publication", publication)
+        with self.assertRaisesRegex(MODULE.ReportError, "promotion_hash_invalid"):
+            self.render()
+
+    def test_rejects_oci_moving_alias_drift(self) -> None:
+        publication = copy.deepcopy(self.publication)
+        publication["oci_aliases"]["references"]["latest"]["digest"] = (
+            "sha256:" + "f" * 64
+        )
+        self.rewrite("publication", publication)
+        with self.assertRaisesRegex(MODULE.ReportError, "oci_aliases_invalid"):
             self.render()
 
 

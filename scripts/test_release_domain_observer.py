@@ -102,8 +102,24 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "react_native": "React Native SDK",
         }
         responses = []
+        release_id = 10
         for repository_id in ("core", "javascript", "ios", "android", "react_native"):
             coordinate = observer.identity["repositories"][repository_id]
+            expected_assets, adoption_required = observer._expected_release_assets(
+                repository_id, coordinate["version"]
+            )
+            names = sorted(expected_assets)
+            if adoption_required:
+                names.append("npm-release-adoption-123-1.json")
+            assets = [
+                {
+                    "id": index + 1,
+                    "name": name,
+                    "size": 1,
+                    "digest": "sha256:" + f"{index + 1:064x}",
+                }
+                for index, name in enumerate(names)
+            ]
             responses.extend((
                 json.dumps({"ref": "refs/tags/v1.0.0", "object": {"type": "tag", "sha": "f" * 40}}).encode(),
                 json.dumps({
@@ -115,8 +131,26 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                         else f"{titles[repository_id]} v1.0.0\n\nCore promotion: v1.0.0\nPromotion evidence SHA-256: {promotion_hash}"
                     ),
                 }).encode(),
-                json.dumps({"tag_name": "v1.0.0", "draft": False, "prerelease": False, "immutable": True}).encode(),
+                json.dumps({
+                    "id": release_id,
+                    "tag_name": "v1.0.0",
+                    "name": (
+                        "Latchway v1.0.0" if repository_id == "core" else "SDK v1.0.0"
+                    ),
+                    "body": (
+                        "Immutable Latchway product release v1.0.0.\n\n"
+                        f"Candidate commit: {coordinate['commit']}\n"
+                        f"Promotion evidence SHA-256: {promotion_hash}"
+                        if repository_id == "core"
+                        else "Immutable SDK release."
+                    ),
+                    "draft": False,
+                    "prerelease": False,
+                    "immutable": True,
+                    "assets": assets,
+                }).encode(),
             ))
+            release_id += 1
         attestation = b'{"verification":"passed"}\n'
         with mock.patch.object(observer, "_gh_json", side_effect=responses), mock.patch.object(
             observer, "_verify_release_attestation", return_value=attestation
@@ -690,12 +724,28 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 json.dumps(tag_object).encode(), tag, commit
             )
         release = {
+            "id": 42,
             "tag_name": tag,
             "draft": False,
             "prerelease": False,
             "immutable": True,
         }
         MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
+        exact = {
+            **release,
+            "name": "Latchway v1.0.0",
+            "body": "pinned body",
+        }
+        MODULE.Observer._validate_release(
+            json.dumps(exact).encode(), tag,
+            expected_name="Latchway v1.0.0", expected_body="pinned body",
+        )
+        exact["body"] = "attacker-controlled notes"
+        with self.assertRaisesRegex(MODULE.ObservationError, "github_release_invalid"):
+            MODULE.Observer._validate_release(
+                json.dumps(exact).encode(), tag,
+                expected_name="Latchway v1.0.0", expected_body="pinned body",
+            )
         release["prerelease"] = True
         with self.assertRaisesRegex(MODULE.ObservationError, "github_release_invalid"):
             MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
@@ -709,13 +759,25 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         verified = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b'{"verified":true}\n', stderr=b""
         )
+        release = {
+            "id": 42,
+            "tag_name": "v1.0.0",
+            "draft": False,
+            "immutable": True,
+            "assets": [],
+        }
         with mock.patch.dict(os.environ, {"GH_TOKEN": "test-token"}), mock.patch.object(
             MODULE.shutil, "which", return_value="/usr/bin/gh"
-        ), mock.patch.object(MODULE.subprocess, "run", return_value=verified) as run:
+        ), mock.patch.object(MODULE.subprocess, "run", return_value=verified) as run, mock.patch.object(
+            MODULE.RELEASE_ATTESTATION, "validate_bytes", return_value={"status": "passed"}
+        ):
             payload = observer._verify_release_attestation(
-                "Latchway/latchway", "v1.0.0"
+                "Latchway/latchway", "v1.0.0", "f" * 40, release
             )
-        self.assertEqual(payload, verified.stdout)
+        self.assertEqual(
+            payload,
+            MODULE.canonical_json({"status": "passed"}),
+        )
         command = run.call_args.args[0]
         self.assertEqual(
             command[1:],
@@ -738,14 +800,15 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         ), mock.patch.object(MODULE.subprocess, "run", return_value=rejected), self.assertRaisesRegex(
             MODULE.ObservationError, "github_release_attestation_invalid"
         ):
-            observer._verify_release_attestation("Latchway/latchway", "v1.0.0")
+            observer._verify_release_attestation(
+                "Latchway/latchway", "v1.0.0", "f" * 40, release
+            )
 
     def test_public_registry_validators_reject_coordinate_tampering(self) -> None:
         coordinate = {"version": "1.0.0", "commit": "a" * 40}
         npm = {
             "name": "@latchway/client",
             "version": "1.0.0",
-            "gitHead": "a" * 40,
             "dist": {
                 "integrity": "sha512-"
                 + base64.b64encode(b"published-archive".ljust(64, b"x")).decode()
@@ -754,7 +817,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         MODULE.Observer._validate_npm(
             json.dumps(npm).encode(), "@latchway/client", coordinate
         )
-        npm["gitHead"] = "b" * 40
+        npm["version"] = "1.0.1"
         with self.assertRaisesRegex(MODULE.ObservationError, "registry_npm_invalid"):
             MODULE.Observer._validate_npm(
                 json.dumps(npm).encode(), "@latchway/client", coordinate
@@ -780,6 +843,203 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             MODULE.Observer._validate_swift_resolution(
                 json.dumps(swift).encode(), coordinate
             )
+
+    def test_npm_provenance_origin_may_fail_but_adoption_must_succeed(self) -> None:
+        run = {
+            "id": 41,
+            "run_attempt": 1,
+            "event": "repository_dispatch",
+            "status": "completed",
+            "conclusion": "failure",
+            "head_sha": "a" * 40,
+            "head_branch": "main",
+            "path": ".github/workflows/release.yml",
+            "repository": {"full_name": "Latchway/latchway-js"},
+        }
+        MODULE.Observer._validate_npm_workflow_run(
+            run,
+            "Latchway/latchway-js",
+            "a" * 40,
+            41,
+            1,
+            conclusions={"success", "failure", "cancelled", "timed_out"},
+        )
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "registry_npm_provenance_run_invalid"
+        ):
+            MODULE.Observer._validate_npm_workflow_run(
+                run,
+                "Latchway/latchway-js",
+                "a" * 40,
+                41,
+                1,
+                conclusions={"success"},
+            )
+        run["conclusion"] = "success"
+        MODULE.Observer._validate_npm_workflow_run(
+            run,
+            "Latchway/latchway-js",
+            "a" * 40,
+            41,
+            1,
+            conclusions={"success"},
+        )
+
+    def test_exact_sdk_release_asset_sets_reject_unknown_missing_and_no_adoption(self) -> None:
+        expected, adoption_required = MODULE.Observer._expected_release_assets(
+            "javascript", "1.0.0"
+        )
+        names = sorted(expected) + ["npm-release-adoption-7-2.json"]
+        release = {
+            "id": 42,
+            "tag_name": "v1.0.0",
+            "draft": False,
+            "prerelease": False,
+            "immutable": True,
+            "assets": [
+                {"id": index + 1, "name": name, "size": 1, "digest": "sha256:" + f"{index + 1:064x}"}
+                for index, name in enumerate(names)
+            ],
+        }
+        MODULE.Observer._validate_release(
+            json.dumps(release).encode(), "v1.0.0",
+            expected_assets=expected, adoption_required=adoption_required,
+        )
+        for mutation in ("unknown", "missing", "no-adoption"):
+            changed = copy.deepcopy(release)
+            if mutation == "unknown":
+                changed["assets"].append({"id": 99, "name": "evil.json", "size": 1, "digest": "sha256:" + "f" * 64})
+            elif mutation == "missing":
+                changed["assets"] = [item for item in changed["assets"] if item["name"] != "package-evidence.json"]
+            else:
+                changed["assets"] = [item for item in changed["assets"] if not item["name"].startswith("npm-release-adoption-")]
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                MODULE.ObservationError, "github_release_asset_set_invalid"
+            ):
+                MODULE.Observer._validate_release(
+                    json.dumps(changed).encode(), "v1.0.0",
+                    expected_assets=expected, adoption_required=adoption_required,
+                )
+
+    def test_android_release_schema_tracks_canonical_portal_assets_and_intent(self) -> None:
+        version = "1.0.0"
+        coordinate = {
+            "version": version,
+            "tag": "v1.0.0",
+            "commit": "d" * 40,
+        }
+        expected, adoption_required = MODULE.Observer._expected_release_assets(
+            "android", version
+        )
+        self.assertFalse(adoption_required)
+        self.assertEqual(
+            expected,
+            {
+                "latchway-android-1.0.0-maven-repository.zip",
+                "latchway-android-1.0.0-central-portal.zip",
+                "SHA256SUMS",
+                "github-release-tag-binding.json",
+                "latchway-maven-signing-public-key.asc",
+                "maven-central-upload-intent.json",
+                "maven-central-deployment.json",
+                "maven-central-deployment-status.json",
+                "maven-central-release-evidence.json",
+            },
+        )
+        repository_archive = b"reviewed repository"
+        portal_archive = b"signed portal bundle"
+        public_key = b"public key"
+        purls = sorted(
+            f"pkg:maven/dev.latchway/{module}@{version}"
+            for module in (
+                "latchway-core",
+                "latchway-okhttp",
+                "latchway-play-integrity",
+                "latchway-firebase-auth",
+                "latchway-bom",
+            )
+        )
+        intent = {
+            "schema": "latchway.maven-central-upload-intent.v1",
+            "repository": "Latchway/latchway-android",
+            "source_commit": coordinate["commit"],
+            "release_tag": coordinate["tag"],
+            "version": version,
+            "namespace": "dev.latchway",
+            "publishing_type": "user_managed",
+            "authorization": "recoverable_exact_upload",
+            "reviewed_repository_archive_sha256": hashlib.sha256(
+                repository_archive
+            ).hexdigest(),
+            "reviewed_portal_bundle_sha256": hashlib.sha256(
+                portal_archive
+            ).hexdigest(),
+            "reviewed_public_key_sha256": hashlib.sha256(public_key).hexdigest(),
+            "expected_purls": purls,
+        }
+
+        def encoded(value: object) -> bytes:
+            return (json.dumps(value, sort_keys=True) + "\n").encode()
+
+        intent_bytes = encoded(intent)
+        deployment = {
+            "schema": "latchway.maven-central-deployment.v1",
+            "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "source_commit": coordinate["commit"],
+            "version": version,
+            "expected_purls": purls,
+            "deployment_id": "12345678-1234-1234-1234-123456789abc",
+        }
+        deployment_bytes = encoded(deployment)
+        status = {
+            "schema": "latchway.maven-central-deployment-status.v1",
+            "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
+            "deployment_id": deployment["deployment_id"],
+            "deployment_state": "PUBLISHED",
+            "purls": purls,
+        }
+        status_bytes = encoded(status)
+        proof = {
+            "deployment": {
+                "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+                "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
+                "status_sha256": hashlib.sha256(status_bytes).hexdigest(),
+                "record": deployment,
+                "status": status,
+            }
+        }
+        tag_binding = {
+            "schema": "latchway.github-release-tag-binding.v1",
+            "tag": coordinate["tag"],
+            "tag_object_sha": "e" * 40,
+            "commit": coordinate["commit"],
+            "message_sha256": "f" * 64,
+        }
+        assets = {
+            "latchway-android-1.0.0-maven-repository.zip": {
+                "bytes": repository_archive
+            },
+            "latchway-android-1.0.0-central-portal.zip": {
+                "bytes": portal_archive
+            },
+            "latchway-maven-signing-public-key.asc": {"bytes": public_key},
+            "maven-central-upload-intent.json": {"bytes": intent_bytes},
+            "maven-central-deployment.json": {"bytes": deployment_bytes},
+            "maven-central-deployment-status.json": {"bytes": status_bytes},
+            "maven-central-release-evidence.json": {"bytes": encoded(proof)},
+            "github-release-tag-binding.json": {"bytes": encoded(tag_binding)},
+        }
+        MODULE.Observer._validate_android_release_documents(assets, coordinate)
+        changed = copy.deepcopy(assets)
+        legacy = copy.deepcopy(intent)
+        legacy["publishing_type"] = "automatic"
+        legacy["authorization"] = "single_upload_only"
+        changed["maven-central-upload-intent.json"]["bytes"] = encoded(legacy)
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "registry_maven_deployment_evidence_invalid"
+        ):
+            MODULE.Observer._validate_android_release_documents(changed, coordinate)
 
     def test_live_sdk_run_and_artifact_metadata_reject_every_substitution(self) -> None:
         metadata = {

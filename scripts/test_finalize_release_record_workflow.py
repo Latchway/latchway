@@ -57,7 +57,7 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
 
     def test_attested_release_evidence_precedes_render_and_mutation(self) -> None:
         immutable_support = self.names.index(
-            "Preflight immutable evidence-release support"
+            "Preflight protected immutable-release settings for every release repository"
         )
         provenance = self.names.index("Authenticate every fixed evidence run and attempt")
         attestations = self.names.index(
@@ -91,6 +91,14 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(self.text.count('--source-ref refs/heads/main'), 6)
         self.assertGreaterEqual(self.text.count('--source-digest "$CANDIDATE_COMMIT"'), 6)
         self.assertGreaterEqual(self.text.count('--signer-digest "$CANDIDATE_COMMIT"'), 6)
+        immutable_script = self.steps[immutable_support]["run"]
+        self.assertIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", self.text)
+        self.assertEqual(
+            immutable_script.count('"repos/$repository/immutable-releases"'), 1
+        )
+        self.assertIn('(keys | sort) == ["enabled", "enforced_by_owner"]', immutable_script)
+        self.assertIn(".enabled == true", immutable_script)
+        self.assertIn('(.enforced_by_owner | type) == "boolean"', immutable_script)
 
     def test_public_coordinates_are_derived_and_independently_checked(self) -> None:
         for value in (
@@ -104,7 +112,9 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             'docker buildx imagetools inspect --raw "$image"',
             'gh attestation verify "oci://$image"',
             'npm --userconfig=/dev/null view "@latchway/client@$javascript_version"',
-            '.gitHead == $commit',
+            '._npmUser.trustedPublisher.id == "github"',
+            '.dist.signatures | type == "array" and length > 0',
+            '.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"',
             '"dev.latchway:latchway-bom:" + $android',
             'scripts/render-completion-report.py',
             'scripts/verify-public-registry-proof.py',
@@ -117,6 +127,12 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             '--evidence-tag "evidence/$RELEASE_TAG"',
             '.immutable == true',
             'gh release verify "$RELEASE_TAG"',
+            "verify-github-release-attestation.py",
+            "fixed-product-release-assets.txt",
+            "expected-product-release-assets.txt",
+            "release_attestation_sha256",
+            "promotion_evidence_sha256",
+            "assets: $release_assets",
         ):
             self.assertIn(value, self.text)
         self.assertNotIn("registry_coordinates", self.workflow["on"]["workflow_dispatch"]["inputs"])
@@ -171,6 +187,13 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         self.assertIn('.immutable == true', publish)
         self.assertIn('gh release verify "$evidence_tag"', publish)
         self.assertIn('gh release verify-asset "$evidence_tag"', publish)
+        self.assertIn("pre-publish-evidence-tag-ref.json", publish)
+        self.assertIn("pre-publish-final-evidence-assets.txt", publish)
+        self.assertIn("expected-final-evidence-assets.txt", publish)
+        self.assertIn("verify-github-release-attestation.py", publish)
+        self.assertIn("If-None-Match:", publish)
+        self.assertIn("--expected-status 304", publish)
+        self.assertNotIn("If-Match:", publish)
         self.assertNotIn('gh release upload "$RELEASE_TAG"', self.text)
         for forbidden in ("--clobber", "gh release delete", "git push --force", "continue-on-error"):
             self.assertNotIn(forbidden, self.text)

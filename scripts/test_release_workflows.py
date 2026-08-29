@@ -35,6 +35,54 @@ def all_steps(workflow: dict) -> list[dict]:
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_sensitive_github_cli_operations_require_fixed_version_first(self) -> None:
+        sensitive = ("gh release verify", "gh attestation verify")
+        guarded: list[str] = []
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            offsets = [text.index(command) for command in sensitive if command in text]
+            if not offsets:
+                continue
+            guarded.append(path.name)
+            self.assertIn("require-gh-version.py", text, path.name)
+            self.assertLess(text.index("require-gh-version.py"), min(offsets), path.name)
+        self.assertEqual(
+            guarded,
+            [
+                "aggregate-release-evidence.yml",
+                "cloud-deployment-aggregate.yml",
+                "cross-repository-conformance.yml",
+                "deployment-evidence.yml",
+                "finalize-release-record.yml",
+                "operational-resilience-evidence.yml",
+                "promote-release.yml",
+                "release-domain-evidence.yml",
+                "release-domain-observations.yml",
+                "release-failure-evidence.yml",
+                "release-load-evidence.yml",
+                "security.yml",
+            ],
+        )
+        observer = (ROOT / "scripts/release-domain-observer.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("require_github_cli()", observer)
+        self.assertLess(
+            observer.index("require_github_cli()\n        observer = Observer"),
+            observer.index("observer.observe()"),
+        )
+        for script_name, guarded_branch in (
+            ("deployment-evidence.py", 'if args.command == "finalize":'),
+            ("release-domain-evidence.py", "if arguments.output_directory is None:"),
+        ):
+            script = (ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+            self.assertIn("GH_VERSION.installed_version()", script, script_name)
+            self.assertLess(
+                script.index("GH_VERSION.installed_version()", script.index(guarded_branch)),
+                script.index("finalize(", script.index(guarded_branch)),
+                script_name,
+            )
+
     def test_candidate_workflow_cannot_publish_stable_coordinates(self) -> None:
         workflow = load_workflow("release.yml")
         self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
@@ -68,17 +116,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "Preflight immutable releases and every fixed core release asset"
         )
         existing_tag = names.index("Verify any existing core release tag")
-        oci_promotion = names.index("Promote only the verified index digest to stable OCI tags")
         tag_creation = names.index("Create the evidence-gated annotated core tag")
+        draft = names.index("Prepare the recoverable product release draft and exact assets")
+        oci_promotion = names.index("Promote only the verified index digest to stable OCI tags")
         release_creation = names.index("Publish the immutable release record")
         sdk_dispatch = names.index("Dispatch exact evidence-bound SDK publications")
         self.assertLess(candidate_attestation, bindings)
         self.assertLess(bindings, image_provenance)
         self.assertLess(image_provenance, immutable_preflight)
         self.assertLess(immutable_preflight, existing_tag)
-        self.assertLess(existing_tag, oci_promotion)
-        self.assertLess(oci_promotion, tag_creation)
-        self.assertLess(tag_creation, release_creation)
+        self.assertLess(existing_tag, tag_creation)
+        self.assertLess(tag_creation, draft)
+        self.assertLess(draft, oci_promotion)
+        self.assertLess(oci_promotion, release_creation)
         self.assertLess(release_creation, sdk_dispatch)
 
         serialized = (WORKFLOWS / "promote-release.yml").read_text(encoding="utf-8")
@@ -91,9 +141,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--deny-self-hosted-runners", serialized)
         self.assertIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", serialized)
         self.assertIn("repos/$repository/immutable-releases", serialized)
+        self.assertIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", serialized)
+        self.assertIn('(keys | sort) == ["enabled", "enforced_by_owner"]', serialized)
         self.assertIn('gh release create "$INTENDED_TAG" --draft', serialized)
         self.assertIn('.immutable == true', serialized)
         self.assertIn('gh release verify "$INTENDED_TAG"', serialized)
+        self.assertIn("verify-github-release-attestation.py", serialized)
+        self.assertIn("If-None-Match:", serialized)
+        self.assertIn("--expected-status 304", serialized)
+        self.assertNotIn("If-Match:", serialized)
+        self.assertNotIn("--generate-notes", serialized)
         self.assertNotIn("continue-on-error", serialized)
 
     def test_cross_repository_promotion_is_mandatory_and_attested(self) -> None:

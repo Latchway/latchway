@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -179,6 +180,35 @@ PHYSICAL_OBSERVATIONS = {
 REMAINING_WORK_CATEGORIES = frozenset(
     {"post_1_0_enhancement", "documented_non_goal", "low_severity_accepted_risk"}
 )
+CORE_PRODUCT_RELEASE_ASSETS = frozenset(
+    {
+        "latchway-cross-repository-promotion.json",
+        "latchway-cross-repository-promotion.attestation.sigstore.json",
+        "latchway-candidate.json",
+        "latchway-candidate.attestation.sigstore.json",
+        "latchway-contract.tar.gz",
+        "latchway-linux-amd64.spdx.json",
+        "latchway-linux-arm64.spdx.json",
+        "latchway-linux-amd64-vulnerability.json",
+        "latchway-linux-arm64-vulnerability.json",
+        "latchway-linux-amd64-license.json",
+        "latchway-linux-arm64-license.json",
+        "security-summary.json",
+        "security-summary.attestation.sigstore.json",
+        "oci-alias-promotion.json",
+    }
+)
+CANONICAL_SECURITY_STATEMENT: Mapping[str, Any] = {
+    "known_accepted_risks": [
+        "Web App Check and Turnstile verdicts are intentionally treated as lower-trust risk signals than native hardware-backed attestation.",
+        "An upstream provider can retain request content under its own account policy after Latchway dispatches an authorized request.",
+    ],
+    "prompt_logging_defaults": "Prompt and response body logging is disabled. Normal request, usage, audit, and telemetry records exclude prompt bodies, provider credentials, identity tokens, attestation evidence, and DPoP proofs.",
+    "secret_storage_behavior": "Committed and activated configuration stores bounded secret references, never plaintext upstream or identity-provider credentials. Runtime secret values are resolved only by the configured secret provider and are redacted from Admin responses, logs, audit records, and release evidence.",
+    "key_rotation_behavior": "The worker rotates gateway signing keys with an overlap window, keeps previously issued sessions verifiable through the retained public keys, audits rotation, and supports operator-triggered rotation and retirement.",
+    "attestation_limitations": "Production App Attest and Play Integrity prove the configured application and device verdicts for a bound challenge; they do not prove a human identity, and availability remains subject to the platform provider and eligible hardware.",
+    "web_threat_model_limitations": "Web clients cannot provide Secure Enclave or StrongBox-equivalent identity. Firebase App Check and Turnstile are combined with identity, DPoP, origin/action/hostname binding, replay controls, rate limits, and server-owned policy rather than treated as native device proof.",
+}
 
 
 class ReportError(Exception):
@@ -241,6 +271,16 @@ def require_string(value: Any, pattern: re.Pattern[str], code: str) -> str:
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
         raise ReportError(code)
     return value
+
+
+def parse_utc(value: Any, code: str) -> datetime:
+    if not isinstance(value, str) or UTC.fullmatch(value) is None:
+        raise ReportError(code)
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise ReportError(code) from None
+    return parsed.replace(tzinfo=timezone.utc)
 
 
 def sha256_file(
@@ -339,7 +379,9 @@ def regular_tree(root: Path, code: str) -> dict[str, Path]:
     return result
 
 
-def validate_report_metadata(repository: Path) -> Mapping[str, Any]:
+def validate_report_metadata(
+    repository: Path, derived_platforms: Mapping[str, str] | None = None
+) -> Mapping[str, Any]:
     metadata = read_json(repository / "docs/release/final-report-metadata.json")
     require_fields(
         metadata,
@@ -357,6 +399,8 @@ def validate_report_metadata(repository: Path) -> Mapping[str, Any]:
         raise ReportError("release_record_compatibility_metadata_invalid")
     for value in platforms.values():
         bounded_text(value, "release_record_compatibility_metadata_invalid")
+    if derived_platforms is not None and platforms != derived_platforms:
+        raise ReportError("release_record_compatibility_metadata_mismatch")
     security = metadata.get("security_statement")
     expected_security = {
         "known_accepted_risks",
@@ -368,6 +412,8 @@ def validate_report_metadata(repository: Path) -> Mapping[str, Any]:
     }
     if not isinstance(security, dict) or set(security) != expected_security:
         raise ReportError("release_record_security_metadata_invalid")
+    if security != CANONICAL_SECURITY_STATEMENT:
+        raise ReportError("release_record_security_metadata_mismatch")
     risks = security["known_accepted_risks"]
     if not isinstance(risks, list) or not 1 <= len(risks) <= 8 or len(set(risks)) != len(risks):
         raise ReportError("release_record_security_metadata_invalid")
@@ -491,6 +537,99 @@ def validate_physical_receipts(external: Path) -> int:
     return retained_count
 
 
+def derive_compatibility_from_registry_proofs(external: Path) -> dict[str, str]:
+    domain = read_json(external / "public_registries.json")
+    artifacts = domain.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ReportError("release_record_compatibility_proof_invalid")
+
+    def proof(suffix: str) -> Mapping[str, Any]:
+        matches = [
+            item
+            for item in artifacts
+            if isinstance(item, dict)
+            and set(item) == {"path", "sha256"}
+            and isinstance(item.get("path"), str)
+            and item["path"].endswith(suffix)
+        ]
+        if len(matches) != 1:
+            raise ReportError("release_record_compatibility_proof_invalid")
+        relative = safe_relative(
+            matches[0]["path"], "release_record_compatibility_proof_invalid"
+        )
+        path = resolve_regular(
+            external, relative, "release_record_compatibility_proof_invalid"
+        )
+        if sha256_file(path) != matches[0]["sha256"]:
+            raise ReportError("release_record_compatibility_proof_invalid")
+        return read_json(path)
+
+    javascript = proof("artifacts--registry-npm-javascript--tool-output.json")
+    react_native = proof("artifacts--registry-npm-react-native--tool-output.json")
+    ios = proof("artifacts--registry-cocoapods--tool-output.json")
+    android = proof("artifacts--registry-maven-central--tool-output.json")
+    javascript_facts = javascript.get("compatibility")
+    react_native_facts = react_native.get("compatibility")
+    ios_facts = ios.get("compatibility")
+    android_facts = android.get("compatibility")
+    if (
+        javascript.get("registry") != "npm"
+        or javascript.get("package") != "@latchway/client"
+        or react_native.get("registry") != "npm"
+        or react_native.get("package") != "@latchway/react-native"
+        or ios.get("registry") != "cocoapods"
+        or android.get("registry") != "maven_central"
+        or not isinstance(javascript_facts, dict)
+        or set(javascript_facts) != {"minimum_node"}
+        or not isinstance(react_native_facts, dict)
+        or set(react_native_facts)
+        != {
+            "minimum_node",
+            "react_native",
+            "minimum_ios",
+            "minimum_android_api",
+        }
+        or not isinstance(ios_facts, dict)
+        or set(ios_facts) != {"minimum_ios"}
+        or not isinstance(android_facts, dict)
+        or set(android_facts) != {"minimum_android_api"}
+    ):
+        raise ReportError("release_record_compatibility_proof_invalid")
+    node = javascript_facts.get("minimum_node")
+    rn_node = react_native_facts.get("minimum_node")
+    rn_version = react_native_facts.get("react_native")
+    ios_minimum = ios_facts.get("minimum_ios")
+    rn_ios_minimum = react_native_facts.get("minimum_ios")
+    android_minimum = android_facts.get("minimum_android_api")
+    rn_android_minimum = react_native_facts.get("minimum_android_api")
+    if (
+        not isinstance(node, str)
+        or re.fullmatch(r"[1-9][0-9]*\.[0-9]+\.[0-9]+", node) is None
+        or rn_node != node
+        or not isinstance(rn_version, str)
+        or re.fullmatch(r"(?:0|[1-9][0-9]*)\.[0-9]+\.x", rn_version) is None
+        or not isinstance(ios_minimum, str)
+        or re.fullmatch(r"[1-9][0-9]*\.[0-9]+", ios_minimum) is None
+        or rn_ios_minimum != ios_minimum
+        or not isinstance(android_minimum, int)
+        or isinstance(android_minimum, bool)
+        or android_minimum < 1
+        or not isinstance(rn_android_minimum, int)
+        or isinstance(rn_android_minimum, bool)
+        or rn_android_minimum < android_minimum
+    ):
+        raise ReportError("release_record_compatibility_proof_mismatch")
+    return {
+        "javascript_sdk": f"Node.js {node}",
+        "ios_sdk": f"iOS {ios_minimum}",
+        "android_sdk": f"Android API {android_minimum}",
+        "react_native_sdk": (
+            f"React Native {rn_version}; iOS {rn_ios_minimum}; "
+            f"Android API {rn_android_minimum}"
+        ),
+    }
+
+
 def validate_durable_evidence_root(
     *,
     root: Path,
@@ -499,7 +638,7 @@ def validate_durable_evidence_root(
     conformance: Mapping[str, Any],
     commit: str,
     metadata_path: Path,
-) -> tuple[int, int]:
+) -> tuple[int, int, dict[str, str]]:
     files = regular_tree(root, "release_record_durable_evidence_invalid")
     if set(path.split("/", 1)[0] for path in files) != {
         "candidate",
@@ -530,6 +669,26 @@ def validate_durable_evidence_root(
         raise ReportError("release_record_durable_evidence_identity_mismatch")
 
     security = read_json(security_path)
+    candidate = read_json(candidate_path)
+    candidate_created_at = parse_utc(
+        candidate.get("created_at"), "release_record_candidate_time_invalid"
+    )
+    security_candidate = security.get("candidate")
+    security_window = security.get("evidence_window")
+    if (
+        not isinstance(security_candidate, dict)
+        or security_candidate.get("candidate_created_at") != candidate.get("created_at")
+        or not isinstance(security_window, dict)
+    ):
+        raise ReportError("release_record_security_time_invalid")
+    security_started_at = parse_utc(
+        security_window.get("started_at"), "release_record_security_time_invalid"
+    )
+    security_finished_at = parse_utc(
+        security_window.get("finished_at"), "release_record_security_time_invalid"
+    )
+    if not candidate_created_at <= security_started_at < security_finished_at:
+        raise ReportError("release_record_security_time_invalid")
     raw_evidence = security.get("raw_evidence")
     if not isinstance(raw_evidence, list) or not raw_evidence:
         raise ReportError("release_record_durable_security_raw_invalid")
@@ -558,6 +717,23 @@ def validate_durable_evidence_root(
     actual_security_raw = {path for path in files if path.startswith("security/raw/")}
     if actual_security_raw != expected_security_raw:
         raise ReportError("release_record_durable_security_raw_invalid")
+    for relative in sorted(expected_security_raw):
+        if not relative.endswith(".result.json"):
+            continue
+        result = read_json(files[relative])
+        started_at = parse_utc(
+            result.get("started_at"), "release_record_security_raw_time_invalid"
+        )
+        finished_at = parse_utc(
+            result.get("finished_at"), "release_record_security_raw_time_invalid"
+        )
+        if not (
+            security_started_at
+            <= started_at
+            <= finished_at
+            <= security_finished_at
+        ):
+            raise ReportError("release_record_security_raw_time_invalid")
 
     # The operational report may claim live configuration activation and
     # rollback only when the retained PostgreSQL-enabled race run proves that
@@ -657,6 +833,18 @@ def validate_durable_evidence_root(
             != domain_by_id[domain]["document_sha256"]
         ):
             raise ReportError("release_record_durable_domain_invalid")
+        document_started_at = parse_utc(
+            document.get("started_at"), "release_record_durable_domain_time_invalid"
+        )
+        document_finished_at = parse_utc(
+            document.get("finished_at"), "release_record_durable_domain_time_invalid"
+        )
+        if (
+            document.get("started_at") != domain_by_id[domain].get("started_at")
+            or document.get("finished_at") != domain_by_id[domain].get("finished_at")
+            or not candidate_created_at <= document_started_at < document_finished_at
+        ):
+            raise ReportError("release_record_durable_domain_time_invalid")
         hashes: list[str] = []
         for artifact in artifacts:
             if not isinstance(artifact, dict) or set(artifact) != {"path", "sha256"}:
@@ -673,7 +861,8 @@ def validate_durable_evidence_root(
         if sorted(hashes) != sorted(domain_by_id[domain]["artifact_sha256"]):
             raise ReportError("release_record_durable_domain_invalid")
     physical_file_count = validate_physical_receipts(external)
-    return len(expected_security_raw), physical_file_count
+    compatibility = derive_compatibility_from_registry_proofs(external)
+    return len(expected_security_raw), physical_file_count, compatibility
 
 
 def validate_durable_archive(archive: Path, root: Path) -> None:
@@ -788,6 +977,9 @@ def validate_candidate(
         "release_record_candidate_fields_invalid",
     )
     version = tag[1:]
+    candidate_created_at = parse_utc(
+        candidate.get("created_at"), "release_record_candidate_identity_mismatch"
+    )
     if (
         candidate.get("schema_version") != 1
         or candidate.get("kind") != "latchway_release_candidate"
@@ -795,8 +987,6 @@ def validate_candidate(
         or candidate.get("candidate_commit") != commit
         or candidate.get("intended_tag") != tag
         or candidate.get("version") != version
-        or not isinstance(candidate.get("created_at"), str)
-        or UTC.fullmatch(candidate["created_at"]) is None
     ):
         raise ReportError("release_record_candidate_identity_mismatch")
     contract = candidate.get("contract")
@@ -811,12 +1001,14 @@ def validate_candidate(
     contract_version = require_string(
         contract.get("version"), SEMVER, "release_record_contract_version_invalid"
     )
+    contract_released_at = parse_utc(
+        contract.get("released_at"), "release_record_candidate_contract_invalid"
+    )
     if (
         contract.get("status") != "released"
         or contract.get("bundle_file_name")
         != f"latchway-contract-{contract_version}.tar.gz"
-        or not isinstance(contract.get("released_at"), str)
-        or UTC.fullmatch(contract["released_at"]) is None
+        or contract_released_at > candidate_created_at
         or not isinstance(contract.get("bundle_sha256"), str)
         or SHA256.fullmatch(contract["bundle_sha256"]) is None
     ):
@@ -961,6 +1153,8 @@ def validate_conformance(
         domain_by_id[identifier] = domain
     if set(domain_by_id) != set(LOCAL_DOMAINS + EXTERNAL_DOMAINS):
         raise ReportError("release_record_domains_incomplete")
+    external_starts: list[datetime] = []
+    external_finishes: list[datetime] = []
     for identifier in LOCAL_DOMAINS + EXTERNAL_DOMAINS:
         domain = domain_by_id[identifier]
         if domain.get("required") is not True or domain.get("status") != "passed":
@@ -971,12 +1165,18 @@ def validate_conformance(
             if (
                 not isinstance(domain.get("document_sha256"), str)
                 or SHA256.fullmatch(domain["document_sha256"]) is None
-                or not isinstance(domain.get("started_at"), str)
-                or UTC.fullmatch(domain["started_at"]) is None
-                or not isinstance(domain.get("finished_at"), str)
-                or UTC.fullmatch(domain["finished_at"]) is None
             ):
                 raise ReportError("release_record_domain_proof_invalid")
+            started_at = parse_utc(
+                domain.get("started_at"), "release_record_domain_proof_invalid"
+            )
+            finished_at = parse_utc(
+                domain.get("finished_at"), "release_record_domain_proof_invalid"
+            )
+            if started_at >= finished_at:
+                raise ReportError("release_record_domain_proof_invalid")
+            external_starts.append(started_at)
+            external_finishes.append(finished_at)
             artifact_hashes = domain.get("artifact_sha256")
             if (
                 not isinstance(artifact_hashes, list)
@@ -989,6 +1189,32 @@ def validate_conformance(
                 )
             ):
                 raise ReportError("release_record_domain_artifact_proof_invalid")
+    evidence_window = report.get("evidence_window")
+    if not isinstance(evidence_window, dict) or set(evidence_window) != {
+        "started_at",
+        "finished_at",
+        "maximum_age_seconds",
+    }:
+        raise ReportError("release_record_evidence_window_invalid")
+    evidence_started_at = parse_utc(
+        evidence_window.get("started_at"), "release_record_evidence_window_invalid"
+    )
+    evidence_finished_at = parse_utc(
+        evidence_window.get("finished_at"), "release_record_evidence_window_invalid"
+    )
+    if (
+        evidence_started_at != min(external_starts)
+        or evidence_finished_at != max(external_finishes)
+        or evidence_started_at >= evidence_finished_at
+        or not isinstance(evidence_window.get("maximum_age_seconds"), int)
+        or isinstance(evidence_window.get("maximum_age_seconds"), bool)
+        or evidence_window["maximum_age_seconds"] < 1
+        or (
+            evidence_finished_at - evidence_started_at
+        ).total_seconds()
+        > evidence_window["maximum_age_seconds"]
+    ):
+        raise ReportError("release_record_evidence_window_invalid")
     checks = report.get("checks")
     if not isinstance(checks, list) or not checks:
         raise ReportError("release_record_checks_invalid")
@@ -1081,6 +1307,27 @@ def canonical_registries(repositories: list[Mapping[str, Any]], oci: str) -> dic
     }
 
 
+def canonical_oci_aliases(
+    repositories: list[Mapping[str, Any]], image: Mapping[str, Any]
+) -> dict[str, Any]:
+    by_id = {item["id"]: item for item in repositories}
+    version = by_id["core"]["version"]
+    match = SEMVER.fullmatch(version)
+    if match is None:
+        raise ReportError("release_record_oci_aliases_invalid")
+    major, minor, _ = version.split(".")
+    digest = image["index_digest"]
+    repository = image["repository"]
+    tags = (version, f"{major}.{minor}", major, "latest")
+    return {
+        "immutable_version": version,
+        "references": {
+            tag: {"reference": f"{repository}:{tag}", "digest": digest}
+            for tag in tags
+        },
+    }
+
+
 def validate_publication(
     publication: Mapping[str, Any],
     commit: str,
@@ -1097,8 +1344,10 @@ def validate_publication(
             "core_commit",
             "core_tag",
             "tag_object_sha",
+            "promotion_evidence_sha256",
             "github_release",
             "oci_image_digest",
+            "oci_aliases",
             "registries",
         },
         "release_record_publication_fields_invalid",
@@ -1116,6 +1365,11 @@ def validate_publication(
     require_string(
         publication.get("tag_object_sha"), COMMIT, "release_record_tag_object_invalid"
     )
+    promotion_sha256 = require_string(
+        publication.get("promotion_evidence_sha256"),
+        SHA256,
+        "release_record_promotion_hash_invalid",
+    )
     release = publication.get("github_release")
     if not isinstance(release, dict):
         raise ReportError("release_record_github_release_invalid")
@@ -1125,11 +1379,14 @@ def validate_publication(
             "id",
             "url",
             "tag_name",
+            "name",
+            "body",
             "draft",
             "prerelease",
             "immutable",
             "published_at",
             "release_attestation_sha256",
+            "assets",
         },
         "release_record_github_release_invalid",
     )
@@ -1140,17 +1397,118 @@ def validate_publication(
         or release.get("url")
         != f"https://github.com/Latchway/latchway/releases/tag/{tag}"
         or release.get("tag_name") != tag
+        or release.get("name") != f"Latchway {tag}"
+        or release.get("body")
+        != (
+            f"Immutable Latchway product release {tag}.\n\n"
+            f"Candidate commit: {commit}\n"
+            f"Promotion evidence SHA-256: {promotion_sha256}"
+        )
         or release.get("draft") is not False
         or release.get("prerelease") is not False
         or release.get("immutable") is not True
-        or not isinstance(release.get("published_at"), str)
-        or UTC.fullmatch(release["published_at"]) is None
         or not isinstance(release.get("release_attestation_sha256"), str)
         or SHA256.fullmatch(release["release_attestation_sha256"]) is None
     ):
         raise ReportError("release_record_github_release_invalid")
+    parse_utc(release.get("published_at"), "release_record_github_release_invalid")
+    assets = release.get("assets")
+    if not isinstance(assets, list) or len(assets) != len(CORE_PRODUCT_RELEASE_ASSETS):
+        raise ReportError("release_record_github_release_assets_invalid")
+    names: list[str] = []
+    for asset in assets:
+        if (
+            not isinstance(asset, dict)
+            or set(asset) != {"id", "name", "size", "digest"}
+            or not isinstance(asset.get("id"), int)
+            or isinstance(asset.get("id"), bool)
+            or asset["id"] < 1
+            or not isinstance(asset.get("name"), str)
+            or asset["name"] in names
+            or not isinstance(asset.get("size"), int)
+            or isinstance(asset.get("size"), bool)
+            or asset["size"] < 1
+            or not isinstance(asset.get("digest"), str)
+            or DIGEST.fullmatch(asset["digest"]) is None
+        ):
+            raise ReportError("release_record_github_release_assets_invalid")
+        names.append(asset["name"])
+    if names != sorted(CORE_PRODUCT_RELEASE_ASSETS):
+        raise ReportError("release_record_github_release_assets_invalid")
+    promotion_assets = [
+        asset
+        for asset in assets
+        if asset.get("name") == "latchway-cross-repository-promotion.json"
+    ]
+    if (
+        len(promotion_assets) != 1
+        or promotion_assets[0].get("digest") != f"sha256:{promotion_sha256}"
+    ):
+        raise ReportError("release_record_promotion_hash_invalid")
     if publication.get("registries") != canonical_registries(repositories, expected_oci):
         raise ReportError("release_record_registry_coordinates_mismatch")
+    if publication.get("oci_aliases") != canonical_oci_aliases(repositories, image):
+        raise ReportError("release_record_oci_aliases_invalid")
+
+
+def validate_evidence_chronology(
+    *,
+    candidate: Mapping[str, Any],
+    security: Mapping[str, Any],
+    conformance: Mapping[str, Any],
+    publication: Mapping[str, Any],
+) -> None:
+    candidate_created_at = parse_utc(
+        candidate.get("created_at"), "release_record_chronology_invalid"
+    )
+    contract = candidate.get("contract")
+    if not isinstance(contract, dict):
+        raise ReportError("release_record_chronology_invalid")
+    contract_released_at = parse_utc(
+        contract.get("released_at"), "release_record_chronology_invalid"
+    )
+    security_window = security.get("evidence_window")
+    if not isinstance(security_window, dict):
+        raise ReportError("release_record_chronology_invalid")
+    security_started_at = parse_utc(
+        security_window.get("started_at"), "release_record_chronology_invalid"
+    )
+    security_finished_at = parse_utc(
+        security_window.get("finished_at"), "release_record_chronology_invalid"
+    )
+    release = publication.get("github_release")
+    if not isinstance(release, dict):
+        raise ReportError("release_record_chronology_invalid")
+    published_at = parse_utc(
+        release.get("published_at"), "release_record_chronology_invalid"
+    )
+    if not (
+        contract_released_at
+        <= candidate_created_at
+        <= security_started_at
+        < security_finished_at
+        <= published_at
+    ):
+        raise ReportError("release_record_chronology_invalid")
+    domain_by_id = {
+        item.get("id"): item
+        for item in conformance.get("evidence_domains", [])
+        if isinstance(item, dict)
+    }
+    for domain in EXTERNAL_DOMAINS:
+        value = domain_by_id.get(domain)
+        if not isinstance(value, dict):
+            raise ReportError("release_record_chronology_invalid")
+        started_at = parse_utc(
+            value.get("started_at"), "release_record_chronology_invalid"
+        )
+        finished_at = parse_utc(
+            value.get("finished_at"), "release_record_chronology_invalid"
+        )
+        if not candidate_created_at <= started_at < finished_at:
+            raise ReportError("release_record_chronology_invalid")
+        if domain in {"public_tags", "public_registries"} and started_at < published_at:
+            raise ReportError("release_record_post_publication_evidence_invalid")
 
 
 def escape(value: Any) -> str:
@@ -1184,9 +1542,25 @@ def render(
         conformance, commit, tag, contract, image
     )
     security_checks = validate_security(security, commit, tag, contract, image)
-    validate_publication(publication, commit, tag, repositories, image)
+    validate_publication(
+        publication,
+        commit,
+        tag,
+        repositories,
+        image,
+    )
+    validate_evidence_chronology(
+        candidate=candidate,
+        security=security,
+        conformance=conformance,
+        publication=publication,
+    )
     metadata = validate_report_metadata(repository)
-    security_raw_count, physical_receipt_file_count = validate_durable_evidence_root(
+    (
+        security_raw_count,
+        physical_receipt_file_count,
+        derived_platforms,
+    ) = validate_durable_evidence_root(
         root=durable_evidence_root,
         candidate_path=candidate_path,
         security_path=security_path,
@@ -1194,6 +1568,8 @@ def render(
         commit=commit,
         metadata_path=repository / "docs/release/final-report-metadata.json",
     )
+    if metadata["compatibility"]["minimum_platform_versions"] != derived_platforms:
+        raise ReportError("release_record_compatibility_metadata_mismatch")
     schema_version = database_schema_version(repository)
     oci = f"{image['repository']}@{image['index_digest']}"
     registries = publication["registries"]

@@ -27,14 +27,19 @@ class PromotionResumabilityTests(unittest.TestCase):
             "Preflight immutable releases and every fixed core release asset"
         )
         state = self.names.index("Verify any existing core release tag")
-        image = self.names.index("Promote only the verified index digest to stable OCI tags")
         create = self.names.index("Create the evidence-gated annotated core tag")
         final_tag = self.names.index("Re-fetch and verify the immutable annotated core tag")
+        prepare = self.names.index(
+            "Prepare the recoverable product release draft and exact assets"
+        )
+        image = self.names.index("Promote only the verified index digest to stable OCI tags")
         release = self.names.index("Publish the immutable release record")
         self.assertLess(preflight, state)
-        self.assertLess(state, image)
-        self.assertLess(image, create)
+        self.assertLess(state, create)
         self.assertLess(create, final_tag)
+        self.assertLess(final_tag, prepare)
+        self.assertLess(prepare, image)
+        self.assertLess(image, release)
         self.assertLess(final_tag, release)
         self.assertLess(create, release)
         create_step = self.steps[create]
@@ -54,15 +59,21 @@ class PromotionResumabilityTests(unittest.TestCase):
         for value in ('.object.type == "tag"', '.object.type == "commit"', '.object.sha == $commit', '.message == $message'):
             self.assertIn(value, final_script)
 
-    def test_stable_oci_coordinates_are_verify_or_create(self) -> None:
+    def test_stable_oci_coordinates_are_immutable_or_monotonic(self) -> None:
         script = self.steps[
             self.names.index("Promote only the verified index digest to stable OCI tags")
         ]["run"]
         self.assertIn("docker buildx imagetools inspect --raw", script)
-        self.assertIn('test "$actual" = "$INDEX_DIGEST"', script)
-        self.assertIn("inspect_status=$?", script)
+        self.assertIn('test "$(digest_of "$RUNNER_TEMP/oci-version-final.json")" = "$INDEX_DIGEST"', script)
+        self.assertIn("local status=$?", script)
         self.assertIn("manifest unknown|name unknown|not found", script)
         self.assertIn("docker buildx imagetools create", script)
+        self.assertIn("verify-oci-alias-transition.py", script)
+        self.assertIn("docker pull --platform linux/amd64", script)
+        self.assertIn(".immutable == true", script)
+        self.assertIn("--certificate-github-workflow-sha \"$current_commit\"", script)
+        self.assertIn("oci-alias-$alias-pre-update.json", script)
+        self.assertIn('for alias in "$major.$minor" "$major" latest', script)
         self.assertLess(script.index("imagetools inspect --raw"), script.index("imagetools create"))
 
     def test_release_is_reconciled_without_overwriting_assets(self) -> None:
@@ -71,33 +82,54 @@ class PromotionResumabilityTests(unittest.TestCase):
                 "Preflight immutable releases and every fixed core release asset"
             )
         ]["run"]
+        prepare = self.steps[
+            self.names.index(
+                "Prepare the recoverable product release draft and exact assets"
+            )
+        ]["run"]
         script = self.steps[self.names.index("Publish the immutable release record")]["run"]
         for value in (
             'gh release create "$INTENDED_TAG" --draft',
-            '.draft == true and .immutable == false',
             'existing=$(jq --raw-output',
             'test "$existing" = "$expected"',
             'gh release upload "$INTENDED_TAG" "$asset"',
+            "product-expected-assets.txt",
+        ):
+            self.assertIn(value, prepare)
+        for value in (
             "'{draft: false}'",
-            '.draft == false and .immutable == true',
+            '.immutable == $immutable',
             'gh release verify "$INTENDED_TAG"',
             'gh release verify-asset "$INTENDED_TAG"',
+            "pre-publish-product-tag-ref.json",
+            "product-pre-publish-assets.txt",
+            "verify-github-release-attestation.py",
         ):
             self.assertIn(value, script)
         for value in (
-            '"repos/$repository/immutable-releases"',
-            'X-GitHub-Api-Version: 2026-03-10',
-            '.enabled == true',
             "latchway-candidate.attestation.sigstore.json",
             "latchway-cross-repository-promotion.attestation.sigstore.json",
-            'test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d \' \')" = 13',
+            'test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d \' \')" = 14',
+            "oci-alias-promotion.json",
             "gh release download",
             "cmp --silent",
         ):
             self.assertIn(value, preflight)
         self.assertEqual(preflight.count("gh release upload"), 0)
-        self.assertNotIn("--clobber", script)
-        self.assertNotIn("gh release delete", script)
+        admin = self.steps[
+            self.names.index(
+                "Preflight protected immutable-release settings for every release repository"
+            )
+        ]["run"]
+        for value in (
+            '"repos/$repository/immutable-releases"',
+            'X-GitHub-Api-Version: 2026-03-10',
+            '(keys | sort) == ["enabled", "enforced_by_owner"]',
+            '.enabled == true',
+        ):
+            self.assertIn(value, admin)
+        self.assertNotIn("--clobber", prepare + script)
+        self.assertNotIn("gh release delete", prepare + script)
         self.assertNotIn("git push --force", self.text)
 
 

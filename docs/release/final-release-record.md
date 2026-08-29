@@ -1,10 +1,11 @@
 # Final release record
 
 `finalize-release-record.yml` is the last, post-publication v1 release gate. It
-does not publish a candidate, create a tag, create a GitHub release, or publish
-an SDK package. It runs only on protected `main` in the `release` environment
-after those operations and after release-scope cross-repository conformance has
-passed.
+does not publish the product candidate or an SDK package. It runs only on
+protected `main` in the `release` environment after those operations and after
+release-scope cross-repository conformance has passed. It does create or resume
+the separate annotated `evidence/vX.Y.Z` tag and draft, attach the complete
+fixed evidence set, and publish that evidence release immutably.
 
 ## Required inputs
 
@@ -33,15 +34,22 @@ candidate checkout.
 The release-scope report is not a user assertion. Its attested `release_ready`
 verdict transitively covers the authenticated raw observations for all required
 domains, including public tags and registries. In particular, those producers
-verify the exact npm package versions and `gitHead`, CocoaPods release, Swift
-tag, every Maven Central module, and the signed/provenanced OCI index digest.
+compare the exact npm registry tarballs to the reviewed release bytes and
+retain the raw registry view, provenance, signatures, Sigstore material, and
+any authenticated adoption record. They also verify the CocoaPods proof, Swift
+release assets, every signed Maven Central module plus its deployment records,
+and the signed/provenanced OCI index digest.
 The finalizer additionally performs fresh checks for:
 
 - the annotated core tag object and exact candidate target;
 - the existing non-draft, non-prerelease GitHub release;
-- the immutable OCI index and stable version tag digest;
+- the immutable OCI index plus the exact version, `X.Y`, `X`, and `latest` tag
+  digests;
 - the OCI Cosign identity and GitHub provenance; and
-- both npm package versions, commits, and SHA-512 integrity metadata.
+- both npm package versions, SHA-512 integrity, registry signatures, trusted
+  publisher identity, and source-bound SLSA provenance. npm does not inject
+  `gitHead` into these reviewed prebuilt tarballs, so commit identity comes
+  from the authenticated provenance and retained registry/adoption evidence.
 
 Registry coordinates accepted by the renderer are derived from the five exact
 repository coordinates in the attested conformance report. They are not
@@ -61,7 +69,13 @@ operational/mobile proof; candidate artifact hashes; and hashes of its four
 input documents.
 
 The workflow attests that exact Markdown file and publishes it with
-`COMPLETION_REPORT.attestation.sigstore.json`. Publication is verify-or-add:
+`COMPLETION_REPORT.attestation.sigstore.json`. It creates or resumes the draft,
+uploads every fixed asset, re-fetches the protected tag target and exact draft
+asset set immediately before publication, proves the exact validated ETag is
+still current with a conditional GET, then verifies the immutable release and
+every asset. GitHub does not document atomic `If-Match` support for this PATCH,
+so the protected release environment must remain the exclusive draft writer.
+Reconciliation is verify-or-add while the release is a draft:
 
 - an absent asset may be uploaded;
 - one existing report must have exactly the newly rendered SHA-256 and bytes;
@@ -74,8 +88,10 @@ The workflow attests that exact Markdown file and publishes it with
 Because a fresh Sigstore bundle is not byte-deterministic, an exact rerun reuses
 and re-verifies the existing bundle instead of creating a different one. If an
 earlier run stopped after uploading only the report, the rerun may create and
-add the missing valid bundle. The final report, bundle, and verified public
-state are also retained as a 90-day workflow artifact.
+add the missing valid bundle while the draft remains mutable. Once published,
+reruns perform verification only; no post-publication upload is permitted. The
+final report, bundle, and verified public state are also retained as a 90-day
+workflow artifact.
 
 The checked-in `docs/implementation/COMPLETION_REPORT.md` remains source
 documentation. It must not claim dynamic publication facts. The release asset

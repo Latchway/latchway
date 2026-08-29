@@ -36,6 +36,15 @@ if COMMON_SPEC is None or COMMON_SPEC.loader is None:
 COMMON = importlib.util.module_from_spec(COMMON_SPEC)
 COMMON_SPEC.loader.exec_module(COMMON)
 
+GH_VERSION_PATH = Path(__file__).with_name("require-gh-version.py")
+GH_VERSION_SPEC = importlib.util.spec_from_file_location(
+    "latchway_release_domain_require_gh_version", GH_VERSION_PATH
+)
+if GH_VERSION_SPEC is None or GH_VERSION_SPEC.loader is None:
+    raise RuntimeError("GitHub CLI version policy cannot be loaded")
+GH_VERSION = importlib.util.module_from_spec(GH_VERSION_SPEC)
+GH_VERSION_SPEC.loader.exec_module(GH_VERSION)
+
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RUN_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 TOOL_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$")
@@ -878,6 +887,10 @@ def main() -> int:
         else:
             if arguments.output_directory is None:
                 raise EvidenceError("output_directory_required")
+            try:
+                GH_VERSION.installed_version()
+            except GH_VERSION.VersionError as error:
+                raise EvidenceError(str(error)) from error
             document = finalize(
                 domain=arguments.domain,
                 source_path=arguments.source_conformance,

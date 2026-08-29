@@ -60,6 +60,8 @@ jobs:
           ref: ${{ inputs.candidate_commit }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Require a fixed GitHub CLI verifier
+        run: python3 scripts/require-gh-version.py
       - name: Require exact immutable finalizer inputs
         shell: bash
         env:
@@ -84,17 +86,32 @@ jobs:
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-      - name: Preflight immutable evidence-release support
+      - name: Preflight protected immutable-release settings for every release repository
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
         run: |
           set -Eeuo pipefail
-          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" \
-            > "$RUNNER_TEMP/immutable-releases.json"
-          jq --exit-status '.enabled == true' \
-            "$RUNNER_TEMP/immutable-releases.json" >/dev/null
+          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+          for repository in \
+            Latchway/latchway \
+            Latchway/latchway-js \
+            Latchway/latchway-ios-sdk \
+            Latchway/latchway-android \
+            Latchway/latchway-react-native-sdk; do
+            slug=${repository##*/}
+            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$repository/immutable-releases" \
+              > "$RUNNER_TEMP/$slug-immutable-releases.json"
+            jq --exit-status '
+              type == "object" and
+              (keys | sort) == ["enabled", "enforced_by_owner"] and
+              .enabled == true and
+              (.enforced_by_owner | type) == "boolean"
+            ' "$RUNNER_TEMP/$slug-immutable-releases.json" >/dev/null
+          done
       - name: Authenticate every fixed evidence run and attempt
         shell: bash
         env:
@@ -245,31 +262,85 @@ jobs:
           gh api -H "X-GitHub-Api-Version: 2026-03-10" \
             "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
             > "$RUNNER_TEMP/release.json"
-          jq --exit-status --arg tag "$RELEASE_TAG" \
-            '.tag_name == $tag and .name == ("Latchway " + $tag) and
+          promotion_digest=$(jq --raw-output '
+            [.assets[] | select(.name == "latchway-cross-repository-promotion.json")] |
+            if length == 1 then (.[0].digest // "digest-unavailable")
+            else error("promotion evidence asset missing or duplicated") end
+          ' "$RUNNER_TEMP/release.json")
+          [[ "$promotion_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          promotion_sha256=${promotion_digest#sha256:}
+          expected_body="Immutable Latchway product release $RELEASE_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $promotion_sha256"
+          jq --exit-status --arg tag "$RELEASE_TAG" --arg body "$expected_body" \
+            '.tag_name == $tag and .name == ("Latchway " + $tag) and .body == $body and
              .draft == false and .prerelease == false and .immutable == true and
              (.id | type == "number" and . > 0) and
              (.published_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' \
             "$RUNNER_TEMP/release.json" >/dev/null
           gh release verify "$RELEASE_TAG" --format json \
-            | jq --sort-keys . > "$RUNNER_TEMP/product-release-attestation.json"
+            > "$RUNNER_TEMP/product-release-attestation.json"
           mkdir -p "$RUNNER_TEMP/promotion-release-assets"
           gh release download "$RELEASE_TAG" \
             --pattern latchway-cross-repository-promotion.json \
             --pattern latchway-cross-repository-promotion.attestation.sigstore.json \
+            --pattern oci-alias-promotion.json \
             --dir "$RUNNER_TEMP/promotion-release-assets"
           promotion="$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.json"
           promotion_bundle="$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.attestation.sigstore.json"
-          for asset in "$promotion" "$promotion_bundle"; do
+          : > "$RUNNER_TEMP/fixed-product-release-assets.txt"
+          for asset in \
+            "$promotion" \
+            "$promotion_bundle" \
+            "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            "$RUNNER_TEMP/candidate/latchway-contract.tar.gz" \
+            "$RUNNER_TEMP/candidate/latchway-linux-amd64.spdx.json" \
+            "$RUNNER_TEMP/candidate/latchway-linux-arm64.spdx.json" \
+            "$RUNNER_TEMP/candidate/latchway-linux-amd64-vulnerability.json" \
+            "$RUNNER_TEMP/candidate/latchway-linux-arm64-vulnerability.json" \
+            "$RUNNER_TEMP/candidate/latchway-linux-amd64-license.json" \
+            "$RUNNER_TEMP/candidate/latchway-linux-arm64-license.json" \
+            "$RUNNER_TEMP/security/security-summary.json" \
+            "$RUNNER_TEMP/security/security-summary.attestation.sigstore.json" \
+            "$RUNNER_TEMP/promotion-release-assets/oci-alias-promotion.json"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test -s "$asset"
+            printf '%s\n' "$asset" >> "$RUNNER_TEMP/fixed-product-release-assets.txt"
+          done
+          test "$(wc -l < "$RUNNER_TEMP/fixed-product-release-assets.txt" | tr -d ' ')" = 14
+          while IFS= read -r asset; do basename "$asset"; done \
+            < "$RUNNER_TEMP/fixed-product-release-assets.txt" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-product-release-assets.txt"
+          jq --raw-output '.assets[].name' "$RUNNER_TEMP/release.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/actual-product-release-assets.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/expected-product-release-assets.txt" \
+            "$RUNNER_TEMP/actual-product-release-assets.txt"
+          while IFS= read -r asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
             actual=$(jq --raw-output --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("promotion asset missing or duplicated") end' \
+              '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("product asset missing or duplicated") end' \
               "$RUNNER_TEMP/release.json")
             test "$actual" = "$expected"
             gh release verify-asset "$RELEASE_TAG" "$asset" --format json \
               > "$RUNNER_TEMP/product-release-asset-${name}.json"
-          done
+          done < "$RUNNER_TEMP/fixed-product-release-assets.txt"
+          python3 scripts/verify-github-release-attestation.py \
+            --attestation "$RUNNER_TEMP/product-release-attestation.json" \
+            --release "$RUNNER_TEMP/release.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --ref-sha "$tag_object" \
+            --output "$RUNNER_TEMP/product-release-attestation-verification.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            > "$RUNNER_TEMP/final-product-tag-ref.json"
+          cmp --silent \
+            <(jq --sort-keys . "$RUNNER_TEMP/tag-ref.json") \
+            <(jq --sort-keys . "$RUNNER_TEMP/final-product-tag-ref.json")
           gh attestation verify "$promotion" \
             --bundle "$promotion_bundle" \
             --repo "$GITHUB_REPOSITORY" \
@@ -279,7 +350,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/promotion-attestation-verification.json"
-          promotion_sha256=$(sha256sum "$promotion" | cut -d ' ' -f 1)
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$promotion_sha256"
           expected_tag_message="Latchway $RELEASE_TAG
 
           Promotion evidence SHA-256: $promotion_sha256"
@@ -294,6 +365,36 @@ jobs:
           docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway:$version" > "$RUNNER_TEMP/oci-version-index.json"
           version_actual="sha256:$(sha256sum "$RUNNER_TEMP/oci-version-index.json" | cut -d ' ' -f 1)"
           test "$version_actual" = "${image##*@}"
+          IFS=. read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$minor" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$patch" =~ ^(0|[1-9][0-9]*)$ ]]
+          aliases=("$version" "$major.$minor" "$major" latest)
+          for alias in "${aliases[@]}"; do
+            docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway:$alias" \
+              > "$RUNNER_TEMP/oci-alias-$alias.json"
+            alias_actual="sha256:$(sha256sum "$RUNNER_TEMP/oci-alias-$alias.json" | cut -d ' ' -f 1)"
+            test "$alias_actual" = "${image##*@}"
+          done
+          jq --null-input \
+            --arg repository ghcr.io/latchway/latchway \
+            --arg version "$version" --arg mm "$major.$minor" --arg m "$major" \
+            --arg digest "${image##*@}" \
+            '{immutable_version: $version, references: {
+              ($version): {reference: ($repository + ":" + $version), digest: $digest},
+              ($mm): {reference: ($repository + ":" + $mm), digest: $digest},
+              ($m): {reference: ($repository + ":" + $m), digest: $digest},
+              latest: {reference: ($repository + ":latest"), digest: $digest}
+            }}' > "$RUNNER_TEMP/oci-alias-state.json"
+          jq --exit-status \
+            --arg repository ghcr.io/latchway/latchway \
+            --arg version "$version" --arg commit "$CANDIDATE_COMMIT" \
+            --arg digest "${image##*@}" --arg mm "$major.$minor" --arg m "$major" \
+            '.schema_version == 1 and .kind == "latchway_oci_alias_promotion" and
+             .repository == $repository and .version == $version and
+             .source_commit == $commit and .index_digest == $digest and
+             .immutable_version == $version and .moving_aliases == [$mm, $m, "latest"]' \
+            "$RUNNER_TEMP/promotion-release-assets/oci-alias-promotion.json" >/dev/null
           cosign verify \
             --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
@@ -308,16 +409,22 @@ jobs:
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/oci-attestation-verification.json"
           javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
-          javascript_commit=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .commit' "$report")
           react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
-          react_native_commit=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .commit' "$report")
           npm --userconfig=/dev/null view "@latchway/client@$javascript_version" --json > "$RUNNER_TEMP/npm-javascript.json"
           npm --userconfig=/dev/null view "@latchway/react-native@$react_native_version" --json > "$RUNNER_TEMP/npm-react-native.json"
-          jq --exit-status --arg version "$javascript_version" --arg commit "$javascript_commit" \
-            '.name == "@latchway/client" and .version == $version and .gitHead == $commit and (.dist.integrity | startswith("sha512-"))' \
+          jq --exit-status --arg version "$javascript_version" \
+            '.name == "@latchway/client" and .version == $version and
+             (.dist.integrity | startswith("sha512-")) and
+             (._npmUser.trustedPublisher.id == "github") and
+             (.dist.signatures | type == "array" and length > 0) and
+             (.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
             "$RUNNER_TEMP/npm-javascript.json" >/dev/null
-          jq --exit-status --arg version "$react_native_version" --arg commit "$react_native_commit" \
-            '.name == "@latchway/react-native" and .version == $version and .gitHead == $commit and (.dist.integrity | startswith("sha512-"))' \
+          jq --exit-status --arg version "$react_native_version" \
+            '.name == "@latchway/react-native" and .version == $version and
+             (.dist.integrity | startswith("sha512-")) and
+             (._npmUser.trustedPublisher.id == "github") and
+             (.dist.signatures | type == "array" and length > 0) and
+             (.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
             "$RUNNER_TEMP/npm-react-native.json" >/dev/null
       - name: Seal verified public coordinates for the offline renderer
         shell: bash
@@ -333,16 +440,24 @@ jobs:
           ios_version=$(jq --raw-output '.repositories[] | select(.id == "ios") | .version' "$report")
           ios_tag=$(jq --raw-output '.repositories[] | select(.id == "ios") | .intended_tag' "$report")
           android_version=$(jq --raw-output '.repositories[] | select(.id == "android") | .version' "$report")
+          promotion_sha256=$(sha256sum \
+            "$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.json" \
+            | cut -d ' ' -f 1)
           jq --null-input \
             --arg repository Latchway/latchway \
             --arg commit "$CANDIDATE_COMMIT" \
             --arg tag "$RELEASE_TAG" \
             --arg tag_object "$(jq --raw-output .object.sha "$RUNNER_TEMP/tag-ref.json")" \
+            --arg promotion_sha256 "$promotion_sha256" \
             --argjson release_id "$(jq .id "$RUNNER_TEMP/release.json")" \
             --arg release_url "https://github.com/Latchway/latchway/releases/tag/$RELEASE_TAG" \
+            --arg release_name "$(jq --raw-output .name "$RUNNER_TEMP/release.json")" \
+            --arg release_body "$(jq --raw-output .body "$RUNNER_TEMP/release.json")" \
             --arg published_at "$(jq --raw-output .published_at "$RUNNER_TEMP/release.json")" \
-            --arg release_attestation_sha256 "$(sha256sum "$RUNNER_TEMP/product-release-attestation.json" | cut -d ' ' -f 1)" \
+            --arg release_attestation_sha256 "$(sha256sum "$RUNNER_TEMP/product-release-attestation-verification.json" | cut -d ' ' -f 1)" \
+            --argjson release_assets "$(jq --compact-output '[.assets[] | {id, name, size, digest}] | sort_by(.name)' "$RUNNER_TEMP/release.json")" \
             --arg image "$image" \
+            --argjson oci_aliases "$(cat "$RUNNER_TEMP/oci-alias-state.json")" \
             --arg js "@latchway/client@$javascript_version" \
             --arg rn "@latchway/react-native@$react_native_version" \
             --arg swift "https://github.com/Latchway/latchway-ios-sdk.git@$ios_tag" \
@@ -351,11 +466,15 @@ jobs:
             '{schema_version: 1, kind: "latchway_public_release_state",
               repository: $repository, core_commit: $commit, core_tag: $tag,
               tag_object_sha: $tag_object,
+              promotion_evidence_sha256: $promotion_sha256,
               github_release: {id: $release_id, url: $release_url, tag_name: $tag,
+                name: $release_name, body: $release_body,
                 draft: false, prerelease: false, immutable: true,
                 published_at: $published_at,
-                release_attestation_sha256: $release_attestation_sha256},
+                release_attestation_sha256: $release_attestation_sha256,
+                assets: $release_assets},
               oci_image_digest: $image,
+              oci_aliases: $oci_aliases,
               registries: {
                 oci: $image, npm_javascript: $js, npm_react_native: $rn,
                 swift_package: $swift, cocoapods: $pod,
@@ -396,7 +515,7 @@ jobs:
             "$destination/latchway-publication-state.json"
           cp -- "$RUNNER_TEMP/public-registry-byte-proof.json" \
             "$destination/latchway-public-registry-byte-proof.json"
-          cp -- "$RUNNER_TEMP/product-release-attestation.json" \
+          cp -- "$RUNNER_TEMP/product-release-attestation-verification.json" \
             "$destination/latchway-product-release-attestation.json"
           mkdir -p "$durable_root/candidate" "$durable_root/security" "$durable_root/external" "$durable_root/source"
           install -m 0600 -- \
@@ -609,6 +728,9 @@ jobs:
             printf '%s\n' "$asset" >> "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
           done
           test "$(wc -l < "$RUNNER_TEMP/fixed-final-evidence-assets.txt" | tr -d ' ')" = 9
+          while IFS= read -r asset; do basename "$asset"; done \
+            < "$RUNNER_TEMP/fixed-final-evidence-assets.txt" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-final-evidence-assets.txt"
 
           set +e
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
@@ -667,6 +789,13 @@ jobs:
               "$RUNNER_TEMP/final-release-record/$existing_name" \
               "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
           done < <(jq --raw-output '.assets[].name' "$RUNNER_TEMP/final-release-preflight.json")
+          if [[ "$mode" == immutable ]]; then
+            jq --raw-output '.assets[].name' "$RUNNER_TEMP/final-release-preflight.json" \
+              | LC_ALL=C sort > "$RUNNER_TEMP/preflight-final-evidence-assets.txt"
+            diff --unified=0 \
+              "$RUNNER_TEMP/expected-final-evidence-assets.txt" \
+              "$RUNNER_TEMP/preflight-final-evidence-assets.txt"
+          fi
           while IFS= read -r asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
@@ -763,9 +892,29 @@ jobs:
                 *) echo "invalid preflight disposition" >&2; exit 1 ;;
               esac
             done < "$plan"
-            gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            gh api --include -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
-              > "$RUNNER_TEMP/evidence-draft.json"
+              > "$RUNNER_TEMP/pre-publish-evidence-snapshot.http"
+            python3 scripts/verify-github-api-snapshot.py \
+              --response "$RUNNER_TEMP/pre-publish-evidence-snapshot.http" \
+              --expected-status 200 \
+              --body-output "$RUNNER_TEMP/pre-publish-evidence-draft.json" \
+              --etag-output "$RUNNER_TEMP/pre-publish-evidence.etag"
+            release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/pre-publish-evidence-draft.json")
+            jq --exit-status \
+              --arg tag "$evidence_tag" \
+              --arg title "$title" \
+              --arg body "$notes" \
+              --argjson id "$release_id" \
+              '.id == $id and .tag_name == $tag and .name == $title and
+               .body == $body and .draft == true and .prerelease == false and
+               .immutable == false' "$RUNNER_TEMP/pre-publish-evidence-draft.json" >/dev/null
+            jq --raw-output '.assets[].name' "$RUNNER_TEMP/pre-publish-evidence-draft.json" \
+              | LC_ALL=C sort > "$RUNNER_TEMP/pre-publish-final-evidence-assets.txt"
+            diff --unified=0 \
+              "$RUNNER_TEMP/expected-final-evidence-assets.txt" \
+              "$RUNNER_TEMP/pre-publish-final-evidence-assets.txt"
             while IFS=$'\t' read -r _ asset; do
               name=${asset##*/}
               expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
@@ -773,12 +922,36 @@ jobs:
                 '[.assets[] | select(.name == $name)] |
                  if length == 1 then (.[0].digest // "digest-unavailable")
                  else error("draft evidence asset missing or duplicated") end' \
-                "$RUNNER_TEMP/evidence-draft.json")
+                "$RUNNER_TEMP/pre-publish-evidence-draft.json")
               test "$actual" = "$expected"
             done < "$plan"
-            release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
-              "$RUNNER_TEMP/evidence-draft.json")
+            # Close the protected tag target again immediately before publication.
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+              > "$RUNNER_TEMP/pre-publish-evidence-tag-ref.json"
+            jq --exit-status --arg ref "refs/tags/$evidence_tag" \
+              '.ref == $ref and .object.type == "tag" and
+               (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/pre-publish-evidence-tag-ref.json" >/dev/null
+            pre_publish_tag_object=$(jq --raw-output .object.sha \
+              "$RUNNER_TEMP/pre-publish-evidence-tag-ref.json")
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$pre_publish_tag_object" \
+              > "$RUNNER_TEMP/pre-publish-evidence-tag-object.json"
+            jq --exit-status \
+              --arg tag "$evidence_tag" \
+              --arg commit "$CANDIDATE_COMMIT" \
+              --arg message "$message" \
+              '.tag == $tag and .object.type == "commit" and
+               .object.sha == $commit and .message == $message' \
+              "$RUNNER_TEMP/pre-publish-evidence-tag-object.json" >/dev/null
             jq --null-input '{draft: false}' > "$RUNNER_TEMP/publish-evidence-release.json"
+            gh api --include \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -H "If-None-Match: $(cat "$RUNNER_TEMP/pre-publish-evidence.etag")" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+              > "$RUNNER_TEMP/pre-publish-evidence-unchanged.http"
+            python3 scripts/verify-github-api-snapshot.py \
+              --response "$RUNNER_TEMP/pre-publish-evidence-unchanged.http" \
+              --expected-status 304
             gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --input "$RUNNER_TEMP/publish-evidence-release.json" \
@@ -787,10 +960,26 @@ jobs:
           gh api -H "X-GitHub-Api-Version: 2026-03-10" \
             "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
             > "$RUNNER_TEMP/final-release.json"
-          jq --exit-status --arg tag "$evidence_tag" --arg title "$title" --arg body "$notes" \
+          final_release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+            "$RUNNER_TEMP/final-release.json")
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            test "$final_release_id" = "$release_id"
+          fi
+          jq --exit-status --arg tag "$evidence_tag" --arg title "$title" --arg body "$notes" --argjson id "$final_release_id" \
             '.tag_name == $tag and .name == $title and .body == $body and .draft == false and
-             .prerelease == false and .immutable == true' \
+             .prerelease == false and .immutable == true and .id == $id' \
             "$RUNNER_TEMP/final-release.json" >/dev/null
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/$final_release_id" \
+            > "$RUNNER_TEMP/final-release-by-id.json"
+          cmp --silent \
+            <(jq --sort-keys . "$RUNNER_TEMP/final-release.json") \
+            <(jq --sort-keys . "$RUNNER_TEMP/final-release-by-id.json")
+          jq --raw-output '.assets[].name' "$RUNNER_TEMP/final-release.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/final-evidence-assets.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/expected-final-evidence-assets.txt" \
+            "$RUNNER_TEMP/final-evidence-assets.txt"
           gh release verify "$evidence_tag" --format json \
             > "$RUNNER_TEMP/evidence-release-attestation.json"
           while IFS=$'\t' read -r _ asset; do
@@ -805,6 +994,27 @@ jobs:
             gh release verify-asset "$evidence_tag" "$asset" --format json \
               > "$RUNNER_TEMP/evidence-release-asset-${name}.json"
           done < "$plan"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/final-evidence-tag-ref.json"
+          final_tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$RUNNER_TEMP/final-evidence-tag-ref.json")
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/final-evidence-tag-ref.json")" = tag
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$final_tag_object" \
+            > "$RUNNER_TEMP/final-evidence-tag-object.json"
+          jq --exit-status \
+            --arg tag "$evidence_tag" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$message" \
+            '.tag == $tag and .object.type == "commit" and
+             .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/final-evidence-tag-object.json" >/dev/null
+          python3 scripts/verify-github-release-attestation.py \
+            --attestation "$RUNNER_TEMP/evidence-release-attestation.json" \
+            --release "$RUNNER_TEMP/final-release.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$evidence_tag" \
+            --ref-sha "$final_tag_object" \
+            --output "$RUNNER_TEMP/evidence-release-attestation-verification.json"
       - name: Retain the final report bundle and verified public state
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -813,6 +1023,7 @@ jobs:
             ${{ runner.temp }}/final-release-record/
             ${{ runner.temp }}/publication-state.json
             ${{ runner.temp }}/evidence-release-attestation.json
+            ${{ runner.temp }}/evidence-release-attestation-verification.json
             ${{ runner.temp }}/evidence-release-asset-*.json
           if-no-files-found: error
           compression-level: 0

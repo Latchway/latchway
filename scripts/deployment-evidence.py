@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import gzip
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -34,6 +35,14 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
+GH_VERSION_PATH = Path(__file__).with_name("require-gh-version.py")
+GH_VERSION_SPEC = importlib.util.spec_from_file_location(
+    "latchway_deployment_require_gh_version", GH_VERSION_PATH
+)
+if GH_VERSION_SPEC is None or GH_VERSION_SPEC.loader is None:
+    raise RuntimeError("GitHub CLI version policy cannot be loaded")
+GH_VERSION = importlib.util.module_from_spec(GH_VERSION_SPEC)
+GH_VERSION_SPEC.loader.exec_module(GH_VERSION)
 PLATFORMS = ("compose", "cloud_run", "aws", "fly_io", "cloudflare_containers")
 OBSERVATIONS = (
     "identity",
@@ -1610,6 +1619,10 @@ def main() -> int:
             seal_capture(args.capture_dir.resolve(), args.output.resolve())
             return 0
         if args.command == "finalize":
+            try:
+                GH_VERSION.installed_version()
+            except GH_VERSION.VersionError as error:
+                raise EvidenceError(str(error)) from error
             finalize(args)
             return 0
     except EvidenceError as error:
