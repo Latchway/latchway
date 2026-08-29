@@ -11,11 +11,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	maximumGoTestStdoutBytes = 8 << 20
+	maximumGoTestStderrBytes = 1 << 20
+	maximumGoTestLogBytes    = 12 << 20
 )
 
 type matrix struct {
@@ -94,6 +102,29 @@ type externalArtifact struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
+
+type boundedBuffer struct {
+	buffer    bytes.Buffer
+	maximum   int
+	truncated bool
+}
+
+func (buffer *boundedBuffer) Write(value []byte) (int, error) {
+	written := len(value)
+	remaining := buffer.maximum - buffer.buffer.Len()
+	if remaining <= 0 {
+		buffer.truncated = buffer.truncated || written != 0
+		return written, nil
+	}
+	if len(value) > remaining {
+		value = value[:remaining]
+		buffer.truncated = true
+	}
+	_, _ = buffer.buffer.Write(value)
+	return written, nil
+}
+
+func (buffer *boundedBuffer) Bytes() []byte { return buffer.buffer.Bytes() }
 
 func main() {
 	var matrixPath, outputPath, scope, externalDir string
@@ -221,9 +252,14 @@ func runAutomated(scenario scenario, logDirectory string, timeout time.Duration)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout+30*time.Second)
 		command := exec.CommandContext(ctx, "go", args...)
 		command.Env = append(os.Environ(), "GOCACHE=/tmp/latchway-go-cache")
-		output, commandErr := command.CombinedOutput()
+		stdout := &boundedBuffer{maximum: maximumGoTestStdoutBytes}
+		stderr := &boundedBuffer{maximum: maximumGoTestStderrBytes}
+		command.Stdout = stdout
+		command.Stderr = stderr
+		commandErr := command.Run()
 		timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 		cancel()
+		output, logBuildErr := goTestEvidenceLog(stdout.Bytes(), stderr.Bytes(), command.Env)
 		logName := fmt.Sprintf("%s-%02d.jsonl", scenario.ID, index+1)
 		logPath := filepath.Join(logDirectory, logName)
 		writeErr := os.WriteFile(logPath, output, 0o644)
@@ -245,6 +281,16 @@ func runAutomated(scenario scenario, logDirectory string, timeout time.Duration)
 			result.Error = "write bounded test log: " + writeErr.Error()
 			break
 		}
+		if stdout.truncated || stderr.truncated || len(output) > maximumGoTestLogBytes {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("go test invocation %d exceeded the bounded evidence log", index+1)
+			break
+		}
+		if logBuildErr != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("go test invocation %d emitted malformed JSON stdout", index+1)
+			break
+		}
 		if commandErr != nil {
 			result.Status = "failed"
 			if timedOut {
@@ -254,9 +300,9 @@ func runAutomated(scenario scenario, logDirectory string, timeout time.Duration)
 			}
 			break
 		}
-		if !goTestLogProvesPass(output) {
+		if !goTestLogProvesPass(stdout.Bytes(), invocation.Run) {
 			result.Status = "failed"
-			result.Error = fmt.Sprintf("go test invocation %d emitted no passing test event (a skip is not evidence)", index+1)
+			result.Error = fmt.Sprintf("go test invocation %d did not pass every concrete requested test (a skip is not evidence)", index+1)
 			break
 		}
 	}
@@ -264,21 +310,122 @@ func runAutomated(scenario scenario, logDirectory string, timeout time.Duration)
 	return result
 }
 
-func goTestLogProvesPass(output []byte) bool {
+func goTestLogProvesPass(output []byte, run string) bool {
+	expected := make(map[string]struct{})
+	for _, test := range strings.Split(run, "|") {
+		expected[test] = struct{}{}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
-	passedTest := false
+	passed := make(map[string]struct{}, len(expected))
 	for {
 		var event struct {
 			Action string `json:"Action"`
 			Test   string `json:"Test"`
 		}
 		if err := decoder.Decode(&event); err != nil {
-			return errors.Is(err, io.EOF) && passedTest
+			return errors.Is(err, io.EOF) && len(passed) == len(expected)
 		}
-		if event.Action == "pass" && event.Test != "" {
-			passedTest = true
+		if event.Action == "fail" {
+			return false
+		}
+		if _, required := expected[event.Test]; !required {
+			continue
+		}
+		if event.Action == "skip" {
+			return false
+		}
+		if event.Action == "pass" {
+			passed[event.Test] = struct{}{}
 		}
 	}
+}
+
+func goTestEvidenceLog(stdout, stderr []byte, environment []string) ([]byte, error) {
+	var output bytes.Buffer
+	encoder := json.NewEncoder(&output)
+	redactions := sensitiveEnvironmentValues(environment)
+	if len(stderr) != 0 {
+		event := map[string]any{
+			"Action":  "output",
+			"Package": "github.com/latchway/latchway/tests/failure/runner",
+			"Output":  redactSensitiveText(string(stderr), redactions),
+		}
+		if err := encoder.Encode(event); err != nil {
+			return nil, err
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(stdout))
+	for {
+		var event map[string]any
+		if err := decoder.Decode(&event); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return output.Bytes(), err
+		}
+		if _, ok := event["Action"].(string); !ok {
+			return output.Bytes(), errors.New("go test event has no action")
+		}
+		if diagnostic, ok := event["Output"].(string); ok {
+			event["Output"] = redactSensitiveText(diagnostic, redactions)
+		}
+		if err := encoder.Encode(event); err != nil {
+			return output.Bytes(), err
+		}
+		if output.Len() > maximumGoTestLogBytes {
+			return output.Bytes(), errors.New("go test evidence log exceeded maximum")
+		}
+	}
+	return output.Bytes(), nil
+}
+
+func sensitiveEnvironmentValues(environment []string) []string {
+	seen := make(map[string]struct{})
+	add := func(value string) {
+		if len(value) >= 4 {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, entry := range environment {
+		key, value, found := strings.Cut(entry, "=")
+		if !found || !sensitiveEnvironmentKey(key) {
+			continue
+		}
+		add(value)
+		if parsed, err := url.Parse(value); err == nil && parsed.User != nil {
+			if password, ok := parsed.User.Password(); ok {
+				add(password)
+				add(url.QueryEscape(password))
+			}
+		}
+	}
+	values := make([]string, 0, len(seen))
+	for value := range seen {
+		values = append(values, value)
+	}
+	sort.Slice(values, func(left, right int) bool { return len(values[left]) > len(values[right]) })
+	return values
+}
+
+func sensitiveEnvironmentKey(key string) bool {
+	key = strings.ToUpper(key)
+	for _, marker := range []string{"TOKEN", "PASSWORD", "SECRET", "CREDENTIAL", "KEY", "AUTH", "COOKIE", "DATABASE_URL"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func redactSensitiveText(value string, redactions []string) string {
+	if len(redactions) == 0 {
+		return value
+	}
+	replacements := make([]string, 0, len(redactions)*2)
+	for _, sensitive := range redactions {
+		replacements = append(replacements, sensitive, "[REDACTED]")
+	}
+	return strings.NewReplacer(replacements...).Replace(value)
 }
 
 func validateExternal(scenario scenario, directory, commit, scope string) scenarioResult {

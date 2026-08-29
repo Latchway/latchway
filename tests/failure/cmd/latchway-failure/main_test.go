@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,7 +85,50 @@ func stringOf(character byte, count int) string {
 func TestGoTestLogRequiresAConcretePassingTest(t *testing.T) {
 	passing := []byte("{\"Action\":\"pass\",\"Test\":\"TestExactGate\"}\n{\"Action\":\"pass\"}\n")
 	skipped := []byte("{\"Action\":\"skip\",\"Test\":\"TestExactGate\"}\n{\"Action\":\"pass\"}\n")
-	if !goTestLogProvesPass(passing) || goTestLogProvesPass(skipped) {
+	partial := []byte("{\"Action\":\"pass\",\"Test\":\"TestExactGate\"}\n")
+	if !goTestLogProvesPass(passing, "TestExactGate") ||
+		goTestLogProvesPass(skipped, "TestExactGate") ||
+		goTestLogProvesPass(partial, "TestExactGate|TestSecondGate") {
 		t.Fatal("go test evidence accepted a skip or rejected a concrete passing test")
+	}
+}
+
+func TestGoTestEvidenceSeparatesJSONStdoutFromRedactedStderr(t *testing.T) {
+	databaseURL := "postgres://user:very-secret-password@127.0.0.1:5432/latchway"
+	stdout := []byte("{\"Action\":\"pass\",\"Test\":\"TestExactGate\"}\n")
+	stderr := []byte("go: downloading example.invalid/module\ndiagnostic " + databaseURL + " very-secret-password\n")
+	log, err := goTestEvidenceLog(stdout, stderr, []string{"LATCHWAY_TEST_DATABASE_URL=" + databaseURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(log, []byte(databaseURL)) || bytes.Contains(log, []byte("very-secret-password")) ||
+		!bytes.Contains(log, []byte("[REDACTED]")) {
+		t.Fatalf("combined evidence was not redaction-safe: %s", log)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(log))
+	for decoded := 0; ; decoded++ {
+		var event map[string]any
+		if err := decoder.Decode(&event); err != nil {
+			if !errors.Is(err, io.EOF) || decoded != 2 {
+				t.Fatalf("combined evidence event count = %d: %v", decoded, err)
+			}
+			break
+		}
+	}
+	if !goTestLogProvesPass(log, "TestExactGate") {
+		t.Fatal("leading stderr diagnostics obscured a concrete passing JSON event")
+	}
+	if _, err := goTestEvidenceLog([]byte("not JSON\n"), stderr, nil); err == nil {
+		t.Fatal("malformed go test JSON stdout was ignored")
+	}
+}
+
+func TestBoundedBufferReportsTruncationWithoutBlockingTheCommand(t *testing.T) {
+	buffer := &boundedBuffer{maximum: 4}
+	if written, err := buffer.Write([]byte("123456")); err != nil || written != 6 {
+		t.Fatalf("Write() = %d, %v", written, err)
+	}
+	if !buffer.truncated || string(buffer.Bytes()) != "1234" {
+		t.Fatalf("bounded buffer = %q truncated=%t", buffer.Bytes(), buffer.truncated)
 	}
 }

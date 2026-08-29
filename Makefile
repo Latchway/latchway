@@ -1,6 +1,7 @@
 SHELL := /bin/sh
 
 GO ?= go
+GOFMT ?= $(shell $(GO) env GOROOT)/bin/gofmt
 PNPM ?= pnpm
 SQLC_IMAGE ?= sqlc/sqlc:1.31.1
 FUZZ_TIME ?= 3s
@@ -29,7 +30,7 @@ check: fmt check-generated vet test
 	cd web/console && $(PNPM) check
 
 fmt:
-	@files="$$(gofmt -l adapters cmd conformance internal migrations web/console/*.go)"; \
+	@files="$$(git ls-files -z -- '*.go' | xargs -0 $(GOFMT) -l)" || exit $$?; \
 	if test -n "$$files"; then echo "$$files"; exit 1; fi
 
 fuzz-smoke:

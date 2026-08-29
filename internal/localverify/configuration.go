@@ -121,7 +121,7 @@ func upstreamDocument(identifier, baseURL string) map[string]any {
 		"authentication": map[string]any{"type": "bearer", "secretRef": "secret/provider-credential"},
 		"staticHeaders":  map[string]any{"X-Provider-Tenant": providerTenant},
 		"timeouts": map[string]any{
-			"connect": "2s", "firstByte": "5s", "idle": "2s", "total": "10s",
+			"connect": "2s", "responseHeader": "5s", "firstByte": "5s", "idle": "2s", "total": "10s",
 		},
 	}
 }

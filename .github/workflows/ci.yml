@@ -21,6 +21,8 @@ jobs:
           persist-credentials: false
       - name: Validate normative contracts
         run: python3 scripts/validate-contracts.py
+      - name: Validate CI workflow invariants
+        run: python3 -m unittest scripts/test_ci_workflow.py
       - name: Prove deterministic contract bundle
         run: |
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a
@@ -115,6 +117,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 10.15.0
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
@@ -124,8 +130,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Enable pinned package manager
-        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
       - name: Install
         working-directory: web/console
         run: pnpm install --frozen-lockfile
@@ -197,6 +201,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 10.15.0
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
@@ -205,8 +213,6 @@ jobs:
       - name: Check Cloudflare Worker and generated bindings
         working-directory: deploy/cloudflare
         run: |
-          corepack enable
-          corepack prepare pnpm@10.15.0 --activate
           pnpm install --frozen-lockfile
           pnpm check
       - name: Validate Cloud Run Terraform
