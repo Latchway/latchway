@@ -32,7 +32,7 @@ has been publicly tagged or published.
 | JavaScript | `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
 | Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
 | Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `96371f1340a4fb835429290360a344d66a79454d` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `c8716b99ac70bc12f8a8fe40fd678e83301f9317` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| React Native | `@latchway/react-native` | `1.0.0` | `3c7426e8d0d71d9f17db4e0a1ce454589982b078` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:

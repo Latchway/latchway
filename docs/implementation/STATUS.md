@@ -37,7 +37,7 @@ but must not alter `api/`; any later API drift invalidates the locks.
 | JavaScript `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Source, tests, examples, exports, package closure, reproducibility, and clean-consumer gates pass |
 | Swift package / `Latchway` pod | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Swift tests, release build, package consumer, CocoaPods lint, fixture, and contract gates pass |
 | Android `dev.latchway:latchway-*` | `1.0.0` | `96371f1340a4fb835429290360a344d66a79454d` | Unit, device-evidence fixture, assemble, lint, local Maven, and offline-consumer gates pass |
-| React Native `@latchway/react-native` | `1.0.0` | `c8716b99ac70bc12f8a8fe40fd678e83301f9317` | JavaScript, codegen, native bridge, example, package closure, reproducibility, podspec, and evidence-export gates pass |
+| React Native `@latchway/react-native` | `1.0.0` | `3c7426e8d0d71d9f17db4e0a1ce454589982b078` | JavaScript, codegen, native bridge, example, package closure, reproducibility, podspec, and evidence-export gates pass |
 
 The React Native compatibility manifest pins the exact JavaScript, Swift, and
 Android source commits above. The native Android SDK supports API 23 or newer;
