@@ -200,7 +200,7 @@ async function installAdminFixture(page: Page) {
     });
     if (url.pathname === "/admin/v1/usage/timeseries") return json(route, 200, { interval: url.searchParams.get("interval") ?? "hour", points: [{ timestamp: instant, values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 } }] });
     const requestDetail = {
-      attempts: [{ completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", id: ids.attempt, model: "openai/gpt", started_at: instant, status: "succeeded", upstream: "openrouter", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "upstream_reported" }],
+      attempts: [{ attempt_number: 1, completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", first_byte_at: "2026-08-29T00:00:00.500Z", http_status: 200, id: ids.attempt, model: "openai/gpt", route: "primary", started_at: instant, status: "succeeded", upstream: "openrouter", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "upstream_reported" }],
       completed_at: "2026-08-29T00:00:03Z", environment_id: ids.environment, feature: "assistant", id: ids.request, installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: instant, status: "succeeded", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 1, output_tokens: 20, total_tokens: 30 }, user_id: ids.user
     };
     if (url.pathname === "/admin/v1/requests") return json(route, 200, { items: [requestDetail], page: { has_more: false } });
@@ -470,7 +470,9 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByRole("heading", { name: "Aggregate usage" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
   await expect(page.getByText("2.5 s")).toBeVisible();
-  await expect(page.getByText(/does not expose route IDs, upstream HTTP status/)).toBeVisible();
+  await expect(page.getByText("primary")).toBeVisible();
+  await expect(page.getByText("500 ms")).toBeVisible();
+  await expect(page.getByText(/closed, sanitized vocabulary/)).toBeVisible();
 
   await page.getByRole("link", { name: /^Route simulator/ }).click();
   await page.getByLabel("Environment context ID").fill(ids.environment);

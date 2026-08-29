@@ -48,9 +48,11 @@ and optional activation with the successive strong ETags. Focused Cost,
 Latency, Errors, and Attestation failures pages use the canonical aggregate
 endpoints without aliasing the whole Usage screen. Request selection loads the
 exact detail endpoint and renders bounded aggregate/attempt timing, usage,
-cost, and provenance; route/HTTP/failure fields remain absent because the v1
-API does not expose them. The route simulator can bind its inputs to an exact
-active environment revision and feature list and cross-checks the response.
+cost, provenance, attempt number, route, first-byte time, HTTP status, and the
+closed sanitized failure category. Unknown durable failure values collapse to
+`unknown`; provider error text and raw internal errors never enter the browser.
+The route simulator can bind its inputs to an exact active environment revision
+and feature list and cross-checks the response.
 Every mutation uses `/admin/v1/*`; browser code has no database client,
 connection string, or local policy evaluator.
 

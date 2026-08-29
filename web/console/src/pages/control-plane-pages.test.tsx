@@ -114,9 +114,15 @@ describe("rich usage and route-simulator views", () => {
 
   it("renders token and cost provenance independently for each attempt", async () => {
 	const request = { attempts: [{
-	  completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
-	  id: "atm_0123456789abcdef", model: "openai/gpt", started_at: "2026-08-29T00:00:00Z",
-	  status: "succeeded", upstream: "openrouter", usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "unknown"
+	  attempt_number: 1, completed_at: "2026-08-29T00:00:00.400Z", cost_provenance: "unknown",
+	  failure_code: "timeout", http_status: 504, id: "atm_0123456789abcdef", model: "openai/gpt",
+	  route: "primary", started_at: "2026-08-29T00:00:00Z", status: "failed",
+	  upstream: "openrouter", usage_provenance: "unknown"
+	}, {
+	  attempt_number: 2, completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
+	  first_byte_at: "2026-08-29T00:00:01Z", http_status: 200, id: "atm_0123456789abcdeg", model: "openai/gpt",
+	  route: "fallback", started_at: "2026-08-29T00:00:00.500Z", status: "succeeded", upstream: "openrouter",
+	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "unknown"
 	}], completed_at: "2026-08-29T00:00:03Z", environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
 	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
@@ -132,15 +138,19 @@ describe("rich usage and route-simulator views", () => {
 	expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
 	expect(screen.getByRole("heading", { name: "Aggregate usage" })).toBeInTheDocument();
 	expect(screen.getByRole("heading", { name: "Ordered upstream attempts" })).toBeInTheDocument();
-	expect(screen.getAllByText("2.5 s")).toHaveLength(1);
+	expect(screen.getByText("500 ms")).toBeInTheDocument();
 	expect(screen.getAllByText("321")).toHaveLength(2);
+	expect(screen.getByText("fallback")).toBeInTheDocument();
+	expect(screen.getByText("504")).toBeInTheDocument();
+	expect(screen.getByText("timeout")).toBeInTheDocument();
 	expect(screen.getByText("upstream_reported")).toBeInTheDocument();
 	expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
-	expect(screen.getByText(/does not expose route IDs, upstream HTTP status/)).toBeInTheDocument();
+	expect(screen.getByText(/closed, sanitized vocabulary/)).toBeInTheDocument();
+	expect(screen.queryByText("upstream_timeout")).not.toBeInTheDocument();
   });
 
   it("rejects request detail that does not match the selected environment", async () => {
-    const listed = { attempts: [], environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef" };
+    const listed = { attempts: [], completed_at: "2026-08-29T00:00:01Z", environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef" };
     adminRequestMock.mockImplementation(async (path: string) => path.endsWith(listed.id) ? { data: { ...listed, environment_id: "env_ffffffffffffffff" } } : { data: { items: [listed], page: { has_more: false } } });
     const user = userEvent.setup();
     render(<RequestsPage />);

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -33,7 +34,10 @@ const (
 	maximumIdentityProviders     = 64
 	maximumUsagePoints           = 10_000
 	maximumSummaryRange          = 366 * 24 * time.Hour
+	maximumUpstreamAttempts      = 32
 )
+
+var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type operationalStore struct {
 	pool      *pgxpool.Pool
@@ -89,11 +93,16 @@ type usageValues struct {
 
 type upstreamAttemptDocument struct {
 	ID              string       `json:"id"`
+	AttemptNumber   int32        `json:"attempt_number"`
+	Route           string       `json:"route"`
 	Upstream        string       `json:"upstream"`
 	Model           string       `json:"model"`
 	StartedAt       time.Time    `json:"started_at"`
+	FirstByteAt     *time.Time   `json:"first_byte_at,omitempty"`
 	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
 	Status          string       `json:"status"`
+	HTTPStatus      *int32       `json:"http_status,omitempty"`
+	FailureCode     *string      `json:"failure_code,omitempty"`
 	Usage           *usageValues `json:"usage,omitempty"`
 	UsageProvenance string       `json:"usage_provenance"`
 	CostProvenance  string       `json:"cost_provenance"`
@@ -860,6 +869,70 @@ func publicAttemptStatus(status string) string {
 	}
 }
 
+// publicAttemptFailureCode is deliberately a many-to-one boundary. Durable
+// failure codes are internal implementation details and may contain legacy or
+// dependency-specific values. Only this closed, redaction-safe vocabulary is
+// returned by the Admin API.
+func publicAttemptFailureCode(code string) string {
+	switch code {
+	case "client_cancelled", "request_cancelled":
+		return "canceled"
+	case "pricing_unavailable", "quota_state_unavailable", "configuration_invalid":
+		return "gateway_error"
+	case "upstream_protocol_error":
+		return "protocol_error"
+	case "upstream_timeout", "upstream_timed_out":
+		return "timeout"
+	case "upstream_unavailable":
+		return "unavailable"
+	case "upstream_non_success":
+		return "upstream_rejected"
+	default:
+		return "unknown"
+	}
+}
+
+func validateUpstreamAttempt(
+	attempt upstreamAttemptDocument,
+	storedStatus string,
+	storedFailureCode *string,
+	expectedNumber int32,
+) error {
+	if attempt.AttemptNumber != expectedNumber || attempt.AttemptNumber < 1 ||
+		attempt.AttemptNumber > maximumUpstreamAttempts ||
+		id.Validate(attempt.ID, id.UpstreamAttempt) != nil ||
+		!operationalIdentifierPattern.MatchString(attempt.Route) ||
+		!operationalIdentifierPattern.MatchString(attempt.Upstream) ||
+		attempt.StartedAt.IsZero() {
+		return errOperationalCorrupt
+	}
+	if attempt.FirstByteAt != nil && attempt.FirstByteAt.Before(attempt.StartedAt) ||
+		attempt.CompletedAt != nil && attempt.CompletedAt.Before(attempt.StartedAt) ||
+		attempt.FirstByteAt != nil && attempt.CompletedAt != nil &&
+			attempt.FirstByteAt.After(*attempt.CompletedAt) ||
+		attempt.HTTPStatus != nil && (*attempt.HTTPStatus < 100 || *attempt.HTTPStatus > 599) {
+		return errOperationalCorrupt
+	}
+	switch storedStatus {
+	case "started":
+		if attempt.CompletedAt != nil || attempt.HTTPStatus != nil || storedFailureCode != nil {
+			return errOperationalCorrupt
+		}
+	case "succeeded":
+		if attempt.CompletedAt == nil || storedFailureCode != nil || attempt.HTTPStatus == nil ||
+			*attempt.HTTPStatus < 200 || *attempt.HTTPStatus > 299 {
+			return errOperationalCorrupt
+		}
+	case "failed", "timed_out", "cancelled":
+		if attempt.CompletedAt == nil || storedFailureCode == nil {
+			return errOperationalCorrupt
+		}
+	default:
+		return errOperationalCorrupt
+	}
+	return nil
+}
+
 func (store *operationalStore) populateRequestDetails(
 	ctx context.Context,
 	organizationID string,
@@ -875,8 +948,9 @@ func (store *operationalStore) populateRequestDetails(
 		requestIndexes[items[index].ID] = index
 	}
 	attemptRows, err := store.pool.Query(ctx, `
-		SELECT logical_request_id, upstream_attempt_id, upstream_key,
-		       COALESCE(physical_model, ''), started_at, completed_at, status,
+		SELECT logical_request_id, upstream_attempt_id, attempt_number, route_key,
+		       upstream_key, COALESCE(physical_model, ''), started_at, first_byte_at,
+		       completed_at, status, http_status, failure_code,
 		       cost_confidence, pricing_source
 		FROM upstream_attempts
 		WHERE organization_id = $1 AND logical_request_id = ANY($2::text[])
@@ -888,22 +962,29 @@ func (store *operationalStore) populateRequestDetails(
 	attemptLocations := make(map[string][2]int)
 	for attemptRows.Next() {
 		var requestID, status string
-		var costConfidence, pricingSource *string
+		var failureCode, costConfidence, pricingSource *string
 		var attempt upstreamAttemptDocument
 		if err := attemptRows.Scan(
-			&requestID, &attempt.ID, &attempt.Upstream, &attempt.Model,
-			&attempt.StartedAt, &attempt.CompletedAt, &status,
+			&requestID, &attempt.ID, &attempt.AttemptNumber, &attempt.Route,
+			&attempt.Upstream, &attempt.Model, &attempt.StartedAt, &attempt.FirstByteAt,
+			&attempt.CompletedAt, &status, &attempt.HTTPStatus, &failureCode,
 			&costConfidence, &pricingSource,
 		); err != nil {
 			attemptRows.Close()
 			return fmt.Errorf("scan upstream attempt: %w", err)
 		}
 		requestIndex, ok := requestIndexes[requestID]
-		if !ok || id.Validate(attempt.ID, id.UpstreamAttempt) != nil {
+		if !ok || validateUpstreamAttempt(
+			attempt, status, failureCode, int32(len(items[requestIndex].Attempts)+1),
+		) != nil {
 			attemptRows.Close()
 			return errOperationalCorrupt
 		}
 		attempt.Status = publicAttemptStatus(status)
+		if failureCode != nil {
+			publicCode := publicAttemptFailureCode(*failureCode)
+			attempt.FailureCode = &publicCode
+		}
 		attempt.UsageProvenance = "unknown"
 		attempt.CostProvenance = "unknown"
 		if costConfidence != nil {

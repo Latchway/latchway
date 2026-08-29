@@ -159,9 +159,12 @@ latchway audit --organization org_...
 
 List commands use bounded keyset pages. Pass the printed opaque cursor back via
 `--cursor`; never decode or modify it. Request output contains metadata,
-attempts, normalized usage, and separate token/cost provenance, not prompt or
-response bodies. An opted-in OpenRouter report is labeled
-`upstream_reported` with source `openrouter_usage_cost`; see
+contiguously ordered attempt numbers, routes, start/first-byte/completion
+times, optional HTTP status, the closed sanitized failure category, normalized
+usage, and separate token/cost provenance. It never contains prompt/response
+bodies, provider error text, or raw internal errors; unrecognized durable
+failure values appear only as `unknown`. An opted-in OpenRouter report is
+labeled `upstream_reported` with source `openrouter_usage_cost`; see
 [Provider-reported cost](provider-reported-cost.md).
 
 ## Exact route simulation

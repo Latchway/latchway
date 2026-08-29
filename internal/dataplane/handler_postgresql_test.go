@@ -225,15 +225,15 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		Limits: []configuration.Limit{
 			{
 				Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
-				Scope: []string{"user", "feature"}, Window: "1d", Maximum: 2, Hard: true,
+				Scope: []string{"user", "feature"}, Window: "1d", Timezone: "UTC", Maximum: 2, Hard: true,
 			},
 			{
 				Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
-				Scope: []string{"environment"}, Window: "1mo", Maximum: 3, Hard: true,
+				Scope: []string{"environment"}, Window: "1mo", Timezone: "UTC", Maximum: 3, Hard: true,
 			},
 			{
 				Metric: quota.OutputTokensMetric, Algorithm: quota.CalendarAlgorithm,
-				Scope: []string{"user", "model"}, Window: "1d", Maximum: 256, Hard: true,
+				Scope: []string{"user", "model"}, Window: "1d", Timezone: "UTC", Maximum: 256, Hard: true,
 			},
 			{
 				Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
@@ -284,7 +284,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		ID: dataPlaneE2ECostPlan,
 		Limits: []configuration.Limit{{
 			Metric: quota.CostNanoUSDMetric, Algorithm: quota.CalendarAlgorithm,
-			Scope: []string{"user", "feature"}, Window: "1mo",
+			Scope: []string{"user", "feature"}, Window: "1mo", Timezone: "UTC",
 			Maximum: dataPlaneE2ECostMaximum, Hard: true,
 		}},
 	}

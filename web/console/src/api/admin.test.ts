@@ -108,23 +108,43 @@ describe("canonical Admin API browser client", () => {
 
   it("keeps provider cost provenance and its fixed report source distinct", () => {
 	const attempt = {
-	  cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
+	  attempt_number: 1, completed_at: "2026-08-29T00:00:02Z",
+	  cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", http_status: 200,
 	  id: "atm_0123456789abcdef", model: "openai/gpt", started_at: "2026-08-29T00:00:00Z",
-	  status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
+	  route: "primary", status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
 	};
 	expect(RequestSchema.parse({
 	  attempts: [attempt], environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
-	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  completed_at: "2026-08-29T00:00:03Z", protocol: "openai_chat",
+	  started_at: "2026-08-29T00:00:00Z", status: "succeeded",
 	  user_id: "usr_0123456789abcdef"
 	}).attempts[0]).toEqual(attempt);
 	expect(() => RequestSchema.parse({
 	  attempts: [{ ...attempt, cost_source: "secret source\n" }],
 	  environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
-	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  completed_at: "2026-08-29T00:00:03Z", protocol: "openai_chat",
+	  started_at: "2026-08-29T00:00:00Z", status: "succeeded",
 	  user_id: "usr_0123456789abcdef"
 	})).toThrow();
+	const request = {
+	  attempts: [attempt], completed_at: "2026-08-29T00:00:03Z",
+	  environment_id: "env_0123456789abcdef", feature: "assistant",
+	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
+	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  user_id: "usr_0123456789abcdef"
+	};
+	expect(() => RequestSchema.parse({ ...request, attempts: [{ ...attempt, attempt_number: 2 }] })).toThrow();
+	expect(() => RequestSchema.parse({
+	  ...request, attempts: [{ ...attempt, first_byte_at: "2026-08-29T00:00:03Z" }]
+	})).toThrow();
+	expect(() => RequestSchema.parse({
+	  ...request, attempts: [{ ...attempt, failure_code: "upstream_timeout" }]
+	})).toThrow();
+	expect(() => RequestSchema.parse({
+	  ...request, attempts: [{ ...attempt, failure_code: "timeout", status: "failed" }]
+	})).not.toThrow();
 	const values = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 	const analytics = {
 	  active_users: 0, attestation_failure_rate: { denominator: 0, numerator: 0, parts_per_million: 0 },

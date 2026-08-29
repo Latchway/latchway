@@ -37,11 +37,24 @@ Usage summary ranges are half-open (`start <= recorded_at < end`) and limited
 to 366 days. Timeseries data uses UTC hour or UTC day buckets and rejects a
 range that would emit more than 10,000 points. Token and cost values come from
 the immutable usage ledger; multi-attempt usage is summed while the logical
-request record remains single-counted. The request explorer returns metadata,
-attempt lifecycle, model/upstream selection, and separate token-usage and cost
-provenance, never prompt or response bodies. Provider-reported cost exposes the
-fixed bounded source `openrouter_usage_cost`; the attempt's configured catalog
-binding remains distinct for reservation replay.
+request record remains single-counted. The request explorer returns metadata
+and contiguous physical attempts ordered by `attempt_number` (1–32). Each
+attempt includes its canonical route and upstream, physical model,
+start/optional-first-byte/optional-completion times, optional upstream HTTP
+status, public lifecycle status, normalized usage, and separate token-usage and
+cost provenance. The read path rejects gaps, noncanonical route keys,
+impossible lifecycle combinations, and timestamps outside
+`started_at <= first_byte_at <= completed_at`; it does not partially return a
+corrupt request.
+
+Attempt failures use the closed public vocabulary `canceled`, `gateway_error`,
+`protocol_error`, `timeout`, `unavailable`, `upstream_rejected`, and `unknown`.
+Known internal lifecycle codes map into those categories; every unrecognized or
+legacy internal value collapses to `unknown`. Raw provider bodies, provider
+error text, internal errors, request/response bodies, and identity subjects are
+never returned. Provider-reported cost exposes the fixed bounded source
+`openrouter_usage_cost`; the attempt's configured catalog binding remains
+distinct for reservation replay.
 
 The rich summary limits each feature, physical-model, and selected-limit-plan
 breakdown to an operator-selected 1–200 rows and reports truncation. It returns

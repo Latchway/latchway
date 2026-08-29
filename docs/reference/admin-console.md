@@ -69,11 +69,12 @@ the atomic conflict check and audit mutation.
 
 Selecting a logical request loads the exact request-detail endpoint. The view
 shows request status, start/completion/duration, aggregate usage, and ordered
-attempt start/completion/duration, upstream, physical model, public status,
-usage, cost, and independent usage/cost provenance. The v1 Admin API does not
-expose a route ID, upstream HTTP status, or public failure code on an attempt,
-so the console states that boundary instead of fabricating those fields. Raw
-request/response bodies and identity subjects remain excluded.
+attempt number, route, start/first-byte/completion timing, upstream, physical
+model, public status, optional HTTP status, sanitized failure category, usage,
+cost, and independent usage/cost provenance. Failure values are restricted to
+the canonical public vocabulary and unknown durable values appear only as
+`unknown`. Raw request/response or provider error bodies, provider error text,
+internal errors, and identity subjects remain excluded.
 
 The route simulator can load one environment's exact active revision and its
 bounded canonical feature IDs. It preselects that revision/feature and rejects

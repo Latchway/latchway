@@ -3,6 +3,7 @@ package adminapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"log/slog"
@@ -160,10 +161,25 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
+		!bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.secondAttemptID)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"usage_provenance":"upstream_reported"`)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"cost_provenance":"upstream_reported"`)) ||
 		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"cost_source":"openrouter_usage_cost"`)) {
 		t.Fatalf("request get status/body=%d %s", requestGet.Code, requestGet.Body.String())
+	}
+	var requestDocument logicalRequestDocument
+	decodeResponse(t, requestGet, &requestDocument)
+	if len(requestDocument.Attempts) != 2 ||
+		requestDocument.Attempts[0].AttemptNumber != 1 || requestDocument.Attempts[0].Route != "primary" ||
+		requestDocument.Attempts[0].HTTPStatus == nil || *requestDocument.Attempts[0].HTTPStatus != 504 ||
+		requestDocument.Attempts[0].FailureCode == nil || *requestDocument.Attempts[0].FailureCode != "timeout" ||
+		requestDocument.Attempts[0].FirstByteAt != nil ||
+		requestDocument.Attempts[1].AttemptNumber != 2 || requestDocument.Attempts[1].Route != "fallback" ||
+		requestDocument.Attempts[1].FirstByteAt == nil || requestDocument.Attempts[1].FailureCode != nil {
+		t.Fatalf("request attempt detail/order = %#v", requestDocument.Attempts)
+	}
+	if bytes.Contains(requestGet.Body.Bytes(), []byte(`upstream_timeout`)) {
+		t.Fatalf("request detail exposed internal failure code: %s", requestGet.Body.String())
 	}
 
 	start := fixture.recordedAt.Add(-time.Hour).Format(time.RFC3339)
@@ -312,6 +328,95 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		ID string `json:"id"`
 	}
 	decodeResponse(t, secondOrganization, &secondOrganizationDocument)
+	secondLogin := performJSON(t, handler, http.MethodPost, "/admin/v1/auth/login", map[string]string{
+		"email": "owner-operations@example.test", "password": "correct horse battery staple",
+		"organization_id": secondOrganizationDocument.ID,
+	}, nil, "", "https://console.example.test")
+	if secondLogin.Code != http.StatusOK {
+		t.Fatalf("second organization login status=%d body=%s", secondLogin.Code, secondLogin.Body.String())
+	}
+	secondCookie := secondLogin.Result().Cookies()[0]
+	secondCSRF := secondLogin.Header().Get(csrfHeader)
+	secondApplicationResponse := performJSON(t, handler, http.MethodPost, "/admin/v1/applications", map[string]string{
+		"organization_id": secondOrganizationDocument.ID, "slug": "secondary-mobile", "display_name": "Secondary Mobile",
+	}, secondCookie, secondCSRF, "https://console.example.test")
+	if secondApplicationResponse.Code != http.StatusCreated {
+		t.Fatalf("second application status=%d body=%s", secondApplicationResponse.Code, secondApplicationResponse.Body.String())
+	}
+	var secondApplication struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, secondApplicationResponse, &secondApplication)
+	secondEnvironmentResponse := performJSON(t, handler, http.MethodPost,
+		"/admin/v1/applications/"+secondApplication.ID+"/environments", map[string]string{
+			"slug": "production", "display_name": "Production", "kind": "production",
+		}, secondCookie, secondCSRF, "https://console.example.test")
+	if secondEnvironmentResponse.Code != http.StatusCreated {
+		t.Fatalf("second environment status=%d body=%s", secondEnvironmentResponse.Code, secondEnvironmentResponse.Body.String())
+	}
+	var secondEnvironment struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, secondEnvironmentResponse, &secondEnvironment)
+	secondFixture := seedOperationalFixture(
+		t, ctx, pool, secondOrganizationDocument.ID, secondApplication.ID, secondEnvironment.ID,
+	)
+	crossTenantRequest := performGET(handler, "/admin/v1/requests/"+secondFixture.requestID, cookie)
+	if crossTenantRequest.Code != http.StatusNotFound ||
+		bytes.Contains(crossTenantRequest.Body.Bytes(), []byte(secondFixture.attemptID)) ||
+		bytes.Contains(crossTenantRequest.Body.Bytes(), []byte(secondFixture.secondAttemptID)) {
+		t.Fatalf("cross-tenant request status/body=%d %s", crossTenantRequest.Code, crossTenantRequest.Body.String())
+	}
+	secondTenantRequest := performGET(handler, "/admin/v1/requests/"+secondFixture.requestID, secondCookie)
+	if secondTenantRequest.Code != http.StatusOK ||
+		!bytes.Contains(secondTenantRequest.Body.Bytes(), []byte(secondFixture.secondAttemptID)) {
+		t.Fatalf("same-tenant request status/body=%d %s", secondTenantRequest.Code, secondTenantRequest.Body.String())
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE upstream_attempts SET failure_code = 'provider_body_secret_text'
+		WHERE upstream_attempt_id = $1
+	`, secondFixture.attemptID); err != nil {
+		t.Fatalf("seed unrecognized attempt failure: %v", err)
+	}
+	unknownFailure := performGET(handler, "/admin/v1/requests/"+secondFixture.requestID, secondCookie)
+	if unknownFailure.Code != http.StatusOK ||
+		!bytes.Contains(unknownFailure.Body.Bytes(), []byte(`"failure_code":"unknown"`)) ||
+		bytes.Contains(unknownFailure.Body.Bytes(), []byte("provider_body_secret_text")) {
+		t.Fatalf("unknown failure mapping status/body=%d %s", unknownFailure.Code, unknownFailure.Body.String())
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE upstream_attempts SET failure_code = 'upstream_timeout'
+		WHERE upstream_attempt_id = $1
+	`, secondFixture.attemptID); err != nil {
+		t.Fatalf("restore recognized attempt failure: %v", err)
+	}
+	assertCorruptAttempt := func(name, mutation, restore string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, mutation, secondFixture.secondAttemptID); err != nil {
+			t.Fatalf("%s mutation: %v", name, err)
+		}
+		response := performGET(handler, "/admin/v1/requests/"+secondFixture.requestID, secondCookie)
+		if response.Code != http.StatusInternalServerError ||
+			bytes.Contains(response.Body.Bytes(), []byte("corrupt")) ||
+			bytes.Contains(response.Body.Bytes(), []byte("Invalid Route")) {
+			t.Fatalf("%s corrupt-row response status/body=%d %s", name, response.Code, response.Body.String())
+		}
+		if _, err := pool.Exec(ctx, restore, secondFixture.secondAttemptID); err != nil {
+			t.Fatalf("%s restore: %v", name, err)
+		}
+	}
+	assertCorruptAttempt("timestamp order",
+		`UPDATE upstream_attempts SET first_byte_at = completed_at + interval '1 second' WHERE upstream_attempt_id = $1`,
+		`UPDATE upstream_attempts SET first_byte_at = completed_at - interval '30 seconds' WHERE upstream_attempt_id = $1`)
+	assertCorruptAttempt("attempt-number gap",
+		`UPDATE upstream_attempts SET attempt_number = 3 WHERE upstream_attempt_id = $1`,
+		`UPDATE upstream_attempts SET attempt_number = 2 WHERE upstream_attempt_id = $1`)
+	assertCorruptAttempt("noncanonical route",
+		`UPDATE upstream_attempts SET route_key = 'Invalid Route' WHERE upstream_attempt_id = $1`,
+		`UPDATE upstream_attempts SET route_key = 'fallback' WHERE upstream_attempt_id = $1`)
+	assertCorruptAttempt("started terminal fields",
+		`UPDATE upstream_attempts SET status = 'started' WHERE upstream_attempt_id = $1`,
+		`UPDATE upstream_attempts SET status = 'succeeded' WHERE upstream_attempt_id = $1`)
 	crossTenantAudit := performGET(handler, "/admin/v1/audit-events?organization_id="+
 		url.QueryEscape(secondOrganizationDocument.ID), cookie)
 	if crossTenantAudit.Code != http.StatusForbidden {
@@ -363,15 +468,16 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 }
 
 type operationalFixture struct {
-	userID         string
-	installationID string
-	grantID        string
-	refreshID      string
-	requestID      string
-	attemptID      string
-	recordedAt     time.Time
-	subjectHMAC    []byte
-	refreshHash    []byte
+	userID          string
+	installationID  string
+	grantID         string
+	refreshID       string
+	requestID       string
+	attemptID       string
+	secondAttemptID string
+	recordedAt      time.Time
+	subjectHMAC     []byte
+	refreshHash     []byte
 }
 
 func seedOperationalFixture(
@@ -391,6 +497,10 @@ func seedOperationalFixture(
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	fixtureBytes := func(label string) []byte {
+		digest := sha256.Sum256([]byte(label + ":" + organizationID + ":" + applicationID + ":" + environmentID))
+		return append([]byte(nil), digest[:]...)
+	}
 	revisionID := id.Must(id.ConfigRevision)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO config_revisions (
@@ -415,8 +525,9 @@ func seedOperationalFixture(
 		userID: id.Must(id.ApplicationUser), installationID: id.Must(id.Installation),
 		grantID: id.Must(id.SessionGrant), refreshID: id.Must(id.RefreshToken),
 		requestID: id.Must(id.LogicalRequest), attemptID: id.Must(id.UpstreamAttempt),
-		recordedAt: now.Add(-10 * time.Minute), subjectHMAC: bytes.Repeat([]byte{0x5a}, 32),
-		refreshHash: bytes.Repeat([]byte{0x6b}, 32),
+		secondAttemptID: id.Must(id.UpstreamAttempt),
+		recordedAt:      now.Add(-10 * time.Minute), subjectHMAC: fixtureBytes("subject"),
+		refreshHash: fixtureBytes("refresh-token"),
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO application_users (
@@ -465,7 +576,7 @@ func seedOperationalFixture(
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
 		          'app_verified', $10, $10, 'debug', $12, $11, $12)
 	`, fixture.grantID, organizationID, applicationID, environmentID, fixture.userID,
-		fixture.installationID, bytes.Repeat([]byte{0x2c}, 32), dpopJKT, revisionID,
+		fixture.installationID, fixtureBytes("access-token-jti"), dpopJKT, revisionID,
 		now.Add(-45*time.Minute), now.Add(-40*time.Minute), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -506,12 +617,27 @@ func seedOperationalFixture(
 		INSERT INTO upstream_attempts (
 		    upstream_attempt_id, organization_id, application_id, environment_id,
 		    logical_request_id, attempt_number, route_key, upstream_key, physical_model,
-		    status, started_at, first_byte_at, completed_at, http_status, billed_cost_nano_usd,
+		    status, started_at, completed_at, http_status, failure_code, billed_cost_nano_usd,
 		    currency, price_revision, pricing_source, cost_confidence
 		) VALUES ($1, $2, $3, $4, $5, 1, 'primary', 'openai', 'gpt-test',
-		          'succeeded', $6, $7, $8, 200, 123, 'USD', 'fixture', 'configuration', 'reported')
+		          'timed_out', $6, $7, 504, 'upstream_timeout', 123,
+		          'USD', 'fixture', 'configuration', 'reported')
 	`, fixture.attemptID, organizationID, applicationID, environmentID, fixture.requestID,
-		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt.Add(-45*time.Second), fixture.recordedAt); err != nil {
+		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt.Add(-40*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO upstream_attempts (
+		    upstream_attempt_id, organization_id, application_id, environment_id,
+		    logical_request_id, attempt_number, route_key, upstream_key, physical_model,
+		    model_key, attempt_decision_binding_version, attempt_decision_sha256,
+		    input_accounting_binding_version,
+		    status, started_at, first_byte_at, completed_at, http_status
+		) VALUES ($1, $2, $3, $4, $5, 2, 'fallback', 'anthropic', 'claude-test',
+		          'assistant_fallback', 1, decode(repeat('42', 32), 'hex'), 1,
+		          'succeeded', $6, $7, $8, 200)
+	`, fixture.secondAttemptID, organizationID, applicationID, environmentID, fixture.requestID,
+		fixture.recordedAt.Add(-39*time.Second), fixture.recordedAt.Add(-30*time.Second), fixture.recordedAt); err != nil {
 		t.Fatal(err)
 	}
 	usage := []struct {

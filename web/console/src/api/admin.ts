@@ -133,11 +133,26 @@ const UsageValues = z
   })
   .strict();
 
+const PublicAttemptFailureCode = z.enum([
+  "canceled",
+  "gateway_error",
+  "protocol_error",
+  "timeout",
+  "unavailable",
+  "upstream_rejected",
+  "unknown"
+]);
+
 const AttemptSchema = z
   .object({
+    attempt_number: z.number().int().min(1).max(32),
     completed_at: OptionalInstant,
+    failure_code: PublicAttemptFailureCode.optional(),
+    first_byte_at: OptionalInstant,
+    http_status: z.number().int().min(100).max(599).optional(),
     id: OpaqueID,
     model: z.string().max(512),
+    route: Identifier,
     started_at: Instant,
     status: z.enum(["succeeded", "failed", "canceled", "unknown"]),
     upstream: Identifier,
@@ -152,7 +167,40 @@ const AttemptSchema = z
     cost_provenance: z.enum(["upstream_reported", "calculated", "estimated", "unknown"]),
     cost_source: Identifier.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((attempt, context) => {
+    const startedAt = Date.parse(attempt.started_at);
+    const firstByteAt = attempt.first_byte_at ? Date.parse(attempt.first_byte_at) : undefined;
+    const completedAt = attempt.completed_at ? Date.parse(attempt.completed_at) : undefined;
+    if (firstByteAt !== undefined && firstByteAt < startedAt) {
+      context.addIssue({ code: "custom", message: "First byte precedes attempt start.", path: ["first_byte_at"] });
+    }
+    if (completedAt !== undefined && completedAt < startedAt) {
+      context.addIssue({ code: "custom", message: "Completion precedes attempt start.", path: ["completed_at"] });
+    }
+    if (firstByteAt !== undefined && completedAt !== undefined && firstByteAt > completedAt) {
+      context.addIssue({ code: "custom", message: "First byte follows attempt completion.", path: ["first_byte_at"] });
+    }
+    if (attempt.status === "unknown") {
+      if (attempt.completed_at || attempt.http_status || attempt.failure_code) {
+        context.addIssue({ code: "custom", message: "In-progress attempts cannot contain terminal fields." });
+      }
+      return;
+    }
+    if (!attempt.completed_at) {
+      context.addIssue({ code: "custom", message: "Terminal attempts require completion time.", path: ["completed_at"] });
+    }
+    if (attempt.status === "succeeded") {
+      if (!attempt.http_status || attempt.http_status < 200 || attempt.http_status > 299) {
+        context.addIssue({ code: "custom", message: "Successful attempts require a 2xx HTTP status.", path: ["http_status"] });
+      }
+      if (attempt.failure_code) {
+        context.addIssue({ code: "custom", message: "Successful attempts cannot contain a failure code.", path: ["failure_code"] });
+      }
+    } else if (!attempt.failure_code) {
+      context.addIssue({ code: "custom", message: "Failed or canceled attempts require a public failure code.", path: ["failure_code"] });
+    }
+  });
 
 export const RequestSchema = z
   .object({
@@ -174,7 +222,29 @@ export const RequestSchema = z
     usage: UsageValues.optional(),
     user_id: OpaqueID
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    const startedAt = Date.parse(request.started_at);
+    const completedAt = request.completed_at ? Date.parse(request.completed_at) : undefined;
+    if (completedAt !== undefined && completedAt < startedAt) {
+      context.addIssue({ code: "custom", message: "Request completion precedes request start.", path: ["completed_at"] });
+    }
+    if (request.status === "unknown" && request.completed_at) {
+      context.addIssue({ code: "custom", message: "In-progress requests cannot contain completion time.", path: ["completed_at"] });
+    }
+    if (request.status !== "unknown" && !request.completed_at) {
+      context.addIssue({ code: "custom", message: "Terminal requests require completion time.", path: ["completed_at"] });
+    }
+    request.attempts.forEach((attempt, index) => {
+      if (attempt.attempt_number !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          message: "Attempts must be contiguous and ordered by attempt number.",
+          path: ["attempts", index, "attempt_number"]
+        });
+      }
+    });
+  });
 
 export const RequestPageSchema = z
   .object({ items: z.array(RequestSchema).max(200), page: PageInfo })

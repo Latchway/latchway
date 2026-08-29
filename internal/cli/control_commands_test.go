@@ -120,6 +120,7 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 		facts, _ := body["request"].(map[string]any)
 		if body["platform"] != "react_native_ios" || claims["plan"] != "premium" ||
 			facts["rewritten_request_bytes"] != float64(1024) || facts["framing_unit_count"] != float64(1) ||
+			facts["image_units"] != float64(2) || facts["tool_calls"] != float64(3) ||
 			facts["requested_output_max"] != float64(64) {
 			t.Fatalf("simulation body = %#v", body)
 		}
@@ -131,6 +132,7 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 		"--server", "http://127.0.0.1:8080", "--output", "json", "routes", "simulate", controlTestRevision,
 		"--feature", "assistant", "--platform", "react_native_ios", "--trust-level", "app_verified",
 		"--requested-output-max", "64", "--rewritten-request-bytes", "1024", "--framing-unit-count", "1",
+		"--image-units", "2", "--tool-calls", "3",
 		"--claims-file", claimsPath, "--api-token-env", "TEST_LATCHWAY_ROUTE_TOKEN",
 	}, opts); err != nil {
 		t.Fatalf("routes simulate error = %v", err)
@@ -198,10 +200,12 @@ func TestRequestOutputKeepsReportedCostSourceDistinctFromTokenUsage(t *testing.T
 	var output bytes.Buffer
 	request := logicalRequestCLI{
 		ID: "req_00000000000000000000000000", Feature: "assistant",
-		Status: "succeeded", StartedAt: "2026-08-29T00:00:00Z",
+		Status: "failed", StartedAt: "2026-08-29T00:00:00Z",
 		Attempts: []upstreamAttemptCLI{{
-			ID: "atm_00000000000000000000000000", Upstream: "openrouter",
-			Model: "openai/gpt", Status: "succeeded",
+			ID: "atm_00000000000000000000000000", AttemptNumber: 1, Route: "primary",
+			Upstream: "openrouter", Model: "openai/gpt", Status: "failed",
+			StartedAt: "2026-08-29T00:00:00Z", CompletedAt: "2026-08-29T00:00:02Z",
+			HTTPStatus: 504, FailureCode: "timeout",
 			UsageProvenance: "unknown", CostProvenance: "upstream_reported",
 			CostSource: "openrouter_usage_cost",
 		}},
@@ -211,8 +215,97 @@ func TestRequestOutputKeepsReportedCostSourceDistinctFromTokenUsage(t *testing.T
 	}
 	if !strings.Contains(output.String(), "upstream_reported") ||
 		!strings.Contains(output.String(), "openrouter_usage_cost") ||
-		!strings.Contains(output.String(), "unknown") {
+		!strings.Contains(output.String(), "unknown") ||
+		!strings.Contains(output.String(), "primary") ||
+		!strings.Contains(output.String(), "504") ||
+		!strings.Contains(output.String(), "timeout") {
 		t.Fatalf("request cost provenance output = %q", output.String())
+	}
+}
+
+func TestRequestsInspectJSONIncludesSanitizedAttemptLifecycle(t *testing.T) {
+	token := strings.Repeat("request-inspect-token-", 2)
+	t.Setenv("TEST_LATCHWAY_REQUEST_TOKEN", token)
+	requestID := "req_00000000000000000000000000"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.Path != "/admin/v1/requests/"+requestID ||
+			request.Header.Get("Authorization") != "Bearer "+token {
+			t.Fatalf("request inspect call = %s %s", request.Method, request.URL.Path)
+		}
+		return controlHTTPResponse(request, http.StatusOK, `{
+			"id":"req_00000000000000000000000000",
+			"environment_id":"env_00000000000000000000000000",
+			"user_id":"usr_00000000000000000000000000",
+			"installation_id":"ins_00000000000000000000000000",
+			"feature":"assistant","protocol":"openai_chat",
+			"started_at":"2026-08-29T00:00:00Z","completed_at":"2026-08-29T00:00:03Z","status":"failed",
+			"attempts":[{
+				"id":"atm_00000000000000000000000000","attempt_number":1,"route":"primary",
+				"upstream":"openrouter","model":"openai/gpt","started_at":"2026-08-29T00:00:00Z",
+				"first_byte_at":"2026-08-29T00:00:01Z","completed_at":"2026-08-29T00:00:02Z",
+				"status":"failed","http_status":502,"failure_code":"protocol_error",
+				"usage_provenance":"unknown","cost_provenance":"unknown"
+			}]
+		}`, nil), nil
+	})}
+	var output bytes.Buffer
+	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "requests", "inspect", requestID,
+		"--api-token-env", "TEST_LATCHWAY_REQUEST_TOKEN",
+	}, opts); err != nil {
+		t.Fatalf("requests inspect error = %v", err)
+	}
+	for _, field := range []string{
+		`"attempt_number": 1`, `"route": "primary"`, `"first_byte_at": "2026-08-29T00:00:01Z"`,
+		`"http_status": 502`, `"failure_code": "protocol_error"`,
+	} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("request JSON omitted %s: %s", field, output.String())
+		}
+	}
+	if strings.Contains(output.String(), token) || strings.Contains(output.String(), "provider body") {
+		t.Fatalf("request JSON exposed unsafe material: %s", output.String())
+	}
+}
+
+func TestRequestDocumentValidationRejectsRawFailureAndCorruptOrdering(t *testing.T) {
+	t.Parallel()
+	request := logicalRequestCLI{
+		ID: "req_00000000000000000000000000", EnvironmentID: controlTestEnvironment,
+		UserID: "usr_00000000000000000000000000", InstallationID: "ins_00000000000000000000000000",
+		Feature: "assistant", Protocol: "openai_chat", Status: "failed",
+		StartedAt: "2026-08-29T00:00:00Z", CompletedAt: "2026-08-29T00:00:03Z",
+		Attempts: []upstreamAttemptCLI{{
+			ID: "atm_00000000000000000000000000", AttemptNumber: 1,
+			Route: "primary", Upstream: "openrouter", Model: "openai/gpt",
+			StartedAt: "2026-08-29T00:00:00Z", FirstByteAt: "2026-08-29T00:00:01Z",
+			CompletedAt: "2026-08-29T00:00:02Z", Status: "failed", HTTPStatus: 502,
+			FailureCode: "protocol_error", UsageProvenance: "unknown", CostProvenance: "unknown",
+		}},
+	}
+	if !validLogicalRequestCLI(request) {
+		t.Fatal("valid public request detail was rejected")
+	}
+	for name, mutate := range map[string]func(*logicalRequestCLI){
+		"raw internal failure": func(value *logicalRequestCLI) {
+			value.Attempts[0].FailureCode = "upstream_protocol_error"
+		},
+		"attempt gap": func(value *logicalRequestCLI) { value.Attempts[0].AttemptNumber = 2 },
+		"timestamp inversion": func(value *logicalRequestCLI) {
+			value.Attempts[0].FirstByteAt = "2026-08-29T00:00:02.500Z"
+		},
+		"success with failure": func(value *logicalRequestCLI) { value.Attempts[0].Status = "succeeded" },
+	} {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			candidate := request
+			candidate.Attempts = append([]upstreamAttemptCLI(nil), request.Attempts...)
+			mutate(&candidate)
+			if validLogicalRequestCLI(candidate) {
+				t.Fatal("corrupt or unsafe request detail was accepted")
+			}
+		})
 	}
 }
 

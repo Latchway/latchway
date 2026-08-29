@@ -1671,14 +1671,35 @@ components:
     UpstreamAttempt:
       type: object
       additionalProperties: false
-      required: [id, upstream, model, started_at, status, usage_provenance, cost_provenance]
+      description: >-
+        One redaction-safe physical attempt. Attempts are returned in contiguous
+        attempt_number order. Terminal attempts have completed_at; succeeded attempts
+        have a 2xx http_status and no failure_code; failed or canceled attempts have a
+        sanitized failure_code. Unknown durable failure values map to unknown and raw
+        provider or internal error text is never returned.
+      required: [id, attempt_number, route, upstream, model, started_at, status, usage_provenance, cost_provenance]
       properties:
         id: { type: string, pattern: '^atm_[A-Za-z0-9_-]{16,128}$' }
+        attempt_number: { type: integer, minimum: 1, maximum: 32 }
+        route: { $ref: '#/components/schemas/Identifier' }
         upstream: { $ref: '#/components/schemas/Identifier' }
         model: { type: string, maxLength: 512 }
         started_at: { type: string, format: date-time }
+        first_byte_at:
+          type: string
+          format: date-time
+          description: First response byte observed by the gateway, when one was observed; never precedes started_at or follows completed_at.
         completed_at: { type: string, format: date-time }
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
+        http_status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: Upstream HTTP status when a valid status line was received.
+        failure_code:
+          type: string
+          enum: [canceled, gateway_error, protocol_error, timeout, unavailable, upstream_rejected, unknown]
+          description: Closed, sanitized public failure category. Omitted for successful and in-progress attempts.
         usage: { $ref: '#/components/schemas/UsageValues' }
         usage_provenance: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] }
         cost_provenance:
@@ -1707,7 +1728,11 @@ components:
         completed_at: { type: string, format: date-time }
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
         usage: { $ref: '#/components/schemas/UsageValues' }
-        attempts: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/UpstreamAttempt' } }
+        attempts:
+          type: array
+          maxItems: 32
+          description: Ordered by contiguous attempt_number beginning at one.
+          items: { $ref: '#/components/schemas/UpstreamAttempt' }
     RequestPage:
       type: object
       additionalProperties: false

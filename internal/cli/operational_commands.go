@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 type controlCommandOptions struct {
 	tokenEnvironment string
 }
+
+var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type pageInfoCLI struct {
 	HasMore    bool   `json:"has_more"`
@@ -69,11 +72,16 @@ type usageValuesCLI struct {
 
 type upstreamAttemptCLI struct {
 	ID              string          `json:"id"`
+	AttemptNumber   int32           `json:"attempt_number"`
+	Route           string          `json:"route"`
 	Upstream        string          `json:"upstream"`
 	Model           string          `json:"model"`
 	StartedAt       string          `json:"started_at"`
+	FirstByteAt     string          `json:"first_byte_at,omitempty"`
 	CompletedAt     string          `json:"completed_at,omitempty"`
 	Status          string          `json:"status"`
+	HTTPStatus      int             `json:"http_status,omitempty"`
+	FailureCode     string          `json:"failure_code,omitempty"`
 	Usage           *usageValuesCLI `json:"usage,omitempty"`
 	UsageProvenance string          `json:"usage_provenance"`
 	CostProvenance  string          `json:"cost_provenance"`
@@ -426,6 +434,11 @@ func newRequestsListCommand(opts *options, root *controlCommandOptions) *cobra.C
 			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/requests", query, nil, http.StatusOK, &page); err != nil {
 				return err
 			}
+			for _, request := range page.Items {
+				if !validLogicalRequestCLI(request) {
+					return errors.New("Admin API returned a non-conforming request document")
+				}
+			}
 			return printRequests(opts, page)
 		},
 	}
@@ -450,6 +463,9 @@ func newRequestsInspectCommand(opts *options, root *controlCommandOptions) *cobr
 			var request logicalRequestCLI
 			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/requests/"+args[0], nil, nil, http.StatusOK, &request); err != nil {
 				return err
+			}
+			if !validLogicalRequestCLI(request) {
+				return errors.New("Admin API returned a non-conforming request document")
 			}
 			return printRequest(opts, request)
 		},
@@ -748,6 +764,87 @@ func printInstallation(opts *options, installation installationCLI) error {
 	}})
 }
 
+func validPublicAttemptFailureCode(value string) bool {
+	switch value {
+	case "canceled", "gateway_error", "protocol_error", "timeout", "unavailable", "upstream_rejected", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func validLogicalRequestCLI(request logicalRequestCLI) bool {
+	startedAt, err := time.Parse(time.RFC3339Nano, request.StartedAt)
+	if err != nil || len(request.Attempts) > 32 {
+		return false
+	}
+	var completedAt *time.Time
+	if request.CompletedAt != "" {
+		value, parseErr := time.Parse(time.RFC3339Nano, request.CompletedAt)
+		if parseErr != nil || value.Before(startedAt) {
+			return false
+		}
+		completedAt = &value
+	}
+	switch request.Status {
+	case "unknown":
+		if completedAt != nil {
+			return false
+		}
+	case "succeeded", "failed", "canceled":
+		if completedAt == nil {
+			return false
+		}
+	default:
+		return false
+	}
+	for index, attempt := range request.Attempts {
+		if !validUpstreamAttemptCLI(attempt, int32(index+1)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validUpstreamAttemptCLI(attempt upstreamAttemptCLI, expectedNumber int32) bool {
+	if attempt.AttemptNumber != expectedNumber || attempt.AttemptNumber < 1 || attempt.AttemptNumber > 32 ||
+		id.Validate(attempt.ID, id.UpstreamAttempt) != nil ||
+		!operationalIdentifierPattern.MatchString(attempt.Route) ||
+		!operationalIdentifierPattern.MatchString(attempt.Upstream) ||
+		(attempt.HTTPStatus != 0 && (attempt.HTTPStatus < 100 || attempt.HTTPStatus > 599)) {
+		return false
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
+	if err != nil {
+		return false
+	}
+	var firstByteAt, completedAt *time.Time
+	if attempt.FirstByteAt != "" {
+		value, parseErr := time.Parse(time.RFC3339Nano, attempt.FirstByteAt)
+		if parseErr != nil || value.Before(startedAt) {
+			return false
+		}
+		firstByteAt = &value
+	}
+	if attempt.CompletedAt != "" {
+		value, parseErr := time.Parse(time.RFC3339Nano, attempt.CompletedAt)
+		if parseErr != nil || value.Before(startedAt) || firstByteAt != nil && firstByteAt.After(value) {
+			return false
+		}
+		completedAt = &value
+	}
+	switch attempt.Status {
+	case "unknown":
+		return completedAt == nil && attempt.HTTPStatus == 0 && attempt.FailureCode == ""
+	case "succeeded":
+		return completedAt != nil && attempt.HTTPStatus >= 200 && attempt.HTTPStatus <= 299 && attempt.FailureCode == ""
+	case "failed", "canceled":
+		return completedAt != nil && validPublicAttemptFailureCode(attempt.FailureCode)
+	default:
+		return false
+	}
+}
+
 func printRequests(opts *options, page logicalRequestPageCLI) error {
 	if opts.output == "json" {
 		return printControlJSON(opts, page)
@@ -779,13 +876,25 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 	}
 	attempts := make([][]string, 0, len(request.Attempts))
 	for _, attempt := range request.Attempts {
+		httpStatus := "-"
+		if attempt.HTTPStatus != 0 {
+			httpStatus = strconv.Itoa(attempt.HTTPStatus)
+		}
+		failureCode := attempt.FailureCode
+		if failureCode == "" {
+			failureCode = "-"
+		}
 		attempts = append(attempts, []string{
-			attempt.ID, attempt.Upstream, attempt.Model, attempt.Status,
+			strconv.Itoa(int(attempt.AttemptNumber)), attempt.ID, attempt.Route,
+			attempt.Upstream, attempt.Model, attempt.Status, formatControlTime(attempt.StartedAt),
+			formatControlTime(attempt.FirstByteAt), formatControlTime(attempt.CompletedAt),
+			httpStatus, failureCode,
 			attempt.UsageProvenance, attempt.CostProvenance, attempt.CostSource,
 		})
 	}
 	return printControlTable(opts, []string{
-		"ATTEMPT", "UPSTREAM", "MODEL", "STATUS", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
+		"#", "ATTEMPT", "ROUTE", "UPSTREAM", "MODEL", "STATUS", "STARTED", "FIRST BYTE",
+		"COMPLETED", "HTTP", "FAILURE", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
 	}, attempts)
 }
 
