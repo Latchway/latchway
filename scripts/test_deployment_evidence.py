@@ -329,6 +329,15 @@ class DeploymentEvidenceTests(unittest.TestCase):
         self.assertNotIn("refs/tags/", text)
         self.assertIn('--source-digest "$CANDIDATE_COMMIT"', text)
         self.assertIn('--core-commit "$CANDIDATE_COMMIT"', text)
+        self.assertIn("version: '0.4.89'", text)
+        self.assertIn(
+            'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
+            text,
+        )
+        self.assertLess(
+            text.index("uses: superfly/flyctl-actions/setup-flyctl@"),
+            text.index('flyctl config validate --strict --app "$FLY_APP"'),
+        )
 
     def test_static_assets_pass(self) -> None:
         checks = deployment.static_checks()

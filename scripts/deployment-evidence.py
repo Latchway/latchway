@@ -649,6 +649,7 @@ def validate_workflow() -> Mapping[str, Any]:
         "/__latchway/cloudflare/evidence/shutdown",
         "version: '540.0.0'",
         "version: '0.4.89'",
+        'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
         "--args=--output,json,migrate,status",
         'command:["--output","json","migrate","status"]',
         "--signal SIGTERM --time 35",
