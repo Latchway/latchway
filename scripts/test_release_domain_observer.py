@@ -33,6 +33,96 @@ FIXTURE_MODULE = importlib.util.module_from_spec(FIXTURE_SPEC)
 FIXTURE_SPEC.loader.exec_module(FIXTURE_MODULE)
 
 
+def canonical_maven_file_rows(
+    version: str, fingerprint: str
+) -> tuple[list[dict], list[dict], str]:
+    signature = (
+        "-----BEGIN PGP SIGNATURE-----\n"
+        "test\n"
+        "-----END PGP SIGNATURE-----\n"
+    )
+    signature_bytes = signature.encode("ascii")
+    signature_sha256 = hashlib.sha256(signature_bytes).hexdigest()
+    checksum_lengths = {"md5": 32, "sha1": 40, "sha256": 64, "sha512": 128}
+    expected_paths = sorted(
+        {
+            f"{module}/{version}/{module}-{version}{suffix}"
+            for module in (
+                "latchway-core", "latchway-okhttp", "latchway-play-integrity",
+                "latchway-firebase-auth", "latchway-bom",
+            )
+            for suffix in (
+                (".pom", ".module", "-sources.jar", "-javadoc.jar")
+                if module == "latchway-bom"
+                else (".pom", ".module", "-sources.jar", "-javadoc.jar", ".aar")
+            )
+        }
+    )
+    files: list[dict] = []
+    manifest: list[dict] = []
+    for path in expected_paths:
+        artifact = path.encode("utf-8")
+        artifact_sha256 = hashlib.sha256(artifact).hexdigest()
+        checksums = []
+        for algorithm, length in checksum_lengths.items():
+            published_digest = hashlib.sha512(
+                f"{algorithm}:{path}".encode()
+            ).hexdigest()[:length]
+            checksum_bytes = f"{published_digest}\n".encode("ascii")
+            checksums.append(
+                {
+                    "algorithm": algorithm,
+                    "path": f"{path}.{algorithm}",
+                    "bytes": len(checksum_bytes),
+                    "sha256": hashlib.sha256(checksum_bytes).hexdigest(),
+                    "published_digest": published_digest,
+                }
+            )
+        files.append(
+            {
+                "path": path,
+                "sha256": artifact_sha256,
+                "bytes": len(artifact),
+                "signature_sha256": signature_sha256,
+                "signature_bytes": len(signature_bytes),
+                "signature_armored": signature,
+                "gpg_status": {
+                    "schema_version": 1,
+                    "primary_fingerprint": fingerprint,
+                    "signing_fingerprint": fingerprint,
+                    "public_key_algorithm": "1",
+                    "hash_algorithm": "10",
+                    "status_lines": ["[GNUPG:] VALIDSIG test"],
+                },
+                "checksums": checksums,
+                "checksums_byte_identical": True,
+            }
+        )
+        manifest.extend(
+            [
+                {"path": path, "bytes": len(artifact), "sha256": artifact_sha256},
+                {
+                    "path": f"{path}.asc",
+                    "bytes": len(signature_bytes),
+                    "sha256": signature_sha256,
+                },
+                *(
+                    {
+                        "path": checksum["path"],
+                        "bytes": checksum["bytes"],
+                        "sha256": checksum["sha256"],
+                    }
+                    for checksum in checksums
+                ),
+            ]
+        )
+    manifest.sort(key=lambda item: item["path"])
+    manifest_sha256 = hashlib.sha256(
+        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    ).hexdigest()
+    return files, manifest, manifest_sha256
+
+
 class ReleaseDomainObserverTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
@@ -949,6 +1039,10 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         repository_archive = b"reviewed repository"
         portal_archive = b"signed portal bundle"
         public_key = b"public key"
+        portal_sha = hashlib.sha256(portal_archive).hexdigest()
+        deployment_name = (
+            f"latchway-android-v{version}-{coordinate['commit'][:12]}-{portal_sha}"
+        )
         purls = sorted(
             f"pkg:maven/dev.latchway/{module}@{version}"
             for module in (
@@ -960,12 +1054,13 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             )
         )
         intent = {
-            "schema": "latchway.maven-central-upload-intent.v1",
+            "schema": "latchway.maven-central-upload-intent.v2",
             "repository": "Latchway/latchway-android",
             "source_commit": coordinate["commit"],
             "release_tag": coordinate["tag"],
             "version": version,
             "namespace": "dev.latchway",
+            "deployment_name": deployment_name,
             "publishing_type": "user_managed",
             "authorization": "recoverable_exact_upload",
             "reviewed_repository_archive_sha256": hashlib.sha256(
@@ -974,6 +1069,9 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "reviewed_portal_bundle_sha256": hashlib.sha256(
                 portal_archive
             ).hexdigest(),
+            "reviewed_repository_manifest_sha256": "a" * 64,
+            "reviewed_repository_file_count": 120,
+            "reviewed_portal_bundle_file_count": 144,
             "reviewed_public_key_sha256": hashlib.sha256(public_key).hexdigest(),
             "expected_purls": purls,
         }
@@ -983,31 +1081,58 @@ class ReleaseDomainObserverTests(unittest.TestCase):
 
         intent_bytes = encoded(intent)
         deployment = {
-            "schema": "latchway.maven-central-deployment.v1",
+            "schema": "latchway.maven-central-deployment.v2",
             "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "deployment_name": deployment_name,
+            "publishing_type": "user_managed",
+            "namespace": "dev.latchway",
             "source_commit": coordinate["commit"],
             "version": version,
             "expected_purls": purls,
-            "deployment_id": "12345678-1234-1234-1234-123456789abc",
+            "reviewed_portal_bundle_sha256": portal_sha,
+            "record_kind": "portal_deployment",
+            "deployment_id": "38570f16-da32-4c14-bd2e-c1acc0782365",
+            "public_manifest_sha256": None,
         }
         deployment_bytes = encoded(deployment)
         status = {
-            "schema": "latchway.maven-central-deployment-status.v1",
+            "schema": "latchway.maven-central-deployment-status.v2",
             "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
             "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
+            "record_kind": "portal_deployment",
             "deployment_id": deployment["deployment_id"],
+            "deployment_name": deployment_name,
             "deployment_state": "PUBLISHED",
             "purls": purls,
+            "public_manifest_sha256": None,
         }
         status_bytes = encoded(status)
+        files, public_manifest, public_manifest_sha256 = canonical_maven_file_rows(
+            version, "A" * 40
+        )
         proof = {
+            "schema_version": 2,
+            "registry": "maven_central",
+            "namespace": "dev.latchway",
+            "version": version,
+            "reviewed_repository": True,
+            "primary_artifacts_byte_identical": True,
+            "checksum_files_byte_identical": True,
+            "signature_files_present": True,
+            "signatures_cryptographically_verified": True,
+            "signing_fingerprint": "A" * 40,
+            "reviewed_public_key_sha256": hashlib.sha256(public_key).hexdigest(),
             "deployment": {
                 "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
                 "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
                 "status_sha256": hashlib.sha256(status_bytes).hexdigest(),
+                "record_kind": "portal_deployment",
                 "record": deployment,
                 "status": status,
-            }
+            },
+            "public_manifest": public_manifest,
+            "public_manifest_sha256": public_manifest_sha256,
+            "files": files,
         }
         tag_binding = {
             "schema": "latchway.github-release-tag-binding.v1",
@@ -1031,15 +1156,104 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "github-release-tag-binding.json": {"bytes": encoded(tag_binding)},
         }
         MODULE.Observer._validate_android_release_documents(assets, coordinate)
-        changed = copy.deepcopy(assets)
+        MODULE.Observer._validate_maven_proof(
+            encoded(proof),
+            coordinate,
+            "A" * 40,
+            hashlib.sha256(public_key).hexdigest(),
+        )
+
+        mutations = []
+        legacy_assets = copy.deepcopy(assets)
         legacy = copy.deepcopy(intent)
         legacy["publishing_type"] = "automatic"
         legacy["authorization"] = "single_upload_only"
-        changed["maven-central-upload-intent.json"]["bytes"] = encoded(legacy)
-        with self.assertRaisesRegex(
-            MODULE.ObservationError, "registry_maven_deployment_evidence_invalid"
+        legacy_assets["maven-central-upload-intent.json"]["bytes"] = encoded(legacy)
+        mutations.append(legacy_assets)
+
+        extra_intent_assets = copy.deepcopy(assets)
+        extra_intent = copy.deepcopy(intent)
+        extra_intent["unreviewed"] = True
+        extra_intent_assets["maven-central-upload-intent.json"]["bytes"] = encoded(
+            extra_intent
+        )
+        mutations.append(extra_intent_assets)
+
+        missing_status_assets = copy.deepcopy(assets)
+        missing_status = copy.deepcopy(status)
+        missing_status.pop("deployment_name")
+        missing_status_assets["maven-central-deployment-status.json"]["bytes"] = encoded(
+            missing_status
+        )
+        mutations.append(missing_status_assets)
+
+        wrong_kind_assets = copy.deepcopy(assets)
+        wrong_kind = copy.deepcopy(deployment)
+        wrong_kind["record_kind"] = "unreviewed"
+        wrong_kind_assets["maven-central-deployment.json"]["bytes"] = encoded(wrong_kind)
+        mutations.append(wrong_kind_assets)
+
+        extra_proof_deployment_assets = copy.deepcopy(assets)
+        extra_proof_deployment = copy.deepcopy(proof)
+        extra_proof_deployment["deployment"]["unreviewed"] = True
+        extra_proof_deployment_assets["maven-central-release-evidence.json"][
+            "bytes"
+        ] = encoded(extra_proof_deployment)
+        mutations.append(extra_proof_deployment_assets)
+
+        missing_proof_deployment_assets = copy.deepcopy(assets)
+        missing_proof_deployment = copy.deepcopy(proof)
+        missing_proof_deployment["deployment"].pop("status_sha256")
+        missing_proof_deployment_assets["maven-central-release-evidence.json"][
+            "bytes"
+        ] = encoded(missing_proof_deployment)
+        mutations.append(missing_proof_deployment_assets)
+
+        adoption_assets = copy.deepcopy(assets)
+        adoption = copy.deepcopy(deployment)
+        adoption["record_kind"] = "public_registry_adoption"
+        adoption["deployment_id"] = None
+        adoption["public_manifest_sha256"] = "b" * 64
+        adoption_bytes = encoded(adoption)
+        adoption_status = copy.deepcopy(status)
+        adoption_status["record_sha256"] = hashlib.sha256(adoption_bytes).hexdigest()
+        adoption_status["record_kind"] = "public_registry_adoption"
+        adoption_status["deployment_id"] = None
+        adoption_status["public_manifest_sha256"] = "b" * 64
+        adoption_status_bytes = encoded(adoption_status)
+        adoption_proof = copy.deepcopy(proof)
+        adoption_proof["deployment"] = {
+            "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "record_sha256": hashlib.sha256(adoption_bytes).hexdigest(),
+            "status_sha256": hashlib.sha256(adoption_status_bytes).hexdigest(),
+            "record_kind": "public_registry_adoption",
+            "record": adoption,
+            "status": adoption_status,
+        }
+        adoption_assets["maven-central-deployment.json"]["bytes"] = adoption_bytes
+        adoption_assets["maven-central-deployment-status.json"]["bytes"] = (
+            adoption_status_bytes
+        )
+        adoption_assets["maven-central-release-evidence.json"]["bytes"] = encoded(
+            adoption_proof
+        )
+        mutations.append(adoption_assets)
+
+        for index, changed in enumerate(mutations):
+            with self.subTest(index=index), self.assertRaisesRegex(
+                MODULE.ObservationError, "registry_maven_deployment_evidence_invalid"
+            ):
+                MODULE.Observer._validate_android_release_documents(changed, coordinate)
+
+    def test_android_observer_replays_with_complete_deployment_evidence(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        for name in (
+            "LATCHWAY_CENTRAL_UPLOAD_INTENT",
+            "LATCHWAY_CENTRAL_DEPLOYMENT_RECORD",
+            "LATCHWAY_CENTRAL_DEPLOYMENT_STATUS",
         ):
-            MODULE.Observer._validate_android_release_documents(changed, coordinate)
+            self.assertIn(f'"{name}"', source)
+        self.assertIn('"LATCHWAY_CENTRAL_REQUIRE_DEPLOYMENT_EVIDENCE": "true"', source)
 
     def test_live_sdk_run_and_artifact_metadata_reject_every_substitution(self) -> None:
         metadata = {

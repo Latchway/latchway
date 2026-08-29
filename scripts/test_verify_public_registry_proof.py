@@ -284,29 +284,136 @@ class PublicRegistryProofTests(unittest.TestCase):
         return proof
 
     def maven_proof(self) -> dict:
-        signature = "-----BEGIN PGP SIGNATURE-----\ntest\n"
+        signature = (
+            "-----BEGIN PGP SIGNATURE-----\n"
+            "test\n"
+            "-----END PGP SIGNATURE-----\n"
+        )
         version = "1.0.0"
         archive = b"archive"
         portal = b"portal"
         key = b"public-key"
+        portal_sha = hashlib.sha256(portal).hexdigest()
+        deployment_name = f"latchway-android-v{version}-{'b' * 12}-{portal_sha}"
+        purls = sorted(
+            f"pkg:maven/dev.latchway/{module}@{version}"
+            for module in (
+                "latchway-core", "latchway-okhttp", "latchway-play-integrity",
+                "latchway-firebase-auth", "latchway-bom",
+            )
+        )
         intent = {
-            "schema": "latchway.maven-central-upload-intent.v1",
+            "schema": "latchway.maven-central-upload-intent.v2",
             "repository": "Latchway/latchway-android",
             "source_commit": "b" * 40,
             "release_tag": "v1.0.0",
             "version": version,
             "namespace": "dev.latchway",
+            "deployment_name": deployment_name,
             "publishing_type": "user_managed",
             "authorization": "recoverable_exact_upload",
             "reviewed_repository_archive_sha256": hashlib.sha256(archive).hexdigest(),
             "reviewed_portal_bundle_sha256": hashlib.sha256(portal).hexdigest(),
+            "reviewed_repository_manifest_sha256": "d" * 64,
+            "reviewed_repository_file_count": 120,
+            "reviewed_portal_bundle_file_count": 144,
             "reviewed_public_key_sha256": hashlib.sha256(key).hexdigest(),
+            "expected_purls": purls,
         }
         intent_bytes = (json.dumps(intent, indent=2, sort_keys=True) + "\n").encode()
-        deployment = {"schema": "latchway.maven-central-deployment.v1", "intent_sha256": hashlib.sha256(intent_bytes).hexdigest()}
+        deployment = {
+            "schema": "latchway.maven-central-deployment.v2",
+            "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "deployment_name": deployment_name,
+            "publishing_type": "user_managed",
+            "namespace": "dev.latchway",
+            "version": version,
+            "source_commit": "b" * 40,
+            "expected_purls": purls,
+            "reviewed_portal_bundle_sha256": portal_sha,
+            "record_kind": "portal_deployment",
+            "deployment_id": "38570f16-da32-4c14-bd2e-c1acc0782365",
+            "public_manifest_sha256": None,
+        }
         deployment_bytes = (json.dumps(deployment, indent=2, sort_keys=True) + "\n").encode()
-        status = {"schema": "latchway.maven-central-deployment-status.v1", "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(), "deployment_state": "PUBLISHED"}
+        status = {
+            "schema": "latchway.maven-central-deployment-status.v2",
+            "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+            "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
+            "record_kind": "portal_deployment",
+            "deployment_id": deployment["deployment_id"],
+            "deployment_name": deployment_name,
+            "deployment_state": "PUBLISHED",
+            "purls": purls,
+            "public_manifest_sha256": None,
+        }
         status_bytes = (json.dumps(status, indent=2, sort_keys=True) + "\n").encode()
+        files = []
+        public_manifest = []
+        checksum_lengths = {"md5": 32, "sha1": 40, "sha256": 64, "sha512": 128}
+        signature_bytes = signature.encode("ascii")
+        signature_sha256 = hashlib.sha256(signature_bytes).hexdigest()
+        for path in sorted(MODULE.expected_maven_paths(version)):
+            artifact_bytes = path.encode("utf-8")
+            artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+            checksums = []
+            for algorithm, length in checksum_lengths.items():
+                published_digest = hashlib.sha512(
+                    f"{algorithm}:{path}".encode()
+                ).hexdigest()[:length]
+                checksum_bytes = f"{published_digest}\n".encode("ascii")
+                checksums.append(
+                    {
+                        "algorithm": algorithm,
+                        "path": f"{path}.{algorithm}",
+                        "bytes": len(checksum_bytes),
+                        "sha256": hashlib.sha256(checksum_bytes).hexdigest(),
+                        "published_digest": published_digest,
+                    }
+                )
+            files.append(
+                {
+                    "path": path,
+                    "sha256": artifact_sha256,
+                    "bytes": len(artifact_bytes),
+                    "signature_sha256": signature_sha256,
+                    "signature_bytes": len(signature_bytes),
+                    "signature_armored": signature,
+                    "gpg_status": {
+                        "schema_version": 1,
+                        "primary_fingerprint": "A" * 40,
+                        "signing_fingerprint": "A" * 40,
+                        "public_key_algorithm": "1",
+                        "hash_algorithm": "10",
+                        "status_lines": ["[GNUPG:] VALIDSIG test"],
+                    },
+                    "checksums": checksums,
+                    "checksums_byte_identical": True,
+                }
+            )
+            public_manifest.extend(
+                [
+                    {
+                        "path": path,
+                        "bytes": len(artifact_bytes),
+                        "sha256": artifact_sha256,
+                    },
+                    {
+                        "path": f"{path}.asc",
+                        "bytes": len(signature_bytes),
+                        "sha256": signature_sha256,
+                    },
+                    *(
+                        {
+                            "path": checksum["path"],
+                            "bytes": checksum["bytes"],
+                            "sha256": checksum["sha256"],
+                        }
+                        for checksum in checksums
+                    ),
+                ]
+            )
+        public_manifest.sort(key=lambda item: item["path"])
         proof = {
             "schema_version": 2,
             "registry": "maven_central",
@@ -318,25 +425,20 @@ class PublicRegistryProofTests(unittest.TestCase):
             "signature_files_present": True,
             "signatures_cryptographically_verified": True,
             "signing_fingerprint": "A" * 40,
-            "reviewed_public_key_sha256": "c" * 64,
+            "reviewed_public_key_sha256": hashlib.sha256(key).hexdigest(),
             "deployment": {
                 "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
                 "record_sha256": hashlib.sha256(deployment_bytes).hexdigest(),
                 "status_sha256": hashlib.sha256(status_bytes).hexdigest(),
+                "record_kind": "portal_deployment",
                 "record": deployment,
                 "status": status,
             },
-            "files": [
-                {
-                    "path": path,
-                    "sha256": "a" * 64,
-                    "bytes": 1,
-                    "signature_sha256": hashlib.sha256(signature.encode()).hexdigest(),
-                    "signature_armored": signature,
-                    "checksums_byte_identical": True,
-                }
-                for path in sorted(MODULE.expected_maven_paths("1.0.0"))
-            ],
+            "public_manifest": public_manifest,
+            "public_manifest_sha256": hashlib.sha256(
+                (json.dumps(public_manifest, indent=2, sort_keys=True) + "\n").encode()
+            ).hexdigest(),
+            "files": files,
         }
         original = copy.deepcopy(proof)
         proof_bytes = (json.dumps(original, indent=2, sort_keys=True) + "\n").encode()
@@ -426,6 +528,21 @@ class PublicRegistryProofTests(unittest.TestCase):
         wrong_key = copy.deepcopy(proof)
         wrong_key["signing_fingerprint"] = "not-a-fingerprint"
         mutations.append(wrong_key)
+        extra_file_field = copy.deepcopy(proof)
+        extra_file_field["files"][0]["unreviewed"] = True
+        mutations.append(extra_file_field)
+        missing_checksum_field = copy.deepcopy(proof)
+        missing_checksum_field["files"][0]["checksums"][0].pop("published_digest")
+        mutations.append(missing_checksum_field)
+        extra_gpg_field = copy.deepcopy(proof)
+        extra_gpg_field["files"][0]["gpg_status"]["unreviewed"] = True
+        mutations.append(extra_gpg_field)
+        manifest_substitution = copy.deepcopy(proof)
+        manifest_substitution["public_manifest"][0]["bytes"] += 1
+        mutations.append(manifest_substitution)
+        extra_deployment_field = copy.deepcopy(proof)
+        extra_deployment_field["deployment"]["unreviewed"] = True
+        mutations.append(extra_deployment_field)
         for index, tampered in enumerate(mutations):
             with self.subTest(index=index), self.assertRaises(MODULE.ProofError):
                 MODULE.validate_maven(tampered, coordinate)

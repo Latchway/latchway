@@ -598,12 +598,164 @@ jobs:
             [[ "$major" =~ ^(0|[1-9][0-9]*)$ ]]
             [[ "$minor" =~ ^(0|[1-9][0-9]*)$ ]]
             [[ "$patch" =~ ^(0|[1-9][0-9]*)$ ]]
-            for alias in "$major.$minor" "$major" latest; do
+            aliases=("$major.$minor" "$major" latest)
+            declare -A alias_state=()
+            declare -A alias_digest=()
+            declare -A finalized_versions=()
+            jq --null-input \
+              --arg mm "$major.$minor" --arg m "$major" \
+              '{
+                aliases: {($mm): null, ($m): null, latest: null},
+                stable_predecessors: {}
+              }' \
+              > "$RUNNER_TEMP/oci-alias-transition-plan.json"
+
+            require_finalized_version() {
+              local prior_version="$1" prior_commit="$2"
+              local prefix="$RUNNER_TEMP/prior-final-$prior_version"
+              local evidence_tag="evidence/v$prior_version"
+              local expected_title="Latchway v$prior_version final evidence"
+              local expected_body="Authoritative final evidence for immutable product release v$prior_version at $prior_commit."
+              local expected_message
+              printf -v expected_message \
+                'Latchway v%s final evidence\n\nProduct release: v%s\nCandidate commit: %s' \
+                "$prior_version" "$prior_version" "$prior_commit"
+              if [[ -n "${finalized_versions[$prior_version]:-}" ]]; then
+                test "${finalized_versions[$prior_version]}" = "$prior_commit"
+                return
+              fi
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+                > "$prefix-tag-ref.json"
+              jq --exit-status --arg ref "refs/tags/$evidence_tag" \
+                '.ref == $ref and .object.type == "tag" and
+                 (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+                "$prefix-tag-ref.json" >/dev/null
+              local evidence_tag_object
+              evidence_tag_object=$(jq --raw-output .object.sha "$prefix-tag-ref.json")
+              gh api "repos/$GITHUB_REPOSITORY/git/tags/$evidence_tag_object" \
+                > "$prefix-tag-object.json"
+              jq --exit-status \
+                --arg tag "$evidence_tag" \
+                --arg commit "$prior_commit" \
+                --arg message "$expected_message" \
+                '.tag == $tag and .object.type == "commit" and
+                 .object.sha == $commit and .message == $message' \
+                "$prefix-tag-object.json" >/dev/null
+              gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+                > "$prefix-release.json"
+              jq --exit-status \
+                --arg tag "$evidence_tag" \
+                --arg title "$expected_title" \
+                --arg body "$expected_body" \
+                --argjson assets '[
+                  "COMPLETION_REPORT.attestation.sigstore.json",
+                  "COMPLETION_REPORT.md",
+                  "SHA256SUMS",
+                  "latchway-cross-repository-release.attestation.sigstore.json",
+                  "latchway-cross-repository-release.json",
+                  "latchway-product-release-attestation.json",
+                  "latchway-public-registry-byte-proof.json",
+                  "latchway-publication-state.json",
+                  "latchway-release-evidence-v1.tar.gz"
+                ]' \
+                '.tag_name == $tag and .name == $title and .body == $body and
+                 .draft == false and .prerelease == false and .immutable == true and
+                 ([.assets[].name] | sort) == $assets and
+                 all(.assets[]; (.id | type == "number" and . > 0) and
+                   (.size | type == "number" and . > 0) and
+                   (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")))' \
+                "$prefix-release.json" >/dev/null
+              gh release verify "$evidence_tag" --format json \
+                > "$prefix-release-attestation.json"
+              python3 latchway/scripts/verify-github-release-attestation.py \
+                --attestation "$prefix-release-attestation.json" \
+                --release "$prefix-release.json" \
+                --repository "$GITHUB_REPOSITORY" \
+                --tag "$evidence_tag" \
+                --ref-sha "$evidence_tag_object" \
+                --output "$prefix-release-attestation-verification.json"
+              mkdir "$prefix-assets"
+              gh release download "$evidence_tag" --dir "$prefix-assets"
+              gh attestation verify "$prefix-assets/COMPLETION_REPORT.md" \
+                --bundle "$prefix-assets/COMPLETION_REPORT.attestation.sigstore.json" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/finalize-release-record.yml" \
+                --source-digest "$prior_commit" \
+                --signer-digest "$prior_commit" \
+                --source-ref refs/heads/main \
+                --deny-self-hosted-runners >/dev/null
+              python3 latchway/scripts/verify-final-evidence-release.py \
+                --directory "$prefix-assets" \
+                --release "$prefix-release.json" \
+                --candidate-commit "$prior_commit" \
+                --release-tag "v$prior_version"
+              finalized_versions[$prior_version]="$prior_commit"
+            }
+
+            # A failed promotion can leave its immutable product tag and exact
+            # OCI version before it reaches the moving-alias phase. Enumerate
+            # every stable product tag so a later release cannot skip that
+            # unfinished version merely because no moving alias reached it.
+            gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" \
+              --jq '.[] | [.ref, .object.type, .object.sha] | @tsv' \
+              > "$RUNNER_TEMP/stable-product-tag-refs.tsv"
+            candidate_tag_seen=false
+            while IFS=$'\t' read -r stable_ref object_type object_sha; do
+              if [[ ! "$stable_ref" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                continue
+              fi
+              prior_version="${stable_ref#refs/tags/v}"
+              if [[ "$prior_version" == "$VERSION" ]]; then
+                candidate_tag_seen=true
+                continue
+              fi
+              test "$object_type" = tag
+              [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]]
+              # This also rejects an older candidate when any newer stable tag
+              # already exists; stable promotions never skip or roll back.
+              python3 latchway/scripts/verify-oci-alias-transition.py \
+                --alias latest \
+                --current-version "$prior_version" \
+                --candidate-version "$VERSION" >/dev/null
+              gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
+                > "$RUNNER_TEMP/prior-product-$prior_version-tag.json"
+              prior_commit=$(jq --exit-status --raw-output \
+                '.object.sha | select(
+                  type == "string" and test("^[0-9a-f]{40}$")
+                )' "$RUNNER_TEMP/prior-product-$prior_version-tag.json")
+              jq --exit-status \
+                --arg tag "v$prior_version" \
+                --arg commit "$prior_commit" \
+                '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
+                "$RUNNER_TEMP/prior-product-$prior_version-tag.json" >/dev/null
+              require_finalized_version "$prior_version" "$prior_commit"
+              jq \
+                --arg version "$prior_version" \
+                --arg commit "$prior_commit" \
+                '.stable_predecessors[$version] = {
+                  commit: $commit,
+                  finalized: true
+                }' "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+                > "$RUNNER_TEMP/oci-alias-transition-plan.next.json"
+              mv -- "$RUNNER_TEMP/oci-alias-transition-plan.next.json" \
+                "$RUNNER_TEMP/oci-alias-transition-plan.json"
+            done < "$RUNNER_TEMP/stable-product-tag-refs.tsv"
+            test "$candidate_tag_seen" = true
+
+            # Preflight every moving alias and its predecessor's immutable final
+            # evidence before changing any alias. This prevents a newer release
+            # from making an unfinished older release impossible to finalize.
+            for alias in "${aliases[@]}"; do
               target="$IMAGE:$alias"
               if inspect_reference "$target" \
                 "$RUNNER_TEMP/oci-alias-$alias-existing.json" \
                 "$RUNNER_TEMP/oci-alias-$alias-existing.error"; then
                 current_digest="$(digest_of "$RUNNER_TEMP/oci-alias-$alias-existing.json")"
+                alias_state[$alias]=present
+                alias_digest[$alias]="$current_digest"
+                predecessor_finalized=false
                 if [[ "$current_digest" != "$INDEX_DIGEST" ]]; then
                   # Authenticate the prior alias state before authorizing a
                   # monotonic move. The version label alone is never trusted.
@@ -652,13 +804,50 @@ jobs:
                     --signer-digest "$current_commit" \
                     --source-ref refs/heads/main \
                     --deny-self-hosted-runners >/dev/null
-                  # Close a registry-side race before the controlled overwrite.
-                  docker buildx imagetools inspect --raw "$target" \
-                    > "$RUNNER_TEMP/oci-alias-$alias-pre-update.json"
-                  test "$(digest_of "$RUNNER_TEMP/oci-alias-$alias-pre-update.json")" = "$current_digest"
+                  require_finalized_version "$current_version" "$current_commit"
+                  predecessor_finalized=true
+                else
+                  current_version="$VERSION"
+                fi
+                jq \
+                  --arg alias "$alias" \
+                  --arg current "$current_version" \
+                  --argjson finalized "$predecessor_finalized" \
+                  '.aliases[$alias] = {
+                    current_version: $current,
+                    predecessor_finalized: $finalized
+                  }' "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+                  > "$RUNNER_TEMP/oci-alias-transition-plan.next.json"
+                mv -- "$RUNNER_TEMP/oci-alias-transition-plan.next.json" \
+                  "$RUNNER_TEMP/oci-alias-transition-plan.json"
+              else
+                alias_state[$alias]=absent
+              fi
+            done
+            python3 latchway/scripts/verify-oci-alias-transition.py \
+              --candidate-version "$VERSION" \
+              --plan "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+              > "$RUNNER_TEMP/oci-alias-transition-authorization.json"
+
+            # Re-close each preflight state immediately before its controlled
+            # create/advance. The shared concurrency group excludes another
+            # Latchway promotion or finalizer throughout this phase.
+            for alias in "${aliases[@]}"; do
+              target="$IMAGE:$alias"
+              if [[ "${alias_state[$alias]}" == present ]]; then
+                docker buildx imagetools inspect --raw "$target" \
+                  > "$RUNNER_TEMP/oci-alias-$alias-pre-update.json"
+                test "$(digest_of "$RUNNER_TEMP/oci-alias-$alias-pre-update.json")" = "${alias_digest[$alias]}"
+                if [[ "${alias_digest[$alias]}" != "$INDEX_DIGEST" ]]; then
                   docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
                 fi
               else
+                if inspect_reference "$target" \
+                  "$RUNNER_TEMP/oci-alias-$alias-pre-create.json" \
+                  "$RUNNER_TEMP/oci-alias-$alias-pre-create.error"; then
+                  echo "OCI alias appeared after absent preflight: $alias" >&2
+                  exit 1
+                fi
                 docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
               fi
               docker buildx imagetools inspect --raw "$target" \

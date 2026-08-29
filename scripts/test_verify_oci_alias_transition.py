@@ -36,6 +36,72 @@ class OCIAliasTransitionTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.TransitionError, "oci_alias_version_invalid"):
             MODULE.authorize("latest", "1.0.0", "1.1.0-rc.1")
 
+    def test_overlapping_release_requires_predecessor_finalization(self) -> None:
+        current = {
+            alias: {
+                "current_version": "1.0.0",
+                "predecessor_finalized": False,
+            }
+            for alias in ("1", "latest")
+        }
+        current["1.1"] = None
+        with self.assertRaisesRegex(
+            MODULE.TransitionError, "oci_alias_predecessor_unfinalized"
+        ):
+            MODULE.authorize_plan("1.1.0", current)
+
+        for alias in ("1", "latest"):
+            current[alias]["predecessor_finalized"] = True
+        self.assertEqual(
+            MODULE.authorize_plan("1.1.0", current),
+            {"1.1": "create", "1": "advance", "latest": "advance"},
+        )
+
+    def test_plan_rejects_partial_or_falsely_typed_finalization_state(self) -> None:
+        with self.assertRaisesRegex(MODULE.TransitionError, "plan_scope"):
+            MODULE.authorize_plan("1.1.0", {"latest": None})
+        state = {
+            "1.1": None,
+            "1": {"current_version": "1.0.0", "predecessor_finalized": "true"},
+            "latest": {"current_version": "1.0.0", "predecessor_finalized": True},
+        }
+        with self.assertRaisesRegex(MODULE.TransitionError, "plan_state"):
+            MODULE.authorize_plan("1.1.0", state)
+
+    def test_unfinished_exact_version_cannot_be_skipped_by_newer_release(self) -> None:
+        aliases = {
+            "1.2": None,
+            "1": {"current_version": "1.0.0", "predecessor_finalized": True},
+            "latest": {
+                "current_version": "1.0.0",
+                "predecessor_finalized": True,
+            },
+        }
+        with self.assertRaisesRegex(
+            MODULE.TransitionError, "predecessor_state_invalid"
+        ):
+            MODULE.authorize_plan(
+                "1.2.0",
+                aliases,
+                {"1.1.0": {"commit": "b" * 40, "finalized": False}},
+            )
+        self.assertEqual(
+            MODULE.authorize_plan(
+                "1.2.0",
+                aliases,
+                {"1.1.0": {"commit": "b" * 40, "finalized": True}},
+            ),
+            {"1.2": "create", "1": "advance", "latest": "advance"},
+        )
+        with self.assertRaisesRegex(
+            MODULE.TransitionError, "predecessor_order_invalid"
+        ):
+            MODULE.authorize_plan(
+                "1.2.0",
+                aliases,
+                {"1.3.0": {"commit": "c" * 40, "finalized": True}},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

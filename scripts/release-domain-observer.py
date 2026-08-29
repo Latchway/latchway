@@ -1544,6 +1544,16 @@ class Observer:
                 "LATCHWAY_CENTRAL_EXPECTED_REPOSITORY": str(android_root),
                 "LATCHWAY_CENTRAL_SIGNING_FINGERPRINT": signing_fingerprint,
                 "LATCHWAY_CENTRAL_SIGNING_PUBLIC_KEY": str(android_public_key_path),
+                "LATCHWAY_CENTRAL_UPLOAD_INTENT": str(
+                    android_root / "maven-central-upload-intent.json"
+                ),
+                "LATCHWAY_CENTRAL_DEPLOYMENT_RECORD": str(
+                    android_root / "maven-central-deployment.json"
+                ),
+                "LATCHWAY_CENTRAL_DEPLOYMENT_STATUS": str(
+                    android_root / "maven-central-deployment-status.json"
+                ),
+                "LATCHWAY_CENTRAL_REQUIRE_DEPLOYMENT_EVIDENCE": "true",
             },
         )
         self._validate_maven_proof(
@@ -2610,9 +2620,37 @@ class Observer:
                 else (".pom", ".module", "-sources.jar", "-javadoc.jar", ".aar")
             )
         }
+        checksum_algorithms = {
+            "md5": 32,
+            "sha1": 40,
+            "sha256": 64,
+            "sha512": 128,
+        }
+        expected_manifest_paths = {
+            derived
+            for path in expected_paths
+            for derived in (
+                path,
+                f"{path}.asc",
+                *(f"{path}.{algorithm}" for algorithm in checksum_algorithms),
+            )
+        }
+        public_manifest = value.get("public_manifest")
+        deployment = value.get("deployment")
         if (
-            value.get("schema_version") != 2
+            not isinstance(value, dict)
+            or set(value)
+            != {
+                "schema_version", "registry", "namespace", "version",
+                "reviewed_repository", "primary_artifacts_byte_identical",
+                "checksum_files_byte_identical", "signature_files_present",
+                "signatures_cryptographically_verified", "signing_fingerprint",
+                "reviewed_public_key_sha256", "deployment", "public_manifest",
+                "public_manifest_sha256", "files",
+            }
+            or value.get("schema_version") != 2
             or value.get("registry") != "maven_central"
+            or value.get("namespace") != "dev.latchway"
             or value.get("version") != coordinate["version"]
             or value.get("reviewed_repository") is not True
             or value.get("primary_artifacts_byte_identical") is not True
@@ -2624,19 +2662,131 @@ class Observer:
             or not isinstance(files, list)
             or {item.get("path") for item in files if isinstance(item, dict)} != expected_paths
             or len(files) != len(expected_paths)
-            or any(
-                not isinstance(item, dict)
-                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256"))) is None
-                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("signature_sha256"))) is None
-                or not isinstance(item.get("signature_armored"), str)
-                or not item["signature_armored"].startswith("-----BEGIN PGP SIGNATURE-----")
-                or hashlib.sha256(item["signature_armored"].encode("ascii")).hexdigest()
-                != item.get("signature_sha256")
-                or item.get("checksums_byte_identical") is not True
-                for item in files
+            or not isinstance(public_manifest, list)
+            or len(public_manifest) != len(expected_manifest_paths)
+            or public_manifest
+            != sorted(
+                public_manifest,
+                key=lambda item: item.get("path", "") if isinstance(item, dict) else "",
             )
+            or not isinstance(deployment, dict)
+            or set(deployment)
+            != {
+                "intent_sha256", "record_sha256", "status_sha256", "record_kind",
+                "record", "status",
+            }
         ):
             raise ObservationError("registry_maven_proof_invalid")
+
+        manifest_by_path: dict[str, Mapping[str, Any]] = {}
+        for item in public_manifest:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"path", "bytes", "sha256"}
+                or item.get("path") not in expected_manifest_paths
+                or item["path"] in manifest_by_path
+                or not isinstance(item.get("bytes"), int)
+                or isinstance(item.get("bytes"), bool)
+                or item["bytes"] < 1
+                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256"))) is None
+            ):
+                raise ObservationError("registry_maven_proof_invalid")
+            manifest_by_path[item["path"]] = item
+        if (
+            set(manifest_by_path) != expected_manifest_paths
+            or value.get("public_manifest_sha256")
+            != hashlib.sha256(canonical_json(public_manifest)).hexdigest()
+        ):
+            raise ObservationError("registry_maven_proof_invalid")
+
+        file_keys = {
+            "path", "sha256", "bytes", "signature_sha256", "signature_bytes",
+            "signature_armored", "gpg_status", "checksums",
+            "checksums_byte_identical",
+        }
+        gpg_keys = {
+            "schema_version", "primary_fingerprint", "signing_fingerprint",
+            "public_key_algorithm", "hash_algorithm", "status_lines",
+        }
+        for item in files:
+            if not isinstance(item, dict) or set(item) != file_keys:
+                raise ObservationError("registry_maven_proof_invalid")
+            path = item.get("path")
+            signature = item.get("signature_armored")
+            checksums = item.get("checksums")
+            gpg_status = item.get("gpg_status")
+            try:
+                signature_bytes = signature.encode("ascii") if isinstance(signature, str) else b""
+            except UnicodeEncodeError:
+                raise ObservationError("registry_maven_proof_invalid") from None
+            if (
+                path not in expected_paths
+                or not isinstance(item.get("bytes"), int)
+                or isinstance(item.get("bytes"), bool)
+                or item["bytes"] < 1
+                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256"))) is None
+                or not isinstance(item.get("signature_bytes"), int)
+                or isinstance(item.get("signature_bytes"), bool)
+                or not 1 <= item["signature_bytes"] <= 65536
+                or item["signature_bytes"] != len(signature_bytes)
+                or re.fullmatch(r"[0-9a-f]{64}", str(item.get("signature_sha256"))) is None
+                or not isinstance(signature, str)
+                or not signature.startswith("-----BEGIN PGP SIGNATURE-----")
+                or hashlib.sha256(signature_bytes).hexdigest()
+                != item.get("signature_sha256")
+                or item.get("checksums_byte_identical") is not True
+                or not isinstance(checksums, list)
+                or [entry.get("algorithm") for entry in checksums if isinstance(entry, dict)]
+                != list(checksum_algorithms)
+                or len(checksums) != len(checksum_algorithms)
+                or not isinstance(gpg_status, dict)
+                or set(gpg_status) != gpg_keys
+                or gpg_status.get("schema_version") != 1
+                or gpg_status.get("primary_fingerprint") != signing_fingerprint
+                or re.fullmatch(
+                    r"[0-9A-F]{40}", str(gpg_status.get("signing_fingerprint"))
+                )
+                is None
+                or gpg_status.get("public_key_algorithm")
+                not in {"1", "3", "19", "22", "27"}
+                or gpg_status.get("hash_algorithm") != "10"
+                or not isinstance(gpg_status.get("status_lines"), list)
+                or not gpg_status["status_lines"]
+                or any(
+                    not isinstance(line, str) or not line.startswith("[GNUPG:]")
+                    for line in gpg_status["status_lines"]
+                )
+                or manifest_by_path[path].get("bytes") != item["bytes"]
+                or manifest_by_path[path].get("sha256") != item["sha256"]
+                or manifest_by_path[f"{path}.asc"].get("bytes")
+                != item["signature_bytes"]
+                or manifest_by_path[f"{path}.asc"].get("sha256")
+                != item["signature_sha256"]
+            ):
+                raise ObservationError("registry_maven_proof_invalid")
+            for checksum in checksums:
+                algorithm = checksum.get("algorithm") if isinstance(checksum, dict) else None
+                expected_length = checksum_algorithms.get(str(algorithm))
+                checksum_path = f"{path}.{algorithm}"
+                if (
+                    not isinstance(checksum, dict)
+                    or set(checksum)
+                    != {"algorithm", "path", "bytes", "sha256", "published_digest"}
+                    or checksum.get("path") != checksum_path
+                    or not isinstance(checksum.get("bytes"), int)
+                    or isinstance(checksum.get("bytes"), bool)
+                    or not 1 <= checksum["bytes"] <= 256
+                    or re.fullmatch(r"[0-9a-f]{64}", str(checksum.get("sha256"))) is None
+                    or expected_length is None
+                    or re.fullmatch(
+                        rf"[0-9a-f]{{{expected_length}}}",
+                        str(checksum.get("published_digest")),
+                    )
+                    is None
+                    or manifest_by_path[checksum_path].get("bytes") != checksum["bytes"]
+                    or manifest_by_path[checksum_path].get("sha256") != checksum["sha256"]
+                ):
+                    raise ObservationError("registry_maven_proof_invalid")
 
     @staticmethod
     def _validate_android_release_documents(
@@ -2674,8 +2824,66 @@ class Observer:
         status_sha = hashlib.sha256(
             assets["maven-central-deployment-status.json"]["bytes"]
         ).hexdigest()
+        portal_sha = hashlib.sha256(
+            assets[
+                f"latchway-android-{coordinate['version']}-central-portal.zip"
+            ]["bytes"]
+        ).hexdigest()
+        expected_deployment_name = (
+            f"latchway-android-v{coordinate['version']}-"
+            f"{coordinate['commit'][:12]}-{portal_sha}"
+        )
+        intent_keys = {
+            "schema", "repository", "source_commit", "release_tag", "version",
+            "namespace", "deployment_name", "publishing_type",
+            "reviewed_repository_archive_sha256",
+            "reviewed_repository_manifest_sha256", "reviewed_repository_file_count",
+            "reviewed_portal_bundle_sha256", "reviewed_portal_bundle_file_count",
+            "reviewed_public_key_sha256", "expected_purls", "authorization",
+        }
+        deployment_keys = {
+            "schema", "intent_sha256", "deployment_name", "publishing_type",
+            "namespace", "version", "source_commit", "expected_purls",
+            "reviewed_portal_bundle_sha256", "record_kind", "deployment_id",
+            "public_manifest_sha256",
+        }
+        status_keys = {
+            "schema", "intent_sha256", "record_sha256", "record_kind",
+            "deployment_id", "deployment_name", "deployment_state", "purls",
+            "public_manifest_sha256",
+        }
+        record_kind = deployment.get("record_kind")
+        public_manifest = deployment.get("public_manifest_sha256")
+        proof_deployment = proof.get("deployment")
+        proof_keys = {
+            "schema_version", "registry", "namespace", "version",
+            "reviewed_repository", "primary_artifacts_byte_identical",
+            "checksum_files_byte_identical", "signature_files_present",
+            "signatures_cryptographically_verified", "signing_fingerprint",
+            "reviewed_public_key_sha256", "deployment", "public_manifest",
+            "public_manifest_sha256", "files",
+        }
+        proof_deployment_keys = {
+            "intent_sha256", "record_sha256", "status_sha256", "record_kind",
+            "record", "status",
+        }
+        deployment_kind_valid = (
+            record_kind == "portal_deployment"
+            and re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                str(deployment.get("deployment_id")),
+                re.IGNORECASE,
+            )
+            is not None
+            and public_manifest is None
+        ) or (
+            record_kind == "public_registry_adoption"
+            and deployment.get("deployment_id") is None
+            and re.fullmatch(r"[0-9a-f]{64}", str(public_manifest)) is not None
+        )
         if (
-            intent.get("schema") != "latchway.maven-central-upload-intent.v1"
+            set(intent) != intent_keys
+            or intent.get("schema") != "latchway.maven-central-upload-intent.v2"
             or intent.get("repository") != "Latchway/latchway-android"
             or intent.get("source_commit") != coordinate["commit"]
             or intent.get("release_tag") != coordinate["tag"]
@@ -2690,15 +2898,18 @@ class Observer:
                 ]["bytes"]
             ).hexdigest()
             or intent.get("reviewed_portal_bundle_sha256")
-            != hashlib.sha256(
-                assets[
-                    f"latchway-android-{coordinate['version']}-central-portal.zip"
-                ]["bytes"]
-            ).hexdigest()
+            != portal_sha
             or intent.get("reviewed_public_key_sha256")
             != hashlib.sha256(
                 assets["latchway-maven-signing-public-key.asc"]["bytes"]
             ).hexdigest()
+            or intent.get("deployment_name") != expected_deployment_name
+            or not isinstance(intent.get("reviewed_repository_manifest_sha256"), str)
+            or re.fullmatch(
+                r"[0-9a-f]{64}", intent["reviewed_repository_manifest_sha256"]
+            ) is None
+            or intent.get("reviewed_repository_file_count") != 120
+            or intent.get("reviewed_portal_bundle_file_count") != 144
             or sorted(intent.get("expected_purls", [])) != purls
             or set(tag_binding)
             != {
@@ -2712,28 +2923,53 @@ class Observer:
             != "latchway.github-release-tag-binding.v1"
             or tag_binding.get("tag") != coordinate["tag"]
             or tag_binding.get("commit") != coordinate["commit"]
-            or not valid_commit(tag_binding.get("tag_object_sha"))
+            or re.fullmatch(
+                r"(?:[0-9a-f]{40}|[0-9a-f]{64})",
+                str(tag_binding.get("tag_object_sha")),
+            ) is None
             or re.fullmatch(
                 r"[0-9a-f]{64}", str(tag_binding.get("message_sha256"))
             )
             is None
-            or deployment.get("schema") != "latchway.maven-central-deployment.v1"
+            or set(deployment) != deployment_keys
+            or deployment.get("schema") != "latchway.maven-central-deployment.v2"
             or deployment.get("intent_sha256") != intent_sha
+            or deployment.get("deployment_name") != expected_deployment_name
+            or deployment.get("publishing_type") != "user_managed"
+            or deployment.get("namespace") != "dev.latchway"
             or deployment.get("source_commit") != coordinate["commit"]
             or deployment.get("version") != coordinate["version"]
             or sorted(deployment.get("expected_purls", [])) != purls
+            or deployment.get("reviewed_portal_bundle_sha256") != portal_sha
+            or not deployment_kind_valid
+            or set(status) != status_keys
             or status.get("schema")
-            != "latchway.maven-central-deployment-status.v1"
+            != "latchway.maven-central-deployment-status.v2"
             or status.get("intent_sha256") != intent_sha
             or status.get("record_sha256") != deployment_sha
+            or status.get("record_kind") != record_kind
             or status.get("deployment_id") != deployment.get("deployment_id")
+            or status.get("deployment_name") != expected_deployment_name
             or status.get("deployment_state") != "PUBLISHED"
             or sorted(status.get("purls", [])) != purls
+            or status.get("public_manifest_sha256") != public_manifest
+            or set(proof) != proof_keys
+            or proof.get("schema_version") != 2
+            or proof.get("registry") != "maven_central"
+            or proof.get("namespace") != "dev.latchway"
+            or proof.get("version") != coordinate["version"]
+            or not isinstance(proof_deployment, dict)
+            or set(proof_deployment) != proof_deployment_keys
             or nested(proof, "deployment", "intent_sha256") != intent_sha
             or nested(proof, "deployment", "record_sha256") != deployment_sha
             or nested(proof, "deployment", "status_sha256") != status_sha
+            or nested(proof, "deployment", "record_kind") != record_kind
             or nested(proof, "deployment", "record") != deployment
             or nested(proof, "deployment", "status") != status
+            or (
+                record_kind == "public_registry_adoption"
+                and public_manifest != proof.get("public_manifest_sha256")
+            )
         ):
             raise ObservationError("registry_maven_deployment_evidence_invalid")
 

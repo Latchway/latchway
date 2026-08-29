@@ -17,6 +17,7 @@ class PromotionResumabilityTests(unittest.TestCase):
         value = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         if not isinstance(value, dict):
             raise AssertionError("promotion workflow must be a mapping")
+        self.workflow = value
         self.job = value["jobs"]["promote"]
         self.steps = self.job["steps"]
         self.names = [item.get("name", "") for item in self.steps]
@@ -73,8 +74,60 @@ class PromotionResumabilityTests(unittest.TestCase):
         self.assertIn(".immutable == true", script)
         self.assertIn("--certificate-github-workflow-sha \"$current_commit\"", script)
         self.assertIn("oci-alias-$alias-pre-update.json", script)
-        self.assertIn('for alias in "$major.$minor" "$major" latest', script)
+        self.assertIn('aliases=("$major.$minor" "$major" latest)', script)
         self.assertLess(script.index("imagetools inspect --raw"), script.index("imagetools create"))
+
+    def test_overlapping_release_cannot_advance_unfinalized_aliases(self) -> None:
+        finalizer = yaml.safe_load(
+            (WORKFLOW.parent / "finalize-release-record.yml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            self.workflow["concurrency"]["group"],
+            finalizer["concurrency"]["group"],
+        )
+        self.assertFalse(self.workflow["concurrency"]["cancel-in-progress"])
+        self.assertFalse(finalizer["concurrency"]["cancel-in-progress"])
+        script = self.steps[
+            self.names.index("Promote only the verified index digest to stable OCI tags")
+        ]["run"]
+        for value in (
+            "require_finalized_version()",
+            'evidence_tag="evidence/v$prior_version"',
+            '.immutable == true',
+            'gh release verify "$evidence_tag"',
+            "verify-github-release-attestation.py",
+            'gh attestation verify "$prefix-assets/COMPLETION_REPORT.md"',
+            '.github/workflows/finalize-release-record.yml',
+            "verify-final-evidence-release.py",
+            "git/matching-refs/tags/v",
+            "stable_predecessors",
+            'test "$candidate_tag_seen" = true',
+            '--plan "$RUNNER_TEMP/oci-alias-transition-plan.json"',
+            'for alias in "${aliases[@]}"',
+            "OCI alias appeared after absent preflight",
+        ):
+            self.assertIn(value, script)
+        self.assertEqual(script.count('for alias in "${aliases[@]}"'), 2)
+        prior_evidence = script.index(
+            'require_finalized_version "$current_version" "$current_commit"'
+        )
+        stable_tag_guard = script.index(
+            'require_finalized_version "$prior_version" "$prior_commit"'
+        )
+        plan_authorization = script.index(
+            '--plan "$RUNNER_TEMP/oci-alias-transition-plan.json"'
+        )
+        mutation_phase = script.index(
+            '# Re-close each preflight state immediately before its controlled'
+        )
+        first_moving_mutation = script.index(
+            'docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"',
+            mutation_phase,
+        )
+        self.assertLess(prior_evidence, mutation_phase)
+        self.assertLess(stable_tag_guard, mutation_phase)
+        self.assertLess(plan_authorization, mutation_phase)
+        self.assertLess(mutation_phase, first_moving_mutation)
 
     def test_release_is_reconciled_without_overwriting_assets(self) -> None:
         preflight = self.steps[

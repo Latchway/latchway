@@ -52,6 +52,23 @@ may advance only through an authenticated, semver-monotonic transition; a rerun
 of an older release cannot move an alias backward. Promotion and final evidence
 both bind every intended alias to the expected index digest.
 
+Promotion and finalization share one repository-wide stable-release chronology
+group. Before a promotion changes any moving alias, it preflights all three
+aliases and requires the exact immutable `evidence/vX.Y.Z` tag, deterministic
+release metadata, complete nine-asset set, and GitHub release attestation for
+every earlier stable product tag and every superseded alias version. Enumerating
+product tags also catches a failed promotion that created its exact immutable
+tag/version coordinate but stopped before moving an alias. It then verifies
+each earlier version's completion report against the retained bundle and the
+exact finalizer workflow/source
+identity, downloads all nine assets, matches every byte to the GitHub release
+digests and `SHA256SUMS`, and matches every durable asset to the hash table in
+the signed report. Only after every predecessor has final evidence does a
+second phase re-close all alias states and advance them. Consequently a newer
+promotion may fail safely and be retried while the preceding finalizer is
+unfinished, but it cannot advance aliases and make that finalizer permanently
+unrecoverable.
+
 GitHub's Update Release endpoint does not document an atomic `If-Match`
 precondition for the publish PATCH. The workflows therefore capture the exact
 validated draft representation and ETag, require a supported conditional GET

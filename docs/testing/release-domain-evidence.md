@@ -215,6 +215,12 @@ not workflow input. They are defined by `CLAIM_REQUIREMENTS` and
   for every one of the five repositories.
 - Public-registry evidence requires the exact GHCR digest, both npm packages,
   Swift package resolution, CocoaPods resolution, and Maven Central resolution.
+  The Maven observation replays verification with the exact v2 upload intent,
+  deployment record, and terminal deployment status. It requires the canonical
+  15-field proof, six-field embedded deployment, 144-entry public manifest,
+  nine-field artifact rows, five-field checksum rows, and six-field GnuPG
+  status; Portal state remains null where adoption state is inapplicable, while
+  an adoption record must bind the exact verified public-manifest digest.
 
 The fixed producer runs the real command or harness and writes its actual exit
 code and redacted output. An operator-authored `status: passed` document is not

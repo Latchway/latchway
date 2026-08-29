@@ -44,7 +44,9 @@ permissions:
   packages: read
 
 concurrency:
-  group: finalize-release-record-${{ inputs.release_tag }}
+  # Finalization must close one release's moving aliases before a later
+  # promotion is allowed to advance them.
+  group: promote-stable-oci-aliases
   cancel-in-progress: false
 
 jobs:

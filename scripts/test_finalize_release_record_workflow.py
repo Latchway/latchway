@@ -54,6 +54,14 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             ".github/workflows/cross-repository-conformance.yml",
         ):
             self.assertIn(workflow, self.text)
+        promotion = yaml.safe_load(
+            (WORKFLOW.parent / "promote-release.yml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            self.workflow["concurrency"]["group"],
+            promotion["concurrency"]["group"],
+        )
+        self.assertFalse(self.workflow["concurrency"]["cancel-in-progress"])
 
     def test_attested_release_evidence_precedes_render_and_mutation(self) -> None:
         immutable_support = self.names.index(

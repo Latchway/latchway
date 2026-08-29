@@ -51,6 +51,17 @@ The finalizer additionally performs fresh checks for:
   `gitHead` into these reviewed prebuilt tarballs, so commit identity comes
   from the authenticated provenance and retained registry/adoption evidence.
 
+Finalization shares the promotion workflow's repository-wide chronology group.
+A later promotion must authenticate this release's immutable final-evidence tag,
+complete fixed asset set, and GitHub release attestation before it may advance
+any `X.Y`, `X`, or `latest` alias. It also verifies the retained completion
+report attestation against this exact finalizer workflow and candidate commit,
+then closes every downloaded asset against the release API digest,
+`SHA256SUMS`, and the signed report's durable-asset hash table. The promotion
+performs those checks for every superseded alias before its separate mutation
+phase, so overlapping release runs fail closed without making an older
+finalizer impossible to resume.
+
 Registry coordinates accepted by the renderer are derived from the five exact
 repository coordinates in the attested conformance report. They are not
 workflow inputs. The rendered domain table preserves the public-registry
