@@ -110,6 +110,28 @@ jobs:
           path: latchway-react-native-sdk
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify the fixed authenticated aggregate producer run
+        if: inputs.scope != 'source'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXTERNAL_EVIDENCE_RUN_ID: ${{ inputs.external_evidence_run_id }}
+          EXTERNAL_EVIDENCE_ARTIFACT: ${{ inputs.external_evidence_artifact }}
+        run: |
+          set -Eeuo pipefail
+          candidate_commit=$(git -C "$GITHUB_WORKSPACE/latchway" rev-parse --verify HEAD)
+          [[ "$candidate_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXTERNAL_EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$EXTERNAL_EVIDENCE_ARTIFACT" = latchway-v1-external-evidence
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXTERNAL_EVIDENCE_RUN_ID" > "$RUNNER_TEMP/aggregate-run.json"
+          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/aggregate-run.json")
+          jq --exit-status --arg commit "$candidate_commit" \
+            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
+            "$RUNNER_TEMP/aggregate-run.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/aggregate-workflow.json"
+          jq --exit-status \
+            '.path == ".github/workflows/aggregate-release-evidence.yml" and .state == "active"' \
+            "$RUNNER_TEMP/aggregate-workflow.json" >/dev/null
       - name: Download independently produced external evidence
         if: inputs.scope != 'source'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -125,20 +147,48 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_SCOPE: ${{ inputs.scope }}
         run: |
+          set -Eeuo pipefail
           candidate_commit=$(git -C "$GITHUB_WORKSPACE/latchway" rev-parse --verify HEAD)
-          domains=(live_sdk_conformance live_provider supply_chain)
+          manifest="$RUNNER_TEMP/latchway-external-evidence/aggregate-manifest.json"
+          gh attestation verify "$manifest" \
+            --bundle "$RUNNER_TEMP/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/aggregate-release-evidence.yml" \
+            --source-digest "$candidate_commit" \
+            --signer-digest "$candidate_commit" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/aggregate-attestation-verification.json"
+          jq --exit-status --arg scope "$EVIDENCE_SCOPE" --arg commit "$candidate_commit" '
+            .schema_version == 1 and
+            .kind == "latchway_external_evidence_aggregate" and
+            .scope == $scope and
+            .candidate_commit == $commit and
+            (if $scope == "release" then
+              .domains == ["live_sdk_conformance", "physical_devices", "live_provider", "cloud_deployments", "operational_resilience", "supply_chain", "public_tags", "public_registries"]
+            else
+              .domains == ["live_sdk_conformance", "physical_devices", "live_provider", "cloud_deployments", "operational_resilience", "supply_chain"]
+            end)
+          ' "$manifest" >/dev/null
+          domains=(live_sdk_conformance physical_devices live_provider cloud_deployments operational_resilience supply_chain)
           if [[ "$EVIDENCE_SCOPE" == release ]]; then
             domains+=(public_tags public_registries)
           fi
           for domain in "${domains[@]}"; do
             document="$RUNNER_TEMP/latchway-external-evidence/$domain.json"
             bundle="$RUNNER_TEMP/latchway-external-evidence/${domain}.attestation.sigstore.json"
+            signer=.github/workflows/release-domain-evidence.yml
+            if [[ "$domain" == cloud_deployments ]]; then
+              signer=.github/workflows/cloud-deployment-aggregate.yml
+            elif [[ "$domain" == operational_resilience ]]; then
+              signer=.github/workflows/operational-resilience-evidence.yml
+            fi
             test -f "$document"
             test -f "$bundle"
             gh attestation verify "$document" \
               --bundle "$bundle" \
               --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-evidence.yml" \
+              --signer-workflow "$GITHUB_REPOSITORY/$signer" \
               --source-digest "$candidate_commit" \
               --signer-digest "$candidate_commit" \
               --source-ref refs/heads/main \

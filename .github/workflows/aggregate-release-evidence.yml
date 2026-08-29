@@ -1,0 +1,267 @@
+name: Aggregate authenticated release evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Prepublication promotion or postpublication release evidence
+        required: true
+        default: promotion
+        type: choice
+        options: [promotion, release]
+      candidate_commit:
+        description: Exact 40-character core candidate commit
+        required: true
+        type: string
+      live_sdk_conformance_run_id:
+        description: Protected live SDK finalizer run
+        required: true
+        type: string
+      physical_devices_run_id:
+        description: Protected physical-device finalizer run
+        required: true
+        type: string
+      live_provider_run_id:
+        description: Protected live-provider finalizer run
+        required: true
+        type: string
+      cloud_deployments_run_id:
+        description: Protected cloud aggregate run
+        required: true
+        type: string
+      operational_resilience_run_id:
+        description: Protected operational-resilience run
+        required: true
+        type: string
+      supply_chain_run_id:
+        description: Protected supply-chain finalizer run
+        required: true
+        type: string
+      public_tags_run_id:
+        description: Protected public-tags finalizer run (release scope only)
+        required: false
+        type: string
+      public_registries_run_id:
+        description: Protected public-registries finalizer run (release scope only)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aggregate-release-evidence-${{ inputs.scope }}-${{ inputs.candidate_commit }}
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact candidate aggregator
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact candidate and scope-specific run set
+        shell: bash
+        env:
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          LIVE_SDK_RUN_ID: ${{ inputs.live_sdk_conformance_run_id }}
+          PHYSICAL_RUN_ID: ${{ inputs.physical_devices_run_id }}
+          LIVE_PROVIDER_RUN_ID: ${{ inputs.live_provider_run_id }}
+          CLOUD_RUN_ID: ${{ inputs.cloud_deployments_run_id }}
+          OPERATIONS_RUN_ID: ${{ inputs.operational_resilience_run_id }}
+          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          for run_id in \
+            "$LIVE_SDK_RUN_ID" "$PHYSICAL_RUN_ID" "$LIVE_PROVIDER_RUN_ID" \
+            "$CLOUD_RUN_ID" "$OPERATIONS_RUN_ID" "$SUPPLY_CHAIN_RUN_ID"; do
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+          done
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            [[ "$PUBLIC_TAGS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$PUBLIC_REGISTRIES_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          else
+            test "$EVIDENCE_SCOPE" = promotion
+            test -z "$PUBLIC_TAGS_RUN_ID"
+            test -z "$PUBLIC_REGISTRIES_RUN_ID"
+          fi
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1)"
+      - name: Verify every domain run belongs to its fixed producer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          LIVE_SDK_RUN_ID: ${{ inputs.live_sdk_conformance_run_id }}
+          PHYSICAL_RUN_ID: ${{ inputs.physical_devices_run_id }}
+          LIVE_PROVIDER_RUN_ID: ${{ inputs.live_provider_run_id }}
+          CLOUD_RUN_ID: ${{ inputs.cloud_deployments_run_id }}
+          OPERATIONS_RUN_ID: ${{ inputs.operational_resilience_run_id }}
+          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+        run: |
+          set -Eeuo pipefail
+          verify_run() {
+            local domain="$1" run_id="$2" expected_workflow="$3"
+            local run="$RUNNER_TEMP/${domain}-run.json"
+            local workflow="$RUNNER_TEMP/${domain}-workflow.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$run"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
+              "$run" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$run")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
+            jq --exit-status --arg path "$expected_workflow" \
+              '.path == $path and .state == "active"' "$workflow" >/dev/null
+          }
+          verify_run live_sdk_conformance "$LIVE_SDK_RUN_ID" .github/workflows/release-domain-evidence.yml
+          verify_run physical_devices "$PHYSICAL_RUN_ID" .github/workflows/release-domain-evidence.yml
+          verify_run live_provider "$LIVE_PROVIDER_RUN_ID" .github/workflows/release-domain-evidence.yml
+          verify_run cloud_deployments "$CLOUD_RUN_ID" .github/workflows/cloud-deployment-aggregate.yml
+          verify_run operational_resilience "$OPERATIONS_RUN_ID" .github/workflows/operational-resilience-evidence.yml
+          verify_run supply_chain "$SUPPLY_CHAIN_RUN_ID" .github/workflows/release-domain-evidence.yml
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            verify_run public_tags "$PUBLIC_TAGS_RUN_ID" .github/workflows/release-domain-evidence.yml
+            verify_run public_registries "$PUBLIC_REGISTRIES_RUN_ID" .github/workflows/release-domain-evidence.yml
+          fi
+      - name: Download live SDK conformance domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-live_sdk_conformance-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/live_sdk_conformance
+          run-id: ${{ inputs.live_sdk_conformance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download physical-device domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-physical_devices-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/physical_devices
+          run-id: ${{ inputs.physical_devices_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download live-provider domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-live_provider-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/live_provider
+          run-id: ${{ inputs.live_provider_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download cloud-deployments domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cloud_deployments-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/cloud_deployments
+          run-id: ${{ inputs.cloud_deployments_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download operational-resilience domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-operational-resilience-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/operational_resilience
+          run-id: ${{ inputs.operational_resilience_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download supply-chain domain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-supply_chain-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/supply_chain
+          run-id: ${{ inputs.supply_chain_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download public-tags domain
+        if: inputs.scope == 'release'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-public_tags-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/public_tags
+          run-id: ${{ inputs.public_tags_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download public-registries domain
+        if: inputs.scope == 'release'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-public_registries-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/domains/public_registries
+          run-id: ${{ inputs.public_registries_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify every exact domain attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          domains=(live_sdk_conformance physical_devices live_provider cloud_deployments operational_resilience supply_chain)
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            domains+=(public_tags public_registries)
+          fi
+          for domain in "${domains[@]}"; do
+            signer=.github/workflows/release-domain-evidence.yml
+            if [[ "$domain" == cloud_deployments ]]; then
+              signer=.github/workflows/cloud-deployment-aggregate.yml
+            elif [[ "$domain" == operational_resilience ]]; then
+              signer=.github/workflows/operational-resilience-evidence.yml
+            fi
+            gh attestation verify "$RUNNER_TEMP/domains/$domain/$domain.json" \
+              --bundle "$RUNNER_TEMP/domains/$domain/$domain.attestation.sigstore.json" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/$signer" \
+              --source-digest "$CANDIDATE_COMMIT" \
+              --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              --format json > "$RUNNER_TEMP/${domain}-attestation-verification.json"
+          done
+      - name: Build collision-free hash-bound evidence union
+        shell: bash
+        env:
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          domains=(live_sdk_conformance physical_devices live_provider cloud_deployments operational_resilience supply_chain)
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            domains+=(public_tags public_registries)
+          fi
+          arguments=()
+          for domain in "${domains[@]}"; do
+            arguments+=(--input "$domain=$RUNNER_TEMP/domains/$domain")
+          done
+          python3 scripts/aggregate-release-evidence.py \
+            --scope "$EVIDENCE_SCOPE" \
+            --candidate-commit "$CANDIDATE_COMMIT" \
+            "${arguments[@]}" \
+            --output-directory "$RUNNER_TEMP/latchway-v1-external-evidence"
+      - name: Attest the exact aggregate manifest
+        id: aggregate-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/latchway-v1-external-evidence/aggregate-manifest.json
+      - name: Retain the aggregate attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.aggregate-attestation.outputs.bundle-path }}
+        run: install -m 0600 -- "$BUNDLE_PATH" "$RUNNER_TEMP/latchway-v1-external-evidence/aggregate-manifest.attestation.sigstore.json"
+      - name: Retain only the authenticated release-evidence aggregate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-v1-external-evidence
+          path: ${{ runner.temp }}/latchway-v1-external-evidence
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
