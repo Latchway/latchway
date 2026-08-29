@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import {
   adminRequest,
@@ -7,6 +8,7 @@ import {
   AdministratorSchema,
   RequestSchema,
   RevisionSchema,
+  SelfTestScheduleSchema,
   UsageSummarySchema,
   UserSchema
 } from "./admin";
@@ -52,6 +54,44 @@ describe("canonical Admin API browser client", () => {
         headers: expect.objectContaining({ "X-CSRF-Token": csrf })
       })
     );
+  });
+
+  it("sends a transient bearer without cookies or CSRF and never returns token material", async () => {
+    const bearerToken = "transient-scheduled-self-test-token-material-1234567890";
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe(`Bearer ${bearerToken}`);
+      expect(headers.get("X-CSRF-Token")).toBeNull();
+      expect(headers.get("Cookie")).toBeNull();
+      expect(init?.credentials).toBe("omit");
+      expect(init?.body).toBe(JSON.stringify({ kind: "upstream" }));
+      return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" }, status: 201 });
+    }) as unknown as typeof fetch;
+    const result = await adminRequest(
+      "/admin/v1/self-test-schedules",
+      z.object({ ok: z.boolean() }).strict(),
+      { bearerToken, body: { kind: "upstream" }, method: "POST" },
+      fetcher
+    );
+    expect(result).toEqual({ data: { ok: true } });
+    expect(JSON.stringify(result)).not.toContain(bearerToken);
+
+    let rejected: unknown;
+    try {
+      await adminRequest(
+        "/admin/v1/self-test-schedules",
+        z.object({ ok: z.boolean() }).strict(),
+        { bearerToken, body: { kind: "upstream" }, method: "POST" },
+        vi.fn(async () => new Response(JSON.stringify({
+          code: "permission_denied", detail: "The durable credential is not authorized.", retryable: false,
+          status: 403, title: "Permission denied", type: "https://latchway.dev/problems/permission_denied"
+        }), { headers: { "Content-Type": "application/problem+json" }, status: 403 })) as unknown as typeof fetch
+      );
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toBeDefined();
+    expect(JSON.stringify(rejected)).not.toContain(bearerToken);
   });
 
   it("carries a strong server ETag into activation", async () => {
@@ -104,6 +144,21 @@ describe("canonical Admin API browser client", () => {
       metadata,
       token: "one-time-printable-token-material-1234567890"
     })).toEqual({ metadata, token: "one-time-printable-token-material-1234567890" });
+  });
+
+  it("accepts only redaction-safe, lifecycle-consistent self-test schedule metadata", () => {
+    const schedule = {
+      application_id: "app_0123456789abcdef", authorization_credential_id: "tok_0123456789abcdef",
+      config_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
+      daily_cost_limit_nano_usd: 240_000_000, environment_id: "env_0123456789abcdef",
+      id: "sts_0123456789abcdef", interval_seconds: 3600, kind: "upstream",
+      max_cost_nano_usd: 10_000_000, model: "canary", next_run_at: "2026-08-29T01:00:00Z",
+      status: "active", updated_at: "2026-08-29T00:00:00Z", upstream: "primary"
+    };
+    expect(SelfTestScheduleSchema.parse(schedule)).toEqual(schedule);
+    expect(() => SelfTestScheduleSchema.parse({ ...schedule, provider_secret: "must-not-render" })).toThrow();
+    expect(() => SelfTestScheduleSchema.parse({ ...schedule, next_run_at: undefined })).toThrow();
+    expect(() => SelfTestScheduleSchema.parse({ ...schedule, daily_cost_limit_nano_usd: 1 })).toThrow();
   });
 
   it("keeps provider cost provenance and its fixed report source distinct", () => {

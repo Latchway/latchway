@@ -13,12 +13,12 @@ vi.mock("../api/session", () => ({
   useConsoleSession: () => ({
     data: {
       mode: "configured",
-      session: { capabilities: ["inspect_users"], organization_id: "org_0123456789abcdef" }
+      session: { capabilities: ["inspect_users", "run_self_tests"], organization_id: "org_0123456789abcdef" }
     }
   })
 }));
 
-import { AttestationFailuresPage, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, UsagePage } from "./control-plane-pages";
+import { AttestationFailuresPage, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage } from "./control-plane-pages";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 
@@ -213,5 +213,44 @@ describe("rich usage and route-simulator views", () => {
     await user.click(screen.getByRole("button", { name: "Simulate route" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Route context mismatch");
     expect(screen.queryByRole("heading", { name: "Allowed" })).not.toBeInTheDocument();
+  });
+
+  it("creates, lists, reads, and disables a schedule using only durable token metadata", async () => {
+    const schedule = {
+      application_id: "app_0123456789abcdef", authorization_credential_id: "tok_0123456789abcdef",
+      config_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
+      daily_cost_limit_nano_usd: 240_000_000, environment_id: "env_0123456789abcdef",
+      id: "sts_0123456789abcdef", interval_seconds: 3600, kind: "upstream", max_cost_nano_usd: 10_000_000,
+      model: "canary", next_run_at: "2026-08-29T01:00:00Z", status: "active",
+      updated_at: "2026-08-29T00:00:00Z", upstream: "primary"
+    } as const;
+    adminRequestMock.mockImplementation(async (path: string, _schema: unknown, options?: { method?: string; body?: unknown }) => {
+      if (options?.method === "DELETE") return { data: { ...schedule, disabled_at: "2026-08-29T00:10:00Z", disabled_reason_code: "operator_disabled", next_run_at: undefined, status: "disabled", updated_at: "2026-08-29T00:10:00Z" } };
+      if (options?.method === "POST") return { data: schedule };
+      if (path === `/admin/v1/self-test-schedules/${schedule.id}`) return { data: schedule };
+      return { data: { items: [schedule], page: { has_more: false } } };
+    });
+    const user = userEvent.setup();
+    render(<SelfTestsPage />);
+    await user.type(screen.getByLabelText("Scheduled environment ID"), schedule.environment_id);
+    await user.click(screen.getByRole("button", { name: "Load schedules" }));
+
+    expect(await screen.findByRole("button", { name: schedule.id })).toBeInTheDocument();
+    expect(screen.getByText(schedule.config_revision_id)).toBeInTheDocument();
+    expect(screen.getByText(schedule.authorization_credential_id)).toBeInTheDocument();
+    const bearerToken = "transient-scheduled-self-test-token-material-1234567890";
+    await user.type(screen.getByLabelText(/^Durable Admin API token/), bearerToken);
+    await user.type(screen.getByLabelText("Scheduled upstream ID"), schedule.upstream);
+    await user.type(screen.getByLabelText("Scheduled model ID"), schedule.model);
+    await user.click(screen.getByRole("button", { name: "Create schedule" }));
+
+    expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/self-test-schedules", expect.anything(), expect.objectContaining({
+      bearerToken, body: expect.not.objectContaining({ authorization_credential_id: expect.anything() }), method: "POST"
+    }));
+    expect(screen.getByLabelText(/^Durable Admin API token/)).toHaveValue("");
+    const createBody = adminRequestMock.mock.calls.find(([path, , options]) => path === "/admin/v1/self-test-schedules" && options?.method === "POST")?.[2]?.body;
+    expect(JSON.stringify(createBody)).not.toContain(bearerToken);
+    await user.click(screen.getByRole("button", { name: "Disable schedule" }));
+    expect(await screen.findByText(`${schedule.id} · disabled`)).toBeInTheDocument();
   });
 });

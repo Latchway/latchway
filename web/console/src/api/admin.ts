@@ -379,8 +379,48 @@ export const SelfTestSchema = z
     created_at: Instant,
     id: OpaqueID,
     kind: z.enum(["local", "upstream", "openrouter"]),
+    schedule_id: OpaqueID.optional(),
     state: z.enum(["queued", "running", "passed", "failed", "canceled"])
   })
+  .strict();
+
+export const SelfTestScheduleSchema = z
+  .object({
+    application_id: OpaqueID,
+    authorization_credential_id: z.string().regex(/^tok_[A-Za-z0-9_-]{16,128}$/),
+    config_revision_id: OpaqueID,
+    created_at: Instant,
+    daily_cost_limit_nano_usd: z.number().int().min(1).max(10_000_000_000),
+    disabled_at: OptionalInstant,
+    disabled_reason_code: Identifier.optional(),
+    environment_id: OpaqueID,
+    id: OpaqueID,
+    interval_seconds: z.number().int().min(3_600).max(2_592_000),
+    kind: z.enum(["upstream", "openrouter"]),
+    last_enqueued_at: OptionalInstant,
+    last_self_test_id: OpaqueID.optional(),
+    max_cost_nano_usd: z.number().int().min(1).max(1_000_000_000),
+    model: Identifier,
+    next_run_at: OptionalInstant,
+    status: z.enum(["active", "disabled"]),
+    updated_at: Instant,
+    upstream: Identifier
+  })
+  .strict()
+  .superRefine((schedule, context) => {
+    if (schedule.daily_cost_limit_nano_usd < schedule.max_cost_nano_usd) {
+      context.addIssue({ code: "custom", message: "Daily cost limit is below the per-run maximum.", path: ["daily_cost_limit_nano_usd"] });
+    }
+    if (schedule.status === "active" && (!schedule.next_run_at || schedule.disabled_at || schedule.disabled_reason_code)) {
+      context.addIssue({ code: "custom", message: "Active schedule lifecycle fields are inconsistent." });
+    }
+    if (schedule.status === "disabled" && (schedule.next_run_at || !schedule.disabled_at || !schedule.disabled_reason_code)) {
+      context.addIssue({ code: "custom", message: "Disabled schedule lifecycle fields are inconsistent." });
+    }
+  });
+
+export const SelfTestSchedulePageSchema = z
+  .object({ items: z.array(SelfTestScheduleSchema).max(200), page: PageInfo })
   .strict();
 
 export const SystemStatusSchema = z
@@ -594,6 +634,8 @@ export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 export type UsageTimeseries = z.infer<typeof UsageTimeseriesSchema>;
 export type AuditPage = z.infer<typeof AuditPageSchema>;
 export type SelfTestRun = z.infer<typeof SelfTestSchema>;
+export type SelfTestSchedule = z.infer<typeof SelfTestScheduleSchema>;
+export type SelfTestSchedulePage = z.infer<typeof SelfTestSchedulePageSchema>;
 export type SystemStatus = z.infer<typeof SystemStatusSchema>;
 export type RouteSimulation = z.infer<typeof RouteSimulationSchema>;
 export type ConfigurationRevision = z.infer<typeof RevisionSchema>;
@@ -601,6 +643,7 @@ export type ConfigurationValidation = z.infer<typeof ValidationSchema>;
 export type ConfigurationPlan = z.infer<typeof ConfigurationPlanSchema>;
 
 interface AdminRequestOptions {
+  bearerToken?: string;
   body?: unknown;
   etag?: string;
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -622,10 +665,16 @@ export async function adminRequest<T>(
     throw new Error("Invalid canonical Admin API path.");
   }
   const method = options.method ?? "GET";
+  const bearerToken = options.bearerToken;
+  if (bearerToken !== undefined && (bearerToken.length < 32 || bearerToken.length > 2048 || !/^[\x21-\x7e]+$/.test(bearerToken))) {
+    throw new Error("Invalid transient Admin API token.");
+  }
   const headers: Record<string, string> = {
     Accept: "application/json, application/problem+json"
   };
-  if (method !== "GET") {
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  } else if (method !== "GET") {
     const csrf = adminCSRFToken();
     if (!csrf) {
       throw new AdminRequestError({
@@ -649,7 +698,7 @@ export async function adminRequest<T>(
     response = await fetcher(path, {
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       cache: "no-store",
-      credentials: "same-origin",
+      credentials: bearerToken ? "omit" : "same-origin",
       headers,
       method,
       redirect: "error",

@@ -303,6 +303,111 @@ func (api *API) auditEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
 }
 
+type createSelfTestScheduleRequest struct {
+	Kind                  string `json:"kind"`
+	EnvironmentID         string `json:"environment_id"`
+	Upstream              string `json:"upstream"`
+	Model                 string `json:"model"`
+	MaxCostNanoUSD        int64  `json:"max_cost_nano_usd"`
+	DailyCostLimitNanoUSD int64  `json:"daily_cost_limit_nano_usd"`
+	IntervalSeconds       int64  `json:"interval_seconds"`
+}
+
+func (api *API) selfTestSchedules(w http.ResponseWriter, r *http.Request) {
+	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size") {
+		api.writeProblem(w, r, invalidRequest("The self-test schedule query is invalid."))
+		return
+	}
+	environmentID, ok := requiredQueryValue(r, "environment_id")
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
+		return
+	}
+	page, err := parseOperationalPage(r, id.SelfTestSchedule)
+	if err != nil {
+		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
+		return
+	}
+	items, err := api.operations.listSelfTestSchedules(
+		r.Context(), mustPrincipal(r.Context()), environmentID, page,
+	)
+	if err != nil {
+		api.handleOperationalError(w, r, err, "")
+		return
+	}
+	items, pageDocument := buildPage(items, int(page.size), func(item selfTestScheduleDocument) cursorDocument {
+		return cursorDocument{CreatedAt: item.CreatedAt, ID: item.ID}
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+}
+
+func (api *API) createSelfTestSchedule(w http.ResponseWriter, r *http.Request) {
+	if !onlyQueryKeys(r) {
+		api.writeProblem(w, r, invalidRequest("The self-test schedule query is invalid."))
+		return
+	}
+	request, err := decodeJSON[createSelfTestScheduleRequest](r)
+	if err != nil || request.IntervalSeconds < int64(minimumSelfTestScheduleInterval/time.Second) ||
+		request.IntervalSeconds > int64(maximumSelfTestScheduleInterval/time.Second) {
+		api.writeProblem(w, r, invalidRequest("The self-test schedule request is invalid."))
+		return
+	}
+	operationID, err := newMutationOperationID(r.Context())
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	schedule, err := api.operations.createSelfTestSchedule(
+		r.Context(), mustPrincipal(r.Context()), createSelfTestScheduleInput{
+			Kind: request.Kind, Environment: request.EnvironmentID, Upstream: request.Upstream,
+			Model: request.Model, MaxCost: request.MaxCostNanoUSD,
+			DailyCostLimit: request.DailyCostLimitNanoUSD,
+			Interval:       time.Duration(request.IntervalSeconds) * time.Second,
+			RequestID:      operationID,
+		},
+	)
+	if err != nil {
+		api.handleOperationalError(w, r, err, operationID)
+		return
+	}
+	writeJSON(w, http.StatusCreated, schedule)
+}
+
+func (api *API) selfTestSchedule(w http.ResponseWriter, r *http.Request) {
+	if !onlyQueryKeys(r) {
+		api.writeProblem(w, r, invalidRequest("The self-test schedule query is invalid."))
+		return
+	}
+	schedule, err := api.operations.getSelfTestSchedule(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "scheduleID"),
+	)
+	if err != nil {
+		api.handleOperationalError(w, r, err, "")
+		return
+	}
+	writeJSON(w, http.StatusOK, schedule)
+}
+
+func (api *API) disableSelfTestSchedule(w http.ResponseWriter, r *http.Request) {
+	if !onlyQueryKeys(r) {
+		api.writeProblem(w, r, invalidRequest("The self-test schedule query is invalid."))
+		return
+	}
+	operationID, err := newMutationOperationID(r.Context())
+	if err != nil {
+		api.internal(w, r, err)
+		return
+	}
+	schedule, err := api.operations.disableSelfTestSchedule(
+		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "scheduleID"), operationID,
+	)
+	if err != nil {
+		api.handleOperationalError(w, r, err, operationID)
+		return
+	}
+	writeJSON(w, http.StatusOK, schedule)
+}
+
 type startSelfTestRequest struct {
 	Kind           string `json:"kind"`
 	EnvironmentID  string `json:"environment_id"`

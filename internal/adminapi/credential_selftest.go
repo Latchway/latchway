@@ -109,6 +109,13 @@ func WithCredentialSelfTests(secretStore dataplane.SecretStore, targets dataplan
 			return err
 		}
 		api.operations.selfTests = runner
+		schedules, scheduleErr := newProductionScheduledSelfTestService(
+			productionSelfTestSnapshotLoader{store: api.configurations}, secretStore, targets,
+		)
+		if scheduleErr != nil {
+			return scheduleErr
+		}
+		api.operations.selfSchedules = schedules
 		return nil
 	}
 }
@@ -743,6 +750,9 @@ func validStoredSelfTest(run selfTestDocument) bool {
 		(run.State != "passed" && run.State != "failed") || run.CreatedAt.IsZero() ||
 		run.CompletedAt == nil || run.CompletedAt.IsZero() || run.CompletedAt.Before(run.CreatedAt) ||
 		len(run.Checks) == 0 || len(run.Checks) > 32 {
+		return false
+	}
+	if run.ScheduleID != "" && id.Validate(run.ScheduleID, id.SelfTestSchedule) != nil {
 		return false
 	}
 	for _, check := range run.Checks {

@@ -40,9 +40,10 @@ const (
 var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type operationalStore struct {
-	pool      *pgxpool.Pool
-	newID     func(id.Prefix) (string, error)
-	selfTests credentialSelfTestRunner
+	pool          *pgxpool.Pool
+	newID         func(id.Prefix) (string, error)
+	selfTests     credentialSelfTestRunner
+	selfSchedules scheduledSelfTestService
 }
 
 func newOperationalStore(pool *pgxpool.Pool) *operationalStore {
@@ -160,6 +161,7 @@ type selfTestCheck struct {
 
 type selfTestDocument struct {
 	ID          string          `json:"id"`
+	ScheduleID  string          `json:"schedule_id,omitempty"`
 	Kind        string          `json:"kind"`
 	State       string          `json:"state"`
 	CreatedAt   time.Time       `json:"created_at"`

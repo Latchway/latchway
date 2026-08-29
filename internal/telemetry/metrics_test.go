@@ -34,6 +34,7 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	registry.RecordQuotaDenial(ctx, Labels{Feature: "assistant", Outcome: "denied"}, false)
 	registry.RecordWorkerJob(ctx, "enforce_retention", "succeeded", 20*time.Millisecond)
 	registry.RecordWorkerJob(ctx, "release_expired_concurrency_leases", "succeeded", 10*time.Millisecond)
+	registry.RecordScheduledSelfTest(ctx, Labels{Application: "app_mobile", Environment: "production", Outcome: "passed"})
 
 	recorder := httptest.NewRecorder()
 	registry.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
@@ -48,6 +49,7 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 		"latchway_input_tokens_total", "latchway_output_tokens_total",
 		"latchway_cost_nano_usd_total", "latchway_quota_denials_total",
 		"latchway_worker_job_duration_seconds",
+		"latchway_scheduled_self_tests_total",
 	} {
 		if !strings.Contains(text, name) {
 			t.Fatalf("metrics output missing %s:\n%s", name, text)

@@ -11,6 +11,8 @@ import {
   RevisionSchema,
   RouteSimulationSchema,
   SelfTestSchema,
+  SelfTestSchedulePageSchema,
+  SelfTestScheduleSchema,
   UsageSummarySchema,
   UsageTimeseriesSchema,
   UserPageSchema,
@@ -24,6 +26,7 @@ import {
   type LogicalRequestPage,
   type RouteSimulation,
   type SelfTestRun,
+  type SelfTestSchedule,
   type UsageSummary,
   type UsageTimeseries
 } from "../api/admin";
@@ -407,6 +410,7 @@ export function RouteSimulatorPage() {
 
 export function SelfTestsPage() {
   const session = useConsoleSession(); const [run, setRun] = useState<SelfTestRun>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false); const [kind, setKind] = useState("local");
+  const [scheduleKind, setScheduleKind] = useState<"upstream" | "openrouter">("upstream"); const [scheduleEnvironment, setScheduleEnvironment] = useState(""); const [schedules, setSchedules] = useState<SelfTestSchedule[]>(); const [selectedSchedule, setSelectedSchedule] = useState<SelfTestSchedule>();
   if (session.data?.mode !== "configured") return <AccessRequired />;
   const canRun = session.data.session?.capabilities.includes("run_self_tests") ?? false;
   async function start(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -422,8 +426,48 @@ export function SelfTestsPage() {
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
   async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { setRun((await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
+  async function loadSchedules(): Promise<void> {
+    if (!environmentPattern.test(scheduleEnvironment)) return;
+    setBusy(true); setProblem(undefined);
+    try {
+      const page = await adminRequest(queryPath("/admin/v1/self-test-schedules", { environment_id: scheduleEnvironment }), SelfTestSchedulePageSchema);
+      setSchedules(page.data.items); setSelectedSchedule(page.data.items[0]);
+    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
+  async function createSchedule(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault(); setBusy(true); setProblem(undefined); const element = event.currentTarget; const form = new FormData(element); const bearerToken = String(form.get("authorization_token")); const tokenInput = element.elements.namedItem("authorization_token"); if (tokenInput instanceof HTMLInputElement) tokenInput.value = "";
+    try {
+      const created = (await adminRequest("/admin/v1/self-test-schedules", SelfTestScheduleSchema, { method: "POST", body: {
+        daily_cost_limit_nano_usd: Number(form.get("daily_cost_limit_nano_usd")), environment_id: scheduleEnvironment,
+        interval_seconds: Number(form.get("interval_seconds")), kind: scheduleKind, max_cost_nano_usd: Number(form.get("max_cost_nano_usd")), model: String(form.get("model")), upstream: String(form.get("upstream"))
+      }, bearerToken })).data;
+      setSchedules((current) => [created, ...(current ?? []).filter((item) => item.id !== created.id)]); setSelectedSchedule(created);
+    } catch (error) { setProblem(problemFromError(error)); } finally { if (tokenInput instanceof HTMLInputElement) tokenInput.value = ""; setBusy(false); }
+  }
+  async function selectSchedule(schedule: SelfTestSchedule): Promise<void> {
+    setBusy(true); setProblem(undefined);
+    try { setSelectedSchedule((await adminRequest(`/admin/v1/self-test-schedules/${schedule.id}`, SelfTestScheduleSchema)).data); }
+    catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
+  async function disableSchedule(): Promise<void> {
+    if (!selectedSchedule) return; setBusy(true); setProblem(undefined);
+    try {
+      const disabled = (await adminRequest(`/admin/v1/self-test-schedules/${selectedSchedule.id}`, SelfTestScheduleSchema, { method: "DELETE" })).data;
+      setSelectedSchedule(disabled); setSchedules((current) => current?.map((item) => item.id === disabled.id ? disabled : item));
+    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
     <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the configured two-request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
     {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
+    <section className="detail-card"><h2>Scheduled credential-aware self-tests</h2><p>Each schedule pins one active configuration revision and one durable API-token ID. Browser session values and provider secret values are never stored in the schedule.</p>
+      <div className="filter-bar"><label>Scheduled environment ID<input pattern={environmentInputPattern} required value={scheduleEnvironment} onChange={(event) => { setScheduleEnvironment(event.target.value); setSchedules(undefined); setSelectedSchedule(undefined); }} /></label><button className="secondary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} onClick={() => void loadSchedules()} type="button">Load schedules</button></div>
+      <form className="control-form" onSubmit={(event) => void createSchedule(event)}><div className="form-field-grid"><label>Scheduled test kind<select value={scheduleKind} onChange={(event) => setScheduleKind(event.target.value as "upstream" | "openrouter")}><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label><label>Durable Admin API token<input autoComplete="off" maxLength={2048} minLength={32} name="authorization_token" required type="password" /><small>Enter an active token scoped to run_self_tests. It is sent once as Authorization Bearer and cleared immediately; only its stable credential ID is bound.</small></label></div>
+        <div className="form-field-grid"><label>Scheduled upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Scheduled model ID<input name="model" pattern={identifierInputPattern} required /></label></div>
+        <div className="form-field-grid"><label>Per-run maximum cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /></label><label>UTC-day maximum cost (nano-USD)<input defaultValue={240_000_000} max={10_000_000_000} min={1} name="daily_cost_limit_nano_usd" required type="number" /></label></div>
+        <label>Cadence (seconds)<input defaultValue={3600} max={2_592_000} min={3600} name="interval_seconds" required step={1} type="number" /><small>Allowed range: one hour through 30 days. Missed intervals coalesce to one run.</small></label><button className="primary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} type="submit">Create schedule</button>
+      </form>
+      {schedules ? <Table headers={["Schedule", "Target", "Cadence", "Per run / UTC day", "State"]} rows={schedules.map((schedule) => [<button className="table-link" onClick={() => void selectSchedule(schedule)} type="button">{schedule.id}</button>, `${schedule.upstream} / ${schedule.model}`, `${schedule.interval_seconds.toLocaleString()} s`, `${schedule.max_cost_nano_usd.toLocaleString()} / ${schedule.daily_cost_limit_nano_usd.toLocaleString()}`, schedule.status])} /> : null}
+      {selectedSchedule ? <section className="detail-card"><div className="detail-card__heading"><div><h3>Schedule detail</h3><p>{selectedSchedule.id} · {selectedSchedule.status}</p></div><button className="secondary-action" disabled={!canRun || busy || selectedSchedule.status !== "active"} onClick={() => void disableSchedule()} type="button">Disable schedule</button></div><dl><div><dt>Application / environment</dt><dd>{selectedSchedule.application_id} / {selectedSchedule.environment_id}</dd></div><div><dt>Pinned configuration</dt><dd>{selectedSchedule.config_revision_id}</dd></div><div><dt>Authorization credential</dt><dd>{selectedSchedule.authorization_credential_id}</dd></div><div><dt>Target</dt><dd>{selectedSchedule.kind}: {selectedSchedule.upstream} / {selectedSchedule.model}</dd></div><div><dt>Cost ceilings</dt><dd>{selectedSchedule.max_cost_nano_usd.toLocaleString()} per run / {selectedSchedule.daily_cost_limit_nano_usd.toLocaleString()} per UTC day</dd></div><div><dt>Cadence</dt><dd>{selectedSchedule.interval_seconds.toLocaleString()} seconds</dd></div><div><dt>Next run</dt><dd>{selectedSchedule.next_run_at ? new Date(selectedSchedule.next_run_at).toLocaleString() : "Disabled"}</dd></div><div><dt>Last run</dt><dd>{selectedSchedule.last_self_test_id ?? "—"}</dd></div></dl></section> : null}
+    </section>
   </div>;
 }

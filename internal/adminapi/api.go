@@ -213,6 +213,10 @@ func (api *API) Handler() http.Handler {
 		protected.Get("/usage/summary", api.usageSummary)
 		protected.Get("/usage/timeseries", api.usageTimeseries)
 		protected.Get("/audit-events", api.auditEvents)
+		protected.Get("/self-test-schedules", api.selfTestSchedules)
+		protected.With(api.mutationProtection).Post("/self-test-schedules", api.createSelfTestSchedule)
+		protected.Get("/self-test-schedules/{scheduleID}", api.selfTestSchedule)
+		protected.With(api.mutationProtection).Delete("/self-test-schedules/{scheduleID}", api.disableSelfTestSchedule)
 		protected.With(api.mutationProtection).Post("/self-tests", api.startSelfTest)
 		protected.Get("/self-tests/{selfTestID}", api.selfTest)
 		protected.Get("/system", api.systemStatus)
@@ -1302,6 +1306,10 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.installation_revoke", "admin_request"
 	case strings.HasSuffix(path, "/self-tests") && method == http.MethodPost:
 		return "admin.self_test_run", "admin_request"
+	case strings.HasSuffix(path, "/self-test-schedules") && method == http.MethodPost:
+		return "admin.self_test_schedule_create", "admin_request"
+	case strings.Contains(path, "/self-test-schedules/") && method == http.MethodDelete:
+		return "admin.self_test_schedule_disable", "admin_request"
 	default:
 		return "admin.request_rejected", "admin_request"
 	}

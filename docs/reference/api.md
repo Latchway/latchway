@@ -38,6 +38,13 @@ The CLI uses a scoped, expirable, revocable API token supplied only through an
 environment variable. Mutation endpoints are audited and configuration
 updates use strong ETags. Secret-valued inputs are write-only.
 
+Scheduled self-test creation is the deliberate console exception: the endpoint
+accepts only a scoped Admin API bearer because that exact durable credential is
+the future execution authority. The browser reads it from a password field for
+one call, sets `Authorization`, omits cookies and CSRF, clears the field, and
+does not place the value in request JSON, response schemas, Web Storage, or
+logs. Schedule responses expose only the stable credential ID.
+
 Admin and client errors are canonical `application/problem+json` documents.
 They contain a stable safe code, request ID, retry guidance, and optional
 operation correlation—not provider payloads, raw internal errors, identity

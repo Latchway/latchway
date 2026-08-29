@@ -50,6 +50,13 @@ type Store struct {
 	*storeMaterial
 }
 
+// Binding is redaction-safe metadata for one exact active secret version.
+// It contains no key identifier, ciphertext, nonce, hash or plaintext.
+type Binding struct {
+	RecordID string
+	Version  int64
+}
+
 type storeMaterial struct {
 	loader        secretRecordLoader
 	provider      Provider
@@ -89,6 +96,79 @@ func (store *Store) Use(ctx context.Context, scope Scope, reference string, cons
 	name := strings.TrimPrefix(reference, "secret/")
 	record, err := store.loader.load(ctx, scope, name)
 	if err != nil {
+		return ErrUnavailable
+	}
+	if err := record.validate(scope, name, store.providerKeyID); err != nil {
+		return err
+	}
+
+	plaintext, err := store.provider.Decrypt(Envelope{
+		FormatVersion: int(record.formatVersion),
+		Algorithm:     algorithm,
+		KeyID:         record.masterKeyID,
+		Nonce:         record.nonce,
+		Ciphertext:    record.ciphertext,
+	}, AssociatedData{
+		OrganizationID: record.organizationID,
+		EnvironmentID:  record.environmentID,
+		SecretID:       record.id,
+		SecretVersion:  record.version,
+		FormatVersion:  int(record.formatVersion),
+	})
+	if err != nil {
+		clear(plaintext)
+		return ErrUnavailable
+	}
+	defer clear(plaintext)
+	if len(plaintext) == 0 {
+		return ErrInvalid
+	}
+	if err := consume(plaintext); err != nil {
+		return ErrInvalid
+	}
+	return nil
+}
+
+// ActiveBinding resolves only the opaque identifier and version of the
+// current active record. Automated operations persist this metadata to reject
+// later credential substitution without persisting secret material.
+func (store *Store) ActiveBinding(ctx context.Context, scope Scope, reference string) (Binding, error) {
+	if store == nil || store.storeMaterial == nil || ctx == nil || validateScope(scope) != nil ||
+		!secretReferencePattern.MatchString(reference) {
+		return Binding{}, ErrInvalid
+	}
+	name := strings.TrimPrefix(reference, "secret/")
+	record, err := store.loader.load(ctx, scope, name)
+	if err != nil {
+		return Binding{}, ErrUnavailable
+	}
+	if err := record.validate(scope, name, store.providerKeyID); err != nil {
+		return Binding{}, err
+	}
+	return Binding{RecordID: record.id, Version: record.version}, nil
+}
+
+// UseBound decrypts only when the currently active record is the exact opaque
+// record and version reviewed when the operation was created. Rotation fails
+// closed instead of silently rebinding an unattended operation.
+func (store *Store) UseBound(
+	ctx context.Context,
+	scope Scope,
+	reference string,
+	binding Binding,
+	consume func([]byte) error,
+) error {
+	if store == nil || store.storeMaterial == nil || ctx == nil || consume == nil ||
+		validateScope(scope) != nil || !secretReferencePattern.MatchString(reference) ||
+		id.Validate(binding.RecordID, id.SecretRecord) != nil || binding.Version < 1 {
+		return ErrInvalid
+	}
+	name := strings.TrimPrefix(reference, "secret/")
+	record, err := store.loader.load(ctx, scope, name)
+	if err != nil {
+		return ErrUnavailable
+	}
+	if record.id != binding.RecordID || record.version != binding.Version {
 		return ErrUnavailable
 	}
 	if err := record.validate(scope, name, store.providerKeyID); err != nil {

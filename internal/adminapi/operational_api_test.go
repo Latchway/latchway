@@ -312,6 +312,73 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(credentialSelfTestGet.Body.Bytes(), []byte(`credential-aware fixture completed`)) {
 		t.Fatalf("credential self-test get status/body=%d %s", credentialSelfTestGet.Code, credentialSelfTestGet.Body.String())
 	}
+	api.operations.selfSchedules = scheduledSelfTestServiceFixture{revisionID: fixture.revisionID}
+	scheduleBody := map[string]any{
+		"kind": "upstream", "environment_id": environment.ID,
+		"upstream": "primary", "model": "canary", "max_cost_nano_usd": 1_000_000,
+		"daily_cost_limit_nano_usd": 24_000_000, "interval_seconds": 3600,
+	}
+	sessionSchedule := performJSON(t, handler, http.MethodPost, "/admin/v1/self-test-schedules",
+		scheduleBody, cookie, csrf, "https://console.example.test")
+	if sessionSchedule.Code != http.StatusForbidden {
+		t.Fatalf("session-backed schedule status/body=%d %s", sessionSchedule.Code, sessionSchedule.Body.String())
+	}
+	sessionSubstitutionBody := make(map[string]any, len(scheduleBody)+1)
+	for key, value := range scheduleBody {
+		sessionSubstitutionBody[key] = value
+	}
+	sessionSubstitutionBody["authorization_credential_id"] = id.Must(id.AdminAPIToken)
+	sessionSubstitution := performJSON(t, handler, http.MethodPost, "/admin/v1/self-test-schedules",
+		sessionSubstitutionBody, cookie, csrf, "https://console.example.test")
+	if sessionSubstitution.Code != http.StatusBadRequest {
+		t.Fatalf("session credential substitution status/body=%d %s", sessionSubstitution.Code, sessionSubstitution.Body.String())
+	}
+	scheduleToken := createUserOverrideAPIToken(t, handler, cookie, csrf,
+		"self-test-scheduler", []string{"run_self_tests"})
+	var scheduleTokenID string
+	if err := pool.QueryRow(ctx, `
+		SELECT admin_api_token_id FROM admin_api_tokens
+		WHERE organization_id = $1 AND name = 'self-test-scheduler'
+	`, session.OrganizationID).Scan(&scheduleTokenID); err != nil {
+		t.Fatal(err)
+	}
+	createdSchedule := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/self-test-schedules", scheduleBody, scheduleToken)
+	if createdSchedule.Code != http.StatusCreated ||
+		!bytes.Contains(createdSchedule.Body.Bytes(), []byte(`"status":"active"`)) ||
+		!bytes.Contains(createdSchedule.Body.Bytes(), []byte(`"authorization_credential_id":"`+scheduleTokenID+`"`)) {
+		t.Fatalf("create schedule status/body=%d %s", createdSchedule.Code, createdSchedule.Body.String())
+	}
+	var scheduleDocument struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, createdSchedule, &scheduleDocument)
+	if id.Validate(scheduleDocument.ID, id.SelfTestSchedule) != nil {
+		t.Fatalf("created invalid schedule ID %q", scheduleDocument.ID)
+	}
+	duplicateSchedule := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/self-test-schedules", scheduleBody, scheduleToken)
+	if duplicateSchedule.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate schedule status/body=%d %s", duplicateSchedule.Code, duplicateSchedule.Body.String())
+	}
+	listedSchedules := performGET(handler, "/admin/v1/self-test-schedules?environment_id="+
+		url.QueryEscape(environment.ID), cookie)
+	if listedSchedules.Code != http.StatusOK ||
+		!bytes.Contains(listedSchedules.Body.Bytes(), []byte(scheduleDocument.ID)) {
+		t.Fatalf("list schedules status/body=%d %s", listedSchedules.Code, listedSchedules.Body.String())
+	}
+	readSchedule := performGET(handler, "/admin/v1/self-test-schedules/"+scheduleDocument.ID, cookie)
+	if readSchedule.Code != http.StatusOK ||
+		!bytes.Contains(readSchedule.Body.Bytes(), []byte(fixture.revisionID)) {
+		t.Fatalf("read schedule status/body=%d %s", readSchedule.Code, readSchedule.Body.String())
+	}
+	disabledSchedule := performJSON(t, handler, http.MethodDelete,
+		"/admin/v1/self-test-schedules/"+scheduleDocument.ID, nil, cookie, csrf, "https://console.example.test")
+	if disabledSchedule.Code != http.StatusOK ||
+		!bytes.Contains(disabledSchedule.Body.Bytes(), []byte(`"status":"disabled"`)) ||
+		!bytes.Contains(disabledSchedule.Body.Bytes(), []byte(`"disabled_reason_code":"operator_disabled"`)) {
+		t.Fatalf("disable schedule status/body=%d %s", disabledSchedule.Code, disabledSchedule.Body.String())
+	}
 	selfTestWithUnknownQuery := performJSON(t, handler, http.MethodPost, "/admin/v1/self-tests?unexpected=true", map[string]any{
 		"kind": "local", "environment_id": environment.ID,
 	}, cookie, csrf, "https://console.example.test")
@@ -424,7 +491,10 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 
 	audit := performGET(handler, "/admin/v1/audit-events?page_size=200", cookie)
-	for _, action := range []string{"admin.user_block", "admin.user_unblock", "admin.installation_revoke", "admin.self_test_run"} {
+	for _, action := range []string{
+		"admin.user_block", "admin.user_unblock", "admin.installation_revoke", "admin.self_test_run",
+		"admin.self_test_schedule_create", "admin.self_test_schedule_disable",
+	} {
 		if audit.Code != http.StatusOK || !bytes.Contains(audit.Body.Bytes(), []byte(action)) {
 			t.Fatalf("audit event %q missing: status=%d body=%s", action, audit.Code, audit.Body.String())
 		}
@@ -468,6 +538,7 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 }
 
 type operationalFixture struct {
+	revisionID      string
 	userID          string
 	installationID  string
 	grantID         string
@@ -522,7 +593,8 @@ func seedOperationalFixture(
 		t.Fatal(err)
 	}
 	fixture := operationalFixture{
-		userID: id.Must(id.ApplicationUser), installationID: id.Must(id.Installation),
+		revisionID: revisionID,
+		userID:     id.Must(id.ApplicationUser), installationID: id.Must(id.Installation),
 		grantID: id.Must(id.SessionGrant), refreshID: id.Must(id.RefreshToken),
 		requestID: id.Must(id.LogicalRequest), attemptID: id.Must(id.UpstreamAttempt),
 		secondAttemptID: id.Must(id.UpstreamAttempt),
@@ -686,4 +758,28 @@ func (fixture credentialSelfTestRunnerFixture) Run(
 	input credentialSelfTestInput,
 ) credentialSelfTestResult {
 	return fixture(ctx, input)
+}
+
+type scheduledSelfTestServiceFixture struct {
+	revisionID string
+}
+
+func (fixture scheduledSelfTestServiceFixture) Prepare(
+	_ context.Context,
+	input credentialSelfTestInput,
+) (preparedScheduledSelfTest, error) {
+	return preparedScheduledSelfTest{
+		Scope: input.Scope, RevisionID: fixture.revisionID, Kind: input.Kind,
+		UpstreamID: input.UpstreamID, ModelID: input.ModelID,
+		MaxCostNanoUSD: input.MaxCostNano,
+	}, nil
+}
+
+func (scheduledSelfTestServiceFixture) RunBound(
+	context.Context,
+	preparedScheduledSelfTest,
+) credentialSelfTestResult {
+	return credentialSelfTestResult{State: "passed", Checks: []selfTestCheck{
+		passedSelfTestCheck("fixture", "The scheduled fixture completed."),
+	}}
 }

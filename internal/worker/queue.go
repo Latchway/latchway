@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	defaultWorkerStaleAfter = 90 * time.Second
-	maximumJobsPerClaimPass = 100
+	defaultWorkerStaleAfter         = 90 * time.Second
+	maximumJobsPerClaimPass         = 100
+	maximumSelfTestsPerSchedulePass = 100
 )
 
 var (
@@ -23,7 +24,7 @@ var (
 	ErrJobLeaseLost        = errors.New("worker job lease was lost")
 )
 
-var supportedJobTypes = map[string]time.Duration{
+var periodicJobTypes = map[string]time.Duration{
 	"release_expired_reservations":       time.Minute,
 	"release_expired_concurrency_leases": time.Minute,
 	"prune_dpop_replays":                 time.Minute,
@@ -36,10 +37,16 @@ var supportedJobTypes = map[string]time.Duration{
 	"reconcile_pending_usage":            time.Minute,
 }
 
-// run_scheduled_self_test is deliberately not executable here. Existing rows
-// of that type are synchronous Admin API self-test history; the durable schema
-// has no persisted schedule, tenant/target selection, authorization actor, or
-// bounded cost policy from which a worker could safely construct a real test.
+var supportedJobTypes = func() map[string]time.Duration {
+	types := make(map[string]time.Duration, len(periodicJobTypes)+1)
+	for jobType, interval := range periodicJobTypes {
+		types[jobType] = interval
+	}
+	// Per-schedule cadence is persisted in self_test_schedules, so this value is
+	// only the closed executable-type marker used by claim validation.
+	types["run_scheduled_self_test"] = time.Hour
+	return types
+}()
 
 // Job is the public, payload-free claim passed to bounded built-in handlers.
 // The queue deliberately does not expose arbitrary database payloads to logs.
@@ -117,13 +124,13 @@ func CheckRecentHeartbeat(ctx context.Context, pool *pgxpool.Pool, maxAge time.D
 // Concurrent replicas converge through the unique (job_type,idempotency_key)
 // constraint.
 func (queue *Queue) Schedule(ctx context.Context, now time.Time, jobTypes []string) error {
-	if queue == nil || ctx == nil || now.IsZero() || len(jobTypes) == 0 || len(jobTypes) > len(supportedJobTypes) {
+	if queue == nil || ctx == nil || now.IsZero() || len(jobTypes) == 0 || len(jobTypes) > len(periodicJobTypes) {
 		return errors.New("worker scheduling input is invalid")
 	}
 	jobTypes = append([]string(nil), jobTypes...)
 	sort.Strings(jobTypes)
 	for index, jobType := range jobTypes {
-		interval, ok := supportedJobTypes[jobType]
+		interval, ok := periodicJobTypes[jobType]
 		if !ok || (index > 0 && jobTypes[index-1] == jobType) {
 			return errors.New("worker scheduling input is invalid")
 		}
@@ -144,6 +151,106 @@ func (queue *Queue) Schedule(ctx context.Context, now time.Time, jobTypes []stri
 		}
 	}
 	return nil
+}
+
+// ScheduleSelfTests coalesces each overdue active schedule to one job and
+// advances its next due instant in the same transaction. Concurrent replicas
+// partition due rows with SKIP LOCKED and converge through the job queue's
+// unique idempotency key without producing catch-up cost bursts.
+func (queue *Queue) ScheduleSelfTests(ctx context.Context, now time.Time) (int, error) {
+	if queue == nil || ctx == nil || now.IsZero() {
+		return 0, errors.New("scheduled self-test input is invalid")
+	}
+	tx, err := queue.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return 0, errors.New("begin scheduled self-test enqueue")
+	}
+	defer rollbackQueue(tx)
+	rows, err := tx.Query(ctx, `
+		SELECT self_test_schedule_id, organization_id, environment_id,
+		       next_run_at, interval_seconds
+		FROM self_test_schedules
+		WHERE status = 'active' AND next_run_at <= $1
+		ORDER BY next_run_at, created_at, self_test_schedule_id
+		LIMIT $2
+		FOR UPDATE SKIP LOCKED
+	`, now.UTC(), maximumSelfTestsPerSchedulePass)
+	if err != nil {
+		return 0, errors.New("select due self-test schedules")
+	}
+	type dueSchedule struct {
+		id, organizationID, environmentID string
+		dueAt                             time.Time
+		intervalSeconds                   int64
+	}
+	due := make([]dueSchedule, 0, maximumSelfTestsPerSchedulePass)
+	for rows.Next() {
+		var item dueSchedule
+		if err := rows.Scan(&item.id, &item.organizationID, &item.environmentID, &item.dueAt, &item.intervalSeconds); err != nil {
+			rows.Close()
+			return 0, errors.New("scan due self-test schedule")
+		}
+		if id.Validate(item.id, id.SelfTestSchedule) != nil ||
+			id.Validate(item.organizationID, id.Organization) != nil ||
+			id.Validate(item.environmentID, id.Environment) != nil || item.dueAt.IsZero() ||
+			item.intervalSeconds < int64(time.Hour/time.Second) ||
+			item.intervalSeconds > int64((30*24*time.Hour)/time.Second) {
+			rows.Close()
+			return 0, errors.New("stored self-test schedule is invalid")
+		}
+		due = append(due, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, errors.New("iterate due self-test schedules")
+	}
+	rows.Close()
+
+	inserted := 0
+	for _, item := range due {
+		jobID, err := queue.newID(id.Job)
+		if err != nil {
+			return 0, errors.New("generate scheduled self-test job identifier")
+		}
+		interval := time.Duration(item.intervalSeconds) * time.Second
+		next := nextScheduleAfter(item.dueAt.UTC(), interval, now.UTC())
+		idempotencyKey := "self-test-schedule:" + item.id + ":" + item.dueAt.UTC().Format("20060102T150405Z")
+		result, err := tx.Exec(ctx, `
+			INSERT INTO jobs (
+				job_id, organization_id, environment_id, job_type, idempotency_key,
+				payload, status, available_at, max_attempts, created_at, updated_at
+			) VALUES (
+				$1, $2, $3, 'run_scheduled_self_test', $4,
+				jsonb_build_object('schedule_id', $5::text, 'scheduled_for', $6::timestamptz),
+				'pending', $6, 3, statement_timestamp(), statement_timestamp()
+			)
+			ON CONFLICT (job_type, idempotency_key) DO NOTHING
+		`, jobID, item.organizationID, item.environmentID, idempotencyKey, item.id, item.dueAt.UTC())
+		if err != nil {
+			return 0, errors.New("enqueue scheduled self-test")
+		}
+		inserted += int(result.RowsAffected())
+		if _, err := tx.Exec(ctx, `
+			UPDATE self_test_schedules
+			SET next_run_at = $2, last_enqueued_at = $3, updated_at = statement_timestamp()
+			WHERE self_test_schedule_id = $1 AND status = 'active'
+		`, item.id, next, item.dueAt.UTC()); err != nil {
+			return 0, errors.New("advance scheduled self-test")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, errors.New("commit scheduled self-test enqueue")
+	}
+	return inserted, nil
+}
+
+func nextScheduleAfter(dueAt time.Time, interval time.Duration, now time.Time) time.Time {
+	if dueAt.After(now) {
+		return dueAt
+	}
+	elapsed := now.Sub(dueAt)
+	steps := elapsed/interval + 1
+	return dueAt.Add(steps * interval)
 }
 
 func scheduleBucket(now time.Time, interval time.Duration) time.Time {

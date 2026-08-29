@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -179,6 +180,75 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 	}
 	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"state": "passed"`) {
 		t.Fatalf("unsafe or incomplete self-test output = %q", output.String())
+	}
+}
+
+func TestVerifyScheduleManagesExactDurableBindingsWithoutCredentialMaterial(t *testing.T) {
+	token := strings.Repeat("scheduled-self-test-control-token-", 2)
+	t.Setenv("TEST_LATCHWAY_SCHEDULE_TOKEN", token)
+	const scheduleID = "sts_00000000000000000000000000"
+	const revisionID = "rev_00000000000000000000000000"
+	const credentialID = "tok_00000000000000000000000000"
+	active := `{"id":"` + scheduleID + `","environment_id":"` + controlTestEnvironment + `","application_id":"app_00000000000000000000000000","config_revision_id":"` + revisionID + `","authorization_credential_id":"` + credentialID + `","kind":"upstream","upstream":"primary","model":"canary","max_cost_nano_usd":10000000,"daily_cost_limit_nano_usd":240000000,"interval_seconds":3600,"status":"active","next_run_at":"2026-08-29T01:00:00Z","created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"}`
+	disabled := `{"id":"` + scheduleID + `","environment_id":"` + controlTestEnvironment + `","application_id":"app_00000000000000000000000000","config_revision_id":"` + revisionID + `","authorization_credential_id":"` + credentialID + `","kind":"upstream","upstream":"primary","model":"canary","max_cost_nano_usd":10000000,"daily_cost_limit_nano_usd":240000000,"interval_seconds":3600,"status":"disabled","disabled_at":"2026-08-29T00:10:00Z","disabled_reason_code":"operator_disabled","created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:10:00Z"}`
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.Header.Get("Authorization") != "Bearer "+token || request.Header.Get("Cookie") != "" || request.Header.Get("Origin") != "" {
+			t.Fatal("scheduled self-test command did not use only the scoped bearer")
+		}
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/self-test-schedules":
+			var body map[string]any
+			decoder := json.NewDecoder(request.Body)
+			decoder.UseNumber()
+			if err := decoder.Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["environment_id"] != controlTestEnvironment || body["kind"] != "upstream" ||
+				body["upstream"] != "primary" || body["model"] != "canary" ||
+				body["max_cost_nano_usd"] != json.Number("10000000") ||
+				body["daily_cost_limit_nano_usd"] != json.Number("240000000") ||
+				body["interval_seconds"] != json.Number("3600") {
+				t.Fatalf("schedule create body=%#v", body)
+			}
+			if _, exists := body["authorization_credential_id"]; exists || strings.Contains(fmt.Sprint(body), token) {
+				t.Fatalf("schedule body contained credential material or substitution: %#v", body)
+			}
+			return controlHTTPResponse(request, http.StatusCreated, active, nil), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/self-test-schedules":
+			if request.URL.Query().Get("environment_id") != controlTestEnvironment || request.URL.Query().Get("page_size") != "50" {
+				t.Fatalf("schedule list query=%s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{"items":[`+active+`],"page":{"has_more":false}}`, nil), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/self-test-schedules/"+scheduleID:
+			return controlHTTPResponse(request, http.StatusOK, active, nil), nil
+		case request.Method == http.MethodDelete && request.URL.Path == "/admin/v1/self-test-schedules/"+scheduleID:
+			return controlHTTPResponse(request, http.StatusOK, disabled, nil), nil
+		default:
+			t.Fatalf("unexpected schedule request %s %s", request.Method, request.URL.String())
+			return nil, nil
+		}
+	})}
+	var output bytes.Buffer
+	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
+	common := []string{"--server", "http://127.0.0.1:8080", "--output", "json", "verify", "--api-token-env", "TEST_LATCHWAY_SCHEDULE_TOKEN", "schedule"}
+	commands := [][]string{
+		{"create", "--environment", controlTestEnvironment, "--upstream", "primary", "--model", "canary"},
+		{"list", "--environment", controlTestEnvironment},
+		{"get", scheduleID},
+		{"disable", scheduleID},
+	}
+	for _, command := range commands {
+		args := append(append([]string{}, common...), command...)
+		if err := executeWithOptions(context.Background(), args, opts); err != nil {
+			t.Fatalf("verify schedule %s: %v", command[0], err)
+		}
+	}
+	if calls != 4 || !strings.Contains(output.String(), revisionID) ||
+		!strings.Contains(output.String(), credentialID) || !strings.Contains(output.String(), `"status": "disabled"`) ||
+		strings.Contains(output.String(), token) {
+		t.Fatalf("schedule calls=%d output=%q", calls, output.String())
 	}
 }
 

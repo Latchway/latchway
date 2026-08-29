@@ -83,10 +83,23 @@ feature does not match the loaded context. Production CEL and route resolution
 still execute only on the server; loading context does not reserve quota or
 dispatch upstream traffic.
 
+The Self-tests view combines immediate diagnostics with persistent scheduled
+upstream checks. Schedule list, detail, and disable use the signed-in session
+and require `run_self_tests`. Creation cannot derive durable execution
+authority from that session: the operator enters an existing scoped Admin API
+token into a password field, and the shared client sends it only as
+`Authorization: Bearer` with `credentials: omit`. The field is cleared as soon
+as it is read and again after the call. Token plaintext is absent from the JSON
+body, Zod response types, component state, storage, and rendered detail; the
+returned stable token ID, pinned configuration revision, target, cadence, and
+cost ceilings are shown for review.
+
 ## Browser boundary
 
-All non-GET Admin requests pass through the shared same-origin client, which
-adds the session-bound CSRF header and refuses non-canonical paths. Zod schemas
+All non-GET Admin requests pass through the shared canonical client. Normal
+cookie mutations add the session-bound CSRF header. The scheduled self-test
+create call instead uses only its transient bearer, explicitly omits cookies,
+and adds no CSRF header, preventing ambiguous dual authentication. Zod schemas
 are strict and bounded; unknown response fields, including an accidental
 secret `value`, fail closed. The production bundle has no database client,
 connection string, browser policy evaluator, or browser-storage credential

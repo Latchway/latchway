@@ -66,6 +66,8 @@ const (
 	UsageRecord         Prefix = "usg"
 	Job                 Prefix = "job"
 	AuditEvent          Prefix = "aud"
+	SelfTest            Prefix = "tst"
+	SelfTestSchedule    Prefix = "sts"
 )
 
 const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

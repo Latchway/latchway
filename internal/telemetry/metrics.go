@@ -103,6 +103,7 @@ type Registry struct {
 	reservationsActive    metric.Int64UpDownCounter
 	reservationsReclaimed metric.Int64Counter
 	configActivations     metric.Int64Counter
+	scheduledSelfTests    metric.Int64Counter
 	workerJobDuration     metric.Float64Histogram
 }
 
@@ -247,6 +248,10 @@ func (registry *Registry) initialize(meter metric.Meter) (err error) {
 		return err
 	}
 	registry.configActivations, err = meter.Int64Counter("latchway_config_revision_activations_total")
+	if err != nil {
+		return err
+	}
+	registry.scheduledSelfTests, err = meter.Int64Counter("latchway_scheduled_self_tests_total")
 	if err != nil {
 		return err
 	}
@@ -478,6 +483,28 @@ func (registry *Registry) RecordWorkerJob(ctx context.Context, job, outcome stri
 		attribute.String("outcome", safeMetricLabel("outcome", outcome)),
 	}
 	registry.workerJobDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attributes...))
+}
+
+// RecordScheduledSelfTest records only tenant resource identifiers and a
+// closed outcome. Schedule, job, administrator, credential, provider response
+// and secret identifiers are intentionally absent from the metric surface.
+func (registry *Registry) RecordScheduledSelfTest(ctx context.Context, labels Labels) {
+	if registry == nil {
+		return
+	}
+	labels.Feature = ""
+	labels.Route = ""
+	labels.Upstream = ""
+	labels.ModelAlias = ""
+	labels.Platform = ""
+	labels.AttestationLevel = ""
+	labels.Plan = ""
+	switch labels.Outcome {
+	case "passed", "failed", "rejected", "recovered":
+	default:
+		labels.Outcome = "invalid"
+	}
+	registry.scheduledSelfTests.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
 }
 
 func (labels Labels) attributes() []attribute.KeyValue {

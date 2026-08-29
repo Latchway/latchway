@@ -431,8 +431,8 @@ func TestRuntimeExecutesDistinctBoundedConcurrencyRecoveryLane(t *testing.T) {
 func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	t.Parallel()
 	types := scheduledDurableJobTypes()
-	if len(types) != len(supportedJobTypes) {
-		t.Fatalf("scheduled jobs=%d supported=%d", len(types), len(supportedJobTypes))
+	if len(types)+1 != len(supportedJobTypes) {
+		t.Fatalf("periodic jobs=%d supported=%d", len(types), len(supportedJobTypes))
 	}
 	seen := make(map[string]struct{}, len(types))
 	for _, jobType := range types {
@@ -447,8 +447,11 @@ func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	if _, ok := seen["release_expired_concurrency_leases"]; !ok {
 		t.Fatal("concurrency recovery lane is absent")
 	}
-	if _, unsafe := seen["run_scheduled_self_test"]; unsafe {
-		t.Fatal("scheduled self-test became executable without a persisted authorization contract")
+	if _, periodic := seen["run_scheduled_self_test"]; periodic {
+		t.Fatal("per-schedule self-test entered the global periodic scheduler")
+	}
+	if _, supported := supportedJobTypes["run_scheduled_self_test"]; !supported {
+		t.Fatal("persistently authorized scheduled self-test is not executable")
 	}
 	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 	runtime := &Runtime{
@@ -468,15 +471,22 @@ func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 		}),
 		operations: operationalJobsStub{}, quotaBatchSize: 1, replayBatchSize: 1,
 		attestationBatchSize: 1, maxBatches: 1, now: func() time.Time { return now },
+		selfTests: scheduledSelfTestsFunc(func(context.Context, string) (int64, error) { return 1, nil }),
 	}
 	for _, jobType := range types {
 		if _, err := runtime.executeJob(context.Background(), Job{Type: jobType, ScheduledAt: now}); err != nil {
 			t.Fatalf("scheduled job %q is not executable: %v", jobType, err)
 		}
 	}
-	if _, err := runtime.executeJob(context.Background(), Job{Type: "run_scheduled_self_test", ScheduledAt: now}); err == nil {
-		t.Fatal("scheduled self-test executed without a persisted authorization contract")
+	if processed, err := runtime.executeJob(context.Background(), Job{Type: "run_scheduled_self_test", ScheduledAt: now}); err != nil || processed != 1 {
+		t.Fatalf("scheduled self-test processed=%d err=%v", processed, err)
 	}
+}
+
+type scheduledSelfTestsFunc func(context.Context, string) (int64, error)
+
+func (run scheduledSelfTestsFunc) ExecuteScheduled(ctx context.Context, jobID string) (int64, error) {
+	return run(ctx, jobID)
 }
 
 func newTestRuntime(t *testing.T, config Config) *Runtime {

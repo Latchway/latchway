@@ -17,6 +17,7 @@ const ids = {
   rotatedSecret: "sec_1123456789abcdef",
   unusedSecret: "sec_2123456789abcdef",
   selfTest: "tst_0123456789abcdef",
+  selfTestSchedule: "sts_0123456789abcdef",
   user: "usr_0123456789abcdef"
 };
 const csrf = "csrf_0123456789abcdefghijklmnopqrstuvwxyz";
@@ -53,7 +54,10 @@ async function installAdminFixture(page: Page) {
   const rollbackBodies: Array<Record<string, unknown>> = [];
   const secretBodies: Array<Record<string, unknown>> = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
+  const selfTestScheduleBodies: Array<Record<string, unknown>> = [];
+  const selfTestScheduleAuthorizations: Array<{ authorization?: string; cookie?: string; csrf?: string }> = [];
   let apiTokens: Array<Record<string, unknown>> = [];
+  let selfTestSchedules: Array<Record<string, unknown>> = [];
   let secretItems: Array<Record<string, unknown>> = [{
     algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment,
     id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1
@@ -210,6 +214,28 @@ async function installAdminFixture(page: Page) {
       facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, trust_level: "app_verified" },
       fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: activeConfigurationRevisionID, route: "primary", upstream: "openai", warnings: []
     });
+    if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "GET") return json(route, 200, { items: selfTestSchedules, page: { has_more: false } });
+    if (url.pathname === "/admin/v1/self-test-schedules" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      selfTestScheduleBodies.push(body);
+      selfTestScheduleAuthorizations.push({ authorization: request.headers().authorization, cookie: request.headers().cookie, csrf: request.headers()["x-csrf-token"] });
+      const schedule = {
+        application_id: ids.application, authorization_credential_id: ids.apiToken,
+        config_revision_id: activeConfigurationRevisionID, created_at: instant,
+        daily_cost_limit_nano_usd: body.daily_cost_limit_nano_usd, environment_id: body.environment_id,
+        id: ids.selfTestSchedule, interval_seconds: body.interval_seconds, kind: body.kind,
+        max_cost_nano_usd: body.max_cost_nano_usd, model: body.model,
+        next_run_at: "2026-08-29T01:00:00Z", status: "active", updated_at: instant, upstream: body.upstream
+      };
+      selfTestSchedules = [schedule];
+      return json(route, 201, schedule);
+    }
+    if (url.pathname === `/admin/v1/self-test-schedules/${ids.selfTestSchedule}` && request.method() === "GET") return json(route, 200, selfTestSchedules[0]);
+    if (url.pathname === `/admin/v1/self-test-schedules/${ids.selfTestSchedule}` && request.method() === "DELETE") {
+      const disabled = { ...selfTestSchedules[0], disabled_at: "2026-08-29T00:10:00Z", disabled_reason_code: "operator_disabled", next_run_at: undefined, status: "disabled", updated_at: "2026-08-29T00:10:00Z" };
+      selfTestSchedules = [disabled];
+      return json(route, 200, disabled);
+    }
     if (url.pathname === "/admin/v1/self-tests") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       selfTestBodies.push(body);
@@ -227,7 +253,7 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { administratorBodies, apiTokenBodies, applicationBodies, configurationETags, configurationPatchBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies };
+  return { administratorBodies, apiTokenBodies, applicationBodies, configurationETags, configurationPatchBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies, selfTestScheduleAuthorizations, selfTestScheduleBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -509,6 +535,41 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
     upstream: "openrouter"
   }]);
   expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
+});
+
+test("self-test schedules bind durable token metadata and support list, detail, and disable", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /^API tokens/ }).click();
+  await page.getByLabel("Token name").fill("self-test-scheduler");
+  await page.getByLabel("Run self-tests").check();
+  await page.getByRole("button", { name: "Create API token" }).click();
+  await page.getByRole("button", { name: "Dismiss token" }).click();
+
+  await page.getByRole("link", { name: /^Self-tests/ }).click();
+  await page.getByLabel("Scheduled environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load schedules" }).click();
+  await page.getByLabel("Durable Admin API token").fill(oneTimeAPIToken);
+  await page.getByLabel("Scheduled upstream ID").fill("primary");
+  await page.getByLabel("Scheduled model ID").fill("canary");
+  await page.getByRole("button", { name: "Create schedule" }).click();
+  await expect(page.getByLabel("Durable Admin API token")).toHaveValue("");
+  await expect(page.getByText(ids.activeRevision)).toBeVisible();
+  await expect(page.getByText(ids.apiToken, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: ids.selfTestSchedule }).click();
+  await page.getByRole("button", { name: "Disable schedule" }).click();
+  await expect(page.getByText(`${ids.selfTestSchedule} · disabled`)).toBeVisible();
+
+  expect(fixture.selfTestScheduleBodies).toEqual([{
+    daily_cost_limit_nano_usd: 240_000_000, environment_id: ids.environment,
+    interval_seconds: 3600, kind: "upstream",
+    max_cost_nano_usd: 10_000_000, model: "canary", upstream: "primary"
+  }]);
+  expect(fixture.selfTestScheduleAuthorizations).toEqual([{ authorization: `Bearer ${oneTimeAPIToken}`, cookie: undefined, csrf: undefined }]);
+  expect(JSON.stringify(fixture.selfTestScheduleBodies)).not.toContain(oneTimeAPIToken);
 });
 
 test("owner manages administrators without persisting password material", async ({ page }) => {

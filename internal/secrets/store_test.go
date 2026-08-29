@@ -46,6 +46,44 @@ func TestStoreUseAuthenticatesAndClearsPlaintext(t *testing.T) {
 	}
 }
 
+func TestStoreBoundUseRejectsSecretSubstitution(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	scope := testSecretScope(t)
+	provider := testEnvironmentMasterKey(t, 0x42)
+	record := testSecretRecord(t, provider, scope, "provider-key", 7, []byte("provider credential"), now)
+	store, err := newStore(&fakeSecretRecordLoader{record: record}, provider, provider.KeyID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := store.ActiveBinding(context.Background(), scope, "secret/provider-key")
+	if err != nil || binding.RecordID != record.id || binding.Version != 7 {
+		t.Fatalf("ActiveBinding()=%+v err=%v", binding, err)
+	}
+	called := false
+	if err := store.UseBound(context.Background(), scope, "secret/provider-key", binding, func(value []byte) error {
+		called = true
+		if string(value) != "provider credential" {
+			t.Fatal("bound callback received wrong value")
+		}
+		return nil
+	}); err != nil || !called {
+		t.Fatalf("UseBound() err=%v called=%t", err, called)
+	}
+	for _, replacement := range []Binding{
+		{RecordID: mustSecretID(t, id.SecretRecord), Version: binding.Version},
+		{RecordID: binding.RecordID, Version: binding.Version + 1},
+	} {
+		called = false
+		if err := store.UseBound(context.Background(), scope, "secret/provider-key", replacement, func([]byte) error {
+			called = true
+			return nil
+		}); !errors.Is(err, ErrUnavailable) || called {
+			t.Fatalf("substituted UseBound() err=%v called=%t", err, called)
+		}
+	}
+}
+
 func TestStoreUseFailsClosedForCryptographicMismatch(t *testing.T) {
 	t.Parallel()
 

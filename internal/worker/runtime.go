@@ -13,6 +13,7 @@ import (
 const (
 	defaultInterval             = 30 * time.Second
 	defaultRunTimeout           = 10 * time.Second
+	defaultSelfTestRunTimeout   = 60 * time.Second
 	defaultQuotaBatchSize       = 100
 	defaultReplayBatchSize      = 1_000
 	defaultAttestationBatchSize = 100
@@ -60,6 +61,13 @@ type OperationalJobs interface {
 	EnforceRetention(context.Context, time.Time, int) (int64, error)
 }
 
+// ScheduledSelfTests executes one already-claimed, persistently authorized
+// self-test job. The implementation owns target/config/credential revalidation
+// and the durable dispatch marker; Runtime never receives secret material.
+type ScheduledSelfTests interface {
+	ExecuteScheduled(context.Context, string) (int64, error)
+}
+
 // Ticker is the stoppable clock source used between maintenance runs.
 type Ticker interface {
 	C() <-chan time.Time
@@ -80,6 +88,7 @@ type Config struct {
 	SigningKeys  SigningKeyMaintainer
 	IdentityKeys IdentityKeyMaintainer
 	Operations   OperationalJobs
+	SelfTests    ScheduledSelfTests
 	Queue        *Queue
 	Telemetry    *telemetry.Registry
 	Logger       *slog.Logger
@@ -108,6 +117,7 @@ type Runtime struct {
 	signingKeys  SigningKeyMaintainer
 	identityKeys IdentityKeyMaintainer
 	operations   OperationalJobs
+	selfTests    ScheduledSelfTests
 	queue        *Queue
 	telemetry    *telemetry.Registry
 	logger       *slog.Logger
@@ -135,7 +145,7 @@ func New(config Config) (*Runtime, error) {
 		return nil, errors.New("worker attestation cleaner is nil")
 	}
 	if config.Queue != nil {
-		if _, ok := config.Quotas.(operationalQuota); !ok || config.Challenges == nil || config.SigningKeys == nil || config.IdentityKeys == nil || config.Operations == nil {
+		if _, ok := config.Quotas.(operationalQuota); !ok || config.Challenges == nil || config.SigningKeys == nil || config.IdentityKeys == nil || config.Operations == nil || config.SelfTests == nil {
 			return nil, errors.New("durable worker job dependency is nil")
 		}
 	}
@@ -178,7 +188,8 @@ func New(config Config) (*Runtime, error) {
 		quotas: config.Quotas, replays: config.Replays,
 		attestations: config.Attestations, challenges: config.Challenges,
 		signingKeys: config.SigningKeys, identityKeys: config.IdentityKeys, operations: config.Operations,
-		queue: config.Queue, telemetry: config.Telemetry, logger: config.Logger,
+		selfTests: config.SelfTests,
+		queue:     config.Queue, telemetry: config.Telemetry, logger: config.Logger,
 		interval: config.Interval, runTimeout: config.RunTimeout,
 		quotaBatchSize: config.QuotaBatchSize, replayBatchSize: config.ReplayBatchSize,
 		attestationBatchSize: config.AttestationBatchSize,
@@ -270,7 +281,14 @@ func (runtime *Runtime) runDurablePass(ctx context.Context) {
 		runtime.logFailure(ctx, "worker_heartbeat", 0, 0, "schedule_failed")
 		return
 	}
-	for range len(jobTypes) {
+	selfTestScheduleCtx, selfTestScheduleCancel := context.WithTimeout(ctx, runtime.runTimeout)
+	scheduledSelfTests, err := runtime.queue.ScheduleSelfTests(selfTestScheduleCtx, now)
+	selfTestScheduleCancel()
+	if err != nil {
+		runtime.logFailure(ctx, "run_scheduled_self_test", 0, 0, "schedule_failed")
+		return
+	}
+	for range len(jobTypes) + scheduledSelfTests {
 		if ctx.Err() != nil {
 			return
 		}
@@ -301,7 +319,11 @@ func scheduledDurableJobTypes() []string {
 
 func (runtime *Runtime) executeDurableJob(ctx context.Context, job Job) {
 	started := runtime.now()
-	runCtx, cancel := context.WithTimeout(ctx, runtime.runTimeout)
+	runTimeout := runtime.runTimeout
+	if job.Type == "run_scheduled_self_test" && runTimeout < defaultSelfTestRunTimeout {
+		runTimeout = defaultSelfTestRunTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, runTimeout)
 	processed, err := runtime.executeJob(runCtx, job)
 	cancel()
 	duration := runtime.now().Sub(started)
@@ -377,6 +399,8 @@ func (runtime *Runtime) executeJob(ctx context.Context, job Job) (int64, error) 
 			return runtime.attestations.DeleteExpired(ctx, runtime.now().UTC(), runtime.attestationBatchSize)
 		})
 		return processed + attestation, err
+	case "run_scheduled_self_test":
+		return runtime.selfTests.ExecuteScheduled(ctx, job.ID)
 	default:
 		return 0, errors.New("unsupported durable worker job")
 	}

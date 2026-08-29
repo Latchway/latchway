@@ -892,6 +892,77 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuditPage' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-test-schedules:
+    get:
+      tags: [Self-tests]
+      operationId: listSelfTestSchedules
+      summary: List bounded self-test schedules for one environment.
+      description: Returns stable authorization credential IDs and pinned configuration IDs, never token plaintext, provider secret material, or provider bodies.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Redaction-safe schedule page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedulePage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Self-tests]
+      operationId: createSelfTestSchedule
+      summary: Create a bounded schedule using the authenticating durable API token.
+      description: |
+        This operation rejects browser sessions. The scoped Admin API bearer token
+        authenticating this request is bound by stable token ID and active administrator
+        membership; its plaintext is never accepted in the document or persisted. The
+        active configuration revision and exact current provider secret record versions
+        are pinned at creation. Any later token revocation, configuration replacement,
+        or secret rotation disables the schedule instead of silently rebinding it.
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSelfTestScheduleRequest' }
+      responses:
+        '201':
+          description: Persistently authorized schedule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-test-schedules/{scheduleId}:
+    get:
+      tags: [Self-tests]
+      operationId: getSelfTestSchedule
+      summary: Return one redaction-safe self-test schedule.
+      parameters:
+        - $ref: '#/components/parameters/SelfTestScheduleID'
+      responses:
+        '200':
+          description: Exact persisted schedule bindings and lifecycle state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Self-tests]
+      operationId: disableSelfTestSchedule
+      summary: Permanently disable a self-test schedule.
+      description: Soft-disables future runs while preserving run and audit evidence.
+      parameters:
+        - $ref: '#/components/parameters/SelfTestScheduleID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Disabled schedule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/self-tests:
     post:
       tags: [Self-tests]
@@ -1039,6 +1110,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/SelfTestID' }
+    SelfTestScheduleID:
+      name: scheduleId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SelfTestScheduleID' }
     StartTime:
       name: start
       in: query
@@ -1111,6 +1187,9 @@ components:
     SelfTestID:
       type: string
       pattern: '^tst_[A-Za-z0-9_-]{16,128}$'
+    SelfTestScheduleID:
+      type: string
+      pattern: '^sts_[A-Za-z0-9_-]{16,128}$'
     PageInfo:
       type: object
       additionalProperties: false
@@ -1897,12 +1976,66 @@ components:
           properties:
             kind: { enum: [upstream, openrouter] }
             max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+    CreateSelfTestScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, environment_id, upstream, model, max_cost_nano_usd, daily_cost_limit_nano_usd, interval_seconds]
+      properties:
+        kind: { type: string, enum: [upstream, openrouter] }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        upstream: { $ref: '#/components/schemas/Identifier', description: Active server-owned upstream identifier. }
+        model: { $ref: '#/components/schemas/Identifier', description: Active configured logical model identifier. }
+        max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+        daily_cost_limit_nano_usd: { type: integer, minimum: 1, maximum: 10000000000 }
+        interval_seconds: { type: integer, minimum: 3600, maximum: 2592000 }
+    SelfTestSchedule:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, application_id, config_revision_id, authorization_credential_id, kind, upstream, model, max_cost_nano_usd, daily_cost_limit_nano_usd, interval_seconds, status, created_at, updated_at]
+      properties:
+        id: { $ref: '#/components/schemas/SelfTestScheduleID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        config_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        authorization_credential_id: { $ref: '#/components/schemas/TokenID', description: Stable durable credential ID; never token plaintext. }
+        kind: { type: string, enum: [upstream, openrouter] }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        model: { $ref: '#/components/schemas/Identifier' }
+        max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+        daily_cost_limit_nano_usd: { type: integer, minimum: 1, maximum: 10000000000 }
+        interval_seconds: { type: integer, minimum: 3600, maximum: 2592000 }
+        status: { type: string, enum: [active, disabled] }
+        next_run_at: { type: string, format: date-time }
+        last_enqueued_at: { type: string, format: date-time }
+        last_self_test_id: { $ref: '#/components/schemas/SelfTestID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time }
+        disabled_reason_code: { $ref: '#/components/schemas/Identifier' }
+      oneOf:
+        - properties: { status: { const: active } }
+          required: [next_run_at]
+          not:
+            anyOf:
+              - required: [disabled_at]
+              - required: [disabled_reason_code]
+        - properties: { status: { const: disabled } }
+          required: [disabled_at, disabled_reason_code]
+          not: { required: [next_run_at] }
+    SelfTestSchedulePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SelfTestSchedule' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
     SelfTestRun:
       type: object
       additionalProperties: false
       required: [id, kind, state, created_at, checks]
       properties:
         id: { $ref: '#/components/schemas/SelfTestID' }
+        schedule_id: { $ref: '#/components/schemas/SelfTestScheduleID' }
         kind: { type: string, enum: [local, upstream, openrouter] }
         state: { type: string, enum: [queued, running, passed, failed, canceled] }
         created_at: { type: string, format: date-time }

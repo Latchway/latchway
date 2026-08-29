@@ -287,7 +287,7 @@ func newWorkerRuntime(
 	identityKeyCache identity.RemoteKeyDocumentCache,
 	observability *telemetry.Registry,
 	logger *slog.Logger,
-) (*worker.Runtime, error) {
+) (workerRuntime, error) {
 	replayStore, err := session.NewReplayStore(session.ReplayStoreConfig{Pool: pool})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker replay cleaner: %w", err)
@@ -312,6 +312,23 @@ func newWorkerRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("construct worker configuration store: %w", err)
 	}
+	secretStore, err := secrets.NewStore(secrets.StoreConfig{Pool: pool, Provider: envelope})
+	if err != nil {
+		return nil, fmt.Errorf("construct worker secret store: %w", err)
+	}
+	targetCache := dataplane.NewTargetCache()
+	keepTargetCache := false
+	defer func() {
+		if !keepTargetCache {
+			_ = targetCache.Close()
+		}
+	}()
+	selfTests, err := adminapi.NewScheduledSelfTestExecutor(
+		pool, configurationStore, secretStore, targetCache, observability,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("construct scheduled self-test executor: %w", err)
+	}
 	identityKeys, err := session.NewIdentityKeyMaintenance(session.IdentityKeyMaintenanceConfig{
 		Pool: pool, Configuration: configurationStore, SharedCache: identityKeyCache,
 	})
@@ -329,12 +346,28 @@ func newWorkerRuntime(
 	runtime, err := worker.New(worker.Config{
 		Quotas: quotaStore, Replays: replayStore, Attestations: appAttestKeys,
 		Challenges: challengeMaintenance, SigningKeys: keyManager, IdentityKeys: identityKeys, Operations: operations,
-		Queue: queue, Telemetry: observability, Logger: logger,
+		SelfTests: selfTests,
+		Queue:     queue, Telemetry: observability, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("construct worker runtime: %w", err)
 	}
-	return runtime, nil
+	keepTargetCache = true
+	return &ownedWorkerRuntime{runtime: runtime, targets: targetCache}, nil
+}
+
+type ownedWorkerRuntime struct {
+	runtime *worker.Runtime
+	targets *dataplane.TargetCache
+}
+
+func (runtime *ownedWorkerRuntime) Run(ctx context.Context) error {
+	if runtime == nil || runtime.runtime == nil || runtime.targets == nil {
+		return errors.New("owned worker runtime is invalid")
+	}
+	err := runtime.runtime.Run(ctx)
+	closeErr := runtime.targets.Close()
+	return errors.Join(err, closeErr)
 }
 
 func newRuntimeInstanceID() (string, error) {

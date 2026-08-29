@@ -182,6 +182,131 @@ func TestQueueSchedulesEveryExecutableJobExactlyOnceAcrossReplicasPostgreSQL(t *
 	}
 }
 
+func TestQueueEnqueuesDueSelfTestExactlyOnceAcrossReplicasPostgreSQL(t *testing.T) {
+	pool, ctx := isolatedWorkerPool(t)
+	first := mustWorkerQueue(t, pool, "runtime-SELFTESTAAAAAAAA", "worker")
+	second := mustWorkerQueue(t, pool, "runtime-SELFTESTBBBBBBBB", "all")
+	for _, queue := range []*Queue{first, second} {
+		if err := queue.Heartbeat(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	scheduleID := seedDueWorkerSelfTestSchedule(t, ctx, pool, now.Add(-time.Minute))
+
+	start := make(chan struct{})
+	counts := make(chan int, 2)
+	errorsChannel := make(chan error, 2)
+	var wait sync.WaitGroup
+	for _, queue := range []*Queue{first, second} {
+		queue := queue
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			count, err := queue.ScheduleSelfTests(ctx, now)
+			counts <- count
+			errorsChannel <- err
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(counts)
+	close(errorsChannel)
+	inserted := 0
+	for count := range counts {
+		inserted += count
+	}
+	for err := range errorsChannel {
+		if err != nil {
+			t.Fatalf("schedule due self-test: %v", err)
+		}
+	}
+	if inserted != 1 {
+		t.Fatalf("scheduled self-test inserts=%d, want 1", inserted)
+	}
+	var jobs int
+	var nextRun time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM jobs WHERE job_type = 'run_scheduled_self_test'), next_run_at
+		FROM self_test_schedules WHERE self_test_schedule_id = $1
+	`, scheduleID).Scan(&jobs, &nextRun); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 1 || !nextRun.After(now) {
+		t.Fatalf("scheduled jobs=%d next=%s now=%s", jobs, nextRun, now)
+	}
+	job, found, err := first.Claim(ctx, 30*time.Second)
+	if err != nil || !found || job.Type != "run_scheduled_self_test" {
+		t.Fatalf("claim scheduled self-test found=%t job=%+v err=%v", found, job, err)
+	}
+	if err := first.Complete(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedDueWorkerSelfTestSchedule(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	dueAt time.Time,
+) string {
+	t.Helper()
+	organizationID := id.Must(id.Organization)
+	applicationID := id.Must(id.Application)
+	environmentID := id.Must(id.Environment)
+	adminUserID := id.Must(id.AdminUser)
+	membershipID := id.Must(id.AdminMembership)
+	tokenID := id.Must(id.AdminAPIToken)
+	revisionID := id.Must(id.ConfigRevision)
+	scheduleID := id.Must(id.SelfTestSchedule)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO organizations (organization_id, slug, display_name) VALUES ($1,'self-test-org','Self-test Org')`, []any{organizationID}},
+		{`INSERT INTO applications (application_id, organization_id, slug, display_name) VALUES ($1,$2,'mobile','Mobile')`, []any{applicationID, organizationID}},
+		{`INSERT INTO environments (environment_id, organization_id, application_id, slug, display_name, kind)
+			VALUES ($1,$2,$3,'production','Production','production')`, []any{environmentID, organizationID, applicationID}},
+		{`INSERT INTO admin_users (admin_user_id, email, email_normalized, display_name)
+			VALUES ($1,'scheduler@example.test','scheduler@example.test','Scheduler')`, []any{adminUserID}},
+		{`INSERT INTO admin_memberships (admin_membership_id, organization_id, admin_user_id, role)
+			VALUES ($1,$2,$3,'operator')`, []any{membershipID, organizationID, adminUserID}},
+		{`INSERT INTO admin_api_tokens (
+			admin_api_token_id, organization_id, admin_user_id, name, token_hash,
+			token_hint, scopes, created_by_admin_user_id
+		) VALUES ($1,$2,$3,'scheduler',$4,'ABC123',ARRAY['run_self_tests']::text[],$3)`,
+			[]any{tokenID, organizationID, adminUserID, bytes.Repeat([]byte{0x71}, 32)}},
+		{`INSERT INTO config_revisions (
+			config_revision_id, organization_id, application_id, environment_id,
+			revision_number, etag, status, document, compiled_document,
+			validation_report, created_by_admin_user_id, validated_at, activated_at
+		) VALUES ($1,$2,$3,$4,1,'"self-test-revision"','valid','{}'::jsonb,'{}'::jsonb,
+			'{"valid":true,"issues":[]}'::jsonb,$5,statement_timestamp(),statement_timestamp())`,
+			[]any{revisionID, organizationID, applicationID, environmentID, adminUserID}},
+		{`INSERT INTO active_config_revisions (
+			organization_id, application_id, environment_id, config_revision_id,
+			revision_status, activated_by_admin_user_id
+		) VALUES ($1,$2,$3,$4,'valid',$5)`,
+			[]any{organizationID, applicationID, environmentID, revisionID, adminUserID}},
+		{`INSERT INTO self_test_schedules (
+			self_test_schedule_id, organization_id, application_id, environment_id,
+			config_revision_id, kind, upstream_key, model_key, max_cost_nano_usd,
+			daily_cost_limit_nano_usd, interval_seconds, authorized_admin_user_id,
+			authorization_method, authorization_credential_id, status, next_run_at,
+			created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,'upstream','primary','canary',1000000,24000000,3600,
+			$6,'api_token',$7,'active',$8,$9,$9)`,
+			[]any{scheduleID, organizationID, applicationID, environmentID, revisionID, adminUserID, tokenID, dueAt.UTC(), dueAt.Add(-time.Hour).UTC()}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return scheduleID
+}
+
 func TestQueueRecoversJobAfterWorkerHeartbeatFailurePostgreSQL(t *testing.T) {
 	pool, ctx := isolatedWorkerPool(t)
 	lost := mustWorkerQueue(t, pool, "runtime-CCCCCCCCCCCCCCCC", "worker")

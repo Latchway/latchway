@@ -13,7 +13,10 @@ CLI must consume these HTTP resources rather than querying PostgreSQL.
 - User block/unblock and installation revocation require
   `revoke_installations`. Blocking suspends future sessions and revokes current
   grants and refresh tokens; unblocking never restores revoked credentials.
-- Local self-tests require `run_self_tests`.
+- Local and credential-aware self-tests require `run_self_tests`. Creating a
+  persistent schedule additionally requires bearer authentication by the
+  exact durable API token that will authorize later runs; a browser session
+  cannot create or substitute that authority.
 - Every lookup derives the organization from the authenticated principal.
   Supplied organization filters must exactly match that organization, and
   cross-tenant identifiers are reported as not found or denied.
@@ -96,6 +99,26 @@ retrieved after a restart. The result contains only fixed check names and safe
 details: no provider credential, prompt, response, URL, raw dependency error,
 or provider error body. A completed diagnostic has terminal `passed` or
 `failed` state; a failed check is never presented as a successful verification.
+
+Credential-aware runs can also be scheduled through
+`/admin/v1/self-test-schedules`. Creation pins the exact active configuration
+revision, current provider-secret record IDs and versions, tenant target,
+per-run and UTC-day cost ceilings, cadence, administrator, and authenticating
+Admin API-token ID. Token plaintext and provider secret material are never
+persisted. The server rejects browser-session creation even if a token ID is
+supplied; the console's create form sends a transient bearer with cookies
+omitted and clears its password field immediately. List, detail, and disable
+remain capability-gated redaction-safe operations.
+
+The worker revalidates the token, active membership, tenant resources, pinned
+configuration, and every secret version before each run. Revocation, revision
+replacement, or secret rotation fails closed and disables the schedule rather
+than rebinding. Cadences range from one hour through 30 days, missed intervals
+coalesce to one run, and row locks plus a daily reservation ledger prevent
+replicas from exceeding the cost ceiling. A durable marker is committed before
+provider dispatch; recovery after that marker records the fixed
+`execution_recovery` failure and never repeats an ambiguous provider request.
+See [Scheduled self-tests](../operations/scheduled-self-tests.md).
 
 `GET /admin/v1/system` reports build version, contract and protocol versions,
 the configured process role, current migration version, and a readiness bit.

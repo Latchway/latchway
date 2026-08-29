@@ -203,11 +203,39 @@ type selfTestCheckCLI struct {
 
 type selfTestRunCLI struct {
 	ID          string             `json:"id"`
+	ScheduleID  string             `json:"schedule_id,omitempty"`
 	Kind        string             `json:"kind"`
 	State       string             `json:"state"`
 	CreatedAt   string             `json:"created_at"`
 	CompletedAt string             `json:"completed_at,omitempty"`
 	Checks      []selfTestCheckCLI `json:"checks"`
+}
+
+type selfTestScheduleCLI struct {
+	ID                        string `json:"id"`
+	EnvironmentID             string `json:"environment_id"`
+	ApplicationID             string `json:"application_id"`
+	ConfigRevisionID          string `json:"config_revision_id"`
+	AuthorizationCredentialID string `json:"authorization_credential_id"`
+	Kind                      string `json:"kind"`
+	Upstream                  string `json:"upstream"`
+	Model                     string `json:"model"`
+	MaxCostNanoUSD            int64  `json:"max_cost_nano_usd"`
+	DailyCostLimitNanoUSD     int64  `json:"daily_cost_limit_nano_usd"`
+	IntervalSeconds           int64  `json:"interval_seconds"`
+	Status                    string `json:"status"`
+	NextRunAt                 string `json:"next_run_at,omitempty"`
+	LastEnqueuedAt            string `json:"last_enqueued_at,omitempty"`
+	LastSelfTestID            string `json:"last_self_test_id,omitempty"`
+	CreatedAt                 string `json:"created_at"`
+	UpdatedAt                 string `json:"updated_at"`
+	DisabledAt                string `json:"disabled_at,omitempty"`
+	DisabledReasonCode        string `json:"disabled_reason_code,omitempty"`
+}
+
+type selfTestSchedulePageCLI struct {
+	Items []selfTestScheduleCLI `json:"items"`
+	Page  pageInfoCLI           `json:"page"`
 }
 
 type systemStatusCLI struct {
@@ -610,6 +638,7 @@ func newVerifyCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "verify", Short: "Run bounded local or server-side verification"}
 	addControlTokenFlag(command, values)
 	command.AddCommand(newVerifyLocalCommand(opts))
+	command.AddCommand(newVerifyScheduleCommand(opts, values))
 	for _, kind := range []string{"upstream", "openrouter"} {
 		kind := kind
 		var environmentID, upstream, model string
@@ -651,6 +680,137 @@ func newVerifyCommand(opts *options) *cobra.Command {
 		command.AddCommand(subcommand)
 	}
 	return command
+}
+
+func newVerifyScheduleCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	command := &cobra.Command{Use: "schedule", Short: "Manage persistently authorized bounded self-test schedules"}
+	command.AddCommand(
+		newVerifyScheduleCreateCommand(opts, root),
+		newVerifyScheduleListCommand(opts, root),
+		newVerifyScheduleGetCommand(opts, root),
+		newVerifyScheduleDisableCommand(opts, root),
+	)
+	return command
+}
+
+func newVerifyScheduleCreateCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	var environmentID, kind, upstream, model string
+	var maxCost, dailyCost int64
+	var intervalSeconds int64
+	command := &cobra.Command{
+		Use: "create", Short: "Create a schedule bound to the current durable Admin API token", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if id.Validate(environmentID, id.Environment) != nil ||
+				(kind != "upstream" && kind != "openrouter") ||
+				!operationalIdentifierPattern.MatchString(upstream) ||
+				!operationalIdentifierPattern.MatchString(model) ||
+				maxCost < 1 || maxCost > 1_000_000_000 ||
+				dailyCost < maxCost || dailyCost > 10_000_000_000 ||
+				intervalSeconds < 3600 || intervalSeconds > 2_592_000 {
+				return errors.New("scheduled verification target, cadence, or budget is invalid")
+			}
+			runsPerDay := (86_400 + intervalSeconds - 1) / intervalSeconds
+			if maxCost > dailyCost/runsPerDay {
+				return errors.New("scheduled verification daily budget cannot cover the configured cadence")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			request := map[string]any{
+				"environment_id": environmentID, "kind": kind, "upstream": upstream, "model": model,
+				"max_cost_nano_usd": maxCost, "daily_cost_limit_nano_usd": dailyCost,
+				"interval_seconds": intervalSeconds,
+			}
+			var schedule selfTestScheduleCLI
+			if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/self-test-schedules", nil, request, http.StatusCreated, &schedule); err != nil {
+				return err
+			}
+			return printSelfTestSchedule(opts, schedule)
+		},
+	}
+	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&kind, "kind", "upstream", "scheduled self-test kind: upstream or openrouter")
+	command.Flags().StringVar(&upstream, "upstream", "", "server-owned upstream identifier")
+	command.Flags().StringVar(&model, "model", "", "active configured model identifier")
+	command.Flags().Int64Var(&maxCost, "max-cost-nano-usd", 10_000_000, "per-run hard cost ceiling")
+	command.Flags().Int64Var(&dailyCost, "daily-cost-limit-nano-usd", 240_000_000, "UTC-day hard cost ceiling")
+	command.Flags().Int64Var(&intervalSeconds, "interval-seconds", 3600, "cadence from 3600 through 2592000 seconds")
+	_ = command.MarkFlagRequired("environment")
+	_ = command.MarkFlagRequired("upstream")
+	_ = command.MarkFlagRequired("model")
+	return command
+}
+
+func newVerifyScheduleListCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	var environmentID, cursor string
+	var pageSize int
+	command := &cobra.Command{
+		Use: "list", Short: "List redaction-safe schedule metadata", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if id.Validate(environmentID, id.Environment) != nil {
+				return errors.New("scheduled verification environment is invalid")
+			}
+			query, err := pageQuery(environmentID, cursor, pageSize)
+			if err != nil {
+				return err
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var page selfTestSchedulePageCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/self-test-schedules", query, nil, http.StatusOK, &page); err != nil {
+				return err
+			}
+			return printSelfTestSchedulePage(opts, page)
+		},
+	}
+	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&cursor, "cursor", "", "opaque next-page cursor")
+	command.Flags().IntVar(&pageSize, "page-size", 50, "number of schedules to return (1-200)")
+	_ = command.MarkFlagRequired("environment")
+	return command
+}
+
+func newVerifyScheduleGetCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use: "get SCHEDULE_ID", Short: "Inspect one schedule and its exact persisted bindings", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.SelfTestSchedule) != nil {
+				return errors.New("self-test schedule ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var schedule selfTestScheduleCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/self-test-schedules/"+args[0], nil, nil, http.StatusOK, &schedule); err != nil {
+				return err
+			}
+			return printSelfTestSchedule(opts, schedule)
+		},
+	}
+}
+
+func newVerifyScheduleDisableCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use: "disable SCHEDULE_ID", Short: "Permanently disable a self-test schedule", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.SelfTestSchedule) != nil {
+				return errors.New("self-test schedule ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var schedule selfTestScheduleCLI
+			if _, err := client.do(cmd.Context(), http.MethodDelete, "/admin/v1/self-test-schedules/"+args[0], nil, nil, http.StatusOK, &schedule); err != nil {
+				return err
+			}
+			return printSelfTestSchedule(opts, schedule)
+		},
+	}
 }
 
 func verifyShort(kind string) string {
@@ -998,4 +1158,36 @@ func printSelfTest(opts *options, run selfTestRunCLI) error {
 		return err
 	}
 	return printControlTable(opts, []string{"CHECK", "STATE", "DETAIL"}, rows)
+}
+
+func printSelfTestSchedule(opts *options, schedule selfTestScheduleCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, schedule)
+	}
+	return printControlTable(opts, []string{
+		"SCHEDULE", "ENVIRONMENT", "CONFIG REVISION", "CREDENTIAL", "KIND", "TARGET",
+		"INTERVAL", "MAX/RUN", "MAX/UTC DAY", "STATUS", "NEXT RUN", "LAST SELF-TEST",
+	}, [][]string{{
+		schedule.ID, schedule.EnvironmentID, schedule.ConfigRevisionID,
+		schedule.AuthorizationCredentialID, schedule.Kind, schedule.Upstream + "/" + schedule.Model,
+		strconv.FormatInt(schedule.IntervalSeconds, 10), strconv.FormatInt(schedule.MaxCostNanoUSD, 10),
+		strconv.FormatInt(schedule.DailyCostLimitNanoUSD, 10), schedule.Status,
+		formatControlTime(schedule.NextRunAt), schedule.LastSelfTestID,
+	}})
+}
+
+func printSelfTestSchedulePage(opts *options, page selfTestSchedulePageCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, page)
+	}
+	for _, schedule := range page.Items {
+		if err := printSelfTestSchedule(opts, schedule); err != nil {
+			return err
+		}
+	}
+	if page.Page.HasMore {
+		_, err := fmt.Fprintf(opts.stdout, "next cursor: %s\n", page.Page.NextCursor)
+		return err
+	}
+	return nil
 }

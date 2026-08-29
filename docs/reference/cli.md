@@ -255,3 +255,30 @@ server requires configured pricing and trusted model-aware input accounting and
 refuses dispatch if it cannot prove the bound. The CLI never reads, obtains, or
 forwards a provider credential; every credential remains in the server's
 write-only secret store.
+
+Use the same `run_self_tests`-scoped Admin API token to create a persistent
+schedule. Creation binds that authenticating token's stable ID; there is no
+credential-ID or token-value request flag.
+
+```bash
+latchway verify schedule create \
+  --environment env_... \
+  --kind upstream \
+  --upstream primary \
+  --model canary \
+  --interval-seconds 3600 \
+  --max-cost-nano-usd 10000000 \
+  --daily-cost-limit-nano-usd 240000000
+
+latchway verify schedule list --environment env_...
+latchway verify schedule get sts_...
+latchway verify schedule disable sts_...
+```
+
+The cadence must be one hour through 30 days. The server also requires the
+UTC-day ceiling to cover the theoretical cadence at the per-run maximum,
+limits each organization to 32 active schedules, and permits only one active
+schedule for the same environment/kind/upstream/model selection. Output shows
+the exact pinned revision, durable credential ID, cadence, cost ceilings, next
+run, last run, and lifecycle state; it never prints the token or a provider
+secret.
