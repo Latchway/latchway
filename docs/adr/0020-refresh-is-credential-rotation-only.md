@@ -61,6 +61,14 @@ the exact new session exchange, while DPoP continues to bind refresh-token
 rotation to the installation key. Strict body parsing prevents accidental or
 malicious field smuggling.
 
+## Migration implications
+
+SDKs and applications must stop sending identity or attestation fields to the
+refresh endpoint. When identity renewal or attestation step-up is required,
+clients must discard the old session and run the existing challenge/exchange
+flow. Refresh-token storage, rotation, DPoP key handling, and the wire protocol
+version otherwise remain unchanged.
+
 ## Status
 
 Accepted and implemented for draft contract `0.5.0` and wire protocol `1` on

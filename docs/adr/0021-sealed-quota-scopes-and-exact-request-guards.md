@@ -95,6 +95,15 @@ Adding a new structured request grammar or changing the meaning of an image or
 tool-call unit requires a versioned protocol/contract decision and matching
 adapter, replay, PostgreSQL, simulator, and adversarial evidence.
 
+## Security implications
+
+Sealed platform and normalized-claim inputs prevent clients from selecting a
+fresh quota namespace. Domain-separated claim digests keep raw identity facts
+out of operational records while distinguishing missing from present values.
+Post-rewrite hashing and exact structured measurements prevent same-length body
+substitution, pre-rewrite undercounting, and fabricated request-local units;
+unsupported opaque measurements fail closed instead of becoming estimates.
+
 ## Migration implications
 
 Database schema `18` extends the closed scope vocabulary and adds the versioned

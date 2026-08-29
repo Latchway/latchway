@@ -91,6 +91,15 @@ positive route response cap limits untrusted output, and the explicit SSE gate
 prevents an administrator from accidentally activating an unbounded long-lived
 stream. Unsafe replay is off unless every executed route opts in.
 
+## Migration implications
+
+Existing generic-upstream configurations must add an explicit `opaqueHttp`
+feature policy and route response bound before they can serve `/proxy/`
+traffic. Routes that previously assumed query forwarding, arbitrary headers,
+or retry of mutating methods must be rewritten to use canonical provider paths,
+positive header allowlists, and an explicit unsafe-replay decision. Structured
+OpenAI and Anthropic routes are unaffected.
+
 ## Status
 
 Accepted and implemented for draft contract `0.5.0` and wire protocol `1` on
