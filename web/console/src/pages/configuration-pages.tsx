@@ -16,6 +16,7 @@ import {
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { buildNativeSnippets, buildNativeTemplate } from "./native-template";
 
 const environmentPattern = "env_[A-Za-z0-9_-]{16,128}";
 
@@ -29,63 +30,6 @@ function ValidationResult({ report }: { report?: ConfigurationValidation }) {
     <p>Checked {new Date(report.checked_at).toLocaleString()}</p>
     {report.issues.length ? <ul>{report.issues.map((issue, index) => <li key={`${issue.path}-${issue.code}-${index}`}><strong>{issue.severity}: {issue.code}</strong> <code>{issue.path}</code> — {issue.message}</li>)}</ul> : <p>No validation issues.</p>}
   </section> : null;
-}
-
-function buildNativeTemplate(input: {
-  application: string;
-  environment: string;
-  organization: string;
-  firebaseProject: string;
-  appIDPrefix: string;
-  bundleID: string;
-  packageName: string;
-  cloudProject: number;
-  certificateDigest: string;
-  upstreamURL: string;
-  secretName?: string;
-}): string {
-  return JSON.stringify({
-    apiVersion: "latchway.dev/v1alpha1",
-    kind: "EnvironmentConfig",
-    metadata: {
-      organization: input.organization,
-      application: input.application,
-      environment: input.environment,
-      description: "React Native iOS and Android production gateway"
-    },
-    spec: {
-      identityProviders: [{ id: "firebase", type: "firebase", projectId: input.firebaseProject }],
-      attestationPolicies: [{
-        id: "native",
-        platforms: {
-          react_native_ios: {
-            provider: "app_attest", mode: "required",
-            appAttest: { appIdPrefix: input.appIDPrefix, bundleId: input.bundleID, environment: "production", allowedValidationCategories: [1], allowedBundleVersions: ["1.0"] }
-          },
-          react_native_android: {
-            provider: "play_integrity", mode: "required",
-            playIntegrity: { packageName: input.packageName, cloudProjectNumber: input.cloudProject, certificateSha256Digests: [input.certificateDigest], minimumDeviceIntegrity: "device", requireLicensed: true, allowTestingResponses: false, minimumVersionCode: 1, maximumVersionCode: 0, credentialSource: "metadata" }
-          }
-        }
-      }],
-      upstreams: [{
-        id: "primary", type: "openai_compatible", baseUrl: input.upstreamURL,
-        authentication: input.secretName ? { type: "bearer", secretRef: `secret/${input.secretName}` } : { type: "none" }
-      }],
-      models: [{ id: "assistant_default", upstream: "primary", upstreamModel: "gpt-5-mini" }],
-      limitPlans: [{ id: "standard", limits: [
-        { metric: "logical_requests", scope: ["user", "feature"], window: "1d", maximum: 100 },
-        { metric: "output_tokens", scope: ["user", "feature"], window: "1d", maximum: 100000 },
-        { metric: "input_tokens", scope: ["user", "feature"], perRequestMaximum: 20000 }
-      ] }],
-      features: [{
-        id: "assistant", protocol: "openai_responses", attestationPolicy: "native",
-        access: { expression: "principal.authenticated" }, limitPlan: { expression: "'standard'" },
-        output: { defaultMaximumTokens: 800, absoluteMaximumTokens: 2000 },
-        routes: [{ id: "primary", when: "true", model: "assistant_default", priority: 10 }]
-      }]
-    }
-  }, null, 2);
 }
 
 async function createValidateActivate(input: {
@@ -110,7 +54,7 @@ async function createValidateActivate(input: {
 
 export function SetupWizardPage() {
   const session = useConsoleSession();
-  const [workspace, setWorkspace] = useState<{ applicationID: string; applicationSlug: string; environmentID: string; environmentSlug: string }>();
+  const [workspace, setWorkspace] = useState<{ applicationID: string; applicationSlug: string; cloudProjectNumber: string; environmentID: string; environmentSlug: string }>();
   const [document, setDocument] = useState(""); const [secretName, setSecretName] = useState<string>();
   const [revision, setRevision] = useState<ConfigurationRevision>(); const [validation, setValidation] = useState<ConfigurationValidation>(); const [test, setTest] = useState<SelfTestRun>();
   const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
@@ -119,16 +63,19 @@ export function SetupWizardPage() {
   const canManageSecrets = session.data?.session?.capabilities.includes("manage_secrets") ?? false;
   const canTest = session.data?.session?.capabilities.includes("run_self_tests") ?? false;
   const completed = useMemo(() => [true, true, Boolean(workspace), Boolean(workspace), Boolean(document), Boolean(document), Boolean(secretName), Boolean(document), Boolean(document), Boolean(document), test?.state === "passed", Boolean(revision?.activated_at)], [document, revision, secretName, test, workspace]);
+  const snippets = workspace ? buildNativeSnippets(workspace) : undefined;
   if (session.data?.mode !== "configured") return <section className="empty-state"><h1>Sign in to continue setup.</h1></section>;
 
   async function createWorkspace(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
     try {
       const applicationSlug = String(form.get("application_slug")); const environmentSlug = String(form.get("environment_slug"));
+      const cloudProject = Number(form.get("cloud_project"));
+      if (!Number.isSafeInteger(cloudProject) || cloudProject < 1) throw new Error("The Cloud project number must be a positive safe integer.");
       const application = (await adminRequest("/admin/v1/applications", ApplicationSchema, { method: "POST", body: { organization_id: organizationID, slug: applicationSlug, display_name: String(form.get("application_name")) } })).data;
       const environment = (await adminRequest(`/admin/v1/applications/${application.id}/environments`, EnvironmentSchema, { method: "POST", body: { slug: environmentSlug, display_name: String(form.get("environment_name")), kind: "production" } })).data;
-      const next = { applicationID: application.id, applicationSlug, environmentID: environment.id, environmentSlug }; setWorkspace(next);
-      setDocument(buildNativeTemplate({ organization: String(form.get("organization_slug")), application: applicationSlug, environment: environmentSlug, firebaseProject: String(form.get("firebase_project")), appIDPrefix: String(form.get("app_id_prefix")), bundleID: String(form.get("bundle_id")), packageName: String(form.get("package_name")), cloudProject: Number(form.get("cloud_project")), certificateDigest: String(form.get("certificate_digest")), upstreamURL: String(form.get("upstream_url")) }));
+      const next = { applicationID: application.id, applicationSlug, cloudProjectNumber: String(cloudProject), environmentID: environment.id, environmentSlug }; setWorkspace(next);
+      setDocument(buildNativeTemplate({ organization: String(form.get("organization_slug")), application: applicationSlug, environment: environmentSlug, firebaseProject: String(form.get("firebase_project")), appIDPrefix: String(form.get("app_id_prefix")), bundleID: String(form.get("bundle_id")), bundleVersion: String(form.get("bundle_version")), packageName: String(form.get("package_name")), cloudProject, certificateDigest: String(form.get("certificate_digest")), upstreamURL: String(form.get("upstream_url")), physicalModel: String(form.get("physical_model")), maximumFramingTokensPerRequest: Number(form.get("maximum_framing_tokens_per_request")), maximumFramingTokensPerMessage: Number(form.get("maximum_framing_tokens_per_message")), maximumContextTokens: Number(form.get("maximum_context_tokens")) }));
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
@@ -168,15 +115,16 @@ export function SetupWizardPage() {
       <form className="control-form" onSubmit={(event) => void createWorkspace(event)}>
         <div className="form-field-grid"><label>Organization slug<input name="organization_slug" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Application name<input name="application_name" required /></label><label>Application slug<input name="application_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label></div>
         <div className="form-field-grid"><label>Environment name<input defaultValue="Production" name="environment_name" required /></label><label>Environment slug<input defaultValue="production" name="environment_slug" pattern="[a-z][a-z0-9-]{1,62}" required /></label><label>Firebase project ID<input name="firebase_project" pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" required /></label></div>
-        <fieldset><legend>Apple App Attest</legend><div className="form-field-grid"><label>App ID prefix<input name="app_id_prefix" required /></label><label>Bundle ID<input name="bundle_id" required /></label></div></fieldset>
-        <fieldset><legend>Google Play Integrity</legend><div className="form-field-grid"><label>Package name<input name="package_name" required /></label><label>Cloud project number<input min={1} name="cloud_project" required type="number" /></label><label>Certificate SHA-256 digest (base64url)<input name="certificate_digest" pattern="[A-Za-z0-9_-]{43}" required /></label></div></fieldset>
+        <fieldset><legend>Apple App Attest</legend><div className="form-field-grid"><label>App ID prefix<input name="app_id_prefix" required /></label><label>Bundle ID<input name="bundle_id" required /></label><label>Allowed bundle version<input name="bundle_version" placeholder="1.0.0" required /></label></div></fieldset>
+        <fieldset><legend>Google Play Integrity</legend><div className="form-field-grid"><label>Package name<input name="package_name" required /></label><label>Cloud project number<input max={Number.MAX_SAFE_INTEGER} min={1} name="cloud_project" required type="number" /></label><label>Certificate SHA-256 digest (base64url)<input name="certificate_digest" pattern="[A-Za-z0-9_-]{43}" required /></label></div></fieldset>
         <label>Upstream HTTPS base URL<input defaultValue="https://api.openai.com/v1" name="upstream_url" pattern="https://.*" required type="url" /></label>
+        <fieldset><legend>Trusted input accounting</legend><p>Review these operator-owned bounds against the exact physical model before activation. The starter route accepts bounded text-only OpenAI Responses requests.</p><div className="form-field-grid"><label>Physical upstream model<input defaultValue="gpt-5-mini" name="physical_model" required /></label><label>Framing tokens per request<input defaultValue={8} min={0} name="maximum_framing_tokens_per_request" required type="number" /></label><label>Framing tokens per input item<input defaultValue={4} min={0} name="maximum_framing_tokens_per_message" required type="number" /></label><label>Maximum model context tokens<input defaultValue={128000} min={4096} name="maximum_context_tokens" required type="number" /></label></div></fieldset>
         <button className="primary-action" disabled={!canConfigure || busy} type="submit">{busy ? "Creating…" : "Create application and environment"}</button>
       </form></section> : <>
       <section className="wizard-card"><h2>Write-only upstream credential</h2><p>Optional for a no-auth test upstream. The value is sent once, cleared from the form, and never returned.</p><form className="filter-bar" onSubmit={(event) => void createSecret(event)}><label>Secret name<input defaultValue="primary_api_key" name="secret_name" pattern="[a-z][a-z0-9_-]{0,62}" required /></label><label>Secret value<input autoComplete="off" name="secret_value" required type="password" /></label><button className="primary-action" disabled={!canManageSecrets || busy || Boolean(secretName)} type="submit">{secretName ? "Credential added" : "Add credential"}</button></form></section>
       <section className="wizard-card"><h2>Schema-backed full configuration document</h2><p>All identity, attestation, upstream, model, feature, route, pricing, session, privacy, and limit areas can be represented in this complete v1 document. Server validation is authoritative.</p><textarea aria-label="Full configuration JSON" className="code-editor" onChange={(event) => setDocument(event.target.value)} rows={32} spellCheck={false} value={document} /><div className="button-row"><button className="secondary-action" disabled={busy} onClick={() => void applyConfiguration(false)} type="button">Validate and plan only</button><button className="primary-action" disabled={!canConfigure || busy} onClick={() => void applyConfiguration(true)} type="button">Validate and activate with ETag</button></div><ValidationResult report={validation} />{revision ? <p className="resource-result">Revision <code>{revision.id}</code> is <strong>{revision.state}</strong>.</p> : null}</section>
       <section className="wizard-card"><h2>Local self-test</h2><p>This verifies durable database, schema, and active configuration state without spending upstream tokens.</p><button className="primary-action" disabled={!canTest || busy || revision?.state !== "active"} onClick={() => void runSelfTest()} type="button">Run local self-test</button>{test ? <p className="resource-result">Self-test <code>{test.id}</code>: <strong>{test.state}</strong></p> : null}</section>
-      <section className="wizard-card"><h2>Platform SDK snippets</h2><p>These snippets identify only your gateway and client-visible Latchway configuration; they contain no provider key.</p><h3>React Native</h3><pre>{`const latchway = createLatchwayClient({\n  baseURL: window.location.origin,\n  applicationID: "${workspace.applicationSlug}",\n  environment: "${workspace.environmentSlug}",\n  getIdentityToken,\n});`}</pre><h3>iOS</h3><pre>{`LatchwayConfiguration(\n  baseURL: gatewayURL,\n  applicationID: "${workspace.applicationSlug}",\n  environment: "${workspace.environmentSlug}",\n  identityProvider: "firebase"\n)`}</pre><h3>Android</h3><pre>{`LatchwayConfiguration(\n  baseUrl = gatewayUrl,\n  applicationId = "${workspace.applicationSlug}",\n  environment = "${workspace.environmentSlug}",\n  defaultFeature = "assistant",\n)`}</pre></section>
+      <section className="wizard-card"><h2>Platform SDK snippets</h2><p>These snippets identify only your gateway and client-visible Latchway configuration; they contain no provider key. Use the generated application resource ID shown below, not the application slug.</p><h3>React Native</h3><pre>{snippets?.reactNative}</pre><h3>iOS</h3><pre>{snippets?.ios}</pre><h3>Android</h3><pre>{snippets?.android}</pre></section>
     </>}
   </div>;
 }

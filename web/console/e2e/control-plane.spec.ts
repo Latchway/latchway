@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const ids = {
   admin: "adm_0123456789abcdef",
-  application: "app_0123456789abcdef",
+  application: "app_01J00000000000000000000000",
   environment: "env_0123456789abcdef",
   organization: "org_0123456789abcdef",
   revision: "rev_0123456789abcdef",
@@ -32,6 +32,7 @@ function problem(route: Route, code: string, status: number, detail: string) {
 async function installAdminFixture(page: Page) {
   let authenticated = false;
   const mutations: Array<{ path: string; csrf: string | null }> = [];
+  const revisionBodies: unknown[] = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
@@ -53,7 +54,11 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === "/admin/v1/applications") return json(route, 201, { created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" });
     if (url.pathname === `/admin/v1/applications/${ids.application}/environments`) return json(route, 201, { application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" });
     if (url.pathname === "/admin/v1/secrets") return json(route, 201, { algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment, id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1 });
-    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions`) return json(route, 201, { created_at: instant, created_by: ids.admin, document: JSON.parse(request.postData() ?? "{}").document, environment_id: ids.environment, id: ids.revision, state: "draft", version: 1 }, { ETag: '"revision-etag"' });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions`) {
+      const document = JSON.parse(request.postData() ?? "{}").document as unknown;
+      revisionBodies.push(document);
+      return json(route, 201, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.revision, state: "draft", version: 1 }, { ETag: '"revision-etag"' });
+    }
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/plan`) return problem(route, "resource_not_found", 404, "No active configuration exists.");
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/activate`) return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: {}, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
@@ -67,7 +72,7 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { mutations, selfTestBodies };
+  return { mutations, revisionBodies, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -84,11 +89,49 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Firebase project ID").fill("example-mobile");
   await page.getByLabel("App ID prefix").fill("TEAM1234");
   await page.getByLabel("Bundle ID").fill("com.example.mobile");
+  await page.getByLabel("Allowed bundle version").fill("2.3.4");
   await page.getByLabel("Package name").fill("com.example.mobile");
   await page.getByLabel("Cloud project number").fill("123456789");
-  await page.getByLabel("Certificate SHA-256 digest (base64url)").fill("A".repeat(43));
+  await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
+    "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+  );
   await page.getByRole("button", { name: "Create application and environment" }).click();
   await expect(page.getByRole("heading", { name: "Write-only upstream credential" })).toBeVisible();
+  const generated = JSON.parse(await page.getByLabel("Full configuration JSON").inputValue()) as {
+    spec: {
+      attestationPolicies: Array<{ platforms: Record<string, unknown> }>;
+      inputAccountingProfiles: Array<Record<string, unknown>>;
+      models: Array<Record<string, unknown>>;
+    };
+  };
+  expect(Object.keys(generated.spec.attestationPolicies[0]?.platforms ?? {}).sort()).toEqual([
+    "android", "ios", "react_native_android", "react_native_ios"
+  ]);
+  expect(generated.spec.attestationPolicies[0]?.platforms).toMatchObject({
+    ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
+    android: { minimumTrustLevel: "device_verified" },
+    react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
+    react_native_android: { minimumTrustLevel: "device_verified" }
+  });
+  expect(generated.spec.inputAccountingProfiles[0]).toMatchObject({
+    protocol: "openai_responses", physicalModel: "gpt-5-mini",
+    maximumFramingTokensPerRequest: 8, maximumFramingTokensPerMessage: 4,
+    maximumContextTokens: 128000
+  });
+  expect(generated.spec.models[0]).toMatchObject({
+    upstreamModel: "gpt-5-mini", capabilities: ["openai_responses"],
+    inputAccountingRef: "assistant_default_responses_accounting"
+  });
+  const snippets = await page.locator("pre").allTextContents();
+  expect(snippets).toHaveLength(3);
+  expect(snippets.every((snippet) => snippet.includes(ids.application))).toBe(true);
+  expect(snippets[0]).toContain("baseURL: gatewayURL");
+  expect(snippets[0]).toContain('identityProvider: "firebase"');
+  expect(snippets[0]).toContain('playIntegrityCloudProjectNumber: "123456789"');
+  expect(snippets[0]).toContain('latchway.fetch("/v1/responses"');
+  expect(snippets[0]).toContain('latchwayFeature: "assistant"');
+  expect(snippets.join("\n")).not.toContain("applicationID: \"mobile-app\"");
+  expect(snippets.join("\n")).not.toContain("window.location.origin");
   await page.getByLabel("Secret value").fill("test-only-upstream-key");
   await page.getByRole("button", { name: "Add credential" }).click();
   await expect(page.getByRole("button", { name: "Credential added" })).toBeVisible();
@@ -97,6 +140,12 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await expect(page.getByText(/is active/)).toBeVisible();
   await page.getByRole("button", { name: "Run local self-test" }).click();
   await expect(page.getByText(/Self-test .*passed/)).toBeVisible();
+  expect(fixture.revisionBodies).toHaveLength(1);
+  expect(fixture.revisionBodies[0]).toEqual(expect.objectContaining({
+    spec: expect.objectContaining({ models: expect.arrayContaining([
+      expect.objectContaining({ inputAccountingRef: "assistant_default_responses_accounting" })
+    ]) })
+  }));
 
   await page.getByRole("link", { name: /^Users/ }).click();
   await page.getByLabel("Environment ID").fill(ids.environment);
