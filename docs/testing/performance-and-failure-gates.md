@@ -298,3 +298,12 @@ not dirty the candidate. Cloud platform smoke, physical App Attest/Play
 Integrity, and published
 artifact conformance are separate release gates; neither of these runners
 claims them.
+
+The release report becomes an `operational_resilience` claim only through the
+strict aggregate described in
+[`operational-resilience-evidence.md`](operational-resilience-evidence.md).
+That aggregate reopens every external scenario document, rehashes every raw
+artifact, requires the documented exact assertion set for every destructive
+scenario (not merely nonempty passing assertions), requires the fixed
+multi-replica observations, and binds this report to the same candidate as the
+release-image load, restore, upgrade, and application-rollback drills.

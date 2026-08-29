@@ -1,5 +1,15 @@
 # Implementation status
 
+## Local working-tree update — operational resilience evidence (2026-08-29)
+
+The core repository now contains a fail-closed operational-resilience evidence
+producer, isolated backup/restore and previous-image upgrade/application-
+rollback drill, protected attestation workflow, and tamper/substitution tests.
+It emits no release claim from local load or automated-only failure evidence.
+The live exact-image load, destructive multi-replica scenarios, recovery drill,
+and released-image rollback still must execute successfully before the domain
+can become promotion evidence.
+
 ## Local working-tree update — challenge-bound reauthentication (2026-08-29)
 
 The draft refresh contract now matches the server's fail-closed behavior:

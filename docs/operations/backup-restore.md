@@ -83,3 +83,15 @@ test sessions and destroy the isolated environment after recording evidence.
 
 Never solve a master-key mismatch by overwriting the runtime key. Stop and
 recover the correct key or restore a database encrypted under the available key.
+
+## Release evidence drill
+
+The release gate uses the isolated executable launcher documented in
+[`../testing/operational-resilience-evidence.md`](../testing/operational-resilience-evidence.md).
+It creates fresh source and restore PostgreSQL containers, verifies an
+immutable custom archive and distinct database identities, compares a bounded
+tenant-state fingerprint, and runs the previous released image's migration
+status and doctor checks on the restore. The launcher cannot accept an
+operator-supplied database URL, so it cannot be pointed at production. A
+handwritten restore summary or an archive that was not restored does not
+satisfy the gate.

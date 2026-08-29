@@ -179,6 +179,14 @@ platform evidence; the orchestrator only validates identity, completeness, and
 artifact integrity so that evidence from another system cannot be silently
 substituted.
 
+The `operational_resilience.json` producer is
+[`scripts/operational-resilience-evidence.py`](../../scripts/operational-resilience-evidence.py).
+It is intentionally stricter than the generic domain-envelope validator: it
+requires exact release-image load evidence, release-scope live failure and
+replica evidence, an executed restore, and previous-image application rollback
+against the candidate schema. See
+[`operational-resilience-evidence.md`](operational-resilience-evidence.md).
+
 Run the prepublication aggregation before creating tags or publishing:
 
 ```bash
@@ -235,8 +243,12 @@ workflow. Supply immutable commit or tag refs for all five repositories. In
 release scope, also supply the core tag and, when available, a run ID and
 artifact name containing the external evidence directory. The workflow checks
 out exactly those refs, runs this command, and retains JSON/JUnit even when the
-verdict fails. It has no package, registry, release, environment, or
-attestation-publishing permission.
+verdict fails. It attests the exact source, promotion, or release JSON report
+with GitHub OIDC. Consumers of source-scope evidence must verify the attestation
+against this exact workflow, `refs/heads/main`, and the candidate source digest;
+the source report itself neither needs nor claims an already-created tag. The
+workflow has no package, registry, release, or deployment-environment mutation
+permission.
 
 The workflow does not dispatch SDK updates or publish releases. Those remain
 separate, explicitly authorized operations after a passing evidence report.

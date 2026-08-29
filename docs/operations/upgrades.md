@@ -63,3 +63,15 @@ There are no down migrations. If a migration itself must be undone:
 
 Directly deleting migration-ledger rows or hand-editing production tables is
 unsupported and can invalidate quota, audit, signing, or replay guarantees.
+
+## Release evidence drill
+
+Before promotion, run the exact previous release digest, then the exact
+candidate digest, then the previous release digest again against one isolated
+database. The automated procedure and its fail-closed report contract are in
+[`../testing/operational-resilience-evidence.md`](../testing/operational-resilience-evidence.md).
+The prior image must report the candidate schema as current and become ready
+after application rollback. If it cannot, the candidate has no proven
+application rollback path and must not be promoted; a pre-upgrade database
+restore is schema recovery, not evidence that the prior binary supports the
+new schema.
