@@ -24,6 +24,9 @@ SPEC.loader.exec_module(deployment)
 COMMIT = "a" * 40
 DIGEST = "b" * 64
 BUNDLE = "c" * 64
+PLATFORM_DIGEST = "d" * 64
+CONFIG_DIGEST = "e" * 64
+MIRROR_DIGEST = "f" * 64
 IMAGE = f"ghcr.io/latchway/latchway@sha256:{DIGEST}"
 STARTED = "2026-08-29T01:00:00Z"
 FINISHED = "2026-08-29T01:05:00Z"
@@ -66,7 +69,12 @@ def http_observation(endpoint: str, path: str) -> dict[str, object]:
     }
 
 
-def shutdown(method: str, platform_timeout: int, app_timeout: int) -> dict[str, object]:
+def shutdown(
+    method: str,
+    platform_timeout: int,
+    app_timeout: int,
+    digest: str = DIGEST,
+) -> dict[str, object]:
     return {
         "method": method,
         "started_at": "2026-08-29T01:03:10Z",
@@ -76,8 +84,8 @@ def shutdown(method: str, platform_timeout: int, app_timeout: int) -> dict[str, 
         "application_timeout_seconds": app_timeout,
         "exit_code": 0,
         "readiness_restored": True,
-        "before": {"image_digest": f"sha256:{DIGEST}", "resource_id": "before"},
-        "after": {"image_digest": f"sha256:{DIGEST}", "resource_id": "after"},
+        "before": {"image_digest": f"sha256:{digest}", "resource_id": "before"},
+        "after": {"image_digest": f"sha256:{digest}", "resource_id": "after"},
     }
 
 
@@ -194,13 +202,60 @@ def platform_values(platform: str) -> tuple[str, dict[str, object], dict[str, ob
         stopped = shutdown("fly_machine_restart", 35, 30)
     else:
         endpoint = "https://ai.example.com"
+        application_id = "12345678-abcd-1234-abcd-123456789abc"
+        mirror_image = f"registry.cloudflare.com/account/latchway@sha256:{MIRROR_DIGEST}"
+        layers = [{"digest": f"sha256:{'1' * 64}", "size": 1234}]
         control = {
             "platform": platform,
-            "worker": {"status": "ready", "resource_id": "accounts/hash/workers/latchway"},
-            "container": {"image_digest": f"sha256:{DIGEST}"},
+            "worker": {
+                "status": "ready",
+                "resource_id": application_id,
+                "deployments": [{"id": "deployment"}],
+                "versions": [{"id": "version"}],
+            },
+            "container": {
+                "application": {
+                    "id": application_id,
+                    "name": "latchway",
+                    "state": "active",
+                    "instances": 1,
+                    "image": mirror_image,
+                    "version": 7,
+                    "updated_at": "2026-08-29T01:00:30Z",
+                },
+                "instances": [{
+                    "id": "instance-id",
+                    "name": "instance-0",
+                    "state": "running",
+                    "location": "sin01",
+                    "version": 7,
+                    "created": "2026-08-29T01:03:30Z",
+                }],
+                "canonical": {
+                    "index_digest": f"sha256:{DIGEST}",
+                    "platform": "linux/amd64",
+                    "platform_digest": f"sha256:{PLATFORM_DIGEST}",
+                    "config_digest": f"sha256:{CONFIG_DIGEST}",
+                    "layers": layers,
+                },
+                "mirror": {
+                    "image": mirror_image,
+                    "manifest_digest": f"sha256:{MIRROR_DIGEST}",
+                    "config_digest": f"sha256:{CONFIG_DIGEST}",
+                    "layers": layers,
+                },
+            },
         }
-        migration["provider_execution"] = {"exit_code": 0, "job_id": "migration"}
-        stopped = shutdown("cloudflare_container_replacement", 30, 25)
+        migration["provider_execution"] = {
+            "exit_code": 0,
+            "evidence_id": "12345-1",
+            "instance_name": "instance-0",
+            "command": ["/latchway", "--output", "json", "migrate", "status"],
+        }
+        stopped = shutdown(
+            "cloudflare_container_replacement", 900, 30, MIRROR_DIGEST
+        )
+        stopped.update({"evidence_id": "12345-1", "provider_reason": "runtime_signal"})
     migration["provider_execution"]["reported_status"] = migration["status"]
     return endpoint, control, migration, stopped
 
@@ -212,7 +267,7 @@ def capture(root: Path, platform: str) -> dict[str, object]:
         "cloud_run": "https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/p/services/latchway",
         "aws": "arn:aws:ecs:r:a:service/latchway",
         "fly_io": "fly-app-id",
-        "cloudflare_containers": "accounts/hash/workers/latchway",
+        "cloudflare_containers": "12345678-abcd-1234-abcd-123456789abc",
     }[platform]
     values = {
         "identity": {
@@ -252,9 +307,9 @@ def capture(root: Path, platform: str) -> dict[str, object]:
         "provider_resource_id": resource_id,
         "collector": {
             "repository": "Latchway/latchway",
-            "workflow_ref": "Latchway/latchway/.github/workflows/deployment-evidence.yml@refs/tags/v1.0.0",
-            "ref": "refs/tags/v1.0.0",
-            "sha": COMMIT,
+            "workflow_ref": "Latchway/latchway/.github/workflows/deployment-evidence.yml@refs/heads/main",
+            "ref": "refs/heads/main",
+            "sha": "e" * 40,
             "run_id": "12345",
             "run_attempt": 1,
             "runner_environment": "github-hosted",
@@ -267,6 +322,14 @@ def capture(root: Path, platform: str) -> dict[str, object]:
 
 
 class DeploymentEvidenceTests(unittest.TestCase):
+    def test_workflow_is_prepublication_and_candidate_attested(self) -> None:
+        result = deployment.validate_workflow()
+        self.assertGreaterEqual(result["pinned_actions"], 1)
+        text = (SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml").read_text()
+        self.assertNotIn("refs/tags/", text)
+        self.assertIn('--source-digest "$CANDIDATE_COMMIT"', text)
+        self.assertIn('--core-commit "$CANDIDATE_COMMIT"', text)
+
     def test_static_assets_pass(self) -> None:
         checks = deployment.static_checks()
         self.assertTrue(checks)
@@ -294,6 +357,15 @@ class DeploymentEvidenceTests(unittest.TestCase):
             failure = next(item for item in checks if item.identifier == "capture.control_plane")
             self.assertEqual(failure.status, "failed")
             self.assertEqual(failure.reason, "aws_task_digest_mismatch")
+
+    def test_capture_separates_trusted_workflow_source_from_candidate_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = capture(root, "compose")
+            self.assertNotEqual(manifest["collector"]["sha"], manifest["core_commit"])
+            validated, checks = deployment.validate_capture(root)
+            self.assertEqual(validated["core_commit"], COMMIT)
+            self.assertTrue(all(item.status == "passed" for item in checks), checks)
 
     def test_duplicate_json_members_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -375,6 +447,26 @@ class DeploymentEvidenceTests(unittest.TestCase):
             )
             self.assertEqual(failure.status, "failed")
             self.assertEqual(failure.reason, "shutdown_observation_invalid")
+
+    def test_cloudflare_rejects_non_equivalent_registry_mirror(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = capture(root, "cloudflare_containers")
+            control = json.loads((root / "control_plane.json").read_text())
+            control["container"]["mirror"]["layers"][0]["digest"] = (
+                "sha256:" + "9" * 64
+            )
+            dump(root / "control_plane.json", control)
+            manifest["observations"]["control_plane"]["sha256"] = (
+                deployment.sha256_file(root / "control_plane.json")
+            )
+            dump(root / "manifest.json", manifest)
+            _, checks = deployment.validate_capture(root)
+            failure = next(
+                item for item in checks if item.identifier == "capture.control_plane"
+            )
+            self.assertEqual(failure.status, "failed")
+            self.assertEqual(failure.reason, "cloudflare_deployment_invalid")
 
     def test_seal_is_deterministic_and_safe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -102,9 +102,10 @@ gcloud run jobs execute MIGRATION_JOB --project PROJECT --region REGION \
   --args=--output,json,migrate,status --wait
 ```
 
-Then run `.github/workflows/deployment-evidence.yml` from the release tag with
-`platform=cloud_run`, the exact `ghcr.io/latchway/latchway@sha256:...` release
-identity, public endpoint, project, region, service, and migration job. The
+Then run `.github/workflows/deployment-evidence.yml` from protected `main` with
+`platform=cloud_run`, the exact candidate commit, intended tag, candidate run
+ID, `ghcr.io/latchway/latchway@sha256:...` OCI index, public endpoint, project,
+region, service, and migration job. The
 collector reads the remote status from execution-scoped provider logs, checks
 the service and job image, resolves the revision digest, verifies secret
 references without retrieving their values, performs a two-revision SIGTERM

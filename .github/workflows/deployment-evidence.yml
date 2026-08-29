@@ -10,9 +10,21 @@ on:
         description: Deployment platform to exercise
         type: choice
         required: true
-        options: [compose, cloud_run, aws, fly_io]
+        options: [compose, cloud_run, aws, fly_io, cloudflare_containers]
+      candidate_commit:
+        description: Exact untagged core candidate commit
+        type: string
+        required: true
+      intended_tag:
+        description: Intended public tag bound by the candidate manifest
+        type: string
+        required: true
+      candidate_run_id:
+        description: Release-candidate run containing the attested manifest and artifacts
+        type: string
+        required: true
       image:
-        description: Exact public Latchway release image (ghcr.io/latchway/latchway@sha256:...)
+        description: Exact candidate OCI index (ghcr.io/latchway/latchway@sha256:...)
         type: string
         required: true
       endpoint:
@@ -51,6 +63,10 @@ on:
         description: Fly application name (fly_io only)
         type: string
         required: false
+      cloudflare_mirror_image:
+        description: Exact content-equivalent amd64 mirror in registry.cloudflare.com (Cloudflare only)
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -80,18 +96,23 @@ jobs:
           retention-days: 30
 
   capture:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: deployment-evidence-${{ inputs.platform }}
     permissions:
+      actions: read
       artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
+      packages: read
     env:
       PLATFORM: ${{ inputs.platform }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
       RELEASE_IMAGE: ${{ inputs.image }}
       ENDPOINT: ${{ inputs.endpoint }}
       DEPLOYMENT_ENVIRONMENT: deployment-evidence-${{ inputs.platform }}
@@ -103,20 +124,50 @@ jobs:
       AWS_CLUSTER: ${{ inputs.aws_cluster }}
       AWS_SERVICE: ${{ inputs.aws_service }}
       FLY_APP: ${{ inputs.fly_app }}
+      CLOUDFLARE_MIRROR_IMAGE: ${{ inputs.cloudflare_mirror_image }}
       AWS_PAGER: ''
       CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
       FLY_NO_UPDATE_CHECK: '1'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Reject mutable or non-release input
+      - name: Download the immutable candidate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/latchway-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify immutable prepublication candidate authority
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
           [[ "$DEPLOYMENT_ENVIRONMENT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
+          gh attestation verify "$candidate" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest "$candidate" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --image ghcr.io/latchway/latchway
+          test "$(jq -r '.image.repository + \"@\" + .image.index_digest' "$candidate")" = "$RELEASE_IMAGE"
           mkdir -p /tmp/latchway-deployment-capture
           date -u +%Y-%m-%dT%H:%M:%SZ > /tmp/latchway-deployment-started-at
       - name: Authenticate to Google Cloud with GitHub OIDC
@@ -142,6 +193,23 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
         with:
           version: '0.4.89'
+      - name: Set up pinned Node.js for Cloudflare evidence
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: deploy/cloudflare/pnpm-lock.yaml
+      - name: Set up Docker Buildx for Cloudflare manifest verification
+        if: inputs.platform == 'cloudflare_containers'
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Authenticate to the candidate registry
+        if: inputs.platform == 'cloudflare_containers'
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Capture Compose migration, runtime, and SIGTERM evidence
         if: inputs.platform == 'compose'
@@ -713,6 +781,126 @@ jobs:
           PY
           printf '%s\n' "$resource_id" > /tmp/latchway-provider-resource-id
 
+      - name: Capture Cloudflare Container image, migration, secret, and replacement evidence
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_EVIDENCE_TOKEN: ${{ secrets.CLOUDFLARE_EVIDENCE_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]]
+          [[ "$CLOUDFLARE_MIRROR_IMAGE" =~ ^registry\.cloudflare\.com/${CLOUDFLARE_ACCOUNT_ID}/[a-z0-9]+([._-][a-z0-9]+)*@sha256:[0-9a-f]{64}$ ]]
+          test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -ge 32
+          test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -le 256
+          capture=/tmp/latchway-deployment-capture
+          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
+          amd64_digest=$(jq -er '.image.platforms["linux/amd64"] | select(test("^sha256:[0-9a-f]{64}$"))' "$candidate")
+          mirror_digest="${CLOUDFLARE_MIRROR_IMAGE##*@}"
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm --dir deploy/cloudflare install --frozen-lockfile
+          wrangler=(pnpm --dir deploy/cloudflare exec wrangler --config "$GITHUB_WORKSPACE/deploy/cloudflare/wrangler.release.jsonc")
+          pnpm --dir deploy/cloudflare exec wrangler containers registries credentials registry.cloudflare.com \
+            --pull --expiration-minutes 15 --json > /tmp/cloudflare-registry-credentials.json
+          registry_username=$(jq -er '.username | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json)
+          jq -er '.password | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json \
+            | docker login registry.cloudflare.com --username "$registry_username" --password-stdin
+          docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway@$amd64_digest" > /tmp/cloudflare-canonical-manifest.json
+          docker buildx imagetools inspect --raw "$CLOUDFLARE_MIRROR_IMAGE" > /tmp/cloudflare-mirror-manifest.json
+          rm /tmp/cloudflare-registry-credentials.json
+          docker logout registry.cloudflare.com >/dev/null
+          pnpm --dir deploy/cloudflare release:config -- --image "$CLOUDFLARE_MIRROR_IMAGE"
+          pnpm --dir deploy/cloudflare release:deploy
+          evidence_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          request_body=$(jq --null-input --compact-output --arg evidence_id "$evidence_id" '{evidence_id: $evidence_id}')
+          migration_ready=0
+          for _ in {1..24}; do
+            "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications-before.json
+            app_id=$(jq -er --arg image "$CLOUDFLARE_MIRROR_IMAGE" \
+              '[.[] | select(.name == "latchway" and .image == $image and (.state == "active" or .state == "ready"))] | if length == 1 then .[0].id else empty end' \
+              /tmp/cloudflare-applications-before.json || true)
+            if [[ "$app_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && \
+              curl --silent --show-error --fail-with-body --max-time 20 \
+                --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+                --header 'Content-Type: application/json' \
+                --data "$request_body" \
+                --output /tmp/cloudflare-migration-before.json \
+                "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
+              "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-before.json
+              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications-before.json)
+              if jq -e --argjson version "$app_version" \
+                'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
+                /tmp/cloudflare-instances-before.json >/dev/null; then
+                migration_ready=1
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test "$migration_ready" = 1
+          "${wrangler[@]}" whoami --json > /tmp/cloudflare-whoami.json
+          "${wrangler[@]}" secret list --name latchway --format json > /tmp/cloudflare-secrets.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          curl --silent --show-error --fail-with-body --max-time 60 \
+            --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$request_body" \
+            --output /tmp/cloudflare-shutdown.json \
+            "$ENDPOINT/__latchway/cloudflare/evidence/shutdown"
+          jq -e --arg evidence_id "$evidence_id" \
+            '.evidence_id == $evidence_id and .stop.signal == "SIGTERM" and .stop.reason == "runtime_signal" and .stop.exit_code == 0' \
+            /tmp/cloudflare-shutdown.json >/dev/null
+          replacement_ready=0
+          for _ in {1..24}; do
+            if curl --silent --show-error --fail-with-body --max-time 20 \
+              --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+              --header 'Content-Type: application/json' \
+              --data "$request_body" \
+              --output /tmp/cloudflare-migration.json \
+              "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
+              "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications.json
+              "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-after.json
+              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications.json)
+              before_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-before.json)
+              after_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-after.json)
+              if [[ "$before_created" != "$after_created" ]] && jq -e --argjson version "$app_version" \
+                'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
+                /tmp/cloudflare-instances-after.json >/dev/null; then
+                replacement_ready=1
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test "$replacement_ready" = 1
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          "${wrangler[@]}" deployments list --name latchway --json > /tmp/cloudflare-deployments.json
+          "${wrangler[@]}" versions list --name latchway --json > /tmp/cloudflare-versions.json
+          wrangler_version=$(pnpm --dir deploy/cloudflare exec wrangler --version)
+          python3 scripts/cloudflare-deployment-capture.py \
+            --candidate-manifest "$candidate" \
+            --canonical-manifest /tmp/cloudflare-canonical-manifest.json \
+            --mirror-manifest /tmp/cloudflare-mirror-manifest.json \
+            --mirror-image "$CLOUDFLARE_MIRROR_IMAGE" \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --whoami /tmp/cloudflare-whoami.json \
+            --applications /tmp/cloudflare-applications.json \
+            --instances-before /tmp/cloudflare-instances-before.json \
+            --instances-after /tmp/cloudflare-instances-after.json \
+            --deployments /tmp/cloudflare-deployments.json \
+            --versions /tmp/cloudflare-versions.json \
+            --secrets /tmp/cloudflare-secrets.json \
+            --migration /tmp/cloudflare-migration.json \
+            --shutdown /tmp/cloudflare-shutdown.json \
+            --observed-at "$shutdown_finished" \
+            --shutdown-started "$shutdown_started" \
+            --shutdown-finished "$shutdown_finished" \
+            --wrangler-version "$wrangler_version" \
+            --output-dir "$capture" \
+            --resource-id-output /tmp/latchway-provider-resource-id
+
       - name: Capture bounded HTTPS health and readiness responses
         run: >-
           python3 scripts/deployment-evidence.py observe-http
@@ -730,7 +918,8 @@ jobs:
             --capture-dir /tmp/latchway-deployment-capture \
             --started-at "$(cat /tmp/latchway-deployment-started-at)" \
             --finished-at "$finished_at" \
-            --core-release "$GITHUB_REF_NAME" \
+            --core-commit "$CANDIDATE_COMMIT" \
+            --core-release "$INTENDED_TAG" \
             --image "$RELEASE_IMAGE" \
             --endpoint "$ENDPOINT" \
             --provider-resource-id "$provider_resource_id" \
@@ -754,7 +943,7 @@ jobs:
       - name: Upload signed provider evidence
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: latchway-deployment-${{ inputs.platform }}-${{ github.ref_name }}
+          name: latchway-deployment-${{ inputs.platform }}-${{ inputs.candidate_commit }}
           path: |
             /tmp/${{ inputs.platform }}.tar.gz
             /tmp/${{ inputs.platform }}.attestation.json

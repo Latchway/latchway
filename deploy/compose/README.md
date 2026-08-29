@@ -38,13 +38,16 @@ Before calling this a release deployment, use
 checkout does not prove that a released digest, cloud platform, or provider
 secret store was tested.
 
-For repeatable release evidence, protect the GitHub environment
+For repeatable prepublication evidence, protect the GitHub environment
 `deployment-evidence-compose` with a required reviewer and dispatch the pinned
-workflow from the release tag:
+workflow from protected `main` with the attested candidate coordinates:
 
 ```bash
-gh workflow run deployment-evidence.yml --ref v1.0.0 \
+gh workflow run deployment-evidence.yml --ref main \
   -f platform=compose \
+  -f candidate_commit='<40 lowercase hex>' \
+  -f intended_tag=v1.0.0 \
+  -f candidate_run_id='<release-candidate workflow run ID>' \
   -f image='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>' \
   -f endpoint='http://127.0.0.1:18080'
 ```

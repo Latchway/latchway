@@ -51,8 +51,9 @@ SEMVER = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[
 RELEASE = re.compile(rf"^v{SEMVER}$")
 OCI_IMAGE = re.compile(r"^ghcr\.io/latchway/latchway@sha256:([0-9a-f]{64})$")
 RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$")
+EVIDENCE_ID = re.compile(r"^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$")
 WORKFLOW_REF = re.compile(
-    r"^Latchway/latchway/\.github/workflows/deployment-evidence\.yml@refs/tags/(v.+)$"
+    r"^Latchway/latchway/\.github/workflows/deployment-evidence\.yml@refs/heads/main$"
 )
 MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
@@ -328,6 +329,7 @@ def static_checks() -> list[Check]:
     check("static.cloud_run_terraform", "Cloud Run Terraform pins image and secret boundaries.", validate_cloud_run_terraform)
     check("static.aws_terraform", "AWS Terraform pins image, drain, health, and secret boundaries.", validate_aws_terraform)
     check("static.fly", "Fly config pins migration, health, and drain behavior.", validate_fly)
+    check("static.cloudflare", "Cloudflare pins streaming, lifecycle, and protected live-evidence boundaries.", validate_cloudflare)
     check("static.workflow", "The live evidence workflow uses protected, pinned collectors.", validate_workflow)
     return checks
 
@@ -543,6 +545,53 @@ def validate_fly() -> Mapping[str, Any]:
     return {"health_paths": sorted(paths)}
 
 
+def validate_cloudflare() -> Mapping[str, Any]:
+    configuration = ROOT / "deploy/cloudflare/wrangler.jsonc"
+    container = ROOT / "deploy/cloudflare/src/container.ts"
+    worker = ROOT / "deploy/cloudflare/src/index.ts"
+    package = read_json(ROOT / "deploy/cloudflare/package.json")
+    require_text(
+        configuration,
+        (
+            '"image": "../../Dockerfile"',
+            '"max_instances": 4',
+            '"LATCHWAY_DB_MAX_CONNECTIONS": "5"',
+            '"LATCHWAY_SHUTDOWN_TIMEOUT": "30s"',
+            '"rollout_step_percentage": [10, 50, 100]',
+            '"rollout_active_grace_period": 35',
+            '"observability": {',
+        ),
+        "cloudflare_configuration_incomplete",
+    )
+    require_text(
+        container,
+        (
+            'const command = ["/latchway", "--output", "json", "migrate", "status"]',
+            "this.ctx.container!.exec(command",
+            'await this.stop("SIGTERM")',
+            "MAX_EVIDENCE_OUTPUT_BYTES",
+            "latchway:evidence:pending-stop",
+            "params.exitCode",
+        ),
+        "cloudflare_container_evidence_incomplete",
+    )
+    require_text(
+        worker,
+        (
+            '"/__latchway/cloudflare/evidence/migration"',
+            '"/__latchway/cloudflare/evidence/shutdown"',
+            'Reflect.get(env, "LATCHWAY_EVIDENCE_TOKEN")',
+            'crypto.subtle.digest("SHA-256"',
+            '"Cache-Control": "no-store"',
+            'getByName("instance-0")',
+        ),
+        "cloudflare_worker_evidence_incomplete",
+    )
+    if nested(package, "devDependencies", "wrangler") != "4.127.1":
+        raise EvidenceError("cloudflare_wrangler_not_pinned")
+    return {"wrangler_version": "4.127.1", "instances": 4}
+
+
 def validate_workflow() -> Mapping[str, Any]:
     path = ROOT / ".github/workflows/deployment-evidence.yml"
     document = yaml_as_json(path)
@@ -560,7 +609,20 @@ def validate_workflow() -> Mapping[str, Any]:
         raise EvidenceError("deployment_workflow_action_unpinned")
     text = path.read_text(encoding="utf-8")
     required = (
+        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
         "environment: deployment-evidence-${{ inputs.platform }}",
+        "name: latchway-candidate-${{ inputs.candidate_commit }}",
+        "run-id: ${{ inputs.candidate_run_id }}",
+        '--source-digest "$CANDIDATE_COMMIT"',
+        "--source-ref refs/heads/main",
+        "--core-commit \"$CANDIDATE_COMMIT\"",
+        "--core-release \"$INTENDED_TAG\"",
+        "cloudflare_containers",
+        "scripts/cloudflare-deployment-capture.py",
+        "CLOUDFLARE_API_TOKEN",
+        "containers registries credentials registry.cloudflare.com",
+        "/__latchway/cloudflare/evidence/migration",
+        "/__latchway/cloudflare/evidence/shutdown",
         "version: '540.0.0'",
         "version: '0.4.89'",
         "--args=--output,json,migrate,status",
@@ -572,7 +634,11 @@ def validate_workflow() -> Mapping[str, Any]:
     )
     if any(fragment not in text for fragment in required):
         raise EvidenceError("deployment_workflow_incomplete")
-    if "deployment_environment:" in text or "internal/database/migrations" in text:
+    if (
+        "deployment_environment:" in text
+        or "internal/database/migrations" in text
+        or "refs/tags/" in text
+    ):
         raise EvidenceError("deployment_workflow_assertion_fallback_forbidden")
     return {"pinned_actions": len(uses), "protected_environment_prefix": "deployment-evidence-"}
 
@@ -638,11 +704,8 @@ def make_manifest(args: argparse.Namespace) -> dict[str, Any]:
     }
     if environment["repository"] != "Latchway/latchway" or environment["runner_environment"] != "github-hosted":
         raise EvidenceError("collector_identity_invalid")
-    workflow_match = WORKFLOW_REF.fullmatch(str(environment["workflow_ref"] or ""))
-    if workflow_match is None or environment["ref"] != f"refs/tags/{args.core_release}":
+    if WORKFLOW_REF.fullmatch(str(environment["workflow_ref"] or "")) is None or environment["ref"] != "refs/heads/main":
         raise EvidenceError("collector_workflow_invalid")
-    if workflow_match.group(1) != args.core_release:
-        raise EvidenceError("collector_release_ref_mismatch")
     if not isinstance(environment["sha"], str) or COMMIT.fullmatch(environment["sha"]) is None:
         raise EvidenceError("collector_commit_invalid")
     if not isinstance(environment["run_id"], str) or re.fullmatch(r"[1-9]\d{0,19}", environment["run_id"]) is None:
@@ -655,6 +718,8 @@ def make_manifest(args: argparse.Namespace) -> dict[str, Any]:
         raise EvidenceError("collector_run_invalid")
     if not RELEASE.fullmatch(args.core_release):
         raise EvidenceError("core_release_invalid")
+    if not COMMIT.fullmatch(args.core_commit):
+        raise EvidenceError("core_commit_invalid")
     if OCI_IMAGE.fullmatch(args.image) is None:
         raise EvidenceError("release_image_invalid")
     started, finished = parse_time(args.started_at), parse_time(args.finished_at)
@@ -683,7 +748,7 @@ def make_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "platform": args.platform,
         "started_at": args.started_at,
         "finished_at": args.finished_at,
-        "core_commit": environment["sha"],
+        "core_commit": args.core_commit,
         "core_release": args.core_release,
         "contract_version": json.loads((ROOT / "api/protocol-version.json").read_text())["contract_version"],
         "bundle_sha256": build_bundle_sha256(),
@@ -741,14 +806,13 @@ def validate_manifest(value: Any, root: Path) -> dict[str, Any]:
         {"repository", "workflow_ref", "ref", "sha", "run_id", "run_attempt", "runner_environment", "environment"},
         "capture_collector_fields_invalid",
     )
-    workflow_match = WORKFLOW_REF.fullmatch(str(collector.get("workflow_ref", "")))
     if (
         collector.get("repository") != "Latchway/latchway"
         or collector.get("runner_environment") != "github-hosted"
-        or collector.get("sha") != manifest["core_commit"]
-        or collector.get("ref") != f"refs/tags/{manifest['core_release']}"
-        or workflow_match is None
-        or workflow_match.group(1) != manifest["core_release"]
+        or collector.get("ref") != "refs/heads/main"
+        or WORKFLOW_REF.fullmatch(str(collector.get("workflow_ref", ""))) is None
+        or not isinstance(collector.get("sha"), str)
+        or COMMIT.fullmatch(collector["sha"]) is None
         or not isinstance(collector.get("run_id"), str)
         or re.fullmatch(r"[1-9]\d{0,19}", collector["run_id"]) is None
         or not isinstance(collector.get("run_attempt"), int)
@@ -1042,19 +1106,134 @@ def validate_cloudflare_capture(control: Mapping[str, Any], migration: Mapping[s
     value = require_fields(control, {"platform", "worker", "container"}, "cloudflare_control_fields_invalid")
     if value["platform"] != "cloudflare_containers" or not isinstance(value["worker"], dict) or not isinstance(value["container"], dict):
         raise EvidenceError("cloudflare_control_invalid")
-    if value["worker"].get("status") != "ready" or image_digest(value["container"].get("image_digest")) != digest:
+    worker = require_fields(
+        value["worker"],
+        {"status", "resource_id", "deployments", "versions"},
+        "cloudflare_worker_fields_invalid",
+    )
+    container = require_fields(
+        value["container"],
+        {"application", "instances", "canonical", "mirror"},
+        "cloudflare_container_fields_invalid",
+    )
+    application = require_fields(
+        container["application"],
+        {"id", "name", "state", "instances", "image", "version", "updated_at"},
+        "cloudflare_application_fields_invalid",
+    )
+    canonical = require_fields(
+        container["canonical"],
+        {"index_digest", "platform", "platform_digest", "config_digest", "layers"},
+        "cloudflare_canonical_image_fields_invalid",
+    )
+    mirror = require_fields(
+        container["mirror"],
+        {"image", "manifest_digest", "config_digest", "layers"},
+        "cloudflare_mirror_image_fields_invalid",
+    )
+    if (
+        worker["status"] != "ready"
+        or worker["resource_id"] != application["id"]
+        or not isinstance(worker["deployments"], list)
+        or not worker["deployments"]
+        or not isinstance(worker["versions"], list)
+        or not worker["versions"]
+        or application["name"] != "latchway"
+        or application["state"] not in ("active", "ready")
+        or not isinstance(application["id"], str)
+        or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", application["id"]) is None
+        or type(application["instances"]) is not int
+        or application["instances"] < 1
+        or type(application["version"]) is not int
+        or application["version"] < 1
+        or not isinstance(application["updated_at"], str)
+        or canonical["index_digest"] != f"sha256:{digest}"
+        or canonical["platform"] != "linux/amd64"
+        or image_digest(canonical["platform_digest"]) is None
+        or image_digest(canonical["config_digest"]) is None
+        or image_digest(mirror["manifest_digest"]) is None
+        or image_digest(mirror["config_digest"]) is None
+        or image_digest(mirror["image"]) != image_digest(mirror["manifest_digest"])
+        or image_digest(application["image"]) != image_digest(mirror["manifest_digest"])
+        or canonical["config_digest"] != mirror["config_digest"]
+        or canonical["layers"] != mirror["layers"]
+        or not isinstance(canonical["layers"], list)
+        or not canonical["layers"]
+        or any(
+            not isinstance(layer, dict)
+            or set(layer) != {"digest", "size"}
+            or image_digest(layer.get("digest")) is None
+            or not isinstance(layer.get("size"), int)
+            or layer["size"] < 1
+            for layer in canonical["layers"]
+        )
+    ):
         raise EvidenceError("cloudflare_deployment_invalid")
+    instances = container["instances"]
+    if (
+        not isinstance(instances, list)
+        or not instances
+        or any(
+            not isinstance(instance, dict)
+            or set(instance) != {"id", "name", "state", "location", "version", "created"}
+            or instance.get("state") != "running"
+            or instance.get("version") != application["version"]
+            or not isinstance(instance.get("id"), str)
+            or not isinstance(instance.get("name"), str)
+            or not isinstance(instance.get("created"), str)
+            for instance in instances
+        )
+    ):
+        raise EvidenceError("cloudflare_instances_not_ready")
     execution = migration.get("provider_execution")
-    if not isinstance(execution, dict) or execution.get("exit_code") != 0:
+    if (
+        not isinstance(execution, dict)
+        or set(execution) != {"exit_code", "evidence_id", "instance_name", "command", "reported_status"}
+        or execution.get("exit_code") != 0
+        or not isinstance(execution.get("evidence_id"), str)
+        or EVIDENCE_ID.fullmatch(execution["evidence_id"]) is None
+        or execution.get("instance_name") != "instance-0"
+        or execution.get("command") != ["/latchway", "--output", "json", "migrate", "status"]
+    ):
         raise EvidenceError("cloudflare_migration_execution_failed")
-    validate_shutdown(shutdown, "cloudflare_container_replacement", 30, 25, digest)
-    return {"resource": value["worker"].get("resource_id"), "digest": digest}
+    mirror_digest = image_digest(mirror["manifest_digest"])
+    if mirror_digest is None:
+        raise EvidenceError("cloudflare_mirror_digest_invalid")
+    validate_shutdown(
+        shutdown,
+        "cloudflare_container_replacement",
+        900,
+        30,
+        mirror_digest,
+        extra_fields={"evidence_id", "provider_reason"},
+    )
+    if (
+        nested(shutdown, "before", "resource_id") == nested(shutdown, "after", "resource_id")
+        or shutdown.get("evidence_id") != execution["evidence_id"]
+        or shutdown.get("provider_reason") != "runtime_signal"
+    ):
+        raise EvidenceError("cloudflare_container_not_replaced")
+    return {"resource": worker["resource_id"], "digest": digest, "runtime_digest": mirror_digest}
 
 
-def validate_shutdown(value: Any, method: str, platform_timeout: int, app_timeout: int, digest: str) -> None:
+def validate_shutdown(
+    value: Any,
+    method: str,
+    platform_timeout: int,
+    app_timeout: int,
+    digest: str,
+    *,
+    extra_fields: Iterable[str] = (),
+) -> None:
+    fields = {
+        "method", "started_at", "finished_at", "signal",
+        "platform_timeout_seconds", "application_timeout_seconds", "exit_code",
+        "readiness_restored", "before", "after",
+    }
+    fields.update(extra_fields)
     shutdown = require_fields(
         value,
-        {"method", "started_at", "finished_at", "signal", "platform_timeout_seconds", "application_timeout_seconds", "exit_code", "readiness_restored", "before", "after"},
+        fields,
         "shutdown_observation_fields_invalid",
     )
     started, finished = parse_time(shutdown["started_at"]), parse_time(shutdown["finished_at"])
@@ -1227,8 +1406,8 @@ def verify_attestation(archive: Path, bundle: Path, trusted_root: Path, manifest
             "--bundle", str(bundle),
             "--custom-trusted-root", str(trusted_root),
             "--signer-workflow", SIGNER_WORKFLOW,
-            "--source-digest", manifest["core_commit"],
-            "--source-ref", f"refs/tags/{manifest['core_release']}",
+            "--source-digest", manifest["collector"]["sha"],
+            "--source-ref", "refs/heads/main",
             "--deny-self-hosted-runners",
             "--format", "json",
         ],
@@ -1366,6 +1545,7 @@ def parse_arguments() -> argparse.Namespace:
     manifest.add_argument("--capture-dir", type=Path, required=True)
     manifest.add_argument("--started-at", required=True)
     manifest.add_argument("--finished-at", required=True)
+    manifest.add_argument("--core-commit", required=True)
     manifest.add_argument("--core-release", required=True)
     manifest.add_argument("--image", required=True)
     manifest.add_argument("--endpoint", required=True)

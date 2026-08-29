@@ -49,6 +49,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/run-local-load-gates.sh", serialized)
         self.assertIn("-scope automated", serialized)
         self.assertIn("subject-path: latchway-candidate.json", serialized)
+        self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         for job in workflow["jobs"].values():
             self.assertEqual(job.get("if"), "github.ref == 'refs/heads/main'")
 
@@ -81,6 +82,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/verify-promotion.py", serialized)
         self.assertIn("--signer-workflow", serialized)
         self.assertIn("--source-ref refs/heads/main", serialized)
+        self.assertGreaterEqual(serialized.count("--source-digest"), 3)
+        self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("--deny-self-hosted-runners", serialized)
         self.assertIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", serialized)
         self.assertNotIn("continue-on-error", serialized)
@@ -95,6 +98,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--oci-image-digest", serialized)
         self.assertIn("--external-evidence-dir", serialized)
         self.assertIn("subject-path:", serialized)
+        self.assertNotIn("if: inputs.scope != 'source'\n        uses: actions/attest@", serialized)
+        self.assertIn('test "$GITHUB_SHA" = "$core_commit"', serialized)
         self.assertNotIn("continue-on-error", serialized)
         download = next(
             step

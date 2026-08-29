@@ -115,13 +115,45 @@ The platform-only health endpoint is
 liveness and `/readyz` for database, schema, configuration, signing-key,
 master-key, and worker-heartbeat readiness.
 
+## Release evidence
+
+Create the protected GitHub environment
+`deployment-evidence-cloudflare_containers` with account-scoped
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and a random
+`CLOUDFLARE_EVIDENCE_TOKEN` of 32–256 characters. Install the same evidence
+token as the Worker secret `LATCHWAY_EVIDENCE_TOKEN`; it is used only to
+authorize the bounded migration and graceful-stop evidence operations and is
+never written to the artifact:
+
+```bash
+wrangler secret put LATCHWAY_EVIDENCE_TOKEN
+```
+
+Mirror the candidate's verified `linux/amd64` child into
+`registry.cloudflare.com/ACCOUNT/latchway` without rebuilding it. Then dispatch
+`.github/workflows/deployment-evidence.yml` from protected `main` with
+`platform=cloudflare_containers`, the exact candidate commit, intended tag,
+candidate workflow run ID, canonical GHCR index digest, public HTTPS endpoint,
+and `cloudflare_mirror_image` pinned by digest.
+
+The collector verifies the candidate attestation, hashes the canonical child
+and mirror manifests, and requires identical config and ordered layer
+descriptors before deploying. It then waits for the asynchronous Container
+rollout, executes `/latchway --output json migrate status` inside `instance-0`
+through the Durable Object Container API, confirms Worker secret names without
+reading their values, sends SIGTERM through the same API, records the
+provider-reported reason and exit code, and proves a newly created healthy
+instance serves the same mirror digest. The signed report continues to bind the
+canonical multi-architecture OCI index used by the other platforms.
+
 ## Rollout and rollback
 
 The checked-in rollout advances 10%, 50%, then 100%. Its 35-second active grace
 period makes a recently connected container ineligible for replacement until
 that connection reaches the configured age; it is not a request-drain
 guarantee. After Cloudflare selects an instance for replacement it sends
-`SIGTERM` and applies its separate platform shutdown bound. Verify `/readyz`, a
+`SIGTERM`; the platform allows up to 15 minutes before SIGKILL, while Latchway's
+own configured drain is 30 seconds. Verify `/readyz`, a
 non-streaming request, and a long-lived SSE request through the rollout, and
 wait for rollout completion before recording evidence. `wrangler versions
 list` shows deployable versions; use `wrangler rollback VERSION_ID` for

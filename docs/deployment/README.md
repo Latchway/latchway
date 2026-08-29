@@ -39,7 +39,9 @@ Before accepting traffic:
 
 Cloud/provider account smoke tests, DNS/TLS, physical App Attest and Play
 Integrity evidence, and post-publication package tests cannot be replaced by a
-local build. Record those results against the exact release digest and SDK tags.
+local build. Record prepublication results against the attested candidate
+commit, intended tags, and exact OCI index; promotion creates public tags only
+after those records pass.
 
 ## Deployment evidence gate
 
@@ -54,13 +56,14 @@ tests:
 
 That command may pass without a cloud account. It never sets any
 `*_verified` release claim. Live claims are produced only by the pinned
-`.github/workflows/deployment-evidence.yml` workflow from a release tag and a
-fixed protected environment:
+`.github/workflows/deployment-evidence.yml` workflow from protected `main`, an
+attested release-candidate run, and a fixed protected environment:
 
 - `deployment-evidence-compose`
 - `deployment-evidence-cloud_run`
 - `deployment-evidence-aws`
 - `deployment-evidence-fly_io`
+- `deployment-evidence-cloudflare_containers`
 
 Each run observes the provider identity and resource ID, the configured and
 resolved image digest, a remote `migrate status`, secret references without
@@ -70,11 +73,16 @@ deterministic and receives a GitHub artifact attestation. A missing command,
 log record, provider permission, digest match, health check, or archive fails
 the run; there is no manual-pass input.
 
-Start each capture against the already deployed release. For example:
+Start each capture against the exact candidate image before any public tag is
+created. The candidate commit must be the commit in the downloaded candidate
+manifest; the workflow source revision is recorded separately. For example:
 
 ```bash
-gh workflow run deployment-evidence.yml --ref v1.0.0 \
+gh workflow run deployment-evidence.yml --ref main \
   -f platform=cloud_run \
+  -f candidate_commit='<40 lowercase hex>' \
+  -f intended_tag=v1.0.0 \
+  -f candidate_run_id='<release-candidate workflow run ID>' \
   -f image='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>' \
   -f endpoint='https://ai.example.com' \
   -f gcp_project='<project-id>' \
@@ -83,8 +91,9 @@ gh workflow run deployment-evidence.yml --ref v1.0.0 \
   -f gcp_migration_job='latchway-migrate'
 ```
 
-Run the equivalent dispatch for `compose`, `aws`, and `fly_io`; their exact
-provider inputs and permissions are documented in the platform READMEs.
+Run the equivalent dispatch for `compose`, `aws`, `fly_io`, and
+`cloudflare_containers`; their exact provider inputs and permissions are
+documented in the platform READMEs.
 Compose accepts only a loopback HTTP endpoint. Cloud platforms require a
 public HTTPS origin; private, loopback, link-local, and redirect targets are
 rejected by the observer.
@@ -92,22 +101,22 @@ rejected by the observer.
 ### Aggregate release evidence
 
 Place all five provider archives and their attestation bundles under the
-cross-repository evidence root. Cloudflare Containers still requires an
-external live capture because this repository cannot exercise a provider
-account locally. That capture is accepted only when it uses the same schema,
-release identity, protected environment
-`deployment-evidence-cloudflare_containers`, and signer workflow
-`.github/workflows/deployment-evidence.yml` as the other platforms. A capture
-or attestation produced by another workflow is rejected by the finalizer.
+cross-repository evidence root. Every archive must come from the same pinned
+workflow, the platform's fixed protected environment, and the same candidate
+identity. A capture or attestation produced by another workflow is rejected by
+the finalizer.
 
-The Cloudflare capture must come from provider-observed state, not operator
+The Cloudflare capture comes from provider-observed state, not operator
 assertions. In addition to the common digest, secret-reference, health, and
-readiness checks, it must include a ready Worker resource ID, the exact
-container image digest, and a successful provider migration execution whose
+readiness checks, it includes a ready Worker and Container application ID, the
+canonical signed index and amd64 child, a content-equivalent Cloudflare Registry
+mirror (identical config and ordered layer descriptors), and a successful
+in-container migration execution whose
 `migration.provider_execution.reported_status` is equal to
 `migration.status`. Its shutdown observation must record a SIGTERM container
-replacement with the same digest before and after, a 30-second platform limit,
-a 25-second application drain limit, exit code zero, and
+replacement with the same mirror digest before and after, Cloudflare's
+15-minute force-stop bound, the application's 30-second drain limit, provider
+exit code zero, and
 `shutdown.readiness_restored == true`. Missing provider-returned identifiers,
 timestamps, execution results, or restored readiness fail closed.
 
@@ -145,8 +154,9 @@ python3 scripts/deployment-evidence.py finalize \
 ```
 
 The finalizer performs offline attestation verification with the repository,
-signer workflow, source tag, source commit, and GitHub-hosted runner policy
-fixed. Only after all five signed archives pass does it write
+signer workflow, protected-main source revision, and GitHub-hosted runner policy
+fixed. Candidate commit/tag/image bindings are verified independently inside
+every archive. Only after all five signed archives pass does it write
 `cloud_deployments.json` in the shape accepted by the cross-repository release
 gate. Preserve the evidence directory and `trusted_root.jsonl` with the release
 record; the generated verification summary includes their cryptographic

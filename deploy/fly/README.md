@@ -78,9 +78,9 @@ Both `LATCHWAY_DATABASE_URL` and `LATCHWAY_MASTER_KEY` must appear as
 `Deployed`, not staged or partial. Every running application Machine must
 resolve to the release digest and at least two must be started.
 
-Run `.github/workflows/deployment-evidence.yml` from the release tag with
-`platform=fly_io`, the exact release image, public HTTPS endpoint, and Fly app
-name. The pinned collector records the provider-returned app ID, checks the
+Run `.github/workflows/deployment-evidence.yml` from protected `main` with
+`platform=fly_io`, the candidate commit/run/intended tag, exact OCI index,
+public HTTPS endpoint, and Fly app name. The pinned collector records the provider-returned app ID, checks the
 resolved digest of every running Machine, binds migration output to an existing
 Machine, restarts one Machine explicitly with SIGTERM and a 35-second timeout,
 waits for a new Machine instance, and probes `/healthz` plus `/readyz`.

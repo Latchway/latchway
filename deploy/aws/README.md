@@ -71,7 +71,7 @@ forward-only rollback are covered in `docs/operations/backup-restore.md` and
 
 Create the fixed protected GitHub environment `deployment-evidence-aws` with
 `AWS_ROLE_TO_ASSUME`. Its GitHub OIDC trust policy must restrict the repository,
-release-tag ref, and this environment. The role needs read access to the ECS
+protected-main ref, and this environment. The role needs read access to the ECS
 cluster, service, task definition, and tasks; permission to run and stop tasks
 on the named service/task definition; `iam:PassRole` only for the task and
 execution roles; and read-only access to the named CloudWatch log group. It
@@ -87,9 +87,9 @@ aws ecs list-tasks --cluster CLUSTER --service-name SERVICE --desired-status RUN
 aws ecs describe-tasks --cluster CLUSTER --tasks TASK_ARNS --region REGION
 ```
 
-Run `.github/workflows/deployment-evidence.yml` from the release tag with
-`platform=aws`, the source GHCR release identity by digest, public HTTPS
-endpoint, region, cluster, and service. The collector launches a private
+Run `.github/workflows/deployment-evidence.yml` from protected `main` with
+`platform=aws`, the candidate commit/run/intended tag, source GHCR OCI index by
+digest, public HTTPS endpoint, region, cluster, and service. The collector launches a private
 one-off status task, obtains its exact JSON report from that task's authenticated
 CloudWatch stream, confirms every running task resolved to the same digest,
 checks Secrets Manager ARN references without fetching values, stops one of at

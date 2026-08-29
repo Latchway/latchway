@@ -1,7 +1,72 @@
-export { LatchwayContainer } from "./container";
+import { LatchwayContainer } from "./container";
+
+export { LatchwayContainer };
 
 const PLATFORM_HEALTH_PATH = "/__latchway/cloudflare/healthz";
+const EVIDENCE_MIGRATION_PATH = "/__latchway/cloudflare/evidence/migration";
+const EVIDENCE_SHUTDOWN_PATH = "/__latchway/cloudflare/evidence/shutdown";
+const MAX_EVIDENCE_BODY_BYTES = 1024;
+const EVIDENCE_ID = /^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$/;
 const MAX_CONFIGURED_INSTANCES = 4;
+
+type EvidenceContainerStub = DurableObjectStub<LatchwayContainer>;
+
+function secureEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= left[index]! ^ right[index]!;
+  }
+  return difference === 0;
+}
+
+async function authorizedEvidenceRequest(request: Request, env: Env): Promise<boolean> {
+  const expected = Reflect.get(env, "LATCHWAY_EVIDENCE_TOKEN");
+  const authorization = request.headers.get("Authorization");
+  if (
+    typeof expected !== "string" ||
+    expected.length < 32 ||
+    expected.length > 256 ||
+    authorization === null ||
+    authorization.length > 263 ||
+    !authorization.startsWith("Bearer ")
+  ) {
+    return false;
+  }
+  const encoder = new TextEncoder();
+  const [expectedDigest, providedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+    crypto.subtle.digest("SHA-256", encoder.encode(authorization.slice(7))),
+  ]);
+  return secureEqual(new Uint8Array(expectedDigest), new Uint8Array(providedDigest));
+}
+
+async function evidenceIdentifier(request: Request): Promise<string> {
+  const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
+  if (!Number.isSafeInteger(declaredLength) || declaredLength > MAX_EVIDENCE_BODY_BYTES) {
+    throw new Error("invalid evidence request length");
+  }
+  const body = await request.text();
+  if (new TextEncoder().encode(body).byteLength > MAX_EVIDENCE_BODY_BYTES) {
+    throw new Error("evidence request exceeded its bound");
+  }
+  const value: unknown = JSON.parse(body);
+  const evidenceId =
+    typeof value === "object" && value !== null
+      ? Reflect.get(value, "evidence_id")
+      : undefined;
+  if (typeof evidenceId !== "string" || !EVIDENCE_ID.test(evidenceId)) {
+    throw new Error("invalid evidence identifier");
+  }
+  return evidenceId;
+}
+
+function evidenceJSON(value: unknown, status = 200): Response {
+  return Response.json(value, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
 
 function instanceCount(configured: string): number {
   const count = Number(configured);
@@ -75,6 +140,37 @@ export default {
         });
       }
       return Response.json({ status: "ok", platform: "cloudflare-containers" });
+    }
+
+    if (url.pathname === EVIDENCE_MIGRATION_PATH || url.pathname === EVIDENCE_SHUTDOWN_PATH) {
+      if (request.method !== "POST") {
+        return new Response(null, { status: 405, headers: { Allow: "POST" } });
+      }
+      if (!(await authorizedEvidenceRequest(request, env))) {
+        return evidenceJSON({ error: "unauthorized" }, 401);
+      }
+      try {
+        const evidenceId = await evidenceIdentifier(request);
+        const container = env.LATCHWAY_CONTAINER.getByName(
+          "instance-0",
+        ) as EvidenceContainerStub;
+        const result =
+          url.pathname === EVIDENCE_MIGRATION_PATH
+            ? await container.evidenceMigrationStatus(evidenceId)
+            : await container.evidenceGracefulStop(evidenceId);
+        return evidenceJSON(result);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "Cloudflare evidence operation failed",
+            operation:
+              url.pathname === EVIDENCE_MIGRATION_PATH ? "migration" : "shutdown",
+            error_type: error instanceof Error ? error.name : "unknown",
+          }),
+        );
+        return evidenceJSON({ error: "evidence_operation_failed" }, 500);
+      }
     }
 
     try {

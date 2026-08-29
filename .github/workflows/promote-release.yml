@@ -66,6 +66,7 @@ jobs:
           [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
           [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$PROMOTION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -n "$DISPATCH_TOKEN"
           for repository in \
@@ -99,11 +100,13 @@ jobs:
           gh attestation verify "$CANDIDATE_MANIFEST" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
           gh attestation verify "$PROMOTION_REPORT" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
       - name: Verify the candidate artifact and exact aggregate bindings
@@ -147,6 +150,7 @@ jobs:
           gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
       - name: Refuse an existing core release tag
