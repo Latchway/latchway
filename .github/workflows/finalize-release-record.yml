@@ -1,0 +1,444 @@
+name: Finalize immutable release record
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Exact protected-main release commit
+        required: true
+        type: string
+      release_tag:
+        description: Exact stable annotated core release tag
+        required: true
+        type: string
+      candidate_run_id:
+        description: Exact successful release-candidate run ID
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact successful release-candidate run attempt
+        required: true
+        type: string
+      security_run_id:
+        description: Exact successful candidate-security run ID
+        required: true
+        type: string
+      security_run_attempt:
+        description: Exact successful candidate-security run attempt
+        required: true
+        type: string
+      release_conformance_run_id:
+        description: Exact successful release-scope cross-repository run ID
+        required: true
+        type: string
+      release_conformance_run_attempt:
+        description: Exact successful release-scope cross-repository run attempt
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: write
+  id-token: write
+  packages: read
+
+concurrency:
+  group: finalize-release-record-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact released source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact immutable finalizer inputs
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          SECURITY_RUN_ID: ${{ inputs.security_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_run_attempt }}
+          CONFORMANCE_RUN_ID: ${{ inputs.release_conformance_run_id }}
+          CONFORMANCE_RUN_ATTEMPT: ${{ inputs.release_conformance_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          for value in \
+            "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
+            "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" \
+            "$CONFORMANCE_RUN_ID" "$CONFORMANCE_RUN_ATTEMPT"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
+          done
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Authenticate every fixed evidence run and attempt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          SECURITY_RUN_ID: ${{ inputs.security_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_run_attempt }}
+          CONFORMANCE_RUN_ID: ${{ inputs.release_conformance_run_id }}
+          CONFORMANCE_RUN_ATTEMPT: ${{ inputs.release_conformance_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          verify_run() {
+            local label="$1" run_id="$2" run_attempt="$3" expected_workflow="$4"
+            local run="$RUNNER_TEMP/$label-run.json"
+            local workflow="$RUNNER_TEMP/$label-workflow.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$run"
+            jq --exit-status \
+              --arg commit "$CANDIDATE_COMMIT" \
+              --argjson attempt "$run_attempt" \
+              '.event == "workflow_dispatch" and
+               .status == "completed" and .conclusion == "success" and
+               .head_sha == $commit and .head_branch == "main" and
+               .run_attempt == $attempt' "$run" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$run")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
+            jq --exit-status --arg path "$expected_workflow" \
+              '.path == $path and .state == "active"' "$workflow" >/dev/null
+          }
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+          verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml
+          verify_run conformance "$CONFORMANCE_RUN_ID" "$CONFORMANCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+      - name: Download the exact candidate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact candidate-security evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-security-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/security
+          run-id: ${{ inputs.security_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact release-scope conformance evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-release
+          path: ${{ runner.temp }}/conformance
+          run-id: ${{ inputs.release_conformance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify all evidence signer identities and immutable source bindings
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          gh attestation verify "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/security/security-summary.json" \
+            --bundle "$RUNNER_TEMP/security/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/security-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
+            --bundle "$RUNNER_TEMP/conformance/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/conformance-attestation-verification.json"
+      - name: Recompute the candidate and security gates
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$RELEASE_TAG" \
+            --image ghcr.io/latchway/latchway
+          python3 scripts/security-evidence.py \
+            --verify \
+            --report "$RUNNER_TEMP/security/security-summary.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --raw-directory "$RUNNER_TEMP/security/raw" \
+            --repository "$GITHUB_WORKSPACE" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$RELEASE_TAG"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+      - name: Verify exact public tag release OCI and npm state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/conformance/latchway-cross-repository.json"
+          candidate="$RUNNER_TEMP/candidate/latchway-candidate.json"
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$RELEASE_TAG" \
+            '.scope == "release" and .verdict == "passed" and .release_ready == true and
+             ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length == 1) and
+             ([.evidence_domains[] | select((.id == "public_tags" or .id == "public_registries") and .required == true and .status == "passed")] | length == 2)' \
+            "$report" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > "$RUNNER_TEMP/tag-ref.json"
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/tag-ref.json")" = tag
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/tag-ref.json")
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/tag-object.json"
+          jq --exit-status --arg tag "$RELEASE_TAG" --arg commit "$CANDIDATE_COMMIT" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
+            "$RUNNER_TEMP/tag-object.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          jq --exit-status --arg tag "$RELEASE_TAG" \
+            '.tag_name == $tag and .name == ("Latchway " + $tag) and
+             .draft == false and .prerelease == false and
+             (.id | type == "number" and . > 0) and
+             (.published_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' \
+            "$RUNNER_TEMP/release.json" >/dev/null
+          image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
+          [[ "$image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect --raw "$image" > "$RUNNER_TEMP/oci-index.json"
+          actual="sha256:$(sha256sum "$RUNNER_TEMP/oci-index.json" | cut -d ' ' -f 1)"
+          test "$actual" = "${image##*@}"
+          version=${RELEASE_TAG#v}
+          docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway:$version" > "$RUNNER_TEMP/oci-version-index.json"
+          version_actual="sha256:$(sha256sum "$RUNNER_TEMP/oci-version-index.json" | cut -d ' ' -f 1)"
+          test "$version_actual" = "${image##*@}"
+          cosign verify \
+            --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-sha "$CANDIDATE_COMMIT" \
+            "$image" > "$RUNNER_TEMP/cosign-verification.json"
+          gh attestation verify "oci://$image" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/oci-attestation-verification.json"
+          javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
+          javascript_commit=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .commit' "$report")
+          react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
+          react_native_commit=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .commit' "$report")
+          npm --userconfig=/dev/null view "@latchway/client@$javascript_version" --json > "$RUNNER_TEMP/npm-javascript.json"
+          npm --userconfig=/dev/null view "@latchway/react-native@$react_native_version" --json > "$RUNNER_TEMP/npm-react-native.json"
+          jq --exit-status --arg version "$javascript_version" --arg commit "$javascript_commit" \
+            '.name == "@latchway/client" and .version == $version and .gitHead == $commit and (.dist.integrity | startswith("sha512-"))' \
+            "$RUNNER_TEMP/npm-javascript.json" >/dev/null
+          jq --exit-status --arg version "$react_native_version" --arg commit "$react_native_commit" \
+            '.name == "@latchway/react-native" and .version == $version and .gitHead == $commit and (.dist.integrity | startswith("sha512-"))' \
+            "$RUNNER_TEMP/npm-react-native.json" >/dev/null
+      - name: Seal verified public coordinates for the offline renderer
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/conformance/latchway-cross-repository.json"
+          image=$(jq --raw-output '.contract.oci_image_digest' "$report")
+          javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
+          react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
+          ios_version=$(jq --raw-output '.repositories[] | select(.id == "ios") | .version' "$report")
+          ios_tag=$(jq --raw-output '.repositories[] | select(.id == "ios") | .intended_tag' "$report")
+          android_version=$(jq --raw-output '.repositories[] | select(.id == "android") | .version' "$report")
+          jq --null-input \
+            --arg repository Latchway/latchway \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$RELEASE_TAG" \
+            --arg tag_object "$(jq --raw-output .object.sha "$RUNNER_TEMP/tag-ref.json")" \
+            --argjson release_id "$(jq .id "$RUNNER_TEMP/release.json")" \
+            --arg release_url "https://github.com/Latchway/latchway/releases/tag/$RELEASE_TAG" \
+            --arg published_at "$(jq --raw-output .published_at "$RUNNER_TEMP/release.json")" \
+            --arg image "$image" \
+            --arg js "@latchway/client@$javascript_version" \
+            --arg rn "@latchway/react-native@$react_native_version" \
+            --arg swift "https://github.com/Latchway/latchway-ios-sdk.git@$ios_tag" \
+            --arg pod "Latchway/$ios_version" \
+            --arg android "$android_version" \
+            '{schema_version: 1, kind: "latchway_public_release_state",
+              repository: $repository, core_commit: $commit, core_tag: $tag,
+              tag_object_sha: $tag_object,
+              github_release: {id: $release_id, url: $release_url, tag_name: $tag,
+                draft: false, prerelease: false, published_at: $published_at},
+              oci_image_digest: $image,
+              registries: {
+                oci: $image, npm_javascript: $js, npm_react_native: $rn,
+                swift_package: $swift, cocoapods: $pod,
+                maven_central: [
+                  "dev.latchway:latchway-core:" + $android,
+                  "dev.latchway:latchway-okhttp:" + $android,
+                  "dev.latchway:latchway-play-integrity:" + $android,
+                  "dev.latchway:latchway-firebase-auth:" + $android,
+                  "dev.latchway:latchway-bom:" + $android
+                ]
+              }}' > "$RUNNER_TEMP/publication-state.json"
+      - name: Render the deterministic final completion report
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/final-release-record"
+          python3 scripts/render-completion-report.py \
+            --candidate "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --security "$RUNNER_TEMP/security/security-summary.json" \
+            --release-conformance "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
+            --publication-state "$RUNNER_TEMP/publication-state.json" \
+            --repository "$GITHUB_WORKSPACE" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$RELEASE_TAG" \
+            --output "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
+      - name: Reconcile any existing immutable final assets
+        id: final-assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          report="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
+          bundle="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json"
+          report_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | length' "$RUNNER_TEMP/release.json")
+          bundle_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.attestation.sigstore.json")] | length' "$RUNNER_TEMP/release.json")
+          test "$report_count" -le 1
+          test "$bundle_count" -le 1
+          if [[ "$report_count" -eq 0 && "$bundle_count" -eq 1 ]]; then
+            echo "attestation bundle exists without its report" >&2
+            exit 1
+          fi
+          if [[ "$report_count" -eq 1 ]]; then
+            expected="sha256:$(sha256sum "$report" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | .[0].digest // "digest-unavailable"' "$RUNNER_TEMP/release.json")
+            test "$existing" = "$expected"
+            mkdir -p "$RUNNER_TEMP/existing-final-assets"
+            gh release download "$RELEASE_TAG" --pattern COMPLETION_REPORT.md --dir "$RUNNER_TEMP/existing-final-assets"
+            cmp --silent "$report" "$RUNNER_TEMP/existing-final-assets/COMPLETION_REPORT.md"
+            echo "report_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$bundle_count" -eq 1 ]]; then
+            gh release download "$RELEASE_TAG" \
+              --pattern COMPLETION_REPORT.attestation.sigstore.json \
+              --dir "$RUNNER_TEMP/existing-final-assets"
+            install -m 0600 -- \
+              "$RUNNER_TEMP/existing-final-assets/COMPLETION_REPORT.attestation.sigstore.json" \
+              "$bundle"
+            gh attestation verify "$report" \
+              --bundle "$bundle" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/finalize-release-record.yml" \
+              --source-digest "$CANDIDATE_COMMIT" \
+              --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              --format json > "$RUNNER_TEMP/existing-final-attestation-verification.json"
+            echo "bundle_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Attest the exact final completion report when absent
+        if: steps.final-assets.outputs.bundle_exists != 'true'
+        id: completion-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.md
+      - name: Retain and verify the new completion attestation bundle
+        if: steps.final-assets.outputs.bundle_exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          BUNDLE_PATH: ${{ steps.completion-attestation.outputs.bundle-path }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0600 -- "$BUNDLE_PATH" "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json"
+          gh attestation verify "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md" \
+            --bundle "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/finalize-release-record.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/new-final-attestation-verification.json"
+      - name: Upload only missing exact final assets without clobbering
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REPORT_EXISTS: ${{ steps.final-assets.outputs.report_exists }}
+          BUNDLE_EXISTS: ${{ steps.final-assets.outputs.bundle_exists }}
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
+          bundle="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json"
+          test -f "$report"
+          test -f "$bundle"
+          if [[ "$REPORT_EXISTS" != true ]]; then
+            gh release upload "$RELEASE_TAG" "$report"
+          fi
+          if [[ "$BUNDLE_EXISTS" != true ]]; then
+            gh release upload "$RELEASE_TAG" "$bundle"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/final-release.json"
+          for asset in "$report" "$bundle"; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            actual=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] |
+               if length == 1 then (.[0].digest // "digest-unavailable")
+               else error("final release asset missing or duplicated") end' \
+              "$RUNNER_TEMP/final-release.json")
+            test "$actual" = "$expected"
+          done
+      - name: Retain the final report bundle and verified public state
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-final-release-record-${{ inputs.candidate_commit }}
+          path: |
+            ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.md
+            ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.attestation.sigstore.json
+            ${{ runner.temp }}/publication-state.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
