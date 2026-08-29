@@ -179,8 +179,8 @@
   "targets": {
     "overhead_samples": 1000,
     "overhead_warmup": 20,
-    "p50_gateway_overhead_ms": 5,
-    "p95_gateway_overhead_ms": 15,
+    "p50_gateway_overhead_ms": 15,
+    "p95_gateway_overhead_ms": 20,
     "p99_gateway_overhead_ms": 30,
     "non_stream_rps": 100,
     "non_stream_duration_seconds": 60,

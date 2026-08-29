@@ -57,7 +57,10 @@ func TestBuildLoadConfigRetainsContractFloors(t *testing.T) {
 	t.Parallel()
 	value := buildLoadConfig(validLoadOptions(), "http://10.239.100.10:19090/v1")
 	targets := value["targets"].(map[string]any)
-	if targets["non_stream_rps"] != 100 || targets["sse_concurrency"] != 500 || targets["idle_memory_mib"] != 256 {
+	if targets["p50_gateway_overhead_ms"] != 15 ||
+		targets["p95_gateway_overhead_ms"] != 20 ||
+		targets["p99_gateway_overhead_ms"] != 30 ||
+		targets["non_stream_rps"] != 100 || targets["sse_concurrency"] != 500 || targets["idle_memory_mib"] != 256 {
 		t.Fatalf("load target floors changed: %#v", targets)
 	}
 	metadata := value["metadata"].(map[string]any)

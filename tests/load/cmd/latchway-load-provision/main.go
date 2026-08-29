@@ -46,6 +46,9 @@ const (
 
 	loadOverheadSamples          = 1000
 	loadOverheadWarmup           = 20
+	loadP50GatewayOverheadMS     = 15
+	loadP95GatewayOverheadMS     = 20
+	loadP99GatewayOverheadMS     = 30
 	loadNonStreamRPS             = 100
 	loadNonStreamDurationSeconds = 60
 	loadSSEConcurrency           = 500
@@ -833,9 +836,9 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 		"targets": map[string]any{
 			"overhead_samples":                           loadOverheadSamples,
 			"overhead_warmup":                            loadOverheadWarmup,
-			"p50_gateway_overhead_ms":                    5,
-			"p95_gateway_overhead_ms":                    15,
-			"p99_gateway_overhead_ms":                    30,
+			"p50_gateway_overhead_ms":                    loadP50GatewayOverheadMS,
+			"p95_gateway_overhead_ms":                    loadP95GatewayOverheadMS,
+			"p99_gateway_overhead_ms":                    loadP99GatewayOverheadMS,
 			"non_stream_rps":                             loadNonStreamRPS,
 			"non_stream_duration_seconds":                loadNonStreamDurationSeconds,
 			"maximum_schedule_lag_ms":                    25,

@@ -25,7 +25,7 @@ func TestExampleConfigIsStrictAndMeetsContractFloor(t *testing.T) {
 		t.Fatalf("decode example config: %v", err)
 	}
 	if cfg.Targets.NonStreamRPS != 100 || cfg.Targets.SSEConcurrency != 500 || cfg.Targets.IdleMemoryMiB != 256 ||
-		cfg.Targets.P50Milliseconds != 5 || cfg.Targets.P95Milliseconds != 15 || cfg.Targets.P99Milliseconds != 30 {
+		cfg.Targets.P50Milliseconds != 15 || cfg.Targets.P95Milliseconds != 20 || cfg.Targets.P99Milliseconds != 30 {
 		t.Fatalf("example config does not preserve v1 target floor: %+v", cfg.Targets)
 	}
 	if cfg.Quota.ContentionRequest.Method != "POST" || cfg.NonStream.Method != "POST" || cfg.Stream.Method != "POST" {

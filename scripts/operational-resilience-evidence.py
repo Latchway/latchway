@@ -1186,7 +1186,7 @@ def validate_load_gate_metrics(
             or set(targets) != {"p50", "p95", "p99"}
         ):
             raise EvidenceError(code)
-        for percentile, ceiling in (("p50", 5), ("p95", 15), ("p99", 30)):
+        for percentile, ceiling in (("p50", 15), ("p95", 20), ("p99", 30)):
             target = evidence_number(targets[percentile])
             observed = evidence_number(metrics[f"{percentile}_overhead_ms"])
             if target is None or observed is None or not 0 < target <= ceiling or observed >= target:

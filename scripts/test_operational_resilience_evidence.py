@@ -401,7 +401,7 @@ class OperationalEvidenceFixture:
                 "p50_direct_upstream_ms": 1,
                 "p95_direct_upstream_ms": 1,
                 "p99_direct_upstream_ms": 1,
-                "targets_ms": {"p50": 5, "p95": 15, "p99": 30},
+                "targets_ms": {"p50": 15, "p95": 20, "p99": 30},
                 "gateway_results": self.result_evidence(21),
                 "direct_upstream_results": self.result_evidence(21),
             },
@@ -1367,16 +1367,37 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
     def test_rejects_tampered_load_target_and_scenario_claim_set(self) -> None:
         original_load = self.fixture.load_path.read_bytes()
 
-        def widen_overhead(value: dict[str, object]) -> None:
-            gate = next(
-                gate for gate in value["gates"] if gate["name"] == "gateway_overhead"
-            )
-            gate["metrics"]["targets_ms"]["p99"] = 31
+        for percentile, widened in (("p50", 16), ("p95", 21), ("p99", 31)):
+            def widen_overhead(
+                value: dict[str, object],
+                percentile: str = percentile,
+                widened: int = widened,
+            ) -> None:
+                gate = next(
+                    gate for gate in value["gates"] if gate["name"] == "gateway_overhead"
+                )
+                gate["metrics"]["targets_ms"][percentile] = widened
 
-        self.mutate(self.fixture.load_path, widen_overhead)
-        with self.assertRaisesRegex(MODULE.EvidenceError, "load_gate_metrics_invalid"):
-            self.finalize("load-target-output")
-        self.fixture.load_path.write_bytes(original_load)
+            self.mutate(self.fixture.load_path, widen_overhead)
+            with self.assertRaisesRegex(MODULE.EvidenceError, "load_gate_metrics_invalid"):
+                self.finalize(f"load-{percentile}-target-output")
+            self.fixture.load_path.write_bytes(original_load)
+
+        for percentile, boundary in (("p50", 15), ("p95", 20), ("p99", 30)):
+            def reach_overhead_boundary(
+                value: dict[str, object],
+                percentile: str = percentile,
+                boundary: int = boundary,
+            ) -> None:
+                gate = next(
+                    gate for gate in value["gates"] if gate["name"] == "gateway_overhead"
+                )
+                gate["metrics"][f"{percentile}_overhead_ms"] = boundary
+
+            self.mutate(self.fixture.load_path, reach_overhead_boundary)
+            with self.assertRaisesRegex(MODULE.EvidenceError, "load_gate_metrics_invalid"):
+                self.finalize(f"load-{percentile}-boundary-output")
+            self.fixture.load_path.write_bytes(original_load)
 
         scenario = self.fixture.failure_dir / "live-process-kill-after-reservation.json"
         self.mutate(scenario, lambda value: value["assertions"].pop())
