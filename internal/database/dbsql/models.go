@@ -283,6 +283,23 @@ type GatewaySigningKey struct {
 	RetiredAt               pgtype.Timestamptz `db:"retired_at" json:"retired_at"`
 }
 
+type IdentityJwksCache struct {
+	IssuerSha256      []byte             `db:"issuer_sha256" json:"issuer_sha256"`
+	SourceSha256      []byte             `db:"source_sha256" json:"source_sha256"`
+	SourceFormat      string             `db:"source_format" json:"source_format"`
+	Document          []byte             `db:"document" json:"document"`
+	DocumentSha256    []byte             `db:"document_sha256" json:"document_sha256"`
+	Etag              *string            `db:"etag" json:"etag"`
+	LastModified      pgtype.Timestamptz `db:"last_modified" json:"last_modified"`
+	FetchedAt         pgtype.Timestamptz `db:"fetched_at" json:"fetched_at"`
+	FreshUntil        pgtype.Timestamptz `db:"fresh_until" json:"fresh_until"`
+	StaleUntil        pgtype.Timestamptz `db:"stale_until" json:"stale_until"`
+	RefreshLeaseToken []byte             `db:"refresh_lease_token" json:"refresh_lease_token"`
+	RefreshLeaseUntil pgtype.Timestamptz `db:"refresh_lease_until" json:"refresh_lease_until"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type IdentityProviderState struct {
 	IdentityProviderStateID string             `db:"identity_provider_state_id" json:"identity_provider_state_id"`
 	OrganizationID          string             `db:"organization_id" json:"organization_id"`
@@ -569,8 +586,9 @@ type UpstreamAttempt struct {
 	InputAccountingProfileDigest  []byte             `db:"input_accounting_profile_digest" json:"input_accounting_profile_digest"`
 	RewrittenBodySha256           []byte             `db:"rewritten_body_sha256" json:"rewritten_body_sha256"`
 	InputTokenBound               *int64             `db:"input_token_bound" json:"input_token_bound"`
-	OutputTokenBound              *int64             `db:"output_token_bound" json:"output_token_bound"`
-	TotalTokenBound               *int64             `db:"total_token_bound" json:"total_token_bound"`
+	// Exact server-applied generated-token maximum: zero only for a protocol without generated tokens, positive for generative protocols.
+	OutputTokenBound *int64 `db:"output_token_bound" json:"output_token_bound"`
+	TotalTokenBound  *int64 `db:"total_token_bound" json:"total_token_bound"`
 }
 
 // Per-dispatch token and cost allocations and their conservative settlement under one logical quota reservation.
