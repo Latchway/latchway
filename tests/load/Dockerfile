@@ -20,3 +20,4 @@ COPY --from=build --chmod=0555 /out/latchway-load /tools/latchway-load
 COPY --from=build --chmod=0555 /out/latchway-load-fixture /tools/latchway-load-fixture
 COPY --from=build --chmod=0555 /out/latchway-load-provision /tools/latchway-load-provision
 WORKDIR /src
+USER 65532:65532

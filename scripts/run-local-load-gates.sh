@@ -81,6 +81,18 @@ chmod 700 "$evidence_dir"
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+# The image defaults to UID/GID 65532. Bind-mounted evidence is host-owned, so
+# run the tools as the invoking non-root user on both Linux and Docker Desktop.
+host_uid=$(id -u)
+host_gid=$(id -g)
+case "$host_uid:$host_gid" in
+  *[!0-9:]*|:*|*:) echo "host UID and GID must be numeric" >&2; exit 2 ;;
+esac
+if [ "$host_uid" -eq 0 ]; then
+  echo "refusing to run load tooling as root" >&2
+  exit 2
+fi
+tools_user="$host_uid:$host_gid"
 run_dir=$(mktemp -d /tmp/latchway-load-local.XXXXXX)
 case "$run_dir" in
   /tmp/latchway-load-local.*) ;;
@@ -247,6 +259,7 @@ docker run --detach \
   --name "$fixture" \
   --network "$network" \
   --ip "$fixture_ip" \
+  --user "$tools_user" \
   --read-only \
   --tmpfs /tmp:size=16m,mode=1777 \
   --cap-drop ALL \
@@ -338,6 +351,7 @@ export LATCHWAY_LOAD_BOOTSTRAP_TOKEN=$bootstrap_token
 export LATCHWAY_LOAD_ADMIN_PASSWORD=$admin_password
 docker run --rm \
   --network "container:$gateway" \
+  --user "$tools_user" \
   --read-only \
   --tmpfs /tmp:size=16m,mode=1777 \
   --cap-drop ALL \
@@ -368,6 +382,7 @@ cp "$run_dir/runtime/load-config.json" "$evidence_dir/load-config.json"
 docker run --rm \
   --network "container:$gateway" \
   --pid "container:$gateway" \
+  --user "$tools_user" \
   --read-only \
   --tmpfs /tmp:size=32m,mode=1777 \
   --cap-drop ALL \
