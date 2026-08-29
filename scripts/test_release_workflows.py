@@ -64,7 +64,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         candidate_attestation = names.index("Verify candidate and promotion attestations")
         bindings = names.index("Verify the candidate artifact and exact aggregate bindings")
         image_provenance = names.index("Verify the exact candidate image signature and provenance")
-        existing_tag = names.index("Refuse an existing core release tag")
+        existing_tag = names.index("Verify any existing core release tag")
         oci_promotion = names.index("Promote only the verified index digest to stable OCI tags")
         tag_creation = names.index("Create the evidence-gated annotated core tag")
         release_creation = names.index("Publish the immutable release record")

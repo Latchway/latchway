@@ -209,20 +209,40 @@ jobs:
             --source-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
-      - name: Refuse an existing core release tag
+      - name: Verify any existing core release tag
+        id: release-state
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
         run: |
+          set -Eeuo pipefail
+          message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $REPORT_SHA256"
           set +e
-          git -C latchway ls-remote --exit-code --tags origin "refs/tags/$INTENDED_TAG" >/dev/null 2>&1
-          status=$?
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/existing-tag-ref.json" 2> "$RUNNER_TEMP/existing-tag-error.txt"
+          lookup_status=$?
           set -e
-          if [[ "$status" -eq 0 ]]; then
-            echo "refusing to replace existing core tag $INTENDED_TAG" >&2
-            exit 1
+          if [[ "$lookup_status" -ne 0 ]]; then
+            test "$lookup_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/existing-tag-error.txt"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          test "$status" -eq 2
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/existing-tag-ref.json")
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/existing-tag-ref.json")" = tag
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/existing-tag-object.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$message" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/existing-tag-object.json" >/dev/null
+          echo "tag_exists=true" >> "$GITHUB_OUTPUT"
       - name: Promote only the verified index digest to stable OCI tags
         shell: bash
         env:
@@ -230,6 +250,7 @@ jobs:
           INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
           VERSION: ${{ steps.verified.outputs.core_version }}
         run: |
+          set -Eeuo pipefail
           targets=("$VERSION")
           if [[ "$VERSION" != *-* ]]; then
             IFS=. read -r major minor patch <<< "$VERSION"
@@ -238,10 +259,19 @@ jobs:
           fi
           for tag in "${targets[@]}"; do
             target="$IMAGE:$tag"
-            if docker buildx imagetools inspect --raw "$target" > "$RUNNER_TEMP/existing-index.json" 2>/dev/null; then
+            set +e
+            docker buildx imagetools inspect --raw "$target" \
+              > "$RUNNER_TEMP/existing-index.json" \
+              2> "$RUNNER_TEMP/existing-index-error.txt"
+            inspect_status=$?
+            set -e
+            if [[ "$inspect_status" -eq 0 ]]; then
               actual="sha256:$(sha256sum "$RUNNER_TEMP/existing-index.json" | cut -d ' ' -f 1)"
               test "$actual" = "$INDEX_DIGEST"
             else
+              grep --extended-regexp --ignore-case --quiet \
+                'manifest unknown|name unknown|not found' \
+                "$RUNNER_TEMP/existing-index-error.txt"
               docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
             fi
             docker buildx imagetools inspect --raw "$target" > "$RUNNER_TEMP/promoted-index.json"
@@ -249,6 +279,7 @@ jobs:
             test "$actual" = "$INDEX_DIGEST"
           done
       - name: Create the evidence-gated annotated core tag
+        if: steps.release-state.outputs.tag_exists != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -288,22 +319,68 @@ jobs:
           SECURITY_DIR: ${{ runner.temp }}/latchway-security
           PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
         run: |
+          set -Eeuo pipefail
           cp -- "$PROMOTION_REPORT" "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
-          gh release create "$INTENDED_TAG" \
-            --verify-tag \
-            --generate-notes \
-            --title "Latchway $INTENDED_TAG" \
-            "$RUNNER_TEMP/latchway-cross-repository-promotion.json" \
-            "$CANDIDATE_DIR/latchway-candidate.json" \
-            "$CANDIDATE_DIR/latchway-contract.tar.gz" \
-            "$CANDIDATE_DIR/latchway-linux-amd64.spdx.json" \
-            "$CANDIDATE_DIR/latchway-linux-arm64.spdx.json" \
-            "$CANDIDATE_DIR/latchway-linux-amd64-vulnerability.json" \
-            "$CANDIDATE_DIR/latchway-linux-arm64-vulnerability.json" \
-            "$CANDIDATE_DIR/latchway-linux-amd64-license.json" \
-            "$CANDIDATE_DIR/latchway-linux-arm64-license.json" \
-            "$SECURITY_DIR/security-summary.json" \
+          cp -- \
+            "$RUNNER_TEMP/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/release-error.txt"
+          release_status=$?
+          set -e
+          if [[ "$release_status" -eq 0 ]]; then
+            expected_prerelease=false
+            if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+            jq --exit-status \
+              --arg tag "$INTENDED_TAG" \
+              --arg title "Latchway $INTENDED_TAG" \
+              --argjson prerelease "$expected_prerelease" \
+              '.tag_name == $tag and .name == $title and .draft == false and .prerelease == $prerelease' \
+              "$RUNNER_TEMP/release.json" >/dev/null
+          else
+            test "$release_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/release-error.txt"
+          fi
+          if [[ "$release_status" -ne 0 && "$INTENDED_TAG" == *-* ]]; then
+            gh release create "$INTENDED_TAG" --verify-tag --generate-notes --prerelease --title "Latchway $INTENDED_TAG"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
+          elif [[ "$release_status" -ne 0 ]]; then
+            gh release create "$INTENDED_TAG" --verify-tag --generate-notes --title "Latchway $INTENDED_TAG"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
+          fi
+          assets=(
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-candidate.json"
+            "$CANDIDATE_DIR/latchway-candidate.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-contract.tar.gz"
+            "$CANDIDATE_DIR/latchway-linux-amd64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-license.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-license.json"
+            "$SECURITY_DIR/security-summary.json"
             "$SECURITY_DIR/security-summary.attestation.sigstore.json"
+          )
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 0 then "absent"
+              elif length == 1 then (.[] | .digest // "digest-unavailable")
+              else error("duplicate release asset") end
+            ' "$RUNNER_TEMP/release.json")
+            if [[ "$existing" == absent ]]; then
+              gh release upload "$INTENDED_TAG" "$asset"
+              gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
+              existing=$(jq --raw-output --arg name "$name" '[.assets[] | select(.name == $name)] | if length == 1 then (.[] | .digest // "digest-unavailable") else error("release asset missing after upload") end' "$RUNNER_TEMP/release.json")
+            fi
+            test "$existing" = "$expected"
+          done
       - name: Dispatch exact evidence-bound SDK publications
         shell: bash
         env:
