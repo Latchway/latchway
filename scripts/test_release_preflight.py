@@ -73,14 +73,56 @@ class ReleasePreflightTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def validate(self) -> dict[str, object]:
-        return MODULE.validate_candidate("v1.0.0", self.commit, self.now)
+    def validate(self, tag: str = "v1.0.0") -> dict[str, object]:
+        return MODULE.validate_candidate(tag, self.commit, self.now)
+
+    def commit_version(self, version: str) -> None:
+        (self.root / "web/console/package.json").write_text(
+            json.dumps({"version": version}), encoding="utf-8"
+        )
+        (self.root / "internal/buildinfo/buildinfo.go").write_text(
+            f'var (\n\tVersion = "{version}"\n)\n'
+            'const (\n\tContractVersion = "1.0.0"\n)\n',
+            encoding="utf-8",
+        )
+        changelog = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        changelog = changelog.replace("## [1.0.0]", f"## [{version}]", 1)
+        (self.root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+        self.run_git(
+            "add",
+            "web/console/package.json",
+            "internal/buildinfo/buildinfo.go",
+            "CHANGELOG.md",
+        )
+        self.run_git("commit", "-q", "-m", f"version {version}")
+        self.commit = self.run_git("rev-parse", "HEAD").stdout.strip()
 
     def test_accepts_clean_untagged_released_candidate(self) -> None:
         report = self.validate()
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["candidate_commit"], self.commit)
         self.assertEqual(report["intended_tag"], "v1.0.0")
+
+    def test_accepts_canonical_rc_checkpoint(self) -> None:
+        self.commit_version("1.0.0-rc.1")
+        report = self.validate("v1.0.0-rc.1")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["candidate_commit"], self.commit)
+        self.assertEqual(report["intended_tag"], "v1.0.0-rc.1")
+        self.assertEqual(report["version"], "1.0.0-rc.1")
+
+    def test_rejects_prerelease_that_cannot_be_a_canonical_prior_rc(self) -> None:
+        for tag in (
+            "v1.0.0-alpha.1",
+            "v1.0.0-rc.0",
+            "v1.0.0-rc.01",
+            "v1.0.0-rc.1.extra",
+        ):
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(
+                    MODULE.PreflightError, "release_tag_not_canonical"
+                ):
+                    self.validate(tag)
 
     def test_rejects_draft_contract(self) -> None:
         self.write_manifest(self.now - timedelta(hours=1), status="draft")

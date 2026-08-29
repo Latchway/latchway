@@ -1,6 +1,6 @@
 # Implementation status
 
-Status date: 2026-08-29
+Status date: 2026-08-30
 
 Latchway is a **source-complete version 1 candidate**, optimized first for
 React Native applications using the native iOS and Android SDKs. It is suitable
@@ -14,16 +14,16 @@ promoted.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 19 exact local candidate complete; protected release finalization pending |
-| Current objective | Revalidate the synchronized documentation descendant, then move the exact signed candidate through protected `main`, external evidence, promotion, and publication |
+| Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
+| Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
 | Last passing commit in each repository | Core source/load/release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96`; Android `dbfcc2936d3f74f61201bb8933fabd40937a70fb`; React Native `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `19` |
 | Last full test time | `2026-08-29T11:18:10Z`, successful completion of the non-root self-contained local v1 load suite at `73743b1633e4521aeda7ba1228cd18b78ef3a185`; mobile/package validation completed at the synchronized SDK heads |
 | Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
-| Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: the protected branch has not received the local candidate, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
-| External credentials still required | Protected GitHub and registry publication/signing identities; Apple signing/App Attest configuration and a physical device; Play Console, Google Cloud/Play Integrity configuration and a Play-distributed device build; OpenRouter credentials; and credentials for every claimed cloud deployment |
-| Next executable task | With a valid GitHub session, push the signed candidate commits, merge them through protected `main`, and dispatch the exact-candidate release/evidence sequence; connect the physical devices and provider/cloud credentials for their protected domains |
+| Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: protected `main` has not retained the required canonical RC candidate run or its stable descendant run, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
+| External credentials still required | Protected GitHub repository settings, runners, and registry publication/signing identities; Apple Distribution signing and production App Attest configuration (a physical iPhone is connected); a physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
+| Next executable task | Advance protected `main` only to the signed `1.0.0-rc.1` checkpoint and wait for its `release.yml` run to pass; only then advance to the signed stable descendant and begin exact-candidate source and release evidence |
 
 Passing repository commands at the recorded heads include:
 
@@ -60,6 +60,7 @@ mise exec -- pnpm pack:check
 | Field | Value |
 | --- | --- |
 | Intended server release | `v1.0.0` |
+| Required retained prior candidate | Canonical `v1.0.0-rc.1` source checkpoint and successful protected-main `release.yml` run; no public RC tag |
 | Contract version | `0.5.1` |
 | Contract status | `released` (normative source freeze; not a public product-release claim) |
 | Contract release time | `2026-08-29T07:14:27Z` |

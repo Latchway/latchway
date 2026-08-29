@@ -106,6 +106,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: Latchway/latchway-js
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
           ref: ${{ inputs.javascript_commit }}
           path: latchway-js
           fetch-depth: 0
@@ -114,6 +115,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: Latchway/latchway-ios-sdk
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
           ref: ${{ inputs.ios_commit }}
           path: latchway-ios-sdk
           fetch-depth: 0
@@ -122,6 +124,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: Latchway/latchway-android
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
           ref: ${{ inputs.android_commit }}
           path: latchway-android
           fetch-depth: 0
@@ -130,6 +133,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: Latchway/latchway-react-native-sdk
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
           ref: ${{ inputs.react_native_commit }}
           path: latchway-react-native-sdk
           fetch-depth: 0

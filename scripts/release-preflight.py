@@ -21,12 +21,13 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SEMVER = re.compile(
-    r"^v(?P<version>0|[1-9]\d*)\."
-    r"(0|[1-9]\d*)\."
-    r"(0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"$"
+CORE_VERSION = (
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
+)
+CANDIDATE_TAG = re.compile(
+    rf"^v{CORE_VERSION}(?:-rc\.(?:[1-9][0-9]*))?$"
 )
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 CANONICAL_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -91,8 +92,7 @@ def parse_released_at(value: Any, now: datetime) -> datetime:
 
 
 def validate_candidate(tag: str, commit: str, now: datetime) -> dict[str, Any]:
-    match = SEMVER.fullmatch(tag)
-    if match is None:
+    if CANDIDATE_TAG.fullmatch(tag) is None:
         raise PreflightError("release_tag_not_canonical")
     if COMMIT.fullmatch(commit) is None:
         raise PreflightError("candidate_commit_not_canonical")

@@ -21,6 +21,44 @@ all of the following machine reports:
 This tooling has no synthetic success mode. Until the protected workflow runs
 with live artifacts, `operational_resilience` remains unverified.
 
+## Canonical RC checkpoint sequence
+
+A stable release needs two different protected-main source commits and two
+successful candidate runs. For `v1.0.0`, the first commit must coherently set
+the binary version, console version, and changelog coordinate to
+`1.0.0-rc.1`. The second must be its Git descendant and coherently restore
+those source coordinates to `1.0.0`. The frozen `api/` tree, contract version,
+release time, and deterministic bundle must be byte-identical at both commits.
+
+Advance protected `main` only to the RC commit, then dispatch and wait for the
+exact candidate run to succeed:
+
+```bash
+gh workflow run release.yml \
+  --repo Latchway/latchway \
+  --ref main \
+  -f candidate_commit="$RC_COMMIT" \
+  -f intended_tag=v1.0.0-rc.1
+```
+
+Record that run's numeric ID and actual attempt before advancing `main`. The
+candidate workflow publishes only the immutable
+`candidate-$RC_COMMIT` image coordinate and evidence artifact; it does not
+create or push an RC Git tag, GitHub release, or stable OCI alias.
+
+After the RC run succeeds, advance `main` to the stable descendant and run the
+source-conformance and stable-candidate workflows at that exact new head. Keep
+`main` fixed there through promotion and finalization. Supplying the RC commit
+as an input after skipping its protected-main candidate run, advancing both
+commits before dispatching the RC run, reusing one commit for both versions,
+or rebuilding either version from a dirty checkout does not satisfy the gate.
+
+The operational workflow receives the retained RC commit/run/attempt through
+`previous_candidate_*`. It still independently requires exact run identity,
+Git ancestry, canonical same-base `rc.N` to stable versions, equal frozen
+contracts, increasing creation time, and four distinct OCI index/platform
+digests. This sequence prepares evidence; it never creates a public tag.
+
 ## Input identity
 
 Run source-scope cross-repository conformance and the release-candidate

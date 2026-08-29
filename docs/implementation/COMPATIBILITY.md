@@ -36,6 +36,13 @@ Documentation-only descendants may follow the candidate without changing that
 implementation claim; a later code change must become a new candidate and
 rerun the affected evidence.
 
+The operational-resilience gate also requires one non-public canonical
+`v1.0.0-rc.1` source checkpoint and candidate run before the final `v1.0.0`
+source descendant is built. Both commits retain this exact frozen contract and
+SDK compatibility baseline. The RC coordinate is immutable candidate evidence,
+not a Git tag, published package version, public release, or supported
+compatibility coordinate.
+
 ## Version 1 component matrix
 
 | Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |

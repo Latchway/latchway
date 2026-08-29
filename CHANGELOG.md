@@ -4,10 +4,13 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-08-29
+## [1.0.0-rc.1] - 2026-08-30
 
 ### Changed
 
+- Establish the canonical retained release-candidate checkpoint required by
+  the protected previous-candidate upgrade and application-rollback gate. The
+  checkpoint does not create a public tag or alter the frozen API contract.
 - Advance contract 0.5.1 for closed, provider-specific Apple App
   Attest and Google Play Integrity configuration while retaining wire protocol
   version 1; contract 0.5.0 remains the preceding sealed local checkpoint.

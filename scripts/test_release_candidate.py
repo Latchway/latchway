@@ -50,10 +50,10 @@ class ReleaseCandidateTests(unittest.TestCase):
         MODULE.ROOT = self.previous_root
         self.temporary.cleanup()
 
-    def build(self) -> dict[str, object]:
+    def build(self, tag: str = "v1.0.0") -> dict[str, object]:
         return MODULE.build_manifest(
             commit="a" * 40,
-            tag="v1.0.0",
+            tag=tag,
             image="ghcr.io/latchway/latchway",
             index_digest="sha256:" + "1" * 64,
             platform_digests={
@@ -83,6 +83,33 @@ class ReleaseCandidateTests(unittest.TestCase):
         verified = self.verify(path)
         self.assertEqual(verified["candidate_commit"], "a" * 40)
         self.assertEqual(verified["image"]["index_digest"], "sha256:" + "1" * 64)
+
+    def test_round_trip_accepts_canonical_rc_checkpoint(self) -> None:
+        (self.root / "web/console/package.json").write_text(
+            json.dumps({"version": "1.0.0-rc.1"}), encoding="utf-8"
+        )
+        path = self.write(self.build("v1.0.0-rc.1"))
+        verified = MODULE.verify_manifest(
+            path,
+            expected_commit="a" * 40,
+            expected_tag="v1.0.0-rc.1",
+            expected_image="ghcr.io/latchway/latchway",
+            now=self.now,
+        )
+        self.assertEqual(verified["version"], "1.0.0-rc.1")
+
+    def test_rejects_prerelease_that_cannot_be_a_canonical_prior_rc(self) -> None:
+        for tag in (
+            "v1.0.0-alpha.1",
+            "v1.0.0-rc.0",
+            "v1.0.0-rc.01",
+            "v1.0.0-rc.1.extra",
+        ):
+            with self.subTest(tag=tag):
+                with self.assertRaisesRegex(
+                    MODULE.CandidateError, "candidate_tag_invalid"
+                ):
+                    self.build(tag)
 
     def test_rejects_substituted_artifact(self) -> None:
         path = self.write(self.build())

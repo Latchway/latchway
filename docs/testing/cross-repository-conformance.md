@@ -266,6 +266,12 @@ the source report itself neither needs nor claims an already-created tag. The
 workflow has no package, registry, release, or deployment-environment mutation
 permission.
 
+When sibling repositories are private, configure the repository secret
+`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` as a fine-grained credential with
+Contents: read access only to the four SDK repositories. The checkout steps use
+that credential only for sibling source and do not persist it. Public sibling
+repositories require no secret and fall back to the job token.
+
 The workflow does not dispatch SDK updates or publish releases. Those remain
 separate, explicitly authorized operations after a passing evidence report.
 

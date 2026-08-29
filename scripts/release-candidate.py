@@ -16,10 +16,12 @@ from typing import Any, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
-TAG = re.compile(
-    r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+CORE_VERSION = (
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
 )
+TAG = re.compile(rf"^v{CORE_VERSION}(?:-rc\.(?:[1-9][0-9]*))?$")
 IMAGE = re.compile(r"^ghcr\.io/latchway/latchway$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 CANONICAL_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")

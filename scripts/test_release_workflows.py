@@ -86,7 +86,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_candidate_workflow_cannot_publish_stable_coordinates(self) -> None:
         workflow = load_workflow("release.yml")
         self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
+        intended_tag = workflow["on"]["workflow_dispatch"]["inputs"]["intended_tag"]
+        self.assertIn("canonical vX.Y.Z-rc.N", intended_tag["description"])
+        self.assertIn("tags are created only by promotion", intended_tag["description"])
         serialized = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+        self.assertIn("(-rc\\.([1-9][0-9]*))?", serialized)
         self.assertNotIn("gh release create", serialized)
         self.assertNotIn("refs/tags/", serialized)
         self.assertNotIn("type=semver", serialized)
@@ -183,6 +187,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
             if step.get("name") == "Download independently produced external evidence"
         )
         self.assertEqual(download.get("if"), "inputs.scope != 'source'")
+
+    def test_private_sibling_checkouts_use_a_least_privilege_read_token(self) -> None:
+        expected = "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}"
+        for workflow_name in (
+            "cross-repository-conformance.yml",
+            "release-domain-observations.yml",
+        ):
+            sibling_checkouts = [
+                step
+                for step in all_steps(load_workflow(workflow_name))
+                if isinstance(step.get("with"), dict)
+                and "repository" in step["with"]
+                and step["with"]["repository"].startswith("Latchway/")
+                and step.get("uses", "").startswith("actions/checkout@")
+            ]
+            self.assertEqual(len(sibling_checkouts), 4, workflow_name)
+            for step in sibling_checkouts:
+                self.assertEqual(step["with"].get("token"), expected, step)
 
     def test_external_domain_evidence_is_protected_attested_and_candidate_bound(self) -> None:
         workflow = load_workflow("release-domain-evidence.yml")

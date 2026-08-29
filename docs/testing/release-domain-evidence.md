@@ -91,6 +91,12 @@ every result must bind the exact five repository commits, package tags and
 versions, contract version, bundle SHA-256, core release, and immutable OCI
 index digest.
 
+Private sibling checkouts use the protected
+`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` secret. It must be a fine-grained
+Contents: read credential scoped only to the four SDK repositories. The token
+is not persisted by checkout and is unnecessary when those repositories are
+public.
+
 The finalizer accepts only the artifact name derived from the domain and
 candidate commit. It queries the GitHub Actions API and requires the supplied
 run to be a completed successful `workflow_dispatch` run of
