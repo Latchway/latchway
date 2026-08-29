@@ -709,6 +709,16 @@ func (api *API) createAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := mustPrincipal(r.Context())
+	maximumContext := adminauth.AuthorizationContext{
+		PromptBodiesAllowedByPolicy: true,
+		AdminPromptBodiesEnabled:    true,
+	}
+	for _, capability := range scope.Values() {
+		if !principal.Allows(capability, maximumContext) {
+			api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "An API token cannot delegate a capability outside its own effective scope."})
+			return
+		}
+	}
 	auditRequestID, err := id.New(id.AdminRequest)
 	if err != nil {
 		api.internal(w, r, err)

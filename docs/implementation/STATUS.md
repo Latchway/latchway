@@ -1,5 +1,32 @@
 # Implementation status
 
+## Local working-tree update — token-mode CLI and API-token console (2026-08-29)
+
+The CLI now validates an environment-supplied scoped bearer with the canonical
+session endpoint and revokes that exact bearer with the canonical logout
+endpoint. These `login` and `logout` commands never accept passwords, create a
+cookie session, or persist credential material. API-token list/create/revoke
+commands expose metadata only. Creation requires a new exclusive regular file,
+verifies mode `0600` before the API mutation, never prints the issued value or
+path, removes incomplete output, and compensating-revokes a token when a
+post-creation write cannot be completed.
+
+The embedded console now has an API-token view using its same-origin cookie and
+CSRF boundary. It lists metadata, selects only capabilities effective in the
+current session, displays newly issued plaintext once in ephemeral component
+state, warns that copying crosses into an operating-system clipboard, supports
+explicit dismissal, and revokes tokens. It never uses local or session storage.
+Bearer-authenticated creation is additionally fail-closed: every delegated
+scope must be within the bearer principal's effective scope, even if the
+underlying administrator role has a broader capability.
+
+Focused Admin API and CLI normal/race tests and vet, contract validation,
+console lint/typecheck, 27 console unit tests, and all four control-plane
+Playwright flows pass locally. The focused Admin API integration test also
+passes against the existing local PostgreSQL 18.6 development service,
+including scope-delegation denial and its redacted audit result. Contract/SDK
+locks remain deliberately unsealed until the final core revision is available.
+
 ## Local working-tree update — metric registry and route observations (2026-08-29)
 
 All 16 initial policy metrics are now represented by one ordered declarative

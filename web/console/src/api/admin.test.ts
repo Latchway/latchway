@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { adminRequest, AdministratorSchema, RevisionSchema, UserSchema } from "./admin";
+import {
+  adminRequest,
+  APITokenMetadataSchema,
+  CreatedAPITokenSchema,
+  AdministratorSchema,
+  RevisionSchema,
+  UserSchema
+} from "./admin";
 import { loginAdministrator } from "./auth";
 
 const csrf = "csrf_0123456789abcdefghijklmnopqrstuvwxyz";
@@ -79,6 +86,22 @@ describe("canonical Admin API browser client", () => {
     };
     expect(AdministratorSchema.parse(administrator)).toEqual(administrator);
     expect(() => AdministratorSchema.parse({ ...administrator, password: "must-not-render" })).toThrow();
+  });
+
+  it("keeps one-time API-token plaintext separate from list metadata", () => {
+    const metadata = {
+      created_at: "2026-08-29T00:00:00Z",
+      id: "tok_0123456789abcdef",
+      name: "mobile-ci",
+      revoked: false,
+      scopes: ["inspect_users"]
+    };
+    expect(APITokenMetadataSchema.parse(metadata)).toEqual(metadata);
+    expect(() => APITokenMetadataSchema.parse({ ...metadata, token: "must-not-appear-in-list-metadata" })).toThrow();
+    expect(CreatedAPITokenSchema.parse({
+      metadata,
+      token: "one-time-printable-token-material-1234567890"
+    })).toEqual({ metadata, token: "one-time-printable-token-material-1234567890" });
   });
 });
 

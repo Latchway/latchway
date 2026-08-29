@@ -1229,6 +1229,24 @@ a {
   overflow-wrap: anywhere;
 }
 
+.credential-reveal {
+  border-color: #dfbd78;
+  background: var(--amber-light);
+}
+
+.credential-reveal__value {
+  width: 100%;
+  margin-top: 0.45rem;
+  padding: 0.8rem;
+  resize: vertical;
+  color: var(--ink);
+  border: 1px solid #c99a43;
+  border-radius: 0.55rem;
+  background: white;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

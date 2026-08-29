@@ -6,7 +6,7 @@ import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
 
-type ConsoleRoute = "/" | "/setup" | "/configuration" | "/administrators" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
+type ConsoleRoute = "/" | "/setup" | "/configuration" | "/administrators" | "/api-tokens" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
 
 interface NavigationLinkProps {
   children: ReactNode;
@@ -117,6 +117,7 @@ export function AppShell() {
 
             <p className="nav-group-label nav-group-label--spaced">Administration</p>
             <NavigationLink description="Accounts and roles" to="/administrators">Administrators</NavigationLink>
+            <NavigationLink description="Scoped automation credentials" to="/api-tokens">API tokens</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">Identity</p>
             <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>

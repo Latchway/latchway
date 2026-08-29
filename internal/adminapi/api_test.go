@@ -231,6 +231,12 @@ func TestAdminAPIPostgreSQL(t *testing.T) {
 	if bearerSession.Code != http.StatusOK || !bytes.Contains(bearerSession.Body.Bytes(), []byte(`"expires_at":null`)) {
 		t.Fatalf("API-token session status/body = %d %s", bearerSession.Code, bearerSession.Body.String())
 	}
+	escalation := performBearerJSON(t, handler, http.MethodPost, "/admin/v1/api-tokens", map[string]any{
+		"name": "scope-escalation", "scopes": []string{"manage_owners"},
+	}, createdToken.Token)
+	if escalation.Code != http.StatusForbidden {
+		t.Fatalf("API-token scope escalation status/body = %d %s", escalation.Code, escalation.Body.String())
+	}
 	tokenList := performGET(handler, "/admin/v1/api-tokens", cookies[0])
 	if tokenList.Code != http.StatusOK || bytes.Contains(tokenList.Body.Bytes(), []byte(createdToken.Token)) {
 		t.Fatalf("API token metadata list status/body = %d %s", tokenList.Code, tokenList.Body.String())
@@ -419,6 +425,7 @@ func assertAdministrativePersistence(t *testing.T, ctx context.Context, pool *pg
 		"admin.application_create:succeeded": 2,
 		"admin.environment_create:succeeded": 1,
 		"admin.api_token_create:succeeded":   1,
+		"admin.api_token_create:denied":      1,
 		"admin.api_token_revoke:succeeded":   1,
 		"admin.bootstrap_owner:denied":       1,
 		"admin.application_create:denied":    1,

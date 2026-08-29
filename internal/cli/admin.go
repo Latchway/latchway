@@ -57,7 +57,10 @@ type adminProblem struct {
 
 func newAdminCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "admin", Short: "Perform administrative operations through the canonical API"}
-	command.AddCommand(newAdminBootstrapCommand(opts), newAdminAccountsCommand(opts), newAdminUsersCommand(opts))
+	command.AddCommand(
+		newAdminBootstrapCommand(opts), newAdminAccountsCommand(opts),
+		newAdminAPITokensCommand(opts), newAdminUsersCommand(opts),
+	)
 	return command
 }
 

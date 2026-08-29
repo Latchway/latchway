@@ -6,7 +6,7 @@ The first owner flow requires a high-entropy `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN`, s
 
 ## Authorization
 
-Capabilities derive from server-side memberships and the roles `owner`, `admin`, `operator`, and `viewer`. Every Admin API handler checks the specific capability and tenant scope. UI hiding is not authorization. API tokens are high-entropy, displayed once, hashed, scoped, expirable, revocable, and audited.
+Capabilities derive from server-side memberships and the roles `owner`, `admin`, `operator`, and `viewer`. Every Admin API handler checks the specific capability and tenant scope. UI hiding is not authorization. API tokens are high-entropy, displayed once, hashed, scoped, expirable, revocable, and audited. A bearer-authenticated token creation request may delegate only capabilities in that bearer's effective scope; the administrator's broader underlying role cannot elevate it.
 
 ## Configuration and secrets
 
@@ -20,4 +20,4 @@ Every administrative mutation records actor, capability, tenant, action, target,
 
 ## Operational attacks
 
-Rate-limit login and token endpoints; detect credential stuffing and session fixation; prevent cross-tenant ID enumeration; enforce secure proxy/host configuration; redact diagnostics; and ensure CLI secrets enter by stdin, file descriptor, or named environment variable rather than command arguments. Backup and restore must preserve encryption metadata and audit integrity without capturing the external master key in the database backup.
+Rate-limit login and token endpoints; detect credential stuffing and session fixation; prevent cross-tenant ID enumeration; enforce secure proxy/host configuration; redact diagnostics; and ensure CLI secrets enter by stdin, file descriptor, or named environment variable rather than command arguments. A newly issued CLI API token goes only to a caller-selected, exclusive mode-`0600` regular file and never to terminal output. Browser copy actions explicitly warn that an operating-system clipboard is outside the console's storage boundary. Backup and restore must preserve encryption metadata and audit integrity without capturing the external master key in the database backup.

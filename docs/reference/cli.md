@@ -23,12 +23,24 @@ return a non-zero status for invalid input, denied operations, invalid server
 documents, and RFC 9457 failures.
 
 Version 1 deliberately does not persist an administrator password, session
-cookie, CSRF token, or API token. A password-based `latchway login` would need
-to retain a bearer-equivalent cookie and CSRF secret across processes, and the
-project does not yet have a reviewed portable OS credential-store or device
-authorization flow. Use a scoped API token supplied by a secret manager and
-revoke it through the canonical Admin API when it is no longer needed. Browser
-sessions remain confined to the console and its logout endpoint.
+cookie, CSRF token, or API token. `latchway login` is a token-mode validation
+command: it reads the selected environment variable, calls
+`GET /admin/v1/auth/session`, and prints only administrator, organization,
+capability, and expiration metadata. It neither accepts a password nor creates
+or stores a credential. `latchway logout` calls `POST /admin/v1/auth/logout`
+with that same environment-supplied bearer, revoking it server-side; the dead
+value remains in the parent shell until the operator unsets or replaces it.
+
+```bash
+latchway login
+# Run scoped administrative commands.
+latchway logout
+unset LATCHWAY_ADMIN_API_TOKEN
+```
+
+Browser password sessions remain confined to the embedded console. A
+password-based cross-process CLI session would require a reviewed portable OS
+credential store or device authorization flow and is intentionally absent.
 
 Generate completion with Cobra's built-in commands:
 
@@ -65,6 +77,36 @@ organization. Password reset also revokes affected credentials. The final
 active owner cannot be demoted or disabled. Because a local password belongs
 to the global administrator identity, an owner-driven reset is rejected when
 that identity also belongs to another organization.
+
+## API tokens
+
+List and revoke only the current administrator's token metadata through the
+canonical API:
+
+```bash
+latchway admin api-tokens list
+latchway admin api-tokens revoke tok_...
+```
+
+Creation requires one or more explicit capabilities and a new output path:
+
+```bash
+latchway admin api-tokens create \
+  --name mobile-ci \
+  --scope inspect_users \
+  --scope run_self_tests \
+  --token-output-file ./mobile-ci.token
+```
+
+The output path must not already exist. Before asking the server to mutate
+state, the CLI creates an exclusive regular file, fixes and verifies mode
+`0600`, then writes the one-time token and synchronizes it. Standard output
+contains metadata only. Existing files and symlinks are never overwritten; an
+incomplete file is removed after failure, and a token is compensating-revoked
+when a post-creation write cannot be completed. Move the file into the chosen
+secret manager, then remove the local copy using the operator's normal secure
+workflow. A bearer-authenticated token cannot create a token with capabilities
+outside its own effective scope.
 
 ## Immutable configuration
 

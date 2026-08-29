@@ -3,6 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const ids = {
   admin: "adm_0123456789abcdef",
   administrator: "adm_1123456789abcdef",
+  apiToken: "tok_0123456789abcdef",
   application: "app_01J00000000000000000000000",
   environment: "env_0123456789abcdef",
   organization: "org_0123456789abcdef",
@@ -13,6 +14,7 @@ const ids = {
 };
 const csrf = "csrf_0123456789abcdefghijklmnopqrstuvwxyz";
 const instant = "2026-08-29T00:00:00Z";
+const oneTimeAPIToken = "one-time-browser-token-material-1234567890";
 
 function json(route: Route, status: number, body: unknown, headers: Record<string, string> = {}) {
   return route.fulfill({
@@ -34,8 +36,10 @@ async function installAdminFixture(page: Page) {
   let authenticated = false;
   const mutations: Array<{ path: string; csrf: string | null }> = [];
   const administratorBodies: Array<Record<string, unknown>> = [];
+  const apiTokenBodies: Array<Record<string, unknown>> = [];
   const revisionBodies: unknown[] = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
+  let apiTokens: Array<Record<string, unknown>> = [];
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
     capabilities: ["activate_configuration", "inspect_users", "manage_owners", "manage_secrets", "revoke_installations", "run_self_tests"],
@@ -62,6 +66,19 @@ async function installAdminFixture(page: Page) {
       const action = url.pathname.split("/").at(-1); const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>; administratorBodies.push({ action, ...body });
       return json(route, 200, { created_at: instant, display_name: "Second Owner", email: "second-owner@example.test", id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: action === "role" ? body.role : "operator", status: action === "disable" ? "disabled" : "active", updated_at: instant, ...(action === "disable" ? { disabled_at: instant } : {}) });
     }
+    if (url.pathname === "/admin/v1/api-tokens" && request.method() === "GET") return json(route, 200, { items: apiTokens });
+    if (url.pathname === "/admin/v1/api-tokens" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      apiTokenBodies.push(body);
+      const metadata = { created_at: instant, id: ids.apiToken, name: body.name, revoked: false, scopes: body.scopes };
+      apiTokens = [...apiTokens, metadata];
+      return json(route, 201, { metadata, token: oneTimeAPIToken });
+    }
+    if (url.pathname === `/admin/v1/api-tokens/${ids.apiToken}` && request.method() === "DELETE") {
+      apiTokenBodies.push({ action: "revoke", token_id: ids.apiToken });
+      apiTokens = apiTokens.map((token) => token.id === ids.apiToken ? { ...token, revoked: true } : token);
+      return route.fulfill({ status: 204 });
+    }
     if (url.pathname === "/admin/v1/applications") return json(route, 201, { created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" });
     if (url.pathname === `/admin/v1/applications/${ids.application}/environments`) return json(route, 201, { application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" });
     if (url.pathname === "/admin/v1/secrets") return json(route, 201, { algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment, id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1 });
@@ -83,7 +100,7 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { administratorBodies, mutations, revisionBodies, selfTestBodies };
+  return { administratorBodies, apiTokenBodies, mutations, revisionBodies, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -240,6 +257,39 @@ test("owner manages administrators without persisting password material", async 
     { action: "role", role: "operator" },
     { action: "reset-password", password: "replacement administrator password" },
     { action: "disable" }
+  ]);
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+});
+
+test("owner stores a one-time API token explicitly and can revoke its metadata", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: "http://127.0.0.1:4174"
+  });
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /^API tokens/ }).click();
+  await page.getByRole("button", { name: "Load API tokens" }).click();
+  await expect(page.getByText("No scoped automation credentials have been created for this administrator.")).toBeVisible();
+  await page.getByLabel("Token name").fill("mobile-ci");
+  await page.getByLabel("Inspect users and usage").check();
+  await page.getByLabel("Run self-tests").check();
+  await page.getByRole("button", { name: "Create API token" }).click();
+  await expect(page.getByText("This is the only time Latchway will show this credential.")).toBeVisible();
+  await expect(page.getByLabel("One-time API token")).toHaveValue(oneTimeAPIToken);
+  await page.getByRole("button", { name: "Copy token — clipboard may retain it" }).click();
+  await expect(page.getByText("Copied. The operating system clipboard may retain this credential.")).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(oneTimeAPIToken);
+  await page.getByRole("button", { name: "Dismiss token" }).click();
+  await expect(page.getByLabel("One-time API token")).toHaveCount(0);
+  const tokenRow = page.getByRole("row", { name: /mobile-ci/ });
+  await tokenRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(tokenRow.getByText("Revoked")).toBeVisible();
+  expect(fixture.apiTokenBodies).toEqual([
+    { name: "mobile-ci", scopes: ["inspect_users", "run_self_tests"] },
+    { action: "revoke", token_id: ids.apiToken }
   ]);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 });

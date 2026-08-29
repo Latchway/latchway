@@ -37,6 +37,39 @@ export const AdministratorPageSchema = z
   .object({ items: z.array(AdministratorSchema).max(200), page: PageInfo })
   .strict();
 
+export const AdministratorCapabilitySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_.-]{0,127}$/);
+
+const APITokenScopesSchema = z
+  .array(AdministratorCapabilitySchema)
+  .min(1)
+  .refine((scopes) => new Set(scopes).size === scopes.length, {
+    message: "API token scopes must be unique."
+  });
+
+export const APITokenMetadataSchema = z
+  .object({
+    created_at: Instant,
+    expires_at: OptionalInstant,
+    id: z.string().regex(/^tok_[A-Za-z0-9_-]{16,128}$/),
+    name: z.string().min(1).max(256),
+    revoked: z.boolean(),
+    scopes: APITokenScopesSchema
+  })
+  .strict();
+
+export const APITokenPageSchema = z
+  .object({ items: z.array(APITokenMetadataSchema) })
+  .strict();
+
+export const CreatedAPITokenSchema = z
+  .object({
+    metadata: APITokenMetadataSchema,
+    token: z.string().min(32).max(2048).regex(/^[\x21-\x7e]+$/)
+  })
+  .strict();
+
 export const UserSchema = z
   .object({
     created_at: Instant,
@@ -476,6 +509,9 @@ export const ConfigurationPlanSchema = z
 export type ApplicationUser = z.infer<typeof UserSchema>;
 export type Administrator = z.infer<typeof AdministratorSchema>;
 export type AdministratorPage = z.infer<typeof AdministratorPageSchema>;
+export type APITokenMetadata = z.infer<typeof APITokenMetadataSchema>;
+export type APITokenPage = z.infer<typeof APITokenPageSchema>;
+export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;
 export type ApplicationUserPage = z.infer<typeof UserPageSchema>;
 export type Installation = z.infer<typeof InstallationSchema>;
 export type InstallationPage = z.infer<typeof InstallationPageSchema>;
