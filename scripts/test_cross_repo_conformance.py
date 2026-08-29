@@ -601,6 +601,64 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertIn("sdk_contract_locks_disagree", reasons)
         self.assertIn("sdk_fixture_mismatch", reasons)
 
+    def test_locks_may_pin_an_unchanged_ancestor_contract_checkpoint(self) -> None:
+        contract_source_commit = self.workspace.commits["core"]
+        core = self.workspace.repositories["core"]
+        SyntheticWorkspace.write(
+            core / "docs/implementation/COMPLETION_REPORT.md",
+            "# Exact release coordinates\n\nSDK commits are recorded here.\n",
+        )
+        SyntheticWorkspace.git(core, "add", "docs/implementation/COMPLETION_REPORT.md")
+        SyntheticWorkspace.git(core, "commit", "-m", "docs: record release coordinates")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(core, "rev-parse", "HEAD")
+
+        result, report, _, _ = self.run_gate("ancestor-contract-checkpoint")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        check = next(
+            item for item in report["checks"] if item["id"] == "source.contract_locks"
+        )
+        self.assertEqual(check["status"], "passed")
+        self.assertEqual(
+            check["details"]["contract_source_commit"], contract_source_commit
+        )
+
+    def test_contract_source_checkpoint_rejects_later_api_drift(self) -> None:
+        core = self.workspace.repositories["core"]
+        SyntheticWorkspace.write(
+            core / "api/client.openapi.yaml",
+            "openapi: 3.1.0\ninfo: {title: changed, version: 1.0.0}\n",
+        )
+        SyntheticWorkspace.git(core, "add", "api/client.openapi.yaml")
+        SyntheticWorkspace.git(core, "commit", "-m", "test: drift contract")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(core, "rev-parse", "HEAD")
+
+        result, report, _, _ = self.run_gate("contract-checkpoint-drift")
+        self.assertEqual(result.returncode, 1)
+        reasons = {check.get("reason") for check in report["checks"]}
+        self.assertIn("sdk_locked_contract_source_drift", reasons)
+
+    def test_server_compatibility_range_is_checked_against_core_version(self) -> None:
+        for repository_id in ("javascript", "ios", "android", "react_native"):
+            repository = self.workspace.repositories[repository_id]
+            lock = repository / "contract.lock"
+            lock.write_text(
+                lock.read_text(encoding="utf-8").replace(
+                    "minimum_server_version: 1.0.0",
+                    "minimum_server_version: 1.0.1",
+                ),
+                encoding="utf-8",
+            )
+            SyntheticWorkspace.git(repository, "add", "contract.lock")
+            SyntheticWorkspace.git(repository, "commit", "-m", "test: raise minimum")
+            self.workspace.commits[repository_id] = SyntheticWorkspace.git(
+                repository, "rev-parse", "HEAD"
+            )
+
+        result, report, _, _ = self.run_gate("minimum-server-too-new")
+        self.assertEqual(result.returncode, 1)
+        reasons = {check.get("reason") for check in report["checks"]}
+        self.assertIn("minimum_server_version_exceeds_core", reasons)
+
     def test_promotion_scope_requires_exactly_six_non_public_domains(self) -> None:
         result, report, _, junit = self.run_gate(
             "promotion-missing", scope="promotion"

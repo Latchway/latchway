@@ -157,7 +157,7 @@ CHECK_SUMMARIES = {
     "source.clean_worktrees": "All five source worktrees are clean, including untracked files.",
     "source.core_contract": "Core contract and build declarations are internally consistent.",
     "source.contract_bundle": "Two core contract bundles are byte-identical and internally complete.",
-    "source.contract_locks": "Every SDK lock names the exact core commit, contract, wire version, and bundle hash.",
+    "source.contract_locks": "Every SDK lock names one immutable ancestor contract checkpoint, contract, wire version, server range, and bundle hash.",
     "source.generated_fixtures": "Every SDK fixture is byte-identical to the generated core bundle member.",
     "source.package_versions": "Public package names and source version declarations agree.",
     "source.react_native_pins": "React Native dependencies pin the exact local JavaScript, iOS, and Android sources.",
@@ -565,6 +565,7 @@ class Evaluator:
         repositories = self._required_state("repositories")
         commits = self._required_state("commits")
         contract_version = self._required_state("contract_version")
+        core_version = self._required_state("core_version").split("-", 1)[0]
         wire = self._required_state("wire_protocol")
         bundle_hash = self._required_state("bundle_sha256")
         canonical: dict[str, str] | None = None
@@ -587,9 +588,38 @@ class Evaluator:
             locks[repository_id] = normalized
         assert canonical is not None
 
+        contract_source_commit = canonical.get("core_commit")
+        core = repositories["core"]
+        try:
+            git(core, "cat-file", "-e", f"{contract_source_commit}^{{commit}}")
+        except VerificationError:
+            raise VerificationError("sdk_locked_contract_source_unavailable") from None
+        try:
+            git(
+                core,
+                "merge-base",
+                "--is-ancestor",
+                str(contract_source_commit),
+                commits["core"],
+            )
+        except VerificationError:
+            raise VerificationError("sdk_locked_contract_source_not_ancestor") from None
+        try:
+            git(
+                core,
+                "diff",
+                "--exit-code",
+                "--no-ext-diff",
+                str(contract_source_commit),
+                commits["core"],
+                "--",
+                "api",
+            )
+        except VerificationError:
+            raise VerificationError("sdk_locked_contract_source_drift") from None
+
         expected = {
             "contract_version": contract_version,
-            "core_commit": commits["core"],
             "bundle_sha256": bundle_hash,
             "wire_protocol": str(wire),
         }
@@ -609,20 +639,22 @@ class Evaluator:
             raise VerificationError("invalid_locked_core_release")
         if not isinstance(minimum, str) or SEMVER.fullmatch(minimum) is None:
             raise VerificationError("invalid_minimum_server_version")
-        if semver_key(minimum) > semver_key(contract_version):
-            raise VerificationError("minimum_server_version_exceeds_contract")
+        if semver_key(minimum) > semver_key(core_version):
+            raise VerificationError("minimum_server_version_exceeds_core")
         maximum_match = MAXIMUM_TESTED.fullmatch(maximum or "")
         if maximum_match is None:
             raise VerificationError("invalid_maximum_tested_server_version")
-        contract_parts = contract_version.split(".")
-        if contract_parts[:2] != list(maximum_match.groups()):
+        core_parts = core_version.split(".")
+        if core_parts[:2] != list(maximum_match.groups()):
             raise VerificationError("maximum_tested_server_series_mismatch")
 
         self.state["locks"] = locks
         self.state["core_release"] = core_release
+        self.state["contract_source_commit"] = contract_source_commit
         return {
             "lock_count": len(locks),
             "core_release": core_release,
+            "contract_source_commit": contract_source_commit,
             "minimum_server_version": minimum,
             "maximum_tested_server_version": maximum,
         }
@@ -795,7 +827,7 @@ class Evaluator:
         expected_contract = {
             "version": self._required_state("contract_version"),
             "wire_protocol": self._required_state("wire_protocol"),
-            "core_commit": commits["core"],
+            "core_commit": self._required_state("contract_source_commit"),
             "bundle_sha256": self._required_state("bundle_sha256"),
             "fixtures": fixture_hashes,
         }

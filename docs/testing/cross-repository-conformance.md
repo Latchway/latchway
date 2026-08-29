@@ -11,9 +11,10 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 `source` scope proves local source alignment. It requires:
 
 - five explicit, distinct, clean Git worktrees;
-- every SDK `contract.lock` to name the exact local core commit, contract
-  version, wire version, server range, core release label, and generated bundle
-  SHA-256;
+- every SDK `contract.lock` to name the same immutable core contract checkpoint,
+  contract version, wire version, server range, core release label, and
+  generated bundle SHA-256. The checkpoint must exist, be an ancestor of the
+  candidate, and have no `api/` drift through the candidate commit;
 - two fresh core bundle builds to be byte-identical, safe to extract, complete,
   internally checksummed, and byte-identical to the canonical `api/` sources;
 - the DPoP, attestation-binding, and protocol fixtures in every SDK to be
@@ -142,6 +143,13 @@ Each JSON document has the exact following top-level shape:
 Repository tags and versions need not all be equal; they must equal the exact
 coordinates derived from the five local candidates. The example uses 1.0.0 for
 readability.
+
+The lock's `core_commit` is the contract-source checkpoint, not a
+self-referential release-metadata commit. This permits the core completion
+report to record the exact later SDK commits while preserving an acyclic,
+verifiable chain: core contract checkpoint → SDK locks → final core release
+metadata. The final candidate must retain byte-identical `api/` sources and the
+same deterministic bundle hash from that checkpoint.
 
 Documents are accepted only when their timestamps are ordered, start on or
 after the contract's `released_at`, finish no later than the current time, and
