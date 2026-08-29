@@ -28,3 +28,12 @@ Reports and diagnostic bundles must not include live provider keys, master keys,
 ## Security model
 
 The current security architecture and known validation gaps are documented under [`docs/threat-model/`](docs/threat-model/). No pre-1.0 checkout should be treated as production-ready without explicit evidence in the completion report.
+
+Branch, pull-request, scheduled scan logs, and historical review notes are not
+security evidence for a later release candidate. The protected exact-candidate
+producer, retained raw-output contract, redacted summary, and promotion gate
+are documented in
+[`docs/testing/security-evidence.md`](docs/testing/security-evidence.md).
+Its `automated_gate: passed` result does not claim that the explicitly
+unavailable independent P0-P2, SSRF, cryptography, native-attestation,
+Admin-auth, or browser-XSS reviews ran.

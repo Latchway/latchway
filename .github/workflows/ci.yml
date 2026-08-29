@@ -169,6 +169,9 @@ jobs:
       - name: Validate operational-resilience evidence tooling
         run: |
           python3 -m unittest scripts/test_operational_resilience_evidence.py
+          python3 -m unittest \
+            scripts/test_security_evidence.py \
+            scripts/test_security_workflow.py
           bash -n scripts/run-operational-resilience-drills.sh
       - name: Run deterministic failure and replica gates
         run: >-
