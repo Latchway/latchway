@@ -98,10 +98,64 @@ type logicalRequestPageCLI struct {
 }
 
 type usageSummaryCLI struct {
-	Start      string         `json:"start"`
-	End        string         `json:"end"`
+	Start      string            `json:"start"`
+	End        string            `json:"end"`
+	Values     usageValuesCLI    `json:"values"`
+	Provenance []string          `json:"provenance"`
+	Analytics  usageAnalyticsCLI `json:"analytics"`
+}
+
+type usageFractionCLI struct {
+	Numerator   json.Number `json:"numerator"`
+	Denominator json.Number `json:"denominator"`
+}
+
+type usageRateCLI struct {
+	Numerator       json.Number `json:"numerator"`
+	Denominator     json.Number `json:"denominator"`
+	PartsPerMillion json.Number `json:"parts_per_million"`
+}
+
+type usageDistributionCLI struct {
+	Samples json.Number `json:"samples"`
+	P50MS   json.Number `json:"p50_ms"`
+	P95MS   json.Number `json:"p95_ms"`
+	P99MS   json.Number `json:"p99_ms"`
+}
+
+type usageBreakdownItemCLI struct {
+	Key          string         `json:"key"`
+	ActiveUsers  json.Number    `json:"active_users"`
+	RequestCount json.Number    `json:"request_count"`
+	Values       usageValuesCLI `json:"values"`
+}
+
+type usageBreakdownCLI struct {
+	Items     []usageBreakdownItemCLI `json:"items"`
+	Truncated bool                    `json:"truncated"`
+	Limit     int                     `json:"limit"`
+}
+
+type usageProvenanceCLI struct {
+	Provenance string         `json:"provenance"`
 	Values     usageValuesCLI `json:"values"`
-	Provenance []string       `json:"provenance"`
+}
+
+type usageAnalyticsCLI struct {
+	ActiveUsers              json.Number          `json:"active_users"`
+	RequestCount             json.Number          `json:"request_count"`
+	RequestsPerActiveUser    usageFractionCLI     `json:"requests_per_active_user"`
+	CostPerActiveUserNanoUSD usageFractionCLI     `json:"cost_per_active_user_nano_usd"`
+	ByFeature                usageBreakdownCLI    `json:"by_feature"`
+	ByModel                  usageBreakdownCLI    `json:"by_model"`
+	BySelectedPlan           usageBreakdownCLI    `json:"by_selected_plan"`
+	RequestLatency           usageDistributionCLI `json:"request_latency"`
+	TimeToFirstToken         usageDistributionCLI `json:"time_to_first_token"`
+	FailureRate              usageRateCLI         `json:"failure_rate"`
+	QuotaDenialRate          usageRateCLI         `json:"quota_denial_rate"`
+	AttestationFailureRate   usageRateCLI         `json:"attestation_failure_rate"`
+	FallbackRate             usageRateCLI         `json:"fallback_rate"`
+	UsageByProvenance        []usageProvenanceCLI `json:"usage_by_provenance"`
 }
 
 type usagePointCLI struct {
@@ -409,13 +463,18 @@ func newUsageCommand(opts *options) *cobra.Command {
 
 func newUsageSummaryCommand(opts *options, root *controlCommandOptions) *cobra.Command {
 	var environmentID, start, end string
+	var breakdownLimit int
 	command := &cobra.Command{
 		Use: "summary", Short: "Summarize requests, tokens, and nano-USD cost", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if breakdownLimit < 1 || breakdownLimit > 200 {
+				return errors.New("usage breakdown limit must be between 1 and 200")
+			}
 			query, err := usageQuery(environmentID, start, end, "")
 			if err != nil {
 				return err
 			}
+			query.Set("breakdown_limit", strconv.Itoa(breakdownLimit))
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
 				return err
@@ -428,6 +487,7 @@ func newUsageSummaryCommand(opts *options, root *controlCommandOptions) *cobra.C
 		},
 	}
 	usageRangeFlags(command, &environmentID, &start, &end)
+	command.Flags().IntVar(&breakdownLimit, "breakdown-limit", 50, "maximum feature, model, and selected-plan rows (1-200)")
 	return command
 }
 
@@ -725,11 +785,53 @@ func printUsageSummary(opts *options, summary usageSummaryCLI) error {
 	if opts.output == "json" {
 		return printControlJSON(opts, summary)
 	}
-	return printControlTable(opts, []string{"START", "END", "REQUESTS", "INPUT", "OUTPUT", "TOTAL", "COST NANO-USD", "PROVENANCE"}, [][]string{{
-		formatControlTime(summary.Start), formatControlTime(summary.End), summary.Values.LogicalRequests.String(),
-		summary.Values.InputTokens.String(), summary.Values.OutputTokens.String(), summary.Values.TotalTokens.String(),
+	if err := printControlTable(opts, []string{"START", "END", "ACTIVE USERS", "REQUESTS", "REQUESTS/USER", "COST/USER NANO-USD", "INPUT", "OUTPUT", "TOTAL", "COST NANO-USD", "PROVENANCE"}, [][]string{{
+		formatControlTime(summary.Start), formatControlTime(summary.End), summary.Analytics.ActiveUsers.String(),
+		summary.Analytics.RequestCount.String(), usageFractionText(summary.Analytics.RequestsPerActiveUser),
+		usageFractionText(summary.Analytics.CostPerActiveUserNanoUSD), summary.Values.InputTokens.String(),
+		summary.Values.OutputTokens.String(), summary.Values.TotalTokens.String(),
 		summary.Values.CostNanoUSD.String(), strings.Join(summary.Provenance, ","),
-	}})
+	}}); err != nil {
+		return err
+	}
+	if err := printControlTable(opts, []string{"FAILURE PPM", "QUOTA DENIAL PPM", "ATTESTATION FAILURE PPM", "FALLBACK PPM", "LATENCY P50/P95/P99 MS", "TTFT P50/P95/P99 MS"}, [][]string{{
+		summary.Analytics.FailureRate.PartsPerMillion.String(), summary.Analytics.QuotaDenialRate.PartsPerMillion.String(),
+		summary.Analytics.AttestationFailureRate.PartsPerMillion.String(), summary.Analytics.FallbackRate.PartsPerMillion.String(),
+		usageDistributionText(summary.Analytics.RequestLatency), usageDistributionText(summary.Analytics.TimeToFirstToken),
+	}}); err != nil {
+		return err
+	}
+	breakdowns := []struct {
+		label string
+		value usageBreakdownCLI
+	}{
+		{label: "FEATURE", value: summary.Analytics.ByFeature},
+		{label: "MODEL", value: summary.Analytics.ByModel},
+		{label: "SELECTED PLAN", value: summary.Analytics.BySelectedPlan},
+	}
+	for _, selected := range breakdowns {
+		breakdown := selected.value
+		rows := make([][]string, 0, len(breakdown.Items))
+		for _, item := range breakdown.Items {
+			rows = append(rows, []string{item.Key, item.ActiveUsers.String(), item.RequestCount.String(), item.Values.TotalTokens.String(), item.Values.CostNanoUSD.String()})
+		}
+		if err := printControlTable(opts, []string{selected.label, "ACTIVE USERS", "REQUESTS", "TOTAL TOKENS", "COST NANO-USD"}, rows); err != nil {
+			return err
+		}
+	}
+	provenanceRows := make([][]string, 0, len(summary.Analytics.UsageByProvenance))
+	for _, item := range summary.Analytics.UsageByProvenance {
+		provenanceRows = append(provenanceRows, []string{item.Provenance, item.Values.InputTokens.String(), item.Values.OutputTokens.String(), item.Values.TotalTokens.String(), item.Values.CostNanoUSD.String()})
+	}
+	return printControlTable(opts, []string{"USAGE PROVENANCE", "INPUT", "OUTPUT", "TOTAL", "COST NANO-USD"}, provenanceRows)
+}
+
+func usageFractionText(value usageFractionCLI) string {
+	return value.Numerator.String() + "/" + value.Denominator.String()
+}
+
+func usageDistributionText(value usageDistributionCLI) string {
+	return value.P50MS.String() + "/" + value.P95MS.String() + "/" + value.P99MS.String()
 }
 
 func printUsageTimeseries(opts *options, series usageTimeseriesCLI) error {

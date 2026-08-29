@@ -3,10 +3,13 @@ package adminapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/dataplane"
+	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/session"
@@ -16,6 +19,8 @@ const (
 	simulationUserID         = "usr_00000000000000000000000000"
 	simulationInstallationID = "ins_00000000000000000000000000"
 	simulationRequestID      = "req_00000000000000000000000000"
+	maximumSimulatedTokens   = int64(100_000_000)
+	maximumSimulatedBytes    = int64(100 << 20)
 )
 
 type routeSimulationPrincipal struct {
@@ -24,11 +29,22 @@ type routeSimulationPrincipal struct {
 }
 
 type routeSimulationRequest struct {
-	Feature    string                   `json:"feature"`
-	Platform   string                   `json:"platform"`
-	Principal  routeSimulationPrincipal `json:"principal"`
-	TrustLevel string                   `json:"trust_level"`
-	Request    map[string]any           `json:"request"`
+	ApplicationID string                      `json:"application_id,omitempty"`
+	EnvironmentID string                      `json:"environment_id,omitempty"`
+	Feature       string                      `json:"feature"`
+	Platform      string                      `json:"platform"`
+	Principal     routeSimulationPrincipal    `json:"principal"`
+	TrustLevel    string                      `json:"trust_level"`
+	Request       routeSimulationRequestFacts `json:"request"`
+}
+
+type routeSimulationRequestFacts struct {
+	Streaming             bool   `json:"streaming"`
+	AppVersion            string `json:"app_version,omitempty"`
+	RequestedInputTokens  int64  `json:"requested_input_tokens,omitempty"`
+	RequestedOutputMax    int64  `json:"requested_output_max,omitempty"`
+	RewrittenRequestBytes int64  `json:"rewritten_request_bytes,omitempty"`
+	FramingUnitCount      int64  `json:"framing_unit_count,omitempty"`
 }
 
 type routeSimulationLimit struct {
@@ -36,6 +52,7 @@ type routeSimulationLimit struct {
 	Algorithm         string   `json:"algorithm"`
 	Scope             []string `json:"scope"`
 	Window            string   `json:"window,omitempty"`
+	Timezone          string   `json:"timezone,omitempty"`
 	Maximum           int64    `json:"maximum,omitempty"`
 	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
 	Capacity          int64    `json:"capacity,omitempty"`
@@ -51,43 +68,95 @@ type routeSimulationCandidate struct {
 	FallbackOn    []string `json:"fallback_on"`
 }
 
+type routeSimulationFacts struct {
+	ApplicationID         string         `json:"application_id"`
+	EnvironmentID         string         `json:"environment_id"`
+	RevisionID            string         `json:"revision_id"`
+	EnvironmentKind       string         `json:"environment_kind"`
+	Feature               string         `json:"feature"`
+	Platform              string         `json:"platform"`
+	TrustLevel            string         `json:"trust_level"`
+	Authenticated         bool           `json:"authenticated"`
+	NormalizedClaims      map[string]any `json:"normalized_claims"`
+	Streaming             bool           `json:"streaming"`
+	AppVersion            string         `json:"app_version,omitempty"`
+	RequestedInputTokens  int64          `json:"requested_input_tokens"`
+	RequestedOutputMax    int64          `json:"requested_output_max"`
+	RewrittenRequestBytes int64          `json:"rewritten_request_bytes"`
+	FramingUnitCount      int64          `json:"framing_unit_count"`
+}
+
+type routeSimulationFactUse struct {
+	Fact        string `json:"fact"`
+	Role        string `json:"role"`
+	AffectsCEL  bool   `json:"affects_cel"`
+	Explanation string `json:"explanation"`
+}
+
+type routeSimulationInputAccounting struct {
+	Required                       bool   `json:"required"`
+	ProfileID                      string `json:"profile_id,omitempty"`
+	Method                         string `json:"method,omitempty"`
+	RewrittenRequestBytes          int64  `json:"rewritten_request_bytes"`
+	FramingUnitCount               int64  `json:"framing_unit_count"`
+	MaximumFramingTokensPerRequest int64  `json:"maximum_framing_tokens_per_request"`
+	MaximumFramingTokensPerUnit    int64  `json:"maximum_framing_tokens_per_unit"`
+	InputTokenBound                int64  `json:"input_token_bound"`
+	MaximumContextTokens           int64  `json:"maximum_context_tokens"`
+}
+
+type routeSimulationAllocation struct {
+	Metric     string `json:"metric"`
+	Algorithm  string `json:"algorithm"`
+	Units      int64  `json:"units"`
+	Applicable bool   `json:"applicable"`
+	Durable    bool   `json:"durable"`
+}
+
+type routeSimulationReservation struct {
+	AppliedOutputMaximum int64                          `json:"applied_output_maximum"`
+	TotalTokenBound      int64                          `json:"total_token_bound"`
+	CostNanoUSDBound     int64                          `json:"cost_nano_usd_bound"`
+	CostBoundKnown       bool                           `json:"cost_bound_known"`
+	PricingCatalog       string                         `json:"pricing_catalog,omitempty"`
+	InputAccounting      routeSimulationInputAccounting `json:"input_accounting"`
+	Allocations          []routeSimulationAllocation    `json:"allocations"`
+}
+
 type routeSimulationResult struct {
-	Allowed                 bool                       `json:"allowed"`
-	Feature                 string                     `json:"feature"`
-	Protocol                string                     `json:"protocol,omitempty"`
-	MatchedAccessExpression string                     `json:"matched_access_expression,omitempty"`
-	LimitPlan               string                     `json:"limit_plan,omitempty"`
-	Limits                  []routeSimulationLimit     `json:"limits,omitempty"`
-	Route                   string                     `json:"route,omitempty"`
-	Upstream                string                     `json:"upstream,omitempty"`
-	Model                   string                     `json:"model,omitempty"`
-	PhysicalModel           string                     `json:"physical_model,omitempty"`
-	FallbackSequence        []routeSimulationCandidate `json:"fallback_sequence,omitempty"`
-	PricingConfidence       string                     `json:"pricing_confidence,omitempty"`
-	Warnings                []string                   `json:"warnings,omitempty"`
-	Explanation             []string                   `json:"explanation"`
+	Allowed                 bool                        `json:"allowed"`
+	Feature                 string                      `json:"feature"`
+	ApplicationID           string                      `json:"application_id"`
+	EnvironmentID           string                      `json:"environment_id"`
+	RevisionID              string                      `json:"revision_id"`
+	EnvironmentKind         string                      `json:"environment_kind"`
+	Facts                   routeSimulationFacts        `json:"facts"`
+	FactUsage               []routeSimulationFactUse    `json:"fact_usage"`
+	Protocol                string                      `json:"protocol,omitempty"`
+	MatchedAccessExpression string                      `json:"matched_access_expression,omitempty"`
+	LimitPlan               string                      `json:"limit_plan,omitempty"`
+	Limits                  []routeSimulationLimit      `json:"limits,omitempty"`
+	Route                   string                      `json:"route,omitempty"`
+	Upstream                string                      `json:"upstream,omitempty"`
+	Model                   string                      `json:"model,omitempty"`
+	PhysicalModel           string                      `json:"physical_model,omitempty"`
+	FallbackSequence        []routeSimulationCandidate  `json:"fallback_sequence,omitempty"`
+	PricingConfidence       string                      `json:"pricing_confidence,omitempty"`
+	Reservation             *routeSimulationReservation `json:"reservation,omitempty"`
+	Warnings                []string                    `json:"warnings,omitempty"`
+	Explanation             []string                    `json:"explanation"`
 }
 
 func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Request) {
 	request, err := decodeJSON[routeSimulationRequest](r)
 	if err != nil || request.Principal.Authenticated == nil || request.Principal.Claims == nil ||
-		len(request.Principal.Claims) > 64 || len(request.Request) > 64 {
+		len(request.Principal.Claims) > 64 || !validSimulationRequestFacts(request.Request) {
 		api.writeProblem(w, r, invalidRequest("The route-simulation request is invalid."))
 		return
 	}
 	if request.TrustLevel == "" {
 		request.TrustLevel = "none"
 	}
-	streaming := false
-	if raw, exists := request.Request["streaming"]; exists {
-		parsed, ok := raw.(bool)
-		if !ok {
-			api.writeProblem(w, r, invalidRequest("The simulated request.streaming value must be boolean."))
-			return
-		}
-		streaming = parsed
-	}
-
 	compiled, err := api.configurations.SimulationSnapshot(
 		r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "revisionID"),
 	)
@@ -95,19 +164,24 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		api.handleConfigurationError(w, r, err)
 		return
 	}
+	if request.ApplicationID != "" && (id.Validate(request.ApplicationID, id.Application) != nil ||
+		request.ApplicationID != compiled.Scope.ApplicationID) ||
+		request.EnvironmentID != "" && (id.Validate(request.EnvironmentID, id.Environment) != nil ||
+			request.EnvironmentID != compiled.Scope.EnvironmentID) {
+		api.writeProblem(w, r, invalidRequest("The simulator application or environment does not match the selected revision."))
+		return
+	}
+	facts := simulationFacts(compiled, request)
+	base := baseSimulationResult(compiled, facts)
 	if !*request.Principal.Authenticated {
-		writeJSON(w, http.StatusOK, routeSimulationResult{
-			Allowed: false, Feature: request.Feature,
-			Explanation: []string{"Authentication fails before production policy evaluation."},
-		})
+		base.Explanation = []string{"Authentication fails before production policy evaluation."}
+		writeJSON(w, http.StatusOK, base)
 		return
 	}
 	feature, found := compiled.Snapshot.Feature(request.Feature)
 	if !found {
-		writeJSON(w, http.StatusOK, routeSimulationResult{
-			Allowed: false, Feature: request.Feature,
-			Explanation: []string{"The selected revision has no feature with this identifier."},
-		})
+		base.Explanation = []string{"The selected revision has no feature with this identifier."}
+		writeJSON(w, http.StatusOK, base)
 		return
 	}
 	attestationPolicy, found := compiled.Snapshot.AttestationPolicy(feature.AttestationPolicyID)
@@ -118,7 +192,7 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	attestation, found := attestationPolicy.Platforms[request.Platform]
 	if !found {
 		writeJSON(w, http.StatusOK, deniedSimulationResult(
-			request.Feature, feature,
+			base, feature,
 			"The feature's attestation policy does not define the simulated platform.",
 		))
 		return
@@ -132,7 +206,7 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		LogicalRequestID: simulationRequestID, InstallationPlatform: request.Platform,
 		IdentityProvider: "simulator", TrustLevel: request.TrustLevel,
 		AttestationProvider: attestation.Provider, Authenticated: true,
-		NormalizedClaims: request.Principal.Claims, Streaming: streaming, EvaluatedAt: now,
+		NormalizedClaims: request.Principal.Claims, Streaming: request.Request.Streaming, EvaluatedAt: now,
 	})
 	if err != nil {
 		api.writeProblem(w, r, invalidRequest("The route-simulation facts are invalid or exceed their safety bound."))
@@ -141,7 +215,7 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	plan, err := api.policyResolver.ResolvePlan(r.Context(), compiled.Snapshot, request.Feature, input)
 	if err != nil {
 		if detail, denied := simulationDenial(err); denied {
-			writeJSON(w, http.StatusOK, deniedSimulationResult(request.Feature, feature, detail))
+			writeJSON(w, http.StatusOK, deniedSimulationResult(base, feature, detail))
 			return
 		}
 		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an executable route plan."})
@@ -151,12 +225,30 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision produced an empty route plan."})
 		return
 	}
+	primary := plan.Candidates[0]
+	projection, err := dataplane.ProjectReservation(compiled.Snapshot, policy.Decision{
+		Feature: plan.Feature, LimitPlan: plan.LimitPlan, Route: primary.Route,
+		Model: primary.Model, Upstream: primary.Upstream,
+	}, dataplane.ReservationProjectionInput{
+		RequestedOutputMaximum: request.Request.RequestedOutputMax,
+		RewrittenRequestBytes:  request.Request.RewrittenRequestBytes,
+		FramingUnitCount:       request.Request.FramingUnitCount,
+		Streaming:              request.Request.Streaming, EvaluatedAt: now,
+	})
+	if err != nil {
+		if errors.Is(err, dataplane.ErrInvalidReservationProjection) {
+			api.writeProblem(w, r, invalidRequest("The request shape cannot produce the trusted conservative reservation required by this route."))
+			return
+		}
+		api.writeProblem(w, r, problem.Error{Code: "configuration_invalid", Detail: "The selected revision could not produce an exact conservative reservation."})
+		return
+	}
 
 	limits := make([]routeSimulationLimit, 0, len(plan.LimitPlan.Limits))
 	for _, limit := range plan.LimitPlan.Limits {
 		limits = append(limits, routeSimulationLimit{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: append([]string(nil), limit.Scope...),
-			Window: limit.Window, Maximum: limit.Maximum, PerRequestMaximum: limit.PerRequestMaximum,
+			Window: limit.Window, Timezone: limit.Timezone, Maximum: limit.Maximum, PerRequestMaximum: limit.PerRequestMaximum,
 			Capacity: limit.Capacity, RefillPerSecond: limit.RefillPerSecond.String(), Hard: limit.Hard,
 		})
 	}
@@ -171,36 +263,118 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	warnings := []string{
 		"Simulation performs no quota reservation and no upstream dispatch.",
 		"Weighted and sticky selection uses stable synthetic opaque identities for repeatable explanations.",
+		"App version and requested input-token estimates are explanatory only; request shape and output maximum affect reservation, not CEL.",
 	}
-	if len(request.Request) > 0 && (len(request.Request) != 1 || request.Request["streaming"] == nil) {
-		warnings = append(warnings, "Only request.streaming is currently exposed to production feature CEL; other request fields do not affect this decision.")
-	}
-	primary := plan.Candidates[0]
 	pricingConfidence := "unknown"
 	if primary.Model.PricingRef != "" {
 		pricingConfidence = "configured"
 	}
-	writeJSON(w, http.StatusOK, routeSimulationResult{
-		Allowed: true, Feature: plan.Feature.ID, Protocol: plan.Feature.Protocol,
-		MatchedAccessExpression: plan.Feature.AccessExpression,
-		LimitPlan:               plan.LimitPlan.ID, Limits: limits,
-		Route: primary.Route.ID, Upstream: primary.Upstream.ID, Model: primary.Model.ID,
-		PhysicalModel: primary.Model.UpstreamModel, FallbackSequence: candidates,
-		PricingConfidence: pricingConfidence, Warnings: warnings,
-		Explanation: []string{
-			"The exact compiled production CEL policy allowed the simulated principal.",
-			"The route order applies configured priority, weight, sticky selection, and fallback policy.",
-		},
-	})
+	base.Allowed = true
+	base.Protocol = plan.Feature.Protocol
+	base.MatchedAccessExpression = plan.Feature.AccessExpression
+	base.LimitPlan = plan.LimitPlan.ID
+	base.Limits = limits
+	base.Route = primary.Route.ID
+	base.Upstream = primary.Upstream.ID
+	base.Model = primary.Model.ID
+	base.PhysicalModel = primary.Model.UpstreamModel
+	base.FallbackSequence = candidates
+	base.PricingConfidence = pricingConfidence
+	base.Reservation = simulationReservation(projection)
+	base.Warnings = warnings
+	base.Explanation = []string{
+		"The exact compiled production CEL policy allowed the simulated principal.",
+		"The route order applies configured priority, weight, sticky selection, and fallback policy.",
+		"Reservation units use the production clamp, trusted-input, pricing, and quota projection helpers without mutating quota state.",
+	}
+	writeJSON(w, http.StatusOK, base)
 }
 
-func deniedSimulationResult(featureID string, feature configuration.Feature, detail string) routeSimulationResult {
-	return routeSimulationResult{
-		Allowed: false, Feature: featureID, Protocol: feature.Protocol,
-		MatchedAccessExpression: feature.AccessExpression,
-		Warnings:                []string{"Simulation performs no quota reservation and no upstream dispatch."},
-		Explanation:             []string{detail},
+func validSimulationRequestFacts(facts routeSimulationRequestFacts) bool {
+	return len(facts.AppVersion) <= 128 && !strings.ContainsAny(facts.AppVersion, "\r\n\x00") &&
+		facts.RequestedInputTokens >= 0 && facts.RequestedInputTokens <= maximumSimulatedTokens &&
+		facts.RequestedOutputMax >= 0 && facts.RequestedOutputMax <= maximumSimulatedTokens &&
+		facts.RewrittenRequestBytes >= 0 && facts.RewrittenRequestBytes <= maximumSimulatedBytes &&
+		facts.FramingUnitCount >= 0 && facts.FramingUnitCount <= 4096
+}
+
+func simulationFacts(
+	compiled configuration.SimulationSnapshot,
+	request routeSimulationRequest,
+) routeSimulationFacts {
+	return routeSimulationFacts{
+		ApplicationID: compiled.Scope.ApplicationID, EnvironmentID: compiled.Scope.EnvironmentID,
+		RevisionID: compiled.Snapshot.PolicyRevision(), EnvironmentKind: compiled.EnvironmentKind,
+		Feature: request.Feature, Platform: request.Platform, TrustLevel: request.TrustLevel,
+		Authenticated: *request.Principal.Authenticated, NormalizedClaims: request.Principal.Claims,
+		Streaming: request.Request.Streaming, AppVersion: request.Request.AppVersion,
+		RequestedInputTokens:  request.Request.RequestedInputTokens,
+		RequestedOutputMax:    request.Request.RequestedOutputMax,
+		RewrittenRequestBytes: request.Request.RewrittenRequestBytes,
+		FramingUnitCount:      request.Request.FramingUnitCount,
 	}
+}
+
+func baseSimulationResult(
+	compiled configuration.SimulationSnapshot,
+	facts routeSimulationFacts,
+) routeSimulationResult {
+	return routeSimulationResult{
+		Feature: facts.Feature, ApplicationID: compiled.Scope.ApplicationID,
+		EnvironmentID: compiled.Scope.EnvironmentID, RevisionID: compiled.Snapshot.PolicyRevision(),
+		EnvironmentKind: compiled.EnvironmentKind, Facts: facts,
+		FactUsage: []routeSimulationFactUse{
+			{Fact: "application_id", Role: "scope", Explanation: "Authoritative revision scope; it cannot be overridden by simulated facts."},
+			{Fact: "environment_id", Role: "scope", Explanation: "Authoritative revision scope; it cannot be overridden by simulated facts."},
+			{Fact: "revision_id", Role: "scope", Explanation: "Selects the immutable compiled snapshot."},
+			{Fact: "feature", Role: "policy", AffectsCEL: true, Explanation: "Selects the compiled feature and its CEL programs."},
+			{Fact: "platform", Role: "policy", AffectsCEL: true, Explanation: "Selects the platform attestation requirement and is exposed to CEL."},
+			{Fact: "trust_level", Role: "policy", AffectsCEL: true, Explanation: "Checked by attestation policy and exposed to CEL."},
+			{Fact: "authenticated", Role: "authentication", Explanation: "Authentication is checked before CEL."},
+			{Fact: "normalized_claims", Role: "policy", AffectsCEL: true, Explanation: "Bounded normalized claims are exposed to CEL."},
+			{Fact: "streaming", Role: "policy", AffectsCEL: true, Explanation: "The normalized streaming flag is exposed to CEL and stream concurrency."},
+			{Fact: "requested_output_max", Role: "reservation", Explanation: "Applies the production default and absolute output clamp; it does not alter CEL."},
+			{Fact: "rewritten_request_bytes", Role: "reservation", Explanation: "Models the adapter-proved rewritten body size used by trusted input accounting."},
+			{Fact: "framing_unit_count", Role: "reservation", Explanation: "Models the adapter-proved message, item, or input count used by trusted input accounting."},
+			{Fact: "app_version", Role: "explanatory", Explanation: "Returned for context only; it is not currently exposed to production CEL."},
+			{Fact: "requested_input_tokens", Role: "explanatory", Explanation: "Untrusted estimate returned for comparison only; it never affects reservation or CEL."},
+		},
+		Explanation: []string{},
+	}
+}
+
+func simulationReservation(projection dataplane.ReservationProjection) *routeSimulationReservation {
+	allocations := make([]routeSimulationAllocation, 0, len(projection.Allocations))
+	for _, allocation := range projection.Allocations {
+		allocations = append(allocations, routeSimulationAllocation{
+			Metric: allocation.Metric, Algorithm: allocation.Algorithm, Units: allocation.Units,
+			Applicable: allocation.Applicable, Durable: allocation.Durable,
+		})
+	}
+	accounting := projection.InputAccounting
+	return &routeSimulationReservation{
+		AppliedOutputMaximum: projection.AppliedOutputMaximum,
+		TotalTokenBound:      projection.TotalTokenBound, CostNanoUSDBound: projection.CostNanoUSDBound,
+		CostBoundKnown: projection.CostBoundKnown, PricingCatalog: projection.PricingCatalog,
+		InputAccounting: routeSimulationInputAccounting{
+			Required: accounting.Required, ProfileID: accounting.ProfileID, Method: accounting.Method,
+			RewrittenRequestBytes:          accounting.RewrittenRequestBytes,
+			FramingUnitCount:               accounting.FramingUnitCount,
+			MaximumFramingTokensPerRequest: accounting.MaximumFramingTokensPerRequest,
+			MaximumFramingTokensPerUnit:    accounting.MaximumFramingTokensPerUnit,
+			InputTokenBound:                accounting.InputTokenBound,
+			MaximumContextTokens:           accounting.MaximumContextTokens,
+		},
+		Allocations: allocations,
+	}
+}
+
+func deniedSimulationResult(result routeSimulationResult, feature configuration.Feature, detail string) routeSimulationResult {
+	result.Protocol = feature.Protocol
+	result.MatchedAccessExpression = feature.AccessExpression
+	result.Warnings = []string{"Simulation performs no quota reservation and no upstream dispatch."}
+	result.Explanation = []string{detail}
+	return result
 }
 
 func simulationDenial(err error) (string, bool) {

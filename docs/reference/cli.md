@@ -132,13 +132,20 @@ latchway routes simulate rev_... \
   --trust-level app_verified \
   --claims-file normalized-claims.json \
   --requested-input-tokens 1200 \
-  --requested-output-max 800
+  --requested-output-max 800 \
+  --rewritten-request-bytes 4096 \
+  --framing-unit-count 3
 ```
 
-The response explains access, limits, primary routing, physical model,
-fallback order, and pricing confidence. It performs no quota reservation and
-no upstream dispatch. Facts that production CEL does not yet consume are
-reported as non-decisional warnings instead of being simulated in the CLI.
+The response binds the authoritative application, environment, and revision;
+explains access, every applicable limit, primary routing, physical model,
+fallback order, and pricing; and projects the exact conservative units that
+the production quota path would reserve. The byte and framing-unit flags model
+the exact post-rewrite values a production adapter proves and are required when
+the selected plan needs trusted input or total-token accounting. Simulation
+performs no durable reservation and no upstream dispatch. App version and the
+requested-input-token estimate are explicitly explanatory: they are returned
+for comparison but cannot influence CEL or reservation.
 
 ## Secrets and verification
 

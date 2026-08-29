@@ -117,21 +117,26 @@ func TestRouteSimulationUsesServerResolverAndClaimsFile(t *testing.T) {
 		}
 		principal, _ := body["principal"].(map[string]any)
 		claims, _ := principal["claims"].(map[string]any)
-		if body["platform"] != "react_native_ios" || claims["plan"] != "premium" {
+		facts, _ := body["request"].(map[string]any)
+		if body["platform"] != "react_native_ios" || claims["plan"] != "premium" ||
+			facts["rewritten_request_bytes"] != float64(1024) || facts["framing_unit_count"] != float64(1) ||
+			facts["requested_output_max"] != float64(64) {
 			t.Fatalf("simulation body = %#v", body)
 		}
-		return controlHTTPResponse(request, http.StatusOK, `{"allowed":true,"feature":"assistant","protocol":"openai_responses","matched_access_expression":"principal.authenticated","limit_plan":"premium","route":"primary","upstream":"openai","model":"assistant_default","physical_model":"gpt-5-mini","pricing_confidence":"configured","fallback_sequence":[],"explanation":["The exact compiled production CEL policy allowed the simulated principal."]}`, nil), nil
+		return controlHTTPResponse(request, http.StatusOK, `{"allowed":true,"application_id":"app_0123456789abcdef","environment_id":"env_0123456789abcdef","revision_id":"rev_0123456789abcdef","environment_kind":"production","facts":{"feature":"assistant"},"fact_usage":[{"fact":"requested_input_tokens","role":"explanatory","affects_cel":false,"explanation":"estimate only"}],"feature":"assistant","protocol":"openai_responses","matched_access_expression":"principal.authenticated","limit_plan":"premium","route":"primary","upstream":"openai","model":"assistant_default","physical_model":"gpt-5-mini","pricing_confidence":"configured","reservation":{"applied_output_maximum":64,"total_token_bound":1092,"cost_nano_usd_bound":25,"cost_bound_known":true,"pricing_catalog":"default","input_accounting":{"required":true},"allocations":[{"metric":"total_tokens","algorithm":"calendar","units":1092,"applicable":true,"durable":true}]},"fallback_sequence":[],"explanation":["The exact compiled production CEL policy allowed the simulated principal."]}`, nil), nil
 	})}
 	var output bytes.Buffer
 	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
 	if err := executeWithOptions(context.Background(), []string{
 		"--server", "http://127.0.0.1:8080", "--output", "json", "routes", "simulate", controlTestRevision,
 		"--feature", "assistant", "--platform", "react_native_ios", "--trust-level", "app_verified",
+		"--requested-output-max", "64", "--rewritten-request-bytes", "1024", "--framing-unit-count", "1",
 		"--claims-file", claimsPath, "--api-token-env", "TEST_LATCHWAY_ROUTE_TOKEN",
 	}, opts); err != nil {
 		t.Fatalf("routes simulate error = %v", err)
 	}
-	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"physical_model": "gpt-5-mini"`) {
+	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), `"physical_model": "gpt-5-mini"`) ||
+		!strings.Contains(output.String(), `"total_token_bound": 1092`) {
 		t.Fatalf("simulation output = %q", output.String())
 	}
 }

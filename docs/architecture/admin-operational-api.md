@@ -41,6 +41,16 @@ request record remains single-counted. The request explorer returns metadata,
 attempt lifecycle, model/upstream selection, and provenance, never prompt or
 response bodies.
 
+The rich summary limits each feature, physical-model, and selected-limit-plan
+breakdown to an operator-selected 1–200 rows and reports truncation. It returns
+active-user and logical-request counts, exact rational requests/cost per active
+user, integer-millisecond p50/p95/p99 request latency and time to first token,
+and integer parts-per-million failure, quota-denial, attestation-failure, and
+fallback rates. Estimated, calculated, provider-reported, and unknown ledgers
+remain separate. No user identifier is emitted as a time-series or breakdown
+label. Historical requests whose plan predates persisted selection are labeled
+`legacy_unknown`; the migration never guesses a past CEL result.
+
 Audit events expose actor and target opaque IDs plus ordered field,
 operation, and classification markers. They do not expose before/after values
 or free-form mutation reasons.

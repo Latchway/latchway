@@ -59,6 +59,17 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 		if reservation.LogicalRequestID() != input.LogicalRequestID.String() {
 			t.Fatalf("persisted logical ID = %q, want %q", reservation.LogicalRequestID(), input.LogicalRequestID.String())
 		}
+		var selectedLimitPlan string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT selected_limit_plan_key
+			FROM logical_requests
+			WHERE organization_id = $1 AND environment_id = $2 AND logical_request_id = $3
+		`, input.OrganizationID, input.EnvironmentID, input.LogicalRequestID.String()).Scan(&selectedLimitPlan); err != nil {
+			t.Fatalf("read persisted selected limit plan: %v", err)
+		}
+		if selectedLimitPlan != input.LimitPlanKey {
+			t.Fatalf("persisted selected limit plan = %q, want %q", selectedLimitPlan, input.LimitPlanKey)
+		}
 
 		deniedInput := fixture.input(t, "lifecycle", 1)
 		deniedInput.ClientRequestID = input.ClientRequestID

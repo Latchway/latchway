@@ -838,11 +838,16 @@ paths:
       tags: [Usage]
       operationId: getUsageSummary
       summary: Aggregate logical requests, tokens and integer nano-USD cost.
-      description: The half-open `[start, end)` range is limited to 366 days.
+      description: The half-open `[start, end)` range is limited to 366 days; dimensional results are deterministically bounded.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/StartTime'
         - $ref: '#/components/parameters/EndTime'
+        - name: breakdown_limit
+          in: query
+          required: false
+          description: Maximum number of feature, model, and selected-plan rows (default 50).
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         '200':
           description: Usage summary with provenance.
@@ -1299,6 +1304,8 @@ components:
       additionalProperties: false
       required: [feature, platform, principal]
       properties:
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
         feature: { $ref: '#/components/schemas/Identifier' }
         platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
         principal:
@@ -1313,15 +1320,69 @@ components:
           enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
         request:
           type: object
-          additionalProperties: true
-          maxProperties: 64
+          additionalProperties: false
+          properties:
+            streaming: { type: boolean, default: false }
+            app_version: { type: string, maxLength: 128 }
+            requested_input_tokens:
+              type: integer
+              minimum: 0
+              maximum: 100000000
+              description: Explanatory untrusted estimate; never used by CEL or reservation.
+            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+            rewritten_request_bytes:
+              type: integer
+              minimum: 0
+              maximum: 104857600
+              description: Hypothetical exact post-rewrite body size used for conservative trusted-input projection.
+            framing_unit_count:
+              type: integer
+              minimum: 0
+              maximum: 4096
+              description: Hypothetical exact adapter framing-unit count used for conservative trusted-input projection.
     RouteSimulationResult:
       type: object
       additionalProperties: false
-      required: [allowed, feature, explanation]
+      required: [allowed, feature, application_id, environment_id, revision_id, environment_kind, facts, fact_usage, explanation]
       properties:
         allowed: { type: boolean }
         feature: { $ref: '#/components/schemas/Identifier' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        environment_kind: { type: string, enum: [development, staging, production] }
+        facts:
+          type: object
+          additionalProperties: false
+          required: [application_id, environment_id, revision_id, environment_kind, feature, platform, trust_level, authenticated, normalized_claims, streaming, requested_input_tokens, requested_output_max, rewritten_request_bytes, framing_unit_count]
+          properties:
+            application_id: { $ref: '#/components/schemas/ApplicationID' }
+            environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+            revision_id: { $ref: '#/components/schemas/RevisionID' }
+            environment_kind: { type: string, enum: [development, staging, production] }
+            feature: { $ref: '#/components/schemas/Identifier' }
+            platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+            trust_level: { type: string, enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug] }
+            authenticated: { type: boolean }
+            normalized_claims: { type: object, maxProperties: 64, additionalProperties: true }
+            streaming: { type: boolean }
+            app_version: { type: string, maxLength: 128 }
+            requested_input_tokens: { type: integer, minimum: 0, maximum: 100000000 }
+            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+            rewritten_request_bytes: { type: integer, minimum: 0, maximum: 104857600 }
+            framing_unit_count: { type: integer, minimum: 0, maximum: 4096 }
+        fact_usage:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            additionalProperties: false
+            required: [fact, role, affects_cel, explanation]
+            properties:
+              fact: { type: string, maxLength: 128 }
+              role: { type: string, enum: [authentication, scope, policy, reservation, explanatory] }
+              affects_cel: { type: boolean }
+              explanation: { type: string, maxLength: 1024 }
         protocol:
           type: string
           enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
@@ -1370,6 +1431,43 @@ components:
               physical_model: { type: string, maxLength: 512 }
               fallback_on: { type: array, maxItems: 16, uniqueItems: true, items: { type: string } }
         pricing_confidence: { type: string, enum: [configured, unknown] }
+        reservation:
+          type: object
+          additionalProperties: false
+          required: [applied_output_maximum, total_token_bound, cost_nano_usd_bound, cost_bound_known, input_accounting, allocations]
+          properties:
+            applied_output_maximum: { type: integer, minimum: 0 }
+            total_token_bound: { type: integer, minimum: 0 }
+            cost_nano_usd_bound: { type: integer, minimum: 0 }
+            cost_bound_known: { type: boolean }
+            pricing_catalog: { $ref: '#/components/schemas/Identifier' }
+            input_accounting:
+              type: object
+              additionalProperties: false
+              required: [required, rewritten_request_bytes, framing_unit_count, maximum_framing_tokens_per_request, maximum_framing_tokens_per_unit, input_token_bound, maximum_context_tokens]
+              properties:
+                required: { type: boolean }
+                profile_id: { $ref: '#/components/schemas/Identifier' }
+                method: { type: string, enum: [utf8_byte_bpe_declared_framing_v1] }
+                rewritten_request_bytes: { type: integer, minimum: 0 }
+                framing_unit_count: { type: integer, minimum: 0 }
+                maximum_framing_tokens_per_request: { type: integer, minimum: 0 }
+                maximum_framing_tokens_per_unit: { type: integer, minimum: 0 }
+                input_token_bound: { type: integer, minimum: 0 }
+                maximum_context_tokens: { type: integer, minimum: 0 }
+            allocations:
+              type: array
+              maxItems: 128
+              items:
+                type: object
+                additionalProperties: false
+                required: [metric, algorithm, units, applicable, durable]
+                properties:
+                  metric: { type: string }
+                  algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
+                  units: { type: integer, minimum: 0 }
+                  applicable: { type: boolean }
+                  durable: { type: boolean }
         warnings: { type: array, maxItems: 16, items: { type: string, maxLength: 1024 } }
         explanation: { type: array, items: { type: string, maxLength: 1024 } }
     WriteSecretRequest:
@@ -1608,15 +1706,88 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LogicalRequest' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+    UsageFraction:
+      type: object
+      additionalProperties: false
+      required: [numerator, denominator]
+      properties:
+        numerator: { type: integer, minimum: 0 }
+        denominator: { type: integer, minimum: 0 }
+    UsageRate:
+      type: object
+      additionalProperties: false
+      required: [numerator, denominator, parts_per_million]
+      properties:
+        numerator: { type: integer, minimum: 0 }
+        denominator: { type: integer, minimum: 0 }
+        parts_per_million: { type: integer, minimum: 0, maximum: 1000000 }
+    UsageDistribution:
+      type: object
+      additionalProperties: false
+      required: [samples, p50_ms, p95_ms, p99_ms]
+      properties:
+        samples: { type: integer, minimum: 0 }
+        p50_ms: { type: integer, minimum: 0 }
+        p95_ms: { type: integer, minimum: 0 }
+        p99_ms: { type: integer, minimum: 0 }
+    UsageBreakdown:
+      type: object
+      additionalProperties: false
+      required: [items, truncated, limit]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, active_users, request_count, values]
+            properties:
+              key: { type: string, minLength: 1, maxLength: 512 }
+              active_users: { type: integer, minimum: 0 }
+              request_count: { type: integer, minimum: 0 }
+              values: { $ref: '#/components/schemas/UsageValues' }
+        truncated: { type: boolean }
+        limit: { type: integer, minimum: 1, maximum: 200 }
+    UsageAnalytics:
+      type: object
+      additionalProperties: false
+      required: [active_users, request_count, requests_per_active_user, cost_per_active_user_nano_usd, by_feature, by_model, by_selected_plan, request_latency, time_to_first_token, failure_rate, quota_denial_rate, attestation_failure_rate, fallback_rate, usage_by_provenance]
+      properties:
+        active_users: { type: integer, minimum: 0 }
+        request_count: { type: integer, minimum: 0 }
+        requests_per_active_user: { $ref: '#/components/schemas/UsageFraction' }
+        cost_per_active_user_nano_usd: { $ref: '#/components/schemas/UsageFraction' }
+        by_feature: { $ref: '#/components/schemas/UsageBreakdown' }
+        by_model: { $ref: '#/components/schemas/UsageBreakdown' }
+        by_selected_plan: { $ref: '#/components/schemas/UsageBreakdown' }
+        request_latency: { $ref: '#/components/schemas/UsageDistribution' }
+        time_to_first_token: { $ref: '#/components/schemas/UsageDistribution' }
+        failure_rate: { $ref: '#/components/schemas/UsageRate' }
+        quota_denial_rate: { $ref: '#/components/schemas/UsageRate' }
+        attestation_failure_rate: { $ref: '#/components/schemas/UsageRate' }
+        fallback_rate: { $ref: '#/components/schemas/UsageRate' }
+        usage_by_provenance:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [provenance, values]
+            properties:
+              provenance: { type: string, enum: [upstream_reported, calculated, estimated, unknown] }
+              values: { $ref: '#/components/schemas/UsageValues' }
     UsageSummary:
       type: object
       additionalProperties: false
-      required: [start, end, values, provenance]
+      required: [start, end, values, provenance, analytics]
       properties:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         values: { $ref: '#/components/schemas/UsageValues' }
         provenance: { type: array, maxItems: 5, uniqueItems: true, items: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] } }
+        analytics: { $ref: '#/components/schemas/UsageAnalytics' }
     UsageTimeseries:
       type: object
       additionalProperties: false

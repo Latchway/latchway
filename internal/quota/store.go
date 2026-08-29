@@ -183,17 +183,19 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		INSERT INTO logical_requests (
 			logical_request_id, organization_id, application_id, environment_id,
 			application_user_id, installation_id, session_grant_id,
-			config_revision_id, feature_key, protocol, client_request_id,
+			config_revision_id, feature_key, selected_limit_plan_key,
+			protocol, client_request_id,
 			trusted_decision_fingerprint, status, requested_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			$12, 'reserved', $13
+			$12, $13, 'reserved', $14
 		)
 		ON CONFLICT DO NOTHING
 	`, logicalRequestID, prepared.OrganizationID, prepared.ApplicationID,
 		prepared.EnvironmentID, prepared.ApplicationUserID, prepared.InstallationID,
 		prepared.SessionGrantID, prepared.ConfigRevisionID, prepared.FeatureKey,
-		prepared.Protocol, nullableString(prepared.ClientRequestID), fingerprint, requestedAt)
+		prepared.LimitPlanKey, prepared.Protocol, nullableString(prepared.ClientRequestID),
+		fingerprint, requestedAt)
 	if err != nil {
 		return Reservation{}, mapWriteError("insert logical request", err)
 	}

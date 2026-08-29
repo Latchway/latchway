@@ -169,8 +169,18 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	usageQuery := baseQuery + "&start=" + url.QueryEscape(start) + "&end=" + url.QueryEscape(end)
 	summary := performGET(handler, "/admin/v1/usage/summary"+usageQuery, cookie)
 	if summary.Code != http.StatusOK || !bytes.Contains(summary.Body.Bytes(), []byte(`"logical_requests":1`)) ||
-		!bytes.Contains(summary.Body.Bytes(), []byte(`"total_tokens":12`)) {
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"total_tokens":12`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"active_users":1`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"request_count":1`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"key":"assistant"`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"key":"legacy_unknown"`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"p50_ms":60000`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"provenance":"upstream_reported"`)) {
 		t.Fatalf("usage summary status/body=%d %s", summary.Code, summary.Body.String())
+	}
+	invalidBreakdown := performGET(handler, "/admin/v1/usage/summary"+usageQuery+"&breakdown_limit=201", cookie)
+	if invalidBreakdown.Code != http.StatusBadRequest {
+		t.Fatalf("invalid usage breakdown status/body=%d %s", invalidBreakdown.Code, invalidBreakdown.Body.String())
 	}
 	timeseries := performGET(handler, "/admin/v1/usage/timeseries"+usageQuery+"&interval=hour", cookie)
 	if timeseries.Code != http.StatusOK || !bytes.Contains(timeseries.Body.Bytes(), []byte(`"cost_nano_usd":123`)) {
@@ -493,12 +503,12 @@ func seedOperationalFixture(
 		INSERT INTO upstream_attempts (
 		    upstream_attempt_id, organization_id, application_id, environment_id,
 		    logical_request_id, attempt_number, route_key, upstream_key, physical_model,
-		    status, started_at, completed_at, http_status, billed_cost_nano_usd,
+		    status, started_at, first_byte_at, completed_at, http_status, billed_cost_nano_usd,
 		    currency, price_revision, pricing_source, cost_confidence
 		) VALUES ($1, $2, $3, $4, $5, 1, 'primary', 'openai', 'gpt-test',
-		          'succeeded', $6, $7, 200, 123, 'USD', 'fixture', 'configuration', 'calculated')
+		          'succeeded', $6, $7, $8, 200, 123, 'USD', 'fixture', 'configuration', 'calculated')
 	`, fixture.attemptID, organizationID, applicationID, environmentID, fixture.requestID,
-		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt); err != nil {
+		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt.Add(-45*time.Second), fixture.recordedAt); err != nil {
 		t.Fatal(err)
 	}
 	usage := []struct {

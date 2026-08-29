@@ -99,8 +99,23 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	if simulation.Code != http.StatusOK || !bytes.Contains(simulation.Body.Bytes(), []byte(`"allowed":true`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"route":"primary"`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"limit_plan":"free"`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"application_id":"`+application.ID+`"`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"environment_id":"`+environment.ID+`"`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"revision_id":"`+initial.ID+`"`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"applied_output_maximum":800`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"logical_requests","algorithm":"calendar","units":1,"applicable":true,"durable":true`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"requested_input_tokens","role":"explanatory","affects_cel":false`)) ||
 		bytes.Contains(simulation.Body.Bytes(), []byte("api.example.test")) {
 		t.Fatalf("route simulation status=%d body=%s", simulation.Code, simulation.Body.String())
+	}
+	unknownSimulationFact := performConfigurationJSON(t, handler, http.MethodPost,
+		"/admin/v1/config-revisions/"+initial.ID+"/simulate", map[string]any{
+			"feature": "assistant", "platform": "ios", "trust_level": "app_verified",
+			"principal": map[string]any{"authenticated": authenticated, "claims": map[string]any{}},
+			"request":   map[string]any{"streaming": true, "untrusted_decision": true},
+		}, cookie, csrf, "")
+	if unknownSimulationFact.Code != http.StatusBadRequest {
+		t.Fatalf("unknown route-simulation fact status=%d body=%s", unknownSimulationFact.Code, unknownSimulationFact.Body.String())
 	}
 	unauthenticated := false
 	deniedSimulation := performConfigurationJSON(t, handler, http.MethodPost,

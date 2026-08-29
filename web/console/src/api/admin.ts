@@ -12,6 +12,7 @@ const OpaqueID = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{16,128}$/);
 const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
 const OptionalInstant = Instant.optional();
+const NonnegativeSafeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
@@ -91,11 +92,11 @@ export const InstallationPageSchema = z
 
 const UsageValues = z
   .object({
-    cost_nano_usd: z.number().int().nonnegative(),
-    input_tokens: z.number().int().nonnegative(),
-    logical_requests: z.number().int().nonnegative(),
-    output_tokens: z.number().int().nonnegative(),
-    total_tokens: z.number().int().nonnegative()
+    cost_nano_usd: NonnegativeSafeInteger,
+    input_tokens: NonnegativeSafeInteger,
+    logical_requests: NonnegativeSafeInteger,
+    output_tokens: NonnegativeSafeInteger,
+    total_tokens: NonnegativeSafeInteger
   })
   .strict();
 
@@ -146,12 +147,83 @@ export const RequestPageSchema = z
 
 export const UsageSummarySchema = z
   .object({
+    analytics: z
+      .object({
+        active_users: NonnegativeSafeInteger,
+        attestation_failure_rate: usageRateSchema(),
+        by_feature: usageBreakdownSchema(),
+        by_model: usageBreakdownSchema(),
+        by_selected_plan: usageBreakdownSchema(),
+        cost_per_active_user_nano_usd: usageFractionSchema(),
+        failure_rate: usageRateSchema(),
+        fallback_rate: usageRateSchema(),
+        quota_denial_rate: usageRateSchema(),
+        request_count: NonnegativeSafeInteger,
+        request_latency: usageDistributionSchema(),
+        requests_per_active_user: usageFractionSchema(),
+        time_to_first_token: usageDistributionSchema(),
+        usage_by_provenance: z
+          .array(
+            z
+              .object({
+                provenance: z.enum(["upstream_reported", "calculated", "estimated", "unknown"]),
+                values: UsageValues
+              })
+              .strict()
+          )
+          .length(4)
+      })
+      .strict(),
     end: Instant,
     provenance: z.array(z.string()).max(5),
     start: Instant,
     values: UsageValues
   })
   .strict();
+
+function usageFractionSchema() {
+  return z
+    .object({ numerator: NonnegativeSafeInteger, denominator: NonnegativeSafeInteger })
+    .strict();
+}
+
+function usageRateSchema() {
+  return usageFractionSchema()
+    .extend({ parts_per_million: z.number().int().min(0).max(1_000_000) })
+    .strict();
+}
+
+function usageDistributionSchema() {
+  return z
+    .object({
+      p50_ms: NonnegativeSafeInteger,
+      p95_ms: NonnegativeSafeInteger,
+      p99_ms: NonnegativeSafeInteger,
+      samples: NonnegativeSafeInteger
+    })
+    .strict();
+}
+
+function usageBreakdownSchema() {
+  return z
+    .object({
+      items: z
+        .array(
+          z
+            .object({
+              active_users: NonnegativeSafeInteger,
+              key: z.string().min(1).max(512),
+              request_count: NonnegativeSafeInteger,
+              values: UsageValues
+            })
+            .strict()
+        )
+        .max(200),
+      limit: z.number().int().min(1).max(200),
+      truncated: z.boolean()
+    })
+    .strict();
+}
 
 export const UsageTimeseriesSchema = z
   .object({
@@ -250,7 +322,41 @@ export const RevisionSchema = z
 export const RouteSimulationSchema = z
   .object({
     allowed: z.boolean(),
+    application_id: OpaqueID,
+    environment_id: OpaqueID,
+    environment_kind: z.enum(["development", "staging", "production"]),
     explanation: z.array(z.string().max(1024)),
+    facts: z
+      .object({
+        app_version: z.string().max(128).optional(),
+        application_id: OpaqueID,
+        authenticated: z.boolean(),
+        environment_id: OpaqueID,
+        environment_kind: z.enum(["development", "staging", "production"]),
+        feature: Identifier,
+        framing_unit_count: z.number().int().min(0).max(4096),
+        normalized_claims: z.record(z.string(), z.unknown()),
+        platform: z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"]),
+        requested_input_tokens: z.number().int().min(0).max(100_000_000),
+        requested_output_max: z.number().int().min(0).max(100_000_000),
+        revision_id: OpaqueID,
+        rewritten_request_bytes: z.number().int().min(0).max(104_857_600),
+        streaming: z.boolean(),
+        trust_level: z.enum(["none", "identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"])
+      })
+      .strict(),
+    fact_usage: z
+      .array(
+        z
+          .object({
+            affects_cel: z.boolean(),
+            explanation: z.string().max(1024),
+            fact: z.string().max(128),
+            role: z.enum(["authentication", "scope", "policy", "reservation", "explanatory"])
+          })
+          .strict()
+      )
+      .max(16),
     fallback_sequence: z
       .array(
         z
@@ -267,12 +373,67 @@ export const RouteSimulationSchema = z
       .optional(),
     feature: Identifier,
     limit_plan: Identifier.optional(),
-    limits: z.array(z.record(z.string(), z.unknown())).max(128).optional(),
+    limits: z
+      .array(
+        z
+          .object({
+            algorithm: z.enum(["calendar", "token_bucket", "concurrency", "per_request"]),
+            capacity: NonnegativeSafeInteger.optional(),
+            hard: z.boolean(),
+            maximum: NonnegativeSafeInteger.optional(),
+            metric: z.string().max(64),
+            per_request_maximum: NonnegativeSafeInteger.optional(),
+            refill_per_second: z.string().max(64).optional(),
+            scope: z.array(z.string().max(64)).max(9),
+            timezone: z.string().max(128).optional(),
+            window: z.string().max(128).optional()
+          })
+          .strict()
+      )
+      .max(128)
+      .optional(),
     matched_access_expression: z.string().max(4096).optional(),
     model: Identifier.optional(),
     physical_model: z.string().max(512).optional(),
     pricing_confidence: z.enum(["configured", "unknown"]).optional(),
     protocol: z.string().max(64).optional(),
+    reservation: z
+      .object({
+        allocations: z
+          .array(
+            z
+              .object({
+                algorithm: z.enum(["calendar", "token_bucket", "concurrency", "per_request"]),
+                applicable: z.boolean(),
+                durable: z.boolean(),
+                metric: z.string().max(64),
+                units: NonnegativeSafeInteger
+              })
+              .strict()
+          )
+          .max(128),
+        applied_output_maximum: NonnegativeSafeInteger,
+        cost_bound_known: z.boolean(),
+        cost_nano_usd_bound: NonnegativeSafeInteger,
+        input_accounting: z
+          .object({
+            framing_unit_count: z.number().int().min(0).max(4096),
+            input_token_bound: NonnegativeSafeInteger,
+            maximum_context_tokens: NonnegativeSafeInteger,
+            maximum_framing_tokens_per_request: NonnegativeSafeInteger,
+            maximum_framing_tokens_per_unit: NonnegativeSafeInteger,
+            method: z.enum(["utf8_byte_bpe_declared_framing_v1"]).optional(),
+            profile_id: Identifier.optional(),
+            required: z.boolean(),
+            rewritten_request_bytes: z.number().int().min(0).max(104_857_600)
+          })
+          .strict(),
+        pricing_catalog: Identifier.optional(),
+        total_token_bound: NonnegativeSafeInteger
+      })
+      .strict()
+      .optional(),
+    revision_id: OpaqueID,
     route: Identifier.optional(),
     upstream: Identifier.optional(),
     warnings: z.array(z.string().max(1024)).max(16).optional()

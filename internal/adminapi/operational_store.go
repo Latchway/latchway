@@ -112,10 +112,11 @@ type logicalRequestDocument struct {
 }
 
 type usageSummaryDocument struct {
-	Start      time.Time   `json:"start"`
-	End        time.Time   `json:"end"`
-	Values     usageValues `json:"values"`
-	Provenance []string    `json:"provenance"`
+	Start      time.Time              `json:"start"`
+	End        time.Time              `json:"end"`
+	Values     usageValues            `json:"values"`
+	Provenance []string               `json:"provenance"`
+	Analytics  usageAnalyticsDocument `json:"analytics"`
 }
 
 type usagePoint struct {
@@ -1007,8 +1008,10 @@ func (store *operationalStore) usageSummary(
 	environmentID string,
 	start time.Time,
 	end time.Time,
+	breakdownLimit int,
 ) (usageSummaryDocument, error) {
-	if id.Validate(environmentID, id.Environment) != nil || !validUsageRange(start, end, maximumSummaryRange) {
+	if id.Validate(environmentID, id.Environment) != nil || !validUsageRange(start, end, maximumSummaryRange) ||
+		breakdownLimit < 1 || breakdownLimit > maximumUsageBreakdownLimit {
 		return usageSummaryDocument{}, errOperationalInvalid
 	}
 	if !validOperationalRead(principal) {
@@ -1021,8 +1024,14 @@ func (store *operationalStore) usageSummary(
 	if err != nil {
 		return usageSummaryDocument{}, err
 	}
+	analytics, err := store.usageAnalytics(
+		ctx, principal, environmentID, start, end, values, breakdownLimit,
+	)
+	if err != nil {
+		return usageSummaryDocument{}, err
+	}
 	return usageSummaryDocument{
-		Start: start.UTC(), End: end.UTC(), Values: values, Provenance: provenance,
+		Start: start.UTC(), End: end.UTC(), Values: values, Provenance: provenance, Analytics: analytics,
 	}, nil
 }
 

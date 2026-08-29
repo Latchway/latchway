@@ -212,7 +212,7 @@ func (api *API) request(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) usageSummary(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "start", "end") {
+	if !onlyQueryKeys(r, "environment_id", "start", "end", "breakdown_limit") {
 		api.writeProblem(w, r, invalidRequest("The usage-summary query is invalid."))
 		return
 	}
@@ -226,8 +226,17 @@ func (api *API) usageSummary(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The usage time range is invalid."))
 		return
 	}
+	breakdownLimit := defaultUsageBreakdownLimit
+	if raw := r.URL.Query().Get("breakdown_limit"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 1 || parsed > maximumUsageBreakdownLimit {
+			api.writeProblem(w, r, invalidRequest("The usage breakdown limit must be between 1 and 200."))
+			return
+		}
+		breakdownLimit = parsed
+	}
 	document, err := api.operations.usageSummary(
-		r.Context(), mustPrincipal(r.Context()), environmentID, start, end,
+		r.Context(), mustPrincipal(r.Context()), environmentID, start, end, breakdownLimit,
 	)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
