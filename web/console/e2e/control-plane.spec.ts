@@ -519,11 +519,14 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
   await page.getByLabel("Password").fill("test-only-owner-password");
   await page.getByRole("button", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: /^Self-tests/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByLabel("Test kind").selectOption("openrouter");
-  await page.getByLabel("Upstream ID").fill("openrouter");
-  await page.getByLabel("Model ID").fill("canary");
-  await expect(page.getByLabel("Maximum total cost (nano-USD)")).toHaveValue("10000000");
+  const immediateSelfTest = page.locator("form.control-form").filter({
+    has: page.getByRole("button", { name: "Run self-test" }),
+  });
+  await immediateSelfTest.locator('input[name="environment"]').fill(ids.environment);
+  await immediateSelfTest.locator('select[name="kind"]').selectOption("openrouter");
+  await immediateSelfTest.locator('input[name="upstream"]').fill("openrouter");
+  await immediateSelfTest.locator('input[name="model"]').fill("canary");
+  await expect(immediateSelfTest.locator('input[name="max_cost_nano_usd"]')).toHaveValue("10000000");
   await page.getByRole("button", { name: "Run self-test" }).click();
   await expect(page.getByRole("heading", { name: "openrouter self-test" })).toBeVisible();
   await expect(page.getByText("Bounded provider usage passed.")).toBeVisible();
