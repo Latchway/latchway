@@ -2,7 +2,16 @@
 
 Latchway is an Apache-2.0-licensed, self-hostable access gateway that lets untrusted iOS, Android, web, and React Native applications call configured AI infrastructure without embedding upstream provider credentials.
 
-The project is under active construction. The current working tree has a locally tested, authenticated debug-attestation/OpenAI Chat vertical, but it is **not production-ready or released**. Hardware-backed attestation, the remaining protocols and quotas, complete administration and operations, cloud proof, and release hardening are still in progress. The evidence-based state is maintained in [`docs/implementation/STATUS.md`](docs/implementation/STATUS.md); release claims are tracked in [`docs/implementation/COMPLETION_REPORT.md`](docs/implementation/COMPLETION_REPORT.md).
+The current source candidate implements the mobile-first gateway, native and
+web attestation verifiers, structured and restricted opaque protocols, quotas,
+routing, the operator control plane, telemetry/jobs, deployment templates, and
+evidence-gated release automation. It is **not yet a published or supported
+release**: live provider, physical-device, cloud, resilience, public tag, and
+registry receipts must still pass for the exact immutable candidate. The
+evidence-based state is maintained in
+[`docs/implementation/STATUS.md`](docs/implementation/STATUS.md); release claims
+are tracked in
+[`docs/implementation/COMPLETION_REPORT.md`](docs/implementation/COMPLETION_REPORT.md).
 
 ## Product boundary
 
@@ -21,6 +30,12 @@ Protocol contract `0.5.1` uses wire protocol version `1`. Normative artifacts li
 - canonical attestation-binding and RFC 9449 DPoP test vectors.
 
 See [`docs/architecture/overview.md`](docs/architecture/overview.md), [`docs/threat-model/overview.md`](docs/threat-model/overview.md), [`docs/reference/upstream-routing.md`](docs/reference/upstream-routing.md), and [`docs/protocol/`](docs/protocol/) before implementing a client or server.
+
+Start with the [mobile-first five-minute quickstart](docs/quickstart.md). The
+[identity and attestation guide](docs/guides/identity-and-attestation.md),
+[upstream provider guide](docs/guides/upstream-providers.md),
+[API reference](docs/reference/api.md), [CLI reference](docs/reference/cli.md),
+and [troubleshooting guide](docs/troubleshooting.md) cover the production path.
 
 ## Development
 
