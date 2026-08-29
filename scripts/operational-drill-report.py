@@ -57,16 +57,26 @@ def validate_capture_identity(
     root: Path,
     *,
     commit: str,
-    previous_image: str,
+    previous_candidate_commit: str,
+    previous_candidate_version: str,
+    previous_candidate_tag: str,
+    previous_candidate_image: str,
+    previous_candidate_platform_image: str,
     candidate_image: str,
+    candidate_platform_image: str,
     postgres_image: str,
 ) -> tuple[str, str, dict[str, Any]]:
     try:
         value = EVIDENCE.validate_image_inspection(
             root / "image-inspection.json",
             commit=commit,
-            previous_image=previous_image,
             candidate_image=candidate_image,
+            candidate_platform_image=candidate_platform_image,
+            previous_candidate_commit=previous_candidate_commit,
+            previous_candidate_version=previous_candidate_version,
+            previous_candidate_tag=previous_candidate_tag,
+            previous_candidate_image=previous_candidate_image,
+            previous_candidate_platform_image=previous_candidate_platform_image,
             postgres_image=postgres_image,
         )
     except EVIDENCE.EvidenceError as error:
@@ -112,17 +122,37 @@ def build_reports(
     *,
     root: Path,
     commit: str,
-    previous_image: str,
+    previous_candidate_commit: str,
+    previous_candidate_version: str,
+    previous_candidate_tag: str,
+    previous_candidate_image: str,
+    previous_candidate_platform_image: str,
     candidate_image: str,
+    candidate_platform_image: str,
     postgres_image: str,
     started_at: str,
     finished_at: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if (
         EVIDENCE.COMMIT.fullmatch(commit) is None
-        or EVIDENCE.OCI.fullmatch(previous_image) is None
+        or EVIDENCE.COMMIT.fullmatch(previous_candidate_commit) is None
+        or previous_candidate_commit == commit
+        or EVIDENCE.SEMVER.fullmatch(previous_candidate_version) is None
+        or previous_candidate_tag != "v" + previous_candidate_version
+        or EVIDENCE.TAG.fullmatch(previous_candidate_tag) is None
+        or EVIDENCE.OCI.fullmatch(previous_candidate_image) is None
+        or EVIDENCE.OCI.fullmatch(previous_candidate_platform_image) is None
         or EVIDENCE.OCI.fullmatch(candidate_image) is None
-        or previous_image == candidate_image
+        or EVIDENCE.OCI.fullmatch(candidate_platform_image) is None
+        or len(
+            {
+                previous_candidate_image,
+                previous_candidate_platform_image,
+                candidate_image,
+                candidate_platform_image,
+            }
+        )
+        != 4
         or EVIDENCE.POSTGRES_OCI.fullmatch(postgres_image) is None
     ):
         raise DrillError("drill_coordinates_invalid")
@@ -133,8 +163,13 @@ def build_reports(
     source_identity, restore_identity, inspection = validate_capture_identity(
         root,
         commit=commit,
-        previous_image=previous_image,
+        previous_candidate_commit=previous_candidate_commit,
+        previous_candidate_version=previous_candidate_version,
+        previous_candidate_tag=previous_candidate_tag,
+        previous_candidate_image=previous_candidate_image,
+        previous_candidate_platform_image=previous_candidate_platform_image,
         candidate_image=candidate_image,
+        candidate_platform_image=candidate_platform_image,
         postgres_image=postgres_image,
     )
     source_state = validate_state(root / "previous-state.json")
@@ -170,8 +205,8 @@ def build_reports(
     except EVIDENCE.EvidenceError as error:
         raise DrillError(str(error)) from None
     if (
-        previous_version["version"] != inspection["previous_version"]
-        or previous_version["commit"] != inspection["previous_revision"]
+        previous_version["version"] != inspection["previous_candidate_version"]
+        or previous_version["commit"] != inspection["previous_candidate_revision"]
     ):
         raise DrillError("drill_previous_version_mismatch")
     previous_migration = observation(root, "previous-migration.json")
@@ -183,8 +218,12 @@ def build_reports(
         "kind": "latchway_backup_restore_drill",
         "status": "passed",
         "core_commit": commit,
-        "previous_oci_reference": previous_image,
+        "previous_candidate_commit": previous_candidate_commit,
+        "previous_candidate_intended_tag": previous_candidate_tag,
+        "previous_candidate_oci_reference": previous_candidate_image,
+        "previous_candidate_platform_oci_reference": previous_candidate_platform_image,
         "candidate_oci_reference": candidate_image,
+        "candidate_platform_oci_reference": candidate_platform_image,
         "postgres_oci_reference": postgres_image,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -196,7 +235,7 @@ def build_reports(
         },
         "source": {
             "database_identity_sha256": source_identity,
-            "image": previous_image,
+            "image": previous_candidate_platform_image,
             "version": previous_version,
             "migration": previous_migration,
             "doctor": previous_doctor,
@@ -213,7 +252,7 @@ def build_reports(
         },
         "restore": {
             "database_identity_sha256": restore_identity,
-            "image": previous_image,
+            "image": previous_candidate_platform_image,
             "version": previous_version,
             "migration": restore_migration,
             "doctor": restore_doctor,
@@ -252,14 +291,22 @@ def build_reports(
         "kind": "latchway_upgrade_application_rollback_drill",
         "status": "passed",
         "core_commit": commit,
-        "previous_oci_reference": previous_image,
+        "previous_candidate_commit": previous_candidate_commit,
+        "previous_candidate_intended_tag": previous_candidate_tag,
+        "previous_candidate_oci_reference": previous_candidate_image,
+        "previous_candidate_platform_oci_reference": previous_candidate_platform_image,
         "candidate_oci_reference": candidate_image,
+        "candidate_platform_oci_reference": candidate_platform_image,
         "postgres_oci_reference": postgres_image,
         "started_at": started_at,
         "finished_at": finished_at,
-        "previous_before": runtime_stage(root, "previous", previous_image),
-        "candidate_after": runtime_stage(root, "candidate", candidate_image),
-        "previous_rollback": runtime_stage(root, "rollback", previous_image),
+        "previous_before": runtime_stage(
+            root, "previous", previous_candidate_platform_image
+        ),
+        "candidate_after": runtime_stage(root, "candidate", candidate_platform_image),
+        "previous_rollback": runtime_stage(
+            root, "rollback", previous_candidate_platform_image
+        ),
         "assertions": {name: True for name in sorted(EVIDENCE.UPGRADE_ASSERTIONS)},
         "artifacts": artifacts(root, upgrade_names),
     }
@@ -282,6 +329,14 @@ def build_reports(
             root / ".backup-report.check.json",
             commit=commit,
             candidate_image=candidate_image,
+            candidate_platform_image=candidate_platform_image,
+            previous_candidate_commit=previous_candidate_commit,
+            previous_candidate_version=previous_candidate_version,
+            previous_candidate_tag=previous_candidate_tag,
+            previous_candidate_image=previous_candidate_image,
+            previous_candidate_platform_image=previous_candidate_platform_image,
+            contract_version=candidate_version["contract_version"],
+            wire_protocol=candidate_version["protocol_version"],
             released_at=started,
             now=finished,
         )
@@ -292,7 +347,12 @@ def build_reports(
             contract_version=candidate_version["contract_version"],
             wire_protocol=candidate_version["protocol_version"],
             candidate_image=candidate_image,
-            previous_image=previous_image,
+            candidate_platform_image=candidate_platform_image,
+            previous_candidate_commit=previous_candidate_commit,
+            previous_candidate_version=previous_candidate_version,
+            previous_candidate_tag=previous_candidate_tag,
+            previous_candidate_image=previous_candidate_image,
+            previous_candidate_platform_image=previous_candidate_platform_image,
             postgres_image=postgres_image,
             released_at=candidate_build_time,
             now=finished,
@@ -309,8 +369,13 @@ def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     value.add_argument("--evidence-directory", type=Path, required=True)
     value.add_argument("--core-commit", required=True)
-    value.add_argument("--previous-image", required=True)
+    value.add_argument("--previous-candidate-commit", required=True)
+    value.add_argument("--previous-candidate-version", required=True)
+    value.add_argument("--previous-candidate-tag", required=True)
+    value.add_argument("--previous-candidate-image", required=True)
+    value.add_argument("--previous-candidate-platform-image", required=True)
     value.add_argument("--candidate-image", required=True)
+    value.add_argument("--candidate-platform-image", required=True)
     value.add_argument("--postgres-image", required=True)
     value.add_argument("--started-at", required=True)
     value.add_argument("--finished-at", required=True)
@@ -323,8 +388,13 @@ def main() -> int:
         backup, upgrade = build_reports(
             root=arguments.evidence_directory,
             commit=arguments.core_commit,
-            previous_image=arguments.previous_image,
+            previous_candidate_commit=arguments.previous_candidate_commit,
+            previous_candidate_version=arguments.previous_candidate_version,
+            previous_candidate_tag=arguments.previous_candidate_tag,
+            previous_candidate_image=arguments.previous_candidate_image,
+            previous_candidate_platform_image=arguments.previous_candidate_platform_image,
             candidate_image=arguments.candidate_image,
+            candidate_platform_image=arguments.candidate_platform_image,
             postgres_image=arguments.postgres_image,
             started_at=arguments.started_at,
             finished_at=arguments.finished_at,

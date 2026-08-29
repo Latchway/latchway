@@ -66,11 +66,15 @@ unsupported and can invalidate quota, audit, signing, or replay guarantees.
 
 ## Release evidence drill
 
-Before promotion, run the exact previous release digest, then the exact
-candidate digest, then the previous release digest again against one isolated
-database. The automated procedure and its fail-closed report contract are in
+Before promotion, run the exact `linux/amd64` child from an authenticated,
+distinct-ancestor prior release candidate, then the exact current candidate
+child, then the prior candidate child again against one isolated database. The
+prior manifest and retained Sigstore bundle must come from an exact successful
+protected-main `release.yml` run; neither candidate needs a public tag. The
+automated procedure and its fail-closed report contract are in
 [`../testing/operational-resilience-evidence.md`](../testing/operational-resilience-evidence.md).
-The prior image must report the candidate schema as current and become ready
+The prior candidate must have a strictly lower semantic version, report the
+candidate schema as current, and become ready
 after application rollback. If it cannot, the candidate has no proven
 application rollback path and must not be promoted; a pre-upgrade database
 restore is schema recovery, not evidence that the prior binary supports the

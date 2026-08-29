@@ -10,11 +10,13 @@ all of the following machine reports:
 2. the release-scope failure matrix, including all six destructive scenarios
    and at least two API replicas, two workers, and a real load-balancer path;
 3. a PostgreSQL custom-format backup restored into a distinct fresh database,
-   with the previous release's `migrate status` and `doctor` passing and a
+   with the authenticated prior candidate's `migrate status` and `doctor`
+   passing and a
    bounded state fingerprint preserved; and
-4. the previously released image, exact candidate, and previous image again on
-   the same isolated database, with readiness, health, schema compatibility,
-   and the bounded state fingerprint preserved through application rollback.
+4. a distinct-ancestor prior candidate, the exact current candidate, and the
+   prior candidate again on the same isolated database, with readiness, health,
+   schema compatibility, and the bounded state fingerprint preserved through
+   application rollback.
 
 This tooling has no synthetic success mode. Until the protected workflow runs
 with live artifacts, `operational_resilience` remains unverified.
@@ -23,14 +25,19 @@ with live artifacts, `operational_resilience` remains unverified.
 
 Run source-scope cross-repository conformance and the release-candidate
 workflow first, both from protected `main` at the exact untagged candidate
-commit. The protected load and failure producers verify both upstream GitHub
+commit. A separately retained successful `release.yml` run on protected
+`main` supplies the prior candidate at a distinct ancestor commit. The
+protected load and failure producers verify both upstream GitHub
 attestations against that commit, `refs/heads/main`, their exact repository
 workflow paths, and hosted runners before executing or importing observations.
-The aggregate workflow then verifies all four attestation bundles against the
-four fixed signer workflows and the same source digest before the finalizer
-runs. This prepublication path deliberately does not require the intended tag
-to exist. The finalizer requires the reports and producer manifests to agree
-on:
+The aggregate workflow then verifies five attestation bundles: current and
+prior candidate manifests against `release.yml` at their respective source
+commits, plus source, load, and failure evidence against the current commit.
+It also queries both candidate runs, requires successful `workflow_dispatch`
+on `main` with the exact head SHA and active fixed workflow path, and hash-binds
+the prior artifact and bundle into a strict run receipt. This prepublication
+path deliberately does not require either intended tag to exist. The finalizer
+requires the reports and producer manifests to agree on:
 
 - all five repository commits, versions, and intended tags;
 - released contract version, release time, bundle name, and bundle SHA-256;
@@ -38,6 +45,10 @@ on:
 - `ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>`
   for the candidate index and a distinct digest in the same repository for the
   executed `linux/amd64` child;
+- a prior candidate manifest whose commit is a distinct Git ancestor, whose
+  semantic version and creation time are lower/earlier than the current
+  candidate (for example `v1.0.0-rc.1` to `v1.0.0`), and whose index and
+  executed child are distinct from the current candidate;
 - the protected workflow path, protected environment, source commit, run ID
   and attempt, runner class/OS/architecture, fixed invocation, configuration
   checksums, primary-report checksum, and exhaustive raw-artifact checksums.
@@ -155,38 +166,36 @@ finalizer never synthesizes external claims.
 
 The drill launcher creates only fresh, uniquely named containers on a Docker
 `--internal` network. It requires a deliberate acknowledgement, an absolute
-empty evidence directory, a clean exact candidate checkout, two distinct
-immutable Latchway image digests, and an immutable PostgreSQL digest. It never
-accepts a database URL and cannot target an existing database.
+empty evidence directory, a clean exact candidate checkout, the authenticated
+prior-candidate manifest and commit, the current index and exact
+`linux/amd64` child, and an immutable PostgreSQL digest. It never accepts a
+database URL and cannot target an existing database.
 
 ```bash
 scripts/run-operational-resilience-drills.sh \
   --acknowledge-isolated-destructive-drill \
   --evidence-dir /tmp/latchway-operational-drill \
   --core-commit "$CANDIDATE_COMMIT" \
-  --previous-image "ghcr.io/latchway/latchway@sha256:$PREVIOUS_DIGEST" \
-  --candidate-image "ghcr.io/latchway/latchway@sha256:$CANDIDATE_DIGEST" \
+  --previous-candidate-commit "$PREVIOUS_CANDIDATE_COMMIT" \
+  --previous-candidate-manifest /evidence/previous-candidate/latchway-candidate.json \
+  --candidate-image "ghcr.io/latchway/latchway@sha256:$CANDIDATE_INDEX_DIGEST" \
+  --candidate-platform-image "ghcr.io/latchway/latchway@sha256:$CANDIDATE_AMD64_DIGEST" \
   --postgres-image "docker.io/library/postgres@sha256:$POSTGRES_DIGEST"
 ```
 
-The launcher verifies OCI `RepoDigests` and revision labels, creates a small
-disabled tenant fixture, captures a canonical state fingerprint, performs
-`pg_dump`/`pg_restore`, migrates and starts the candidate, then starts the
-previous image against the candidate schema. The previous image must report a
-strictly lower semantic version and exact revision, that revision must be the
-target of its existing annotated `v<version>` Git tag, and the public
-`ghcr.io/latchway/latchway:<version>` tag must resolve to the supplied digest.
-These checks apply only to the previous release; the current intended tag is
-not required to exist. If the prior binary cannot run the candidate schema,
-rollback evidence fails; restoring the pre-upgrade backup is a separate
-schema-recovery operation and does not satisfy application rollback.
-
-The current drill launcher therefore cannot bootstrap a repository with no
-previous annotated release tag. For the first release it remains blocked until
-a separately attested, distinct ancestor release-candidate manifest and run
-are accepted as the prior baseline. A mutable tag, a made-up v0.9 coordinate,
-or reusing the current candidate as its own predecessor is not acceptable
-upgrade or rollback evidence.
+The launcher revalidates every artifact named by the prior manifest, derives
+its immutable OCI index and exact `linux/amd64` child, verifies Git ancestry,
+then checks the executed child images' platform, `RepoDigests`, revision labels,
+and runtime version output. It creates a small disabled tenant fixture,
+captures a canonical state fingerprint, performs `pg_dump`/`pg_restore`,
+migrates and starts the current candidate, then starts the prior candidate
+against the candidate schema. The prior candidate must report its exact
+manifest version and revision and a strictly lower semantic version. Neither
+an annotated Git tag nor a public/stable OCI tag is read or created. A mutable
+tag, a made-up v0.9 coordinate, or reusing the current candidate as its own
+predecessor is not acceptable evidence. If the prior binary cannot run the
+candidate schema, rollback evidence fails; restoring the pre-upgrade backup is
+a separate schema-recovery operation and does not satisfy application rollback.
 
 Raw observations are sealed by `operational-drill-report.py`. The sealer and
 the aggregate finalizer independently validate report shape, image identity,
@@ -195,20 +204,25 @@ artifact SHA-256.
 
 ## Finalize and export
 
-The protected `Operational resilience evidence` workflow downloads candidate,
-source, release-load, and release-failure artifacts by numeric run ID from the
-same repository. It queries the load and failure run records to require the
-fixed workflow path, successful `workflow_dispatch`, protected `main`, and
-exact head SHA. It verifies candidate, source, load-producer, and
-failure-producer attestations for the exact candidate commit, executes the
-isolated drills, revalidates every report and producer checksum, attests the
-domain document with GitHub OIDC, and uploads the bounded reports.
+The protected `Operational resilience evidence` workflow downloads current
+and prior candidate, source, release-load, and release-failure artifacts by
+numeric run ID from the same repository. It queries both candidate and both
+producer run records to require their fixed workflow paths, successful
+`workflow_dispatch`, protected `main`, and exact head SHA. It verifies every
+attestation against its exact signer/source commit, executes the isolated
+drills, revalidates every report and producer checksum, attests the domain
+document with GitHub OIDC, and uploads the bounded reports.
 
 For offline verification of already captured inputs:
 
 ```bash
 python3 scripts/operational-resilience-evidence.py \
   --candidate-manifest /evidence/candidate/latchway-candidate.json \
+  --previous-candidate-manifest /evidence/previous-candidate/latchway-candidate.json \
+  --previous-candidate-attestation /evidence/previous-candidate/latchway-candidate.attestation.sigstore.json \
+  --previous-candidate-run /evidence/previous-candidate-run.json \
+  --previous-candidate-commit "$PREVIOUS_CANDIDATE_COMMIT" \
+  --previous-candidate-run-id "$PREVIOUS_CANDIDATE_RUN_ID" \
   --source-conformance /evidence/source/latchway-cross-repository.json \
   --load-report /evidence/load/load-v1.json \
   --load-producer-manifest /evidence/load/load-producer.json \
@@ -226,8 +240,9 @@ python3 scripts/operational-resilience-evidence.py \
 
 The output directory is absolute and empty. It receives
 `operational_resilience.json` at its root plus copied reports, producer
-manifests, their retained attestation bundles, and a raw-artifact hash index
-under `artifacts/operational-resilience/`. In the protected workflow,
+manifests, their retained attestation bundles, the prior candidate manifest,
+bundle and run receipt, and a raw-artifact hash index under
+`artifacts/operational-resilience/`. In the protected workflow,
 `operational_resilience.attestation.sigstore.json` is copied beside the domain
 document before the directory is uploaded as
 `latchway-operational-resilience-<commit>`. Every path directly named by the

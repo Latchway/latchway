@@ -459,7 +459,7 @@ EXTERNAL_CLAIMS = {
         "live_failure_injection_verified",
         "multi_replica_verified",
         "backup_restore_drill_verified",
-        "released_version_upgrade_rollback_verified",
+        "previous_candidate_upgrade_rollback_verified",
     ),
     "supply_chain": (
         "multi_arch_image_verified",

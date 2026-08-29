@@ -199,8 +199,8 @@ The `operational_resilience.json` producer is
 [`scripts/operational-resilience-evidence.py`](../../scripts/operational-resilience-evidence.py).
 It is intentionally stricter than the generic domain-envelope validator: it
 requires exact release-image load evidence, release-scope live failure and
-replica evidence, an executed restore, and previous-image application rollback
-against the candidate schema. See
+replica evidence, an executed restore, and authenticated distinct-ancestor
+prior-candidate application rollback against the candidate schema. See
 [`operational-resilience-evidence.md`](operational-resilience-evidence.md).
 
 Run the prepublication aggregation before creating tags or publishing:

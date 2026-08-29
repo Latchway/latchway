@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 from typing import Any, Iterable, Mapping
@@ -28,6 +29,7 @@ from typing import Any, Iterable, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+RUN_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 SEMVER = re.compile(
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
@@ -207,22 +209,22 @@ BACKUP_ASSERTIONS = frozenset(
         "source_and_restore_databases_distinct",
         "state_fingerprint_preserved",
         "schema_version_preserved",
-        "previous_image_doctor_passed",
+        "previous_candidate_doctor_passed",
         "restored_runtime_ready_with_escrowed_master_key",
     )
 )
 UPGRADE_ASSERTIONS = frozenset(
     (
-        "previous_release_started",
+        "previous_candidate_started",
         "candidate_migrations_applied",
         "candidate_doctor_passed",
         "candidate_runtime_ready",
         "state_preserved_through_upgrade",
-        "previous_image_application_rollback_started",
-        "previous_image_doctor_passed_after_candidate",
-        "previous_image_runtime_ready_after_candidate",
+        "previous_candidate_application_rollback_started",
+        "previous_candidate_doctor_passed_after_candidate",
+        "previous_candidate_runtime_ready_after_candidate",
         "state_preserved_through_rollback",
-        "schema_compatible_with_previous_image",
+        "schema_compatible_with_previous_candidate",
     )
 )
 DOMAIN_CLAIMS = {
@@ -230,7 +232,7 @@ DOMAIN_CLAIMS = {
     "live_failure_injection_verified": True,
     "multi_replica_verified": True,
     "backup_restore_drill_verified": True,
-    "released_version_upgrade_rollback_verified": True,
+    "previous_candidate_upgrade_rollback_verified": True,
 }
 CANDIDATE_ARTIFACTS = frozenset(
     (
@@ -244,6 +246,7 @@ CANDIDATE_ARTIFACTS = frozenset(
     )
 )
 PRODUCER_SCRIPT = Path(__file__).with_name("operational-producer-evidence.py")
+RELEASE_CANDIDATE_SCRIPT = Path(__file__).with_name("release-candidate.py")
 
 
 class EvidenceError(Exception):
@@ -256,6 +259,17 @@ def load_producer_validator() -> Any:
     )
     if spec is None or spec.loader is None:
         raise EvidenceError("producer_validator_unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_release_candidate_validator() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "operational_previous_release_candidate", RELEASE_CANDIDATE_SCRIPT
+    )
+    if spec is None or spec.loader is None:
+        raise EvidenceError("previous_candidate_validator_unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -561,6 +575,175 @@ def validate_candidate(
     if seen != CANDIDATE_ARTIFACTS:
         raise EvidenceError("candidate_artifacts_invalid")
     return value, reference, created
+
+
+def validate_distinct_ancestor(
+    repository_root: Path, previous_commit: str, candidate_commit: str
+) -> None:
+    if (
+        not real_directory(repository_root)
+        or COMMIT.fullmatch(previous_commit) is None
+        or COMMIT.fullmatch(candidate_commit) is None
+    ):
+        raise EvidenceError("previous_candidate_repository_invalid")
+    if previous_commit == candidate_commit:
+        raise EvidenceError("previous_candidate_same_as_current")
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(repository_root), *arguments],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise EvidenceError("previous_candidate_repository_invalid") from None
+
+    head = git("rev-parse", "--verify", "HEAD^{commit}")
+    previous = git("rev-parse", "--verify", f"{previous_commit}^{{commit}}")
+    candidate = git("rev-parse", "--verify", f"{candidate_commit}^{{commit}}")
+    status = git("status", "--porcelain=v1", "--untracked-files=normal")
+    if (
+        head.returncode != 0
+        or previous.returncode != 0
+        or candidate.returncode != 0
+        or status.returncode != 0
+        or head.stdout.strip() != candidate_commit
+        or previous.stdout.strip() != previous_commit
+        or candidate.stdout.strip() != candidate_commit
+        or status.stdout.strip()
+    ):
+        raise EvidenceError("previous_candidate_repository_invalid")
+    ancestry = git("merge-base", "--is-ancestor", previous_commit, candidate_commit)
+    if ancestry.returncode == 1:
+        raise EvidenceError("previous_candidate_not_ancestor")
+    if ancestry.returncode != 0:
+        raise EvidenceError("previous_candidate_repository_invalid")
+
+
+def validate_previous_candidate_run(
+    path: Path,
+    *,
+    commit: str,
+    expected_run_id: str,
+    manifest_sha256: str,
+    attestation_sha256: str,
+) -> dict[str, Any]:
+    value = require_fields(
+        read_json(path),
+        (
+            "schema_version",
+            "kind",
+            "repository",
+            "workflow_path",
+            "workflow_id",
+            "workflow_state",
+            "run_id",
+            "run_attempt",
+            "event",
+            "status",
+            "conclusion",
+            "head_sha",
+            "head_branch",
+            "artifact_name",
+            "manifest_sha256",
+            "attestation_sha256",
+        ),
+        "previous_candidate_run_invalid",
+    )
+    if (
+        value["schema_version"] != 1
+        or value["kind"] != "latchway_previous_candidate_run"
+        or value["repository"] != "Latchway/latchway"
+        or value["workflow_path"] != ".github/workflows/release.yml"
+        or not isinstance(value["workflow_id"], str)
+        or RUN_ID.fullmatch(value["workflow_id"]) is None
+        or value["workflow_state"] != "active"
+        or not isinstance(expected_run_id, str)
+        or RUN_ID.fullmatch(expected_run_id) is None
+        or value["run_id"] != expected_run_id
+        or not isinstance(value["run_attempt"], int)
+        or isinstance(value["run_attempt"], bool)
+        or value["run_attempt"] < 1
+        or value["event"] != "workflow_dispatch"
+        or value["status"] != "completed"
+        or value["conclusion"] != "success"
+        or value["head_sha"] != commit
+        or value["head_branch"] != "main"
+        or value["artifact_name"] != f"latchway-candidate-{commit}"
+        or value["manifest_sha256"] != manifest_sha256
+        or value["attestation_sha256"] != attestation_sha256
+    ):
+        raise EvidenceError("previous_candidate_run_mismatch")
+    return value
+
+
+def validate_previous_candidate(
+    path: Path,
+    *,
+    expected_commit: str,
+    candidate: Mapping[str, Any],
+    now: datetime,
+    repository_root: Path,
+) -> tuple[dict[str, Any], str, str, datetime]:
+    if expected_commit == candidate["candidate_commit"]:
+        raise EvidenceError("previous_candidate_same_as_current")
+    preliminary = read_json(path)
+    intended_tag = preliminary.get("intended_tag")
+    if not isinstance(intended_tag, str) or TAG.fullmatch(intended_tag) is None:
+        raise EvidenceError("previous_candidate_identity_invalid")
+    validator = load_release_candidate_validator()
+    try:
+        previous = validator.verify_manifest(
+            path,
+            expected_commit=expected_commit,
+            expected_tag=intended_tag,
+            expected_image="ghcr.io/latchway/latchway",
+            now=now,
+        )
+    except validator.CandidateError as error:
+        raise EvidenceError(f"previous_{error}") from None
+    created = parse_time(previous["created_at"], "previous_candidate_time_invalid")
+    candidate_created = parse_time(
+        candidate["created_at"], "previous_candidate_time_invalid"
+    )
+    previous_candidate_image = (
+        previous["image"]["repository"] + "@" + previous["image"]["index_digest"]
+    )
+    previous_candidate_platform_image = (
+        previous["image"]["repository"]
+        + "@"
+        + previous["image"]["platforms"]["linux/amd64"]
+    )
+    candidate_image = (
+        candidate["image"]["repository"] + "@" + candidate["image"]["index_digest"]
+    )
+    candidate_platform_image = (
+        candidate["image"]["repository"]
+        + "@"
+        + candidate["image"]["platforms"]["linux/amd64"]
+    )
+    if (
+        previous["candidate_commit"] != expected_commit
+        or previous["contract"] != candidate["contract"]
+        or not semver_less(previous["version"], candidate["version"])
+        or created >= candidate_created
+        or previous_candidate_image == candidate_image
+        or previous_candidate_platform_image == candidate_platform_image
+    ):
+        raise EvidenceError("previous_candidate_identity_mismatch")
+    validate_distinct_ancestor(
+        repository_root, expected_commit, candidate["candidate_commit"]
+    )
+    return (
+        previous,
+        previous_candidate_image,
+        previous_candidate_platform_image,
+        created,
+    )
 
 
 def validate_source(path: Path, now: datetime) -> dict[str, Any]:
@@ -1763,24 +1946,29 @@ def validate_image_inspection(
     path: Path,
     *,
     commit: str,
-    previous_image: str,
     candidate_image: str,
+    candidate_platform_image: str,
+    previous_candidate_commit: str,
+    previous_candidate_version: str,
+    previous_candidate_tag: str,
+    previous_candidate_image: str,
+    previous_candidate_platform_image: str,
     postgres_image: str,
 ) -> dict[str, Any]:
     value = require_fields(
         read_json(path),
         (
             "candidate_oci_reference",
+            "candidate_platform_oci_reference",
             "candidate_revision",
-            "candidate_repo_digests",
-            "previous_oci_reference",
-            "previous_revision",
-            "previous_repo_digests",
-            "previous_version",
-            "previous_release_tag",
-            "previous_release_tag_type",
-            "previous_release_tag_commit",
-            "previous_version_tag_repo_digests",
+            "candidate_platform_repo_digests",
+            "previous_candidate_oci_reference",
+            "previous_candidate_platform_oci_reference",
+            "previous_candidate_revision",
+            "previous_candidate_version",
+            "previous_candidate_intended_tag",
+            "previous_candidate_platform_repo_digests",
+            "platform",
             "postgres_oci_reference",
             "postgres_repo_digests",
             "network_internal",
@@ -1807,29 +1995,35 @@ def validate_image_inspection(
             raise EvidenceError("drill_image_digest_unresolved")
         return values
 
-    candidate_digests = digest_list("candidate_repo_digests")
-    previous_digests = digest_list("previous_repo_digests")
-    previous_tag_digests = digest_list("previous_version_tag_repo_digests")
+    candidate_digests = digest_list("candidate_platform_repo_digests")
+    previous_digests = digest_list("previous_candidate_platform_repo_digests")
     postgres_digests = digest_list("postgres_repo_digests")
-    previous_version = value["previous_version"]
-    previous_revision = value["previous_revision"]
     source_identity = value["source_database_identity_sha256"]
     restore_identity = value["restore_database_identity_sha256"]
     short_postgres = postgres_image.removeprefix("docker.io/library/")
     if (
         value["candidate_oci_reference"] != candidate_image
+        or value["candidate_platform_oci_reference"] != candidate_platform_image
         or value["candidate_revision"] != commit
-        or candidate_image not in candidate_digests
-        or value["previous_oci_reference"] != previous_image
-        or previous_image not in previous_digests
-        or previous_image not in previous_tag_digests
-        or not isinstance(previous_version, str)
-        or SEMVER.fullmatch(previous_version) is None
-        or not isinstance(previous_revision, str)
-        or COMMIT.fullmatch(previous_revision) is None
-        or value["previous_release_tag"] != "v" + previous_version
-        or value["previous_release_tag_type"] != "tag"
-        or value["previous_release_tag_commit"] != previous_revision
+        or candidate_platform_image not in candidate_digests
+        or value["previous_candidate_oci_reference"] != previous_candidate_image
+        or value["previous_candidate_platform_oci_reference"]
+        != previous_candidate_platform_image
+        or value["previous_candidate_revision"] != previous_candidate_commit
+        or value["previous_candidate_version"] != previous_candidate_version
+        or value["previous_candidate_intended_tag"] != previous_candidate_tag
+        or previous_candidate_tag != "v" + previous_candidate_version
+        or previous_candidate_platform_image not in previous_digests
+        or value["platform"] != "linux/amd64"
+        or len(
+            {
+                candidate_image,
+                candidate_platform_image,
+                previous_candidate_image,
+                previous_candidate_platform_image,
+            }
+        )
+        != 4
         or value["postgres_oci_reference"] != postgres_image
         or (
             postgres_image not in postgres_digests
@@ -1959,11 +2153,18 @@ def validate_backup(
     *,
     commit: str,
     candidate_image: str,
+    candidate_platform_image: str,
+    previous_candidate_commit: str,
+    previous_candidate_version: str,
+    previous_candidate_tag: str,
+    previous_candidate_image: str,
+    previous_candidate_platform_image: str,
+    contract_version: str,
+    wire_protocol: int | str,
     released_at: datetime,
     now: datetime,
 ) -> tuple[
     tuple[datetime, datetime],
-    str,
     str,
     list[dict[str, str]],
     dict[str, Any],
@@ -1976,8 +2177,12 @@ def validate_backup(
             "kind",
             "status",
             "core_commit",
-            "previous_oci_reference",
+            "previous_candidate_commit",
+            "previous_candidate_intended_tag",
+            "previous_candidate_oci_reference",
+            "previous_candidate_platform_oci_reference",
             "candidate_oci_reference",
+            "candidate_platform_oci_reference",
             "postgres_oci_reference",
             "started_at",
             "finished_at",
@@ -1990,16 +2195,18 @@ def validate_backup(
         ),
         "backup_fields_invalid",
     )
-    previous = value["previous_oci_reference"]
     if (
         value["schema_version"] != 1
         or value["kind"] != "latchway_backup_restore_drill"
         or value["status"] != "passed"
         or value["core_commit"] != commit
-        or not isinstance(previous, str)
-        or OCI.fullmatch(previous) is None
-        or previous == candidate_image
+        or value["previous_candidate_commit"] != previous_candidate_commit
+        or value["previous_candidate_intended_tag"] != previous_candidate_tag
+        or value["previous_candidate_oci_reference"] != previous_candidate_image
+        or value["previous_candidate_platform_oci_reference"]
+        != previous_candidate_platform_image
         or value["candidate_oci_reference"] != candidate_image
+        or value["candidate_platform_oci_reference"] != candidate_platform_image
         or not isinstance(value["postgres_oci_reference"], str)
         or POSTGRES_OCI.fullmatch(value["postgres_oci_reference"]) is None
     ):
@@ -2021,11 +2228,19 @@ def validate_backup(
         "production_targeted": False,
     }:
         raise EvidenceError("backup_isolation_invalid")
-    source = validate_state(value["source"], previous, "backup_source_invalid")
-    restore = validate_state(value["restore"], previous, "backup_restore_invalid")
+    source = validate_state(
+        value["source"], previous_candidate_platform_image, "backup_source_invalid"
+    )
+    restore = validate_state(
+        value["restore"], previous_candidate_platform_image, "backup_restore_invalid"
+    )
     if (
         source["database_identity_sha256"] == restore["database_identity_sha256"]
         or source["version"] != restore["version"]
+        or source["version"]["version"] != previous_candidate_version
+        or source["version"]["commit"] != previous_candidate_commit
+        or source["version"]["contract_version"] != contract_version
+        or source["version"]["protocol_version"] != str(wire_protocol)
         or source["migration"] != restore["migration"]
         or source["state_fingerprint_sha256"] != restore["state_fingerprint_sha256"]
         or source["row_counts"] != restore["row_counts"]
@@ -2072,7 +2287,7 @@ def validate_backup(
         now=now,
         code="backup_time_invalid",
     )
-    return interval, previous, value["postgres_oci_reference"], index, source, restore
+    return interval, value["postgres_oci_reference"], index, source, restore
 
 
 def validate_runtime_stage(value: Any, image: str, code: str) -> dict[str, Any]:
@@ -2121,7 +2336,12 @@ def validate_upgrade(
     contract_version: str,
     wire_protocol: int | str,
     candidate_image: str,
-    previous_image: str,
+    candidate_platform_image: str,
+    previous_candidate_commit: str,
+    previous_candidate_version: str,
+    previous_candidate_tag: str,
+    previous_candidate_image: str,
+    previous_candidate_platform_image: str,
     postgres_image: str,
     released_at: datetime,
     now: datetime,
@@ -2139,8 +2359,12 @@ def validate_upgrade(
             "kind",
             "status",
             "core_commit",
-            "previous_oci_reference",
+            "previous_candidate_commit",
+            "previous_candidate_intended_tag",
+            "previous_candidate_oci_reference",
+            "previous_candidate_platform_oci_reference",
             "candidate_oci_reference",
+            "candidate_platform_oci_reference",
             "postgres_oci_reference",
             "started_at",
             "finished_at",
@@ -2157,24 +2381,38 @@ def validate_upgrade(
         or value["kind"] != "latchway_upgrade_application_rollback_drill"
         or value["status"] != "passed"
         or value["core_commit"] != commit
-        or value["previous_oci_reference"] != previous_image
+        or value["previous_candidate_commit"] != previous_candidate_commit
+        or value["previous_candidate_intended_tag"] != previous_candidate_tag
+        or value["previous_candidate_oci_reference"] != previous_candidate_image
+        or value["previous_candidate_platform_oci_reference"]
+        != previous_candidate_platform_image
         or value["candidate_oci_reference"] != candidate_image
+        or value["candidate_platform_oci_reference"] != candidate_platform_image
         or value["postgres_oci_reference"] != postgres_image
     ):
         raise EvidenceError("upgrade_identity_invalid")
     before = validate_runtime_stage(
-        value["previous_before"], previous_image, "upgrade_previous_invalid"
+        value["previous_before"],
+        previous_candidate_platform_image,
+        "upgrade_previous_invalid",
     )
     candidate = validate_runtime_stage(
-        value["candidate_after"], candidate_image, "upgrade_candidate_invalid"
+        value["candidate_after"],
+        candidate_platform_image,
+        "upgrade_candidate_invalid",
     )
     rollback = validate_runtime_stage(
-        value["previous_rollback"], previous_image, "upgrade_rollback_invalid"
+        value["previous_rollback"],
+        previous_candidate_platform_image,
+        "upgrade_rollback_invalid",
     )
     if (
         before["version"] != rollback["version"]
+        or before["version"]["version"] != previous_candidate_version
+        or before["version"]["commit"] != previous_candidate_commit
+        or before["version"]["contract_version"] != contract_version
+        or before["version"]["protocol_version"] != str(wire_protocol)
         or not semver_less(before["version"]["version"], core_version)
-        or before["version"]["commit"] == commit
         or candidate["version"]["version"] != core_version
         or candidate["version"]["commit"] != commit
         or candidate["version"]["contract_version"] != contract_version
@@ -2220,6 +2458,11 @@ def write_json(path: Path, value: Any) -> None:
 def finalize(
     *,
     candidate_manifest: Path,
+    previous_candidate_manifest: Path,
+    previous_candidate_attestation: Path,
+    previous_candidate_run: Path,
+    previous_candidate_commit: str,
+    previous_candidate_run_id: str,
     source_conformance: Path,
     load_report: Path,
     load_producer_manifest: Path,
@@ -2234,9 +2477,13 @@ def finalize(
     upgrade_report: Path,
     output_directory: Path,
     now: datetime,
+    repository_root: Path = ROOT,
 ) -> dict[str, Any]:
     report_paths = (
         candidate_manifest,
+        previous_candidate_manifest,
+        previous_candidate_attestation,
+        previous_candidate_run,
         source_conformance,
         load_report,
         load_producer_manifest,
@@ -2254,6 +2501,25 @@ def finalize(
         candidate["image"]["repository"]
         + "@"
         + candidate["image"]["platforms"]["linux/amd64"]
+    )
+    (
+        previous_candidate,
+        previous_candidate_image,
+        previous_candidate_platform_image,
+        _,
+    ) = validate_previous_candidate(
+        previous_candidate_manifest,
+        expected_commit=previous_candidate_commit,
+        candidate=candidate,
+        now=now,
+        repository_root=repository_root,
+    )
+    previous_candidate_run_document = validate_previous_candidate_run(
+        previous_candidate_run,
+        commit=previous_candidate_commit,
+        expected_run_id=previous_candidate_run_id,
+        manifest_sha256=report_hashes[previous_candidate_manifest],
+        attestation_sha256=report_hashes[previous_candidate_attestation],
     )
     contract = source["contract"]
     commit = source["repositories"]["core"]["commit"]
@@ -2323,7 +2589,6 @@ def finalize(
         raise EvidenceError("producer_evidence_interval_mismatch")
     (
         backup_interval,
-        previous_image,
         postgres_image,
         backup_index,
         backup_source,
@@ -2332,6 +2597,14 @@ def finalize(
         backup_report,
         commit=commit,
         candidate_image=image,
+        candidate_platform_image=platform_image,
+        previous_candidate_commit=previous_candidate_commit,
+        previous_candidate_version=previous_candidate["version"],
+        previous_candidate_tag=previous_candidate["intended_tag"],
+        previous_candidate_image=previous_candidate_image,
+        previous_candidate_platform_image=previous_candidate_platform_image,
+        contract_version=contract["version"],
+        wire_protocol=contract["wire_protocol"],
         released_at=released_at,
         now=now,
     )
@@ -2349,7 +2622,12 @@ def finalize(
         contract_version=contract["version"],
         wire_protocol=contract["wire_protocol"],
         candidate_image=image,
-        previous_image=previous_image,
+        candidate_platform_image=platform_image,
+        previous_candidate_commit=previous_candidate_commit,
+        previous_candidate_version=previous_candidate["version"],
+        previous_candidate_tag=previous_candidate["intended_tag"],
+        previous_candidate_image=previous_candidate_image,
+        previous_candidate_platform_image=previous_candidate_platform_image,
         postgres_image=postgres_image,
         released_at=released_at,
         now=now,
@@ -2393,15 +2671,25 @@ def finalize(
     backup_inspection = validate_image_inspection(
         backup_inspection_path,
         commit=commit,
-        previous_image=previous_image,
         candidate_image=image,
+        candidate_platform_image=platform_image,
+        previous_candidate_commit=previous_candidate_commit,
+        previous_candidate_version=previous_candidate["version"],
+        previous_candidate_tag=previous_candidate["intended_tag"],
+        previous_candidate_image=previous_candidate_image,
+        previous_candidate_platform_image=previous_candidate_platform_image,
         postgres_image=postgres_image,
     )
     upgrade_inspection = validate_image_inspection(
         upgrade_inspection_path,
         commit=commit,
-        previous_image=previous_image,
         candidate_image=image,
+        candidate_platform_image=platform_image,
+        previous_candidate_commit=previous_candidate_commit,
+        previous_candidate_version=previous_candidate["version"],
+        previous_candidate_tag=previous_candidate["intended_tag"],
+        previous_candidate_image=previous_candidate_image,
+        previous_candidate_platform_image=previous_candidate_platform_image,
         postgres_image=postgres_image,
     )
     if (
@@ -2412,9 +2700,9 @@ def finalize(
         or backup_restore["database_identity_sha256"]
         != backup_inspection["restore_database_identity_sha256"]
         or backup_source["version"]["version"]
-        != backup_inspection["previous_version"]
+        != backup_inspection["previous_candidate_version"]
         or backup_source["version"]["commit"]
-        != backup_inspection["previous_revision"]
+        != backup_inspection["previous_candidate_revision"]
         or upgrade_before["version"] != backup_source["version"]
     ):
         raise EvidenceError("drill_image_observations_mismatch")
@@ -2446,6 +2734,12 @@ def finalize(
         artifact_root.chmod(0o700)
         inputs = (
             (candidate_manifest, "candidate-manifest.json"),
+            (previous_candidate_manifest, "previous-candidate-manifest.json"),
+            (
+                previous_candidate_attestation,
+                "previous-candidate.attestation.sigstore.json",
+            ),
+            (previous_candidate_run, "previous-candidate-run.json"),
             (source_conformance, "source-conformance.json"),
             (load_report, "load-report.json"),
             (load_producer_manifest, "load-producer.json"),
@@ -2479,6 +2773,18 @@ def finalize(
         raw_index = {
             "schema_version": 1,
             "kind": "latchway_operational_resilience_raw_artifact_index",
+            "previous_candidate": {
+                "commit": previous_candidate_commit,
+                "run_id": previous_candidate_run_id,
+                "run_attempt": previous_candidate_run_document["run_attempt"],
+                "intended_tag": previous_candidate["intended_tag"],
+                "version": previous_candidate["version"],
+                "oci_index_reference": previous_candidate_image,
+                "oci_platform_reference": previous_candidate_platform_image,
+                "manifest_sha256": report_hashes[previous_candidate_manifest],
+                "attestation_sha256": report_hashes[previous_candidate_attestation],
+                "run_receipt_sha256": report_hashes[previous_candidate_run],
+            },
             "failure_external": sorted(failure_index, key=lambda item: item["path"]),
             "backup_restore": sorted(backup_index, key=lambda item: item["path"]),
             "upgrade_rollback": sorted(upgrade_index, key=lambda item: item["path"]),
@@ -2520,6 +2826,11 @@ def finalize(
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     value.add_argument("--candidate-manifest", type=Path, required=True)
+    value.add_argument("--previous-candidate-manifest", type=Path, required=True)
+    value.add_argument("--previous-candidate-attestation", type=Path, required=True)
+    value.add_argument("--previous-candidate-run", type=Path, required=True)
+    value.add_argument("--previous-candidate-commit", required=True)
+    value.add_argument("--previous-candidate-run-id", required=True)
     value.add_argument("--source-conformance", type=Path, required=True)
     value.add_argument("--load-report", type=Path, required=True)
     value.add_argument("--load-producer-manifest", type=Path, required=True)
@@ -2541,6 +2852,11 @@ def main() -> int:
     try:
         document = finalize(
             candidate_manifest=arguments.candidate_manifest,
+            previous_candidate_manifest=arguments.previous_candidate_manifest,
+            previous_candidate_attestation=arguments.previous_candidate_attestation,
+            previous_candidate_run=arguments.previous_candidate_run,
+            previous_candidate_commit=arguments.previous_candidate_commit,
+            previous_candidate_run_id=arguments.previous_candidate_run_id,
             source_conformance=arguments.source_conformance,
             load_report=arguments.load_report,
             load_producer_manifest=arguments.load_producer_manifest,

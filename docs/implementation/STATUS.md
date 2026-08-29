@@ -128,15 +128,17 @@ checkpoint or release-readiness evidence.
 The core repository now contains fail-closed protected producers for full load
 and destructive-failure evidence, exhaustive checksum manifests, exact
 candidate/source/runner/workflow/run identity bindings, authenticated
-operational consumption, an isolated backup/restore and previous-image
+operational consumption, an isolated backup/restore and prior-candidate
 upgrade/application-rollback drill, and tamper/substitution tests. It emits no
 release claim from local load or automated-only failure evidence. The live
 exact-index/amd64-child load, destructive multi-replica scenarios, recovery
 drill, and rollback still must execute successfully before the domain can
-become promotion evidence. The current rollback launcher requires an existing
-annotated prior release; first-release use remains blocked pending a separately
-attested distinct-ancestor prior-candidate baseline rather than a fabricated
-v0.9 tag.
+become promotion evidence. The rollback launcher consumes a separately
+attested, exact successful protected-main release-candidate run at a distinct
+ancestor commit, validates and retains its manifest and Sigstore bundle, and
+uses its immutable `linux/amd64` child without requiring an annotated Git tag
+or stable OCI coordinate. This removes the first-release bootstrap deadlock
+without fabricating a prior release; the external drill still has to run.
 
 ## Local working-tree update — challenge-bound reauthentication (2026-08-29)
 

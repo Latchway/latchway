@@ -7,9 +7,11 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -40,24 +42,43 @@ class OperationalEvidenceFixture:
     def __init__(self, root: Path):
         self.root = root
         self.now = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
-        self.commit = "a" * 40
-        self.previous_commit = "e" * 40
+        self.repository_root = root / "repository"
+        self.repository_root.mkdir()
+        self._initialize_repository()
         self.bundle_hash = hashlib.sha256(b"contract").hexdigest()
         self.image = "ghcr.io/latchway/latchway@sha256:" + "1" * 64
         self.platform_image = "ghcr.io/latchway/latchway@sha256:" + "4" * 64
-        self.previous_image = "ghcr.io/latchway/latchway@sha256:" + "2" * 64
+        self.previous_candidate_image = (
+            "ghcr.io/latchway/latchway@sha256:" + "2" * 64
+        )
+        self.previous_candidate_platform_image = (
+            "ghcr.io/latchway/latchway@sha256:" + "6" * 64
+        )
+        self.previous_candidate_version = "1.0.0-rc.1"
+        self.previous_candidate_tag = "v" + self.previous_candidate_version
+        self.previous_candidate_run_id = "12344"
         self.postgres_image = "docker.io/library/postgres@sha256:" + "3" * 64
         self.candidate_dir = root / "candidate"
+        self.previous_candidate_dir = root / "previous-candidate"
         self.load_dir = root / "load"
         self.failure_root = root / "failure-artifact"
         self.failure_dir = self.failure_root / "live-failures"
         self.drill_dir = root / "drills"
         self.candidate_dir.mkdir()
+        self.previous_candidate_dir.mkdir()
         self.load_dir.mkdir()
         self.failure_dir.mkdir(parents=True)
         self.drill_dir.mkdir()
         self.source_path = root / "source.json"
         self.candidate_path = self.candidate_dir / "latchway-candidate.json"
+        self.previous_candidate_path = (
+            self.previous_candidate_dir / "latchway-candidate.json"
+        )
+        self.previous_candidate_attestation_path = (
+            self.previous_candidate_dir
+            / "latchway-candidate.attestation.sigstore.json"
+        )
+        self.previous_candidate_run_path = root / "previous-candidate-run.json"
         self.load_path = self.load_dir / "load-v1.json"
         self.failure_path = self.failure_root / "failure-release.json"
         self.load_producer_path = self.load_dir / "load-producer.json"
@@ -68,10 +89,42 @@ class OperationalEvidenceFixture:
         self.upgrade_path = self.drill_dir / "upgrade-rollback.json"
         self._write_source()
         self._write_candidate()
+        self._write_previous_candidate()
         self._write_load()
         self._write_failure()
         self._write_producers()
         self._write_drills()
+
+    def _git(self, *arguments: str) -> str:
+        environment = {
+            "GIT_AUTHOR_NAME": "Latchway Test",
+            "GIT_AUTHOR_EMAIL": "test@latchway.invalid",
+            "GIT_COMMITTER_NAME": "Latchway Test",
+            "GIT_COMMITTER_EMAIL": "test@latchway.invalid",
+            "GIT_AUTHOR_DATE": "2026-08-29T09:00:00Z",
+            "GIT_COMMITTER_DATE": "2026-08-29T09:00:00Z",
+        }
+        completed = subprocess.run(
+            ["git", "-C", str(self.repository_root), *arguments],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, **environment},
+        )
+        return completed.stdout.strip()
+
+    def _initialize_repository(self) -> None:
+        self._git("init", "--initial-branch=main")
+        marker = self.repository_root / "candidate.txt"
+        marker.write_text("previous\n", encoding="utf-8")
+        self._git("add", "candidate.txt")
+        self._git("commit", "-m", "previous candidate")
+        self.previous_commit = self._git("rev-parse", "HEAD")
+        marker.write_text("current\n", encoding="utf-8")
+        self._git("add", "candidate.txt")
+        self._git("commit", "-m", "current candidate")
+        self.commit = self._git("rev-parse", "HEAD")
 
     @staticmethod
     def timestamp(value: datetime) -> str:
@@ -192,6 +245,77 @@ class OperationalEvidenceFixture:
                     },
                 },
                 "artifacts": entries,
+            },
+        )
+
+    def _write_previous_candidate(self) -> None:
+        for index, name in enumerate(sorted(MODULE.CANDIDATE_ARTIFACTS)):
+            contents = (
+                b"contract"
+                if name == "latchway-contract.tar.gz"
+                else f"previous-artifact-{index}".encode()
+            )
+            (self.previous_candidate_dir / name).write_bytes(contents)
+        entries = [
+            {
+                "path": name,
+                "sha256": self.digest(self.previous_candidate_dir / name),
+            }
+            for name in sorted(MODULE.CANDIDATE_ARTIFACTS)
+        ]
+        self.write(
+            self.previous_candidate_path,
+            {
+                "schema_version": 1,
+                "kind": "latchway_release_candidate",
+                "status": "passed",
+                "created_at": "2026-08-29T10:04:00Z",
+                "candidate_commit": self.previous_commit,
+                "intended_tag": self.previous_candidate_tag,
+                "version": self.previous_candidate_version,
+                "contract": {
+                    "version": "1.0.0",
+                    "status": "released",
+                    "released_at": "2026-08-29T10:00:00Z",
+                    "bundle_file_name": "latchway-contract-1.0.0.tar.gz",
+                    "bundle_sha256": self.bundle_hash,
+                },
+                "image": {
+                    "repository": "ghcr.io/latchway/latchway",
+                    "index_digest": "sha256:" + "2" * 64,
+                    "platforms": {
+                        "linux/amd64": "sha256:" + "6" * 64,
+                        "linux/arm64": "sha256:" + "7" * 64,
+                    },
+                },
+                "artifacts": entries,
+            },
+        )
+        self.write(
+            self.previous_candidate_attestation_path,
+            {"mediaType": "application/vnd.dev.sigstore.bundle+json;version=0.3"},
+        )
+        self.write(
+            self.previous_candidate_run_path,
+            {
+                "schema_version": 1,
+                "kind": "latchway_previous_candidate_run",
+                "repository": "Latchway/latchway",
+                "workflow_path": ".github/workflows/release.yml",
+                "workflow_id": "1001",
+                "workflow_state": "active",
+                "run_id": self.previous_candidate_run_id,
+                "run_attempt": 1,
+                "event": "workflow_dispatch",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": self.previous_commit,
+                "head_branch": "main",
+                "artifact_name": f"latchway-candidate-{self.previous_commit}",
+                "manifest_sha256": self.digest(self.previous_candidate_path),
+                "attestation_sha256": self.digest(
+                    self.previous_candidate_attestation_path
+                ),
             },
         )
 
@@ -584,7 +708,7 @@ class OperationalEvidenceFixture:
             "version": version,
             "commit": commit,
             "build_date": "2026-08-29T10:01:00Z",
-            "contract_version": version,
+            "contract_version": "1.0.0",
             "protocol_version": "1",
         }
 
@@ -623,10 +747,12 @@ class OperationalEvidenceFixture:
         backup_log.write_text('{"status":"passed"}\n', encoding="utf-8")
         upgrade_log = self.drill_dir / "upgrade.log.json"
         upgrade_log.write_text('{"status":"passed"}\n', encoding="utf-8")
-        previous_version = self.version("0.9.0", self.previous_commit)
+        previous_version = self.version(
+            self.previous_candidate_version, self.previous_commit
+        )
         source = {
             "database_identity_sha256": "7" * 64,
-            "image": self.previous_image,
+            "image": self.previous_candidate_platform_image,
             "version": previous_version,
             "migration": self.migration(),
             "doctor": self.doctor(),
@@ -644,8 +770,12 @@ class OperationalEvidenceFixture:
                 "kind": "latchway_backup_restore_drill",
                 "status": "passed",
                 "core_commit": self.commit,
-                "previous_oci_reference": self.previous_image,
+                "previous_candidate_commit": self.previous_commit,
+                "previous_candidate_intended_tag": self.previous_candidate_tag,
+                "previous_candidate_oci_reference": self.previous_candidate_image,
+                "previous_candidate_platform_oci_reference": self.previous_candidate_platform_image,
                 "candidate_oci_reference": self.image,
+                "candidate_platform_oci_reference": self.platform_image,
                 "postgres_oci_reference": self.postgres_image,
                 "started_at": "2026-08-29T10:50:00Z",
                 "finished_at": "2026-08-29T11:00:00Z",
@@ -681,14 +811,28 @@ class OperationalEvidenceFixture:
                 "kind": "latchway_upgrade_application_rollback_drill",
                 "status": "passed",
                 "core_commit": self.commit,
-                "previous_oci_reference": self.previous_image,
+                "previous_candidate_commit": self.previous_commit,
+                "previous_candidate_intended_tag": self.previous_candidate_tag,
+                "previous_candidate_oci_reference": self.previous_candidate_image,
+                "previous_candidate_platform_oci_reference": self.previous_candidate_platform_image,
                 "candidate_oci_reference": self.image,
+                "candidate_platform_oci_reference": self.platform_image,
                 "postgres_oci_reference": self.postgres_image,
                 "started_at": "2026-08-29T11:00:01Z",
                 "finished_at": "2026-08-29T11:10:00Z",
-                "previous_before": self.stage(self.previous_image, "0.9.0", self.previous_commit),
-                "candidate_after": self.stage(self.image, "1.0.0", self.commit),
-                "previous_rollback": self.stage(self.previous_image, "0.9.0", self.previous_commit),
+                "previous_before": self.stage(
+                    self.previous_candidate_platform_image,
+                    self.previous_candidate_version,
+                    self.previous_commit,
+                ),
+                "candidate_after": self.stage(
+                    self.platform_image, "1.0.0", self.commit
+                ),
+                "previous_rollback": self.stage(
+                    self.previous_candidate_platform_image,
+                    self.previous_candidate_version,
+                    self.previous_commit,
+                ),
                 "assertions": {name: True for name in MODULE.UPGRADE_ASSERTIONS},
                 "artifacts": [
                     {"path": upgrade_log.name, "sha256": self.digest(upgrade_log)},
@@ -705,16 +849,18 @@ class OperationalEvidenceFixture:
             self.drill_dir / "image-inspection.json",
             {
                 "candidate_oci_reference": self.image,
+                "candidate_platform_oci_reference": self.platform_image,
                 "candidate_revision": self.commit,
-                "candidate_repo_digests": [self.image],
-                "previous_oci_reference": self.previous_image,
-                "previous_revision": self.previous_commit,
-                "previous_repo_digests": [self.previous_image],
-                "previous_version": "0.9.0",
-                "previous_release_tag": "v0.9.0",
-                "previous_release_tag_type": "tag",
-                "previous_release_tag_commit": self.previous_commit,
-                "previous_version_tag_repo_digests": [self.previous_image],
+                "candidate_platform_repo_digests": [self.platform_image],
+                "previous_candidate_oci_reference": self.previous_candidate_image,
+                "previous_candidate_platform_oci_reference": self.previous_candidate_platform_image,
+                "previous_candidate_revision": self.previous_commit,
+                "previous_candidate_version": self.previous_candidate_version,
+                "previous_candidate_intended_tag": self.previous_candidate_tag,
+                "previous_candidate_platform_repo_digests": [
+                    self.previous_candidate_platform_image
+                ],
+                "platform": "linux/amd64",
                 "postgres_oci_reference": self.postgres_image,
                 "postgres_repo_digests": [self.postgres_image],
                 "network_internal": True,
@@ -724,9 +870,17 @@ class OperationalEvidenceFixture:
         )
 
     def write_raw_drill_observations(self) -> None:
-        previous = self.stage(self.previous_image, "0.9.0", self.previous_commit)
-        candidate = self.stage(self.image, "1.0.0", self.commit)
-        rollback = self.stage(self.previous_image, "0.9.0", self.previous_commit)
+        previous = self.stage(
+            self.previous_candidate_platform_image,
+            self.previous_candidate_version,
+            self.previous_commit,
+        )
+        candidate = self.stage(self.platform_image, "1.0.0", self.commit)
+        rollback = self.stage(
+            self.previous_candidate_platform_image,
+            self.previous_candidate_version,
+            self.previous_commit,
+        )
         for prefix, stage in (
             ("previous", previous),
             ("candidate", candidate),
@@ -744,7 +898,9 @@ class OperationalEvidenceFixture:
             )
         self.write(self.drill_dir / "restore-migration.json", self.migration())
         self.write(self.drill_dir / "restore-doctor.json", self.doctor())
-        previous_build = self.version("0.9.0", self.previous_commit)
+        previous_build = self.version(
+            self.previous_candidate_version, self.previous_commit
+        )
         self.write(
             self.drill_dir / "restore-health.json",
             {"status": "ok", "build": previous_build},
@@ -770,9 +926,24 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def finalize(self, name: str = "output") -> dict[str, object]:
+    def finalize(
+        self,
+        name: str = "output",
+        *,
+        previous_candidate_commit: str | None = None,
+        previous_candidate_run_id: str | None = None,
+    ) -> dict[str, object]:
         return MODULE.finalize(
             candidate_manifest=self.fixture.candidate_path,
+            previous_candidate_manifest=self.fixture.previous_candidate_path,
+            previous_candidate_attestation=self.fixture.previous_candidate_attestation_path,
+            previous_candidate_run=self.fixture.previous_candidate_run_path,
+            previous_candidate_commit=(
+                previous_candidate_commit or self.fixture.previous_commit
+            ),
+            previous_candidate_run_id=(
+                previous_candidate_run_id or self.fixture.previous_candidate_run_id
+            ),
             source_conformance=self.fixture.source_path,
             load_report=self.fixture.load_path,
             load_producer_manifest=self.fixture.load_producer_path,
@@ -787,6 +958,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             upgrade_report=self.fixture.upgrade_path,
             output_directory=self.root / name,
             now=self.fixture.now,
+            repository_root=self.fixture.repository_root,
         )
 
     @staticmethod
@@ -800,19 +972,163 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertEqual(document["domain"], "operational_resilience")
         self.assertEqual(document["oci_image_digest"], self.fixture.image)
         self.assertEqual(document["claims"], MODULE.DOMAIN_CLAIMS)
-        self.assertEqual(len(document["artifacts"]), 11)
+        self.assertTrue(
+            MODULE.semver_less(self.fixture.previous_candidate_version, "1.0.0")
+        )
+        self.assertEqual(len(document["artifacts"]), 14)
         output = self.root / "output"
         self.assertEqual(json.loads((output / "operational_resilience.json").read_text()), document)
+        raw = json.loads(
+            (
+                output
+                / "artifacts/operational-resilience/raw-artifact-index.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            raw["previous_candidate"],
+            {
+                "attestation_sha256": self.fixture.digest(
+                    self.fixture.previous_candidate_attestation_path
+                ),
+                "commit": self.fixture.previous_commit,
+                "intended_tag": "v1.0.0-rc.1",
+                "manifest_sha256": self.fixture.digest(
+                    self.fixture.previous_candidate_path
+                ),
+                "oci_index_reference": self.fixture.previous_candidate_image,
+                "oci_platform_reference": self.fixture.previous_candidate_platform_image,
+                "run_attempt": 1,
+                "run_id": self.fixture.previous_candidate_run_id,
+                "run_receipt_sha256": self.fixture.digest(
+                    self.fixture.previous_candidate_run_path
+                ),
+                "version": "1.0.0-rc.1",
+            },
+        )
         for artifact in document["artifacts"]:
             self.assertEqual(
                 hashlib.sha256((output / artifact["path"]).read_bytes()).hexdigest(),
                 artifact["sha256"],
             )
 
-    def test_workflow_verifies_untagged_candidate_and_source_attestations(self) -> None:
+    def test_rejects_tampered_or_substituted_prior_candidate_evidence(self) -> None:
+        artifact = (
+            self.fixture.previous_candidate_dir
+            / "latchway-linux-amd64-vulnerability.json"
+        )
+        original_artifact = artifact.read_bytes()
+        artifact.write_bytes(b"substituted scan")
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_artifact_hash_mismatch"
+        ):
+            self.finalize("prior-artifact-tamper")
+        artifact.write_bytes(original_artifact)
+
+        original_manifest = self.fixture.previous_candidate_path.read_bytes()
+        self.fixture.previous_candidate_path.write_bytes(
+            self.fixture.candidate_path.read_bytes()
+        )
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_manifest_identity_mismatch"
+        ):
+            self.finalize("prior-manifest-substitution")
+        self.fixture.previous_candidate_path.write_bytes(original_manifest)
+
+        original_bundle = self.fixture.previous_candidate_attestation_path.read_bytes()
+        self.fixture.previous_candidate_attestation_path.write_bytes(b"tampered bundle")
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_run_mismatch"
+        ):
+            self.finalize("prior-bundle-tamper")
+        self.fixture.previous_candidate_attestation_path.write_bytes(original_bundle)
+
+        self.fixture.previous_candidate_attestation_path.unlink()
+        with self.assertRaisesRegex(MODULE.EvidenceError, "artifact_not_regular_file"):
+            self.finalize("prior-bundle-missing")
+
+    def test_rejects_wrong_prior_candidate_run_identity(self) -> None:
+        cases = (
+            (lambda value: value.__setitem__("run_id", "99999")),
+            (
+                lambda value: value.__setitem__(
+                    "workflow_path", ".github/workflows/security.yml"
+                )
+            ),
+            (lambda value: value.__setitem__("head_sha", self.fixture.commit)),
+            (lambda value: value.__setitem__("head_branch", "release")),
+            (lambda value: value.__setitem__("conclusion", "failure")),
+            (
+                lambda value: value.__setitem__(
+                    "artifact_name", f"latchway-candidate-{self.fixture.commit}"
+                )
+            ),
+        )
+        for index, operation in enumerate(cases):
+            with self.subTest(index=index):
+                original = self.fixture.previous_candidate_run_path.read_bytes()
+                self.mutate(self.fixture.previous_candidate_run_path, operation)
+                with self.assertRaisesRegex(
+                    MODULE.EvidenceError, "previous_candidate_run_mismatch"
+                ):
+                    self.finalize(f"prior-run-{index}")
+                self.fixture.previous_candidate_run_path.write_bytes(original)
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_run_mismatch"
+        ):
+            self.finalize(
+                "prior-run-input",
+                previous_candidate_run_id="99999",
+            )
+
+    def test_requires_exact_lower_distinct_ancestor_candidate(self) -> None:
+        self.assertTrue(MODULE.semver_less("1.0.0-rc.1", "1.0.0"))
+        self.assertTrue(MODULE.semver_less("1.0.0-rc.2", "1.0.0-rc.10"))
+        self.assertFalse(MODULE.semver_less("1.0.0-rc.1", "1.0.0-rc.1"))
+        self.assertFalse(MODULE.semver_less("1.0.0", "1.0.0-rc.1"))
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_same_as_current"
+        ):
+            self.finalize(
+                "same-candidate",
+                previous_candidate_commit=self.fixture.commit,
+            )
+
+        tree = self.fixture._git("rev-parse", f"{self.fixture.previous_commit}^{{tree}}")
+        unrelated = self.fixture._git("commit-tree", tree, "-m", "unrelated candidate")
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_not_ancestor"
+        ):
+            MODULE.validate_distinct_ancestor(
+                self.fixture.repository_root, unrelated, self.fixture.commit
+            )
+
+        original = self.fixture.previous_candidate_path.read_bytes()
+        self.mutate(
+            self.fixture.previous_candidate_path,
+            lambda value: value.update(
+                intended_tag="v1.0.1", version="1.0.1"
+            ),
+        )
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_identity_mismatch"
+        ):
+            self.finalize("prior-not-lower")
+        self.fixture.previous_candidate_path.write_bytes(original)
+
+        self.mutate(
+            self.fixture.previous_candidate_path,
+            lambda value: value.__setitem__("created_at", "2026-08-29T10:06:00Z"),
+        )
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "previous_candidate_identity_mismatch"
+        ):
+            self.finalize("prior-not-earlier")
+        self.fixture.previous_candidate_path.write_bytes(original)
+
+    def test_workflow_authenticates_current_and_prior_untagged_candidates(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         verification = workflow.index(
-            "- name: Verify candidate, source, load, and failure attestations"
+            "- name: Verify current, prior-candidate, source, load, and failure attestations"
         )
         finalization = workflow.index("- name: Seal the operational-resilience domain")
         self.assertLess(verification, finalization)
@@ -827,10 +1143,25 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                 workflow,
             )
         self.assertEqual(workflow.count('--source-digest "$CANDIDATE_COMMIT"'), 4)
-        self.assertEqual(workflow.count("--source-ref refs/heads/main"), 4)
-        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 3)
+        self.assertEqual(
+            workflow.count('--source-digest "$PREVIOUS_CANDIDATE_COMMIT"'), 1
+        )
+        self.assertEqual(workflow.count("--source-ref refs/heads/main"), 5)
+        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 4)
         self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', workflow)
+        self.assertIn(
+            'git merge-base --is-ancestor "$PREVIOUS_CANDIDATE_COMMIT" "$CANDIDATE_COMMIT"',
+            workflow,
+        )
+        self.assertIn(
+            '.path == ".github/workflows/release.yml" and .state == "active"',
+            workflow,
+        )
+        self.assertIn("latchway_previous_candidate_run", workflow)
+        self.assertIn("previous-candidate-run-receipt.json", workflow)
+        self.assertIn("manifest_sha256: $manifest_sha256", workflow)
+        self.assertIn("attestation_sha256: $attestation_sha256", workflow)
         self.assertIn("$LOAD_RUN_ID:.github/workflows/release-load-evidence.yml", workflow)
         self.assertIn("$FAILURE_RUN_ID:.github/workflows/release-failure-evidence.yml", workflow)
         self.assertIn('--load-producer-run-id "${{ inputs.load_evidence_run_id }}"', workflow)
@@ -840,6 +1171,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         )
         self.assertIn("operational_resilience.attestation.sigstore.json", workflow)
         self.assertNotIn("refs/tags/", workflow)
+        self.assertNotIn("ghcr.io/latchway/latchway:$", workflow)
 
     def test_fixed_producer_workflows_are_protected_and_commit_pinned(self) -> None:
         load = LOAD_WORKFLOW.read_text(encoding="utf-8")
@@ -1057,7 +1389,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                     self.finalize(f"time-output-{index}")
                 self.fixture.upgrade_path.write_bytes(original)
 
-    def test_rejects_previous_image_that_cannot_run_candidate_schema(self) -> None:
+    def test_rejects_prior_candidate_that_cannot_run_candidate_schema(self) -> None:
         def incompatible(value: dict[str, object]) -> None:
             value["previous_rollback"]["migration"] = {
                 "current": 16,
@@ -1074,14 +1406,31 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         backup, upgrade = DRILL.build_reports(
             root=self.fixture.drill_dir,
             commit=self.fixture.commit,
-            previous_image=self.fixture.previous_image,
+            previous_candidate_commit=self.fixture.previous_commit,
+            previous_candidate_version=self.fixture.previous_candidate_version,
+            previous_candidate_tag=self.fixture.previous_candidate_tag,
+            previous_candidate_image=self.fixture.previous_candidate_image,
+            previous_candidate_platform_image=self.fixture.previous_candidate_platform_image,
             candidate_image=self.fixture.image,
+            candidate_platform_image=self.fixture.platform_image,
             postgres_image=self.fixture.postgres_image,
             started_at="2026-08-29T10:50:00Z",
             finished_at="2026-08-29T11:10:00Z",
         )
         self.assertEqual(backup["status"], "passed")
+        self.assertEqual(
+            backup["previous_candidate_intended_tag"], "v1.0.0-rc.1"
+        )
+        self.assertEqual(
+            backup["source"]["image"],
+            self.fixture.previous_candidate_platform_image,
+        )
         self.assertEqual(upgrade["candidate_after"]["version"]["commit"], self.fixture.commit)
+        self.assertEqual(
+            upgrade["candidate_after"]["image"], self.fixture.platform_image
+        )
+        self.assertNotIn("previous_oci_reference", backup)
+        self.assertNotIn("previous_release_tag", backup)
 
         inspection = self.fixture.drill_dir / "image-inspection.json"
         self.mutate(inspection, lambda value: value.__setitem__("candidate_revision", "b" * 40))
@@ -1089,8 +1438,13 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             DRILL.build_reports(
                 root=self.fixture.drill_dir,
                 commit=self.fixture.commit,
-                previous_image=self.fixture.previous_image,
+                previous_candidate_commit=self.fixture.previous_commit,
+                previous_candidate_version=self.fixture.previous_candidate_version,
+                previous_candidate_tag=self.fixture.previous_candidate_tag,
+                previous_candidate_image=self.fixture.previous_candidate_image,
+                previous_candidate_platform_image=self.fixture.previous_candidate_platform_image,
                 candidate_image=self.fixture.image,
+                candidate_platform_image=self.fixture.platform_image,
                 postgres_image=self.fixture.postgres_image,
                 started_at="2026-08-29T10:50:00Z",
                 finished_at="2026-08-29T11:10:00Z",
