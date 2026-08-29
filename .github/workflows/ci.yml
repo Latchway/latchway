@@ -95,6 +95,22 @@ jobs:
 
   console:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: latchway
+          POSTGRES_USER: latchway
+          POSTGRES_PASSWORD: latchway-console-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U latchway -d latchway"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-console-ci@127.0.0.1:5432/latchway?sslmode=disable
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -104,6 +120,10 @@ jobs:
           node-version: 24.19.0
           cache: pnpm
           cache-dependency-path: web/console/pnpm-lock.yaml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Enable pinned package manager
         run: corepack enable && corepack prepare pnpm@10.15.0 --activate
       - name: Install
@@ -112,6 +132,10 @@ jobs:
       - name: Check console
         working-directory: web/console
         run: pnpm check
+      - name: Prove browser to Go to PostgreSQL first-run workflow
+        env:
+          LATCHWAY_CONSOLE_LIVE_E2E: "1"
+        run: go test -count=1 -run '^TestConsoleFirstRunAgainstLiveStack$' ./internal/livee2e
       - name: Prove reproducible embedded assets
         working-directory: web/console
         run: pnpm verify:reproducible

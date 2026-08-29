@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const liveStackBaseURL = process.env.LATCHWAY_CONSOLE_LIVE_E2E_BASE_URL;
+
 export default defineConfig({
   expect: { timeout: 8_000 },
   forbidOnly: Boolean(process.env.CI),
@@ -9,11 +11,11 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 45_000,
   use: {
-    baseURL: "http://127.0.0.1:4174",
+    baseURL: liveStackBaseURL ?? "http://127.0.0.1:4174",
     screenshot: "only-on-failure",
     trace: "retain-on-failure"
   },
-  webServer: {
+  webServer: liveStackBaseURL ? undefined : {
     command: "corepack pnpm dev --host 127.0.0.1 --port 4174",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

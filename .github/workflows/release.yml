@@ -97,6 +97,7 @@ jobs:
           corepack prepare pnpm@10.15.0 --activate
           pnpm --dir web/console install --frozen-lockfile
           pnpm --dir web/console check
+          LATCHWAY_CONSOLE_LIVE_E2E=1 go test -count=1 -run '^TestConsoleFirstRunAgainstLiveStack$' ./internal/livee2e
           pnpm --dir web/console verify:reproducible
       - name: Run deterministic automated failure and replica gates
         run: >-

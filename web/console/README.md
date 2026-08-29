@@ -51,11 +51,22 @@ pnpm build
 pnpm verify:reproducible
 ```
 
-Tests mock only the HTTP boundary and verify the exact canonical endpoint
-paths. Zod validates all server payloads before UI code consumes them. The
-Playwright gate proves first-run activation with a strong ETag, write-only
+The fast component and default Playwright tests mock only the HTTP boundary and
+verify the exact canonical endpoint paths. Zod validates all server payloads
+before UI code consumes them. The default Playwright gate proves first-run
+activation with a strong ETag, write-only
 credential clearing, user blocking, CSRF on every cookie mutation, absence of
 Web Storage credentials, and server-side logout in Chromium.
+
+The release and CI workflows additionally run
+`TestConsoleFirstRunAgainstLiveStack` with an isolated PostgreSQL schema. That
+gate serves the embedded production bundle from the real Go process and drives
+first-owner bootstrap, application/environment creation, encrypted write-only
+secret creation, native-mobile configuration validation and activation, logout,
+and password login through Chromium. It makes no provider request. Its
+bootstrap, owner, and placeholder provider credentials are randomly generated;
+browser traces, screenshots, and video are disabled for this credential-bearing
+proof, and the schema is dropped after the process drains.
 
 ## Embedded build contract
 
