@@ -5,7 +5,7 @@ PNPM ?= pnpm
 SQLC_IMAGE ?= sqlc/sqlc:1.31.1
 FUZZ_TIME ?= 3s
 FUZZ_PARALLEL ?= 2
-VERSION ?= 0.1.0-dev
+VERSION ?= 1.0.0
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X github.com/latchway/latchway/internal/buildinfo.Version=$(VERSION) -X github.com/latchway/latchway/internal/buildinfo.Commit=$(COMMIT) -X github.com/latchway/latchway/internal/buildinfo.Date=$(BUILD_DATE)

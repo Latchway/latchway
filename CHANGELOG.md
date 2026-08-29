@@ -4,9 +4,11 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
 ### Changed
 
-- Advance the draft contract to 0.5.0 for closed, provider-specific Apple App
+- Advance contract 0.5.0 for closed, provider-specific Apple App
   Attest and Google Play Integrity configuration while retaining wire protocol
   version 1.
 - Advance the draft contract to 0.4.0 for physical-model-bound input
@@ -33,6 +35,6 @@ All notable project changes will be documented here. The format follows [Keep a 
 - Draft client and Admin OpenAPI 3.1 contracts, configuration schema, stable error registry, and cross-language security vectors.
 - Initial Go/PostgreSQL runtime, migration, CLI, embedded console, Compose, and single-image foundation in the working tree.
 
-The local authenticated debug/mock gateway vertical is functional. No public
-package, published image, hardware-attested production proof, or production
-release exists yet.
+Publication remains a separate, evidence-gated operation; this source release
+entry does not itself claim a registry artifact, deployed image, or physical-
+device attestation result.
