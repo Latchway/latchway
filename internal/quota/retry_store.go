@@ -34,6 +34,13 @@ func (store *Store) SettleForRetry(ctx context.Context, attempt Attempt, outcome
 // attempt data-plane remains source-compatible until the route executor opts
 // into retry lifecycle methods.
 func (store *Store) SettleFinalAttempt(ctx context.Context, attempt Attempt, outcome Outcome) error {
+	if store != nil && store.pool != nil && store.newID != nil && ctx != nil &&
+		attempt.number == 1 && attempt.validate() == nil && outcome.validate() == nil {
+		handled, err := store.settleInitialFinalAttempt(ctx, attempt, outcome)
+		if handled {
+			return err
+		}
+	}
 	return store.settleRetryLifecycle(ctx, attempt, outcome, true)
 }
 
