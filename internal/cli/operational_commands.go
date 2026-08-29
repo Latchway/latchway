@@ -528,23 +528,19 @@ func newStatusCommand(opts *options) *cobra.Command {
 
 func newVerifyCommand(opts *options) *cobra.Command {
 	values := &controlCommandOptions{}
-	command := &cobra.Command{Use: "verify", Short: "Run bounded server-side verification through the Admin API"}
+	command := &cobra.Command{Use: "verify", Short: "Run bounded local or server-side verification"}
 	addControlTokenFlag(command, values)
-	for _, kind := range []string{"local", "upstream", "openrouter"} {
+	command.AddCommand(newVerifyLocalCommand(opts))
+	for _, kind := range []string{"upstream", "openrouter"} {
 		kind := kind
 		var environmentID, upstream, model string
-		defaultMaximumCost := int64(0)
-		if kind != "local" {
-			defaultMaximumCost = 10_000_000
-		}
 		var maxCost int64
 		subcommand := &cobra.Command{
 			Use: kind, Short: verifyShort(kind), Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				localInputValid := kind == "local" && upstream == "" && model == "" && maxCost == 0
-				credentialInputValid := kind != "local" && secretNamePattern.MatchString(upstream) &&
+				credentialInputValid := secretNamePattern.MatchString(upstream) &&
 					secretNamePattern.MatchString(model) && maxCost >= 1 && maxCost <= 1_000_000_000
-				if id.Validate(environmentID, id.Environment) != nil || (!localInputValid && !credentialInputValid) {
+				if id.Validate(environmentID, id.Environment) != nil || !credentialInputValid {
 					return errors.New("verification environment, configured selection, or cost bound is invalid")
 				}
 				request := map[string]any{"kind": kind, "environment_id": environmentID}
@@ -571,7 +567,7 @@ func newVerifyCommand(opts *options) *cobra.Command {
 		subcommand.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
 		subcommand.Flags().StringVar(&upstream, "upstream", "", "server-owned upstream identifier")
 		subcommand.Flags().StringVar(&model, "model", "", "active configured model identifier")
-		subcommand.Flags().Int64Var(&maxCost, "max-cost-nano-usd", defaultMaximumCost, "hard two-request verification cost ceiling (10,000,000 is US$0.01)")
+		subcommand.Flags().Int64Var(&maxCost, "max-cost-nano-usd", 10_000_000, "hard two-request verification cost ceiling (10,000,000 is US$0.01)")
 		_ = subcommand.MarkFlagRequired("environment")
 		command.AddCommand(subcommand)
 	}
@@ -580,8 +576,6 @@ func newVerifyCommand(opts *options) *cobra.Command {
 
 func verifyShort(kind string) string {
 	switch kind {
-	case "local":
-		return "Run durable database, schema, and active-configuration checks"
 	case "upstream":
 		return "Run bounded verification against an active server-owned upstream and model"
 	default:

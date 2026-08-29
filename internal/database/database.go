@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,11 +21,39 @@ import (
 
 const migrationLockID int64 = 0x4c41544348574159
 
+var isolatedSchemaName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
 // Open constructs and verifies a bounded PostgreSQL pool.
 func Open(ctx context.Context, databaseURL string, maxConnections int32) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database configuration: %w", err)
+	}
+	return openConfig(ctx, cfg, maxConnections)
+}
+
+// OpenInSchema constructs a pool whose every connection is confined to one
+// explicitly named PostgreSQL schema. It is used by destructive verification
+// and migration drills so they cannot accidentally resolve objects from the
+// operator's application schema through a connection-pool reuse.
+func OpenInSchema(ctx context.Context, databaseURL, schema string, maxConnections int32) (*pgxpool.Pool, error) {
+	if !isolatedSchemaName.MatchString(schema) {
+		return nil, errors.New("isolated database schema name is invalid")
+	}
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database configuration: %w", err)
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = make(map[string]string)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	return openConfig(ctx, cfg, maxConnections)
+}
+
+func openConfig(ctx context.Context, cfg *pgxpool.Config, maxConnections int32) (*pgxpool.Pool, error) {
+	if cfg == nil || maxConnections < 1 {
+		return nil, errors.New("database pool configuration is invalid")
 	}
 	cfg.MaxConns = maxConnections
 	cfg.MinConns = 1

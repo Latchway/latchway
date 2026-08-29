@@ -1,9 +1,9 @@
 # Latchway CLI reference
 
 The `latchway` binary operates the gateway through the same canonical Admin API
-used by the console. Except for `serve`, `migrate`, and the local bootstrap
-doctor, control-plane commands do not open PostgreSQL or read server
-configuration files.
+used by the console. Except for `serve`, `migrate`, the local bootstrap doctor,
+and the explicitly isolated `verify local` gate, control-plane commands do not
+open PostgreSQL or read server configuration files.
 
 ## Authentication and output
 
@@ -115,9 +115,38 @@ printf '%s' "$PROVIDER_KEY" | latchway secret set provider_key --environment env
 latchway secret list --environment env_...
 ```
 
-`latchway verify local --environment env_...` persists a bounded database,
-schema, and active-configuration self-test. Credential-aware verification names
-only active server-owned configuration and a hard two-request cost ceiling:
+`latchway verify local` is a destructive test only inside a generated,
+short-lived PostgreSQL schema. It applies every embedded migration, creates an
+ephemeral tenant, starts deterministic OIDC and upstream fixtures, and executes
+the production session, proxy, trusted-accounting, quota, fallback, recovery,
+header-boundary, SSRF, and configuration rollback paths. It then drops the
+entire schema and proves that it no longer exists, including when an earlier
+check fails.
+
+Supply the database URL by environment-variable name so credentials never enter
+process arguments. The database role needs permission to create and drop
+schemas. The host also needs one non-loopback private IPv4 address for the
+test-owned protected upstreams.
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://...'
+latchway verify local
+latchway --output json verify local --timeout 2m --junit ./local-verify.xml
+
+# Select a differently named variable without exposing its value.
+latchway verify local --database-url-env TEST_DATABASE_URL
+```
+
+Human and JSON output are written to stdout. Optional JUnit XML is replaced
+atomically with mode `0600`; it contains the same ordered checks and deliberately
+omits timestamps, durations, generated identifiers, database coordinates, and
+secrets. A failed check still emits the report and JUnit evidence, returns a
+non-zero status, marks later dependent checks skipped, and always attempts
+cleanup. `DATABASE_URL` is used only as the default fallback when
+`LATCHWAY_DATABASE_URL` was not explicitly selected.
+
+Credential-aware server verification names only active server-owned
+configuration and a hard two-request cost ceiling:
 
 ```bash
 latchway verify upstream --environment env_... --upstream primary --model canary
