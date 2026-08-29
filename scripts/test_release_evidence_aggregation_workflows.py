@@ -67,7 +67,7 @@ class ReleaseEvidenceAggregationWorkflowTests(unittest.TestCase):
             self.assertIn(f"latchway-deployment-{platform}-${{{{ inputs.candidate_commit }}}}", text)
             self.assertIn(f"verify_run {platform}", text)
         for required in (
-            '.path == ".github/workflows/deployment-evidence.yml"',
+            'expected_workflow="${4:-.github/workflows/deployment-evidence.yml}"',
             ".github/workflows/cross-repository-conformance.yml",
             ".github/workflows/release.yml",
             "gh attestation trusted-root",
@@ -144,7 +144,7 @@ class ReleaseEvidenceAggregationWorkflowTests(unittest.TestCase):
 
         text = (WORKFLOWS / "cross-repository-conformance.yml").read_text(encoding="utf-8")
         for required in (
-            'test "$EXTERNAL_EVIDENCE_ARTIFACT" = latchway-v1-external-evidence',
+            'name: latchway-v1-external-evidence-${{ inputs.external_evidence_run_id }}-${{ inputs.external_evidence_run_attempt }}',
             '.path == ".github/workflows/aggregate-release-evidence.yml"',
             "aggregate-manifest.attestation.sigstore.json",
             "domains=(live_sdk_conformance physical_devices live_provider cloud_deployments operational_resilience supply_chain)",

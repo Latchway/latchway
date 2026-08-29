@@ -35,6 +35,10 @@ SEMVER = re.compile(
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 TAG = re.compile(r"^v" + SEMVER.pattern[1:])
+FINAL_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+RC_VERSION = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.([1-9]\d*)$"
+)
 OCI = re.compile(r"^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$")
 POSTGRES_OCI = re.compile(
     r"^docker\.io/library/postgres@sha256:[0-9a-f]{64}$"
@@ -387,6 +391,17 @@ def semver_less(left: str, right: str) -> bool:
     return len(left_pre) < len(right_pre)
 
 
+def canonical_rc_to_final(previous: str, current: str) -> bool:
+    """Require an exact same-base canonical rc.N candidate to stable final."""
+    previous_match = RC_VERSION.fullmatch(previous)
+    current_match = FINAL_VERSION.fullmatch(current)
+    return (
+        previous_match is not None
+        and current_match is not None
+        and previous_match.groups()[:3] == current_match.groups()
+    )
+
+
 def validate_interval(
     started_value: Any,
     finished_value: Any,
@@ -729,7 +744,7 @@ def validate_previous_candidate(
     if (
         previous["candidate_commit"] != expected_commit
         or previous["contract"] != candidate["contract"]
-        or not semver_less(previous["version"], candidate["version"])
+        or not canonical_rc_to_final(previous["version"], candidate["version"])
         or created >= candidate_created
         or previous_candidate_image == candidate_image
         or previous_candidate_platform_image == candidate_platform_image

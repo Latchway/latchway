@@ -17,32 +17,64 @@ on:
         description: Protected live SDK finalizer run
         required: true
         type: string
+      live_sdk_conformance_run_attempt:
+        description: Exact live SDK finalizer run attempt
+        required: true
+        type: string
       physical_devices_run_id:
         description: Protected physical-device finalizer run
+        required: true
+        type: string
+      physical_devices_run_attempt:
+        description: Exact physical-device finalizer run attempt
         required: true
         type: string
       live_provider_run_id:
         description: Protected live-provider finalizer run
         required: true
         type: string
+      live_provider_run_attempt:
+        description: Exact live-provider finalizer run attempt
+        required: true
+        type: string
       cloud_deployments_run_id:
         description: Protected cloud aggregate run
+        required: true
+        type: string
+      cloud_deployments_run_attempt:
+        description: Exact cloud aggregate run attempt
         required: true
         type: string
       operational_resilience_run_id:
         description: Protected operational-resilience run
         required: true
         type: string
+      operational_resilience_run_attempt:
+        description: Exact operational-resilience run attempt
+        required: true
+        type: string
       supply_chain_run_id:
         description: Protected supply-chain finalizer run
+        required: true
+        type: string
+      supply_chain_run_attempt:
+        description: Exact supply-chain finalizer run attempt
         required: true
         type: string
       public_tags_run_id:
         description: Protected public-tags finalizer run (release scope only)
         required: false
         type: string
+      public_tags_run_attempt:
+        description: Exact public-tags finalizer run attempt (release scope only)
+        required: false
+        type: string
       public_registries_run_id:
         description: Protected public-registries finalizer run (release scope only)
+        required: false
+        type: string
+      public_registries_run_attempt:
+        description: Exact public-registries finalizer run attempt (release scope only)
         required: false
         type: string
 
@@ -75,13 +107,21 @@ jobs:
           EVIDENCE_SCOPE: ${{ inputs.scope }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           LIVE_SDK_RUN_ID: ${{ inputs.live_sdk_conformance_run_id }}
+          LIVE_SDK_RUN_ATTEMPT: ${{ inputs.live_sdk_conformance_run_attempt }}
           PHYSICAL_RUN_ID: ${{ inputs.physical_devices_run_id }}
+          PHYSICAL_RUN_ATTEMPT: ${{ inputs.physical_devices_run_attempt }}
           LIVE_PROVIDER_RUN_ID: ${{ inputs.live_provider_run_id }}
+          LIVE_PROVIDER_RUN_ATTEMPT: ${{ inputs.live_provider_run_attempt }}
           CLOUD_RUN_ID: ${{ inputs.cloud_deployments_run_id }}
+          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_deployments_run_attempt }}
           OPERATIONS_RUN_ID: ${{ inputs.operational_resilience_run_id }}
+          OPERATIONS_RUN_ATTEMPT: ${{ inputs.operational_resilience_run_attempt }}
           SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          SUPPLY_CHAIN_RUN_ATTEMPT: ${{ inputs.supply_chain_run_attempt }}
           PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_TAGS_RUN_ATTEMPT: ${{ inputs.public_tags_run_attempt }}
           PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+          PUBLIC_REGISTRIES_RUN_ATTEMPT: ${{ inputs.public_registries_run_attempt }}
         run: |
           set -Eeuo pipefail
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
@@ -90,13 +130,22 @@ jobs:
             "$CLOUD_RUN_ID" "$OPERATIONS_RUN_ID" "$SUPPLY_CHAIN_RUN_ID"; do
             [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
           done
+          for attempt in \
+            "$LIVE_SDK_RUN_ATTEMPT" "$PHYSICAL_RUN_ATTEMPT" "$LIVE_PROVIDER_RUN_ATTEMPT" \
+            "$CLOUD_RUN_ATTEMPT" "$OPERATIONS_RUN_ATTEMPT" "$SUPPLY_CHAIN_RUN_ATTEMPT"; do
+            [[ "$attempt" =~ ^[1-9][0-9]*$ ]]
+          done
           if [[ "$EVIDENCE_SCOPE" == release ]]; then
             [[ "$PUBLIC_TAGS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "$PUBLIC_REGISTRIES_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$PUBLIC_TAGS_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            [[ "$PUBLIC_REGISTRIES_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           else
             test "$EVIDENCE_SCOPE" = promotion
             test -z "$PUBLIC_TAGS_RUN_ID"
             test -z "$PUBLIC_REGISTRIES_RUN_ID"
+            test -z "$PUBLIC_TAGS_RUN_ATTEMPT"
+            test -z "$PUBLIC_REGISTRIES_RUN_ATTEMPT"
           fi
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
@@ -108,77 +157,85 @@ jobs:
           EVIDENCE_SCOPE: ${{ inputs.scope }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           LIVE_SDK_RUN_ID: ${{ inputs.live_sdk_conformance_run_id }}
+          LIVE_SDK_RUN_ATTEMPT: ${{ inputs.live_sdk_conformance_run_attempt }}
           PHYSICAL_RUN_ID: ${{ inputs.physical_devices_run_id }}
+          PHYSICAL_RUN_ATTEMPT: ${{ inputs.physical_devices_run_attempt }}
           LIVE_PROVIDER_RUN_ID: ${{ inputs.live_provider_run_id }}
+          LIVE_PROVIDER_RUN_ATTEMPT: ${{ inputs.live_provider_run_attempt }}
           CLOUD_RUN_ID: ${{ inputs.cloud_deployments_run_id }}
+          CLOUD_RUN_ATTEMPT: ${{ inputs.cloud_deployments_run_attempt }}
           OPERATIONS_RUN_ID: ${{ inputs.operational_resilience_run_id }}
+          OPERATIONS_RUN_ATTEMPT: ${{ inputs.operational_resilience_run_attempt }}
           SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          SUPPLY_CHAIN_RUN_ATTEMPT: ${{ inputs.supply_chain_run_attempt }}
           PUBLIC_TAGS_RUN_ID: ${{ inputs.public_tags_run_id }}
+          PUBLIC_TAGS_RUN_ATTEMPT: ${{ inputs.public_tags_run_attempt }}
           PUBLIC_REGISTRIES_RUN_ID: ${{ inputs.public_registries_run_id }}
+          PUBLIC_REGISTRIES_RUN_ATTEMPT: ${{ inputs.public_registries_run_attempt }}
         run: |
           set -Eeuo pipefail
           verify_run() {
-            local domain="$1" run_id="$2" expected_workflow="$3"
+            local domain="$1" run_id="$2" run_attempt="$3" expected_workflow="$4"
             local run="$RUNNER_TEMP/${domain}-run.json"
             local workflow="$RUNNER_TEMP/${domain}-workflow.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$run"
-            jq --exit-status --arg commit "$CANDIDATE_COMMIT" \
-              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$run"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$run_attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
               "$run" >/dev/null
             workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$run")
             gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
             jq --exit-status --arg path "$expected_workflow" \
               '.path == $path and .state == "active"' "$workflow" >/dev/null
           }
-          verify_run live_sdk_conformance "$LIVE_SDK_RUN_ID" .github/workflows/release-domain-evidence.yml
-          verify_run physical_devices "$PHYSICAL_RUN_ID" .github/workflows/release-domain-evidence.yml
-          verify_run live_provider "$LIVE_PROVIDER_RUN_ID" .github/workflows/release-domain-evidence.yml
-          verify_run cloud_deployments "$CLOUD_RUN_ID" .github/workflows/cloud-deployment-aggregate.yml
-          verify_run operational_resilience "$OPERATIONS_RUN_ID" .github/workflows/operational-resilience-evidence.yml
-          verify_run supply_chain "$SUPPLY_CHAIN_RUN_ID" .github/workflows/release-domain-evidence.yml
+          verify_run live_sdk_conformance "$LIVE_SDK_RUN_ID" "$LIVE_SDK_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+          verify_run physical_devices "$PHYSICAL_RUN_ID" "$PHYSICAL_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+          verify_run live_provider "$LIVE_PROVIDER_RUN_ID" "$LIVE_PROVIDER_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+          verify_run cloud_deployments "$CLOUD_RUN_ID" "$CLOUD_RUN_ATTEMPT" .github/workflows/cloud-deployment-aggregate.yml
+          verify_run operational_resilience "$OPERATIONS_RUN_ID" "$OPERATIONS_RUN_ATTEMPT" .github/workflows/operational-resilience-evidence.yml
+          verify_run supply_chain "$SUPPLY_CHAIN_RUN_ID" "$SUPPLY_CHAIN_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
           if [[ "$EVIDENCE_SCOPE" == release ]]; then
-            verify_run public_tags "$PUBLIC_TAGS_RUN_ID" .github/workflows/release-domain-evidence.yml
-            verify_run public_registries "$PUBLIC_REGISTRIES_RUN_ID" .github/workflows/release-domain-evidence.yml
+            verify_run public_tags "$PUBLIC_TAGS_RUN_ID" "$PUBLIC_TAGS_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
+            verify_run public_registries "$PUBLIC_REGISTRIES_RUN_ID" "$PUBLIC_REGISTRIES_RUN_ATTEMPT" .github/workflows/release-domain-evidence.yml
           fi
       - name: Download live SDK conformance domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-live_sdk_conformance-${{ inputs.candidate_commit }}
+          name: latchway-live_sdk_conformance-${{ inputs.candidate_commit }}-${{ inputs.live_sdk_conformance_run_id }}-${{ inputs.live_sdk_conformance_run_attempt }}
           path: ${{ runner.temp }}/domains/live_sdk_conformance
           run-id: ${{ inputs.live_sdk_conformance_run_id }}
           github-token: ${{ github.token }}
       - name: Download physical-device domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-physical_devices-${{ inputs.candidate_commit }}
+          name: latchway-physical_devices-${{ inputs.candidate_commit }}-${{ inputs.physical_devices_run_id }}-${{ inputs.physical_devices_run_attempt }}
           path: ${{ runner.temp }}/domains/physical_devices
           run-id: ${{ inputs.physical_devices_run_id }}
           github-token: ${{ github.token }}
       - name: Download live-provider domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-live_provider-${{ inputs.candidate_commit }}
+          name: latchway-live_provider-${{ inputs.candidate_commit }}-${{ inputs.live_provider_run_id }}-${{ inputs.live_provider_run_attempt }}
           path: ${{ runner.temp }}/domains/live_provider
           run-id: ${{ inputs.live_provider_run_id }}
           github-token: ${{ github.token }}
       - name: Download cloud-deployments domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-cloud_deployments-${{ inputs.candidate_commit }}
+          name: latchway-cloud_deployments-${{ inputs.candidate_commit }}-${{ inputs.cloud_deployments_run_id }}-${{ inputs.cloud_deployments_run_attempt }}
           path: ${{ runner.temp }}/domains/cloud_deployments
           run-id: ${{ inputs.cloud_deployments_run_id }}
           github-token: ${{ github.token }}
       - name: Download operational-resilience domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-operational-resilience-${{ inputs.candidate_commit }}
+          name: latchway-operational-resilience-${{ inputs.candidate_commit }}-${{ inputs.operational_resilience_run_id }}-${{ inputs.operational_resilience_run_attempt }}
           path: ${{ runner.temp }}/domains/operational_resilience
           run-id: ${{ inputs.operational_resilience_run_id }}
           github-token: ${{ github.token }}
       - name: Download supply-chain domain
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-supply_chain-${{ inputs.candidate_commit }}
+          name: latchway-supply_chain-${{ inputs.candidate_commit }}-${{ inputs.supply_chain_run_id }}-${{ inputs.supply_chain_run_attempt }}
           path: ${{ runner.temp }}/domains/supply_chain
           run-id: ${{ inputs.supply_chain_run_id }}
           github-token: ${{ github.token }}
@@ -186,7 +243,7 @@ jobs:
         if: inputs.scope == 'release'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-public_tags-${{ inputs.candidate_commit }}
+          name: latchway-public_tags-${{ inputs.candidate_commit }}-${{ inputs.public_tags_run_id }}-${{ inputs.public_tags_run_attempt }}
           path: ${{ runner.temp }}/domains/public_tags
           run-id: ${{ inputs.public_tags_run_id }}
           github-token: ${{ github.token }}
@@ -194,7 +251,7 @@ jobs:
         if: inputs.scope == 'release'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-public_registries-${{ inputs.candidate_commit }}
+          name: latchway-public_registries-${{ inputs.candidate_commit }}-${{ inputs.public_registries_run_id }}-${{ inputs.public_registries_run_attempt }}
           path: ${{ runner.temp }}/domains/public_registries
           run-id: ${{ inputs.public_registries_run_id }}
           github-token: ${{ github.token }}
@@ -260,7 +317,7 @@ jobs:
       - name: Retain only the authenticated release-evidence aggregate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: latchway-v1-external-evidence
+          name: latchway-v1-external-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/latchway-v1-external-evidence
           if-no-files-found: error
           compression-level: 0

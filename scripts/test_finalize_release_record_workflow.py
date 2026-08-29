@@ -47,6 +47,7 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         )
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', self.text)
         self.assertIn('.run_attempt == $attempt', self.text)
+        self.assertIn('/actions/runs/$run_id/attempts/$run_attempt', self.text)
         for workflow in (
             ".github/workflows/release.yml",
             ".github/workflows/security.yml",
@@ -70,7 +71,7 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         self.assertLess(render, reconcile)
         self.assertLess(reconcile, attest)
         self.assertLess(attest, upload)
-        self.assertEqual(self.text.count("--deny-self-hosted-runners"), 6)
+        self.assertEqual(self.text.count("--deny-self-hosted-runners"), 8)
         self.assertGreaterEqual(self.text.count('--source-ref refs/heads/main'), 6)
         self.assertGreaterEqual(self.text.count('--source-digest "$CANDIDATE_COMMIT"'), 6)
         self.assertGreaterEqual(self.text.count('--signer-digest "$CANDIDATE_COMMIT"'), 6)
@@ -90,6 +91,9 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             '.gitHead == $commit',
             '"dev.latchway:latchway-bom:" + $android',
             'scripts/render-completion-report.py',
+            'scripts/verify-public-registry-proof.py',
+            'latchway-public-registry-byte-proof.json',
+            'latchway-release-evidence-v1.tar.gz',
         ):
             self.assertIn(value, self.text)
         self.assertNotIn("registry_coordinates", self.workflow["on"]["workflow_dispatch"]["inputs"])

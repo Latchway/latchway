@@ -101,7 +101,7 @@ jobs:
             local label="$1" run_id="$2" run_attempt="$3" expected_workflow="$4"
             local run="$RUNNER_TEMP/$label-run.json"
             local workflow="$RUNNER_TEMP/$label-workflow.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$run"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$run"
             jq --exit-status \
               --arg commit "$CANDIDATE_COMMIT" \
               --argjson attempt "$run_attempt" \
@@ -120,21 +120,21 @@ jobs:
       - name: Download the exact candidate evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-candidate-${{ inputs.candidate_commit }}
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
           path: ${{ runner.temp }}/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
       - name: Download the exact candidate-security evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-security-${{ inputs.candidate_commit }}
+          name: latchway-security-${{ inputs.candidate_commit }}-${{ inputs.security_run_id }}-${{ inputs.security_run_attempt }}
           path: ${{ runner.temp }}/security
           run-id: ${{ inputs.security_run_id }}
           github-token: ${{ github.token }}
       - name: Download the exact release-scope conformance evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-cross-repository-release
+          name: latchway-cross-repository-release-${{ inputs.release_conformance_run_id }}-${{ inputs.release_conformance_run_attempt }}
           path: ${{ runner.temp }}/conformance
           run-id: ${{ inputs.release_conformance_run_id }}
           github-token: ${{ github.token }}
@@ -172,6 +172,15 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/conformance-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/conformance/latchway-external-evidence/aggregate-manifest.json" \
+            --bundle "$RUNNER_TEMP/conformance/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/aggregate-release-evidence.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/aggregate-attestation-verification.json"
       - name: Recompute the candidate and security gates
         shell: bash
         env:
@@ -229,6 +238,36 @@ jobs:
              (.id | type == "number" and . > 0) and
              (.published_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' \
             "$RUNNER_TEMP/release.json" >/dev/null
+          mkdir -p "$RUNNER_TEMP/promotion-release-assets"
+          gh release download "$RELEASE_TAG" \
+            --pattern latchway-cross-repository-promotion.json \
+            --pattern latchway-cross-repository-promotion.attestation.sigstore.json \
+            --dir "$RUNNER_TEMP/promotion-release-assets"
+          promotion="$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.json"
+          promotion_bundle="$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.attestation.sigstore.json"
+          for asset in "$promotion" "$promotion_bundle"; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            actual=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("promotion asset missing or duplicated") end' \
+              "$RUNNER_TEMP/release.json")
+            test "$actual" = "$expected"
+          done
+          gh attestation verify "$promotion" \
+            --bundle "$promotion_bundle" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/promotion-attestation-verification.json"
+          promotion_sha256=$(sha256sum "$promotion" | cut -d ' ' -f 1)
+          expected_tag_message="Latchway $RELEASE_TAG
+
+          Promotion evidence SHA-256: $promotion_sha256"
+          jq --exit-status --arg message "$expected_tag_message" '.message == $message' \
+            "$RUNNER_TEMP/tag-object.json" >/dev/null
           image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
           [[ "$image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
           docker buildx imagetools inspect --raw "$image" > "$RUNNER_TEMP/oci-index.json"
@@ -308,6 +347,38 @@ jobs:
                   "dev.latchway:latchway-bom:" + $android
                 ]
               }}' > "$RUNNER_TEMP/publication-state.json"
+      - name: Independently validate byte-bound public registry proof
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/verify-public-registry-proof.py \
+            --evidence-root "$RUNNER_TEMP/conformance/latchway-external-evidence" \
+            --candidate-commit "$CANDIDATE_COMMIT" \
+            --release-tag "$RELEASE_TAG" \
+            --output "$RUNNER_TEMP/public-registry-byte-proof.json"
+      - name: Build deterministic durable release-evidence assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          destination="$RUNNER_TEMP/final-release-record"
+          mkdir -p "$destination"
+          test -d "$RUNNER_TEMP/conformance/latchway-external-evidence"
+          cp -- "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
+            "$destination/latchway-cross-repository-release.json"
+          cp -- "$RUNNER_TEMP/conformance/latchway-cross-repository.attestation.sigstore.json" \
+            "$destination/latchway-cross-repository-release.attestation.sigstore.json"
+          cp -- "$RUNNER_TEMP/publication-state.json" \
+            "$destination/latchway-publication-state.json"
+          cp -- "$RUNNER_TEMP/public-registry-byte-proof.json" \
+            "$destination/latchway-public-registry-byte-proof.json"
+          tar --sort=name --format=ustar --mtime='UTC 1970-01-01' \
+            --owner=0 --group=0 --numeric-owner -cf - \
+            -C "$RUNNER_TEMP/conformance" latchway-external-evidence \
+            | gzip -n > "$destination/latchway-release-evidence-v1.tar.gz"
+          test -s "$destination/latchway-release-evidence-v1.tar.gz"
       - name: Render the deterministic final completion report
         shell: bash
         env:
@@ -315,7 +386,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -Eeuo pipefail
-          mkdir -p "$RUNNER_TEMP/final-release-record"
           python3 scripts/render-completion-report.py \
             --candidate "$RUNNER_TEMP/candidate/latchway-candidate.json" \
             --security "$RUNNER_TEMP/security/security-summary.json" \
@@ -324,6 +394,11 @@ jobs:
             --repository "$GITHUB_WORKSPACE" \
             --commit "$CANDIDATE_COMMIT" \
             --tag "$RELEASE_TAG" \
+            --durable-asset "latchway-cross-repository-release.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json" \
+            --durable-asset "latchway-cross-repository-release.attestation.sigstore.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json" \
+            --durable-asset "latchway-publication-state.json=$RUNNER_TEMP/final-release-record/latchway-publication-state.json" \
+            --durable-asset "latchway-public-registry-byte-proof.json=$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
+            --durable-asset "latchway-release-evidence-v1.tar.gz=$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz" \
             --output "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
       - name: Reconcile any existing immutable final assets
         id: final-assets
@@ -420,6 +495,31 @@ jobs:
           if [[ "$BUNDLE_EXISTS" != true ]]; then
             gh release upload "$RELEASE_TAG" "$bundle"
           fi
+          for asset in \
+            "$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-publication-state.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz"; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/durable-release.json"
+            existing=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] | if length == 0 then "absent" elif length == 1 then (.[0].digest // "digest-unavailable") else error("durable release asset duplicated") end' \
+              "$RUNNER_TEMP/durable-release.json")
+            if [[ "$existing" == absent ]]; then
+              gh release upload "$RELEASE_TAG" "$asset"
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/durable-release.json"
+            existing=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("durable release asset missing or duplicated") end' \
+              "$RUNNER_TEMP/durable-release.json")
+            test "$existing" = "$expected"
+            mkdir -p "$RUNNER_TEMP/existing-durable-assets"
+            rm -f "$RUNNER_TEMP/existing-durable-assets/$name"
+            gh release download "$RELEASE_TAG" --pattern "$name" --dir "$RUNNER_TEMP/existing-durable-assets"
+            cmp --silent "$asset" "$RUNNER_TEMP/existing-durable-assets/$name"
+          done
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/final-release.json"
           for asset in "$report" "$bundle"; do
             name=${asset##*/}
@@ -434,7 +534,7 @@ jobs:
       - name: Retain the final report bundle and verified public state
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: latchway-final-release-record-${{ inputs.candidate_commit }}
+          name: latchway-final-release-record-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.md
             ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.attestation.sigstore.json

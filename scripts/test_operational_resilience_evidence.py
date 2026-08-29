@@ -1085,6 +1085,18 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertTrue(MODULE.semver_less("1.0.0-rc.2", "1.0.0-rc.10"))
         self.assertFalse(MODULE.semver_less("1.0.0-rc.1", "1.0.0-rc.1"))
         self.assertFalse(MODULE.semver_less("1.0.0", "1.0.0-rc.1"))
+        self.assertTrue(MODULE.canonical_rc_to_final("1.0.0-rc.1", "1.0.0"))
+        self.assertTrue(MODULE.canonical_rc_to_final("1.0.0-rc.10", "1.0.0"))
+        for previous, current in (
+            ("0.9.0", "1.0.0"),
+            ("1.0.0-alpha.1", "1.0.0"),
+            ("1.0.0-rc.0", "1.0.0"),
+            ("1.0.0-rc.01", "1.0.0"),
+            ("1.0.1-rc.1", "1.0.0"),
+            ("1.0.0-rc.1", "1.0.0-rc.2"),
+        ):
+            with self.subTest(previous=previous, current=current):
+                self.assertFalse(MODULE.canonical_rc_to_final(previous, current))
         with self.assertRaisesRegex(
             MODULE.EvidenceError, "previous_candidate_same_as_current"
         ):
@@ -1162,8 +1174,9 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertIn("previous-candidate-run-receipt.json", workflow)
         self.assertIn("manifest_sha256: $manifest_sha256", workflow)
         self.assertIn("attestation_sha256: $attestation_sha256", workflow)
-        self.assertIn("$LOAD_RUN_ID:.github/workflows/release-load-evidence.yml", workflow)
-        self.assertIn("$FAILURE_RUN_ID:.github/workflows/release-failure-evidence.yml", workflow)
+        self.assertIn("$LOAD_RUN_ID:$LOAD_RUN_ATTEMPT:.github/workflows/release-load-evidence.yml", workflow)
+        self.assertIn("$FAILURE_RUN_ID:$FAILURE_RUN_ATTEMPT:.github/workflows/release-failure-evidence.yml", workflow)
+        self.assertIn("/actions/runs/$run_id/attempts/$attempt", workflow)
         self.assertIn('--load-producer-run-id "${{ inputs.load_evidence_run_id }}"', workflow)
         self.assertIn(
             '--failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"',

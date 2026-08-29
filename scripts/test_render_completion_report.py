@@ -196,6 +196,16 @@ class RenderCompletionReportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.paths[name] = path
+        self.durable_assets = {}
+        for name in (
+            "latchway-cross-repository-release.json",
+            "latchway-cross-repository-release.attestation.sigstore.json",
+            "latchway-publication-state.json",
+            "latchway-release-evidence-v1.tar.gz",
+        ):
+            path = self.root / name
+            path.write_bytes((name + "\n").encode("utf-8"))
+            self.durable_assets[name] = path
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -209,6 +219,7 @@ class RenderCompletionReportTests(unittest.TestCase):
             repository=self.repository,
             commit=COMMIT,
             tag=TAG,
+            durable_assets=self.durable_assets,
         )
 
     def rewrite(self, name: str, value: dict) -> None:
@@ -232,6 +243,7 @@ class RenderCompletionReportTests(unittest.TestCase):
             "`public_registries` | `passed`",
             "source_race",
             "Release-scope cross-repository report",
+            "latchway-release-evidence-v1.tar.gz",
         ):
             self.assertIn(value, first)
 

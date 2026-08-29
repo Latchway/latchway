@@ -26,9 +26,12 @@ class PromotionResumabilityTests(unittest.TestCase):
         state = self.names.index("Verify any existing core release tag")
         image = self.names.index("Promote only the verified index digest to stable OCI tags")
         create = self.names.index("Create the evidence-gated annotated core tag")
+        final_tag = self.names.index("Re-fetch and verify the immutable annotated core tag")
         release = self.names.index("Publish the immutable release record")
         self.assertLess(state, image)
         self.assertLess(image, create)
+        self.assertLess(create, final_tag)
+        self.assertLess(final_tag, release)
         self.assertLess(create, release)
         create_step = self.steps[create]
         self.assertEqual(create_step.get("if"), "steps.release-state.outputs.tag_exists != 'true'")
@@ -43,6 +46,9 @@ class PromotionResumabilityTests(unittest.TestCase):
         ):
             self.assertIn(value, state_script)
         self.assertNotIn("refusing to replace existing core tag", self.text)
+        final_script = self.steps[final_tag]["run"]
+        for value in ('.object.type == "tag"', '.object.type == "commit"', '.object.sha == $commit', '.message == $message'):
+            self.assertIn(value, final_script)
 
     def test_stable_oci_coordinates_are_verify_or_create(self) -> None:
         script = self.steps[

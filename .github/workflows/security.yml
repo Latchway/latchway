@@ -20,6 +20,10 @@ on:
         description: Successful release-candidate workflow run ID
         required: true
         type: string
+      candidate_run_attempt:
+        description: Exact successful release-candidate workflow run attempt
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -176,11 +180,13 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
         run: |
           set -Eeuo pipefail
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
           [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -190,13 +196,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
         run: |
           set -Eeuo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > "$RUNNER_TEMP/candidate-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/attempts/$CANDIDATE_RUN_ATTEMPT" > "$RUNNER_TEMP/candidate-run.json"
           workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/candidate-run.json")
           jq --exit-status \
-            --arg commit "$CANDIDATE_COMMIT" \
-            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
+            --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$CANDIDATE_RUN_ATTEMPT" \
+            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
             "$RUNNER_TEMP/candidate-run.json" >/dev/null
           [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/candidate-workflow.json"
@@ -206,7 +213,7 @@ jobs:
       - name: Download the fixed immutable candidate artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-candidate-${{ inputs.candidate_commit }}
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
           path: ${{ runner.temp }}/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
@@ -357,7 +364,7 @@ jobs:
       - name: Retain candidate-bound security evidence
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: latchway-security-${{ inputs.candidate_commit }}
+          name: latchway-security-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/security-final/
           if-no-files-found: error
           compression-level: 0

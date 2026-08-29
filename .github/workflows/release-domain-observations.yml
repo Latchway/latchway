@@ -38,8 +38,16 @@ on:
         description: Successful attested source-conformance run ID
         required: true
         type: string
+      source_evidence_run_attempt:
+        description: Exact source-conformance run attempt
+        required: true
+        type: string
       candidate_run_id:
         description: Successful attested immutable-candidate run ID
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact immutable-candidate run attempt
         required: true
         type: string
       ios_physical_run_id:
@@ -133,7 +141,9 @@ jobs:
           ANDROID_COMMIT: ${{ inputs.android_commit }}
           REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
           SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
           IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
           IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
@@ -146,7 +156,9 @@ jobs:
             [[ "$value" =~ ^[0-9a-f]{40}$ ]]
           done
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           if [[ "$EVIDENCE_DOMAIN" == live_sdk_conformance || "$EVIDENCE_DOMAIN" == physical_devices ]]; then
             for value in "$IOS_PHYSICAL_RUN_ID" "$ANDROID_PHYSICAL_RUN_ID" "$REACT_NATIVE_PHYSICAL_RUN_ID"; do
               [[ "$value" =~ ^[1-9][0-9]{0,19}$ ]]
@@ -161,17 +173,40 @@ jobs:
           test "$(git -C latchway-ios-sdk rev-parse --verify HEAD)" = "$IOS_COMMIT"
           test "$(git -C latchway-android rev-parse --verify HEAD)" = "$ANDROID_COMMIT"
           test "$(git -C latchway-react-native-sdk rev-parse --verify HEAD)" = "$REACT_NATIVE_COMMIT"
+      - name: Authenticate exact source and candidate runs and attempts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          verify_run() {
+            local label="$1" run_id="$2" attempt="$3" path="$4"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RUNNER_TEMP/$label-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/$label-run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
+            jq --exit-status --arg path "$path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+          }
+          verify_run source "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
       - name: Download the exact source-conformance artifact and bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-cross-repository-source
+          name: latchway-cross-repository-source-${{ inputs.source_evidence_run_id }}-${{ inputs.source_evidence_run_attempt }}
           path: ${{ runner.temp }}/source
           run-id: ${{ inputs.source_evidence_run_id }}
           github-token: ${{ github.token }}
       - name: Download the exact candidate artifact and bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-candidate-${{ inputs.candidate_commit }}
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
           path: ${{ runner.temp }}/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
@@ -267,6 +302,7 @@ jobs:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
           GH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+          LATCHWAY_MAVEN_SIGNING_FINGERPRINT: ${{ vars.LATCHWAY_MAVEN_SIGNING_FINGERPRINT }}
           LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
           LATCHWAY_LIVE_SDK_APPLICATION_ID: ${{ vars.LATCHWAY_LIVE_SDK_APPLICATION_ID }}
           LATCHWAY_LIVE_SDK_FEATURE: ${{ vars.LATCHWAY_LIVE_SDK_FEATURE }}
@@ -313,6 +349,7 @@ jobs:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
           GH_TOKEN: ${{ github.token }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+          LATCHWAY_MAVEN_SIGNING_FINGERPRINT: ${{ vars.LATCHWAY_MAVEN_SIGNING_FINGERPRINT }}
           LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
           LATCHWAY_ADMIN_API_TOKEN: ${{ inputs.domain == 'live_provider' && secrets.LATCHWAY_LIVE_PROVIDER_ADMIN_API_TOKEN || '' }}
           LATCHWAY_PROVIDER_ENVIRONMENT_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_ENVIRONMENT_ID }}
@@ -358,7 +395,7 @@ jobs:
       - name: Retain only the attested machine-result set
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: latchway-${{ inputs.domain }}-machine-results-${{ inputs.candidate_commit }}
+          name: latchway-${{ inputs.domain }}-machine-results-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/observation-artifact
           if-no-files-found: error
           compression-level: 0

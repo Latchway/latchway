@@ -138,7 +138,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(job["environment"], "release-evidence")
         self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
         names = [step.get("name", "") for step in job["steps"]]
-        producer_run = names.index("Verify the machine-results run belongs to the fixed producer")
+        producer_run = names.index("Verify every input run and attempt belongs to its fixed producer")
         bundles = names.index("Verify all three exact attestation bundles before finalization")
         finalized = names.index("Finalize the external release-domain document")
         document_attested = names.index("Attest the exact external evidence document")
@@ -154,7 +154,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         serialized = (WORKFLOWS / "release-domain-evidence.yml").read_text(encoding="utf-8")
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("--receipt-attestation", serialized)
-        self.assertIn('.path == ".github/workflows/release-domain-observations.yml"', serialized)
+        self.assertIn("verify_run machine \"$MACHINE_RESULTS_RUN_ID\" \"$MACHINE_RESULTS_RUN_ATTEMPT\" .github/workflows/release-domain-observations.yml", serialized)
         self.assertEqual(serialized.count("--signer-digest"), 3)
         self.assertEqual(serialized.count("--source-digest"), 3)
         self.assertEqual(serialized.count("--deny-self-hosted-runners"), 3)

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import base64
 import copy
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -14,6 +15,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 
 SCRIPT = Path(__file__).with_name("release-domain-observer.py")
@@ -85,6 +87,58 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         observer.candidate_created = self.candidate_created
         observer.now = self.now
         return observer
+
+    def test_public_tags_validate_core_first_independent_of_json_key_order(self) -> None:
+        observer = self.bare_observer("public_tags")
+        observer.identity["repositories"] = {
+            key: observer.identity["repositories"][key]
+            for key in ("android", "react_native", "ios", "javascript", "core")
+        }
+        promotion_hash = "f" * 64
+        titles = {
+            "javascript": "JavaScript SDK",
+            "ios": "iOS SDK",
+            "android": "Android SDK",
+            "react_native": "React Native SDK",
+        }
+        responses = []
+        for repository_id in ("core", "javascript", "ios", "android", "react_native"):
+            coordinate = observer.identity["repositories"][repository_id]
+            responses.extend((
+                json.dumps({"ref": "refs/tags/v1.0.0", "object": {"type": "tag", "sha": "f" * 40}}).encode(),
+                json.dumps({
+                    "tag": "v1.0.0",
+                    "object": {"type": "commit", "sha": coordinate["commit"]},
+                    "message": (
+                        f"Latchway v1.0.0\n\nPromotion evidence SHA-256: {promotion_hash}"
+                        if repository_id == "core"
+                        else f"{titles[repository_id]} v1.0.0\n\nCore promotion: v1.0.0\nPromotion evidence SHA-256: {promotion_hash}"
+                    ),
+                }).encode(),
+                json.dumps({"tag_name": "v1.0.0", "draft": False, "prerelease": False}).encode(),
+            ))
+        with mock.patch.object(observer, "_gh_json", side_effect=responses), mock.patch.object(observer, "emit"):
+            observer.observe_public_tags()
+
+    def test_reviewed_zip_rejects_duplicate_and_symlink_members(self) -> None:
+        for mode in ("duplicate", "symlink"):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as archive:
+                if mode == "duplicate":
+                    with self.assertWarns(UserWarning):
+                        archive.writestr("dev/latchway/file.pom", b"one")
+                        archive.writestr("dev/latchway/file.pom", b"two")
+                else:
+                    member = zipfile.ZipInfo("dev/latchway/link.pom")
+                    member.create_system = 3
+                    member.external_attr = 0o120777 << 16
+                    archive.writestr(member, b"target")
+            with self.subTest(mode=mode), self.assertRaisesRegex(
+                MODULE.ObservationError, "reviewed_maven_archive_invalid"
+            ):
+                destination = self.root / mode
+                destination.mkdir()
+                MODULE.Observer._extract_reviewed_zip(stream.getvalue(), destination)
 
     def concrete_tests(self, receipt_id: str, *, javascript: bool = False) -> list[dict]:
         if javascript:

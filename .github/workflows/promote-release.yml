@@ -15,22 +15,25 @@ on:
         description: Candidate workflow run containing the attested candidate manifest
         required: true
         type: string
-      candidate_artifact:
-        description: Exact candidate artifact name
+      candidate_run_attempt:
+        description: Exact candidate workflow run attempt
         required: true
         type: string
       security_evidence_run_id:
         description: Exact successful security-evidence workflow run ID
         required: true
         type: string
+      security_evidence_run_attempt:
+        description: Exact successful security-evidence run attempt
+        required: true
+        type: string
       promotion_evidence_run_id:
         description: Cross-repository workflow run containing attested promotion evidence
         required: true
         type: string
-      promotion_evidence_artifact:
-        description: Exact promotion evidence artifact name
+      promotion_evidence_run_attempt:
+        description: Exact cross-repository promotion-evidence run attempt
         required: true
-        default: latchway-cross-repository-promotion
         type: string
 
 permissions:
@@ -63,15 +66,21 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
           SECURITY_RUN_ID: ${{ inputs.security_evidence_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_evidence_run_attempt }}
           PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
+          PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
           DISPATCH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
         run: |
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
           [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$SECURITY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SECURITY_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$PROMOTION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROMOTION_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -n "$DISPATCH_TOKEN"
@@ -82,43 +91,50 @@ jobs:
             Latchway/latchway-react-native-sdk; do
             GH_TOKEN="$DISPATCH_TOKEN" gh api "repos/$repository" --jq .full_name >/dev/null
           done
-      - name: Require the fixed successful security workflow run
+      - name: Require the fixed successful producer workflow runs and attempts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
           SECURITY_RUN_ID: ${{ inputs.security_evidence_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_evidence_run_attempt }}
+          PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
+          PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
         run: |
           set -Eeuo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SECURITY_RUN_ID" > "$RUNNER_TEMP/security-run.json"
-          workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/security-run.json")
-          jq --exit-status \
-            --arg commit "$CANDIDATE_COMMIT" \
-            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
-            "$RUNNER_TEMP/security-run.json" >/dev/null
-          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/security-workflow.json"
-          jq --exit-status \
-            '.path == ".github/workflows/security.yml" and .state == "active"' \
-            "$RUNNER_TEMP/security-workflow.json" >/dev/null
+          verify_run() {
+            local label="$1" run_id="$2" run_attempt="$3" expected_path="$4"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$RUNNER_TEMP/$label-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$run_attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/$label-run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
+            jq --exit-status --arg path "$expected_path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+          }
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+          verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml
+          verify_run promotion "$PROMOTION_RUN_ID" "$PROMOTION_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
       - name: Download the immutable candidate evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ inputs.candidate_artifact }}
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
           path: ${{ runner.temp }}/latchway-candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
       - name: Download exact current-candidate security evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-security-${{ inputs.candidate_commit }}
+          name: latchway-security-${{ inputs.candidate_commit }}-${{ inputs.security_evidence_run_id }}-${{ inputs.security_evidence_run_attempt }}
           path: ${{ runner.temp }}/latchway-security
           run-id: ${{ inputs.security_evidence_run_id }}
           github-token: ${{ github.token }}
       - name: Download the aggregate promotion evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ inputs.promotion_evidence_artifact }}
+          name: latchway-cross-repository-promotion-${{ inputs.promotion_evidence_run_id }}-${{ inputs.promotion_evidence_run_attempt }}
           path: ${{ runner.temp }}/latchway-promotion
           run-id: ${{ inputs.promotion_evidence_run_id }}
           github-token: ${{ github.token }}
@@ -310,6 +326,31 @@ jobs:
             --method POST \
             "repos/$GITHUB_REPOSITORY/git/refs" \
             --input "$RUNNER_TEMP/tag-ref.json" >/dev/null
+      - name: Re-fetch and verify the immutable annotated core tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          expected_message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" > "$RUNNER_TEMP/final-tag-ref.json"
+          jq --exit-status \
+            --arg ref "refs/tags/$INTENDED_TAG" \
+            '.ref == $ref and .object.type == "tag" and (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$RUNNER_TEMP/final-tag-ref.json" >/dev/null
+          tag_object=$(jq --raw-output .object.sha "$RUNNER_TEMP/final-tag-ref.json")
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/final-tag-object.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$expected_message" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/final-tag-object.json" >/dev/null
       - name: Publish the immutable release record
         shell: bash
         env:

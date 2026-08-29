@@ -24,6 +24,7 @@ COMMIT = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 OCI_DIGEST = re.compile(r"^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$")
+ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SEMVER = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 TAG = re.compile(r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -512,6 +513,7 @@ def render(
     repository: Path,
     commit: str,
     tag: str,
+    durable_assets: Mapping[str, Path] | None = None,
 ) -> str:
     require_string(commit, COMMIT, "release_record_commit_invalid")
     require_string(tag, TAG, "release_record_tag_invalid")
@@ -528,6 +530,14 @@ def render(
     schema_version = database_schema_version(repository)
     oci = f"{image['repository']}@{image['index_digest']}"
     registries = publication["registries"]
+    durable = durable_assets or {}
+    if not durable or len(durable) > 16:
+        raise ReportError("release_record_durable_assets_invalid")
+    durable_hashes: list[tuple[str, str]] = []
+    for name, path in sorted(durable.items()):
+        if ASSET_NAME.fullmatch(name) is None or path.name != name:
+            raise ReportError("release_record_durable_assets_invalid")
+        durable_hashes.append((name, sha256_file(path)))
 
     lines = [
         f"# Latchway {tag} final release record",
@@ -657,6 +667,20 @@ def render(
             "",
             "The final report and its Sigstore bundle are release assets. The finalizer authenticates each producer workflow, exact run attempt, candidate commit, protected `main` ref, signer workflow identity, and public release state before rendering; reruns may add a missing asset but never replace different bytes.",
             "",
+            "## Durable release evidence assets",
+            "",
+            "| Asset | SHA-256 |",
+            "| --- | --- |",
+        ]
+    )
+    lines.extend(
+        f"| `{escape(name)}` | `{digest}` |" for name, digest in durable_hashes
+    )
+    lines.extend(
+        [
+            "",
+            "These immutable no-clobber release assets retain the release-scope conformance report, its Sigstore bundle, the verified publication state, and the complete hash-bound external evidence tree beyond Actions artifact retention.",
+            "",
         ]
     )
     return "\n".join(lines)
@@ -672,6 +696,25 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--commit", required=True)
     result.add_argument("--tag", required=True)
     result.add_argument("--output", type=Path, required=True)
+    result.add_argument(
+        "--durable-asset",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Durable release asset name and local path (repeatable)",
+    )
+    return result
+
+
+def parse_durable_assets(values: list[str]) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for value in values:
+        if value.count("=") != 1:
+            raise ReportError("release_record_durable_assets_invalid")
+        name, raw_path = value.split("=", 1)
+        if name in result or ASSET_NAME.fullmatch(name) is None or not raw_path:
+            raise ReportError("release_record_durable_assets_invalid")
+        result[name] = Path(raw_path)
     return result
 
 
@@ -689,6 +732,7 @@ def main() -> int:
             repository=arguments.repository,
             commit=arguments.commit,
             tag=arguments.tag,
+            durable_assets=parse_durable_assets(arguments.durable_asset),
         )
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(contents, encoding="utf-8", newline="\n")
