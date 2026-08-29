@@ -118,6 +118,33 @@ jobs:
           path: ${{ runner.temp }}/latchway-external-evidence
           run-id: ${{ inputs.external_evidence_run_id }}
           github-token: ${{ github.token }}
+      - name: Verify protected producer attestations for release-domain documents
+        if: inputs.scope != 'source'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SCOPE: ${{ inputs.scope }}
+        run: |
+          candidate_commit=$(git -C "$GITHUB_WORKSPACE/latchway" rev-parse --verify HEAD)
+          domains=(live_sdk_conformance live_provider supply_chain)
+          if [[ "$EVIDENCE_SCOPE" == release ]]; then
+            domains+=(public_tags public_registries)
+          fi
+          for domain in "${domains[@]}"; do
+            document="$RUNNER_TEMP/latchway-external-evidence/$domain.json"
+            bundle="$RUNNER_TEMP/latchway-external-evidence/${domain}.attestation.sigstore.json"
+            test -f "$document"
+            test -f "$bundle"
+            gh attestation verify "$document" \
+              --bundle "$bundle" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-evidence.yml" \
+              --source-digest "$candidate_commit" \
+              --signer-digest "$candidate_commit" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              --format json > "$RUNNER_TEMP/${domain}-attestation-verification.json"
+          done
       - name: Produce source or release evidence
         shell: bash
         env:
@@ -159,9 +186,15 @@ jobs:
           fi
           python3 latchway/scripts/cross-repo-conformance.py "${arguments[@]}"
       - name: Attest the exact conformance report
+        id: conformance-attestation
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: ${{ runner.temp }}/latchway-cross-repository.json
+      - name: Retain the conformance attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.conformance-attestation.outputs.bundle-path }}
+        run: cp -- "$BUNDLE_PATH" "$RUNNER_TEMP/latchway-cross-repository.attestation.sigstore.json"
       - name: Retain deterministic JSON and JUnit evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -170,6 +203,7 @@ jobs:
           path: |
             ${{ runner.temp }}/latchway-cross-repository.json
             ${{ runner.temp }}/latchway-cross-repository.json.junit.xml
+            ${{ runner.temp }}/latchway-cross-repository.attestation.sigstore.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 90

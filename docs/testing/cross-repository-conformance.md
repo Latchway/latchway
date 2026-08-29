@@ -179,6 +179,14 @@ platform evidence; the orchestrator only validates identity, completeness, and
 artifact integrity so that evidence from another system cannot be silently
 substituted.
 
+The five release, provider, SDK, and publication documents that previously had
+only this envelope validator now use the protected producer/finalizer described
+in [`release-domain-evidence.md`](release-domain-evidence.md). It requires an
+attested exact-workflow receipt over a complete fixed set of candidate-bound,
+hash-bound machine results; it rejects claim booleans as input and retains all
+redacted raw outputs. Missing external access remains an unverified release
+gate rather than a locally manufactured pass.
+
 The `operational_resilience.json` producer is
 [`scripts/operational-resilience-evidence.py`](../../scripts/operational-resilience-evidence.py).
 It is intentionally stricter than the generic domain-envelope validator: it

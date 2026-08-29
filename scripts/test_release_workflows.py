@@ -98,6 +98,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--oci-image-digest", serialized)
         self.assertIn("--external-evidence-dir", serialized)
         self.assertIn("subject-path:", serialized)
+        self.assertIn(
+            "Verify protected producer attestations for release-domain documents",
+            serialized,
+        )
+        self.assertIn("${domain}.attestation.sigstore.json", serialized)
+        self.assertIn(
+            ".github/workflows/release-domain-evidence.yml", serialized
+        )
+        self.assertIn("--signer-digest \"$candidate_commit\"", serialized)
+        self.assertIn("--source-digest \"$candidate_commit\"", serialized)
+        self.assertIn("--deny-self-hosted-runners", serialized)
         self.assertNotIn("if: inputs.scope != 'source'\n        uses: actions/attest@", serialized)
         self.assertIn('test "$GITHUB_SHA" = "$core_commit"', serialized)
         self.assertNotIn("continue-on-error", serialized)
@@ -108,11 +119,83 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(download.get("if"), "inputs.scope != 'source'")
 
+    def test_external_domain_evidence_is_protected_attested_and_candidate_bound(self) -> None:
+        workflow = load_workflow("release-domain-evidence.yml")
+        self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
+        domains = workflow["on"]["workflow_dispatch"]["inputs"]["domain"]["options"]
+        self.assertEqual(
+            domains,
+            [
+                "live_sdk_conformance",
+                "live_provider",
+                "supply_chain",
+                "public_tags",
+                "public_registries",
+            ],
+        )
+        job = workflow["jobs"]["evidence"]
+        self.assertEqual(job["environment"], "release-evidence")
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+        names = [step.get("name", "") for step in job["steps"]]
+        producer_run = names.index("Verify the machine-results run belongs to the fixed producer")
+        bundles = names.index("Verify all three exact attestation bundles before finalization")
+        finalized = names.index("Finalize the external release-domain document")
+        document_attested = names.index("Attest the exact external evidence document")
+        bundle_retained = names.index("Retain the external evidence attestation bundle")
+        artifact_retained = names.index(
+            "Retain the domain document and all hash-bound raw results"
+        )
+        self.assertLess(producer_run, bundles)
+        self.assertLess(bundles, finalized)
+        self.assertLess(finalized, document_attested)
+        self.assertLess(document_attested, bundle_retained)
+        self.assertLess(bundle_retained, artifact_retained)
+        serialized = (WORKFLOWS / "release-domain-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
+        self.assertIn("--receipt-attestation", serialized)
+        self.assertIn('.path == ".github/workflows/release-domain-observations.yml"', serialized)
+        self.assertEqual(serialized.count("--signer-digest"), 3)
+        self.assertEqual(serialized.count("--source-digest"), 3)
+        self.assertEqual(serialized.count("--deny-self-hosted-runners"), 3)
+        self.assertNotIn("machine_results_artifact", serialized)
+        self.assertNotIn("continue-on-error", serialized)
+        self.assertNotIn("secrets.", serialized)
+        self.assertIn("$EVIDENCE_DOMAIN.attestation.sigstore.json", serialized)
+
+        producer = load_workflow("release-domain-observations.yml")
+        producer_job = producer["jobs"]["observe"]
+        self.assertEqual(producer_job["environment"], "release-evidence")
+        self.assertEqual(producer_job["if"], "github.ref == 'refs/heads/main'")
+        producer_names = [step.get("name", "") for step in producer_job["steps"]]
+        executed = producer_names.index("Execute only the fixed domain observation plan")
+        manifested = producer_names.index("Produce the exact machine-results manifest")
+        attested = producer_names.index("Attest the exact machine-results manifest")
+        retained = producer_names.index("Retain only the attested machine-result set")
+        self.assertLess(executed, manifested)
+        self.assertLess(manifested, attested)
+        self.assertLess(attested, retained)
+        producer_text = (WORKFLOWS / "release-domain-observations.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts/release-domain-observer.py", producer_text)
+        self.assertIn(
+            "Refuse hosted substitution for live SDK physical evidence",
+            producer_text,
+        )
+        self.assertIn("live SDK evidence requires authenticated", producer_text)
+        self.assertNotIn("machine_results_run_id", producer_text)
+        self.assertNotIn("continue-on-error", producer_text)
+
+        release_text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+        source_text = (WORKFLOWS / "cross-repository-conformance.yml").read_text(encoding="utf-8")
+        self.assertIn("latchway-candidate.attestation.sigstore.json", release_text)
+        self.assertIn("latchway-cross-repository.attestation.sigstore.json", source_text)
+
     def test_every_third_party_action_is_commit_pinned(self) -> None:
         for name in (
             "release.yml",
             "promote-release.yml",
             "cross-repository-conformance.yml",
+            "release-domain-observations.yml",
+            "release-domain-evidence.yml",
         ):
             for step in all_steps(load_workflow(name)):
                 action = step.get("uses")

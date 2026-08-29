@@ -1,0 +1,176 @@
+name: Protected release-domain evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Attested external release domain to finalize
+        required: true
+        type: choice
+        options:
+          - live_sdk_conformance
+          - live_provider
+          - supply_chain
+          - public_tags
+          - public_registries
+      candidate_commit:
+        description: Exact core candidate and producer commit
+        required: true
+        type: string
+      source_evidence_run_id:
+        description: Successful source-conformance workflow run ID
+        required: true
+        type: string
+      candidate_run_id:
+        description: Successful immutable-candidate workflow run ID
+        required: true
+        type: string
+      machine_results_run_id:
+        description: Successful protected observation workflow run ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-domain-evidence-${{ inputs.domain }}-${{ inputs.candidate_commit }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact candidate finalizer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact main commit and immutable run IDs
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
+        run: |
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$MACHINE_RESULTS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+      - name: Verify the machine-results run belongs to the fixed producer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MACHINE_RESULTS_RUN_ID" > "$RUNNER_TEMP/machine-run.json"
+          workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/machine-run.json")
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main"' \
+            "$RUNNER_TEMP/machine-run.json" >/dev/null
+          [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/machine-workflow.json"
+          jq --exit-status \
+            '.path == ".github/workflows/release-domain-observations.yml" and .state == "active"' \
+            "$RUNNER_TEMP/machine-workflow.json" >/dev/null
+      - name: Download the source report and its attestation bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-source
+          path: ${{ runner.temp }}/source
+          run-id: ${{ inputs.source_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the candidate and its attestation bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download only the fixed producer's attested machine results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-machine-results-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/observations
+          run-id: ${{ inputs.machine_results_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify all three exact attestation bundles before finalization
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          gh attestation verify "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --bundle "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/source-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/observations/machine-results-manifest.json" \
+            --bundle "$RUNNER_TEMP/observations/machine-results.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-observations.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/machine-attestation-verification.json"
+      - name: Finalize the external release-domain document
+        shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+        run: |
+          python3 scripts/release-domain-evidence.py \
+            --finalize \
+            --domain "$EVIDENCE_DOMAIN" \
+            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --source-attestation "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --candidate-attestation "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --raw-directory "$RUNNER_TEMP/observations/raw" \
+            --receipt "$RUNNER_TEMP/observations/machine-results-manifest.json" \
+            --receipt-attestation "$RUNNER_TEMP/observations/machine-results.attestation.sigstore.json" \
+            --output-directory "$RUNNER_TEMP/final"
+      - name: Attest the exact external evidence document
+        id: domain-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/final/${{ inputs.domain }}.json
+      - name: Retain the external evidence attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.domain-attestation.outputs.bundle-path }}
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+        run: install -m 0600 -- "$BUNDLE_PATH" "$RUNNER_TEMP/final/$EVIDENCE_DOMAIN.attestation.sigstore.json"
+      - name: Retain the domain document and all hash-bound raw results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-${{ inputs.candidate_commit }}
+          path: ${{ runner.temp }}/final
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
