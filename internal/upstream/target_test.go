@@ -18,8 +18,10 @@ func TestDestinationPolicy(t *testing.T) {
 	t.Parallel()
 
 	for _, blocked := range []string{
-		"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1",
-		"::1", "fc00::1", "2001:db8::1", "3fff::1",
+		"0.0.0.1", "127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "240.0.0.1", "255.255.255.255",
+		"192.31.196.1", "192.52.193.1", "192.88.99.1", "192.175.48.1",
+		"::1", "64:ff9b::1", "100::1", "fc00::1", "fec0::1", "2001::1", "2001:db8::1", "2002::1",
+		"2620:4f:8000::1", "2d00::1", "3fff::1", "4000::1",
 	} {
 		if (DestinationPolicy{}).allowed(netip.MustParseAddr(blocked)) {
 			t.Fatalf("blocked address accepted: %s", blocked)
@@ -27,6 +29,9 @@ func TestDestinationPolicy(t *testing.T) {
 	}
 	if !(DestinationPolicy{}).allowed(netip.MustParseAddr("1.1.1.1")) {
 		t.Fatal("public address rejected")
+	}
+	if !(DestinationPolicy{}).allowed(netip.MustParseAddr("2606:4700:4700::1111")) {
+		t.Fatal("allocated public IPv6 address rejected")
 	}
 	allowlisted := DestinationPolicy{
 		AllowPrivate: true,
@@ -114,6 +119,19 @@ func TestResolveRejectsMixedDNSAnswers(t *testing.T) {
 	}
 	if _, err := dialer.resolve(context.Background(), "api.example"); err == nil {
 		t.Fatal("mixed public/private DNS answer accepted")
+	}
+}
+
+func TestResolveRejectsEverySpecialUseOrUnallocatedDNSAnswer(t *testing.T) {
+	t.Parallel()
+	for _, address := range []string{
+		"0.0.0.1", "192.31.196.1", "240.0.0.1", "64:ff9b::1", "2001::1", "2002::1",
+		"2620:4f:8000::1", "2d00::1", "4000::1",
+	} {
+		dialer := protectedDialer{resolver: staticResolver{"api.example": {netip.MustParseAddr(address)}}}
+		if _, err := dialer.resolve(context.Background(), "api.example"); err == nil {
+			t.Fatalf("special-use DNS answer accepted: %s", address)
+		}
 	}
 }
 

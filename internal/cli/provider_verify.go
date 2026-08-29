@@ -6,18 +6,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/pricing"
 	"github.com/latchway/latchway/internal/providerverify"
+	"github.com/latchway/latchway/internal/upstream"
 	"github.com/spf13/cobra"
 )
 
-const maximumProviderCredentialBytes = 32 << 10
+const (
+	maximumProviderCredentialBytes = 32 << 10
+	providerVerifyTotalTimeout     = 45 * time.Second
+)
 
 var providerCredentialEnvironmentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 var providerVerifyCheckPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -43,21 +49,25 @@ type providerVerifyCLIOptions struct {
 	protocol          string
 	credentialEnv     string
 	credentialStdin   bool
+	privateCIDRs      []string
 	maxCostUSD        string
 }
 
 func newProviderVerifyCommand(opts *options, control *controlCommandOptions, kind string) *cobra.Command {
 	values := providerVerifyCLIOptions{serverMaxCostNano: 10_000_000}
 	command := &cobra.Command{
-		Use: kind, Short: verifyShort(kind), Args: cobra.NoArgs,
+		Use: kind, Short: verifyShort(kind), Args: safeProviderVerifyNoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runProviderVerify(cmd, opts, control, kind, values)
 		},
 	}
+	command.SetFlagErrorFunc(func(*cobra.Command, error) error {
+		return errors.New("provider verification command-line arguments are invalid")
+	})
 	command.Flags().BoolVar(&values.serverOwned, "server-owned", false, "verify an active server-owned upstream and credential through the Admin API")
 	command.Flags().StringVar(&values.environmentID, "environment", "", "server-owned target environment ID (requires --server-owned)")
 	command.Flags().StringVar(&values.upstream, "upstream", "", "server-owned upstream identifier (requires --server-owned)")
-	command.Flags().StringVar(&values.model, "model", "", "exact physical model identifier")
+	command.Flags().StringVar(&values.model, "model", "", "ephemeral physical model identifier or server-owned logical model key")
 	command.Flags().Int64Var(&values.serverMaxCostNano, "max-cost-nano-usd", values.serverMaxCostNano, "server-owned hard cost ceiling (requires --server-owned)")
 	command.Flags().StringVar(&values.credentialEnv, "api-key-env", "", "read the ephemeral provider API key from this environment variable")
 	command.Flags().BoolVar(&values.credentialStdin, "api-key-stdin", false, "read the ephemeral provider API key from standard input without a trailing newline")
@@ -66,6 +76,7 @@ func newProviderVerifyCommand(opts *options, control *controlCommandOptions, kin
 	} else {
 		command.Flags().StringVar(&values.baseURL, "base-url", "", "canonical production HTTPS OpenAI-compatible API base URL")
 		command.Flags().StringVar(&values.protocol, "protocol", "", "provider protocol (openai_chat)")
+		command.Flags().StringArrayVar(&values.privateCIDRs, "allow-private-cidr", nil, "explicit RFC 1918 or IPv6 ULA CIDR allowed for an internal proxy (repeatable; maximum 32)")
 	}
 	return command
 }
@@ -100,11 +111,18 @@ func runProviderVerify(cmd *cobra.Command, opts *options, control *controlComman
 		}
 		request.Mode = providerverify.ModeOpenAIChat
 		request.BaseURL = values.baseURL
+		policy, err := parseProviderDestinationPolicy(values.privateCIDRs)
+		if err != nil {
+			return err
+		}
+		request.DestinationPolicy = policy
 	default:
 		return errors.New("provider verification mode is invalid")
 	}
 
-	credential, err := readProviderCredential(cmd, values)
+	verifyCtx, cancel := context.WithTimeout(cmd.Context(), providerVerifyTotalTimeout)
+	defer cancel()
+	credential, err := readProviderCredential(verifyCtx, cmd, values)
 	if err != nil {
 		return err
 	}
@@ -119,7 +137,10 @@ func runProviderVerify(cmd *cobra.Command, opts *options, control *controlComman
 	if verifier == nil {
 		verifier = providerverify.New()
 	}
-	report, verifyErr := verifier.Verify(cmd.Context(), request)
+	report, verifyErr := verifier.Verify(verifyCtx, request)
+	// Do not retain the credential while rendering potentially blocking output.
+	// The deferred clear remains as the early-return safety net.
+	clearProviderCredential(credential)
 	if verifyErr != nil {
 		return safeProviderVerifyCLIError(verifyErr)
 	}
@@ -138,7 +159,7 @@ func providerLocalFlagsChanged(command *cobra.Command, kind string) bool {
 	if kind == providerverify.ModeOpenRouter {
 		return command.Flags().Changed("max-cost-usd")
 	}
-	return command.Flags().Changed("base-url") || command.Flags().Changed("protocol")
+	return command.Flags().Changed("base-url") || command.Flags().Changed("protocol") || command.Flags().Changed("allow-private-cidr")
 }
 
 func providerServerFlagsChanged(command *cobra.Command) bool {
@@ -176,13 +197,19 @@ func parseProviderMaxCostUSD(value string) (int64, error) {
 		return 0, errors.New("ephemeral OpenRouter verification requires --max-cost-usd")
 	}
 	result, err := pricing.ParseUSDDecimalNanoUSD(value)
-	if err != nil || result < 1 || result > 1_000_000_000 {
-		return 0, errors.New("--max-cost-usd must be an exact positive USD decimal no greater than 1")
+	if err != nil || result < 0 || result > 1_000_000_000 {
+		return 0, errors.New("--max-cost-usd must be an exact non-negative USD decimal no greater than 1")
 	}
 	return result, nil
 }
 
-func readProviderCredential(command *cobra.Command, values providerVerifyCLIOptions) ([]byte, error) {
+func readProviderCredential(ctx context.Context, command *cobra.Command, values providerVerifyCLIOptions) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("provider API key input is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var material []byte
 	if values.credentialEnv != "" {
 		if !providerCredentialEnvironmentPattern.MatchString(values.credentialEnv) {
@@ -194,9 +221,15 @@ func readProviderCredential(command *cobra.Command, values providerVerifyCLIOpti
 		}
 		material = []byte(value)
 	} else {
-		value, err := io.ReadAll(io.LimitReader(command.InOrStdin(), maximumProviderCredentialBytes+1))
+		value, err := readProviderCredentialStdin(ctx, command.InOrStdin())
 		if err != nil || len(value) == 0 || len(value) > maximumProviderCredentialBytes {
 			clearProviderCredential(value)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
 			return nil, errors.New("provider API key stdin value is missing or invalid")
 		}
 		material = value
@@ -206,6 +239,94 @@ func readProviderCredential(command *cobra.Command, values providerVerifyCLIOpti
 		return nil, errors.New("provider API key contains invalid bytes")
 	}
 	return material, nil
+}
+
+type providerCredentialReadDeadliner interface {
+	SetReadDeadline(time.Time) error
+}
+
+func readProviderCredentialStdin(ctx context.Context, source io.Reader) ([]byte, error) {
+	if source == nil {
+		return nil, errors.New("stdin unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	done := make(chan struct{})
+	var stop func()
+	if deadlines, ok := source.(providerCredentialReadDeadliner); ok {
+		deadline, hasDeadline := ctx.Deadline()
+		if hasDeadline && deadlines.SetReadDeadline(deadline) == nil {
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = deadlines.SetReadDeadline(time.Now())
+				case <-done:
+				}
+			}()
+			stop = func() {
+				close(done)
+				_ = deadlines.SetReadDeadline(time.Time{})
+			}
+		}
+	}
+	if stop == nil {
+		if closer, ok := source.(io.ReadCloser); ok {
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = closer.Close()
+				case <-done:
+				}
+			}()
+			stop = func() { close(done) }
+		}
+	}
+	if stop != nil {
+		defer stop()
+	}
+
+	value, err := io.ReadAll(io.LimitReader(source, maximumProviderCredentialBytes+1))
+	if ctx.Err() != nil {
+		clearProviderCredential(value)
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+			clearProviderCredential(value)
+			return nil, context.DeadlineExceeded
+		}
+	}
+	return value, err
+}
+
+func safeProviderVerifyNoArgs(_ *cobra.Command, args []string) error {
+	if len(args) != 0 {
+		return errors.New("provider verification command-line arguments are invalid")
+	}
+	return nil
+}
+
+func parseProviderDestinationPolicy(values []string) (upstream.DestinationPolicy, error) {
+	if len(values) == 0 {
+		return upstream.DestinationPolicy{}, nil
+	}
+	if len(values) > 32 {
+		return upstream.DestinationPolicy{}, errors.New("--allow-private-cidr accepts at most 32 explicit CIDRs")
+	}
+	policy := upstream.DestinationPolicy{AllowPrivate: true, AllowedCIDRs: make([]netip.Prefix, 0, len(values))}
+	for _, value := range values {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || prefix.String() != value {
+			return upstream.DestinationPolicy{}, errors.New("--allow-private-cidr values must be canonical RFC 1918 or IPv6 ULA CIDRs")
+		}
+		policy.AllowedCIDRs = append(policy.AllowedCIDRs, prefix)
+	}
+	if err := upstream.ValidateDestinationPolicy(policy); err != nil {
+		return upstream.DestinationPolicy{}, errors.New("--allow-private-cidr values must be canonical, non-overlapping RFC 1918 or IPv6 ULA CIDRs")
+	}
+	return policy, nil
 }
 
 func validProviderCredential(value []byte) bool {
@@ -252,7 +373,7 @@ func validProviderVerifyReport(report providerverify.Report, mode string, maximu
 		return false
 	}
 	if mode == providerverify.ModeOpenRouter {
-		if report.CostVerification != providerverify.CostVerified || report.MaximumCostNanoUSD < 1 ||
+		if report.CostVerification != providerverify.CostVerified || report.MaximumCostNanoUSD < 0 ||
 			report.MaximumCostNanoUSD > maximum || report.CalculatedCostNanoUSD < 0 ||
 			report.ReportedCostNanoUSD < 0 || report.CalculatedCostNanoUSD > report.MaximumCostNanoUSD ||
 			report.ReportedCostNanoUSD > report.CalculatedCostNanoUSD {
@@ -263,7 +384,7 @@ func validProviderVerifyReport(report providerverify.Report, mode string, maximu
 		return false
 	}
 	for _, usage := range []providerverify.Usage{report.NonStreaming, report.Streaming} {
-		if usage.InputTokens <= 0 || usage.OutputTokens < 0 || usage.OutputTokens > 1 ||
+		if usage.InputTokens <= 0 || usage.OutputTokens <= 0 || usage.OutputTokens > 1 ||
 			usage.TotalTokens != usage.InputTokens+usage.OutputTokens || usage.ReportedCostNanoUSD < 0 {
 			return false
 		}
@@ -274,10 +395,20 @@ func validProviderVerifyReport(report providerverify.Report, mode string, maximu
 			!utf8.ValidString(check.Detail) || strings.ContainsAny(check.Detail, "\x00\r\n") {
 			return false
 		}
-		if _, duplicate := seenChecks[check.Name]; duplicate || expectedChecks[check.Name] != check.Detail {
+		expectedDetail, known := expectedChecks[check.Name]
+		if _, duplicate := seenChecks[check.Name]; duplicate || !known || expectedDetail != check.Detail {
 			return false
 		}
 		seenChecks[check.Name] = struct{}{}
+	}
+	if len(seenChecks) != len(expectedChecks) {
+		return false
+	}
+	if mode == providerverify.ModeOpenRouter {
+		if report.NonStreaming.ReportedCostNanoUSD > int64(^uint64(0)>>1)-report.Streaming.ReportedCostNanoUSD ||
+			report.NonStreaming.ReportedCostNanoUSD+report.Streaming.ReportedCostNanoUSD != report.ReportedCostNanoUSD {
+			return false
+		}
 	}
 	return true
 }
@@ -290,8 +421,8 @@ func expectedProviderVerifyChecks(mode string) map[string]string {
 	if mode == providerverify.ModeOpenRouter {
 		expected["target"] = "The canonical OpenRouter HTTPS target passed protected destination validation."
 		expected["model_pricing"] = "Exact selected-model pricing and context metadata were validated."
-		expected["key_information"] = "The key is inference-capable, current, and has sufficient declared credit."
-		expected["cost_preflight"] = "The two-request worst-case cost was proved below the operator ceiling before dispatch."
+		expected["key_information"] = "The key is inference-capable, current, and has sufficient declared credit or free access."
+		expected["cost_preflight"] = "The complete live-probe worst-case cost was proved below the operator ceiling before dispatch."
 		expected["cost_reconciliation"] = "Provider-reported cost was exact and did not exceed the trusted calculated bound."
 	} else if mode == providerverify.ModeOpenAIChat {
 		expected["target"] = "The generic HTTPS target passed protected destination validation."

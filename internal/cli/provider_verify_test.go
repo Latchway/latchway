@@ -7,8 +7,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/latchway/latchway/internal/providerverify"
 )
@@ -100,6 +102,81 @@ func TestVerifyUpstreamEphemeralStdinContract(t *testing.T) {
 	if strings.Contains(stdout.String(), providerCLITestSecret) || strings.Contains(stderr.String(), providerCLITestSecret) ||
 		!strings.Contains(stdout.String(), "cost: unverified") || !strings.Contains(stdout.String(), "verification: passed") {
 		t.Fatalf("unsafe or incomplete output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestVerifyUpstreamPropagatesExplicitPrivateCIDRs(t *testing.T) {
+	t.Setenv("PRIVATE_PROXY_KEY", providerCLITestSecret)
+	verifier := providerVerifierFunc(func(_ context.Context, request providerverify.Request) (providerverify.Report, error) {
+		if request.BaseURL != "https://10.20.30.40/v1" || !request.DestinationPolicy.AllowPrivate ||
+			len(request.DestinationPolicy.AllowedCIDRs) != 2 ||
+			request.DestinationPolicy.AllowedCIDRs[0].String() != "10.20.30.0/24" ||
+			request.DestinationPolicy.AllowedCIDRs[1].String() != "fd12:3456::/48" {
+			t.Fatalf("destination policy = %+v", request)
+		}
+		return successfulProviderReport(providerverify.ModeOpenAIChat), nil
+	})
+	err := executeWithOptions(context.Background(), []string{
+		"verify", "upstream", "--base-url", "https://10.20.30.40/v1", "--protocol", "openai_chat",
+		"--api-key-env", "PRIVATE_PROXY_KEY", "--model", "physical-model",
+		"--allow-private-cidr", "10.20.30.0/24", "--allow-private-cidr", "fd12:3456::/48",
+	}, &options{output: "json", stdout: io.Discard, stderr: io.Discard, providerVerifier: verifier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"10.20.30.40/24", "127.0.0.0/8", "10.20.30.0/24,10.20.31.0/24"} {
+		err := executeWithOptions(context.Background(), []string{
+			"verify", "upstream", "--base-url", "https://10.20.30.40/v1", "--protocol", "openai_chat",
+			"--api-key-env", "PRIVATE_PROXY_KEY", "--model", "physical-model", "--allow-private-cidr", value,
+		}, &options{output: "json", stdout: io.Discard, stderr: io.Discard, providerVerifier: verifier})
+		if err == nil {
+			t.Fatalf("invalid private CIDR accepted: %q", value)
+		}
+	}
+}
+
+func TestProviderCredentialMisuseNeverReflectsArgumentValues(t *testing.T) {
+	for _, args := range [][]string{
+		{"verify", "upstream", "--api-key-stdin", providerCLITestSecret},
+		{"verify", "upstream", "--api-key-stdin=" + providerCLITestSecret},
+	} {
+		var stdout, stderr bytes.Buffer
+		err := executeWithOptions(context.Background(), args, &options{output: "json", stdout: &stdout, stderr: &stderr})
+		if err == nil {
+			t.Fatalf("invalid arguments accepted: %v", args)
+		}
+		if combined := stdout.String() + stderr.String() + err.Error(); strings.Contains(combined, providerCLITestSecret) {
+			t.Fatalf("credential-like argument reflected: %q", combined)
+		}
+	}
+}
+
+func TestProviderCredentialStdinHonorsCancellation(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	if _, err := writer.WriteString("partial-secret"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	var output bytes.Buffer
+	err = executeWithOptions(ctx, []string{
+		"verify", "upstream", "--base-url", "https://api.example.test/v1", "--protocol", "openai_chat",
+		"--model", "model", "--api-key-stdin",
+	}, &options{output: "json", stdin: reader, stdout: &output, stderr: &output})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked stdin error=%v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("blocked stdin cancellation took %s", elapsed)
+	}
+	if strings.Contains(output.String(), "partial-secret") {
+		t.Fatalf("partial credential reached output: %q", output.String())
 	}
 }
 
@@ -212,10 +289,10 @@ func TestProviderMaxCostUSDParsingIsExact(t *testing.T) {
 	}{
 		{value: "0.01", want: 10_000_000, ok: true},
 		{value: "0.000000001", want: 1, ok: true},
+		{value: "0", want: 0, ok: true},
 		{value: "1.000000000", want: 1_000_000_000, ok: true},
 		{value: "0.0000000001"},
 		{value: "1.000000001"},
-		{value: "0"},
 		{value: "-0.01"},
 		{value: "NaN"},
 		{value: "9223372036854775808"},
@@ -269,6 +346,32 @@ func TestProviderVerificationCancellationAndUnsafeDependenciesDoNotLeak(t *testi
 	}
 }
 
+func TestProviderReportValidationRequiresExactChecksAndCostReconciliation(t *testing.T) {
+	valid := successfulProviderReport(providerverify.ModeOpenRouter)
+	if !validProviderVerifyReport(valid, providerverify.ModeOpenRouter, 1_000_000) {
+		t.Fatal("valid OpenRouter report rejected")
+	}
+	unknown := successfulProviderReport(providerverify.ModeOpenRouter)
+	unknown.Checks[0] = providerverify.Check{Name: "unknown_check", Passed: true}
+	if validProviderVerifyReport(unknown, providerverify.ModeOpenRouter, 1_000_000) {
+		t.Fatal("unknown check replaced a required check")
+	}
+	mismatch := successfulProviderReport(providerverify.ModeOpenRouter)
+	mismatch.ReportedCostNanoUSD--
+	if validProviderVerifyReport(mismatch, providerverify.ModeOpenRouter, 1_000_000) {
+		t.Fatal("mismatched per-probe reported cost accepted")
+	}
+	free := successfulProviderReport(providerverify.ModeOpenRouter)
+	free.MaximumCostNanoUSD = 0
+	free.CalculatedCostNanoUSD = 0
+	free.ReportedCostNanoUSD = 0
+	free.NonStreaming.ReportedCostNanoUSD = 0
+	free.Streaming.ReportedCostNanoUSD = 0
+	if !validProviderVerifyReport(free, providerverify.ModeOpenRouter, 1_000_000) {
+		t.Fatal("verified free-access report rejected")
+	}
+}
+
 func TestProviderVerifyHelpDocumentsOnlySafeCredentialInputs(t *testing.T) {
 	for _, command := range [][]string{{"verify", "openrouter", "--help"}, {"verify", "upstream", "--help"}} {
 		var stdout bytes.Buffer
@@ -279,6 +382,9 @@ func TestProviderVerifyHelpDocumentsOnlySafeCredentialInputs(t *testing.T) {
 		help := stdout.String()
 		if !strings.Contains(help, "--api-key-env") || !strings.Contains(help, "--api-key-stdin") || strings.Contains(help, "--api-key string") {
 			t.Fatalf("unsafe or incomplete help: %s", help)
+		}
+		if command[1] == "upstream" && (!strings.Contains(help, "--allow-private-cidr") || !strings.Contains(help, "ephemeral")) {
+			t.Fatalf("internal proxy or ephemeral mode missing from help: %s", help)
 		}
 	}
 }

@@ -336,6 +336,22 @@ func isPublicDestination(address netip.Addr) bool {
 	if hardBlockedDestination(address) || address.IsPrivate() {
 		return false
 	}
+	// IsGlobalUnicast also accepts reserved, unallocated IPv6 space. IANA says
+	// unlisted portions of 2000::/3 remain reserved for future allocation, so
+	// admit only a currently allocated global-unicast prefix. Special-purpose
+	// sub-prefixes remain denied by hardBlockedDestination above.
+	if address.Is6() {
+		allocated := false
+		for _, prefix := range allocatedGlobalIPv6Prefixes {
+			if prefix.Contains(address) {
+				allocated = true
+				break
+			}
+		}
+		if !allocated {
+			return false
+		}
+	}
 	return address.IsGlobalUnicast()
 }
 
@@ -360,13 +376,69 @@ var privateDestinationPrefixes = []netip.Prefix{
 }
 
 var additionalBlockedPrefixes = []netip.Prefix{
+	// Go's IsGlobalUnicast intentionally describes address shape rather than
+	// public routability, so it returns true for portions of these special-use
+	// ranges. They must never cross Latchway's default Internet-only boundary.
+	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"),
 	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"),
+	netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.175.48.0/24"),
 	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	// Conservatively deny the complete IANA special-purpose blocks, including
+	// globally reachable anycast/tunnel assignments: none are valid HTTPS API
+	// origins for the gateway's public-Internet destination policy.
+	netip.MustParsePrefix("2001::/23"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2620:4f:8000::/48"),
 	netip.MustParsePrefix("3fff::/20"),
 	netip.MustParsePrefix("fd00:ec2::254/128"),
+}
+
+// allocatedGlobalIPv6Prefixes mirrors the ALLOCATED entries in IANA's IPv6
+// Global Unicast Address Space registry as of 2025-10-10. The IANA and 6to4
+// special-purpose blocks are deliberately omitted because they are denied
+// above even where a more-specific address is globally reachable.
+var allocatedGlobalIPv6Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("2001:200::/23"),
+	netip.MustParsePrefix("2001:400::/23"),
+	netip.MustParsePrefix("2001:600::/23"),
+	netip.MustParsePrefix("2001:800::/22"),
+	netip.MustParsePrefix("2001:c00::/23"),
+	netip.MustParsePrefix("2001:e00::/23"),
+	netip.MustParsePrefix("2001:1200::/23"),
+	netip.MustParsePrefix("2001:1400::/22"),
+	netip.MustParsePrefix("2001:1800::/23"),
+	netip.MustParsePrefix("2001:1a00::/23"),
+	netip.MustParsePrefix("2001:1c00::/22"),
+	netip.MustParsePrefix("2001:2000::/19"),
+	netip.MustParsePrefix("2001:4000::/23"),
+	netip.MustParsePrefix("2001:4200::/23"),
+	netip.MustParsePrefix("2001:4400::/23"),
+	netip.MustParsePrefix("2001:4600::/23"),
+	netip.MustParsePrefix("2001:4800::/23"),
+	netip.MustParsePrefix("2001:4a00::/23"),
+	netip.MustParsePrefix("2001:4c00::/23"),
+	netip.MustParsePrefix("2001:5000::/20"),
+	netip.MustParsePrefix("2001:8000::/19"),
+	netip.MustParsePrefix("2001:a000::/20"),
+	netip.MustParsePrefix("2001:b000::/20"),
+	netip.MustParsePrefix("2003::/18"),
+	netip.MustParsePrefix("2400::/12"),
+	netip.MustParsePrefix("2410::/12"),
+	netip.MustParsePrefix("2600::/12"),
+	netip.MustParsePrefix("2610::/23"),
+	netip.MustParsePrefix("2620::/23"),
+	netip.MustParsePrefix("2630::/12"),
+	netip.MustParsePrefix("2800::/12"),
+	netip.MustParsePrefix("2a00::/12"),
+	netip.MustParsePrefix("2a10::/12"),
+	netip.MustParsePrefix("2c00::/12"),
 }

@@ -257,6 +257,15 @@ PROVIDER_API_KEY=... latchway verify upstream \
   --api-key-env PROVIDER_API_KEY \
   --model provider-model
 
+# Internal proxies stay blocked unless every permitted private subnet is
+# explicitly bounded. Repeat the flag for additional RFC 1918 or ULA subnets.
+PROVIDER_API_KEY=... latchway verify upstream \
+  --base-url https://10.20.30.40/v1 \
+  --protocol openai_chat \
+  --api-key-env PROVIDER_API_KEY \
+  --model provider-model \
+  --allow-private-cidr 10.20.30.0/24
+
 # stdin is exact: do not append a newline.
 printf %s "$OPENROUTER_API_KEY" | latchway verify openrouter \
   --api-key-stdin --model openai/gpt-4o-mini --max-cost-usd 0.01
@@ -264,10 +273,20 @@ printf %s "$OPENROUTER_API_KEY" | latchway verify openrouter \
 
 `--api-key-env` and `--api-key-stdin` are mutually exclusive. Empty, oversized,
 multiline, control-byte, or invalid bearer-token values are rejected. OpenRouter
-requires an exact positive `--max-cost-usd` decimal (up to US$1.00); Latchway
+requires an exact non-negative `--max-cost-usd` decimal (up to US$1.00); Latchway
 converts it directly to integer nano-USD without floating point and proves the
-two-request worst case before dispatch. Generic `openai_chat` verification has
-no trusted price catalog and therefore reports monetary cost as `unverified`.
+complete live-probe worst case before dispatch, including a possible fixed fee
+for the non-inference error probe. A selected free model may therefore produce
+a verified zero-cost report under a zero operator ceiling. Generic
+`openai_chat` verification has no trusted price catalog and therefore reports
+monetary cost as `unverified`.
+
+Generic verification blocks private, loopback, link-local, special-use, and
+unallocated destinations by default and rechecks every DNS answer. Each
+`--allow-private-cidr` is a canonical, non-overlapping RFC 1918 or IPv6 ULA
+subnet; the flag is repeatable up to 32 entries and is unavailable for
+OpenRouter. Loopback, link-local, metadata, and other special-use ranges cannot
+be allow-listed.
 
 To test an active server-owned target and its write-only stored credential, opt
 in explicitly with `--server-owned`. These flags cannot be combined with the

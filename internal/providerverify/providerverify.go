@@ -61,6 +61,10 @@ type Request struct {
 	MaxCostNanoUSD int64
 	Credential     CredentialSource
 	InputProfile   protocol.TrustedInputProfile
+	// DestinationPolicy is accepted only for generic OpenAI-compatible
+	// upstreams. The zero value keeps the default public-Internet-only SSRF
+	// boundary; private access requires explicit, bounded RFC 1918/ULA CIDRs.
+	DestinationPolicy upstream.DestinationPolicy
 }
 
 // Check contains only fixed, credential-free diagnostic text.
@@ -103,7 +107,7 @@ type target interface {
 	Close()
 }
 
-type targetFactory func(string, upstream.Timeouts, upstream.Resolver) (target, error)
+type targetFactory func(string, upstream.DestinationPolicy, upstream.Timeouts, upstream.Resolver) (target, error)
 
 // Verifier owns no durable state and is safe for concurrent use.
 type Verifier struct {
@@ -133,7 +137,7 @@ func (v *Verifier) Verify(ctx context.Context, request Request) (Report, error) 
 	runCtx, cancel := context.WithTimeout(ctx, minDuration(v.totalTimeout, defaultTotalTimeout))
 	defer cancel()
 
-	transport, err := v.newTarget(baseURL, upstream.Timeouts{
+	transport, err := v.newTarget(baseURL, request.DestinationPolicy, upstream.Timeouts{
 		Connect: defaultConnectTimeout, TLSHandshake: defaultConnectTimeout,
 		ResponseHeader: defaultHeaderTimeout, IdleConnection: 30 * time.Second,
 	}, v.resolver)
@@ -188,9 +192,15 @@ func (v *Verifier) verify(ctx context.Context, transport target, request Request
 	report := Report{Mode: mode, CostVerification: CostUnverified, Checks: make([]Check, 0, 8)}
 	var rates pricing.Rates
 	var maximumCost int64
+	var openRouterCredential openRouterKey
+	var err error
 	profile := request.InputProfile
 	if mode == ModeOpenRouter {
 		report.Checks = append(report.Checks, passed("target", "The canonical OpenRouter HTTPS target passed protected destination validation."))
+		openRouterCredential, err = fetchOpenRouterKey(ctx, transport, credential, v.now().UTC())
+		if err != nil {
+			return Report{}, safeError("key_information")
+		}
 		modelMetadata, err := fetchOpenRouterModel(ctx, transport, credential, request.Model)
 		if err != nil {
 			return Report{}, safeError("model_pricing")
@@ -217,18 +227,24 @@ func (v *Verifier) verify(ctx context.Context, transport target, request Request
 	}
 	if mode == ModeOpenRouter {
 		maximumCost, err = addCosts(nonStreaming.MaximumCostNanoUSD, streaming.MaximumCostNanoUSD)
+		if err == nil {
+			// The malformed normalization probe cannot reach inference, but reserve
+			// one advertised fixed request fee in case the provider charges it at
+			// its request-validation boundary.
+			maximumCost, err = addCosts(maximumCost, rates.RequestNanoUSD)
+		}
 		if err != nil || maximumCost > request.MaxCostNanoUSD {
 			return Report{}, safeError("cost_ceiling")
 		}
-		if err := verifyOpenRouterKey(ctx, transport, credential, maximumCost, v.now().UTC()); err != nil {
+		if !openRouterCredential.sufficient(maximumCost) {
 			return Report{}, safeError("key_information")
 		}
 		report.CostVerification = CostVerified
 		report.MaximumCostNanoUSD = maximumCost
 		report.Checks = append(report.Checks,
-			passed("key_information", "The key is inference-capable, current, and has sufficient declared credit."),
+			passed("key_information", "The key is inference-capable, current, and has sufficient declared credit or free access."),
 			passed("input_preflight", "Both exact request bodies passed model-bound conservative input accounting and a one-token output clamp."),
-			passed("cost_preflight", "The two-request worst-case cost was proved below the operator ceiling before dispatch."),
+			passed("cost_preflight", "The complete live-probe worst-case cost was proved below the operator ceiling before dispatch."),
 		)
 	} else {
 		report.Checks = append(report.Checks,
@@ -270,7 +286,7 @@ func (v *Verifier) verify(ctx context.Context, transport target, request Request
 		return Report{}, safeError("usage")
 	}
 
-	if err := probeErrorNormalization(ctx, transport, credential); err != nil {
+	if err := probeErrorNormalization(ctx, transport, credential, request.Model); err != nil {
 		return Report{}, safeError("error_normalization")
 	}
 	report.Checks = append(report.Checks, passed("error_normalization", "A malformed request produced a bounded body-free provider rejection class."))
@@ -285,15 +301,16 @@ func validateRequest(request Request) (string, string, error) {
 	}
 	switch request.Mode {
 	case ModeOpenRouter:
-		if request.BaseURL != "" && request.BaseURL != openRouterBaseURL {
+		if request.BaseURL != "" && request.BaseURL != openRouterBaseURL ||
+			request.DestinationPolicy.AllowPrivate || len(request.DestinationPolicy.AllowedCIDRs) != 0 {
 			return "", "", errors.New("invalid")
 		}
-		if !openRouterModelPattern.MatchString(request.Model) || request.MaxCostNanoUSD < 1 || request.MaxCostNanoUSD > maximumMaxCostNanoUSD {
+		if !openRouterModelPattern.MatchString(request.Model) || request.MaxCostNanoUSD < 0 || request.MaxCostNanoUSD > maximumMaxCostNanoUSD {
 			return "", "", errors.New("invalid")
 		}
 		return ModeOpenRouter, openRouterBaseURL, nil
 	case ModeOpenAIChat:
-		if request.MaxCostNanoUSD != 0 || validateProductionHTTPS(request.BaseURL) != nil {
+		if request.MaxCostNanoUSD != 0 || validateProductionHTTPS(request.BaseURL, request.DestinationPolicy) != nil {
 			return "", "", errors.New("invalid")
 		}
 		return ModeOpenAIChat, request.BaseURL, nil
@@ -322,22 +339,22 @@ func validBearerCredential(credential []byte) bool {
 	return true
 }
 
-func validateProductionHTTPS(raw string) error {
+func validateProductionHTTPS(raw string, policy upstream.DestinationPolicy) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed == nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" ||
 		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
 		return errors.New("HTTPS origin required")
 	}
-	return upstream.ValidateDestination(raw, upstream.DestinationPolicy{})
+	return upstream.ValidateDestination(raw, policy)
 }
 
 type protectedTarget struct{ value *upstream.Target }
 
-func newProtectedTarget(raw string, timeouts upstream.Timeouts, resolver upstream.Resolver) (target, error) {
-	if err := validateProductionHTTPS(raw); err != nil {
+func newProtectedTarget(raw string, policy upstream.DestinationPolicy, timeouts upstream.Timeouts, resolver upstream.Resolver) (target, error) {
+	if err := validateProductionHTTPS(raw, policy); err != nil {
 		return nil, err
 	}
-	value, err := upstream.NewTarget(raw, upstream.DestinationPolicy{}, timeouts, resolver)
+	value, err := upstream.NewTarget(raw, policy, timeouts, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +382,7 @@ func (t *protectedTarget) Close() { t.value.CloseIdleConnections() }
 type preparedProbe struct {
 	Request            *http.Request
 	Adapter            openaichat.Adapter
+	Streaming          bool
 	InputMaximum       int64
 	OutputMaximum      int64
 	TotalMaximum       int64
@@ -401,7 +419,7 @@ func prepareProbe(ctx context.Context, model string, profile protocol.TrustedInp
 			return preparedProbe{}, err
 		}
 	}
-	probe := preparedProbe{Request: request, Adapter: adapter, InputMaximum: preflight.InputTokenBound, OutputMaximum: 1, TotalMaximum: preflight.TotalTokenBound}
+	probe := preparedProbe{Request: request, Adapter: adapter, Streaming: stream, InputMaximum: preflight.InputTokenBound, OutputMaximum: 1, TotalMaximum: preflight.TotalTokenBound}
 	if mode == ModeOpenRouter {
 		result, err := calculateCost(rates, preflight.InputTokenBound, 1)
 		if err != nil {
@@ -488,6 +506,7 @@ func dispatchProbe(ctx context.Context, transport target, credential []byte, pro
 			return errors.New("response")
 		}
 		buffer := make([]byte, 32<<10)
+		var conformance bytes.Buffer
 		var total int64
 		for {
 			if err := ctx.Err(); err != nil {
@@ -502,6 +521,7 @@ func dispatchProbe(ctx context.Context, transport target, credential []byte, pro
 				if err := observer.Observe(buffer[:count]); err != nil {
 					return errors.New("response")
 				}
+				_, _ = conformance.Write(buffer[:count])
 			}
 			if errors.Is(readErr, io.EOF) {
 				break
@@ -514,13 +534,16 @@ func dispatchProbe(ctx context.Context, transport target, credential []byte, pro
 		if err != nil {
 			return errors.New("response")
 		}
+		if err := validateProbeResponse(conformance.Bytes(), probe.Streaming); err != nil {
+			return errors.New("response")
+		}
 		return nil
 	})
 	return usage, err
 }
 
 func validateUsage(usage protocol.Usage, probe preparedProbe) error {
-	if !usage.Known || usage.InputTokens <= 0 || usage.OutputTokens < 0 || usage.InputTokens > probe.InputMaximum ||
+	if !usage.Known || usage.InputTokens <= 0 || usage.OutputTokens <= 0 || usage.InputTokens > probe.InputMaximum ||
 		usage.OutputTokens > probe.OutputMaximum || usage.InputTokens > math.MaxInt64-usage.OutputTokens ||
 		usage.TotalTokens != usage.InputTokens+usage.OutputTokens || usage.TotalTokens > probe.TotalMaximum {
 		return errors.New("usage")
@@ -528,18 +551,32 @@ func validateUsage(usage protocol.Usage, probe preparedProbe) error {
 	return nil
 }
 
-func probeErrorNormalization(ctx context.Context, transport target, credential []byte) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://latchway.invalid/v1/chat/completions", strings.NewReader(`{"model":}`))
+func probeErrorNormalization(ctx context.Context, transport target, credential []byte, model string) error {
+	// Apply the production adapter to a valid request first so the response is
+	// bound to the same protocol-mode context used by the data plane. Corrupting
+	// the body afterward guarantees a provider rejection without requesting an
+	// inference or trusting provider-specific error JSON.
+	probe, err := prepareProbe(ctx, model, conservativeProfile(model, minimumContextTokens), false, ModeOpenAIChat, pricing.Rates{})
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	return transport.Do(ctx, request, protocol.OpenAIChatProviderPath, credential, func(response *http.Response) error {
-		if response == nil || response.Body == nil || response.StatusCode < 400 || response.StatusCode >= 500 || response.ContentLength > maximumMetadataBytes {
+	malformed := []byte(`{"model":}`)
+	probe.Request.Body = io.NopCloser(bytes.NewReader(malformed))
+	probe.Request.ContentLength = int64(len(malformed))
+	probe.Request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(malformed)), nil
+	}
+	return transport.Do(ctx, probe.Request, protocol.OpenAIChatProviderPath, credential, func(response *http.Response) error {
+		if response == nil || response.Body == nil || response.StatusCode < 400 || response.StatusCode >= 500 {
 			return errors.New("normalization")
 		}
-		count, err := io.Copy(io.Discard, io.LimitReader(response.Body, maximumMetadataBytes+1))
-		if err != nil || count > maximumMetadataBytes {
+		observer, err := probe.Adapter.ObserveResponse(ctx, response)
+		if err != nil || observer == nil {
+			return errors.New("normalization")
+		}
+		// This invokes the exact production status normalizer. It must reject the
+		// provider response before any provider-controlled body is read.
+		if err := upstream.NormalizeResponseStatus(response.StatusCode); !errors.Is(err, upstream.ErrUpstreamNonSuccess) {
 			return errors.New("normalization")
 		}
 		return nil

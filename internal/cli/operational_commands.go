@@ -779,7 +779,7 @@ func newVerifyScheduleDisableCommand(opts *options, root *controlCommandOptions)
 func verifyShort(kind string) string {
 	switch kind {
 	case "upstream":
-		return "Run bounded verification against an active server-owned upstream and model"
+		return "Run bounded ephemeral verification against an OpenAI-compatible upstream (or use --server-owned)"
 	default:
 		return "Run bounded OpenRouter key, usage, streaming, clamp, and error checks"
 	}

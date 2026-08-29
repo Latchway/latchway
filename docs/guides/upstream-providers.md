@@ -73,8 +73,10 @@ Credential self-tests execute on the server so provider keys never enter the
 CLI process:
 
 ```bash
-latchway verify upstream --environment env_... --upstream primary --model canary
-latchway verify openrouter --environment env_... --upstream openrouter \
+latchway verify upstream --server-owned \
+  --environment env_... --upstream primary --model canary
+latchway verify openrouter --server-owned \
+  --environment env_... --upstream openrouter \
   --model canary --max-cost-nano-usd 10000000
 ```
 

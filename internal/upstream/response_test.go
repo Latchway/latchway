@@ -370,6 +370,25 @@ func TestRelayResponseRejectsProviderErrorBodyBeforeClientStart(t *testing.T) {
 	}
 }
 
+func TestNormalizeResponseStatusUsesStableProductionClasses(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusNoContent} {
+		if err := NormalizeResponseStatus(status); err != nil {
+			t.Fatalf("success status %d rejected: %v", status, err)
+		}
+	}
+	for _, status := range []int{http.StatusMultipleChoices, http.StatusBadRequest, http.StatusTooManyRequests, 599} {
+		if err := NormalizeResponseStatus(status); !errors.Is(err, ErrUpstreamNonSuccess) {
+			t.Fatalf("provider status %d normalized as %v", status, err)
+		}
+	}
+	for _, status := range []int{0, http.StatusContinue, 600} {
+		if err := NormalizeResponseStatus(status); !errors.Is(err, ErrInvalidResponseRelay) {
+			t.Fatalf("invalid status %d normalized as %v", status, err)
+		}
+	}
+}
+
 func TestRelayResponseEnforcesMaximumBodyBytes(t *testing.T) {
 	t.Parallel()
 

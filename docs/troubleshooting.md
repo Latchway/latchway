@@ -82,7 +82,8 @@ usage is charged conservatively rather than refunded.
 Run the server-side self-test, then inspect ordered request attempts:
 
 ```bash
-latchway verify upstream --environment env_... --upstream UPSTREAM --model MODEL
+latchway verify upstream --server-owned \
+  --environment env_... --upstream UPSTREAM --model MODEL
 latchway requests inspect req_...
 ```
 

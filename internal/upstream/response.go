@@ -66,6 +66,20 @@ type RelayOutcome struct {
 	Usage         protocol.Usage
 }
 
+// NormalizeResponseStatus applies the production provider-status boundary
+// without reading a provider-controlled response body. Non-2xx responses are
+// classified as ErrUpstreamNonSuccess; invalid HTTP response statuses are
+// classified as ErrInvalidResponseRelay.
+func NormalizeResponseStatus(statusCode int) error {
+	if statusCode < http.StatusOK || statusCode > 599 {
+		return ErrInvalidResponseRelay
+	}
+	if statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("%w: status %d", ErrUpstreamNonSuccess, statusCode)
+	}
+	return nil
+}
+
 // RelayResponse streams one upstream response to a client. It deliberately
 // owns no retry, fallback, routing, or quota policy. The caller decides how to
 // handle an error based on ClientStarted.
@@ -110,8 +124,8 @@ func RelayResponse(
 		_ = body.Close()
 	}
 
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return outcome, fmt.Errorf("%w: status %d", ErrUpstreamNonSuccess, response.StatusCode)
+	if err := NormalizeResponseStatus(response.StatusCode); err != nil {
+		return outcome, err
 	}
 	if response.ContentLength > config.MaxBodyBytes {
 		return outcome, ErrResponseBodyTooLarge

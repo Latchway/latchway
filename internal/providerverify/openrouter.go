@@ -23,6 +23,12 @@ type openRouterModel struct {
 	ContextTokens int64
 }
 
+type openRouterKey struct {
+	FreeTier         bool
+	Unlimited        bool
+	RemainingNanoUSD int64
+}
+
 var providerPricePattern = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 func fetchOpenRouterModel(ctx context.Context, transport target, credential []byte, model string) (openRouterModel, error) {
@@ -82,10 +88,18 @@ func parseOpenRouterPricing(value any) (pricing.Rates, error) {
 	if err != nil {
 		return pricing.Rates{}, err
 	}
+	// The verification prompt never opts into explicit caching, but some
+	// providers cache implicitly. Treat every input token as if it were charged
+	// at the most expensive advertised normal/read/write input rate so the
+	// pre-dispatch ceiling remains conservative for either classification.
+	base, err = applyInputCachePrices(object, base)
+	if err != nil {
+		return pricing.Rates{}, err
+	}
 	for key, value := range object {
 		switch key {
-		case "prompt", "completion", "request", "overrides":
-		case "image", "web_search", "internal_reasoning", "input_cache_read", "input_cache_write":
+		case "prompt", "completion", "request", "overrides", "input_cache_read", "input_cache_write":
+		case "image", "web_search", "internal_reasoning":
 			if !exactZeroPrice(value) {
 				return pricing.Rates{}, errors.New("unsupported pricing")
 			}
@@ -111,9 +125,13 @@ func parseOpenRouterPricing(value any) (pricing.Rates, error) {
 		if err != nil {
 			return pricing.Rates{}, err
 		}
+		candidate, err = applyInputCachePrices(entry, candidate)
+		if err != nil {
+			return pricing.Rates{}, err
+		}
 		for key := range entry {
 			switch key {
-			case "prompt", "completion", "request", "min_prompt_tokens", "utc_start", "utc_end", "utc_days":
+			case "prompt", "completion", "request", "input_cache_read", "input_cache_write", "min_prompt_tokens", "utc_start", "utc_end", "utc_days":
 			default:
 				return pricing.Rates{}, errors.New("unknown override")
 			}
@@ -128,7 +146,7 @@ func parseOpenRouterPricing(value any) (pricing.Rates, error) {
 func validatePricingOverride(entry map[string]any) error {
 	priceFields := 0
 	conditionFields := 0
-	for _, name := range []string{"prompt", "completion", "request"} {
+	for _, name := range []string{"prompt", "completion", "request", "input_cache_read", "input_cache_write"} {
 		if _, present := entry[name]; present {
 			priceFields++
 		}
@@ -178,6 +196,19 @@ func validatePricingOverride(entry map[string]any) error {
 	return nil
 }
 
+func applyInputCachePrices(object map[string]any, rates pricing.Rates) (pricing.Rates, error) {
+	for _, name := range []string{"input_cache_read", "input_cache_write"} {
+		if value, present := object[name]; present {
+			rate, err := parseUSDPerTokenPrice(value)
+			if err != nil {
+				return pricing.Rates{}, err
+			}
+			rates.InputNanoUSDPerMillion = maxInt64(rates.InputNanoUSDPerMillion, rate)
+		}
+	}
+	return rates, nil
+}
+
 func validUTCClock(value any) bool {
 	number, ok := value.(json.Number)
 	if !ok {
@@ -187,7 +218,7 @@ func validUTCClock(value any) bool {
 	return err == nil && clock >= 0 && clock <= 2359 && clock%100 < 60
 }
 
-func parsePriceSet(object map[string]any, inherited pricing.Rates, requireAll bool) (pricing.Rates, error) {
+func parsePriceSet(object map[string]any, inherited pricing.Rates, requireTokenPrices bool) (pricing.Rates, error) {
 	result := inherited
 	for _, field := range []struct {
 		name     string
@@ -200,7 +231,10 @@ func parsePriceSet(object map[string]any, inherited pricing.Rates, requireAll bo
 	} {
 		value, present := object[field.name]
 		if !present {
-			if requireAll {
+			// OpenRouter's fixed per-request charge is optional; omission means
+			// zero. Prompt and completion rates are the authoritative token-price
+			// boundary and must always be present on the base model price set.
+			if requireTokenPrices && field.perToken {
 				return pricing.Rates{}, errors.New("missing pricing")
 			}
 			continue
@@ -252,6 +286,14 @@ func parseUSDPerTokenNanoPerMillion(value string) (int64, error) {
 	return result, nil
 }
 
+func parseUSDPerTokenPrice(value any) (int64, error) {
+	text, ok := value.(string)
+	if !ok {
+		return 0, errors.New("pricing")
+	}
+	return parseUSDPerTokenNanoPerMillion(text)
+}
+
 func exactZeroPrice(value any) bool {
 	text, ok := value.(string)
 	if !ok {
@@ -261,71 +303,84 @@ func exactZeroPrice(value any) bool {
 	return err == nil && nano == 0
 }
 
-func verifyOpenRouterKey(ctx context.Context, transport target, credential []byte, maximumCost int64, now time.Time) error {
+func fetchOpenRouterKey(ctx context.Context, transport target, credential []byte, now time.Time) (openRouterKey, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://latchway.invalid/key", nil)
 	if err != nil {
-		return err
+		return openRouterKey{}, err
 	}
-	return transport.Do(ctx, request, "/key", credential, func(response *http.Response) error {
+	var result openRouterKey
+	err = transport.Do(ctx, request, "/key", credential, func(response *http.Response) error {
 		body, err := boundedJSONResponse(response, maximumMetadataBytes)
 		if err != nil {
 			return err
 		}
-		return parseOpenRouterKey(body, maximumCost, now)
+		result, err = parseOpenRouterKey(body, now)
+		return err
 	})
+	return result, err
 }
 
-func parseOpenRouterKey(body []byte, maximumCost int64, now time.Time) error {
+func parseOpenRouterKey(body []byte, now time.Time) (openRouterKey, error) {
 	value, err := jsonsafe.Decode(body)
 	root, ok := value.(map[string]any)
 	if err != nil || !ok || len(root) != 1 {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	data, ok := root["data"].(map[string]any)
 	if !ok {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
-	_, freeOK := data["is_free_tier"].(bool)
+	freeTier, freeOK := data["is_free_tier"].(bool)
 	management, managementOK := data["is_management_key"].(bool)
 	provisioning, provisioningOK := data["is_provisioning_key"].(bool)
 	if !freeOK || !managementOK || !provisioningOK || management || provisioning {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	if expires, present := data["expires_at"]; present && expires != nil {
 		text, ok := expires.(string)
 		parsed, parseErr := time.Parse(time.RFC3339, text)
 		if !ok || parseErr != nil || !parsed.After(now) {
-			return errors.New("key")
+			return openRouterKey{}, errors.New("key")
 		}
 	}
 	limit, limitPresent := data["limit"]
 	remaining, remainingPresent := data["limit_remaining"]
 	if !limitPresent || !remainingPresent {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	if limit == nil {
 		if remaining != nil {
-			return errors.New("key")
+			return openRouterKey{}, errors.New("key")
 		}
-		return nil
+		return openRouterKey{FreeTier: freeTier, Unlimited: true}, nil
 	}
 	limitNumber, ok := limit.(json.Number)
 	if !ok {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	limitNano, err := pricing.ParseUSDDecimalNanoUSD(limitNumber.String())
 	if err != nil || limitNano < 0 {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	remainingNumber, ok := remaining.(json.Number)
 	if !ok {
-		return errors.New("key")
+		return openRouterKey{}, errors.New("key")
 	}
 	remainingNano, err := pricing.ParseUSDDecimalNanoUSD(remainingNumber.String())
-	if err != nil || remainingNano < maximumCost {
-		return errors.New("key")
+	if err != nil || remainingNano < 0 || remainingNano > limitNano {
+		return openRouterKey{}, errors.New("key")
 	}
-	return nil
+	return openRouterKey{FreeTier: freeTier, RemainingNanoUSD: remainingNano}, nil
+}
+
+func (key openRouterKey) sufficient(maximumCost int64) bool {
+	if maximumCost < 0 {
+		return false
+	}
+	if maximumCost == 0 && key.FreeTier {
+		return true
+	}
+	return key.Unlimited || key.RemainingNanoUSD >= maximumCost
 }
 
 func boundedJSONResponse(response *http.Response, maximum int64) ([]byte, error) {
