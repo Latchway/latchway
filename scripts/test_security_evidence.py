@@ -121,10 +121,18 @@ class SecurityEvidenceTests(unittest.TestCase):
         for index, check in enumerate(MODULE.COMMAND_CHECKS):
             result_path, log_path = MODULE.command_paths(self.raw, check)
             log_path.write_bytes(f"{check.identifier} completed\n".encode())
+            binary = None
+            binary_path = MODULE.command_binary_path(self.raw, check)
+            if binary_path is not None:
+                binary_path.write_bytes(b"exact captured release binary\n")
+                binary = {
+                    "path": binary_path.name,
+                    "sha256": MODULE.sha256_file(binary_path),
+                }
             version = check.fixed_version
             if version is None:
                 version = "go1.25.0" if check.tool == "go" else "GNU Make 3.81"
-            result = {
+            result: dict[str, object] = {
                 "schema_version": 1,
                 "kind": "latchway_security_command_result",
                 "check": check.identifier,
@@ -139,6 +147,8 @@ class SecurityEvidenceTests(unittest.TestCase):
                 "exit_code": 0,
                 "log": {"path": log_path.name, "sha256": MODULE.sha256_file(log_path)},
             }
+            if binary is not None:
+                result["binary"] = binary
             self.write_json(result_path, result)
         self.write_json(
             self.raw / "scan-window.json",
@@ -319,6 +329,74 @@ class SecurityEvidenceTests(unittest.TestCase):
                     raw_directory=capture_raw,
                     candidate_commit=self.commit,
                 )
+
+    def test_go_vulnerability_capture_builds_and_hashes_exact_binary(self) -> None:
+        capture_raw = self.root / "capture-govuln"
+        check = MODULE.COMMAND_BY_ID["source_go_vulnerability"]
+        calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+        def run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            argv = tuple(command)
+            environment = dict(kwargs["env"])
+            calls.append((argv, environment))
+            if argv[:3] == ("go", "build", "-trimpath"):
+                output = Path(argv[argv.index("-o") + 1])
+                output.write_bytes(b"captured binary bytes\n")
+            return subprocess.CompletedProcess(argv, 0)
+
+        with (
+            mock.patch.object(
+                MODULE, "validate_clean_repository", return_value="a" * 40
+            ),
+            mock.patch.object(MODULE.subprocess, "run", side_effect=run),
+        ):
+            result = MODULE.capture_command(
+                check,
+                repository=self.repository,
+                raw_directory=capture_raw,
+                candidate_commit=self.commit,
+            )
+
+        binary_path = MODULE.command_binary_path(capture_raw, check)
+        assert binary_path is not None
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(
+            result["binary"],
+            {"path": binary_path.name, "sha256": MODULE.sha256_file(binary_path)},
+        )
+        self.assertEqual(
+            result["execution_context"]["vulnerability_scan_mode"], "binary"
+        )
+        self.assertEqual(
+            result["execution_context"]["vulnerability_binary_package"],
+            "./cmd/latchway",
+        )
+        self.assertEqual(calls[0][0][-1], "./cmd/latchway")
+        self.assertEqual(calls[0][1]["CGO_ENABLED"], "0")
+        self.assertEqual(calls[1][0][-2], "-mode=binary")
+        self.assertEqual(calls[1][0][-1], str(binary_path))
+
+    def test_rejects_substituted_go_vulnerability_binary(self) -> None:
+        check = MODULE.COMMAND_BY_ID["source_go_vulnerability"]
+        binary_path = MODULE.command_binary_path(self.raw, check)
+        assert binary_path is not None
+        binary_path.write_bytes(b"substituted binary\n")
+        with self.assertRaisesRegex(
+            MODULE.SecurityEvidenceError, "command_binary_hash_mismatch"
+        ):
+            self.derive()
+
+        self.build_raw()
+        result_path, _ = MODULE.command_paths(self.raw, check)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["execution_context"]["vulnerability_binary_package"] = "./..."
+        self.write_json(result_path, result)
+        with self.assertRaisesRegex(
+            MODULE.SecurityEvidenceError, "command_result_invalid"
+        ):
+            self.derive()
 
     def test_rejects_log_and_candidate_scan_substitution(self) -> None:
         _, log_path = MODULE.command_paths(self.raw, MODULE.COMMAND_CHECKS[1])

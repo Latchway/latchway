@@ -38,6 +38,16 @@ MAXIMUM_RAW_BYTES = 128 * 1024 * 1024
 IMAGE_REPOSITORY = "ghcr.io/latchway/latchway"
 BLOCKED_SEVERITIES = ("CRITICAL", "HIGH")
 FORBIDDEN_CLAIM_FIELDS = frozenset(("claim", "claims", "passed", "success", "verdict"))
+CAPTURED_BINARY = "<captured-binary>"
+VULNERABILITY_BINARY_PACKAGE = "./cmd/latchway"
+VULNERABILITY_BINARY_BUILD_ARGV = (
+    "go",
+    "build",
+    "-trimpath",
+    "-o",
+    CAPTURED_BINARY,
+    VULNERABILITY_BINARY_PACKAGE,
+)
 
 CANDIDATE_ARTIFACTS = (
     "latchway-contract.tar.gz",
@@ -68,7 +78,8 @@ COMMAND_CHECKS: tuple[CommandCheck, ...] = (
             "run",
             "golang.org/x/vuln/cmd/govulncheck@v1.1.4",
             "-json",
-            "./...",
+            "-mode=binary",
+            CAPTURED_BINARY,
         ),
         "govulncheck",
         "v1.1.4",
@@ -388,12 +399,30 @@ def command_paths(raw_directory: Path, check: CommandCheck) -> tuple[Path, Path]
     )
 
 
+def command_binary_path(raw_directory: Path, check: CommandCheck) -> Path | None:
+    if check.identifier != "source_go_vulnerability":
+        return None
+    return raw_directory / f"{check.file_stem}.binary"
+
+
 def command_execution_context(check: CommandCheck) -> dict[str, Any]:
-    return {
+    context: dict[str, Any] = {
         "postgresql_enabled": check.identifier == "source_race",
         "fuzz_time": "3s" if check.identifier == "source_fuzz_smoke" else None,
         "fuzz_parallel": 2 if check.identifier == "source_fuzz_smoke" else None,
     }
+    if check.identifier == "source_go_vulnerability":
+        context.update(
+            {
+                "vulnerability_scan_mode": "binary",
+                "vulnerability_binary_package": VULNERABILITY_BINARY_PACKAGE,
+                "vulnerability_binary_build_argv": list(
+                    VULNERABILITY_BINARY_BUILD_ARGV
+                ),
+                "vulnerability_binary_cgo_enabled": False,
+            }
+        )
+    return context
 
 
 def discover_tool_version(check: CommandCheck, repository: Path) -> str:
@@ -434,7 +463,12 @@ def capture_command(
     if raw_directory.is_symlink():
         raise SecurityEvidenceError("security_raw_directory_invalid")
     result_path, log_path = command_paths(raw_directory, check)
-    if result_path.exists() or log_path.exists():
+    binary_path = command_binary_path(raw_directory, check)
+    if (
+        result_path.exists()
+        or log_path.exists()
+        or (binary_path is not None and binary_path.exists())
+    ):
         raise SecurityEvidenceError("security_capture_already_exists")
     version = discover_tool_version(check, repository)
     started_at = datetime.now(timezone.utc).replace(microsecond=0)
@@ -468,19 +502,62 @@ def capture_command(
     if check.identifier == "source_fuzz_smoke":
         environment["FUZZ_TIME"] = "3s"
         environment["FUZZ_PARALLEL"] = "2"
+    binary: dict[str, str] | None = None
     try:
         with log_path.open("xb") as output:
             try:
-                result = subprocess.run(
-                    check.argv,
-                    cwd=repository,
-                    env=environment,
-                    check=False,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=check.timeout_seconds,
-                )
-                exit_code = result.returncode
+                if binary_path is not None:
+                    build_environment = dict(environment)
+                    build_environment["CGO_ENABLED"] = "0"
+                    build_argv = tuple(
+                        str(binary_path) if item == CAPTURED_BINARY else item
+                        for item in VULNERABILITY_BINARY_BUILD_ARGV
+                    )
+                    result = subprocess.run(
+                        build_argv,
+                        cwd=repository,
+                        env=build_environment,
+                        check=False,
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        timeout=check.timeout_seconds,
+                    )
+                    exit_code = result.returncode
+                    if exit_code == 0:
+                        if not real_file(binary_path):
+                            exit_code = 125
+                        else:
+                            binary_path.chmod(0o600)
+                            binary = {
+                                "path": binary_path.name,
+                                "sha256": sha256_file(binary_path),
+                            }
+                    if exit_code == 0:
+                        scan_argv = tuple(
+                            str(binary_path) if item == CAPTURED_BINARY else item
+                            for item in check.argv
+                        )
+                        result = subprocess.run(
+                            scan_argv,
+                            cwd=repository,
+                            env=environment,
+                            check=False,
+                            stdout=output,
+                            stderr=subprocess.STDOUT,
+                            timeout=check.timeout_seconds,
+                        )
+                        exit_code = result.returncode
+                else:
+                    result = subprocess.run(
+                        check.argv,
+                        cwd=repository,
+                        env=environment,
+                        check=False,
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        timeout=check.timeout_seconds,
+                    )
+                    exit_code = result.returncode
             except subprocess.TimeoutExpired:
                 exit_code = 124
             except OSError:
@@ -491,7 +568,7 @@ def capture_command(
     if not real_file(log_path, allow_empty=True):
         raise SecurityEvidenceError("security_capture_log_invalid")
     finished_at = datetime.now(timezone.utc).replace(microsecond=0)
-    result_document = {
+    result_document: dict[str, Any] = {
         "schema_version": 1,
         "kind": "latchway_security_command_result",
         "check": check.identifier,
@@ -507,6 +584,8 @@ def capture_command(
             "sha256": sha256_file(log_path, allow_empty=True),
         },
     }
+    if binary_path is not None:
+        result_document["binary"] = binary
     write_json(result_path, result_document)
     validate_clean_repository(repository, candidate_commit)
     return result_document
@@ -524,7 +603,8 @@ def validate_command_result(
     result = load_json(result_path)
     if set(result) & FORBIDDEN_CLAIM_FIELDS:
         raise SecurityEvidenceError("security_raw_claim_forbidden")
-    if set(result) != {
+    expected_binary_path = command_binary_path(raw_directory, check)
+    expected_fields = {
         "schema_version",
         "kind",
         "check",
@@ -536,7 +616,10 @@ def validate_command_result(
         "execution_context",
         "exit_code",
         "log",
-    }:
+    }
+    if expected_binary_path is not None:
+        expected_fields.add("binary")
+    if set(result) != expected_fields:
         raise SecurityEvidenceError("security_command_result_fields_invalid")
     tool = result.get("tool")
     log = result.get("log")
@@ -576,10 +659,30 @@ def validate_command_result(
         raise SecurityEvidenceError("security_command_log_hash_mismatch")
     if result["exit_code"] != 0:
         raise SecurityEvidenceError("security_command_failed")
+    binary = result.get("binary")
+    binary_hash: str | None = None
+    if expected_binary_path is not None:
+        if (
+            not isinstance(binary, dict)
+            or set(binary) != {"path", "sha256"}
+            or binary.get("path") != expected_binary_path.name
+            or not isinstance(binary.get("sha256"), str)
+            or SHA256.fullmatch(binary["sha256"]) is None
+        ):
+            raise SecurityEvidenceError("security_command_binary_invalid")
+        binary_hash = sha256_file(expected_binary_path)
+        if binary_hash != binary["sha256"]:
+            raise SecurityEvidenceError("security_command_binary_hash_mismatch")
+    elif binary is not None:
+        raise SecurityEvidenceError("security_command_binary_invalid")
     artifacts = [
         {"path": f"raw/{result_path.name}", "sha256": sha256_file(result_path)},
         {"path": f"raw/{log_path.name}", "sha256": actual_log_hash},
     ]
+    if expected_binary_path is not None and binary_hash is not None:
+        artifacts.append(
+            {"path": f"raw/{expected_binary_path.name}", "sha256": binary_hash}
+        )
     return result, started_at, finished_at, artifacts
 
 
@@ -691,6 +794,9 @@ def expected_raw_names() -> set[str]:
     names = {"scan-window.json"}
     for check in COMMAND_CHECKS:
         names.update((f"{check.file_stem}.result.json", f"{check.file_stem}.log"))
+        binary_path = command_binary_path(Path("."), check)
+        if binary_path is not None:
+            names.add(binary_path.name)
     names.update(filename for _, filename, _, _ in TRIVY_CHECKS)
     return names
 

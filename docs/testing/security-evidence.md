@@ -43,7 +43,8 @@ candidate scan file makes finalization fail.
 
 The candidate workflow captures only the fixed source-controlled plan:
 
-1. `govulncheck v1.1.4` against all source packages;
+1. `govulncheck v1.1.4` in binary mode against a retained, exact-source,
+   `CGO_ENABLED=0`, `-trimpath` build of `./cmd/latchway`;
 2. `go vet ./...`;
 3. the complete `make fuzz-smoke` target;
 4. `go test -race -json -count=1 ./...` with PostgreSQL enabled;
@@ -55,9 +56,14 @@ Command invocations are selected by check ID inside the producer. There is no
 generic command, claim, pass/fail, severity override, or uploaded result input.
 Each command envelope binds the candidate commit, exact argv, tool/version,
 fixed execution context, start and finish times, exit code, log name, and log
-SHA-256. Fuzzing always uses the committed three-second/two-worker smoke
-parameters; the race capture refuses to start without the PostgreSQL test
-database. The finalizer
+SHA-256. The Go vulnerability result additionally binds the exact package,
+build argv, disabled CGO setting, binary scan mode, retained binary name, and
+binary SHA-256. Retaining the binary lets finalization recompute the hash
+instead of trusting an uploaded digest. Binary mode is required because the
+pinned scanner can analyze Go 1.27 binaries while its source-package loader
+cannot parse Go 1.27 source syntax. Fuzzing always uses the committed
+three-second/two-worker smoke parameters; the race capture refuses to start
+without the PostgreSQL test database. The finalizer
 requires exit code zero and recomputes every hash. It rejects unknown, missing,
 extra, symlinked, oversized, duplicate-key, stale, future, or cross-candidate
 files. The evidence window starts after candidate creation, is at most seven
@@ -80,6 +86,7 @@ security-final/
 ├── security-summary.attestation.sigstore.json
 └── raw/
     ├── scan-window.json
+    ├── source-go-vulnerability.binary
     ├── source-*.result.json
     ├── source-*.log
     ├── source-trivy-*.json
