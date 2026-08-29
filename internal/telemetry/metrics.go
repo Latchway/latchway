@@ -24,6 +24,23 @@ import (
 
 const instrumentationName = "github.com/latchway/latchway"
 
+const (
+	RouteAttemptConditionNone                 = "none"
+	RouteAttemptConditionConnectError         = "connect_error"
+	RouteAttemptConditionTimeoutBeforeHeaders = "timeout_before_headers"
+	RouteAttemptConditionStatus408            = "status_408"
+	RouteAttemptConditionStatus429            = "status_429"
+	RouteAttemptConditionStatus500            = "status_500"
+	RouteAttemptConditionStatus502            = "status_502"
+	RouteAttemptConditionStatus503            = "status_503"
+	RouteAttemptConditionStatus504            = "status_504"
+
+	// CircuitObservationNotConfigured is an explicit observation, not a
+	// breaker state. This release does not suppress or admit a route based on
+	// inferred circuit behavior.
+	CircuitObservationNotConfigured = "not_configured"
+)
+
 var telemetryLabelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
 var highCardinalityIdentifierPattern = regexp.MustCompile(`(?i)^(?:usr|ins|req|sgr|rft|rff|atm|drp)_[A-Za-z0-9_-]{8,}$`)
@@ -42,6 +59,15 @@ type Labels struct {
 	AttestationLevel string
 	Plan             string
 	Outcome          string
+}
+
+// RouteAttemptObservation is the closed route-attempt telemetry vocabulary.
+// Every field is emitted on every dispatched attempt. Invalid or future values
+// collapse to "invalid" instead of creating attacker-controlled time series.
+type RouteAttemptObservation struct {
+	Condition    string
+	Outcome      string
+	CircuitState string
 }
 
 // Registry owns the process metric instruments and Prometheus scrape surface.
@@ -288,11 +314,20 @@ func (registry *Registry) StartStage(ctx context.Context, stage string, labels L
 	}
 }
 
-func (registry *Registry) RecordUpstreamAttempt(ctx context.Context, labels Labels, inputTokens, outputTokens, costNanoUSD int64, firstToken time.Duration) {
+func (registry *Registry) RecordUpstreamAttempt(
+	ctx context.Context,
+	labels Labels,
+	observation RouteAttemptObservation,
+	inputTokens, outputTokens, costNanoUSD int64,
+	firstToken time.Duration,
+) {
 	if registry == nil {
 		return
 	}
-	attributes := labels.attributes()
+	// Generic lifecycle outcomes are intentionally ignored here. Attempt
+	// outcome, route condition, and circuit observation use stricter enums.
+	labels.Outcome = ""
+	attributes := append(labels.attributes(), observation.attributes()...)
 	registry.upstreamAttempts.Add(ctx, 1, metric.WithAttributes(attributes...))
 	if inputTokens >= 0 {
 		registry.inputTokens.Add(ctx, inputTokens, metric.WithAttributes(attributes...))
@@ -306,6 +341,47 @@ func (registry *Registry) RecordUpstreamAttempt(ctx context.Context, labels Labe
 	if firstToken >= 0 {
 		registry.timeToFirstToken.Record(ctx, firstToken.Seconds(), metric.WithAttributes(attributes...))
 	}
+}
+
+func (observation RouteAttemptObservation) attributes() []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("condition", safeRouteAttemptCondition(observation.Condition)),
+		attribute.String("outcome", safeRouteAttemptOutcome(observation.Outcome)),
+		attribute.String("circuit_state", safeCircuitObservationState(observation.CircuitState)),
+	}
+}
+
+func safeRouteAttemptCondition(condition string) string {
+	switch condition {
+	case RouteAttemptConditionNone,
+		RouteAttemptConditionConnectError,
+		RouteAttemptConditionTimeoutBeforeHeaders,
+		RouteAttemptConditionStatus408,
+		RouteAttemptConditionStatus429,
+		RouteAttemptConditionStatus500,
+		RouteAttemptConditionStatus502,
+		RouteAttemptConditionStatus503,
+		RouteAttemptConditionStatus504:
+		return condition
+	default:
+		return "invalid"
+	}
+}
+
+func safeRouteAttemptOutcome(outcome string) string {
+	switch outcome {
+	case "succeeded", "failed", "cancelled", "timed_out":
+		return outcome
+	default:
+		return "invalid"
+	}
+}
+
+func safeCircuitObservationState(state string) string {
+	if state == CircuitObservationNotConfigured {
+		return state
+	}
+	return "invalid"
 }
 
 func (registry *Registry) RecordQuotaDenial(ctx context.Context, labels Labels, concurrency bool) {

@@ -1,5 +1,23 @@
 # Implementation status
 
+## Local working-tree update — metric registry and route observations (2026-08-29)
+
+All 16 initial policy metrics are now represented by one ordered declarative
+registry. The draft configuration schema recognizes every registered name,
+while activation consults the registry's exact implemented metric/algorithm
+matrix and continues to reject unsupported enforcement with
+`limit_capability_unsupported`. Registering a future accounting dimension does
+not silently create quota behavior.
+
+Every dispatched upstream attempt now emits a closed route condition and
+attempt outcome plus an explicit `circuit_state=not_configured` observation.
+Unknown values collapse to `invalid`; provider text and request identifiers
+cannot create metric labels. The circuit observation has no breaker semantics
+and does not admit, suppress, retry, or reroute a request. Focused registry,
+configuration, telemetry, and data-plane tests pass normally and under the race
+detector, and contract validation passes. This is local observability and
+capability-gate evidence, not a configured circuit breaker or release evidence.
+
 ## Local working-tree update — administrator lifecycle (2026-08-29)
 
 Draft contract `0.5.1` adds the canonical owner-authorized administrator
@@ -31,12 +49,12 @@ fields on non-calendar algorithms and invalid, unavailable, or process-local
 zone names fail closed. No client timestamp or timezone header participates.
 
 Focused quota, configuration, and data-plane normal/race tests, the full normal
-Go suite, focused vet, and contract validation pass locally. The new PostgreSQL
-proof covers reservation/snapshot reset and counter equality, timezone
+Go suite, focused vet, and contract validation pass locally. Both new
+PostgreSQL cases pass against the required local PostgreSQL 15 development
+database, covering reservation/snapshot reset and counter equality, timezone
 isolation, idempotent expiry recovery, and settlement-versus-recovery
-serialization, but both cases skip because `LATCHWAY_TEST_DATABASE_URL` is
-absent. This working-tree result is not PostgreSQL execution evidence, an
-immutable compatibility checkpoint, or release-readiness evidence.
+serialization. This local database result is not an immutable compatibility
+checkpoint or release-readiness evidence.
 
 ## Local working-tree update — operational resilience evidence (2026-08-29)
 

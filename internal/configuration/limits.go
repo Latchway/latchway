@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata"
+
+	"github.com/latchway/latchway/internal/limitmetric"
 )
 
 const (
@@ -55,39 +57,33 @@ type immutableLimitIdentity struct {
 }
 
 func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool) {
-	if !limit.Hard {
+	if !limit.Hard || !limitmetric.SupportsEnforcement(limit.Metric, limit.Algorithm) {
 		return Limit{}, immutableLimitIdentity{}, false
 	}
 	switch limit.Algorithm {
 	case "calendar":
 		timezone, ok := canonicalExecutableCalendarTimezone(limit.Timezone)
-		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens" &&
-			limit.Metric != "input_tokens" && limit.Metric != "total_tokens" &&
-			limit.Metric != "cost_nano_usd") ||
-			limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
+		if limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) ||
 			!executableCalendarWindow(limit.Window) || !ok {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 		limit.Timezone = timezone
 	case "token_bucket":
-		if limit.Timezone != "" || (limit.Metric != "logical_requests" && limit.Metric != "input_tokens" &&
-			limit.Metric != "output_tokens" && limit.Metric != "total_tokens") || limit.Window != "" ||
+		if limit.Timezone != "" || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity <= 0 || limit.Capacity > maximumExecutableTokenBucketCapacity ||
 			!executableTokenBucketRefillRate(limit.RefillPerSecond) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":
-		if limit.Timezone != "" || (limit.Metric != "input_tokens" && limit.Metric != "output_tokens" &&
-			limit.Metric != "total_tokens") || limit.Window != "" ||
+		if limit.Timezone != "" || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum <= 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "concurrency":
-		if limit.Timezone != "" || (limit.Metric != "concurrent_requests" && limit.Metric != "concurrent_streams") ||
-			limit.Window != "" || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
+		if limit.Timezone != "" || limit.Window != "" || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}

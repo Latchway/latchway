@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/jsonsafe"
+	"github.com/latchway/latchway/internal/limitmetric"
 )
 
 func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
@@ -505,6 +506,40 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)
 				}
+			}
+		})
+	}
+}
+
+func TestValidatorRegistersEveryInitialMetricButRejectsUnsupportedEnforcement(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range limitmetric.Definitions() {
+		definition := definition
+		if limitmetric.SupportsEnforcement(definition.Name, limitmetric.CalendarAlgorithm) {
+			continue
+		}
+		t.Run(definition.Name, func(t *testing.T) {
+			t.Parallel()
+			document := configurationObject(t)
+			objectArray(objectValue(document, "spec"), "limitPlans")[0]["limits"] = []any{map[string]any{
+				"metric": definition.Name, "algorithm": "calendar", "scope": []any{"user"},
+				"window": "1d", "maximum": json.Number("1"), "hard": true,
+			}}
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+				t.Fatalf("registered metric must remain schema-valid: %+v", issues)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_capability_unsupported") {
+				t.Fatalf("unsupported registered metric activated: report=%+v compiled=%q", report, compiled)
 			}
 		})
 	}

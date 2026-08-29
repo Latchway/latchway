@@ -114,7 +114,7 @@ func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
 	registry.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := metrics.Body.String()
 	for _, expected := range []string{
-		`latchway_upstream_attempts_total{application="` + fixture.authorization.ApplicationID + `",attestation_level="device_verified",environment="` + fixture.authorization.EnvironmentID + `",feature="assistant",model_alias="provider_model",outcome="succeeded",plan="starter",platform="ios",route="primary",upstream="provider"} 1`,
+		`latchway_upstream_attempts_total{application="` + fixture.authorization.ApplicationID + `",attestation_level="device_verified",circuit_state="not_configured",condition="none",environment="` + fixture.authorization.EnvironmentID + `",feature="assistant",model_alias="provider_model",outcome="succeeded",plan="starter",platform="ios",route="primary",upstream="provider"} 1`,
 		`latchway_input_tokens_total`, `latchway_output_tokens_total`,
 		`latchway_reservations_active`, `latchway_time_to_first_token_seconds`,
 	} {
@@ -2661,6 +2661,12 @@ func TestHandlerAcceptsAValidatedFallbackPlanWithoutDispatchingAnInertCandidate(
 
 func TestHandlerFallsBackWithFreshTargetRequestAndPerAttemptAccounting(t *testing.T) {
 	fixture := newHandlerFixture(t)
+	registry, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	fixture.telemetry = registry
 	fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, configuration.Limit{
 		Metric: quota.OutputTokensMetric, Algorithm: quota.PerRequestAlgorithm,
 		Scope: []string{"environment", "model"}, PerRequestMaximum: 64, Hard: true,
@@ -2729,6 +2735,27 @@ func TestHandlerFallsBackWithFreshTargetRequestAndPerAttemptAccounting(t *testin
 		fixture.targets.releaseCalls != 2 {
 		t.Fatalf("attempt dispatch/release = %d/%d/%d",
 			primaryTarget.roundTripCalls, secondaryTarget.roundTripCalls, fixture.targets.releaseCalls)
+	}
+	metrics := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	primaryObserved, secondaryObserved := false, false
+	for _, line := range strings.Split(metrics.Body.String(), "\n") {
+		if !strings.HasPrefix(line, "latchway_upstream_attempts_total{") ||
+			!strings.Contains(line, `circuit_state="not_configured"`) {
+			continue
+		}
+		if strings.Contains(line, `route="primary"`) && strings.Contains(line, `condition="connect_error"`) &&
+			strings.Contains(line, `outcome="failed"`) {
+			primaryObserved = true
+		}
+		if strings.Contains(line, `route="secondary"`) && strings.Contains(line, `condition="none"`) &&
+			strings.Contains(line, `outcome="succeeded"`) {
+			secondaryObserved = true
+		}
+	}
+	if !primaryObserved || !secondaryObserved {
+		t.Fatalf("fallback telemetry missing closed attempt observations primary=%t secondary=%t:\n%s",
+			primaryObserved, secondaryObserved, metrics.Body.String())
 	}
 }
 

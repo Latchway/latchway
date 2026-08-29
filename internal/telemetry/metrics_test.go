@@ -27,7 +27,10 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 		Plan: "standard",
 	})
 	finish("succeeded", 250*time.Millisecond)
-	registry.RecordUpstreamAttempt(ctx, Labels{Route: "primary", Upstream: "openai", ModelAlias: "fast", Outcome: "succeeded"}, 12, 8, 900, 50*time.Millisecond)
+	registry.RecordUpstreamAttempt(ctx, Labels{Route: "primary", Upstream: "openai", ModelAlias: "fast"}, RouteAttemptObservation{
+		Condition: RouteAttemptConditionNone, Outcome: "succeeded",
+		CircuitState: CircuitObservationNotConfigured,
+	}, 12, 8, 900, 50*time.Millisecond)
 	registry.RecordQuotaDenial(ctx, Labels{Feature: "assistant", Outcome: "denied"}, false)
 	registry.RecordWorkerJob(ctx, "enforce_retention", "succeeded", 20*time.Millisecond)
 
@@ -52,6 +55,43 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	for _, forbidden := range []string{"user_id=", "installation_id=", "request_id=", "external_subject=", "raw_model_input="} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("metrics output contains forbidden label %q:\n%s", forbidden, text)
+		}
+	}
+	for _, expected := range []string{`condition="none"`, `outcome="succeeded"`, `circuit_state="not_configured"`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("route-attempt metric missing closed observation %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestRegistryRouteAttemptLabelsRejectValuesOutsideClosedVocabulary(t *testing.T) {
+	t.Parallel()
+
+	registry, err := NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	registry.RecordUpstreamAttempt(context.Background(), Labels{
+		Route: "primary", Outcome: "credential=must-not-win",
+	}, RouteAttemptObservation{
+		Condition:    "req_01J67V7X5JS9VD4AFM3J8MSX91",
+		Outcome:      "provider_private_failure_text",
+		CircuitState: "closed_without_a_configured_breaker",
+	}, -1, -1, -1, -1)
+
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
+	text := recorder.Body.String()
+	if !strings.Contains(text, `latchway_upstream_attempts_total{circuit_state="invalid",condition="invalid",outcome="invalid",route="primary"} 1`) {
+		t.Fatalf("attempt labels did not collapse to the closed invalid value:\n%s", text)
+	}
+	for _, forbidden := range []string{
+		"credential=must-not-win", "req_01J67V7X5JS9VD4AFM3J8MSX91",
+		"provider_private_failure_text", "closed_without_a_configured_breaker",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("attempt metric disclosed unbounded value %q:\n%s", forbidden, text)
 		}
 	}
 }

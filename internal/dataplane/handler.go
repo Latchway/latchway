@@ -458,9 +458,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		}
 		var outcome quota.Outcome
 		result, outcome = calculateAttemptOutcome(current, result)
-		handler.recordAttempt(request.Context(), authorization, current.decision, result, outcome)
-
 		condition, retryable := fallbackCondition(request.Context(), result)
+		handler.recordAttempt(request.Context(), authorization, current.decision, result, outcome, condition)
+
 		nextCandidateIndex := candidateIndex
 		nextRouteAttempts := routeAttempts
 		retryDelay := time.Duration(0)
@@ -1733,6 +1733,7 @@ func (handler *Handler) recordAttempt(
 	decision policy.Decision,
 	result executionResult,
 	outcome quota.Outcome,
+	condition string,
 ) {
 	if handler == nil || handler.telemetry == nil || !result.beginInvoked || !result.dispatchOwner {
 		return
@@ -1742,7 +1743,6 @@ func (handler *Handler) recordAttempt(
 	labels.Environment = authorization.EnvironmentID
 	labels.Platform = authorization.InstallationPlatform
 	labels.AttestationLevel = authorization.TrustLevel
-	labels.Outcome = outcome.Status
 	inputTokens, outputTokens, costNanoUSD := int64(-1), int64(-1), int64(-1)
 	if outcome.Usage.Known {
 		inputTokens, outputTokens = outcome.Usage.InputTokens, outcome.Usage.OutputTokens
@@ -1754,7 +1754,13 @@ func (handler *Handler) recordAttempt(
 	if !result.startedAt.IsZero() && !result.firstByteAt.IsZero() && !result.firstByteAt.Before(result.startedAt) {
 		firstToken = result.firstByteAt.Sub(result.startedAt)
 	}
-	handler.telemetry.RecordUpstreamAttempt(ctx, labels, inputTokens, outputTokens, costNanoUSD, firstToken)
+	if condition == "" {
+		condition = telemetry.RouteAttemptConditionNone
+	}
+	handler.telemetry.RecordUpstreamAttempt(ctx, labels, telemetry.RouteAttemptObservation{
+		Condition: condition, Outcome: outcome.Status,
+		CircuitState: telemetry.CircuitObservationNotConfigured,
+	}, inputTokens, outputTokens, costNanoUSD, firstToken)
 }
 
 func isDPoPFailure(err error) bool {
