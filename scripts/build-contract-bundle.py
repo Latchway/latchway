@@ -63,6 +63,7 @@ def build(output_directory: Path) -> Path:
         "admin.openapi.yaml",
         "config.schema.json",
         "attestation-binding.schema.json",
+        "release-evidence.schema.json",
         "error-codes.yaml",
         "protocol-version.json",
     ]

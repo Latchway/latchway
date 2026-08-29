@@ -28,14 +28,27 @@ live SDK/server behavior, physical devices, a live provider, and cloud
 deployments as `unverified`. Source alignment is necessary release input; it is
 not a publication, runtime compatibility, or hardware-trust claim.
 
-`release` scope repeats every source check and additionally requires:
+`promotion` scope is the prepublication gate. It repeats every source check and
+additionally requires:
 
-- a canonical core release tag matching the core and console versions;
-- released contract metadata and an exact `core_release` in every SDK lock;
-- clean release trees, release changelog entries, and annotated tags pointing
-  to each exact local repository commit;
-- no tracked local build output or credential-shaped release files; and
-- valid, artifact-hash-bound evidence for every external domain listed below.
+- a canonical intended core tag matching the core and console versions;
+- released contract metadata, including a `released_at` no more than seven
+  days old and not in the future, and the exact intended `core_release` in
+  every SDK lock;
+- release changelog entries and no tracked local build output or
+  credential-shaped files, without requiring any tag to exist yet;
+- one exact immutable candidate OCI digest supplied independently on the
+  command line; and
+- valid, artifact-hash-bound evidence for live SDK conformance, physical
+  devices, the live provider, all cloud deployments, operational resilience,
+  and supply-chain verification.
+
+`release` scope is the postpublication gate. It repeats every promotion check
+and additionally requires:
+
+- annotated tags pointing to each exact local repository commit; and
+- public-tag and public-registry evidence in addition to the six promotion
+  domains.
 
 An absent external document is `unverified` and release-blocking. A malformed,
 wrong-commit, wrong-version, failed-claim, unsafe-path, or digest-mismatched
@@ -74,9 +87,11 @@ The output must be outside all five repositories. This prevents evidence
 creation from making a previously clean candidate dirty after the clean-tree
 check.
 
-## External release evidence
+## External promotion and release evidence
 
-Release scope expects this fixed directory shape:
+Promotion scope requires the six non-public documents below. Release scope
+requires the same documents plus `public_tags.json` and
+`public_registries.json`:
 
 ```text
 external-evidence/
@@ -128,11 +143,14 @@ Repository tags and versions need not all be equal; they must equal the exact
 coordinates derived from the five local candidates. The example uses 1.0.0 for
 readability.
 
-Documents are accepted only when their timestamps are ordered and span no more
-than seven days, their repository map exactly matches the candidates, all
+Documents are accepted only when their timestamps are ordered, start on or
+after the contract's `released_at`, finish no later than the current time, and
+are no more than seven days old. Each document and the common earliest-start
+to latest-finish evidence window may span no more than seven days. Their
+repository map must exactly match the candidates, all
 domain-specific claims are present and literally `true`, and every referenced
 regular file is inside the evidence directory with the declared SHA-256. Every
-domain must name the same canonical immutable
+domain must name the independently supplied canonical immutable
 `ghcr.io/latchway/latchway@sha256:...` image; a syntactically valid but
 different digest is rejected.
 Symlinks, traversal, duplicate artifacts, unknown fields, and oversized files
@@ -161,13 +179,28 @@ platform evidence; the orchestrator only validates identity, completeness, and
 artifact integrity so that evidence from another system cannot be silently
 substituted.
 
-Run the final offline aggregation with:
+Run the prepublication aggregation before creating tags or publishing:
+
+```bash
+python3 latchway/scripts/cross-repo-conformance.py \
+  --workspace-root /path/to/workspace \
+  --scope promotion \
+  --release-tag v1.0.0 \
+  --oci-image-digest ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters> \
+  --external-evidence-dir /path/to/external-evidence \
+  --output /tmp/latchway-cross-repo-promotion.json
+```
+
+A passing promotion report has `promotion_ready: true` and
+`release_ready: false`. After publication, run the final aggregation with all
+eight documents:
 
 ```bash
 python3 latchway/scripts/cross-repo-conformance.py \
   --workspace-root /path/to/workspace \
   --scope release \
   --release-tag v1.0.0 \
+  --oci-image-digest ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters> \
   --external-evidence-dir /path/to/external-evidence \
   --output /tmp/latchway-cross-repo-release.json
 ```
@@ -175,6 +208,12 @@ python3 latchway/scripts/cross-repo-conformance.py \
 Exit status is zero only when every required check passes. JSON and JUnit are
 still written when a verification check fails. CLI usage or evidence-write
 errors use exit status 2.
+
+Every report is validated before either output is written against the checked
+out core's strict `api/release-evidence.schema.json`. The report binds the
+contract status and release time, bundle name and hash, exact intended tag for
+all five repositories, candidate OCI digest, per-domain document and artifact
+hashes, and the common evidence window.
 
 ## Report safety and determinism
 
@@ -209,6 +248,8 @@ python3 -m unittest -v scripts/test_cross_repo_conformance.py
 ```
 
 The tests create five isolated Git repositories and cover a complete source
-pass, byte determinism, dirty-tree redaction, lock/fixture drift, missing
-external release evidence, valid hash-bound release evidence, artifact tamper,
-cross-domain OCI digest substitution, and output-path safety.
+pass, byte determinism, dirty-tree redaction, lock/fixture drift, pre-tag
+promotion, the six-versus-eight domain split, valid hash-bound release
+evidence, artifact tamper, coordinate and OCI digest substitution,
+pre-contract/future/stale timestamps, an over-wide aggregate window,
+schema-before-write validation, and output-path safety.

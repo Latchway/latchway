@@ -19,6 +19,25 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / "api"
+PROMOTION_EVIDENCE_DOMAINS = [
+    "live_sdk_conformance",
+    "physical_devices",
+    "live_provider",
+    "cloud_deployments",
+    "operational_resilience",
+    "supply_chain",
+]
+RELEASE_EVIDENCE_DOMAINS = [
+    "live_sdk_conformance",
+    "public_tags",
+    "public_registries",
+    "physical_devices",
+    "live_provider",
+    "cloud_deployments",
+    "operational_resilience",
+    "supply_chain",
+]
+MAXIMUM_RELEASE_EVIDENCE_SECONDS = 7 * 24 * 60 * 60
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -555,6 +574,30 @@ def main() -> None:
         if errors:
             raise ValueError("configuration example failed schema:\n" + "\n".join(errors))
 
+    release_schema_path = API / "release-evidence.schema.json"
+    release_schema = load_document(release_schema_path)
+    if (
+        release_schema.get("$schema")
+        != "https://json-schema.org/draft/2020-12/schema"
+        or release_schema.get("$id")
+        != "https://latchway.dev/schemas/release-evidence.schema.json"
+        or release_schema.get("type") != "object"
+        or release_schema.get("additionalProperties") is not False
+    ):
+        raise ValueError("release evidence schema identity or strict root drifted")
+    walk_refs(release_schema_path, release_schema)
+    release_contract = manifest.get("release_evidence")
+    expected_release_contract = {
+        "schema_file": "release-evidence.schema.json",
+        "schema_version": 1,
+        "maximum_age_seconds": MAXIMUM_RELEASE_EVIDENCE_SECONDS,
+        "maximum_window_seconds": MAXIMUM_RELEASE_EVIDENCE_SECONDS,
+        "promotion_domains": PROMOTION_EVIDENCE_DOMAINS,
+        "release_domains": RELEASE_EVIDENCE_DOMAINS,
+    }
+    if release_contract != expected_release_contract:
+        raise ValueError("protocol manifest release evidence contract drifted")
+
     attestation_schema_path = API / "attestation-binding.schema.json"
     attestation_schema = load_document(attestation_schema_path)
     walk_refs(attestation_schema_path, attestation_schema)
@@ -580,6 +623,7 @@ def main() -> None:
         "admin.openapi.yaml",
         "config.schema.json",
         "attestation-binding.schema.json",
+        "release-evidence.schema.json",
         "error-codes.yaml",
         "protocol-version.json",
         "test-vectors",
@@ -587,7 +631,7 @@ def main() -> None:
     }
     if required != actual:
         raise ValueError(f"bundle manifest entries differ from builder: {sorted(required ^ actual)}")
-    print("contract validation passed: OpenAPI structure/refs, registry, schemas/examples, attestation hashes, DPoP signatures/semantics")
+    print("contract validation passed: OpenAPI structure/refs, registry, schemas/examples, release evidence, attestation hashes, DPoP signatures/semantics")
 
 
 if __name__ == "__main__":

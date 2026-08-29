@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import subprocess
@@ -40,6 +42,10 @@ class SyntheticWorkspace:
         self.commits: dict[str, str] = {}
         self.bundle_sha256 = ""
         self.fixture_sha256: dict[str, str] = {}
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
+        self.released_at = self.now - timedelta(days=2)
+        self.evidence_started_at = self.now - timedelta(hours=1)
+        self.evidence_finished_at = self.now - timedelta(minutes=50)
 
     def create(self) -> None:
         self._create_core()
@@ -66,14 +72,30 @@ class SyntheticWorkspace:
                     "admin.openapi.yaml",
                     "config.schema.json",
                     "attestation-binding.schema.json",
+                    "release-evidence.schema.json",
                     "error-codes.yaml",
                     "protocol-version.json",
                     "test-vectors",
                     "SHA256SUMS",
                 ],
             },
+            "release_evidence": {
+                "schema_file": "release-evidence.schema.json",
+                "schema_version": 1,
+                "maximum_age_seconds": 604800,
+                "maximum_window_seconds": 604800,
+                "promotion_domains": [
+                    "live_sdk_conformance",
+                    "physical_devices",
+                    "live_provider",
+                    "cloud_deployments",
+                    "operational_resilience",
+                    "supply_chain",
+                ],
+                "release_domains": list(EXTERNAL_CLAIMS),
+            },
             "sdk_kinds": ["ios", "android", "javascript", "react-native"],
-            "released_at": "2026-08-29T00:00:00Z",
+            "released_at": self.timestamp(self.released_at),
         }
         self.write_json(root / "api/protocol-version.json", manifest)
         for relative, contents in {
@@ -93,6 +115,10 @@ class SyntheticWorkspace:
             "CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-08-29\n\n- Release.\n",
         }.items():
             self.write(root / relative, contents)
+        shutil.copyfile(
+            CORE_ROOT / "api/release-evidence.schema.json",
+            root / "api/release-evidence.schema.json",
+        )
         self.write_json(
             root / "web/console/package.json",
             {"name": "@latchway/admin-console", "version": "1.0.0", "private": True},
@@ -305,8 +331,8 @@ class SyntheticWorkspace:
                 "kind": "latchway_cross_repository_external_evidence",
                 "domain": domain,
                 "status": "passed",
-                "started_at": "2026-08-29T00:00:00Z",
-                "finished_at": "2026-08-29T00:10:00Z",
+                "started_at": self.timestamp(self.evidence_started_at),
+                "finished_at": self.timestamp(self.evidence_finished_at),
                 "core_commit": self.commits["core"],
                 "core_release": self.core_release,
                 "contract_version": self.contract_version,
@@ -378,6 +404,10 @@ class SyntheticWorkspace:
     @staticmethod
     def sha256(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    @staticmethod
+    def timestamp(value: datetime) -> str:
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 EXTERNAL_CLAIMS = {
@@ -474,8 +504,15 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             "--junit-output",
             str(junit),
         ]
-        if scope == "release":
-            command.extend(["--release-tag", self.workspace.core_release])
+        if scope in ("promotion", "release"):
+            command.extend(
+                [
+                    "--release-tag",
+                    self.workspace.core_release,
+                    "--oci-image-digest",
+                    self.workspace.oci_image_digest,
+                ]
+            )
             if external is not None:
                 command.extend(["--external-evidence-dir", str(external)])
         result = subprocess.run(
@@ -493,16 +530,35 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(report["verdict"], "passed")
         self.assertTrue(report["source_conformance_passed"])
+        self.assertFalse(report["promotion_ready"])
         self.assertFalse(report["release_ready"])
+        self.assertIsNone(report["evidence_window"])
+        self.assertEqual(
+            set(report["contract"]),
+            {
+                "version",
+                "status",
+                "released_at",
+                "wire_protocol",
+                "bundle_file_name",
+                "bundle_sha256",
+                "core_release",
+                "oci_image_digest",
+            },
+        )
+        self.assertTrue(
+            all(set(repository) == {"id", "commit", "version", "intended_tag"}
+                for repository in report["repositories"])
+        )
         external = [
             domain
             for domain in report["evidence_domains"]
-            if domain["id"] not in ("local_source", "local_release")
+            if not domain["id"].startswith("local_")
         ]
         self.assertTrue(external)
         self.assertTrue(all(domain["status"] == "unverified" for domain in external))
         self.assertIn(
-            f'skipped="{len(EXTERNAL_CLAIMS) + 1}"',
+            f'skipped="{len(EXTERNAL_CLAIMS) + 3}"',
             junit.read_text(encoding="utf-8"),
         )
 
@@ -545,10 +601,88 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertIn("sdk_contract_locks_disagree", reasons)
         self.assertIn("sdk_fixture_mismatch", reasons)
 
+    def test_promotion_scope_requires_exactly_six_non_public_domains(self) -> None:
+        result, report, _, junit = self.run_gate(
+            "promotion-missing", scope="promotion"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(report["source_conformance_passed"])
+        self.assertFalse(report["promotion_ready"])
+        self.assertFalse(report["release_ready"])
+        external = {
+            check["id"].removeprefix("external."): check
+            for check in report["checks"]
+            if check["id"].startswith("external.")
+        }
+        required = {domain for domain, check in external.items() if check["required"]}
+        self.assertEqual(required, set(EXTERNAL_CLAIMS) - {"public_tags", "public_registries"})
+        self.assertEqual(external["public_tags"]["status"], "unverified")
+        self.assertEqual(external["public_registries"]["status"], "unverified")
+        window = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "promotion.evidence_window"
+        )
+        self.assertEqual(window["reason"], "prerequisite_evidence_failed")
+        self.assertIn('name="promotion_ready" value="false"', junit.read_text())
+
+    def test_promotion_scope_passes_before_tags_exist_and_binds_manifest(self) -> None:
+        evidence = self.root / "promotion"
+        self.workspace.create_external_evidence(evidence)
+        for repository in self.workspace.repositories.values():
+            SyntheticWorkspace.git(repository, "tag", "-d", self.workspace.core_release)
+        result, report, _, junit = self.run_gate(
+            "promotion-pass", scope="promotion", external=evidence
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["verdict"], "passed")
+        self.assertTrue(report["promotion_ready"])
+        self.assertFalse(report["release_ready"])
+        self.assertEqual(
+            report["contract"],
+            {
+                "version": self.workspace.contract_version,
+                "status": "released",
+                "released_at": self.workspace.timestamp(self.workspace.released_at),
+                "wire_protocol": self.workspace.wire_protocol,
+                "bundle_file_name": "latchway-contract-1.0.0.tar.gz",
+                "bundle_sha256": self.workspace.bundle_sha256,
+                "core_release": self.workspace.core_release,
+                "oci_image_digest": self.workspace.oci_image_digest,
+            },
+        )
+        self.assertEqual(
+            {repository["intended_tag"] for repository in report["repositories"]},
+            {self.workspace.core_release},
+        )
+        self.assertEqual(
+            report["evidence_window"],
+            {
+                "started_at": self.workspace.timestamp(
+                    self.workspace.evidence_started_at
+                ),
+                "finished_at": self.workspace.timestamp(
+                    self.workspace.evidence_finished_at
+                ),
+                "maximum_age_seconds": 604800,
+            },
+        )
+        domains = {domain["id"]: domain for domain in report["evidence_domains"]}
+        for domain in set(EXTERNAL_CLAIMS) - {"public_tags", "public_registries"}:
+            self.assertEqual(domains[domain]["status"], "passed")
+            self.assertRegex(domains[domain]["document_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(len(domains[domain]["artifact_sha256"]), 1)
+        self.assertEqual(domains["public_tags"]["status"], "unverified")
+        self.assertEqual(domains["public_tags"]["artifact_sha256"], [])
+        junit_text = junit.read_text(encoding="utf-8")
+        self.assertIn('name="promotion_ready" value="true"', junit_text)
+        self.assertIn('name="release_ready" value="false"', junit_text)
+
     def test_release_scope_requires_every_external_domain(self) -> None:
         result, report, _, junit = self.run_gate("release-missing", scope="release")
         self.assertEqual(result.returncode, 1)
         self.assertTrue(report["source_conformance_passed"])
+        self.assertFalse(report["promotion_ready"])
         self.assertFalse(report["release_ready"])
         external = [
             check for check in report["checks"] if check["id"].startswith("external.")
@@ -556,7 +690,10 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertEqual(len(external), len(EXTERNAL_CLAIMS))
         self.assertTrue(all(check["required"] for check in external))
         self.assertTrue(all(check["status"] == "unverified" for check in external))
-        self.assertIn(f'failures="{len(EXTERNAL_CLAIMS)}"', junit.read_text(encoding="utf-8"))
+        self.assertIn(
+            f'failures="{len(EXTERNAL_CLAIMS) + 1}"',
+            junit.read_text(encoding="utf-8"),
+        )
 
     def test_release_scope_accepts_only_hash_bound_external_evidence(self) -> None:
         evidence = self.root / "external"
@@ -566,6 +703,7 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(report["verdict"], "passed")
+        self.assertTrue(report["promotion_ready"])
         self.assertTrue(report["release_ready"])
 
         artifact = evidence / "artifacts/physical_devices.txt"
@@ -599,6 +737,169 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertEqual(
             supply_chain_check["reason"], "external_evidence_oci_digest_mismatch"
         )
+
+    def test_promotion_rejects_repository_coordinate_substitution(self) -> None:
+        evidence = self.root / "coordinate-substitution"
+        self.workspace.create_external_evidence(evidence)
+        physical_path = evidence / "physical_devices.json"
+        physical = json.loads(physical_path.read_text(encoding="utf-8"))
+        physical["repositories"]["ios"]["commit"] = "b" * 40
+        SyntheticWorkspace.write_json(physical_path, physical)
+        result, report, _, _ = self.run_gate(
+            "promotion-coordinate-substitution", scope="promotion", external=evidence
+        )
+        self.assertEqual(result.returncode, 1)
+        check = next(
+            item
+            for item in report["checks"]
+            if item["id"] == "external.physical_devices"
+        )
+        self.assertEqual(check["reason"], "external_evidence_repository_mismatch")
+
+    def test_promotion_rejects_unbound_external_times(self) -> None:
+        cases = {
+            "precedes-contract": (
+                self.workspace.released_at - timedelta(hours=1),
+                self.workspace.released_at + timedelta(minutes=1),
+                "external_evidence_precedes_contract_release",
+            ),
+            "future": (
+                self.workspace.now - timedelta(minutes=1),
+                self.workspace.now + timedelta(minutes=5),
+                "external_evidence_time_in_future",
+            ),
+        }
+        for name, (started, finished, reason) in cases.items():
+            with self.subTest(name=name):
+                evidence = self.root / name
+                self.workspace.create_external_evidence(evidence)
+                physical_path = evidence / "physical_devices.json"
+                physical = json.loads(physical_path.read_text(encoding="utf-8"))
+                physical["started_at"] = self.workspace.timestamp(started)
+                physical["finished_at"] = self.workspace.timestamp(finished)
+                SyntheticWorkspace.write_json(physical_path, physical)
+                result, report, _, _ = self.run_gate(
+                    name, scope="promotion", external=evidence
+                )
+                self.assertEqual(result.returncode, 1)
+                check = next(
+                    item
+                    for item in report["checks"]
+                    if item["id"] == "external.physical_devices"
+                )
+                self.assertEqual(check["reason"], reason)
+
+    def test_promotion_rejects_cross_domain_window_over_seven_days(self) -> None:
+        module_name = "latchway_cross_repo_window_under_test"
+        specification = importlib.util.spec_from_file_location(module_name, SCRIPT)
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        sys.modules[module_name] = module
+        try:
+            specification.loader.exec_module(module)
+            evaluator = module.Evaluator(
+                module.Configuration(
+                    scope="promotion",
+                    repositories=self.workspace.repositories,
+                    release_tag=self.workspace.core_release,
+                    oci_image_digest=self.workspace.oci_image_digest,
+                    external_evidence_dir=None,
+                )
+            )
+            evaluator.state["external_evidence"] = {
+                domain: {
+                    "started_at": self.workspace.timestamp(
+                        self.workspace.now - timedelta(hours=1)
+                    ),
+                    "finished_at": self.workspace.timestamp(
+                        self.workspace.now - timedelta(minutes=30)
+                    ),
+                }
+                for domain in module.PROMOTION_DOMAINS
+            }
+            evaluator.state["external_evidence"]["physical_devices"] = {
+                "started_at": self.workspace.timestamp(
+                    self.workspace.now - timedelta(days=8)
+                ),
+                "finished_at": self.workspace.timestamp(
+                    self.workspace.now - timedelta(days=6)
+                ),
+            }
+            with self.assertRaises(module.VerificationError) as raised:
+                evaluator._validate_evidence_window()
+            self.assertEqual(
+                raised.exception.code, "external_evidence_window_too_wide"
+            )
+        finally:
+            sys.modules.pop(module_name, None)
+
+    def test_future_or_stale_contract_release_timestamp_is_rejected(self) -> None:
+        module_name = "latchway_cross_repo_conformance_under_test"
+        specification = importlib.util.spec_from_file_location(module_name, SCRIPT)
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        sys.modules[module_name] = module
+        try:
+            specification.loader.exec_module(module)
+            configuration = module.Configuration(
+                scope="promotion",
+                repositories=self.workspace.repositories,
+                release_tag=self.workspace.core_release,
+                oci_image_digest=self.workspace.oci_image_digest,
+                external_evidence_dir=None,
+            )
+            evaluator = module.Evaluator(configuration)
+            base_state = {
+                "repositories": self.workspace.repositories,
+                "versions": {
+                    repository_id: self.workspace.version
+                    for repository_id in self.workspace.repositories
+                },
+                "intended_tags": {
+                    repository_id: self.workspace.core_release
+                    for repository_id in self.workspace.repositories
+                },
+                "core_release": self.workspace.core_release,
+            }
+            for timestamp, reason in (
+                (
+                    evaluator.now + timedelta(minutes=1),
+                    "contract_released_at_in_future",
+                ),
+                (
+                    evaluator.now - timedelta(days=8),
+                    "contract_released_at_stale",
+                ),
+            ):
+                with self.subTest(reason=reason):
+                    evaluator.state = {
+                        **base_state,
+                        "manifest": {
+                            "contract_status": "released",
+                            "released_at": self.workspace.timestamp(timestamp),
+                        },
+                    }
+                    with self.assertRaises(module.VerificationError) as raised:
+                        evaluator._local_promotion_preconditions()
+                    self.assertEqual(raised.exception.code, reason)
+        finally:
+            sys.modules.pop(module_name, None)
+
+    def test_report_is_validated_against_checked_out_contract_before_write(self) -> None:
+        schema_path = (
+            self.workspace.repositories["core"] / "api/release-evidence.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["properties"]["kind"]["const"] = "tampered_kind"
+        SyntheticWorkspace.write_json(schema_path, schema)
+        result, report, output, junit = self.run_gate("schema-rejects-report")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report, {})
+        self.assertFalse(output.exists())
+        self.assertFalse(junit.exists())
+        self.assertIn("release_evidence_report_schema_invalid", result.stderr)
 
     def test_evidence_output_inside_source_checkout_is_rejected(self) -> None:
         output = self.workspace.repositories["core"] / "evidence.json"

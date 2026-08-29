@@ -32,6 +32,8 @@ MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_BYTES = 128 * 1024 * 1024
 MAX_BUNDLE_ENTRIES = 4096
+MAXIMUM_EVIDENCE_AGE = timedelta(days=7)
+MAXIMUM_EVIDENCE_SECONDS = int(MAXIMUM_EVIDENCE_AGE.total_seconds())
 
 REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
 DEFAULT_REPOSITORY_NAMES = {
@@ -59,6 +61,7 @@ FIXED_CONTRACT_FILES = (
     "config.schema.json",
     "error-codes.yaml",
     "protocol-version.json",
+    "release-evidence.schema.json",
 )
 REQUIRED_SDK_KINDS = frozenset(("ios", "android", "javascript", "react-native"))
 
@@ -78,6 +81,7 @@ LOCK_LINE = re.compile(
     r'^([a-z0-9_]+):\s*(?:"([^"]*)"|([^#\s]+))\s*(?:#.*)?$'
 )
 CHECKSUM_LINE = re.compile(r"^([0-9a-f]{64}) {2}([^\r\n]+)$")
+CANONICAL_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 EXTERNAL_DOMAINS: Mapping[str, tuple[str, ...]] = {
     "live_sdk_conformance": (
@@ -142,6 +146,11 @@ EXTERNAL_DOMAINS: Mapping[str, tuple[str, ...]] = {
         "provenance_verified",
     ),
 }
+PUBLICATION_DOMAINS = frozenset(("public_tags", "public_registries"))
+PROMOTION_DOMAINS = tuple(
+    domain for domain in EXTERNAL_DOMAINS if domain not in PUBLICATION_DOMAINS
+)
+RELEASE_DOMAINS = tuple(EXTERNAL_DOMAINS)
 
 CHECK_SUMMARIES = {
     "source.repository_layout": "All five explicit repository roots are distinct local Git checkouts.",
@@ -152,6 +161,8 @@ CHECK_SUMMARIES = {
     "source.generated_fixtures": "Every SDK fixture is byte-identical to the generated core bundle member.",
     "source.package_versions": "Public package names and source version declarations agree.",
     "source.react_native_pins": "React Native dependencies pin the exact local JavaScript, iOS, and Android sources.",
+    "promotion.local_preconditions": "The released contract and every intended source coordinate are valid before publication.",
+    "promotion.evidence_window": "All required evidence is fresh and belongs to one bounded candidate window.",
     "release.local_preconditions": "All local release coordinates, clean trees, and annotated tags are valid.",
 }
 
@@ -195,6 +206,7 @@ class Configuration:
     scope: str
     repositories: Mapping[str, Path]
     release_tag: str | None
+    oci_image_digest: str | None
     external_evidence_dir: Path | None
 
 
@@ -203,6 +215,7 @@ class Evaluator:
         self.configuration = configuration
         self.checks: list[Check] = []
         self.state: dict[str, Any] = {}
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
 
     def evaluate(self) -> dict[str, Any]:
         self._run("source.repository_layout", "local_source", True, self._repository_layout)
@@ -214,7 +227,22 @@ class Evaluator:
         self._run("source.package_versions", "local_source", True, self._package_versions)
         self._run("source.react_native_pins", "local_source", True, self._react_native_pins)
 
+        promotion_requested = self.configuration.scope in ("promotion", "release")
         release_required = self.configuration.scope == "release"
+        if promotion_requested:
+            self._run(
+                "promotion.local_preconditions",
+                "local_promotion",
+                True,
+                self._local_promotion_preconditions,
+            )
+        else:
+            self._unverified(
+                "promotion.local_preconditions",
+                "local_promotion",
+                False,
+                "promotion_scope_not_requested",
+            )
         if release_required:
             self._run(
                 "release.local_preconditions",
@@ -232,15 +260,33 @@ class Evaluator:
 
         for domain in EXTERNAL_DOMAINS:
             identifier = f"external.{domain}"
-            if release_required:
+            required = release_required or (
+                self.configuration.scope == "promotion" and domain in PROMOTION_DOMAINS
+            )
+            if required:
                 self._verify_external_domain(identifier, domain)
             else:
                 self._unverified(
                     identifier,
                     domain,
                     False,
-                    "external_evidence_not_claimed_by_source_scope",
+                    "external_evidence_not_required_by_scope",
                 )
+
+        if promotion_requested:
+            self._run(
+                "promotion.evidence_window",
+                "local_promotion",
+                True,
+                self._validate_evidence_window,
+            )
+        else:
+            self._unverified(
+                "promotion.evidence_window",
+                "local_promotion",
+                False,
+                "promotion_scope_not_requested",
+            )
 
         required_passed = all(
             check.status == "passed" for check in self.checks if check.required
@@ -250,6 +296,16 @@ class Evaluator:
             for check in self.checks
             if check.domain == "local_source"
         )
+        promotion_required_checks = [
+            check
+            for check in self.checks
+            if check.domain == "local_source"
+            or check.domain == "local_promotion"
+            or check.domain in PROMOTION_DOMAINS
+        ]
+        promotion_ready = promotion_requested and all(
+            check.status == "passed" for check in promotion_required_checks
+        )
         release_ready = release_required and required_passed
         report: dict[str, Any] = {
             "schema_version": 1,
@@ -257,9 +313,11 @@ class Evaluator:
             "scope": self.configuration.scope,
             "verdict": "passed" if required_passed else "failed",
             "source_conformance_passed": source_passed,
+            "promotion_ready": promotion_ready,
             "release_ready": release_ready,
             "contract": self._contract_summary(),
             "repositories": self._repository_summary(),
+            "evidence_window": self.state.get("evidence_window"),
             "evidence_domains": self._domain_summary(),
             "checks": [check.as_json() for check in self.checks],
         }
@@ -409,6 +467,22 @@ class Evaluator:
         status_value = manifest.get("contract_status")
         if status_value not in ("draft", "released"):
             raise VerificationError("invalid_contract_status")
+        released_at = manifest.get("released_at")
+        if status_value == "draft":
+            if released_at is not None:
+                raise VerificationError("draft_contract_has_release_timestamp")
+        else:
+            parse_timestamp(released_at, "contract_released_at_invalid")
+        expected_release_evidence = {
+            "schema_file": "release-evidence.schema.json",
+            "schema_version": 1,
+            "maximum_age_seconds": MAXIMUM_EVIDENCE_SECONDS,
+            "maximum_window_seconds": MAXIMUM_EVIDENCE_SECONDS,
+            "promotion_domains": list(PROMOTION_DOMAINS),
+            "release_domains": list(RELEASE_DOMAINS),
+        }
+        if manifest.get("release_evidence") != expected_release_evidence:
+            raise VerificationError("release_evidence_contract_mismatch")
 
         buildinfo = read_text(core / "internal/buildinfo/buildinfo.go")
         core_version = require_match(
@@ -442,6 +516,8 @@ class Evaluator:
         self.state["wire_protocol"] = wire
         self.state["bundle_name"] = bundle_name
         self.state["core_version"] = core_version
+        self.state["contract_status"] = status_value
+        self.state["released_at"] = released_at
         return {
             "contract_version": contract_version,
             "wire_protocol": wire,
@@ -697,6 +773,10 @@ class Evaluator:
                     "invalid_package_version", {"repository": repository_id}
                 )
         self.state["versions"] = versions
+        self.state["intended_tags"] = {
+            repository_id: f"v{version}"
+            for repository_id, version in versions.items()
+        }
         return {"versions": versions}
 
     def _react_native_pins(self) -> Mapping[str, Any]:
@@ -798,45 +878,38 @@ class Evaluator:
             }
         }
 
-    def _local_release_preconditions(self) -> Mapping[str, Any]:
+    def _local_promotion_preconditions(self) -> Mapping[str, Any]:
         repositories = self._required_state("repositories")
-        commits = self._required_state("commits")
         versions = self._required_state("versions")
+        intended_tags = self._required_state("intended_tags")
         manifest = self._required_state("manifest")
         release_tag = self.configuration.release_tag
         if release_tag is None:
             raise VerificationError("release_tag_required")
         if RELEASE_TAG.fullmatch(release_tag) is None:
             raise VerificationError("release_tag_not_canonical")
-        if release_tag[1:] != versions["core"]:
+        if release_tag != intended_tags["core"]:
             raise VerificationError("core_release_tag_version_mismatch")
         if self._required_state("core_release") != release_tag:
             raise VerificationError("sdk_locks_do_not_name_core_release")
         if manifest.get("contract_status") != "released":
             raise VerificationError("contract_not_marked_released")
-        parse_timestamp(manifest.get("released_at"), "contract_released_at_invalid")
+        released_at = parse_timestamp(
+            manifest.get("released_at"), "contract_released_at_invalid"
+        )
+        if released_at > self.now:
+            raise VerificationError("contract_released_at_in_future")
+        if self.now - released_at > MAXIMUM_EVIDENCE_AGE:
+            raise VerificationError("contract_released_at_stale")
+        image_digest = self.configuration.oci_image_digest
+        if (
+            not isinstance(image_digest, str)
+            or OCI_IMAGE_DIGEST.fullmatch(image_digest) is None
+        ):
+            raise VerificationError("candidate_oci_image_digest_invalid")
 
-        tags = {"core": release_tag}
-        for repository_id in REPOSITORY_IDS[1:]:
-            tags[repository_id] = f"v{versions[repository_id]}"
         for repository_id in REPOSITORY_IDS:
             root = repositories[repository_id]
-            tag = tags[repository_id]
-            try:
-                object_type = git(root, "cat-file", "-t", f"refs/tags/{tag}")
-                target = git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}")
-            except VerificationError:
-                raise VerificationError(
-                    "release_tag_missing", {"repository": repository_id}
-                ) from None
-            if object_type != "tag":
-                raise VerificationError(
-                    "release_tag_not_annotated", {"repository": repository_id}
-                )
-            if target != commits[repository_id]:
-                raise VerificationError(
-                    "release_tag_not_at_head", {"repository": repository_id}
-                )
             changelog = read_text(root / "CHANGELOG.md")
             version = versions[repository_id]
             if re.search(
@@ -853,8 +926,43 @@ class Evaluator:
                     "forbidden_release_files_tracked",
                     {"repository": repository_id, "count": len(forbidden)},
                 )
-        self.state["release_tags"] = tags
-        return {"tags": tags, "annotated_tag_count": len(tags)}
+        self.state["contract_released_at"] = released_at
+        self.state["oci_image_digest"] = image_digest
+        self.state["promotion_preconditions_passed"] = True
+        return {
+            "intended_tags": intended_tags,
+            "contract_released_at": manifest["released_at"],
+            "oci_image_digest": image_digest,
+        }
+
+    def _local_release_preconditions(self) -> Mapping[str, Any]:
+        self._required_state("promotion_preconditions_passed")
+        repositories = self._required_state("repositories")
+        commits = self._required_state("commits")
+        intended_tags = self._required_state("intended_tags")
+        for repository_id in REPOSITORY_IDS:
+            root = repositories[repository_id]
+            tag = intended_tags[repository_id]
+            try:
+                object_type = git(root, "cat-file", "-t", f"refs/tags/{tag}")
+                target = git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}")
+            except VerificationError:
+                raise VerificationError(
+                    "release_tag_missing", {"repository": repository_id}
+                ) from None
+            if object_type != "tag":
+                raise VerificationError(
+                    "release_tag_not_annotated", {"repository": repository_id}
+                )
+            if target != commits[repository_id]:
+                raise VerificationError(
+                    "release_tag_not_at_head", {"repository": repository_id}
+                )
+        self.state["verified_release_tags"] = intended_tags
+        return {
+            "tags": intended_tags,
+            "annotated_tag_count": len(intended_tags),
+        }
 
     def _verify_external_domain(self, identifier: str, domain: str) -> None:
         evidence_root = self.configuration.external_evidence_dir
@@ -888,12 +996,12 @@ class Evaluator:
                 self._required_state("bundle_sha256"),
                 self._required_state("commits")["core"],
                 self.configuration.release_tag,
+                self._required_state("contract_released_at"),
+                self.now,
+                self._required_state("oci_image_digest"),
             )
-            image_digest = document["oci_image_digest"]
-            existing_digest = self.state.get("oci_image_digest")
-            if existing_digest is not None and image_digest != existing_digest:
-                raise VerificationError("external_evidence_oci_digest_mismatch")
-            self.state["oci_image_digest"] = image_digest
+            external_evidence = self.state.setdefault("external_evidence", {})
+            external_evidence[domain] = document
             return document
 
         self._run(identifier, domain, True, verify)
@@ -901,7 +1009,7 @@ class Evaluator:
     def _external_coordinates(self) -> Mapping[str, Mapping[str, str]]:
         commits = self._required_state("commits")
         versions = self._required_state("versions")
-        tags = self._required_state("release_tags")
+        tags = self._required_state("intended_tags")
         return {
             repository_id: {
                 "commit": commits[repository_id],
@@ -911,36 +1019,74 @@ class Evaluator:
             for repository_id in REPOSITORY_IDS
         }
 
+    def _validate_evidence_window(self) -> Mapping[str, Any]:
+        evidence = self._required_state("external_evidence")
+        required_domains = (
+            RELEASE_DOMAINS
+            if self.configuration.scope == "release"
+            else PROMOTION_DOMAINS
+        )
+        if any(domain not in evidence for domain in required_domains):
+            raise VerificationError("prerequisite_evidence_failed")
+        started = [
+            parse_timestamp(evidence[domain]["started_at"], "external_evidence_time_invalid")
+            for domain in required_domains
+        ]
+        finished = [
+            parse_timestamp(evidence[domain]["finished_at"], "external_evidence_time_invalid")
+            for domain in required_domains
+        ]
+        earliest = min(started)
+        latest = max(finished)
+        if latest - earliest > MAXIMUM_EVIDENCE_AGE:
+            raise VerificationError("external_evidence_window_too_wide")
+        window = {
+            "started_at": format_timestamp(earliest),
+            "finished_at": format_timestamp(latest),
+            "maximum_age_seconds": MAXIMUM_EVIDENCE_SECONDS,
+        }
+        self.state["evidence_window"] = window
+        return window
+
     def _required_state(self, key: str) -> Any:
         if key not in self.state:
             raise VerificationError("prerequisite_evidence_failed")
         return self.state[key]
 
-    def _contract_summary(self) -> Mapping[str, Any] | None:
-        keys = ("contract_version", "wire_protocol", "bundle_sha256", "core_release")
-        if not all(key in self.state for key in keys):
-            return None
-        result = {key: self.state[key] for key in keys}
-        if "oci_image_digest" in self.state:
-            result["oci_image_digest"] = self.state["oci_image_digest"]
-        return result
+    def _contract_summary(self) -> Mapping[str, Any]:
+        return {
+            "version": self.state.get("contract_version"),
+            "status": self.state.get("contract_status"),
+            "released_at": self.state.get("released_at"),
+            "wire_protocol": self.state.get("wire_protocol"),
+            "bundle_file_name": self.state.get("bundle_name"),
+            "bundle_sha256": self.state.get("bundle_sha256"),
+            "core_release": self.state.get("core_release"),
+            "oci_image_digest": self.state.get("oci_image_digest"),
+        }
 
     def _repository_summary(self) -> list[Mapping[str, Any]]:
         commits = self.state.get("commits", {})
         versions = self.state.get("versions", {})
-        tags = self.state.get("release_tags", {})
+        tags = self.state.get("intended_tags", {})
         return [
             {
                 "id": repository_id,
                 "commit": commits.get(repository_id),
                 "version": versions.get(repository_id),
-                "release_tag": tags.get(repository_id),
+                "intended_tag": tags.get(repository_id),
             }
             for repository_id in REPOSITORY_IDS
         ]
 
     def _domain_summary(self) -> list[Mapping[str, Any]]:
-        order = ["local_source", "local_release", *EXTERNAL_DOMAINS.keys()]
+        order = [
+            "local_source",
+            "local_promotion",
+            "local_release",
+            *EXTERNAL_DOMAINS.keys(),
+        ]
+        external_evidence = self.state.get("external_evidence", {})
         result: list[Mapping[str, Any]] = []
         for domain in order:
             checks = [check for check in self.checks if check.domain == domain]
@@ -952,11 +1098,17 @@ class Evaluator:
                 status_value = "passed"
             else:
                 status_value = "unverified"
+            evidence = external_evidence.get(domain, {})
             result.append(
                 {
                     "id": domain,
                     "required": any(check.required for check in checks),
                     "status": status_value,
+                    "started_at": evidence.get("started_at"),
+                    "finished_at": evidence.get("finished_at"),
+                    "document_sha256": evidence.get("document_sha256"),
+                    "oci_image_digest": evidence.get("oci_image_digest"),
+                    "artifact_sha256": evidence.get("artifact_sha256", []),
                 }
             )
         return result
@@ -1148,6 +1300,9 @@ def validate_external_document(
     bundle_sha256: str,
     core_commit: str,
     core_release: str | None,
+    contract_released_at: datetime,
+    now: datetime,
+    expected_oci_image_digest: str,
 ) -> Mapping[str, Any]:
     if not is_real_file(document_path) or document_path.stat().st_size > MAX_EVIDENCE_BYTES:
         raise VerificationError("external_evidence_document_invalid")
@@ -1184,10 +1339,18 @@ def validate_external_document(
     image_digest = document.get("oci_image_digest")
     if not isinstance(image_digest, str) or OCI_IMAGE_DIGEST.fullmatch(image_digest) is None:
         raise VerificationError("external_evidence_oci_digest_invalid")
+    if image_digest != expected_oci_image_digest:
+        raise VerificationError("external_evidence_oci_digest_mismatch")
     started = parse_timestamp(document.get("started_at"), "external_evidence_time_invalid")
     finished = parse_timestamp(document.get("finished_at"), "external_evidence_time_invalid")
-    if finished <= started or finished - started > timedelta(days=7):
+    if finished <= started or finished - started > MAXIMUM_EVIDENCE_AGE:
         raise VerificationError("external_evidence_time_invalid")
+    if started < contract_released_at:
+        raise VerificationError("external_evidence_precedes_contract_release")
+    if finished > now:
+        raise VerificationError("external_evidence_time_in_future")
+    if now - finished > MAXIMUM_EVIDENCE_AGE:
+        raise VerificationError("external_evidence_stale")
     if document.get("repositories") != coordinates:
         raise VerificationError("external_evidence_repository_mismatch")
     claims = document.get("claims")
@@ -1236,6 +1399,8 @@ def validate_external_document(
     return {
         "document_sha256": sha256_file(document_path),
         "oci_image_digest": image_digest,
+        "started_at": format_timestamp(started),
+        "finished_at": format_timestamp(finished),
         "artifact_count": len(artifacts),
         "artifact_sha256": sorted(hashes),
     }
@@ -1270,7 +1435,7 @@ def semver_key(value: str) -> tuple[int, int, int, int]:
 
 
 def parse_timestamp(value: Any, error_code: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or CANONICAL_UTC.fullmatch(value) is None:
         raise VerificationError(error_code)
     try:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
@@ -1279,6 +1444,10 @@ def parse_timestamp(value: Any, error_code: str) -> datetime:
     if parsed.tzinfo != timezone.utc:
         raise VerificationError(error_code)
     return parsed
+
+
+def format_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def forbidden_tracked_files(root: Path) -> list[str]:
@@ -1370,6 +1539,190 @@ def read_json(path: Path, maximum_bytes: int = MAX_TEXT_BYTES) -> dict[str, Any]
     return value
 
 
+def schema_pointer(document: Mapping[str, Any], reference: str) -> Mapping[str, Any]:
+    if not reference.startswith("#/"):
+        raise VerificationError("release_evidence_schema_reference_invalid")
+    current: Any = document
+    for encoded in reference[2:].split("/"):
+        key = encoded.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or key not in current:
+            raise VerificationError("release_evidence_schema_reference_invalid")
+        current = current[key]
+    if not isinstance(current, dict):
+        raise VerificationError("release_evidence_schema_reference_invalid")
+    return current
+
+
+def schema_type_matches(value: Any, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    raise VerificationError("release_evidence_schema_type_invalid")
+
+
+def schema_format_matches(value: str, format_name: str) -> bool:
+    if format_name != "date-time":
+        raise VerificationError("release_evidence_schema_format_invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return "T" in value and parsed.tzinfo is not None
+
+
+def release_schema_errors(
+    root: Mapping[str, Any],
+    schema: Mapping[str, Any],
+    value: Any,
+    location: str = "$",
+) -> list[str]:
+    errors: list[str] = []
+    reference = schema.get("$ref")
+    if isinstance(reference, str):
+        errors.extend(
+            release_schema_errors(root, schema_pointer(root, reference), value, location)
+        )
+    for subschema in schema.get("allOf", []):
+        errors.extend(release_schema_errors(root, subschema, value, location))
+    if "anyOf" in schema:
+        outcomes = [
+            release_schema_errors(root, subschema, value, location)
+            for subschema in schema["anyOf"]
+        ]
+        if all(outcome for outcome in outcomes):
+            errors.append(f"{location}:anyOf")
+    if "oneOf" in schema:
+        matches = sum(
+            not release_schema_errors(root, subschema, value, location)
+            for subschema in schema["oneOf"]
+        )
+        if matches != 1:
+            errors.append(f"{location}:oneOf")
+    condition = schema.get("if")
+    if isinstance(condition, dict):
+        branch = schema.get("then", {}) if not release_schema_errors(
+            root, condition, value, location
+        ) else schema.get("else", {})
+        errors.extend(release_schema_errors(root, branch, value, location))
+
+    expected_type = schema.get("type")
+    if expected_type is not None:
+        allowed = expected_type if isinstance(expected_type, list) else [expected_type]
+        if not any(schema_type_matches(value, candidate) for candidate in allowed):
+            return errors + [f"{location}:type"]
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{location}:const")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{location}:enum")
+
+    if isinstance(value, dict):
+        for required in schema.get("required", []):
+            if required not in value:
+                errors.append(f"{location}:required")
+        properties = schema.get("properties", {})
+        additional = schema.get("additionalProperties")
+        for key, child in value.items():
+            if key in properties:
+                errors.extend(
+                    release_schema_errors(
+                        root, properties[key], child, f"{location}.{key}"
+                    )
+                )
+            elif additional is False:
+                errors.append(f"{location}:additionalProperties")
+            elif isinstance(additional, dict):
+                errors.extend(
+                    release_schema_errors(
+                        root, additional, child, f"{location}.{key}"
+                    )
+                )
+        if len(value) < schema.get("minProperties", 0):
+            errors.append(f"{location}:minProperties")
+        maximum_properties = schema.get("maxProperties")
+        if isinstance(maximum_properties, int) and len(value) > maximum_properties:
+            errors.append(f"{location}:maxProperties")
+        property_names = schema.get("propertyNames")
+        if isinstance(property_names, dict):
+            for key in value:
+                errors.extend(
+                    release_schema_errors(
+                        root, property_names, key, f"{location}.propertyName"
+                    )
+                )
+
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            errors.append(f"{location}:minItems")
+        maximum_items = schema.get("maxItems")
+        if isinstance(maximum_items, int) and len(value) > maximum_items:
+            errors.append(f"{location}:maxItems")
+        if schema.get("uniqueItems") is True:
+            encoded = [
+                json.dumps(item, sort_keys=True, separators=(",", ":"))
+                for item in value
+            ]
+            if len(encoded) != len(set(encoded)):
+                errors.append(f"{location}:uniqueItems")
+        items = schema.get("items")
+        if isinstance(items, dict):
+            for index, child in enumerate(value):
+                errors.extend(
+                    release_schema_errors(
+                        root, items, child, f"{location}[{index}]"
+                    )
+                )
+
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{location}:minLength")
+        maximum_length = schema.get("maxLength")
+        if isinstance(maximum_length, int) and len(value) > maximum_length:
+            errors.append(f"{location}:maxLength")
+        pattern = schema.get("pattern")
+        if isinstance(pattern, str) and re.search(pattern, value) is None:
+            errors.append(f"{location}:pattern")
+        format_name = schema.get("format")
+        if isinstance(format_name, str) and not schema_format_matches(value, format_name):
+            errors.append(f"{location}:format")
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = schema.get("minimum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            errors.append(f"{location}:minimum")
+        maximum = schema.get("maximum")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            errors.append(f"{location}:maximum")
+    return errors
+
+
+def validate_release_report(report: Mapping[str, Any], schema_path: Path) -> None:
+    schema = read_json(schema_path, maximum_bytes=MAX_EVIDENCE_BYTES)
+    if (
+        schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema"
+        or schema.get("$id")
+        != "https://latchway.dev/schemas/release-evidence.schema.json"
+        or schema.get("type") != "object"
+        or schema.get("additionalProperties") is not False
+    ):
+        raise VerificationError("release_evidence_schema_invalid")
+    errors = release_schema_errors(schema, schema, report)
+    if errors:
+        raise VerificationError(
+            "release_evidence_report_schema_invalid", {"error_count": len(errors)}
+        )
+
+
 def read_text(path: Path, maximum_bytes: int = MAX_TEXT_BYTES) -> str:
     try:
         return read_bytes(path, maximum_bytes).decode("utf-8")
@@ -1441,7 +1794,12 @@ def write_junit(path: Path, report: Mapping[str, Any]) -> None:
         },
     )
     properties = ET.SubElement(suite, "properties")
-    for name in ("scope", "source_conformance_passed", "release_ready"):
+    for name in (
+        "scope",
+        "source_conformance_passed",
+        "promotion_ready",
+        "release_ready",
+    ):
         ET.SubElement(
             properties,
             "property",
@@ -1537,7 +1895,7 @@ def repository_paths(arguments: argparse.Namespace) -> dict[str, Path]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--scope", choices=("source", "release"), default="source"
+        "--scope", choices=("source", "promotion", "release"), default="source"
     )
     parser.add_argument(
         "--workspace-root",
@@ -1552,12 +1910,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--react-native-repo", type=Path)
     parser.add_argument(
         "--release-tag",
-        help="core annotated tag; required in release scope",
+        help="intended core tag; required in promotion/release scope and verified as annotated in release scope",
+    )
+    parser.add_argument(
+        "--oci-image-digest",
+        help="exact immutable ghcr.io/latchway/latchway candidate digest; required in promotion/release scope",
     )
     parser.add_argument(
         "--external-evidence-dir",
         type=Path,
-        help="release-only directory containing fixed external evidence documents",
+        help="promotion/release directory containing fixed external evidence documents",
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -1571,10 +1933,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     arguments = build_parser().parse_args()
     if arguments.scope == "source" and (
-        arguments.release_tag is not None or arguments.external_evidence_dir is not None
+        arguments.release_tag is not None
+        or arguments.oci_image_digest is not None
+        or arguments.external_evidence_dir is not None
     ):
         build_parser().error(
-            "--release-tag and --external-evidence-dir are valid only in release scope"
+            "--release-tag, --oci-image-digest, and --external-evidence-dir are valid only in promotion/release scope"
         )
     repositories = repository_paths(arguments)
     output = arguments.output.absolute()
@@ -1593,6 +1957,7 @@ def main() -> int:
         scope=arguments.scope,
         repositories=repositories,
         release_tag=arguments.release_tag,
+        oci_image_digest=arguments.oci_image_digest,
         external_evidence_dir=(
             arguments.external_evidence_dir.absolute()
             if arguments.external_evidence_dir is not None
@@ -1601,8 +1966,15 @@ def main() -> int:
     )
     report = Evaluator(configuration).evaluate()
     try:
+        validate_release_report(
+            report,
+            repositories["core"] / "api/release-evidence.schema.json",
+        )
         write_json(output, report)
         write_junit(junit, report)
+    except VerificationError as error:
+        print(f"cross-repository conformance failed: {error.code}", file=sys.stderr)
+        return 2
     except OSError:
         print("cross-repository conformance failed: evidence_write_failed", file=sys.stderr)
         return 2
