@@ -14,8 +14,8 @@ after every release domain has authenticated evidence for one exact candidate.
 | Core | `v1.0.0`; normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen; no public annotated product tag or GitHub release claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `b1738804a9519d9adb39fb31da01258224b955ea` | Local reproducible package/consumer gates pass; npm publication not claimed |
 | Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Local Swift Package, consumer, CocoaPods, and fixture gates pass; public tag/package and physical proof not claimed |
-| Android | `dev.latchway:latchway-*` `1.0.0`; source `96371f1340a4fb835429290360a344d66a79454d` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
-| React Native | `@latchway/react-native@1.0.0`; source `3c7426e8d0d71d9f17db4e0a1ce454589982b078` | Local JavaScript, native bridge, example, package, and evidence-export gates pass; npm and physical-device proof not claimed |
+| Android | `dev.latchway:latchway-*` `1.0.0`; source `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
+| React Native | `@latchway/react-native@1.0.0`; source `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | Local JavaScript, native bridge, example, package, and evidence-export gates pass; npm and physical-device proof not claimed |
 | Contract bundle | `latchway-contract-0.5.1.tar.gz` | Two local builds are byte-identical at SHA-256 `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`; no public release asset claimed |
 | OCI image | Intended `ghcr.io/latchway/latchway:v1.0.0` | Supplemental local image ID `sha256:d0b3ede4d520bb2a5443c8c9fe69c50e8614a2a20e05c81a6d8c3427562e87f7`; no registry `RepoDigest` claimed |
 | Database | Schema `19` | Migration sources and local migration/runtime tests present; exact cloud/released-image migration receipts pending |
@@ -48,7 +48,7 @@ that the product or packages have been publicly released.
 | JavaScript | 36 Vitest and 11 Node tests plus lint, typecheck, build, examples, exports, contract, package closure, clean consumer, and reproducibility; tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
 | Swift/iOS | 64 Swift tests, release build, consumer, CocoaPods lint, contract archive, fixture, and device-evidence schema tests; one environment-dependent test skip was recorded |
 | Android | 670 Gradle tasks for test/assemble/lint, release/adversarial and device-evidence suites, local Maven publication, and offline consumers pass at the synchronized source |
-| React Native | 33 Vitest, 20 Node, 13 Python device-evidence, and 7 physical-evidence-export tests plus lint, typecheck, codegen, build, example/native consumers, podspec, package closure, and reproducibility; tarball SHA-256 `205c471a443f4175d145ebac21da800611a7ef23311ca665579afdbdbd2be7f9` |
+| React Native | 33 Vitest, 20 Node, 13 Python device-evidence, and 7 physical-evidence-export tests plus lint, typecheck, codegen, build, example/native consumers, podspec, package closure, and reproducibility; tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
 
 Repository-local results demonstrate source and package integrity. They do not
 replace the protected all-SDK suite against the exact released image.

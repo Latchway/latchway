@@ -31,15 +31,15 @@ has been publicly tagged or published.
 | Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
 | JavaScript | `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
 | Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
-| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `96371f1340a4fb835429290360a344d66a79454d` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `3c7426e8d0d71d9f17db4e0a1ce454589982b078` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Android API 23+; Java 17; compile SDK 37 |
+| React Native | `@latchway/react-native` | `1.0.0` | `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:
 
 - JavaScript: `b1738804a9519d9adb39fb31da01258224b955ea`
 - Swift: `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`
-- Android: `96371f1340a4fb835429290360a344d66a79454d`
+- Android: `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`
 
 ## Shared fixture identity
 

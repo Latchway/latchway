@@ -36,8 +36,8 @@ but must not alter `api/`; any later API drift invalidates the locks.
 | --- | --- | --- | --- |
 | JavaScript `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Source, tests, examples, exports, package closure, reproducibility, and clean-consumer gates pass |
 | Swift package / `Latchway` pod | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Swift tests, release build, package consumer, CocoaPods lint, fixture, and contract gates pass |
-| Android `dev.latchway:latchway-*` | `1.0.0` | `96371f1340a4fb835429290360a344d66a79454d` | Unit, device-evidence fixture, assemble, lint, local Maven, and offline-consumer gates pass |
-| React Native `@latchway/react-native` | `1.0.0` | `3c7426e8d0d71d9f17db4e0a1ce454589982b078` | JavaScript, codegen, native bridge, example, package closure, reproducibility, podspec, and evidence-export gates pass |
+| Android `dev.latchway:latchway-*` | `1.0.0` | `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Unit, device-evidence fixture, assemble, lint, local Maven, and offline-consumer gates pass |
+| React Native `@latchway/react-native` | `1.0.0` | `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | JavaScript, codegen, native bridge, example, package closure, reproducibility, podspec, and evidence-export gates pass |
 
 The React Native compatibility manifest pins the exact JavaScript, Swift, and
 Android source commits above. The native Android SDK supports API 23 or newer;
@@ -104,7 +104,7 @@ candidate but are not immutable protected-run release evidence.
 | Container vulnerability scan | Trivy reported zero `HIGH` or `CRITICAL` findings in the exported local image |
 | Local SBOM | SPDX 2.3, 52 packages and 52 relationships; SHA-256 `44e96ff77d9264079906f964e76cf4920230ee37a7130d8ee69d8a0c08e325ff` |
 | JavaScript package | Reproducible tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
-| React Native package | Reproducible tarball SHA-256 `205c471a443f4175d145ebac21da800611a7ef23311ca665579afdbdbd2be7f9` |
+| React Native package | Reproducible tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
 
 The release workflow must repeat image, per-architecture scan, SBOM, load, and
 resilience work against the exact published digest on protected runners. Local
