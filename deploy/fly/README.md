@@ -8,8 +8,8 @@ Create or attach a PostgreSQL 15+ cluster. Fly commonly installs its URL as
 `DATABASE_URL`, which Latchway accepts; production URLs must require TLS.
 
 ```bash
-fly postgres create --name replace-latchway-db --region sin
-fly postgres attach replace-latchway-db --app replace-with-your-latchway-app \
+flyctl postgres create --name replace-latchway-db --region sin
+flyctl postgres attach replace-latchway-db --app replace-with-your-latchway-app \
   --variable-name LATCHWAY_DATABASE_URL
 ```
 
@@ -18,9 +18,9 @@ origin with no path, query, or fragment. Generate the master key once, escrow
 it outside Fly, and do not replace it as a shortcut for key rotation.
 
 ```bash
-fly secrets set --app replace-with-your-latchway-app LATCHWAY_MASTER_KEY
-fly secrets set --app replace-with-your-latchway-app LATCHWAY_PUBLIC_ORIGIN
-fly secrets set --app replace-with-your-latchway-app LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_MASTER_KEY
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_PUBLIC_ORIGIN
+flyctl secrets set --app replace-with-your-latchway-app LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
 ```
 
 For a release deployment, bypass the Dockerfile build and deploy the public
@@ -29,8 +29,8 @@ application Machine use the same released image:
 
 ```bash
 export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>'
-fly config validate --config deploy/fly/fly.toml
-fly deploy --app replace-with-your-latchway-app \
+flyctl config validate --strict --config deploy/fly/fly.toml
+flyctl deploy --app replace-with-your-latchway-app \
   --config deploy/fly/fly.toml \
   --image "$LATCHWAY_IMAGE" \
   --wait-timeout 10m
@@ -48,12 +48,12 @@ for 30 seconds.
 After creating the first administrator, remove the bootstrap token:
 
 ```bash
-fly secrets unset --app replace-with-your-latchway-app LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+flyctl secrets unset --app replace-with-your-latchway-app LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
 ```
 
 Fly's proxy can carry streaming responses, but clients should reconnect and
 the upstream should emit periodic SSE events. Monitor `/readyz` during rollout.
-Use `fly releases` and `fly deploy --image IMAGE@sha256:DIGEST` to roll the
+Use `flyctl releases` and `flyctl deploy --image IMAGE@sha256:DIGEST` to roll the
 application back; a schema rollback requires a tested database restore.
 
 ## Release evidence
@@ -84,4 +84,5 @@ public HTTPS endpoint, and Fly app name. The pinned collector records the provid
 resolved digest of every running Machine, binds migration output to an existing
 Machine, restarts one Machine explicitly with SIGTERM and a 35-second timeout,
 waits for a new Machine instance, and probes `/healthz` plus `/readyz`.
-Successful local `fly config validate` output is static evidence only.
+Successful local `flyctl config validate --strict` output is static evidence
+only.

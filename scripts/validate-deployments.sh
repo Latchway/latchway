@@ -34,8 +34,10 @@ docker run --rm \
   "$terraform_image" \
   -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
 
-if command -v fly >/dev/null 2>&1; then
-  fly config validate --config deploy/fly/fly.toml
+if command -v flyctl >/dev/null 2>&1; then
+  flyctl config validate --strict --config deploy/fly/fly.toml
+elif command -v fly >/dev/null 2>&1; then
+  fly config validate --strict --config deploy/fly/fly.toml
 fi
 
 printf 'deployment validation passed; evidence: %s\n' "$output"

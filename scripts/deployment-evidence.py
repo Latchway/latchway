@@ -551,6 +551,21 @@ def validate_fly() -> Mapping[str, Any]:
     paths = {item.get("path") for item in checks if isinstance(item, dict)} if isinstance(checks, list) else set()
     if paths != {"/healthz", "/readyz"}:
         raise EvidenceError("fly_health_checks_invalid")
+    require_text(
+        ROOT / "scripts/validate-deployments.sh",
+        (
+            "command -v flyctl",
+            "flyctl config validate --strict --config deploy/fly/fly.toml",
+            "elif command -v fly",
+            "fly config validate --strict --config deploy/fly/fly.toml",
+        ),
+        "fly_cli_validation_incomplete",
+    )
+    require_text(
+        ROOT / "deploy/fly/README.md",
+        ("flyctl config validate --strict --config deploy/fly/fly.toml",),
+        "fly_documentation_validation_incomplete",
+    )
     return {"health_paths": sorted(paths)}
 
 
