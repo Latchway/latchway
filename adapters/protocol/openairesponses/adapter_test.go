@@ -644,11 +644,11 @@ func TestJSONObserverUsageNormalization(t *testing.T) {
 		wantCode  string
 		wantKnown bool
 	}{
-		{name: "known", body: `{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}`, want: protocol.Usage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14, Known: true, Provenance: providerUsageProvenance}, wantKnown: true},
+		{name: "known", body: `{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14,"cost":0.000043235}}`, want: protocol.Usage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14, Known: true, Provenance: providerUsageProvenance, ReportedCost: protocol.ProviderReportedCost{NanoUSD: 43_235, Present: true, Known: true}}, wantKnown: true},
 		{name: "zero", body: `{"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`, want: protocol.Usage{Known: true, Provenance: providerUsageProvenance}, wantKnown: true},
 		{name: "missing usage", body: `{"id":"resp_1"}`},
 		{name: "null usage", body: `{"usage":null}`},
-		{name: "partial usage", body: `{"usage":{"input_tokens":10,"total_tokens":10}}`},
+		{name: "partial usage retains cost", body: `{"usage":{"input_tokens":10,"total_tokens":10,"cost":1e-9}}`, want: protocol.Usage{ReportedCost: protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true}}},
 		{name: "usage not object", body: `{"usage":1}`, wantCode: "upstream_protocol_error"},
 		{name: "wrong value", body: `{"usage":{"input_tokens":"1","output_tokens":2,"total_tokens":3}}`, wantCode: "upstream_protocol_error"},
 		{name: "negative", body: `{"usage":{"input_tokens":-1,"output_tokens":2,"total_tokens":1}}`, wantCode: "upstream_protocol_error"},
@@ -684,7 +684,7 @@ func TestJSONObserverUsageNormalization(t *testing.T) {
 				if usage != test.want {
 					t.Fatalf("usage=%+v, want %+v", usage, test.want)
 				}
-			} else if usage.Known || usage.Provenance != "unknown" {
+			} else if usage.Known || usage.Provenance != "unknown" || usage.ReportedCost != test.want.ReportedCost {
 				t.Fatalf("usage=%+v, want unknown", usage)
 			}
 		})
@@ -713,7 +713,7 @@ func TestSSEObserverExtractsTerminalCompletedUsage(t *testing.T) {
 		"event: response.output_text.delta\n" +
 		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n" +
 		"event: response.completed\n" +
-		"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":37,\"output_tokens\":11,\"total_tokens\":48}}}\n\n"
+		"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":37,\"output_tokens\":11,\"total_tokens\":48,\"cost\":1e-9}}}\n\n"
 	observer := &sseObserver{}
 	for _, chunk := range splitBytes([]byte(stream), 7) {
 		if err := observer.Observe(chunk); err != nil {
@@ -724,7 +724,11 @@ func TestSSEObserverExtractsTerminalCompletedUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := protocol.Usage{InputTokens: 37, OutputTokens: 11, TotalTokens: 48, Known: true, Provenance: providerUsageProvenance}
+	want := protocol.Usage{
+		InputTokens: 37, OutputTokens: 11, TotalTokens: 48, Known: true,
+		Provenance:   providerUsageProvenance,
+		ReportedCost: protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true},
+	}
 	if usage != want {
 		t.Fatalf("usage=%+v, want %+v", usage, want)
 	}

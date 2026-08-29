@@ -148,7 +148,9 @@ const AttemptSchema = z
       "configured",
       "estimated",
       "unknown"
-    ])
+    ]),
+    cost_provenance: z.enum(["upstream_reported", "calculated", "estimated", "unknown"]),
+    cost_source: Identifier.optional()
   })
   .strict();
 
@@ -199,6 +201,7 @@ export const UsageSummarySchema = z
           .array(
             z
               .object({
+                cost_source: Identifier.optional(),
                 provenance: z.enum(["upstream_reported", "calculated", "estimated", "unknown"]),
                 values: UsageValues
               })

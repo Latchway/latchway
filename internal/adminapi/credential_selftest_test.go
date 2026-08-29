@@ -231,6 +231,9 @@ func TestCredentialSelfTestKeyAndStoredResultValidation(t *testing.T) {
 	if _, ok := decimalUSDToNanoUSD("-1"); ok {
 		t.Fatal("negative credit accepted")
 	}
+	if _, ok := decimalUSDToNanoUSD("0.0000000001"); ok {
+		t.Fatal("sub-nano credit accepted instead of being rounded down")
+	}
 	now := time.Now().UTC()
 	completed := now.Add(time.Second)
 	valid := selfTestDocument{

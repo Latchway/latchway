@@ -2035,7 +2035,7 @@ func TestStorePostgreSQLConfiguredPricing(t *testing.T) {
 		}
 	})
 
-	t.Run("predispatch paths and unpriced attempts create no cost metadata", func(t *testing.T) {
+	t.Run("predispatch paths and unpriced provider reports remain distinct", func(t *testing.T) {
 		releasedInput := fixture.pricedInput(t, "pricing-release", 100, "release-usd")
 		released, err := fixture.store.Reserve(fixture.ctx, releasedInput)
 		if err != nil {
@@ -2093,6 +2093,53 @@ func TestStorePostgreSQLConfiguredPricing(t *testing.T) {
 		assertAttemptUnpriced(t, fixture, unpricedAttempt.ID())
 		if got := fixture.count(t, `SELECT count(*) FROM usage_records WHERE logical_request_id = $1`, unpricedInput.LogicalRequestID.String()); got != 4 {
 			t.Fatalf("unpriced usage rows = %d, want historical 4", got)
+		}
+
+		reportedInput := fixture.input(t, "pricing-unpriced-reported", 100)
+		reportedReservation, err := fixture.store.Reserve(fixture.ctx, reportedInput)
+		if err != nil {
+			t.Fatalf("reserve unpriced reported request: %v", err)
+		}
+		reportedAttempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reportedReservation)
+		if err != nil || !owner {
+			t.Fatalf("begin unpriced reported attempt owner=%t: %v", owner, err)
+		}
+		reportedCost := Cost{
+			NanoUSD: 123_456_789, Known: true, Confidence: ProviderReportedCostConfidence,
+			Currency: USDCurrency, Source: ProviderReportedCostSource,
+		}
+		reportedOutcome := Outcome{
+			Status: AttemptSucceeded, HTTPStatus: 200, Cost: reportedCost,
+		}
+		if err := fixture.store.Settle(fixture.ctx, reportedAttempt, reportedOutcome); err != nil {
+			t.Fatalf("settle unpriced reported request: %v", err)
+		}
+		if err := fixture.store.Settle(fixture.ctx, reportedAttempt, reportedOutcome); err != nil {
+			t.Fatalf("replay unpriced reported settlement: %v", err)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM upstream_attempts
+			WHERE upstream_attempt_id = $1 AND billed_cost_nano_usd = $2
+			  AND cost_confidence = 'reported' AND currency IS NULL
+			  AND price_revision IS NULL AND pricing_source IS NULL
+		`, reportedAttempt.ID(), reportedCost.NanoUSD); got != 1 {
+			t.Fatalf("unpriced reported attempt attribution = %d, want 1", got)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*) FROM usage_records
+			WHERE logical_request_id = $1 AND upstream_attempt_id = $2
+			  AND metric = 'cost_nano_usd' AND units = $3 AND cost_nano_usd = $3
+			  AND currency = 'USD' AND price_revision IS NULL
+			  AND pricing_source = 'openrouter_usage_cost' AND confidence = 'reported'
+			  AND provenance_key = $4
+		`, reportedInput.LogicalRequestID.String(), reportedAttempt.ID(), reportedCost.NanoUSD,
+			providerUsageProvenanceKey(reportedAttempt.ID(), CostNanoUSDMetric)); got != 1 {
+			t.Fatalf("unpriced reported cost usage attribution = %d, want 1", got)
+		}
+		conflicting := reportedOutcome
+		conflicting.Cost.NanoUSD++
+		if err := fixture.store.Settle(fixture.ctx, reportedAttempt, conflicting); !errors.Is(err, ErrFinalized) {
+			t.Fatalf("conflicting unpriced reported settlement = %v, want ErrFinalized", err)
 		}
 	})
 }

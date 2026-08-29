@@ -5,7 +5,9 @@ import {
   APITokenMetadataSchema,
   CreatedAPITokenSchema,
   AdministratorSchema,
+  RequestSchema,
   RevisionSchema,
+  UsageSummarySchema,
   UserSchema
 } from "./admin";
 import { loginAdministrator } from "./auth";
@@ -102,6 +104,44 @@ describe("canonical Admin API browser client", () => {
       metadata,
       token: "one-time-printable-token-material-1234567890"
     })).toEqual({ metadata, token: "one-time-printable-token-material-1234567890" });
+  });
+
+  it("keeps provider cost provenance and its fixed report source distinct", () => {
+	const attempt = {
+	  cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
+	  id: "atm_0123456789abcdef", model: "openai/gpt", started_at: "2026-08-29T00:00:00Z",
+	  status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
+	};
+	expect(RequestSchema.parse({
+	  attempts: [attempt], environment_id: "env_0123456789abcdef", feature: "assistant",
+	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
+	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  user_id: "usr_0123456789abcdef"
+	}).attempts[0]).toEqual(attempt);
+	expect(() => RequestSchema.parse({
+	  attempts: [{ ...attempt, cost_source: "secret source\n" }],
+	  environment_id: "env_0123456789abcdef", feature: "assistant",
+	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
+	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  user_id: "usr_0123456789abcdef"
+	})).toThrow();
+	const values = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
+	const analytics = {
+	  active_users: 0, attestation_failure_rate: { denominator: 0, numerator: 0, parts_per_million: 0 },
+	  by_feature: { items: [], limit: 50, truncated: false }, by_model: { items: [], limit: 50, truncated: false },
+	  by_selected_plan: { items: [], limit: 50, truncated: false }, cost_per_active_user_nano_usd: { denominator: 0, numerator: 0 },
+	  failure_rate: { denominator: 0, numerator: 0, parts_per_million: 0 }, fallback_rate: { denominator: 0, numerator: 0, parts_per_million: 0 },
+	  quota_denial_rate: { denominator: 0, numerator: 0, parts_per_million: 0 }, request_count: 0,
+	  request_latency: { p50_ms: 0, p95_ms: 0, p99_ms: 0, samples: 0 }, requests_per_active_user: { denominator: 0, numerator: 0 },
+	  time_to_first_token: { p50_ms: 0, p95_ms: 0, p99_ms: 0, samples: 0 },
+	  usage_by_provenance: [
+		{ cost_source: "openrouter_usage_cost", provenance: "upstream_reported", values },
+		{ provenance: "calculated", values }, { provenance: "estimated", values }, { provenance: "unknown", values }
+	  ]
+	};
+	expect(UsageSummarySchema.parse({
+	  analytics, end: "2026-08-29T01:00:00Z", provenance: [], start: "2026-08-29T00:00:00Z", values
+	}).analytics.usage_by_provenance.at(0)?.cost_source).toBe("openrouter_usage_cost");
   });
 });
 

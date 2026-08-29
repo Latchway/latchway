@@ -933,6 +933,10 @@ func TestOutcomeValidation(t *testing.T) {
 			Known: true, Provenance: ProviderReportedProvenance,
 		}},
 		{Status: AttemptFailed, HTTPStatus: 503, FailureCode: "upstream_unavailable"},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{
+			NanoUSD: 7, Known: true, Confidence: ProviderReportedCostConfidence,
+			Currency: USDCurrency, Source: ProviderReportedCostSource,
+		}},
 		{Status: AttemptCancelled, FailureCode: "client_cancelled"},
 		{Status: AttemptTimedOut, FailureCode: "upstream_timeout"},
 		{Status: AttemptSucceeded, HTTPStatus: 200, Usage: Usage{
@@ -981,6 +985,13 @@ func TestOutcomeValidation(t *testing.T) {
 			NanoUSD: 1, Known: true, Confidence: CalculatedCostConfidence,
 		}},
 		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{Confidence: "estimated"}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{
+			NanoUSD: 1, Known: true, Confidence: ProviderReportedCostConfidence,
+		}},
+		{Status: AttemptSucceeded, HTTPStatus: 200, Cost: Cost{
+			NanoUSD: 1, Known: true, Confidence: ProviderReportedCostConfidence,
+			Currency: USDCurrency, Source: "other",
+		}},
 	} {
 		if err := outcome.validate(); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid outcome %#v returned %v", outcome, err)
@@ -1016,6 +1027,16 @@ func TestOutcomePricingNormalizationIsContextBound(t *testing.T) {
 		Cost: Cost{NanoUSD: 1, Known: true, Confidence: CalculatedCostConfidence},
 	}, selectedPricing{}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("known unpriced cost returned %v", err)
+	}
+	reported := Cost{
+		NanoUSD: 7, Known: true, Confidence: ProviderReportedCostConfidence,
+		Currency: USDCurrency, Source: ProviderReportedCostSource,
+	}
+	providerOutcome, err := normalizeOutcomeForPricing(Outcome{
+		Status: AttemptSucceeded, HTTPStatus: 200, Cost: reported,
+	}, selectedPricing{})
+	if err != nil || providerOutcome.Cost != reported {
+		t.Fatalf("unpriced provider-reported cost = %#v, %v", providerOutcome, err)
 	}
 }
 

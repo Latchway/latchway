@@ -137,6 +137,17 @@ type OpaqueHTTPDecision struct {
 	StreamingAllowed      bool
 }
 
+// ProviderReportedCost is an optional monetary measurement extracted from a
+// provider's final usage object. Present distinguishes omission from a
+// malformed or non-representable value; Known is true only after exact decimal
+// conversion to integer nano-USD. Policy decides whether a compatible
+// upstream's measurement is trusted for settlement.
+type ProviderReportedCost struct {
+	NanoUSD int64
+	Present bool
+	Known   bool
+}
+
 // Usage records normalized provider measurements.
 type Usage struct {
 	InputTokens  int64
@@ -144,6 +155,7 @@ type Usage struct {
 	TotalTokens  int64
 	Known        bool
 	Provenance   string
+	ReportedCost ProviderReportedCost
 }
 
 // ResponseObserver receives bytes exactly as they pass through the proxy.

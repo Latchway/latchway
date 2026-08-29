@@ -160,7 +160,9 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
-		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"usage_provenance":"upstream_reported"`)) {
+		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"usage_provenance":"upstream_reported"`)) ||
+		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"cost_provenance":"upstream_reported"`)) ||
+		!bytes.Contains(requestGet.Body.Bytes(), []byte(`"cost_source":"openrouter_usage_cost"`)) {
 		t.Fatalf("request get status/body=%d %s", requestGet.Code, requestGet.Body.String())
 	}
 
@@ -175,7 +177,8 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(summary.Body.Bytes(), []byte(`"key":"assistant"`)) ||
 		!bytes.Contains(summary.Body.Bytes(), []byte(`"key":"legacy_unknown"`)) ||
 		!bytes.Contains(summary.Body.Bytes(), []byte(`"p50_ms":60000`)) ||
-		!bytes.Contains(summary.Body.Bytes(), []byte(`"provenance":"upstream_reported"`)) {
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"provenance":"upstream_reported"`)) ||
+		!bytes.Contains(summary.Body.Bytes(), []byte(`"cost_source":"openrouter_usage_cost"`)) {
 		t.Fatalf("usage summary status/body=%d %s", summary.Code, summary.Body.String())
 	}
 	invalidBreakdown := performGET(handler, "/admin/v1/usage/summary"+usageQuery+"&breakdown_limit=201", cookie)
@@ -506,7 +509,7 @@ func seedOperationalFixture(
 		    status, started_at, first_byte_at, completed_at, http_status, billed_cost_nano_usd,
 		    currency, price_revision, pricing_source, cost_confidence
 		) VALUES ($1, $2, $3, $4, $5, 1, 'primary', 'openai', 'gpt-test',
-		          'succeeded', $6, $7, $8, 200, 123, 'USD', 'fixture', 'configuration', 'calculated')
+		          'succeeded', $6, $7, $8, 200, 123, 'USD', 'fixture', 'configuration', 'reported')
 	`, fixture.attemptID, organizationID, applicationID, environmentID, fixture.requestID,
 		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt.Add(-45*time.Second), fixture.recordedAt); err != nil {
 		t.Fatal(err)
@@ -521,12 +524,12 @@ func seedOperationalFixture(
 		{metric: "input_tokens", units: 5, attemptID: fixture.attemptID, confidence: "reported"},
 		{metric: "output_tokens", units: 7, attemptID: fixture.attemptID, confidence: "reported"},
 		{metric: "total_tokens", units: 12, attemptID: fixture.attemptID, confidence: "reported"},
-		{metric: "cost_nano_usd", units: 123, attemptID: fixture.attemptID, confidence: "calculated"},
+		{metric: "cost_nano_usd", units: 123, attemptID: fixture.attemptID, confidence: "reported"},
 	}
 	for index, record := range usage {
 		var cost, currency, revision, source any
 		if record.metric == "cost_nano_usd" {
-			cost, currency, revision, source = int64(123), "USD", "fixture", "configuration"
+			cost, currency, source = int64(123), "USD", "openrouter_usage_cost"
 		}
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO usage_records (

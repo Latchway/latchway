@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/configuration"
 )
 
 const (
@@ -48,6 +49,7 @@ type usageBreakdown struct {
 
 type usageProvenanceItem struct {
 	Provenance string      `json:"provenance"`
+	CostSource *string     `json:"cost_source,omitempty"`
 	Values     usageValues `json:"values"`
 }
 
@@ -348,6 +350,7 @@ func (store *operationalStore) usageProvenanceBreakdown(
 	values := map[string]usageValues{
 		"upstream_reported": {}, "calculated": {}, "estimated": {}, "unknown": {},
 	}
+	reportedCostSeen := false
 	for rows.Next() {
 		var confidence, metric string
 		var units int64
@@ -355,6 +358,9 @@ func (store *operationalStore) usageProvenanceBreakdown(
 			return nil, fmt.Errorf("scan usage provenance: %w", err)
 		}
 		provenance := publicUsageProvenance(confidence)
+		if provenance == "upstream_reported" && metric == "cost_nano_usd" {
+			reportedCostSeen = true
+		}
 		current := values[provenance]
 		if !addUsageMetric(&current, metric, units) {
 			return nil, errOperationalCorrupt
@@ -367,7 +373,12 @@ func (store *operationalStore) usageProvenanceBreakdown(
 	order := []string{"upstream_reported", "calculated", "estimated", "unknown"}
 	result := make([]usageProvenanceItem, 0, len(order))
 	for _, provenance := range order {
-		result = append(result, usageProvenanceItem{Provenance: provenance, Values: values[provenance]})
+		item := usageProvenanceItem{Provenance: provenance, Values: values[provenance]}
+		if provenance == "upstream_reported" && reportedCostSeen {
+			source := configuration.ProviderReportedCostSourceOpenRouterUsage
+			item.CostSource = &source
+		}
+		result = append(result, item)
 	}
 	return result, nil
 }

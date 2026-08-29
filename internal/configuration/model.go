@@ -295,6 +295,22 @@ func (policy UpstreamDestinationPolicy) clone() UpstreamDestinationPolicy {
 	return policy
 }
 
+const ProviderReportedCostSourceOpenRouterUsage = "openrouter_usage_cost"
+
+// ProviderReportedCostPolicy is an explicit operator opt-in for one bounded
+// final-response cost format. Presence is never defaulted. The first supported
+// source is OpenRouter's OpenAI-compatible usage.cost USD decimal.
+type ProviderReportedCostPolicy struct {
+	Source   string
+	Currency string
+}
+
+// Enabled reports whether the policy is the exact production-supported shape.
+func (policy ProviderReportedCostPolicy) Enabled() bool {
+	return policy.Source == ProviderReportedCostSourceOpenRouterUsage &&
+		policy.Currency == "USD"
+}
+
 // Upstream is an immutable target description selected only by active config.
 type Upstream struct {
 	ID                         string
@@ -305,6 +321,7 @@ type Upstream struct {
 	Timeouts                   UpstreamTimeouts
 	DestinationPolicy          UpstreamDestinationPolicy
 	StaticHeaders              map[string]string
+	ProviderReportedCost       ProviderReportedCostPolicy
 }
 
 func (upstream Upstream) clone() Upstream {

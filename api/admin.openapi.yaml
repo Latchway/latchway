@@ -1671,7 +1671,7 @@ components:
     UpstreamAttempt:
       type: object
       additionalProperties: false
-      required: [id, upstream, model, started_at, status, usage_provenance]
+      required: [id, upstream, model, started_at, status, usage_provenance, cost_provenance]
       properties:
         id: { type: string, pattern: '^atm_[A-Za-z0-9_-]{16,128}$' }
         upstream: { $ref: '#/components/schemas/Identifier' }
@@ -1681,6 +1681,15 @@ components:
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
         usage: { $ref: '#/components/schemas/UsageValues' }
         usage_provenance: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] }
+        cost_provenance:
+          type: string
+          enum: [upstream_reported, calculated, estimated, unknown]
+          description: Provenance of this attempt's cost, independent of token-usage provenance.
+        cost_source:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Fixed provider report source or configured pricing catalog identity when cost is known.
     LogicalRequest:
       type: object
       additionalProperties: false
@@ -1777,6 +1786,11 @@ components:
             required: [provenance, values]
             properties:
               provenance: { type: string, enum: [upstream_reported, calculated, estimated, unknown] }
+              cost_source:
+                type: string
+                minLength: 1
+                maxLength: 64
+                description: Present as openrouter_usage_cost when this window contains provider-reported cost.
               values: { $ref: '#/components/schemas/UsageValues' }
     UsageSummary:
       type: object

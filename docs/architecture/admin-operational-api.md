@@ -38,8 +38,10 @@ to 366 days. Timeseries data uses UTC hour or UTC day buckets and rejects a
 range that would emit more than 10,000 points. Token and cost values come from
 the immutable usage ledger; multi-attempt usage is summed while the logical
 request record remains single-counted. The request explorer returns metadata,
-attempt lifecycle, model/upstream selection, and provenance, never prompt or
-response bodies.
+attempt lifecycle, model/upstream selection, and separate token-usage and cost
+provenance, never prompt or response bodies. Provider-reported cost exposes the
+fixed bounded source `openrouter_usage_cost`; the attempt's configured catalog
+binding remains distinct for reservation replay.
 
 The rich summary limits each feature, physical-model, and selected-limit-plan
 breakdown to an operator-selected 1–200 rows and reports truncation. It returns
@@ -47,8 +49,9 @@ active-user and logical-request counts, exact rational requests/cost per active
 user, integer-millisecond p50/p95/p99 request latency and time to first token,
 and integer parts-per-million failure, quota-denial, attestation-failure, and
 fallback rates. Estimated, calculated, provider-reported, and unknown ledgers
-remain separate. No user identifier is emitted as a time-series or breakdown
-label. Historical requests whose plan predates persisted selection are labeled
+remain separate. A provenance breakdown that contains provider-reported cost
+also names its fixed report source. No user identifier is emitted as a
+time-series or breakdown label. Historical requests whose plan predates persisted selection are labeled
 `legacy_unknown`; the migration never guesses a past CEL result.
 
 Audit events expose actor and target opaque IDs plus ordered field,

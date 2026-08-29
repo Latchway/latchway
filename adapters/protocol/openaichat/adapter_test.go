@@ -733,18 +733,30 @@ func TestObservers(t *testing.T) {
 
 	t.Run("json", func(t *testing.T) {
 		observer := &jsonObserver{}
-		_ = observer.Observe([]byte(`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`))
+		_ = observer.Observe([]byte(`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"cost":0.000043235}}`))
 		usage, err := observer.Finalize()
-		if err != nil || !usage.Known || usage.TotalTokens != 14 {
+		if err != nil || !usage.Known || usage.TotalTokens != 14 ||
+			usage.ReportedCost != (protocol.ProviderReportedCost{NanoUSD: 43_235, Present: true, Known: true}) {
 			t.Fatalf("usage=%+v err=%v", usage, err)
 		}
 	})
 
 	t.Run("partial usage is conservative", func(t *testing.T) {
 		observer := &jsonObserver{}
-		_ = observer.Observe([]byte(`{"choices":[],"usage":{"prompt_tokens":10,"total_tokens":14}}`))
+		_ = observer.Observe([]byte(`{"choices":[],"usage":{"prompt_tokens":10,"total_tokens":14,"cost":1e-9}}`))
 		usage, err := observer.Finalize()
-		if err != nil || usage.Known || usage.Provenance != "unknown" {
+		if err != nil || usage.Known || usage.Provenance != "unknown" ||
+			usage.ReportedCost != (protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true}) {
+			t.Fatalf("usage=%+v err=%v", usage, err)
+		}
+	})
+
+	t.Run("invalid optional cost is marked unknown without discarding tokens", func(t *testing.T) {
+		observer := &jsonObserver{}
+		_ = observer.Observe([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"cost":0.0000000001}}`))
+		usage, err := observer.Finalize()
+		if err != nil || !usage.Known ||
+			usage.ReportedCost != (protocol.ProviderReportedCost{Present: true}) {
 			t.Fatalf("usage=%+v err=%v", usage, err)
 		}
 	})
@@ -770,7 +782,7 @@ func TestObservers(t *testing.T) {
 		chunks := []string{
 			"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
 			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,",
-			"\"completion_tokens\":2,\"total_tokens\":7}}\n\ndata: [DONE]\n\n",
+			"\"completion_tokens\":2,\"total_tokens\":7,\"cost\":1e-9}}\n\ndata: [DONE]\n\n",
 		}
 		for _, chunk := range chunks {
 			if err := observer.Observe([]byte(chunk)); err != nil {
@@ -778,7 +790,8 @@ func TestObservers(t *testing.T) {
 			}
 		}
 		usage, err := observer.Finalize()
-		if err != nil || !usage.Known || usage.InputTokens != 5 || usage.OutputTokens != 2 {
+		if err != nil || !usage.Known || usage.InputTokens != 5 || usage.OutputTokens != 2 ||
+			usage.ReportedCost != (protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true}) {
 			t.Fatalf("usage=%+v err=%v", usage, err)
 		}
 	})

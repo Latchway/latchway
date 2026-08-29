@@ -18,7 +18,7 @@ vi.mock("../api/session", () => ({
   })
 }));
 
-import { RouteSimulatorPage, UsagePage } from "./control-plane-pages";
+import { RequestsPage, RouteSimulatorPage, UsagePage } from "./control-plane-pages";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 
@@ -46,7 +46,7 @@ describe("rich usage and route-simulator views", () => {
         requests_per_active_user: { denominator: 2, numerator: 3 },
         time_to_first_token: { p50_ms: 20, p95_ms: 40, p99_ms: 60, samples: 3 },
         usage_by_provenance: [
-          { provenance: "upstream_reported", values: { ...zeroValues, input_tokens: 10, output_tokens: 20, total_tokens: 30 } },
+          { cost_source: "openrouter_usage_cost", provenance: "upstream_reported", values: { ...zeroValues, input_tokens: 10, output_tokens: 20, total_tokens: 30 } },
           { provenance: "calculated", values: { ...zeroValues, cost_nano_usd: 900 } },
           { provenance: "estimated", values: zeroValues },
           { provenance: "unknown", values: zeroValues }
@@ -67,6 +67,28 @@ describe("rich usage and route-simulator views", () => {
     expect(screen.getByText("subscriber")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Usage provenance" })).toBeInTheDocument();
     expect(screen.getByText("upstream_reported")).toBeInTheDocument();
+    expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
+  });
+
+  it("renders token and cost provenance independently for each attempt", async () => {
+	adminRequestMock.mockResolvedValue({ data: {
+	  items: [{ attempts: [{
+		cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
+		id: "atm_0123456789abcdef", model: "openai/gpt", started_at: "2026-08-29T00:00:00Z",
+		status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
+	  }], environment_id: "env_0123456789abcdef", feature: "assistant",
+	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
+	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  user_id: "usr_0123456789abcdef" }],
+	  page: { has_more: false }
+	} });
+	const user = userEvent.setup();
+	render(<RequestsPage />);
+	await user.type(screen.getByLabelText("Environment ID"), "env_0123456789abcdef");
+	await user.click(screen.getByRole("button", { name: "List requests" }));
+	await user.click(await screen.findByRole("button", { name: "req_0123456789abcdef" }));
+	expect(screen.getByText("upstream_reported")).toBeInTheDocument();
+	expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
   });
 
   it("renders authoritative scope, exact reservation, applicable limits, and fact roles", async () => {

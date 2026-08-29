@@ -68,7 +68,11 @@ type compiledUpstream struct {
 		AllowedCIDRs         []string `json:"allowedCidrs"`
 		DNSPinning           bool     `json:"dnsPinning"`
 	} `json:"destinationPolicy"`
-	StaticHeaders map[string]string `json:"staticHeaders"`
+	StaticHeaders        map[string]string `json:"staticHeaders"`
+	ProviderReportedCost *struct {
+		Source   string `json:"source"`
+		Currency string `json:"currency"`
+	} `json:"providerReportedCost,omitempty"`
 }
 
 type compiledModel struct {
@@ -729,11 +733,21 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		}
 		seenHeaders[canonical] = struct{}{}
 	}
+	reportedCost := ProviderReportedCostPolicy{}
+	if raw.ProviderReportedCost != nil {
+		reportedCost = ProviderReportedCostPolicy{
+			Source: raw.ProviderReportedCost.Source, Currency: raw.ProviderReportedCost.Currency,
+		}
+		if raw.Type != "openai_compatible" || !reportedCost.Enabled() {
+			return Upstream{}, ErrInvalid
+		}
+	}
 	return Upstream{
 		ID: raw.ID, Type: raw.Type, BaseURL: raw.BaseURL,
 		DangerousAllowInsecureHTTP: raw.DangerousAllowInsecureHTTP,
 		Authentication:             authentication, Timeouts: timeouts,
 		DestinationPolicy: policy, StaticHeaders: staticHeaders,
+		ProviderReportedCost: reportedCost,
 	}, nil
 }
 

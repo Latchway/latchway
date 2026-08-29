@@ -507,12 +507,12 @@ func TestJSONUsageObservation(t *testing.T) {
 		want      protocol.Usage
 		wantError bool
 	}{
-		{name: "known", body: `{"object":"list","usage":{"prompt_tokens":7,"total_tokens":7}}`, want: protocol.Usage{InputTokens: 7, TotalTokens: 7, Known: true, Provenance: providerUsageProvenance}},
+		{name: "known", body: `{"object":"list","usage":{"prompt_tokens":7,"total_tokens":7,"cost":4.3235e-5}}`, want: protocol.Usage{InputTokens: 7, TotalTokens: 7, Known: true, Provenance: providerUsageProvenance, ReportedCost: protocol.ProviderReportedCost{NanoUSD: 43_235, Present: true, Known: true}}},
 		{name: "known zero", body: `{"usage":{"prompt_tokens":0,"total_tokens":0}}`, want: protocol.Usage{Known: true, Provenance: providerUsageProvenance}},
 		{name: "additional response fields", body: `{"usage":{"prompt_tokens":2,"total_tokens":2,"future_detail":{"cached":0}},"data":[]}`, want: protocol.Usage{InputTokens: 2, TotalTokens: 2, Known: true, Provenance: providerUsageProvenance}},
 		{name: "missing usage", body: `{"data":[]}`, want: unknownUsage()},
 		{name: "null usage", body: `{"usage":null}`, want: unknownUsage()},
-		{name: "missing prompt", body: `{"usage":{"total_tokens":1}}`, want: unknownUsage()},
+		{name: "missing prompt retains cost", body: `{"usage":{"total_tokens":1,"cost":1e-9}}`, want: protocol.Usage{Provenance: "unknown", ReportedCost: protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true}}},
 		{name: "missing total", body: `{"usage":{"prompt_tokens":1}}`, want: unknownUsage()},
 		{name: "usage string", body: `{"usage":"secret"}`, wantError: true},
 		{name: "negative prompt", body: `{"usage":{"prompt_tokens":-1,"total_tokens":0}}`, wantError: true},

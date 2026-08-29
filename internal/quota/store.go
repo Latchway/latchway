@@ -2313,11 +2313,11 @@ func initialCostConfidence(pricing selectedPricing) string {
 }
 
 func settlementCostValues(pricing selectedPricing, cost Cost) (billed any, confidence any) {
+	if cost.Known {
+		return cost.NanoUSD, cost.Confidence
+	}
 	if !pricing.present() {
 		return nil, nil
-	}
-	if cost.Known {
-		return cost.NanoUSD, CalculatedCostConfidence
 	}
 	return nil, UnknownCostConfidence
 }
@@ -2325,7 +2325,11 @@ func settlementCostValues(pricing selectedPricing, cost Cost) (billed any, confi
 func (attempt storedAttempt) selectedPricing() (selectedPricing, error) {
 	selectionAbsent := attempt.currency == nil && attempt.priceRevision == nil && attempt.pricingSource == nil
 	if selectionAbsent {
-		if attempt.billedCost != nil || attempt.costConfidence != nil {
+		if attempt.billedCost == nil && attempt.costConfidence == nil {
+			return selectedPricing{}, nil
+		}
+		if attempt.billedCost == nil || *attempt.billedCost < 0 || attempt.costConfidence == nil ||
+			*attempt.costConfidence != ProviderReportedCostConfidence {
 			return selectedPricing{}, ErrInvalidState
 		}
 		return selectedPricing{}, nil
@@ -2345,7 +2349,7 @@ func (attempt storedAttempt) selectedPricing() (selectedPricing, error) {
 		if attempt.billedCost != nil {
 			return selectedPricing{}, ErrInvalidState
 		}
-	case CalculatedCostConfidence:
+	case CalculatedCostConfidence, ProviderReportedCostConfidence:
 		if attempt.billedCost == nil || *attempt.billedCost < 0 {
 			return selectedPricing{}, ErrInvalidState
 		}
@@ -2800,10 +2804,14 @@ func (store *Store) newSettlementUsageIDsForTokenMetrics(
 			}
 		}
 	}
-	// Preserve all historical usage-ID generation sequences. A configured,
-	// known cost appends exactly one new identifier after existing records.
+	// Preserve all historical usage-ID generation sequences. A known cost
+	// appends exactly one new identifier after existing records. Calculated cost
+	// remains bound to provider token usage and a configured catalog, while an
+	// explicitly trusted provider report is independent of both.
 	if cost.Known {
-		if !usage.Known || !pricing.present() || pricing.validate() != nil {
+		if cost.validate() != nil ||
+			cost.Confidence == CalculatedCostConfidence &&
+				(!usage.Known || !pricing.present() || pricing.validate() != nil) {
 			return settlementUsageIDs{}, ErrInvalidState
 		}
 		if err := generate(&result.cost); err != nil {
@@ -3112,17 +3120,20 @@ func insertSettlementUsage(
 		}
 		return nil
 	}
-	if !pricing.present() || !outcome.Usage.Known {
-		return ErrInvalidState
+	if !pricing.present() {
+		if outcome.Cost.Confidence != ProviderReportedCostConfidence {
+			return ErrInvalidState
+		}
 	}
 	amount := outcome.Cost.NanoUSD
+	attribution := settlementCostUsageAttribution(pricing, outcome.Cost)
 	return insert(
 		identifiers.cost, attempt.id, CostNanoUSDMetric, amount,
 		priceFields{
-			cost: amount, currency: pricing.currency,
-			revision: pricing.revision, source: pricing.source,
+			cost: amount, currency: attribution.currency,
+			revision: attribution.priceRevision, source: attribution.pricingSource,
 		},
-		CalculatedCostConfidence, configuredCostProvenanceKey(attempt.id),
+		outcome.Cost.Confidence, costUsageProvenanceKey(attempt.id, outcome.Cost),
 	)
 }
 
@@ -3153,6 +3164,37 @@ func unknownTokenUsageProvenanceKey(reservationID, metric string) string {
 
 func configuredCostProvenanceKey(attemptID string) string {
 	return "configured_flat_rate:" + attemptID
+}
+
+func costUsageProvenanceKey(attemptID string, cost Cost) string {
+	switch cost.Confidence {
+	case CalculatedCostConfidence:
+		return configuredCostProvenanceKey(attemptID)
+	case ProviderReportedCostConfidence:
+		return providerUsageProvenanceKey(attemptID, CostNanoUSDMetric)
+	default:
+		return ""
+	}
+}
+
+type costUsageAttribution struct {
+	currency      *string
+	priceRevision *string
+	pricingSource *string
+}
+
+func settlementCostUsageAttribution(pricing selectedPricing, cost Cost) costUsageAttribution {
+	if cost.Confidence == ProviderReportedCostConfidence {
+		currency, source := cost.Currency, cost.Source
+		return costUsageAttribution{currency: &currency, pricingSource: &source}
+	}
+	if !pricing.present() {
+		return costUsageAttribution{}
+	}
+	currency, revision, source := pricing.currency, pricing.revision, pricing.source
+	return costUsageAttribution{
+		currency: &currency, priceRevision: &revision, pricingSource: &source,
+	}
 }
 
 func terminalSettlementMatches(
@@ -3212,13 +3254,12 @@ func terminalSettlementMatches(
 	if outcome.Cost.Known {
 		attemptID := attempt.id
 		amount := outcome.Cost.NanoUSD
-		currency := reservation.pricing.currency
-		revision := reservation.pricing.revision
-		source := reservation.pricing.source
-		expected[configuredCostProvenanceKey(attempt.id)] = expectedUsage{
+		attribution := settlementCostUsageAttribution(reservation.pricing, outcome.Cost)
+		expected[costUsageProvenanceKey(attempt.id, outcome.Cost)] = expectedUsage{
 			attemptID: &attemptID, metric: CostNanoUSDMetric, units: amount,
-			costNanoUSD: &amount, currency: &currency, priceRevision: &revision,
-			pricingSource: &source, confidence: CalculatedCostConfidence,
+			costNanoUSD: &amount, currency: attribution.currency,
+			priceRevision: attribution.priceRevision, pricingSource: attribution.pricingSource,
+			confidence: outcome.Cost.Confidence,
 		}
 	}
 	rows, err := tx.Query(ctx, `
@@ -3803,12 +3844,18 @@ func terminalAttemptMatches(stored storedAttempt, outcome Outcome, pricing selec
 		return false
 	}
 	if !pricing.present() {
-		if stored.billedCost != nil || stored.costConfidence != nil || outcome.Cost != (Cost{}) {
+		if outcome.Cost.Known {
+			if outcome.Cost.Confidence != ProviderReportedCostConfidence || stored.billedCost == nil ||
+				*stored.billedCost != outcome.Cost.NanoUSD || stored.costConfidence == nil ||
+				*stored.costConfidence != outcome.Cost.Confidence {
+				return false
+			}
+		} else if stored.billedCost != nil || stored.costConfidence != nil || outcome.Cost != (Cost{}) {
 			return false
 		}
 	} else if outcome.Cost.Known {
 		if stored.billedCost == nil || *stored.billedCost != outcome.Cost.NanoUSD ||
-			stored.costConfidence == nil || *stored.costConfidence != CalculatedCostConfidence {
+			stored.costConfidence == nil || *stored.costConfidence != outcome.Cost.Confidence {
 			return false
 		}
 	} else if stored.billedCost != nil || stored.costConfidence == nil ||

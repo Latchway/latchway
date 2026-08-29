@@ -638,6 +638,7 @@
         "authentication": { "$ref": "#/$defs/UpstreamAuthentication" },
         "timeouts": { "$ref": "#/$defs/Timeouts" },
         "destinationPolicy": { "$ref": "#/$defs/DestinationPolicy" },
+        "providerReportedCost": { "$ref": "#/$defs/ProviderReportedCost" },
         "staticHeaders": {
           "type": "object",
           "maxProperties": 32,
@@ -652,8 +653,22 @@
             "required": ["dangerousAllowInsecureHttp"],
             "properties": { "dangerousAllowInsecureHttp": { "const": true } }
           }
+        },
+        {
+          "if": { "required": ["providerReportedCost"] },
+          "then": { "properties": { "type": { "const": "openai_compatible" } } }
         }
       ]
+    },
+    "ProviderReportedCost": {
+      "type": "object",
+      "description": "Explicit opt-in to exact final provider usage.cost settlement. Configured pricing remains authoritative for pre-dispatch reservations.",
+      "additionalProperties": false,
+      "required": ["source", "currency"],
+      "properties": {
+        "source": { "const": "openrouter_usage_cost" },
+        "currency": { "const": "USD" }
+      }
     },
     "UpstreamAuthentication": {
       "type": "object",

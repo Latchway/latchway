@@ -421,11 +421,16 @@ func withClientWriteDeadline(
 }
 
 func normalizedUsage(usage protocol.Usage) (protocol.Usage, error) {
+	if !validProviderReportedCost(usage.ReportedCost) {
+		return protocol.Usage{}, fmt.Errorf("%w: observer returned invalid provider cost state", ErrInvalidResponseRelay)
+	}
 	if !usage.Known {
 		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.TotalTokens != 0 {
 			return protocol.Usage{}, fmt.Errorf("%w: observer returned counts for unknown usage", ErrInvalidResponseRelay)
 		}
-		return protocol.Usage{Known: false, Provenance: "unknown"}, nil
+		return protocol.Usage{
+			Known: false, Provenance: "unknown", ReportedCost: usage.ReportedCost,
+		}, nil
 	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 ||
 		usage.InputTokens > math.MaxInt64-usage.OutputTokens ||
@@ -434,6 +439,16 @@ func normalizedUsage(usage protocol.Usage) (protocol.Usage, error) {
 		return protocol.Usage{}, fmt.Errorf("%w: observer returned invalid normalized usage", ErrInvalidResponseRelay)
 	}
 	return usage, nil
+}
+
+func validProviderReportedCost(cost protocol.ProviderReportedCost) bool {
+	if !cost.Present {
+		return !cost.Known && cost.NanoUSD == 0
+	}
+	if !cost.Known {
+		return cost.NanoUSD == 0
+	}
+	return cost.NanoUSD >= 0
 }
 
 func validUsageProvenance(value string) bool {

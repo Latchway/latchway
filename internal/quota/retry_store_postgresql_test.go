@@ -989,10 +989,16 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 				InputTokens: 3, OutputTokens: 4, TotalTokens: 7,
 				Known: true, Provenance: ProviderReportedProvenance,
 			},
-			Cost: Cost{NanoUSD: 10, Known: true, Confidence: CalculatedCostConfidence},
+			Cost: Cost{
+				NanoUSD: 10, Known: true, Confidence: ProviderReportedCostConfidence,
+				Currency: USDCurrency, Source: ProviderReportedCostSource,
+			},
 		}
 		if err := fixture.store.SettleFinalAttempt(fixture.ctx, second, secondOutcome); err != nil {
 			t.Fatalf("settle priced retry: %v", err)
+		}
+		if err := fixture.store.SettleFinalAttempt(fixture.ctx, second, secondOutcome); err != nil {
+			t.Fatalf("replay exact provider-reported retry settlement: %v", err)
 		}
 		for _, want := range []struct {
 			metric                  string
@@ -1012,6 +1018,22 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			SELECT count(*) FROM usage_records WHERE logical_request_id = $1
 		`, input.LogicalRequestID.String()); got != 8 {
 			t.Fatalf("priced retry usage records = %d, want 8", got)
+		}
+		if got := fixture.count(t, `
+			SELECT count(*)
+			FROM upstream_attempts AS attempt
+			JOIN usage_records AS usage
+			  ON usage.upstream_attempt_id = attempt.upstream_attempt_id
+			WHERE attempt.upstream_attempt_id = $1
+			  AND attempt.pricing_source = 'standard-usd'
+			  AND attempt.cost_confidence = 'reported'
+			  AND usage.metric = 'cost_nano_usd'
+			  AND usage.pricing_source = 'openrouter_usage_cost'
+			  AND usage.price_revision IS NULL
+			  AND usage.confidence = 'reported'
+			  AND usage.provenance_key = $2
+		`, second.ID(), providerUsageProvenanceKey(second.ID(), CostNanoUSDMetric)); got != 1 {
+			t.Fatalf("reported retry catalog/source attribution rows = %d, want 1", got)
 		}
 		if replay, err := fixture.store.Reserve(fixture.ctx, input); err != nil || replay.ID() != reservation.ID() {
 			t.Fatalf("preflight terminal reservation replay = %#v: %v", replay, err)

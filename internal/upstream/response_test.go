@@ -230,6 +230,32 @@ func TestNormalizedUsageRequiresOverflowSafeExactTokenTotal(t *testing.T) {
 	}
 }
 
+func TestNormalizedUsagePreservesBoundedProviderCostState(t *testing.T) {
+	t.Parallel()
+	valid := []protocol.Usage{
+		{Known: false, Provenance: "unknown", ReportedCost: protocol.ProviderReportedCost{Present: true}},
+		{
+			InputTokens: 1, TotalTokens: 1, Known: true, Provenance: "provider_reported",
+			ReportedCost: protocol.ProviderReportedCost{NanoUSD: 7, Present: true, Known: true},
+		},
+	}
+	for _, usage := range valid {
+		got, err := normalizedUsage(usage)
+		if err != nil || got != usage {
+			t.Fatalf("valid provider cost state %+v normalized to %+v, %v", usage, got, err)
+		}
+	}
+	for _, usage := range []protocol.Usage{
+		{ReportedCost: protocol.ProviderReportedCost{Known: true}},
+		{ReportedCost: protocol.ProviderReportedCost{NanoUSD: 1, Present: true}},
+		{ReportedCost: protocol.ProviderReportedCost{NanoUSD: -1, Present: true, Known: true}},
+	} {
+		if _, err := normalizedUsage(usage); !errors.Is(err, ErrInvalidResponseRelay) {
+			t.Fatalf("invalid provider cost state %+v returned %v", usage, err)
+		}
+	}
+}
+
 func TestRelayResponseCancellationClosesBodyBeforeClientStart(t *testing.T) {
 	t.Parallel()
 

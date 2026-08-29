@@ -107,7 +107,10 @@ func TestStorePostgreSQLHardCostLifecycle(t *testing.T) {
 		}
 		over := Outcome{
 			Status: AttemptSucceeded, HTTPStatus: 200, Usage: knownUsage,
-			Cost: Cost{NanoUSD: 26, Known: true, Confidence: CalculatedCostConfidence},
+			Cost: Cost{
+				NanoUSD: 26, Known: true, Confidence: ProviderReportedCostConfidence,
+				Currency: USDCurrency, Source: ProviderReportedCostSource,
+			},
 		}
 		if err := fixture.store.Settle(fixture.ctx, attempt, over); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("over-reservation hard cost = %v, want ErrInvalidInput", err)
@@ -121,6 +124,12 @@ func TestStorePostgreSQLHardCostLifecycle(t *testing.T) {
 		unknown := Outcome{Status: AttemptTimedOut, FailureCode: "cost_overflow"}
 		if err := fixture.store.Settle(fixture.ctx, attempt, unknown); err != nil {
 			t.Fatalf("conservatively settle rejected hard cost: %v", err)
+		}
+		state = fixture.readHardCostState(t, reservation.ID())
+		if state.settledEntry != 25 || state.releasedEntry != 0 ||
+			state.bucketUsed != 25 || state.bucketReserved != 0 ||
+			state.reservationStatus != "settled" {
+			t.Fatalf("conservatively settled over-reported hard cost = %#v", state)
 		}
 	})
 

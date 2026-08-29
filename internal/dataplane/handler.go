@@ -686,14 +686,14 @@ func calculateAttemptOutcome(
 		// pending or undercharge a failed attempt.
 		result.relay.Usage = protocol.Usage{}
 	}
-	var calculatedCost quota.Cost
+	var settlementCost quota.Cost
 	if !providerUsageOverBound {
-		calculatedCost, result.err = calculateConfiguredCost(
-			prepared.pricing, result.relay.Usage, result.err,
+		settlementCost, result.err = calculateSettlementCost(
+			prepared, result.relay.Usage, result.err,
 		)
 	}
-	calculatedCost = boundedSettlementCost(calculatedCost, prepared.hardCost)
-	return result, quotaOutcome(result.relay, calculatedCost, result.err)
+	settlementCost = boundedSettlementCost(settlementCost, prepared.hardCost)
+	return result, quotaOutcome(result.relay, settlementCost, result.err)
 }
 
 func (handler *Handler) prepareExecutionAttempt(
@@ -1395,6 +1395,29 @@ func calculateConfiguredCost(
 	}, executionErr
 }
 
+func calculateSettlementCost(
+	prepared preparedExecutionAttempt,
+	usage protocol.Usage,
+	executionErr error,
+) (quota.Cost, error) {
+	policy := prepared.decision.Upstream.ProviderReportedCost
+	if !policy.Enabled() {
+		return calculateConfiguredCost(prepared.pricing, usage, executionErr)
+	}
+	// Reported cost is a settlement measurement, never a reservation input. It
+	// is trusted only when an operator-enabled integration produced an exact
+	// nano-USD value. When a hard cost reservation exists, boundedSettlementCost
+	// additionally rejects any report above that configured maximum.
+	if !usage.ReportedCost.Present || !usage.ReportedCost.Known {
+		return quota.Cost{}, executionErr
+	}
+	return quota.Cost{
+		NanoUSD: usage.ReportedCost.NanoUSD, Known: true,
+		Confidence: quota.ProviderReportedCostConfidence,
+		Currency:   policy.Currency, Source: policy.Source,
+	}, executionErr
+}
+
 func validateDecision(featureID string, decision policy.Decision, endpointProtocol string) (validatedDecision, error) {
 	requiredUpstreamType, knownProtocol := protocol.RequiredUpstreamType(endpointProtocol)
 	if decision.Route.ID == "" || decision.Route.ModelID != decision.Model.ID ||
@@ -1407,10 +1430,19 @@ func validateDecision(featureID string, decision policy.Decision, endpointProtoc
 		!slices.Contains(decision.Model.Capabilities, endpointProtocol) ||
 		decision.Upstream.ID == "" || decision.Upstream.Type != requiredUpstreamType ||
 		!validUpstreamAuthentication(decision.Upstream.Authentication) ||
+		!validProviderReportedCostPolicy(decision.Upstream) ||
 		!validTargetTimeouts(decision.Upstream.Timeouts) {
 		return validatedDecision{}, policy.ErrConfiguration
 	}
 	return validateFeatureLimitPlan(featureID, decision.Feature, decision.LimitPlan)
+}
+
+func validProviderReportedCostPolicy(upstreamConfig configuration.Upstream) bool {
+	policy := upstreamConfig.ProviderReportedCost
+	if policy == (configuration.ProviderReportedCostPolicy{}) {
+		return true
+	}
+	return upstreamConfig.Type == "openai_compatible" && policy.Enabled()
 }
 
 func validateDecisionPlan(

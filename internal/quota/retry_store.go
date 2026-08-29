@@ -2123,14 +2123,15 @@ func insertRetryAttemptUsage(
 	if !outcome.Cost.Known {
 		return nil
 	}
-	if !pricing.present() || !outcome.Usage.Known || identifiers.cost == "" {
+	if identifiers.cost == "" || !pricing.present() && outcome.Cost.Confidence != ProviderReportedCostConfidence {
 		return ErrInvalidState
 	}
 	amount := outcome.Cost.NanoUSD
+	attribution := settlementCostUsageAttribution(pricing, outcome.Cost)
 	return insert(
-		identifiers.cost, CostNanoUSDMetric, amount, amount, pricing.currency,
-		pricing.revision, pricing.source, CalculatedCostConfidence,
-		configuredCostProvenanceKey(attempt.id),
+		identifiers.cost, CostNanoUSDMetric, amount, amount, attribution.currency,
+		attribution.priceRevision, attribution.pricingSource, outcome.Cost.Confidence,
+		costUsageProvenanceKey(attempt.id, outcome.Cost),
 	)
 }
 
@@ -2185,11 +2186,12 @@ func retryAttemptUsageMatches(
 	}
 	if outcome.Cost.Known {
 		amount := outcome.Cost.NanoUSD
-		currency, revision, source := pricing.currency, pricing.revision, pricing.source
-		expected[configuredCostProvenanceKey(attempt.id)] = expectedUsage{
+		attribution := settlementCostUsageAttribution(pricing, outcome.Cost)
+		expected[costUsageProvenanceKey(attempt.id, outcome.Cost)] = expectedUsage{
 			metric: CostNanoUSDMetric, units: amount, cost: &amount,
-			currency: &currency, revision: &revision, source: &source,
-			confidence: CalculatedCostConfidence,
+			currency: attribution.currency, revision: attribution.priceRevision,
+			source:     attribution.pricingSource,
+			confidence: outcome.Cost.Confidence,
 		}
 	}
 	rows, err := tx.Query(ctx, `
@@ -2348,7 +2350,11 @@ func storedRetryAttemptAccountingMatches(
 	if attempt.billedCost != nil {
 		outcome.Cost = Cost{
 			NanoUSD: *attempt.billedCost, Known: true,
-			Confidence: CalculatedCostConfidence,
+			Confidence: *attempt.costConfidence,
+		}
+		if outcome.Cost.Confidence == ProviderReportedCostConfidence {
+			outcome.Cost.Currency = USDCurrency
+			outcome.Cost.Source = ProviderReportedCostSource
 		}
 	} else if pricing.present() {
 		outcome.Cost = Cost{Confidence: UnknownCostConfidence}

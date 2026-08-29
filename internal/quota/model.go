@@ -47,11 +47,13 @@ const (
 	maximumAttemptsPerRequest = 32
 	maximumReservationEntries = maximumRulesPerRequest * maximumAttemptsPerRequest
 
-	ProviderReportedProvenance = "provider_reported"
-	UnknownUsageProvenance     = "unknown"
-	USDCurrency                = "USD"
-	CalculatedCostConfidence   = "calculated"
-	UnknownCostConfidence      = "unknown"
+	ProviderReportedProvenance     = "provider_reported"
+	UnknownUsageProvenance         = "unknown"
+	USDCurrency                    = "USD"
+	CalculatedCostConfidence       = "calculated"
+	ProviderReportedCostConfidence = "reported"
+	ProviderReportedCostSource     = "openrouter_usage_cost"
+	UnknownCostConfidence          = "unknown"
 
 	AttemptSucceeded = "succeeded"
 	AttemptFailed    = "failed"
@@ -196,13 +198,17 @@ type Usage struct {
 	Provenance   string
 }
 
-// Cost is a trusted calculated charge in integer nano-USD. Unknown cost has a
-// zero amount and either empty or unknown confidence; the store canonicalizes
-// it according to whether the attempt has a configured pricing selection.
+// Cost is a trusted charge in integer nano-USD. Known charges are either
+// calculated from the selected pricing catalog or reported by an explicitly
+// trusted provider integration. Unknown cost has a zero amount and either
+// empty or unknown confidence; the store canonicalizes it according to whether
+// the attempt has a configured pricing selection.
 type Cost struct {
 	NanoUSD    int64
 	Known      bool
 	Confidence string
+	Currency   string
+	Source     string
 }
 
 // Outcome is the trusted terminal result of an upstream attempt. HTTPStatus
@@ -931,7 +937,8 @@ func (outcome Outcome) validate() error {
 	} else if !failureCodePattern.MatchString(outcome.FailureCode) {
 		return ErrInvalidInput
 	}
-	if outcome.Usage.validate() != nil || outcome.Cost.validate() != nil || outcome.Cost.Known && !outcome.Usage.Known {
+	if outcome.Usage.validate() != nil || outcome.Cost.validate() != nil ||
+		outcome.Cost.Known && outcome.Cost.Confidence == CalculatedCostConfidence && !outcome.Usage.Known {
 		return ErrInvalidInput
 	}
 	return nil
@@ -965,12 +972,25 @@ func (usage Usage) normalized() Usage {
 
 func (cost Cost) validate() error {
 	if !cost.Known {
-		if cost.NanoUSD != 0 || cost.Confidence != "" && cost.Confidence != UnknownCostConfidence {
+		if cost.NanoUSD != 0 || cost.Currency != "" || cost.Source != "" ||
+			cost.Confidence != "" && cost.Confidence != UnknownCostConfidence {
 			return ErrInvalidInput
 		}
 		return nil
 	}
-	if cost.NanoUSD < 0 || cost.Confidence != CalculatedCostConfidence {
+	if cost.NanoUSD < 0 {
+		return ErrInvalidInput
+	}
+	switch cost.Confidence {
+	case CalculatedCostConfidence:
+		if cost.Currency != "" || cost.Source != "" {
+			return ErrInvalidInput
+		}
+	case ProviderReportedCostConfidence:
+		if cost.Currency != USDCurrency || cost.Source != ProviderReportedCostSource {
+			return ErrInvalidInput
+		}
+	default:
 		return ErrInvalidInput
 	}
 	return nil
@@ -982,10 +1002,12 @@ func normalizeOutcomeForPricing(outcome Outcome, pricing selectedPricing) (Outco
 	}
 	outcome.Usage = outcome.Usage.normalized()
 	if !pricing.present() {
-		if outcome.Cost.Known {
+		if outcome.Cost.Known && outcome.Cost.Confidence != ProviderReportedCostConfidence {
 			return Outcome{}, ErrInvalidInput
 		}
-		outcome.Cost = Cost{}
+		if !outcome.Cost.Known {
+			outcome.Cost = Cost{}
+		}
 		return outcome, nil
 	}
 	if !outcome.Cost.Known {

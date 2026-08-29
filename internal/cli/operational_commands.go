@@ -76,6 +76,8 @@ type upstreamAttemptCLI struct {
 	Status          string          `json:"status"`
 	Usage           *usageValuesCLI `json:"usage,omitempty"`
 	UsageProvenance string          `json:"usage_provenance"`
+	CostProvenance  string          `json:"cost_provenance"`
+	CostSource      string          `json:"cost_source,omitempty"`
 }
 
 type logicalRequestCLI struct {
@@ -138,6 +140,7 @@ type usageBreakdownCLI struct {
 
 type usageProvenanceCLI struct {
 	Provenance string         `json:"provenance"`
+	CostSource string         `json:"cost_source,omitempty"`
 	Values     usageValuesCLI `json:"values"`
 }
 
@@ -776,9 +779,14 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 	}
 	attempts := make([][]string, 0, len(request.Attempts))
 	for _, attempt := range request.Attempts {
-		attempts = append(attempts, []string{attempt.ID, attempt.Upstream, attempt.Model, attempt.Status, attempt.UsageProvenance})
+		attempts = append(attempts, []string{
+			attempt.ID, attempt.Upstream, attempt.Model, attempt.Status,
+			attempt.UsageProvenance, attempt.CostProvenance, attempt.CostSource,
+		})
 	}
-	return printControlTable(opts, []string{"ATTEMPT", "UPSTREAM", "MODEL", "STATUS", "USAGE SOURCE"}, attempts)
+	return printControlTable(opts, []string{
+		"ATTEMPT", "UPSTREAM", "MODEL", "STATUS", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
+	}, attempts)
 }
 
 func printUsageSummary(opts *options, summary usageSummaryCLI) error {
@@ -821,9 +829,15 @@ func printUsageSummary(opts *options, summary usageSummaryCLI) error {
 	}
 	provenanceRows := make([][]string, 0, len(summary.Analytics.UsageByProvenance))
 	for _, item := range summary.Analytics.UsageByProvenance {
-		provenanceRows = append(provenanceRows, []string{item.Provenance, item.Values.InputTokens.String(), item.Values.OutputTokens.String(), item.Values.TotalTokens.String(), item.Values.CostNanoUSD.String()})
+		provenanceRows = append(provenanceRows, []string{
+			item.Provenance, item.CostSource, item.Values.InputTokens.String(),
+			item.Values.OutputTokens.String(), item.Values.TotalTokens.String(),
+			item.Values.CostNanoUSD.String(),
+		})
 	}
-	return printControlTable(opts, []string{"USAGE PROVENANCE", "INPUT", "OUTPUT", "TOTAL", "COST NANO-USD"}, provenanceRows)
+	return printControlTable(opts, []string{
+		"USAGE PROVENANCE", "COST SOURCE", "INPUT", "OUTPUT", "TOTAL", "COST NANO-USD",
+	}, provenanceRows)
 }
 
 func usageFractionText(value usageFractionCLI) string {

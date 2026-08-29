@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/latchway/latchway/adapters/protocol/internal/openaiusage"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/protocol"
 )
@@ -1113,6 +1114,7 @@ func usageFromValue(value any) (protocol.Usage, error) {
 	if !ok {
 		return protocol.Usage{}, upstreamMalformed("upstream usage must be an object")
 	}
+	reportedCost := openaiusage.ReportedCost(usageObject)
 	input, inputPresent, err := usageInteger(usageObject, "prompt_tokens", "input_tokens")
 	if err != nil {
 		return protocol.Usage{}, err
@@ -1126,15 +1128,22 @@ func usageFromValue(value any) (protocol.Usage, error) {
 		return protocol.Usage{}, err
 	}
 	if !inputPresent && !outputPresent && !totalPresent {
-		return unknownUsage(), nil
+		usage := unknownUsage()
+		usage.ReportedCost = reportedCost
+		return usage, nil
 	}
 	if !inputPresent || !outputPresent || !totalPresent {
-		return unknownUsage(), nil
+		usage := unknownUsage()
+		usage.ReportedCost = reportedCost
+		return usage, nil
 	}
 	if input > math.MaxInt64-output || total != input+output {
 		return protocol.Usage{}, upstreamMalformed("upstream usage totals are inconsistent")
 	}
-	return protocol.Usage{InputTokens: input, OutputTokens: output, TotalTokens: total, Known: true, Provenance: "provider_reported"}, nil
+	return protocol.Usage{
+		InputTokens: input, OutputTokens: output, TotalTokens: total,
+		Known: true, Provenance: "provider_reported", ReportedCost: reportedCost,
+	}, nil
 }
 
 func usageInteger(object map[string]any, keys ...string) (int64, bool, error) {

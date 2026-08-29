@@ -20,7 +20,13 @@ After completion or failure, a separate transaction records actual/estimated usa
   minute/hour buckets do not alias repeated wall-clock time. The exact
   non-UTC timezone and UTC boundary instant are part of bucket identity.
 - **Integer abuse:** bounded integers, checked arithmetic, integer nano-USD, no floating-point currency.
-- **Negative/unknown usage:** reject negative values; preserve provenance; fail closed when hard pricing is unavailable.
+- **Negative/unknown usage:** reject negative values; preserve token and cost
+  provenance independently; fail closed when a hard reservation cannot be
+  reconciled.
+- **Provider cost spoofing:** provider-reported cost is an explicit,
+  compatible-upstream opt-in; exact final USD decimals only. Configured pricing
+  still creates the pre-dispatch reservation, and an invalid, missing, or
+  over-bound report retains the full hard reservation.
 - **Double settlement/release:** unique operation identifiers and terminal reservation states.
 - **Crash after reservation:** bounded expiry plus idempotent recovery workers.
 - **Fallback amplification:** separate attempt cost from one logical request and reserve a configured worst case where enforceable.
@@ -29,4 +35,9 @@ After completion or failure, a separate transaction records actual/estimated usa
 
 ## Residual risks
 
-Some providers reveal token or cost usage only after execution, and opaque protocols may provide none. Estimates can be conservative and unused reservation released, but perfect pre-dispatch cost knowledge is impossible. Policies must decide whether unknown usage is allowed; hard cost caps deny it.
+Some providers reveal token or cost usage only after execution, and opaque
+protocols may provide none. Estimates can be conservative and unused
+reservation released, but perfect pre-dispatch cost knowledge is impossible.
+An opted-in valid cost report can be retained when token usage is incomplete;
+the token reservation still settles conservatively. Missing or invalid cost
+never becomes zero, and a hard cost reservation is charged in full.

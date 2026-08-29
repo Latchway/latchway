@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/useroverride"
@@ -95,6 +96,8 @@ type upstreamAttemptDocument struct {
 	Status          string       `json:"status"`
 	Usage           *usageValues `json:"usage,omitempty"`
 	UsageProvenance string       `json:"usage_provenance"`
+	CostProvenance  string       `json:"cost_provenance"`
+	CostSource      *string      `json:"cost_source,omitempty"`
 }
 
 type logicalRequestDocument struct {
@@ -873,7 +876,8 @@ func (store *operationalStore) populateRequestDetails(
 	}
 	attemptRows, err := store.pool.Query(ctx, `
 		SELECT logical_request_id, upstream_attempt_id, upstream_key,
-		       COALESCE(physical_model, ''), started_at, completed_at, status
+		       COALESCE(physical_model, ''), started_at, completed_at, status,
+		       cost_confidence, pricing_source
 		FROM upstream_attempts
 		WHERE organization_id = $1 AND logical_request_id = ANY($2::text[])
 		ORDER BY logical_request_id, attempt_number
@@ -884,10 +888,12 @@ func (store *operationalStore) populateRequestDetails(
 	attemptLocations := make(map[string][2]int)
 	for attemptRows.Next() {
 		var requestID, status string
+		var costConfidence, pricingSource *string
 		var attempt upstreamAttemptDocument
 		if err := attemptRows.Scan(
 			&requestID, &attempt.ID, &attempt.Upstream, &attempt.Model,
 			&attempt.StartedAt, &attempt.CompletedAt, &status,
+			&costConfidence, &pricingSource,
 		); err != nil {
 			attemptRows.Close()
 			return fmt.Errorf("scan upstream attempt: %w", err)
@@ -899,6 +905,17 @@ func (store *operationalStore) populateRequestDetails(
 		}
 		attempt.Status = publicAttemptStatus(status)
 		attempt.UsageProvenance = "unknown"
+		attempt.CostProvenance = "unknown"
+		if costConfidence != nil {
+			attempt.CostProvenance = publicUsageProvenance(*costConfidence)
+			switch *costConfidence {
+			case "reported":
+				source := configuration.ProviderReportedCostSourceOpenRouterUsage
+				attempt.CostSource = &source
+			case "calculated", "estimated", "reconciled_later":
+				attempt.CostSource = pricingSource
+			}
+		}
 		attemptIndex := len(items[requestIndex].Attempts)
 		items[requestIndex].Attempts = append(items[requestIndex].Attempts, attempt)
 		attemptLocations[attempt.ID] = [2]int{requestIndex, attemptIndex}

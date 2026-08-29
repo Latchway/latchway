@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -538,19 +537,8 @@ func validateOpenRouterKeyInformation(body []byte, maximumCost int64) error {
 }
 
 func decimalUSDToNanoUSD(value string) (int64, bool) {
-	if value == "" || len(value) > 128 {
-		return 0, false
-	}
-	rational, ok := new(big.Rat).SetString(value)
-	if !ok || rational.Sign() < 0 {
-		return 0, false
-	}
-	rational.Mul(rational, big.NewRat(1_000_000_000, 1))
-	integer := new(big.Int).Quo(rational.Num(), rational.Denom())
-	if !integer.IsInt64() {
-		return 0, false
-	}
-	return integer.Int64(), true
+	nanoUSD, err := pricing.ParseUSDDecimalNanoUSD(value)
+	return nanoUSD, err == nil
 }
 
 func (runner *productionCredentialSelfTests) verifyProviderErrorNormalization(

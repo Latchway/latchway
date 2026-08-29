@@ -1953,6 +1953,117 @@ func TestConfiguredPricingCaptureAndCostCalculation(t *testing.T) {
 	}
 }
 
+func TestProviderReportedCostSettlementIsExplicitExactAndTokenIndependent(t *testing.T) {
+	t.Parallel()
+	prepared := preparedExecutionAttempt{decision: policy.Decision{Upstream: configuration.Upstream{
+		ID: "openrouter", Type: "openai_compatible",
+		ProviderReportedCost: configuration.ProviderReportedCostPolicy{
+			Source:   configuration.ProviderReportedCostSourceOpenRouterUsage,
+			Currency: quota.USDCurrency,
+		},
+	}}}
+	want := quota.Cost{
+		NanoUSD: 123_456_789, Known: true,
+		Confidence: quota.ProviderReportedCostConfidence,
+		Currency:   quota.USDCurrency, Source: quota.ProviderReportedCostSource,
+	}
+	for _, usage := range []protocol.Usage{
+		{
+			InputTokens: 11, OutputTokens: 7, TotalTokens: 18,
+			Known: true, Provenance: quota.ProviderReportedProvenance,
+			ReportedCost: protocol.ProviderReportedCost{
+				NanoUSD: want.NanoUSD, Present: true, Known: true,
+			},
+		},
+		{
+			ReportedCost: protocol.ProviderReportedCost{
+				NanoUSD: want.NanoUSD, Present: true, Known: true,
+			},
+		},
+	} {
+		got, err := calculateSettlementCost(prepared, usage, nil)
+		if err != nil || got != want {
+			t.Fatalf("reported settlement for usage %#v = %#v, %v", usage, got, err)
+		}
+	}
+	for _, reported := range []protocol.ProviderReportedCost{
+		{},
+		{Present: true},
+	} {
+		got, err := calculateSettlementCost(prepared, protocol.Usage{ReportedCost: reported}, nil)
+		if err != nil || got != (quota.Cost{}) {
+			t.Fatalf("untrusted report %#v = %#v, %v", reported, got, err)
+		}
+	}
+
+	disabled := prepared
+	disabled.decision.Upstream.ProviderReportedCost = configuration.ProviderReportedCostPolicy{}
+	got, err := calculateSettlementCost(disabled, protocol.Usage{ReportedCost: protocol.ProviderReportedCost{
+		NanoUSD: want.NanoUSD, Present: true, Known: true,
+	}}, nil)
+	if err != nil || got != (quota.Cost{}) {
+		t.Fatalf("report without opt-in = %#v, %v", got, err)
+	}
+}
+
+func TestProviderReportedCostHardBoundAndUsageDriftFailClosed(t *testing.T) {
+	t.Parallel()
+	prepared := preparedExecutionAttempt{
+		decision: policy.Decision{Upstream: configuration.Upstream{
+			ID: "openrouter", Type: "openai_compatible",
+			ProviderReportedCost: configuration.ProviderReportedCostPolicy{
+				Source:   configuration.ProviderReportedCostSourceOpenRouterUsage,
+				Currency: quota.USDCurrency,
+			},
+		}},
+		appliedOutputMaximum: 3,
+		hardCost:             hardCostReservation{active: true, nanoUSD: 100},
+	}
+	result := executionResult{relay: upstream.RelayOutcome{
+		StatusCode: http.StatusOK,
+		Usage: protocol.Usage{ReportedCost: protocol.ProviderReportedCost{
+			NanoUSD: 101, Present: true, Known: true,
+		}},
+	}}
+	_, outcome := calculateAttemptOutcome(prepared, result)
+	if outcome.Cost != (quota.Cost{}) {
+		t.Fatalf("over-bound provider cost = %#v, want unknown", outcome.Cost)
+	}
+
+	result.relay.Usage = protocol.Usage{
+		InputTokens: 1, OutputTokens: 4, TotalTokens: 5,
+		Known: true, Provenance: quota.ProviderReportedProvenance,
+		ReportedCost: protocol.ProviderReportedCost{NanoUSD: 1, Present: true, Known: true},
+	}
+	result, outcome = calculateAttemptOutcome(prepared, result)
+	if !errors.Is(result.err, errUpstreamProtocol) || outcome.Cost != (quota.Cost{}) || outcome.Usage.Known {
+		t.Fatalf("usage drift result=%v outcome=%#v", result.err, outcome)
+	}
+}
+
+func TestValidateDecisionRejectsForgedProviderReportedCostPolicy(t *testing.T) {
+	t.Parallel()
+	valid := testDecision()
+	valid.Upstream.ProviderReportedCost = configuration.ProviderReportedCostPolicy{
+		Source:   configuration.ProviderReportedCostSourceOpenRouterUsage,
+		Currency: quota.USDCurrency,
+	}
+	if _, err := validateDecision(valid.Feature.ID, valid, protocol.OpenAIChatID); err != nil {
+		t.Fatalf("valid provider-reported cost policy: %v", err)
+	}
+	for _, mutate := range []func(*policy.Decision){
+		func(decision *policy.Decision) { decision.Upstream.ProviderReportedCost.Currency = "" },
+		func(decision *policy.Decision) { decision.Upstream.ProviderReportedCost.Source = "other" },
+		func(decision *policy.Decision) { decision.Upstream.Type = "anthropic" },
+	} {
+		decision := valid
+		mutate(&decision)
+		if _, err := validateDecision(decision.Feature.ID, decision, protocol.OpenAIChatID); !errors.Is(err, policy.ErrConfiguration) {
+			t.Fatalf("forged provider-reported cost policy accepted: %+v err=%v", decision.Upstream, err)
+		}
+	}
+}
+
 func TestAssignDecisionReservationUnitsUsesExactSharedHardCostBound(t *testing.T) {
 	t.Parallel()
 	source, err := pricing.NewSource("standard", id.Must(id.ConfigRevision))

@@ -193,6 +193,29 @@ func TestControlPlaneConsumerCommandsDoNotImportDatabaseStores(t *testing.T) {
 	}
 }
 
+func TestRequestOutputKeepsReportedCostSourceDistinctFromTokenUsage(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	request := logicalRequestCLI{
+		ID: "req_00000000000000000000000000", Feature: "assistant",
+		Status: "succeeded", StartedAt: "2026-08-29T00:00:00Z",
+		Attempts: []upstreamAttemptCLI{{
+			ID: "atm_00000000000000000000000000", Upstream: "openrouter",
+			Model: "openai/gpt", Status: "succeeded",
+			UsageProvenance: "unknown", CostProvenance: "upstream_reported",
+			CostSource: "openrouter_usage_cost",
+		}},
+	}
+	if err := printRequest(&options{output: "table", stdout: &output}, request); err != nil {
+		t.Fatalf("print request: %v", err)
+	}
+	if !strings.Contains(output.String(), "upstream_reported") ||
+		!strings.Contains(output.String(), "openrouter_usage_cost") ||
+		!strings.Contains(output.String(), "unknown") {
+		t.Fatalf("request cost provenance output = %q", output.String())
+	}
+}
+
 func controlHTTPResponse(request *http.Request, status int, body string, extra http.Header) *http.Response {
 	header := http.Header{"Content-Type": []string{"application/json"}}
 	if status >= 400 {
