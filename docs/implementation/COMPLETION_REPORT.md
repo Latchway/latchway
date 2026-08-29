@@ -1,65 +1,151 @@
-# Completion report
+# Version 1 candidate evidence ledger
 
-Status: **incomplete — the local authenticated debug/mock proxy, trusted restricted Chat input/total preflight, existing quota/pricing slices, administrator-owned user overrides, and the contract-0.4/schema-11 checkpoint pass locally, but multi-attempt routing/retries, broader protocols, native attestation, complete administration/operations, deployment, compatibility, hardening, and release gates are unfinished**.
+Status: **source complete; public version 1 release not finalized**.
 
-This is the evidence ledger required for eventual version 1.0. “Not produced” is an explicit failing release gate.
+This file is the truthful pre-release ledger for the current source candidate.
+It is not the immutable post-publication completion report required by section
+39 of the A-to-Z contract. The protected finalizer renders that report only
+after every release domain has authenticated evidence for one exact candidate.
 
 ## Release artifacts
 
-| Artifact | Evidence |
-| --- | --- |
-| Core commit and tag | Contract-`0.4.0`/schema-`11` passing checkpoint `c9347421fac4c729f20ea87f9205c66c15fa983f`; no release tag |
-| iOS commit and tag | Clean `0.4.0` lock-sync commit `922347286157f15ad24785ac735861c6455c2e0e`; no release tag or physical App Attest proof |
-| Android commit and tag | Clean `0.4.0` lock-sync and lifecycle-hardening commit `652f14e9fd1fa6b8f60bdb3c419d4d6b0f526840`; no release tag or registry/Play proof |
-| JavaScript commit and tag | Clean `0.4.0` lock-sync commit `e2d69505d0bba796ac6129e528b640dccb917b1c`; no release tag or registry publication |
-| React Native commit and tag | Clean `0.4.0` lock-sync commit `dcca2e2a9070af95bcfd4babe0cef6677487cd5c`; no release tag or registry publication |
-| OCI image evidence | Local image `latchway:phase6-0a03d93` built successfully at image ID `sha256:c0dcae33d48658d41557fbf6a7886beec53a0c4a14f2322d77da179e303a32e0`; configured runtime user `65532`; no registry RepoDigest or publication |
-| Contract bundle hash | Draft contract `0.4.0` at `39d32a2c9e4b0381ff815a40d87d75b51e4f37d6de55121b7bb0beef690c5c59`; byte reproducible, not published |
-| Database schema version | `11`, validated from fresh and upgrade-path local PostgreSQL schemas; unreleased |
+| Artifact | Candidate coordinate | Current evidence |
+| --- | --- | --- |
+| Core | `v1.0.0`; normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen; no public annotated product tag or GitHub release claimed |
+| JavaScript | `@latchway/client@1.0.0`; source `857f4e12b98b36a9bf4026babaf97a2ae936575e` | Local reproducible package/consumer gates pass; npm publication not claimed |
+| Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `57b45999fbc6edb717ebbf365ec59efb5abba2e2` | Local Swift Package, consumer, CocoaPods, and fixture gates pass; public tag/package and physical proof not claimed |
+| Android | `dev.latchway:latchway-*` `1.0.0`; source `7d099fff11f6730917f37d019ad730a3973672d7` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
+| React Native | `@latchway/react-native@1.0.0`; source `1e71658b3397fc8f508e5a11124aa48f1788cbba` | Local JavaScript, native bridge, example, package, and evidence-export gates pass; npm and physical-device proof not claimed |
+| Contract bundle | `latchway-contract-0.5.1.tar.gz` | Two local builds are byte-identical at SHA-256 `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`; no public release asset claimed |
+| OCI image | Intended `ghcr.io/latchway/latchway:v1.0.0` | Supplemental local image ID `sha256:d0b3ede4d520bb2a5443c8c9fe69c50e8614a2a20e05c81a6d8c3427562e87f7`; no registry `RepoDigest` claimed |
+| Database | Schema `19` | Migration sources and local migration/runtime tests present; exact cloud/released-image migration receipts pending |
+
+Contract `0.5.1` is marked `released` at `2026-08-29T07:14:27Z`
+with wire protocol `1`. That state freezes normative source; it does not assert
+that the product or packages have been publicly released.
 
 ## Test evidence
 
-At immutable core `c9347421fac4c729f20ea87f9205c66c15fa983f`, formatting/diff checks, full PostgreSQL-enabled normal and race Go suites, full vet, contract validation, all ten security-sensitive fuzz-smoke targets, authenticated trusted-preflight PostgreSQL proof, console lint/typecheck/16 tests/build, deterministic asset verification, byte-exact generated SQL, and independent P0-P2 review pass. Two contract-bundle builds are byte-identical at SHA-256 `39d32a2c9e4b0381ff815a40d87d75b51e4f37d6de55121b7bb0beef690c5c59`; client wire protocol remains `1`. All four SDK repositories pin that exact core and bundle and pass their repository-local contract/source/package gates. Live current-core conformance is still required.
+### Core and control plane
 
-The input/total proof now covers executable hard UTC-calendar, rolling token-bucket, and per-request limits through one deliberately restricted trusted preflight. An operator profile binds the exact OpenAI Chat protocol, accounting method, physical model, declared per-request/per-message framing maxima, and context window. After server-owned model rewrite and output clamp, the adapter accepts only bounded text messages and produces an exact rewritten-body proof; the data plane independently recomputes the bound, verifies and rebinds the body before reservation and again before target acquisition, and the quota layer fingerprints every bound and digest. Positive uniform reservations, checked `total = input + output`, atomic contention and denial, settlement/refund, conservative unknown charging, recovery, retry allocation, replay, snapshot projection, malicious underbound rejection, altered and same-length body replay rejection, and provider over-bound anomaly handling are tested. A bound above a bucket capacity or per-request maximum is a mutation-free durable denial. Nonzero configured input pricing may contribute to hard cost only on this trusted path.
+- Go unit/integration/race/vet, PostgreSQL migration/data-plane/admin/job,
+  contract validation, deterministic bundle, fuzz-smoke, console lint/type/test,
+  and fixture-backed browser flows were exercised throughout the version 1
+  source pass.
+- Trusted exact-model input/total-token preflight, atomic quota reservation and
+  settlement, retry/attempt accounting, conservative unknown usage, routing,
+  protocol adapters, session/DPoP, identity, attestation verifiers, Admin API,
+  CLI, dashboard, telemetry, jobs, and release-evidence validators have focused
+  normal, adversarial, and race coverage.
+- The normative contract checkpoint is immutable. Descendant release and
+  documentation changes are compatible only while `api/` remains byte-identical
+  to `2f5e5e67c824e270431f1232cc6dc2824848e380`.
 
-The user-limit-override proof covers strict bounded documents and reasons, required environment scoping, `activate_configuration` authorization, secret/subject exclusion, exact no-op resource idempotency with a success audit on every PUT/DELETE, providerless clear, expired-row healing, attributed denied audits, and eight concurrent replacements leaving exactly one active row. Session authorization locks installation, application user, grant, environment, application, and organization state coherently and seals the exact active override ID/plan or exact absence. Access policy always runs first; an override can replace only the limit plan and never route or access. Request enforcement uses that authorization-sealed selection. The repeatable-read, read-only quota snapshot revalidates the exact seal with active configuration and counters before projecting them. Configuration activation/rollback refuses to strand active overrides, and corrupt or mismatched state fails closed. The CLI takes bearer credentials only from a named environment variable, requires HTTPS except loopback HTTP, rejects redirects, bounds responses, and never prints the token.
+### SDKs and packages
 
-The bounded token-bucket proof covers the currently supported `logical_requests` and `output_tokens` metrics. One semantic request is exactly `1,000,000,000,000` integer balance quanta; output reservations debit the exact adapter-applied cap. The static output clamp is the minimum of the feature absolute maximum, every applicable per-request maximum, and every applicable token-bucket capacity, independent of rule order and current balance. Refill credits only complete `1us` PostgreSQL timestamp ticks, exact internal retry timestamps remain representable beyond a `time.Duration` horizon, and `used_units` and `reserved_units` stay zero. For measured successful output, only reserved-minus-actual units are refunded; equal usage avoids a bucket write and zero usage refunds in full. Failures, unknown usage, and dispatched expiry retain the full debit; pre-dispatch release and undispatched expiry refund it. A policy-decrease refund saturates at the new capacity, and public `Retry-After` calculation is overflow-safe and capped at `MaxInt32` seconds. Accepted replay is stable and denied replay is mutation-free. Focused tests additionally prove exact fragmentation and microsecond boundaries, large retry horizons, capacity contention, mixed-rule atomicity, cursor-only refill, conservative transitions, settlement/expiry races, and corrupt-state rejection.
+| Repository | Local evidence |
+| --- | --- |
+| JavaScript | 36 Vitest and 11 Node tests plus lint, typecheck, build, examples, exports, contract, package closure, clean consumer, and reproducibility; tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
+| Swift/iOS | 64 Swift tests, release build, consumer, CocoaPods lint, contract archive, fixture, and device-evidence schema tests; one environment-dependent test skip was recorded |
+| Android | 670 Gradle tasks for test/assemble/lint, release/adversarial and device-evidence suites, local Maven publication, and offline consumers pass at the synchronized source |
+| React Native | 33 Vitest, 12 Node, 13 Python device-evidence, and 7 physical-evidence-export tests plus lint, typecheck, codegen, build, example/native consumers, podspec, package closure, and reproducibility; tarball SHA-256 `924a55941fc88799754b210f2aa443e577d7ed04407828f0c0907a98277f6df6` |
 
-The authenticated PostgreSQL proof also covers the real custom-JWT/debug-attestation/DPoP/policy/mixed-quota/protected-upstream/settlement vertical: the adapter applies and reserves an output cap of 64, each success settles 7 provider-reported output tokens and releases 57, and the shared output bucket reaches 14 used after two successes. Each success records five usage rows with exact provenance, including a dedicated `43,235` nano-USD row from the configured request fee plus separately rounded zero-input and measured-output charges. The shared routed fixture now uses a zero input-token rate because a global user override may select any plan; focused pricing tests retain nonzero input-rate formula coverage. The attempt and cost row persist the catalog ID, USD, exact configuration revision, and calculated confidence; the cost row additionally carries `configured_flat_rate:<attempt-id>` provenance, and the provider-supplied cost extension is ignored. A held authenticated stream also proves denial before target acquisition/dispatch, non-stream bypass without stream state, exact denial replay, release, immediate reuse, zero `used_units`, retained lease audit rows, and no concurrency usage record. Focused quota tests add exact contention bounds, request/stream applicability, stable accepted and denied replays after release, calendar-denial precedence, all terminal outcomes, both expiry modes, tamper rejection, and settle-versus-expiry serialization. Exact opaque reservation and terminal settlement replays leave state unchanged, DPoP replay does not redispatch, and atomic daily request denial does not mutate the non-exceeded output bucket.
+Repository-local results demonstrate source and package integrity. They do not
+replace the protected all-SDK suite against the exact released image.
 
-The authenticated quota-snapshot proof covers the canonical bodyless `GET /client/v1/features/{feature}/quota` without route selection or upstream dispatch. Policy access and limit-plan decisions must be stable across streaming facts; route-, upstream-, and model-scoped rules fail closed because no physical route exists. One repeatable-read, read-only quota transaction verifies the active revision, obtains one database time, batches bucket reads, and does not lock, write, or materialize missing buckets. Missing state is pristine; calendar limits expose exact usage/reservation/reset; token limits virtually refill and expose whole-unit remaining with availability-derived used; per-request limits expose only maximum; concurrency exposes active occupancy as reserved. DPoP authorization necessarily writes replay state, while quota counters and request/reservation/attempt/usage tables remain unchanged. The E2E proves an invalid query does not consume the proof, a successful read makes no upstream call, and reusing that proof is rejected. Individually unsafe JavaScript integer response fields are omitted rather than rounded.
+### Supplemental runtime, security, and failure evidence
 
-The hard-cost proof covers hard `cost_nano_usd/calendar` rules with immutable configured USD pricing. Routes without trusted input preflight reserve `request charge + ceil(applied output cap * output rate / 1,000,000)` and require a zero input-token rate. Contract `0.4.0` permits the restricted trusted Chat path to add `ceil(trusted input bound * input rate / 1,000,000)`. Every component uses checked integer arithmetic and every applicable cost rule receives the same reservation. Arithmetic overflow fails closed before reserve or provider dispatch. Known provider usage settles calculated actual cost and releases the difference; unknown or over-bound post-dispatch usage charges the full reservation without manufacturing a known-cost record. Zero-priced requests retain a real durable lifecycle. Predispatch release and undispatched expiry refund; dispatched expiry charges. Exact replay validates terminal splits, recovery validates the stored revision plus independently bound accounting profile and catalog, substitution fails without mutation, and historical priced reservations preserve compatibility. Contention cannot overspend, mixed denial is atomic, authenticated denial occurs before target acquisition or provider dispatch, and the public quota snapshot exposes exact used/reserved/remaining cost state without mutating it. Other cost algorithms remain capability-gated.
+- A local production image started with PostgreSQL, migrated to schema 19,
+  passed health/readiness/doctor/version, ran as `65532:65532` with a read-only
+  root filesystem and dropped capabilities, and stopped gracefully.
+- A local OCI layout contained both `linux/amd64` and `linux/arm64`; archive
+  SHA-256 was `926ada1aeba3887384ac9d4b010a94b2899b83134094d833ba4bff2a30ff4743`.
+- `govulncheck` found zero reachable vulnerabilities in the local binary. Trivy
+  found zero `HIGH` or `CRITICAL` findings in the exported local image.
+- The local SPDX 2.3 SBOM contained 52 packages and 52 relationships and had
+  SHA-256 `44e96ff77d9264079906f964e76cf4920230ee37a7130d8ee69d8a0c08e325ff`.
+- Nine automated failure-matrix groups passed. Six destructive/protected
+  scenarios were correctly left `external_required` instead of being
+  represented by synthetic success.
 
-The JavaScript, iOS, Android, and React Native repositories have clean `0.4.0` lock-sync commits and locally passing contract/fixture/source/package gates recorded above. Their `contract.lock` files identify exact core `c9347421fac4c729f20ea87f9205c66c15fa983f` and deterministic bundle `39d32a2c9e4b0381ff815a40d87d75b51e4f37d6de55121b7bb0beef690c5c59`; lock equality is not runtime compatibility evidence.
-
-Current-image Compose startup/smoke and registry digest capture, React Native native-consumer validation, native server attestation fixture suites, physical-device attestation, remaining quota/pricing primitives, live upstream canary, load/soak, released-version upgrade, SBOM, license, dependency, and container security evidence remain incomplete. The local authenticated mock vertical and earlier OCI/current fuzz/full-race evidence do not satisfy all Phase 18 hardening gates.
+All five items are supplemental local observations. The release workflow must
+repeat the applicable work for the exact per-architecture published digest and
+produce authenticated receipts.
 
 ## Compatibility matrix
 
-The draft contract is `0.4.0` and wire protocol is `1`. The immutable core implementation passes at `c9347421fac4c729f20ea87f9205c66c15fa983f`. The current deterministic bundle SHA-256 is `39d32a2c9e4b0381ff815a40d87d75b51e4f37d6de55121b7bb0beef690c5c59`.
+| Server | Protocol | JavaScript | Swift/iOS | Android | React Native |
+| --- | --- | --- | --- | --- | --- |
+| `1.0.0` (`1.0.x` maximum tested series) | Contract `0.5.1`, wire `1` | `1.0.0`, Node 24.19+ / browser | `1.0.0`, iOS 15+ | `1.0.0`, API 23+ | `1.0.0`, RN 0.82.x, iOS 15+, Android API 24+ |
 
-Every SDK lock pins contract `0.4.0`, core revision `c9347421fac4c729f20ea87f9205c66c15fa983f`, bundle `39d32a2c9e4b0381ff815a40d87d75b51e4f37d6de55121b7bb0beef690c5c59`, minimum server `0.4.0`, maximum tested server series `0.4.x`, and wire protocol `1`. Live current-core conformance and external platform gates must still pass before a compatibility promise or minimum released pair can be recorded.
+Every SDK lock pins core
+`2f5e5e67c824e270431f1232cc6dc2824848e380` and contract bundle
+`52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`.
+The React Native manifest also pins the exact JavaScript, Swift, and Android
+source commits shown under Release artifacts.
 
 ## Security statement
 
-- Administrative bootstrap/session/token boundaries, immutable active configuration, strict provider JWT verification, rotating fixed-endpoint key retrieval, external-subject pseudonymization, envelope encryption, protected outbound destinations, header filtering, and no-body-storage architecture are implemented and tested locally.
-- The debug-attested client session plane implements identity-to-challenge/exchange, short-lived DPoP-bound access tokens, rotating refresh families, transactional replay enforcement, refresh-reuse revocation, JWKS publication, protected authorization, and current-installation revocation.
-- Current-installation revocation transactionally validates the access principal and request-bound proof, consumes replay state, and revokes the installation, grants, refresh tokens, and accepted attestation keys. Adversarial, idempotency, clock-regression, race, and contention gates pass.
-- Raw identity credentials, external subjects, upstream secrets, prompt bodies, attestation evidence, and proofs are excluded from normal persistence/logging boundaries by API design and tests where implemented.
-- The local authenticated proxy and atomic mixed request-count/input-token/output-token/total-token/cost reserve/settle path are implemented. Hard calendar and bounded rolling token-bucket limits cover `logical_requests` plus the applicable token metrics; per-request input/output/total bounds are enforced before dispatch. Token buckets use exact microsecond fixed-point refill, stable lifecycle replay, conservative transitions, zero calendar counters, and bounded public retry guidance. Output reservations debit the exact adapter-applied cap; trusted input/total reservations debit exact model-aware bounds. Known successful measured usage refunds only unused units, while failure, unknown post-dispatch usage, provider over-bound usage, and dispatched expiry retain the conservative debit; pre-dispatch release and undispatched expiry refund. Durable request/stream concurrency leases count only active occupancy in `reserved_units`, keep `used_units` at zero, release on settlement/pre-dispatch failure/expiry, retain audit rows, and create no concurrency-occupancy usage records; trusted non-stream requests do not materialize stream capacity. Usage records preserve calculated, reported, or unknown provenance, and per-request-only/non-applicable-stream policies retain an entryless durable lifecycle. Immutable configured USD pricing uses exact separately rounded integer math and exact `effectiveAt` activation, persists catalog/revision attribution for successful and failed known usage, records explicit zero, and retains unknown selection metadata without a false cost row. Bounded hard `cost_nano_usd/calendar` rules reserve the configured request charge plus exact clamped-output and, on the trusted route, input worst case, settle known actual cost, and conservatively charge unknown post-dispatch cost. Provider-reported prices are not trusted. Authenticated quota snapshots are read-only with respect to quota state, reuse canonical rule/scope identities, require context-stable access/plan decisions, and reject unsupported physical scopes; DPoP replay consumption remains an authorization write. Bounded user limit-plan overrides are administrator-owned, environment-scoped, audited, exact-presence sealed, configuration-guarded, and quota-revalidated; access and route selection remain unaffected. Production native attestation trust-root verification, other cost shapes, upstream-reported pricing, remaining multi-attempt/retry work, complete operational jobs, and production deployment remain incomplete. Debug attestation is not evidence of hardware-backed trust.
-- Superseding the earlier dormant-only limitation, contract `0.4.0` activates hard-calendar `input_tokens`/`total_tokens` and nonzero input-priced hard cost only through the exact-model, restricted text-only trusted preflight. All other request shapes and accounting methods remain fail-closed; the old generic raw-byte estimate is still ineligible.
-- Web trust remains explicitly weaker than hardware-backed native trust.
-- No unresolved issue may be interpreted as accepted merely because this report lists it.
+- Prompt and response body logging is disabled by default. Normal request,
+  usage, audit, telemetry, and release evidence exclude prompt bodies,
+  provider credentials, identity tokens, attestation evidence, and DPoP proofs.
+- Upstream and identity-provider secrets are write-only, reference-bound,
+  envelope-encrypted at rest, redacted from control-plane responses, and never
+  supplied by clients. Provider destinations and forwarded headers are bounded
+  and SSRF-protected.
+- Access tokens are short-lived and P-256 DPoP-bound. Refresh tokens rotate;
+  replay/reuse and user/application/environment/installation revocation fail
+  closed across replicas. Signing-key rotation retains the necessary overlap
+  for valid active sessions.
+- Native App Attest and Play Integrity source paths validate configured
+  application identity and challenge binding. They do not prove human identity,
+  and no production physical-device claim exists until the protected device
+  suite passes.
+- Web App Check and Turnstile verdicts are intentionally weaker risk signals
+  than native hardware-backed attestation and are composed with identity,
+  origin/action/hostname checks, DPoP, replay controls, and quotas.
+- A configured upstream may retain request content under its own account and
+  data policy after Latchway dispatches an authorized request.
+- Supplemental local scans found no reachable Go vulnerability and no high or
+  critical local-image vulnerability. The exact release image still requires
+  protected per-architecture vulnerability and license results, SBOMs,
+  signatures, and provenance.
 
 ## Operational proof
 
-An earlier revision demonstrated clean single-image Compose startup, migration, health/readiness, and embedded-console serving. Fresh and upgrade-path PostgreSQL migrations now reach schema version 11. The latest local OCI build evidence remains the older `0a03d9369c0ebcf793f00bac6b002d1caaea6b8e` image and declares non-root user `65532`.
+| Operation | Source/local evidence | Release evidence required |
+| --- | --- | --- |
+| Clean Compose startup | Local production image/PostgreSQL smoke passed | Protected exact-image Compose receipt |
+| Fresh migration | Local schema-19 migration passed | Exact-image cloud/platform migration receipts |
+| Configuration activation/rollback | Canonical Admin API and local concurrency/browser tests pass | Exact-candidate deployment observation under load |
+| Backup/restore | Isolated drill tooling, validation, and documentation are implemented | Protected backup/restore drill receipt |
+| Upgrade/application rollback | Previous-candidate discovery, authentication, and drill tooling are implemented | Successful distinct-ancestor candidate drill |
+| Graceful shutdown | Local container stop passed | Exact-candidate shutdown under protected load |
+| Worker recovery/multi-replica | Jobs, heartbeats, shared replay/quota state, and failure producers are implemented | Destructive protected multi-replica/failure receipts |
+| Cloud deployments | Compose, Cloud Run, AWS, Fly.io, and Cloudflare assets validate locally | Provider-issued exact-image smoke receipts for all claimed platforms |
 
-Current-image Compose startup, a registry RepoDigest, released-version upgrade, configuration rollback under deployment load, backup/restore, graceful shutdown under load, worker recovery, multi-role operation, and cloud-platform smoke tests have not been demonstrated.
+## External-required version 1 gates
 
-## Remaining work
+The following are unfinished release evidence, not post-1.0 enhancements:
 
-Phase 6 has a passing local debug-attested session and protected revocation gate, and the local Phase 7 authenticated mock proxy gate passes. The refresh step-up request shape still needs an explicit contract/version decision, and Phase 7 still lacks its verifier CLI/live canary. Phase 8 includes the recorded request/output/input/total/cost/concurrency quota slices; hard input/total calendar, token-bucket, and per-request shapes plus input-priced hard cost are restricted to the trusted exact-model text-only Chat preflight. Other cost shapes, upstream-reported pricing, remaining multi-attempt/retry work, and the rest of the engine remain. Schema version 11 retains the bounded schema-9 recovery limitation for expired per-request-only entryless attempts. The last synchronized checkpoint is immutable at contract `0.4.0`/schema `11`, wire protocol `1`, and all SDK locks remain synchronized to it; the newer local work is not yet a cross-repository compatibility checkpoint. Phases 9–19 retain open gates including broader adapters/routing/retries, native attestation, complete administration and operations, deployment, live cross-repository conformance, hardening, and release artifacts. No release tag or compatibility promise exists, so this report does not satisfy the version-1.0 completion rule.
+- exact-release-image conformance for JavaScript, Swift, Android, React Native
+  iOS, and React Native Android;
+- real production App Attest on a physical Apple device and Play Integrity from
+  a Play-distributed Android build;
+- live OpenRouter non-streaming/streaming, usage, clamp, and error canaries;
+- exact-image Compose, Cloud Run, AWS, Fly.io, and Cloudflare Containers smokes;
+- protected load, destructive failure, multi-replica, backup/restore, and
+  previous-candidate upgrade/rollback drills;
+- exact per-architecture scans, license results, SBOMs, image signing, and
+  provenance;
+- annotated tags, GitHub releases, OCI/npm/Swift/CocoaPods/Maven publication,
+  raw-asset verification, and clean post-publication consumers.
+
+No valid GitHub/registry publication session, production cloud/provider
+credential set, or connected physical device was available during this source
+pass. These gates cannot be truthfully converted into passing evidence by local
+fixtures or source inspection.
+
+When every item above passes for the same immutable candidate, the finalizer
+will produce the authoritative completion report. Until then, this ledger must
+not be cited as proof that public `v1.0.0` is ready or released.
