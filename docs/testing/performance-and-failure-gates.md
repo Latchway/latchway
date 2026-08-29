@@ -12,8 +12,9 @@ The initial performance environment is exactly:
 - PostgreSQL on a measured low-latency network;
 - prompt and response body logging disabled;
 - a warm configuration cache;
-- the exact release OCI reference (`registry/repository@sha256:<64 lowercase
-  hexadecimal characters>`), not a mutable tag.
+- the exact release OCI index reference and exact executed platform-child
+  reference (`registry/repository@sha256:<64 lowercase hexadecimal
+  characters>`), not a mutable tag.
 
 Record the PostgreSQL version and placement, host/container limits, image
 identity, core commit, deployment revision, and runner identity in the load
@@ -24,9 +25,11 @@ separate artifacts.
 Image identity has two deliberately separate evidence fields. A self-contained
 local run sets only `metadata.local_docker_image_id` to Docker's immutable
 `sha256:<64 lowercase hexadecimal characters>` image ID. Release and cloud
-runs set only `metadata.release_oci_reference` to a fully qualified registry
-repository plus digest. Exactly one field is required. A local Docker image ID
-is useful local evidence, but it is never registry or release evidence.
+runs set `metadata.release_oci_reference` to the multi-architecture index and
+`metadata.release_oci_platform_reference` to a distinct child digest in the
+same fully qualified repository. Exactly one local ID or one complete release
+pair is required. A local Docker image ID is useful local evidence, but it is
+never registry or release evidence.
 
 The load report passes only when the complete six-gate suite runs. A selected
 single-gate run can exit successfully for iteration, but its JSON contains
@@ -165,10 +168,11 @@ Copy and edit
 [`tests/load/config/v1.example.json`](../../tests/load/config/v1.example.json).
 Its 128 MiB stream-growth and 5 MiB/min plateau-slope values are explicit
 example thresholds, not values invented by the product contract.
-The example uses `release_oci_reference`, because it is the form required for
-release and cloud evidence. Do not replace it with a bare `sha256:...` local
-image ID. The self-contained launcher generates its separate local-only config
-automatically.
+The example uses both `release_oci_reference` and
+`release_oci_platform_reference`, because the index and executed child are
+both required for release and cloud evidence. Do not replace them with a bare
+`sha256:...` local image ID. The self-contained launcher generates its
+separate local-only config automatically.
 
 ## Run the load gates
 
@@ -263,7 +267,8 @@ release-blocking until supplied.
 For every live case:
 
 1. use the exact release OCI reference pinned as
-   `registry/repository@sha256:<digest>` and an isolated database;
+   `registry/repository@sha256:<digest>`, record the exact executed
+   platform-child digest in the same repository, and use an isolated database;
 2. capture a bounded before-state (quota snapshot plus relevant durable row
    identifiers, never prompt bodies or credentials);
 3. create the in-flight boundary using the deterministic fixture;
@@ -298,6 +303,16 @@ not dirty the candidate. Cloud platform smoke, physical App Attest/Play
 Integrity, and published
 artifact conformance are separate release gates; neither of these runners
 claims them.
+
+For promotion evidence, do not upload these files from an arbitrary job. The
+protected load producer executes the exact amd64 candidate child on a hosted
+runner. The protected failure producer accepts destructive captures only
+through its protected self-hosted environment, re-runs the fixed release
+validator, seals an exhaustive checksum manifest, and attests that manifest.
+The aggregate verifies both producer workflows and exact numeric run IDs before
+accepting either report. See
+[`operational-resilience-evidence.md`](operational-resilience-evidence.md) for
+the explicit self-hosted trust boundary and artifact layout.
 
 The release report becomes an `operational_resilience` claim only through the
 strict aggregate described in

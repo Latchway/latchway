@@ -5,7 +5,8 @@ gate emits `operational_resilience.json` only after one exact candidate passes
 all of the following machine reports:
 
 1. the complete six-gate v1 load suite against the immutable candidate OCI
-   digest (a local Docker image ID is rejected);
+   index and its exact executed `linux/amd64` child (a local Docker image ID is
+   rejected);
 2. the release-scope failure matrix, including all six destructive scenarios
    and at least two API replicas, two workers, and a real load-balancer path;
 3. a PostgreSQL custom-format backup restored into a distinct fresh database,
@@ -22,16 +23,24 @@ with live artifacts, `operational_resilience` remains unverified.
 
 Run source-scope cross-repository conformance and the release-candidate
 workflow first, both from protected `main` at the exact untagged candidate
-commit. The protected producer verifies both GitHub attestations against that
-commit, `refs/heads/main`, their exact repository workflow paths, and hosted
-runners before the finalizer runs. This prepublication path deliberately does
-not require the intended tag to exist. The finalizer then requires the reports
-to agree on:
+commit. The protected load and failure producers verify both upstream GitHub
+attestations against that commit, `refs/heads/main`, their exact repository
+workflow paths, and hosted runners before executing or importing observations.
+The aggregate workflow then verifies all four attestation bundles against the
+four fixed signer workflows and the same source digest before the finalizer
+runs. This prepublication path deliberately does not require the intended tag
+to exist. The finalizer requires the reports and producer manifests to agree
+on:
 
 - all five repository commits, versions, and intended tags;
 - released contract version, release time, bundle name, and bundle SHA-256;
 - the exact 40-character core commit; and
-- `ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>`.
+- `ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>`
+  for the candidate index and a distinct digest in the same repository for the
+  executed `linux/amd64` child;
+- the protected workflow path, protected environment, source commit, run ID
+  and attempt, runner class/OS/architecture, fixed invocation, configuration
+  checksums, primary-report checksum, and exhaustive raw-artifact checksums.
 
 Every input timestamp must start at or after the contract release time, finish
 no later than the verifier's clock, be no more than seven days old, and fit in
@@ -39,9 +48,13 @@ one seven-day aggregate window.
 
 The load artifact must be named `load-v1.json` and contain
 `complete_suite: true`, `load_targets_passed: true`, a clean candidate commit,
-all six fixed passing gate names, and only `metadata.release_oci_reference`
-for image identity. Output from `run-local-load-gates.sh` intentionally fails
-this release check because it identifies a locally built image.
+all six fixed passing gate names, and both
+`metadata.release_oci_reference` and
+`metadata.release_oci_platform_reference` for index and executed-child
+identity. A self-contained local invocation of `run-local-load-gates.sh`
+intentionally fails this release check because it identifies a locally built
+image. The protected load workflow invokes the same launcher in its explicit
+release mode, after pulling and inspecting the exact candidate child.
 
 The release failure artifact must contain `failure-release.json` and:
 
@@ -92,9 +105,10 @@ arbitrary true booleans do not satisfy the gate:
   `downstream_client_cancel_observed`, `one_terminal_attempt_per_case`,
   `usage_provenance_bounded_per_case`, and `no_permanent_reservation`.
 
-All six documents also bind the exact image, platform, isolated PostgreSQL,
-fault tool, and operator. The replica document has the fixed assertions below
-and additionally binds replica counts and the load balancer.
+All six documents also bind the exact index image, exact platform-child image,
+platform, isolated PostgreSQL, fault tool, and operator. The replica document
+has the fixed assertions below and additionally binds replica counts and the
+load balancer.
 
 The replica scenario additionally records `api_replicas` and
 `worker_replicas` as values of at least `2`, a nonempty `load_balancer`, and
@@ -106,6 +120,36 @@ passing assertions named:
 - `configuration_revision_atomic_across_replicas`;
 - `signing_rotation_preserved_active_sessions`; and
 - `jwks_rotation_converged`.
+
+## Protected load and failure producers
+
+`Protected exact-candidate load evidence` runs on GitHub-hosted Ubuntu in the
+`release-load-evidence` protected environment. It checks out the exact
+candidate commit from protected `main`, authenticates the candidate and source
+artifacts, resolves the candidate index and `linux/amd64` child, and executes
+the complete fixed load launcher against that child. It uploads
+`latchway-release-load-<commit>` with `load-producer.json`, its Sigstore bundle,
+the primary report, exact configuration, redacted provisioning record, logs,
+and all other raw files hash-indexed by the manifest.
+
+`Protected exact-candidate destructive-failure evidence` runs only on a
+runner labeled `self-hosted`, `linux`, `x64`, and
+`latchway-release-failure`, behind the `release-failure-evidence` protected
+environment. The environment variable
+`LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY` must point to the bounded raw
+capture created by the operator's isolated fault controller. The workflow
+rejects a symlinked capture, imports it into runner-temporary storage, runs the
+fixed release-scope validator with an exact PostgreSQL digest, and uploads
+`latchway-release-failure-<commit>` with `failure-producer.json`, its Sigstore
+bundle, the report, committed matrix, non-secret environment record, automated
+logs, and destructive observations.
+
+The self-hosted runner and protected environment are an explicit trust
+boundary: the workflow authenticates what that runner observed and prevents
+cross-candidate substitution, but cannot turn an absent physical fault into an
+observation. Environment approval, runner isolation, retention of the raw
+capture, and review of the attested checksums remain operational controls. The
+finalizer never synthesizes external claims.
 
 ## Executable recovery and rollback drill
 
@@ -137,6 +181,13 @@ not required to exist. If the prior binary cannot run the candidate schema,
 rollback evidence fails; restoring the pre-upgrade backup is a separate
 schema-recovery operation and does not satisfy application rollback.
 
+The current drill launcher therefore cannot bootstrap a repository with no
+previous annotated release tag. For the first release it remains blocked until
+a separately attested, distinct ancestor release-candidate manifest and run
+are accepted as the prior baseline. A mutable tag, a made-up v0.9 coordinate,
+or reusing the current candidate as its own predecessor is not acceptable
+upgrade or rollback evidence.
+
 Raw observations are sealed by `operational-drill-report.py`. The sealer and
 the aggregate finalizer independently validate report shape, image identity,
 schema equality, health/readiness, state equality, assertions, and every raw
@@ -146,10 +197,12 @@ artifact SHA-256.
 
 The protected `Operational resilience evidence` workflow downloads candidate,
 source, release-load, and release-failure artifacts by numeric run ID from the
-same repository. It verifies the candidate and source report attestations for
-the exact candidate commit on protected `main`, executes the isolated drills,
-finalizes the domain, attests the domain document with GitHub OIDC, and uploads
-the bounded reports.
+same repository. It queries the load and failure run records to require the
+fixed workflow path, successful `workflow_dispatch`, protected `main`, and
+exact head SHA. It verifies candidate, source, load-producer, and
+failure-producer attestations for the exact candidate commit, executes the
+isolated drills, revalidates every report and producer checksum, attests the
+domain document with GitHub OIDC, and uploads the bounded reports.
 
 For offline verification of already captured inputs:
 
@@ -158,21 +211,34 @@ python3 scripts/operational-resilience-evidence.py \
   --candidate-manifest /evidence/candidate/latchway-candidate.json \
   --source-conformance /evidence/source/latchway-cross-repository.json \
   --load-report /evidence/load/load-v1.json \
+  --load-producer-manifest /evidence/load/load-producer.json \
+  --load-producer-attestation /evidence/load/load-producer.attestation.sigstore.json \
+  --load-producer-run-id "$LOAD_RUN_ID" \
   --failure-report /evidence/failure/failure-release.json \
+  --failure-producer-manifest /evidence/failure/failure-producer.json \
+  --failure-producer-attestation /evidence/failure/failure-producer.attestation.sigstore.json \
+  --failure-producer-run-id "$FAILURE_RUN_ID" \
   --failure-evidence-dir /evidence/failure/live-failures \
   --backup-restore-report /evidence/drills/backup-restore.json \
   --upgrade-rollback-report /evidence/drills/upgrade-rollback.json \
   --output-directory /evidence/final-operational-resilience
 ```
 
-The output directory is absolute and empty. It receives the exact
-cross-repository domain document plus copied input reports and a raw-artifact
-hash index. It contains no database credential, master key, DPoP key, provider
-payload, prompt, response, device identifier, or absolute developer path.
+The output directory is absolute and empty. It receives
+`operational_resilience.json` at its root plus copied reports, producer
+manifests, their retained attestation bundles, and a raw-artifact hash index
+under `artifacts/operational-resilience/`. In the protected workflow,
+`operational_resilience.attestation.sigstore.json` is copied beside the domain
+document before the directory is uploaded as
+`latchway-operational-resilience-<commit>`. Every path directly named by the
+domain document is relative to that artifact root. The bundle contains no
+database credential, master key, DPoP key, provider payload, prompt, response,
+or device identifier.
 
 Run the deterministic validator suite with:
 
 ```bash
 python3 -m unittest scripts/test_operational_resilience_evidence.py
+bash -n scripts/run-local-load-gates.sh
 bash -n scripts/run-operational-resilience-drills.sh
 ```

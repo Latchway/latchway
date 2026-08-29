@@ -7,6 +7,7 @@
   "finished_at": "2026-08-29T00:05:00Z",
   "environment": {
     "image_digest": "ghcr.io/latchway/latchway@sha256:replace",
+    "platform_image_digest": "ghcr.io/latchway/latchway@sha256:replace-with-executed-linux-amd64-child",
     "platform": "replace",
     "postgresql": "replace",
     "fault_tool": "replace",

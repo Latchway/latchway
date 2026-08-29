@@ -9,7 +9,10 @@ import (
 	"testing"
 )
 
-const testImageHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const (
+	testImageHash    = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testPlatformHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
 
 func TestExampleConfigIsStrictAndMeetsContractFloor(t *testing.T) {
 	path := filepath.Join("..", "..", "config", "v1.example.json")
@@ -142,13 +145,29 @@ func TestImageEvidenceDistinguishesLocalAndReleaseArtifacts(t *testing.T) {
 			metadata: evidenceMetadata{LocalDockerImageID: "sha256:" + testImageHash},
 		},
 		{
-			name:     "release OCI reference",
-			metadata: evidenceMetadata{ReleaseOCIReference: "ghcr.io/latchway/latchway@sha256:" + testImageHash},
+			name: "release OCI reference",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
 		},
 		{
-			name:      "local ID in release field",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "sha256:" + testImageHash},
-			wantError: "fully qualified registry repository",
+			name:      "release index without platform child",
+			metadata:  evidenceMetadata{ReleaseOCIReference: "ghcr.io/latchway/latchway@sha256:" + testImageHash},
+			wantError: "index and platform",
+		},
+		{
+			name:      "release platform child without index",
+			metadata:  evidenceMetadata{ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash},
+			wantError: "index and platform",
+		},
+		{
+			name: "local ID in release field",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
 			name:      "release reference in local field",
@@ -158,8 +177,9 @@ func TestImageEvidenceDistinguishesLocalAndReleaseArtifacts(t *testing.T) {
 		{
 			name: "both evidence forms",
 			metadata: evidenceMetadata{
-				LocalDockerImageID:  "sha256:" + testImageHash,
-				ReleaseOCIReference: "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				LocalDockerImageID:          "sha256:" + testImageHash,
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
 			},
 			wantError: "exactly one",
 		},
@@ -169,34 +189,68 @@ func TestImageEvidenceDistinguishesLocalAndReleaseArtifacts(t *testing.T) {
 			wantError: "exactly one",
 		},
 		{
-			name:      "mutable release tag",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "ghcr.io/latchway/latchway:v1"},
-			wantError: "fully qualified registry repository",
+			name: "mutable release tag",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway:v1",
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
-			name:      "unqualified release repository",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "latchway/latchway@sha256:" + testImageHash},
-			wantError: "fully qualified registry repository",
+			name: "unqualified release repository",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
-			name:      "uppercase release digest",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "ghcr.io/latchway/latchway@sha256:" + strings.ToUpper(testImageHash)},
-			wantError: "fully qualified registry repository",
+			name: "uppercase release digest",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway@sha256:" + strings.ToUpper(testImageHash),
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
-			name:      "tag plus digest",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "ghcr.io/latchway/latchway:v1@sha256:" + testImageHash},
-			wantError: "fully qualified registry repository",
+			name: "tag plus digest",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway:v1@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
-			name:      "registry URL",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "https://ghcr.io/latchway/latchway@sha256:" + testImageHash},
-			wantError: "fully qualified registry repository",
+			name: "registry URL",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "https://ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
 		},
 		{
-			name:      "invalid registry port",
-			metadata:  evidenceMetadata{ReleaseOCIReference: "registry.example:70000/latchway/latchway@sha256:" + testImageHash},
-			wantError: "fully qualified registry repository",
+			name: "invalid registry port",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "registry.example:70000/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "fully qualified registry repositories",
+		},
+		{
+			name: "mismatched release repositories",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "registry.example/latchway/latchway@sha256:" + testPlatformHash,
+			},
+			wantError: "one repository",
+		},
+		{
+			name: "index reused as platform child",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "ghcr.io/latchway/latchway@sha256:" + testImageHash,
+			},
+			wantError: "distinct digests",
 		},
 	} {
 		test := test
@@ -237,8 +291,11 @@ func TestConfigValidationAcceptsExplicitLocalOrReleaseImageEvidence(t *testing.T
 			metadata: evidenceMetadata{LocalDockerImageID: "sha256:" + testImageHash},
 		},
 		{
-			name:     "release",
-			metadata: evidenceMetadata{ReleaseOCIReference: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/latchway@sha256:" + testImageHash},
+			name: "release",
+			metadata: evidenceMetadata{
+				ReleaseOCIReference:         "registry.cloudflare.com/0123456789abcdef0123456789abcdef/latchway@sha256:" + testImageHash,
+				ReleaseOCIPlatformReference: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/latchway@sha256:" + testPlatformHash,
+			},
 		},
 	} {
 		test := test

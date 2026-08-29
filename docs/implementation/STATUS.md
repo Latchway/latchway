@@ -125,13 +125,18 @@ checkpoint or release-readiness evidence.
 
 ## Local working-tree update — operational resilience evidence (2026-08-29)
 
-The core repository now contains a fail-closed operational-resilience evidence
-producer, isolated backup/restore and previous-image upgrade/application-
-rollback drill, protected attestation workflow, and tamper/substitution tests.
-It emits no release claim from local load or automated-only failure evidence.
-The live exact-image load, destructive multi-replica scenarios, recovery drill,
-and released-image rollback still must execute successfully before the domain
-can become promotion evidence.
+The core repository now contains fail-closed protected producers for full load
+and destructive-failure evidence, exhaustive checksum manifests, exact
+candidate/source/runner/workflow/run identity bindings, authenticated
+operational consumption, an isolated backup/restore and previous-image
+upgrade/application-rollback drill, and tamper/substitution tests. It emits no
+release claim from local load or automated-only failure evidence. The live
+exact-index/amd64-child load, destructive multi-replica scenarios, recovery
+drill, and rollback still must execute successfully before the domain can
+become promotion evidence. The current rollback launcher requires an existing
+annotated prior release; first-release use remains blocked pending a separately
+attested distinct-ancestor prior-candidate baseline rather than a fabricated
+v0.9 tag.
 
 ## Local working-tree update — challenge-bound reauthentication (2026-08-29)
 

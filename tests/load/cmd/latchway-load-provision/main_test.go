@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
@@ -70,6 +71,22 @@ func TestBuildLoadConfigRetainsContractFloors(t *testing.T) {
 		environment["postgresql_max_connections"] != 100 ||
 		environment["gateway_db_pool_max_connections"] != 32 {
 		t.Fatalf("load environment omitted exact PostgreSQL/pool facts: %#v", environment)
+	}
+}
+
+func TestBuildLoadConfigBindsReleaseIndexAndExecutedPlatformChild(t *testing.T) {
+	t.Parallel()
+	values := validLoadOptions()
+	values.localDockerImageID = ""
+	values.releaseOCIReference = "ghcr.io/latchway/latchway@sha256:" + strings.Repeat("a", 64)
+	values.releaseOCIPlatformReference = "ghcr.io/latchway/latchway@sha256:" + strings.Repeat("b", 64)
+	value := buildLoadConfig(values, "http://10.239.100.10:19090/v1")
+	metadata := value["metadata"].(map[string]any)
+	if metadata["local_docker_image_id"] != nil ||
+		metadata["release_oci_reference"] != values.releaseOCIReference ||
+		metadata["release_oci_platform_reference"] != values.releaseOCIPlatformReference ||
+		metadata["operator"] != ".github/workflows/release-load-evidence.yml" {
+		t.Fatalf("release load metadata is not exact: %#v", metadata)
 	}
 }
 

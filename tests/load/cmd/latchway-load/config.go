@@ -44,10 +44,11 @@ type environment struct {
 }
 
 type evidenceMetadata struct {
-	LocalDockerImageID  string `json:"local_docker_image_id,omitempty"`
-	ReleaseOCIReference string `json:"release_oci_reference,omitempty"`
-	Deployment          string `json:"deployment"`
-	Operator            string `json:"operator"`
+	LocalDockerImageID          string `json:"local_docker_image_id,omitempty"`
+	ReleaseOCIReference         string `json:"release_oci_reference,omitempty"`
+	ReleaseOCIPlatformReference string `json:"release_oci_platform_reference,omitempty"`
+	Deployment                  string `json:"deployment"`
+	Operator                    string `json:"operator"`
 }
 
 type gatewayConfig struct {
@@ -429,8 +430,9 @@ func validEvidenceCode(value string) bool {
 }
 
 func (metadata evidenceMetadata) validateImageEvidence() error {
-	if metadata.LocalDockerImageID != "" && metadata.ReleaseOCIReference != "" {
-		return errors.New("metadata must contain exactly one of local_docker_image_id or release_oci_reference")
+	releasePresent := metadata.ReleaseOCIReference != "" || metadata.ReleaseOCIPlatformReference != ""
+	if metadata.LocalDockerImageID != "" && releasePresent {
+		return errors.New("metadata must contain exactly one local_docker_image_id or one release OCI index/platform pair")
 	}
 	if metadata.LocalDockerImageID != "" {
 		if placeholder(metadata.LocalDockerImageID) || !validLocalDockerImageID(metadata.LocalDockerImageID) {
@@ -438,13 +440,19 @@ func (metadata evidenceMetadata) validateImageEvidence() error {
 		}
 		return nil
 	}
-	if metadata.ReleaseOCIReference != "" {
-		if placeholder(metadata.ReleaseOCIReference) || !validReleaseOCIReference(metadata.ReleaseOCIReference) {
-			return errors.New("metadata.release_oci_reference must be one fully qualified registry repository pinned by lowercase sha256 digest")
+	if releasePresent {
+		if placeholder(metadata.ReleaseOCIReference) || placeholder(metadata.ReleaseOCIPlatformReference) ||
+			!validReleaseOCIReference(metadata.ReleaseOCIReference) || !validReleaseOCIReference(metadata.ReleaseOCIPlatformReference) {
+			return errors.New("metadata release OCI index and platform references must both be fully qualified registry repositories pinned by lowercase sha256 digests")
+		}
+		indexName, _, _ := strings.Cut(metadata.ReleaseOCIReference, "@sha256:")
+		platformName, _, _ := strings.Cut(metadata.ReleaseOCIPlatformReference, "@sha256:")
+		if indexName != platformName || metadata.ReleaseOCIReference == metadata.ReleaseOCIPlatformReference {
+			return errors.New("metadata release OCI index and platform references must name one repository and distinct digests")
 		}
 		return nil
 	}
-	return errors.New("metadata must contain exactly one of local_docker_image_id or release_oci_reference")
+	return errors.New("metadata must contain exactly one local_docker_image_id or one release OCI index/platform pair")
 }
 
 func (request requestConfig) validate(name string) error {

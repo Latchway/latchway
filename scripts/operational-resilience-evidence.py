@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -242,10 +243,22 @@ CANDIDATE_ARTIFACTS = frozenset(
         "latchway-linux-arm64-license.json",
     )
 )
+PRODUCER_SCRIPT = Path(__file__).with_name("operational-producer-evidence.py")
 
 
 class EvidenceError(Exception):
     """A stable, redaction-safe operational-evidence failure."""
+
+
+def load_producer_validator() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "operational_producer_evidence", PRODUCER_SCRIPT
+    )
+    if spec is None or spec.loader is None:
+        raise EvidenceError("producer_validator_unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1189,6 +1202,7 @@ def validate_load(
     *,
     commit: str,
     image: str,
+    platform_image: str,
     released_at: datetime,
     now: datetime,
 ) -> tuple[datetime, datetime]:
@@ -1229,11 +1243,17 @@ def validate_load(
     )
     metadata = require_fields(
         value["metadata"],
-        ("release_oci_reference", "deployment", "operator"),
+        (
+            "release_oci_reference",
+            "release_oci_platform_reference",
+            "deployment",
+            "operator",
+        ),
         "load_metadata_invalid",
     )
     if (
         metadata["release_oci_reference"] != image
+        or metadata["release_oci_platform_reference"] != platform_image
         or not isinstance(metadata["deployment"], str)
         or not metadata["deployment"].strip()
         or len(metadata["deployment"]) > 500
@@ -1382,6 +1402,7 @@ def validate_external_failure(
     *,
     commit: str,
     image: str,
+    platform_image: str,
     released_at: datetime,
     now: datetime,
 ) -> tuple[tuple[datetime, datetime], list[dict[str, str]]]:
@@ -1411,6 +1432,7 @@ def validate_external_failure(
     environment = value["environment"]
     required_environment = {
         "image_digest",
+        "platform_image_digest",
         "platform",
         "postgresql",
         "fault_tool",
@@ -1420,12 +1442,16 @@ def validate_external_failure(
         required_environment |= {"api_replicas", "worker_replicas", "load_balancer"}
     if not isinstance(environment, dict) or set(environment) != required_environment:
         raise EvidenceError("failure_external_environment_invalid")
-    if environment["image_digest"] != image or any(
-        not isinstance(environment[key], str)
-        or not environment[key].strip()
-        or len(environment[key]) > 500
-        or any(character in environment[key] for character in "\r\n\x00")
-        for key in required_environment
+    if (
+        environment["image_digest"] != image
+        or environment["platform_image_digest"] != platform_image
+        or any(
+            not isinstance(environment[key], str)
+            or not environment[key].strip()
+            or len(environment[key]) > 500
+            or any(character in environment[key] for character in "\r\n\x00")
+            for key in required_environment
+        )
     ):
         raise EvidenceError("failure_external_image_mismatch")
     assertions = value["assertions"]
@@ -1585,6 +1611,7 @@ def validate_failure(
     *,
     commit: str,
     image: str,
+    platform_image: str,
     released_at: datetime,
     now: datetime,
 ) -> tuple[list[tuple[datetime, datetime]], list[dict[str, str]]]:
@@ -1702,6 +1729,7 @@ def validate_failure(
             scenario_id,
             commit=commit,
             image=image,
+            platform_image=platform_image,
             released_at=released_at,
             now=now,
         )
@@ -2194,7 +2222,13 @@ def finalize(
     candidate_manifest: Path,
     source_conformance: Path,
     load_report: Path,
+    load_producer_manifest: Path,
+    load_producer_attestation: Path,
+    load_producer_run_id: str,
     failure_report: Path,
+    failure_producer_manifest: Path,
+    failure_producer_attestation: Path,
+    failure_producer_run_id: str,
     failure_evidence_dir: Path,
     backup_report: Path,
     upgrade_report: Path,
@@ -2205,35 +2239,88 @@ def finalize(
         candidate_manifest,
         source_conformance,
         load_report,
+        load_producer_manifest,
+        load_producer_attestation,
         failure_report,
+        failure_producer_manifest,
+        failure_producer_attestation,
         backup_report,
         upgrade_report,
     )
     report_hashes = {path: sha256_file(path) for path in report_paths}
     source = validate_source(source_conformance, now)
-    _, image, _ = validate_candidate(candidate_manifest, source, now)
+    candidate, image, _ = validate_candidate(candidate_manifest, source, now)
+    platform_image = (
+        candidate["image"]["repository"]
+        + "@"
+        + candidate["image"]["platforms"]["linux/amd64"]
+    )
     contract = source["contract"]
     commit = source["repositories"]["core"]["commit"]
     released_at = source["released_at"]
     intervals: list[tuple[datetime, datetime]] = []
-    intervals.append(
-        validate_load(
-            load_report,
-            commit=commit,
-            image=image,
-            released_at=released_at,
-            now=now,
-        )
+    load_interval = validate_load(
+        load_report,
+        commit=commit,
+        image=image,
+        platform_image=platform_image,
+        released_at=released_at,
+        now=now,
     )
+    intervals.append(load_interval)
     failure_intervals, failure_index = validate_failure(
         failure_report,
         failure_evidence_dir,
         commit=commit,
         image=image,
+        platform_image=platform_image,
         released_at=released_at,
         now=now,
     )
     intervals.extend(failure_intervals)
+    producer = load_producer_validator()
+    try:
+        load_producer = producer.validate_manifest(
+            path=load_producer_manifest,
+            domain="load",
+            source_path=source_conformance,
+            candidate_path=candidate_manifest,
+            evidence_root=load_report.parent,
+            commit=commit,
+            intended_tag=candidate["intended_tag"],
+            contract_version=contract["version"],
+            contract_bundle_sha256=contract["bundle_sha256"],
+            image=image,
+            platform_image=platform_image,
+            expected_run_id=load_producer_run_id,
+        )
+        failure_producer = producer.validate_manifest(
+            path=failure_producer_manifest,
+            domain="failure",
+            source_path=source_conformance,
+            candidate_path=candidate_manifest,
+            evidence_root=failure_report.parent,
+            commit=commit,
+            intended_tag=candidate["intended_tag"],
+            contract_version=contract["version"],
+            contract_bundle_sha256=contract["bundle_sha256"],
+            image=image,
+            platform_image=platform_image,
+            expected_run_id=failure_producer_run_id,
+        )
+    except producer.EvidenceError as error:
+        raise EvidenceError(str(error)) from None
+    failure_interval = (
+        min(started for started, _ in failure_intervals),
+        max(finished for _, finished in failure_intervals),
+    )
+    if (
+        load_producer["started_at"] != format_time(load_interval[0])
+        or load_producer["finished_at"] != format_time(load_interval[1])
+        or failure_producer["started_at"] != format_time(failure_interval[0])
+        or failure_producer["finished_at"] != format_time(failure_interval[1])
+    ):
+        raise EvidenceError("producer_evidence_interval_mismatch")
     (
         backup_interval,
         previous_image,
@@ -2361,7 +2448,17 @@ def finalize(
             (candidate_manifest, "candidate-manifest.json"),
             (source_conformance, "source-conformance.json"),
             (load_report, "load-report.json"),
+            (load_producer_manifest, "load-producer.json"),
+            (
+                load_producer_attestation,
+                "load-producer.attestation.sigstore.json",
+            ),
             (failure_report, "failure-report.json"),
+            (failure_producer_manifest, "failure-producer.json"),
+            (
+                failure_producer_attestation,
+                "failure-producer.attestation.sigstore.json",
+            ),
             (backup_report, "backup-restore-report.json"),
             (upgrade_report, "upgrade-rollback-report.json"),
         )
@@ -2425,7 +2522,13 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--candidate-manifest", type=Path, required=True)
     value.add_argument("--source-conformance", type=Path, required=True)
     value.add_argument("--load-report", type=Path, required=True)
+    value.add_argument("--load-producer-manifest", type=Path, required=True)
+    value.add_argument("--load-producer-attestation", type=Path, required=True)
+    value.add_argument("--load-producer-run-id", required=True)
     value.add_argument("--failure-report", type=Path, required=True)
+    value.add_argument("--failure-producer-manifest", type=Path, required=True)
+    value.add_argument("--failure-producer-attestation", type=Path, required=True)
+    value.add_argument("--failure-producer-run-id", required=True)
     value.add_argument("--failure-evidence-dir", type=Path, required=True)
     value.add_argument("--backup-restore-report", type=Path, required=True)
     value.add_argument("--upgrade-rollback-report", type=Path, required=True)
@@ -2440,7 +2543,13 @@ def main() -> int:
             candidate_manifest=arguments.candidate_manifest,
             source_conformance=arguments.source_conformance,
             load_report=arguments.load_report,
+            load_producer_manifest=arguments.load_producer_manifest,
+            load_producer_attestation=arguments.load_producer_attestation,
+            load_producer_run_id=arguments.load_producer_run_id,
             failure_report=arguments.failure_report,
+            failure_producer_manifest=arguments.failure_producer_manifest,
+            failure_producer_attestation=arguments.failure_producer_attestation,
+            failure_producer_run_id=arguments.failure_producer_run_id,
             failure_evidence_dir=arguments.failure_evidence_dir,
             backup_report=arguments.backup_restore_report,
             upgrade_report=arguments.upgrade_rollback_report,

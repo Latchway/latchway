@@ -339,14 +339,17 @@ func validateExternalDocument(directory, scenarioID, commit string, evidence ext
 		len(evidence.Environment) == 0 || len(evidence.Assertions) == 0 || len(evidence.Artifacts) == 0 {
 		return errors.New("external evidence is missing bounded timestamps, environment, assertions, or artifacts")
 	}
-	for _, key := range []string{"image_digest", "platform", "postgresql", "operator"} {
+	for _, key := range []string{"image_digest", "platform_image_digest", "platform", "postgresql", "fault_tool", "operator"} {
 		if strings.TrimSpace(evidence.Environment[key]) == "" {
 			return fmt.Errorf("external evidence environment is missing %s", key)
 		}
 	}
 	imageParts := strings.Split(evidence.Environment["image_digest"], "@sha256:")
-	if len(imageParts) != 2 || imageParts[0] == "" || !validSHA256(imageParts[1]) {
-		return errors.New("external evidence must bind an immutable OCI sha256 image digest")
+	platformParts := strings.Split(evidence.Environment["platform_image_digest"], "@sha256:")
+	if len(imageParts) != 2 || len(platformParts) != 2 || imageParts[0] == "" ||
+		imageParts[0] != platformParts[0] || !validSHA256(imageParts[1]) ||
+		!validSHA256(platformParts[1]) || imageParts[1] == platformParts[1] {
+		return errors.New("external evidence must bind one immutable OCI index and its distinct platform child")
 	}
 	for _, assertion := range evidence.Assertions {
 		if assertion.Name == "" || assertion.Detail == "" || !assertion.Passed {

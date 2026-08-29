@@ -65,20 +65,22 @@ const (
 )
 
 type options struct {
-	gatewayURL         string
-	upstreamURL        string
-	outputDir          string
-	localDockerImageID string
-	commit             string
-	postgresIdentity   string
-	postgresNetwork    string
-	postgresCPUMilli   int64
-	postgresMemory     int64
-	postgresMemorySwap int64
-	postgresMaxConns   int
-	gatewayDBPool      int
-	bootstrapEnv       string
-	adminPasswordEnv   string
+	gatewayURL                  string
+	upstreamURL                 string
+	outputDir                   string
+	localDockerImageID          string
+	releaseOCIReference         string
+	releaseOCIPlatformReference string
+	commit                      string
+	postgresIdentity            string
+	postgresNetwork             string
+	postgresCPUMilli            int64
+	postgresMemory              int64
+	postgresMemorySwap          int64
+	postgresMaxConns            int
+	gatewayDBPool               int
+	bootstrapEnv                string
+	adminPasswordEnv            string
 }
 
 type apiClient struct {
@@ -148,6 +150,8 @@ func main() {
 	flag.StringVar(&values.upstreamURL, "upstream-base-url", "", "fixture base URL visible from the gateway")
 	flag.StringVar(&values.outputDir, "output-dir", "", "empty private directory for generated session files")
 	flag.StringVar(&values.localDockerImageID, "local-docker-image-id", "", "immutable local Docker gateway image ID")
+	flag.StringVar(&values.releaseOCIReference, "release-oci-reference", "", "immutable release OCI index reference")
+	flag.StringVar(&values.releaseOCIPlatformReference, "release-oci-platform-reference", "", "immutable executed release OCI platform-child reference")
 	flag.StringVar(&values.commit, "commit", "", "exact core commit represented by the image")
 	flag.StringVar(&values.postgresIdentity, "postgres-identity", "", "exact bounded PostgreSQL version/artifact identity")
 	flag.StringVar(&values.postgresNetwork, "postgres-network", "", "exact bounded PostgreSQL network placement")
@@ -170,8 +174,13 @@ func main() {
 }
 
 func run(ctx context.Context, values options) error {
-	if values.upstreamURL == "" || values.outputDir == "" || !validLocalDockerImageID(values.localDockerImageID) || !validCommit(values.commit) {
-		return errors.New("-upstream-base-url, -output-dir, one local sha256 Docker image ID, and one 40-character commit are required")
+	localImage := validLocalDockerImageID(values.localDockerImageID)
+	releaseImage := validReleaseOCIReference(values.releaseOCIReference) &&
+		validReleaseOCIReference(values.releaseOCIPlatformReference) &&
+		releaseRepository(values.releaseOCIReference) == releaseRepository(values.releaseOCIPlatformReference) &&
+		values.releaseOCIReference != values.releaseOCIPlatformReference
+	if values.upstreamURL == "" || values.outputDir == "" || localImage == releaseImage || !validCommit(values.commit) {
+		return errors.New("-upstream-base-url, -output-dir, one 40-character commit, and exactly one local image ID or release index/platform pair are required")
 	}
 	if !validEvidenceText(values.postgresIdentity) || !validEvidenceText(values.postgresNetwork) ||
 		values.postgresCPUMilli < 1000 || values.postgresMemory < 1<<30 ||
@@ -284,21 +293,23 @@ func run(ctx context.Context, values options) error {
 		return err
 	}
 	summary, err := json.MarshalIndent(map[string]any{
-		"schema_version":            1,
-		"kind":                      "latchway_load_provision",
-		"created_at":                time.Now().UTC(),
-		"commit":                    values.commit,
-		"local_docker_image_id":     values.localDockerImageID,
-		"organization_id":           organizationID,
-		"application_id":            applicationID,
-		"environment_id":            environmentID,
-		"configuration_revision_id": revisionID,
-		"installation_id":           grant.Installation.ID,
-		"platform":                  grant.Installation.Platform,
-		"trust_provider":            grant.Trust.Provider,
-		"trust_level":               grant.Trust.Level,
-		"dpop_thumbprint":           thumbprint,
-		"token_type":                grant.TokenType,
+		"schema_version":                 1,
+		"kind":                           "latchway_load_provision",
+		"created_at":                     time.Now().UTC(),
+		"commit":                         values.commit,
+		"local_docker_image_id":          emptyAsNil(values.localDockerImageID),
+		"release_oci_reference":          emptyAsNil(values.releaseOCIReference),
+		"release_oci_platform_reference": emptyAsNil(values.releaseOCIPlatformReference),
+		"organization_id":                organizationID,
+		"application_id":                 applicationID,
+		"environment_id":                 environmentID,
+		"configuration_revision_id":      revisionID,
+		"installation_id":                grant.Installation.ID,
+		"platform":                       grant.Installation.Platform,
+		"trust_provider":                 grant.Trust.Provider,
+		"trust_level":                    grant.Trust.Level,
+		"dpop_thumbprint":                thumbprint,
+		"token_type":                     grant.TokenType,
 	}, "", "  ")
 	if err != nil {
 		return errors.New("encode redacted provision summary")
@@ -836,12 +847,30 @@ func buildLoadConfig(values options, fixtureBaseURL string) map[string]any {
 			"idle_memory_mib":                            256,
 			"request_timeout_seconds":                    120,
 		},
-		"metadata": map[string]any{
-			"local_docker_image_id": values.localDockerImageID,
-			"deployment":            "isolated internal Docker network; gateway --cpus=2 --memory=2g --memory-swap=2g",
-			"operator":              "scripts/run-local-load-gates.sh",
-		},
+		"metadata": loadEvidenceMetadata(values),
 	}
+}
+
+func loadEvidenceMetadata(values options) map[string]any {
+	metadata := map[string]any{
+		"deployment": "isolated internal Docker network; gateway --cpus=2 --memory=2g --memory-swap=2g",
+		"operator":   "scripts/run-local-load-gates.sh",
+	}
+	if values.localDockerImageID != "" {
+		metadata["local_docker_image_id"] = values.localDockerImageID
+		return metadata
+	}
+	metadata["release_oci_reference"] = values.releaseOCIReference
+	metadata["release_oci_platform_reference"] = values.releaseOCIPlatformReference
+	metadata["operator"] = ".github/workflows/release-load-evidence.yml"
+	return metadata
+}
+
+func emptyAsNil(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func loadTerminalLimits() []any {
@@ -1020,6 +1049,20 @@ func validLocalDockerImageID(value string) bool {
 	}
 	_, err := hex.DecodeString(digest)
 	return err == nil
+}
+
+func validReleaseOCIReference(value string) bool {
+	const prefix = "ghcr.io/latchway/latchway@sha256:"
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+sha256.Size*2 || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, prefix))
+	return err == nil
+}
+
+func releaseRepository(value string) string {
+	repository, _, _ := strings.Cut(value, "@sha256:")
+	return repository
 }
 
 func validCommit(value string) bool {

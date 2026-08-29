@@ -8,6 +8,8 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
+import shutil
 import tempfile
 import unittest
 
@@ -22,7 +24,16 @@ DRILL_SPEC = importlib.util.spec_from_file_location("operational_drill_report", 
 assert DRILL_SPEC is not None and DRILL_SPEC.loader is not None
 DRILL = importlib.util.module_from_spec(DRILL_SPEC)
 DRILL_SPEC.loader.exec_module(DRILL)
+PRODUCER_SCRIPT = Path(__file__).with_name("operational-producer-evidence.py")
+PRODUCER_SPEC = importlib.util.spec_from_file_location(
+    "operational_producer_evidence_test", PRODUCER_SCRIPT
+)
+assert PRODUCER_SPEC is not None and PRODUCER_SPEC.loader is not None
+PRODUCER = importlib.util.module_from_spec(PRODUCER_SPEC)
+PRODUCER_SPEC.loader.exec_module(PRODUCER)
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/operational-resilience-evidence.yml"
+LOAD_WORKFLOW = Path(__file__).parents[1] / ".github/workflows/release-load-evidence.yml"
+FAILURE_WORKFLOW = Path(__file__).parents[1] / ".github/workflows/release-failure-evidence.yml"
 
 
 class OperationalEvidenceFixture:
@@ -33,24 +44,33 @@ class OperationalEvidenceFixture:
         self.previous_commit = "e" * 40
         self.bundle_hash = hashlib.sha256(b"contract").hexdigest()
         self.image = "ghcr.io/latchway/latchway@sha256:" + "1" * 64
+        self.platform_image = "ghcr.io/latchway/latchway@sha256:" + "4" * 64
         self.previous_image = "ghcr.io/latchway/latchway@sha256:" + "2" * 64
         self.postgres_image = "docker.io/library/postgres@sha256:" + "3" * 64
         self.candidate_dir = root / "candidate"
-        self.failure_dir = root / "failure"
+        self.load_dir = root / "load"
+        self.failure_root = root / "failure-artifact"
+        self.failure_dir = self.failure_root / "live-failures"
         self.drill_dir = root / "drills"
         self.candidate_dir.mkdir()
-        self.failure_dir.mkdir()
+        self.load_dir.mkdir()
+        self.failure_dir.mkdir(parents=True)
         self.drill_dir.mkdir()
         self.source_path = root / "source.json"
         self.candidate_path = self.candidate_dir / "latchway-candidate.json"
-        self.load_path = root / "load.json"
-        self.failure_path = root / "failure.json"
+        self.load_path = self.load_dir / "load-v1.json"
+        self.failure_path = self.failure_root / "failure-release.json"
+        self.load_producer_path = self.load_dir / "load-producer.json"
+        self.failure_producer_path = self.failure_root / "failure-producer.json"
+        self.load_attestation_path = self.load_dir / "load-producer.attestation.sigstore.json"
+        self.failure_attestation_path = self.failure_root / "failure-producer.attestation.sigstore.json"
         self.backup_path = self.drill_dir / "backup-restore.json"
         self.upgrade_path = self.drill_dir / "upgrade-rollback.json"
         self._write_source()
         self._write_candidate()
         self._write_load()
         self._write_failure()
+        self._write_producers()
         self._write_drills()
 
     @staticmethod
@@ -200,6 +220,14 @@ class OperationalEvidenceFixture:
         }
 
     def _write_load(self) -> None:
+        self.write(
+            self.load_dir / "load-config.json",
+            {"schema_version": 1, "candidate": self.image, "platform": self.platform_image},
+        )
+        self.write(
+            self.load_dir / "environment.json",
+            {"schema_version": 1, "runner": "github-hosted", "platform": "linux/amd64"},
+        )
         nonstream_limits = [
             {
                 "metric": metric,
@@ -362,6 +390,7 @@ class OperationalEvidenceFixture:
                 },
                 "metadata": {
                     "release_oci_reference": self.image,
+                    "release_oci_platform_reference": self.platform_image,
                     "deployment": "isolated release load environment",
                     "operator": "authenticated-ci",
                 },
@@ -390,8 +419,16 @@ class OperationalEvidenceFixture:
         )
 
     def _write_failure(self) -> None:
-        logs_root = self.root / "failure.logs"
+        logs_root = self.failure_root / "failure-release.logs"
         logs_root.mkdir()
+        shutil.copyfile(
+            MODULE.ROOT / "tests/failure/matrix.json",
+            self.failure_root / "failure-matrix.json",
+        )
+        self.write(
+            self.failure_root / "failure-environment.json",
+            {"schema_version": 1, "runner": "self-hosted", "platform": "linux/amd64"},
+        )
         results = []
         matrix, requirements, evidence_notes = MODULE.failure_matrix_details()
         for identifier in sorted(MODULE.AUTOMATED_FAILURE_IDS):
@@ -442,6 +479,7 @@ class OperationalEvidenceFixture:
             ]
             environment = {
                 "image_digest": self.image,
+                "platform_image_digest": self.platform_image,
                 "platform": "isolated-linux",
                 "postgresql": "isolated-postgresql",
                 "fault_tool": "isolated-fault-controller",
@@ -491,6 +529,46 @@ class OperationalEvidenceFixture:
                 "release_passed": True,
             },
         )
+
+    def _write_producers(self) -> None:
+        def context(domain: str) -> dict[str, object]:
+            producer = PRODUCER.PRODUCERS[domain]
+            return {
+                "repository": PRODUCER.REPOSITORY,
+                "workflow_ref": f"{PRODUCER.REPOSITORY}/{producer['workflow']}@refs/heads/main",
+                "source_commit": self.commit,
+                "run_id": "12345" if domain == "load" else "12346",
+                "run_attempt": 1,
+                "environment": producer["environment"],
+                "runner_environment": producer["runner_environment"],
+                "runner_os": "Linux",
+                "runner_arch": "X64",
+                "runner_name_sha256": "9" * 64,
+            }
+
+        PRODUCER.produce(
+            domain="load",
+            source_path=self.source_path,
+            candidate_path=self.candidate_path,
+            evidence_root=self.load_dir,
+            report_path=self.load_path,
+            output_path=self.load_producer_path,
+            context=context("load"),
+            now=self.now,
+        )
+        PRODUCER.produce(
+            domain="failure",
+            source_path=self.source_path,
+            candidate_path=self.candidate_path,
+            evidence_root=self.failure_root,
+            report_path=self.failure_path,
+            output_path=self.failure_producer_path,
+            context=context("failure"),
+            now=self.now,
+        )
+        bundle = {"mediaType": "application/vnd.dev.sigstore.bundle+json;version=0.3"}
+        self.write(self.load_attestation_path, bundle)
+        self.write(self.failure_attestation_path, bundle)
 
     @staticmethod
     def migration() -> dict[str, object]:
@@ -697,7 +775,13 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             candidate_manifest=self.fixture.candidate_path,
             source_conformance=self.fixture.source_path,
             load_report=self.fixture.load_path,
+            load_producer_manifest=self.fixture.load_producer_path,
+            load_producer_attestation=self.fixture.load_attestation_path,
+            load_producer_run_id="12345",
             failure_report=self.fixture.failure_path,
+            failure_producer_manifest=self.fixture.failure_producer_path,
+            failure_producer_attestation=self.fixture.failure_attestation_path,
+            failure_producer_run_id="12346",
             failure_evidence_dir=self.fixture.failure_dir,
             backup_report=self.fixture.backup_path,
             upgrade_report=self.fixture.upgrade_path,
@@ -716,7 +800,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertEqual(document["domain"], "operational_resilience")
         self.assertEqual(document["oci_image_digest"], self.fixture.image)
         self.assertEqual(document["claims"], MODULE.DOMAIN_CLAIMS)
-        self.assertEqual(len(document["artifacts"]), 7)
+        self.assertEqual(len(document["artifacts"]), 11)
         output = self.root / "output"
         self.assertEqual(json.loads((output / "operational_resilience.json").read_text()), document)
         for artifact in document["artifacts"]:
@@ -728,24 +812,158 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
     def test_workflow_verifies_untagged_candidate_and_source_attestations(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         verification = workflow.index(
-            "- name: Verify candidate and source-conformance attestations"
+            "- name: Verify candidate, source, load, and failure attestations"
         )
         finalization = workflow.index("- name: Seal the operational-resilience domain")
         self.assertLess(verification, finalization)
-        self.assertIn(
-            '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"',
-            workflow,
-        )
-        self.assertIn(
-            '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml"',
-            workflow,
-        )
-        self.assertEqual(workflow.count('--source-digest "$CANDIDATE_COMMIT"'), 2)
-        self.assertEqual(workflow.count("--source-ref refs/heads/main"), 2)
-        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 2)
+        for signer in (
+            "release.yml",
+            "cross-repository-conformance.yml",
+            "release-load-evidence.yml",
+            "release-failure-evidence.yml",
+        ):
+            self.assertIn(
+                f'--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/{signer}"',
+                workflow,
+            )
+        self.assertEqual(workflow.count('--source-digest "$CANDIDATE_COMMIT"'), 4)
+        self.assertEqual(workflow.count("--source-ref refs/heads/main"), 4)
+        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 3)
         self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', workflow)
+        self.assertIn("$LOAD_RUN_ID:.github/workflows/release-load-evidence.yml", workflow)
+        self.assertIn("$FAILURE_RUN_ID:.github/workflows/release-failure-evidence.yml", workflow)
+        self.assertIn('--load-producer-run-id "${{ inputs.load_evidence_run_id }}"', workflow)
+        self.assertIn(
+            '--failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"',
+            workflow,
+        )
+        self.assertIn("operational_resilience.attestation.sigstore.json", workflow)
         self.assertNotIn("refs/tags/", workflow)
+
+    def test_fixed_producer_workflows_are_protected_and_commit_pinned(self) -> None:
+        load = LOAD_WORKFLOW.read_text(encoding="utf-8")
+        failure = FAILURE_WORKFLOW.read_text(encoding="utf-8")
+        for workflow in (load, failure):
+            self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
+            self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', workflow)
+            self.assertIn("--signer-digest \"$CANDIDATE_COMMIT\"", workflow)
+            self.assertEqual(workflow.count("--source-ref refs/heads/main"), 2)
+            self.assertEqual(workflow.count("--deny-self-hosted-runners"), 2)
+            self.assertNotIn("refs/tags/", workflow)
+            for action in re.findall(r"^\s*uses:\s*([^\s#]+)", workflow, re.MULTILINE):
+                self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$")
+        self.assertIn("environment: release-load-evidence", load)
+        self.assertIn("runs-on: ubuntu-24.04", load)
+        self.assertIn("-release-image \"$CANDIDATE_INDEX\"", load)
+        self.assertIn("-release-platform-image \"$CANDIDATE_AMD64\"", load)
+        self.assertIn("--domain load", load)
+        self.assertIn("load-producer.attestation.sigstore.json", load)
+        self.assertIn("environment: release-failure-evidence", failure)
+        self.assertIn(
+            "runs-on: [self-hosted, linux, x64, latchway-release-failure]",
+            failure,
+        )
+        self.assertIn("vars.LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY", failure)
+        self.assertIn("test -z \"$(find \"$CAPTURE_DIRECTORY\" -type l -print -quit)\"", failure)
+        self.assertIn("-scope release", failure)
+        self.assertIn("--domain failure", failure)
+        self.assertIn("failure-producer.attestation.sigstore.json", failure)
+
+    def test_rejects_tampered_or_unlisted_producer_artifact(self) -> None:
+        config = self.fixture.load_dir / "load-config.json"
+        original = config.read_bytes()
+        self.mutate(config, lambda value: value.__setitem__("candidate", "substituted"))
+        with self.assertRaisesRegex(MODULE.EvidenceError, "producer_artifact_hash_mismatch"):
+            self.finalize("producer-config-tamper")
+        config.write_bytes(original)
+
+        unexpected = self.fixture.load_dir / "unlisted-observation.json"
+        self.fixture.write(unexpected, {"unexpected": True})
+        with self.assertRaisesRegex(MODULE.EvidenceError, "producer_artifact_set_mismatch"):
+            self.finalize("producer-extra-artifact")
+        unexpected.unlink()
+
+    def test_rejects_producer_identity_run_digest_and_time_substitution(self) -> None:
+        cases = (
+            (
+                lambda value: value["producer"].__setitem__(
+                    "workflow_ref",
+                    "Latchway/latchway/.github/workflows/release.yml@refs/heads/main",
+                ),
+                "producer_context_invalid",
+            ),
+            (
+                lambda value: value["producer"].__setitem__(
+                    "environment", "unprotected"
+                ),
+                "producer_context_invalid",
+            ),
+            (
+                lambda value: value["producer"].__setitem__(
+                    "runner_environment", "self-hosted"
+                ),
+                "producer_context_invalid",
+            ),
+            (
+                lambda value: value["producer"].__setitem__("run_id", "54321"),
+                "producer_run_mismatch",
+            ),
+            (
+                lambda value: value["producer"].__setitem__("source_commit", "b" * 40),
+                "producer_source_mismatch",
+            ),
+            (
+                lambda value: value["candidate"].__setitem__(
+                    "oci_platform_reference",
+                    "ghcr.io/latchway/latchway@sha256:" + "8" * 64,
+                ),
+                "producer_candidate_mismatch",
+            ),
+            (
+                lambda value: value["inputs"].__setitem__(
+                    "candidate_manifest_sha256", "8" * 64
+                ),
+                "producer_input_mismatch",
+            ),
+            (
+                lambda value: value["invocation"]["command"].__setitem__(
+                    -1, "b" * 40
+                ),
+                "producer_invocation_mismatch",
+            ),
+            (
+                lambda value: value.__setitem__("finished_at", "2026-08-29T10:19:59Z"),
+                "producer_evidence_interval_mismatch",
+            ),
+        )
+        for index, (operation, code) in enumerate(cases):
+            with self.subTest(code=code):
+                original = self.fixture.load_producer_path.read_bytes()
+                self.mutate(self.fixture.load_producer_path, operation)
+                with self.assertRaisesRegex(MODULE.EvidenceError, code):
+                    self.finalize(f"producer-identity-{index}")
+                self.fixture.load_producer_path.write_bytes(original)
+
+    def test_rejects_missing_or_cross_domain_producer(self) -> None:
+        original = self.fixture.load_producer_path.read_bytes()
+        self.fixture.load_producer_path.unlink()
+        with self.assertRaisesRegex(MODULE.EvidenceError, "artifact_not_regular_file"):
+            self.finalize("producer-missing")
+        self.fixture.load_producer_path.write_bytes(original)
+
+        attestation = self.fixture.load_attestation_path.read_bytes()
+        self.fixture.load_attestation_path.unlink()
+        with self.assertRaisesRegex(MODULE.EvidenceError, "artifact_not_regular_file"):
+            self.finalize("producer-attestation-missing")
+        self.fixture.load_attestation_path.write_bytes(attestation)
+
+        self.fixture.load_producer_path.write_bytes(
+            self.fixture.failure_producer_path.read_bytes()
+        )
+        with self.assertRaisesRegex(MODULE.EvidenceError, "producer_manifest_invalid"):
+            self.finalize("producer-cross-domain")
+        self.fixture.load_producer_path.write_bytes(original)
 
     def test_rejects_tampered_raw_artifact(self) -> None:
         (self.fixture.drill_dir / "backup.dump").write_bytes(b"substituted archive")
@@ -753,7 +971,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             self.finalize()
 
     def test_rejects_tampered_automated_failure_log(self) -> None:
-        log = next((self.root / "failure.logs").iterdir())
+        log = next((self.fixture.failure_root / "failure-release.logs").iterdir())
         log.write_text('{"Action":"pass","Test":"Substituted"}\n', encoding="utf-8")
         with self.assertRaisesRegex(MODULE.EvidenceError, "automated_log_not_passed"):
             self.finalize()

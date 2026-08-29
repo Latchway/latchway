@@ -195,6 +195,7 @@
   },
   "metadata": {
     "release_oci_reference": "registry.example/latchway/latchway@sha256:<replace-with-64-lowercase-hex-characters>",
+    "release_oci_platform_reference": "registry.example/latchway/latchway@sha256:<replace-with-linux-amd64-child-digest>",
     "deployment": "replace-with-platform-and-revision",
     "operator": "replace-with-runner-identity"
   }

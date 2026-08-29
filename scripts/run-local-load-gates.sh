@@ -2,12 +2,15 @@
 set -eu
 
 usage() {
-  echo "usage: $0 -acknowledge-load -evidence-dir ABSOLUTE_EMPTY_DIRECTORY" >&2
+  echo "usage: $0 -acknowledge-load -evidence-dir ABSOLUTE_EMPTY_DIRECTORY [-release-image INDEX_OCI -release-platform-image AMD64_CHILD_OCI -core-commit COMMIT]" >&2
   exit 2
 }
 
 acknowledge=false
 evidence_dir=
+release_image=
+release_platform_image=
+requested_commit=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -acknowledge-load)
@@ -19,11 +22,46 @@ while [ "$#" -gt 0 ]; do
       evidence_dir=$2
       shift 2
       ;;
+    -release-image)
+      [ "$#" -ge 2 ] || usage
+      release_image=$2
+      shift 2
+      ;;
+    -release-platform-image)
+      [ "$#" -ge 2 ] || usage
+      release_platform_image=$2
+      shift 2
+      ;;
+    -core-commit)
+      [ "$#" -ge 2 ] || usage
+      requested_commit=$2
+      shift 2
+      ;;
     *)
       usage
       ;;
   esac
 done
+
+release_mode=false
+if [ -n "$release_image$release_platform_image$requested_commit" ]; then
+  [ -n "$release_image" ] && [ -n "$release_platform_image" ] && [ -n "$requested_commit" ] || usage
+  release_digest=${release_image#ghcr.io/latchway/latchway@sha256:}
+  platform_digest=${release_platform_image#ghcr.io/latchway/latchway@sha256:}
+  if [ "$release_image" = "$release_digest" ] || [ "${#release_digest}" -ne 64 ]; then
+    echo "release image must be the exact Latchway OCI index digest" >&2; exit 2
+  fi
+  if [ "$release_platform_image" = "$platform_digest" ] || [ "${#platform_digest}" -ne 64 ]; then
+    echo "release platform image must be the exact Latchway OCI child digest" >&2; exit 2
+  fi
+  case "$release_digest$platform_digest" in *[!0-9a-f]*) echo "release digests must be lowercase hexadecimal" >&2; exit 2 ;; esac
+  if [ "${#requested_commit}" -ne 40 ]; then
+    echo "release core commit must contain exactly 40 characters" >&2; exit 2
+  fi
+  case "$requested_commit" in *[!0-9a-f]*) echo "release core commit must be lowercase hexadecimal" >&2; exit 2 ;; esac
+  [ "$release_image" != "$release_platform_image" ] || { echo "release index and platform child must differ" >&2; exit 2; }
+  release_mode=true
+fi
 
 [ "$acknowledge" = true ] || usage
 case "$evidence_dir" in
@@ -102,9 +140,29 @@ if [ -n "$(git -C "$run_dir/source" status --porcelain=v1)" ]; then
   exit 1
 fi
 
-docker build --build-arg "COMMIT=$commit" --tag "$gateway_tag" "$run_dir/source"
-gateway_image_created=true
-gateway_image_id=$(docker image inspect --format '{{.Id}}' "$gateway_tag")
+if [ "$release_mode" = true ] && [ "$commit" != "$requested_commit" ]; then
+  echo "release image commit does not match the exact source checkout" >&2
+  exit 1
+fi
+
+gateway_runtime_image=
+provision_local_image_id=
+if [ "$release_mode" = true ]; then
+  docker pull --platform linux/amd64 "$release_platform_image" >/dev/null
+  gateway_runtime_image=$release_platform_image
+  gateway_image_id=$(docker image inspect --format '{{.Id}}' "$release_platform_image")
+  observed_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$release_platform_image")
+  observed_os=$(docker image inspect --format '{{.Os}}' "$release_platform_image")
+  observed_architecture=$(docker image inspect --format '{{.Architecture}}' "$release_platform_image")
+  [ "$observed_revision" = "$commit" ] || { echo "release platform image revision does not match source commit" >&2; exit 1; }
+  [ "$observed_os/$observed_architecture" = linux/amd64 ] || { echo "release platform child is not linux/amd64" >&2; exit 1; }
+else
+  docker build --build-arg "COMMIT=$commit" --tag "$gateway_tag" "$run_dir/source"
+  gateway_image_created=true
+  gateway_runtime_image=$gateway_tag
+  gateway_image_id=$(docker image inspect --format '{{.Id}}' "$gateway_tag")
+  provision_local_image_id=$gateway_image_id
+fi
 case "$gateway_image_id" in
   sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "gateway build did not produce an immutable sha256 image ID" >&2; exit 1 ;;
@@ -233,7 +291,7 @@ docker run --detach \
   --env LATCHWAY_MIGRATE_ON_START \
   --env LATCHWAY_DB_MAX_CONNECTIONS \
   --env LATCHWAY_SHUTDOWN_TIMEOUT \
-  "$gateway_image_id" >/dev/null
+  "$gateway_runtime_image" >/dev/null
 
 nano_cpus=$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$gateway")
 memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$gateway")
@@ -292,7 +350,9 @@ docker run --rm \
   -gateway-url http://127.0.0.1:8080 \
   -upstream-base-url "http://$fixture_ip:19090/v1" \
   -output-dir /evidence/runtime \
-  -local-docker-image-id "$gateway_image_id" \
+  -local-docker-image-id "$provision_local_image_id" \
+  -release-oci-reference "$release_image" \
+  -release-oci-platform-reference "$release_platform_image" \
   -commit "$commit" \
   -postgres-identity "PostgreSQL 18.6 Alpine local Docker image $postgres_image_id" \
   -postgres-network "same internal-only Docker bridge $network ($subnet); PostgreSQL address $postgres_observed_ip" \
