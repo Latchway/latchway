@@ -16,7 +16,7 @@ promoted.
 | --- | --- |
 | Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
 | Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
-| Last passing commit in each repository | Core canonical RC source/release-tooling checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `e47676775e8e902cf868646348174e2b898162c1`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `649156466a1a58a062bf7832f0a6a7fb257b7339` |
+| Last passing commit in each repository | Core RC implementation/release-tooling checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `e47676775e8e902cf868646348174e2b898162c1`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `649156466a1a58a062bf7832f0a6a7fb257b7339` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `19` |
 | Last full test time | `2026-08-29T22:42:36Z`, successful RC source/release validation (all Go tests, vet, 196 Python tests, console build, frozen API) plus synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
@@ -66,7 +66,7 @@ mise exec -- pnpm pack:check
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Current canonical RC source and release-tooling checkpoint | `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (`1.0.0-rc.1`) |
+| Passing RC implementation and release-tooling checkpoint | `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (`1.0.0-rc.1`); exact protected candidate pending |
 | Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
