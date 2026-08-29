@@ -790,32 +790,38 @@ func attemptDecisionDigest(
 	return canonicalDigestBytes(attemptDecisionBindingDomain, parts), nil
 }
 
+const lockUpstreamAttemptsSQL = `
+	SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
+	       physical_model, model_key, status, first_byte_at, completed_at,
+	       http_status, failure_code, billed_cost_nano_usd, currency,
+	       price_revision, pricing_source, cost_confidence,
+	       attempt_decision_binding_version, attempt_decision_sha256,
+	       per_request_output_token_bound,
+	       input_accounting_binding_version,
+	       input_accounting_method, input_accounting_profile_id,
+	       input_accounting_profile_digest, rewritten_body_sha256,
+	       input_token_bound, output_token_bound, total_token_bound,
+	       request_measurement_binding_version, request_measurement_sha256,
+	       measured_request_bytes, measured_image_units, measured_tool_calls
+	FROM upstream_attempts
+	WHERE logical_request_id = $1
+	ORDER BY attempt_number
+	FOR UPDATE
+`
+
 func loadAttemptsForUpdate(
 	ctx context.Context,
 	tx pgx.Tx,
 	logicalRequestID string,
 ) ([]storedAttempt, error) {
-	rows, err := tx.Query(ctx, `
-			SELECT upstream_attempt_id, attempt_number, route_key, upstream_key,
-			       physical_model, model_key, status, first_byte_at, completed_at,
-			       http_status, failure_code, billed_cost_nano_usd, currency,
-			       price_revision, pricing_source, cost_confidence,
-			       attempt_decision_binding_version, attempt_decision_sha256,
-			       per_request_output_token_bound,
-			       input_accounting_binding_version,
-		       input_accounting_method, input_accounting_profile_id,
-		       input_accounting_profile_digest, rewritten_body_sha256,
-		       input_token_bound, output_token_bound, total_token_bound,
-		       request_measurement_binding_version, request_measurement_sha256,
-		       measured_request_bytes, measured_image_units, measured_tool_calls
-		FROM upstream_attempts
-		WHERE logical_request_id = $1
-		ORDER BY attempt_number
-		FOR UPDATE
-	`, logicalRequestID)
+	rows, err := tx.Query(ctx, lockUpstreamAttemptsSQL, logicalRequestID)
 	if err != nil {
 		return nil, persistenceFailure("lock upstream attempts", err)
 	}
+	return scanStoredAttempts(rows)
+}
+
+func scanStoredAttempts(rows pgx.Rows) ([]storedAttempt, error) {
 	defer rows.Close()
 	result := make([]storedAttempt, 0, maximumAttemptsPerRequest)
 	for rows.Next() {
@@ -858,21 +864,31 @@ func loadAttemptQuotaEntriesForUpdate(
 	reservation lockedReservation,
 	attempt storedAttempt,
 ) ([]lockedAttemptQuotaEntry, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT quota_reservation_entry_id, quota_bucket_id, metric,
-		       allocated_units, charged_units, released_units, settled_at
-		FROM upstream_attempt_quota_entries
-		WHERE organization_id = $1 AND application_id = $2
-		  AND environment_id = $3 AND logical_request_id = $4
-		  AND upstream_attempt_id = $5 AND quota_reservation_id = $6
-		ORDER BY quota_bucket_id COLLATE "C"
-		FOR UPDATE
-	`, reservation.organizationID, reservation.applicationID,
+	rows, err := tx.Query(ctx, lockAttemptQuotaEntriesSQL,
+		reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID,
 		attempt.id, reservation.reservationID)
 	if err != nil {
 		return nil, persistenceFailure("lock upstream attempt quota entries", err)
 	}
+	return scanLockedAttemptQuotaEntries(rows, reservation)
+}
+
+const lockAttemptQuotaEntriesSQL = `
+	SELECT quota_reservation_entry_id, quota_bucket_id, metric,
+	       allocated_units, charged_units, released_units, settled_at
+	FROM upstream_attempt_quota_entries
+	WHERE organization_id = $1 AND application_id = $2
+	  AND environment_id = $3 AND logical_request_id = $4
+	  AND upstream_attempt_id = $5 AND quota_reservation_id = $6
+	ORDER BY quota_bucket_id COLLATE "C"
+	FOR UPDATE
+`
+
+func scanLockedAttemptQuotaEntries(
+	rows pgx.Rows,
+	reservation lockedReservation,
+) ([]lockedAttemptQuotaEntry, error) {
 	defer rows.Close()
 	result := make([]lockedAttemptQuotaEntry, 0, len(reservation.entries))
 	for rows.Next() {
@@ -935,18 +951,21 @@ func attemptUsageSetEmpty(
 	attempt storedAttempt,
 ) (bool, error) {
 	var count int64
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*)
-		FROM usage_records
-		WHERE organization_id = $1 AND application_id = $2
-		  AND environment_id = $3 AND logical_request_id = $4
-		  AND upstream_attempt_id = $5
-	`, reservation.organizationID, reservation.applicationID,
+	if err := tx.QueryRow(ctx, countAttemptUsageSQL,
+		reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID, attempt.id).Scan(&count); err != nil {
 		return false, persistenceFailure("count started attempt usage", err)
 	}
 	return count == 0, nil
 }
+
+const countAttemptUsageSQL = `
+	SELECT count(*)
+	FROM usage_records
+	WHERE organization_id = $1 AND application_id = $2
+	  AND environment_id = $3 AND logical_request_id = $4
+	  AND upstream_attempt_id = $5
+`
 
 func retrySelectedPricing(input PricingSelection, revision string) selectedPricing {
 	if input.CatalogID == "" {

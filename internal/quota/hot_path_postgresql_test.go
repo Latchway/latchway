@@ -101,6 +101,54 @@ func TestStorePostgreSQLLifecycleHotPath(t *testing.T) {
 		assertHotPathTerminalCounts(t, fixture, input.FeatureKey, 1)
 	})
 
+	t.Run("first-byte batch rolls back before exhaustive corruption classification", func(t *testing.T) {
+		input := lifecycleHotPathInput(t, fixture, "first-byte-batch-rollback", 1)
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("reserve first-byte rollback fixture: %v", err)
+		}
+		attempt, owner, err := fixture.store.BeginAttempt(fixture.ctx, reservation)
+		if err != nil || !owner {
+			t.Fatalf("begin first-byte rollback fixture owner=%t: %v", owner, err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE upstream_attempt_quota_entries
+			SET allocated_units = allocated_units + 1
+			WHERE upstream_attempt_id = $1 AND metric = 'output_tokens'
+		`, attempt.ID()); err != nil {
+			t.Fatalf("tamper first-attempt allocation: %v", err)
+		}
+		if err := fixture.store.MarkFirstByte(fixture.ctx, attempt); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("mark first byte with corrupt allocation = %v, want ErrInvalidState", err)
+		}
+		var logicalStatus string
+		var firstByteAt *time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT request.status, attempt.first_byte_at
+			FROM logical_requests AS request
+			JOIN upstream_attempts AS attempt USING (logical_request_id)
+			WHERE attempt.upstream_attempt_id = $1
+		`, attempt.ID()).Scan(&logicalStatus, &firstByteAt); err != nil {
+			t.Fatalf("read state after rejected first-byte batch: %v", err)
+		}
+		if logicalStatus != "dispatched" || firstByteAt != nil {
+			t.Fatalf("rejected first-byte batch committed status=%q first_byte=%v", logicalStatus, firstByteAt)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE upstream_attempt_quota_entries
+			SET allocated_units = allocated_units - 1
+			WHERE upstream_attempt_id = $1 AND metric = 'output_tokens'
+		`, attempt.ID()); err != nil {
+			t.Fatalf("restore first-attempt allocation: %v", err)
+		}
+		if err := fixture.store.MarkFirstByte(fixture.ctx, attempt); err != nil {
+			t.Fatalf("mark first byte after restoring allocation: %v", err)
+		}
+		if err := fixture.store.MarkFirstByte(fixture.ctx, attempt); err != nil {
+			t.Fatalf("replay first byte after fast-path commit: %v", err)
+		}
+	})
+
 	t.Run("request entry and concurrency lease locks remain fail closed", func(t *testing.T) {
 		input := fixture.concurrencyInput(t, "lifecycle-private-locks", 1, 0, false, false)
 		reservation, err := fixture.store.Reserve(fixture.ctx, input)

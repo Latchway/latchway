@@ -1834,9 +1834,202 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	return Attempt{reservation: reservation, attemptID: attemptID, number: 1}, true, nil
 }
 
-// MarkFirstByte records the first response boundary once. It uses its own
-// short transaction and performs no stream reads.
+// MarkFirstByte records the first response boundary once. A newly dispatched
+// first attempt uses one ordered PostgreSQL batch: every row is locked and
+// scanned through the same validators as the general lifecycle path, while
+// the two writes remain tentative until validation succeeds and the
+// transaction commits. Replays, retries, terminal attempts, and any
+// noncanonical state roll back the tentative batch and use the exhaustive
+// classifier below.
 func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
+	if store == nil || store.pool == nil || ctx == nil || attempt.validate() != nil {
+		return ErrInvalidInput
+	}
+	if attempt.number == 1 {
+		handled, err := store.markInitialFirstByte(ctx, attempt)
+		if handled {
+			return err
+		}
+	}
+	return store.markFirstByteSlow(ctx, attempt)
+}
+
+const markInitialAttemptFirstByteSQL = `
+	UPDATE upstream_attempts
+	SET first_byte_at = GREATEST(started_at, statement_timestamp())
+	WHERE upstream_attempt_id = $1 AND logical_request_id = $2
+	  AND attempt_number = 1 AND status = 'started' AND first_byte_at IS NULL
+	RETURNING first_byte_at
+`
+
+const markInitialLogicalStreamingSQL = `
+	UPDATE logical_requests
+	SET status = 'streaming'
+	WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
+	  AND logical_request_id = $4 AND status = 'dispatched'
+	RETURNING status
+`
+
+func (store *Store) markInitialFirstByte(ctx context.Context, attempt Attempt) (bool, error) {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return true, persistenceFailure("begin first-byte record", err)
+	}
+	defer rollback(tx)
+
+	expected := attempt.reservation
+	batch := &pgx.Batch{}
+	batch.Queue(
+		lockQuotaReservationSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID, expected.reservationID,
+	)
+	batch.Queue(
+		lockLogicalRequestSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID,
+	)
+	batch.Queue(lockUpstreamAttemptsSQL, expected.logicalRequestID)
+	batch.Queue(
+		lockReservationEntriesQuery(false),
+		expected.organizationID, expected.applicationID,
+		expected.environmentID, expected.reservationID,
+	)
+	batch.Queue(lockConcurrencyLeasesSQL, expected.environmentID, expected.logicalRequestID)
+	batch.Queue(
+		lockAttemptQuotaEntriesSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID, attempt.attemptID, expected.reservationID,
+	)
+	batch.Queue(
+		countAttemptUsageSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID, attempt.attemptID,
+	)
+	batch.Queue(markInitialAttemptFirstByteSQL, attempt.attemptID, expected.logicalRequestID)
+	batch.Queue(
+		markInitialLogicalStreamingSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID,
+	)
+
+	results := tx.SendBatch(ctx, batch)
+	reservation, scanErr := scanLockedReservation(results.QueryRow(), expected)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	logical, scanErr := scanLockedLogicalRequest(results.QueryRow(), expected)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	attemptRows, queryErr := results.Query()
+	if queryErr != nil {
+		_ = results.Close()
+		return true, persistenceFailure("lock upstream attempts", queryErr)
+	}
+	attempts, scanErr := scanStoredAttempts(attemptRows)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	entryRows, queryErr := results.Query()
+	if queryErr != nil {
+		_ = results.Close()
+		return true, persistenceFailure("lock quota reservation entries", queryErr)
+	}
+	entries, scanErr := scanLockedReservationEntries(entryRows, reservation)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	leaseRows, queryErr := results.Query()
+	if queryErr != nil {
+		_ = results.Close()
+		return true, persistenceFailure("lock concurrency leases", queryErr)
+	}
+	expectedBuckets, expectedIDs := expectedConcurrencyLeaseState(reservation, entries)
+	leases, scanErr := scanLockedConcurrencyLeases(
+		leaseRows, reservation, expectedBuckets, expectedIDs,
+	)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	quotaRows, queryErr := results.Query()
+	if queryErr != nil {
+		_ = results.Close()
+		return true, persistenceFailure("lock upstream attempt quota entries", queryErr)
+	}
+	attemptQuota, scanErr := scanLockedAttemptQuotaEntries(quotaRows, reservation)
+	if scanErr != nil {
+		return store.finishInitialFirstByteMismatch(results, scanErr)
+	}
+	var usageCount int64
+	if scanErr = results.QueryRow().Scan(&usageCount); scanErr != nil {
+		_ = results.Close()
+		return true, persistenceFailure("count started attempt usage", scanErr)
+	}
+	var firstByteAt time.Time
+	attemptUpdateErr := results.QueryRow().Scan(&firstByteAt)
+	var logicalStatus string
+	logicalUpdateErr := results.QueryRow().Scan(&logicalStatus)
+	if closeErr := results.Close(); closeErr != nil {
+		return true, persistenceFailure("complete first-byte batch", closeErr)
+	}
+	if attemptUpdateErr != nil && !errors.Is(attemptUpdateErr, pgx.ErrNoRows) {
+		return true, persistenceFailure("record upstream first byte", attemptUpdateErr)
+	}
+	if logicalUpdateErr != nil && !errors.Is(logicalUpdateErr, pgx.ErrNoRows) {
+		return true, persistenceFailure("mark logical request streaming", logicalUpdateErr)
+	}
+
+	common := reservation.status == "pending" && logical.status == "dispatched" &&
+		logicalStatus == "streaming" && !firstByteAt.IsZero() &&
+		attemptUpdateErr == nil && logicalUpdateErr == nil && len(attempts) == 1
+	if common {
+		stored := attempts[0]
+		common = stored.id == attempt.attemptID && stored.number == 1 &&
+			stored.status == "started" && stored.firstByteAt == nil &&
+			attemptPricingMatchesReservation(stored, reservation.Reservation) &&
+			storedModelKeyMatches(stored, reservation.modelKey) &&
+			storedInitialInputPreflightMatches(stored, reservation.inputPreflight) &&
+			storedInitialRequestMeasurementsMatch(stored, reservation.requestMeasurements) &&
+			pendingEntriesMatch(logical.status, reservation, entries, leases) &&
+			initialAttemptEntriesUnchanged(entries) &&
+			attemptQuotaEntriesUnsettled(attemptQuota) && usageCount == 0 &&
+			attemptQuotaEntriesMatchReservation(reservation, stored, attemptQuota, entries)
+	}
+	if !common {
+		return false, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return true, persistenceFailure("commit first-byte record", err)
+	}
+	return true, nil
+}
+
+func (store *Store) finishInitialFirstByteMismatch(
+	results pgx.BatchResults,
+	err error,
+) (bool, error) {
+	if closeErr := results.Close(); closeErr != nil {
+		return true, persistenceFailure("complete first-byte batch", closeErr)
+	}
+	if errors.Is(err, ErrInvalidState) || errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return true, err
+}
+
+func initialAttemptEntriesUnchanged(entries []lockedEntry) bool {
+	for _, entry := range entries {
+		if entry.originAttemptNumber != 1 ||
+			entry.reservedUnits != entry.initialReservedUnits ||
+			entry.settledUnits != 0 || entry.releasedUnits != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (store *Store) markFirstByteSlow(ctx context.Context, attempt Attempt) error {
 	if store == nil || store.pool == nil || ctx == nil || attempt.validate() != nil {
 		return ErrInvalidInput
 	}
@@ -2439,27 +2632,36 @@ type lockedReservation struct {
 	featureKey        string
 }
 
+const lockQuotaReservationSQL = `
+	SELECT reservation.organization_id, reservation.application_id,
+	       reservation.environment_id, reservation.logical_request_id,
+	       reservation.quota_reservation_id, reservation.status,
+	       reservation.expires_at, logical.application_user_id,
+	       logical.installation_id, logical.feature_key
+	FROM quota_reservations AS reservation
+	JOIN logical_requests AS logical
+	  ON logical.organization_id = reservation.organization_id
+	 AND logical.application_id = reservation.application_id
+	 AND logical.environment_id = reservation.environment_id
+	 AND logical.logical_request_id = reservation.logical_request_id
+	WHERE reservation.organization_id = $1 AND reservation.application_id = $2
+	  AND reservation.environment_id = $3
+	  AND reservation.logical_request_id = $4
+	  AND reservation.quota_reservation_id = $5
+	FOR UPDATE OF reservation
+`
+
 func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lockedReservation, error) {
+	return scanLockedReservation(tx.QueryRow(
+		ctx, lockQuotaReservationSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID, expected.reservationID,
+	), expected)
+}
+
+func scanLockedReservation(row pgx.Row, expected Reservation) (lockedReservation, error) {
 	var result lockedReservation
-	err := tx.QueryRow(ctx, `
-		SELECT reservation.organization_id, reservation.application_id,
-		       reservation.environment_id, reservation.logical_request_id,
-		       reservation.quota_reservation_id, reservation.status,
-		       reservation.expires_at, logical.application_user_id,
-		       logical.installation_id, logical.feature_key
-		FROM quota_reservations AS reservation
-		JOIN logical_requests AS logical
-		  ON logical.organization_id = reservation.organization_id
-		 AND logical.application_id = reservation.application_id
-		 AND logical.environment_id = reservation.environment_id
-		 AND logical.logical_request_id = reservation.logical_request_id
-		WHERE reservation.organization_id = $1 AND reservation.application_id = $2
-		  AND reservation.environment_id = $3
-		  AND reservation.logical_request_id = $4
-		  AND reservation.quota_reservation_id = $5
-		FOR UPDATE OF reservation
-	`, expected.organizationID, expected.applicationID, expected.environmentID,
-		expected.logicalRequestID, expected.reservationID).Scan(
+	err := row.Scan(
 		&result.organizationID, &result.applicationID, &result.environmentID,
 		&result.logicalRequestID, &result.reservationID, &result.status, &result.expiresAt,
 		&result.applicationUserID, &result.installationID, &result.featureKey,
@@ -2502,18 +2704,27 @@ type lockedLogical struct {
 	requestedAt                time.Time
 }
 
+const lockLogicalRequestSQL = `
+	SELECT status, failure_code, protocol, config_revision_id,
+	       trusted_decision_fingerprint, application_user_id, installation_id,
+	       session_grant_id, feature_key, requested_at
+	FROM logical_requests
+	WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
+	  AND logical_request_id = $4
+	FOR UPDATE
+`
+
 func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (lockedLogical, error) {
+	return scanLockedLogicalRequest(tx.QueryRow(
+		ctx, lockLogicalRequestSQL,
+		expected.organizationID, expected.applicationID, expected.environmentID,
+		expected.logicalRequestID,
+	), expected)
+}
+
+func scanLockedLogicalRequest(row pgx.Row, expected Reservation) (lockedLogical, error) {
 	var result lockedLogical
-	err := tx.QueryRow(ctx, `
-		SELECT status, failure_code, protocol, config_revision_id,
-		       trusted_decision_fingerprint, application_user_id, installation_id,
-		       session_grant_id, feature_key, requested_at
-		FROM logical_requests
-		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
-		  AND logical_request_id = $4
-		FOR UPDATE
-	`, expected.organizationID, expected.applicationID, expected.environmentID,
-		expected.logicalRequestID).Scan(
+	err := row.Scan(
 		&result.status, &result.failureCode, &result.protocol, &result.configRevisionID,
 		&result.trustedDecisionFingerprint, &result.applicationUserID,
 		&result.installationID, &result.sessionGrantID, &result.featureKey,
@@ -2782,41 +2993,51 @@ func lockLifecycleEntries(ctx context.Context, tx pgx.Tx, reservation lockedRese
 	return lockEntriesWithScope(ctx, tx, reservation, false)
 }
 
+const lockReservationEntriesSQL = `
+	SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
+	       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
+	       bucket.algorithm, bucket.window_key, bucket.scope_type,
+	       bucket.scope_dimensions, bucket.scope_key,
+	       entry.origin_attempt_number,
+	       entry.initial_reserved_units, entry.reserved_units,
+	       entry.settled_units, entry.released_units,
+	       bucket.used_units, bucket.reserved_units, bucket.hard_maximum,
+	       bucket.available_units, bucket.refill_numerator,
+	       bucket.refill_denominator, bucket.refilled_at, bucket.version
+	FROM quota_reservation_entries AS entry
+	JOIN quota_buckets AS bucket
+	  ON bucket.organization_id = entry.organization_id
+	 AND bucket.application_id = entry.application_id
+	 AND bucket.environment_id = entry.environment_id
+	 AND bucket.quota_bucket_id = entry.quota_bucket_id
+	WHERE entry.organization_id = $1 AND entry.application_id = $2
+	  AND entry.environment_id = $3 AND entry.quota_reservation_id = $4
+	ORDER BY bucket.quota_bucket_id COLLATE "C"
+`
+
+func lockReservationEntriesQuery(lockBuckets bool) string {
+	if lockBuckets {
+		return lockReservationEntriesSQL + " FOR UPDATE OF entry, bucket"
+	}
+	return lockReservationEntriesSQL + " FOR UPDATE OF entry"
+}
+
 func lockEntriesWithScope(
 	ctx context.Context,
 	tx pgx.Tx,
 	reservation lockedReservation,
 	lockBuckets bool,
 ) ([]lockedEntry, error) {
-	lockClause := "FOR UPDATE OF entry"
-	if lockBuckets {
-		lockClause = "FOR UPDATE OF entry, bucket"
-	}
-	rows, err := tx.Query(ctx, `
-		SELECT entry.quota_reservation_entry_id, entry.quota_bucket_id,
-		       bucket.limit_plan_key, bucket.rule_key, bucket.metric,
-		       bucket.algorithm, bucket.window_key, bucket.scope_type,
-		       bucket.scope_dimensions, bucket.scope_key,
-		       entry.origin_attempt_number,
-		       entry.initial_reserved_units, entry.reserved_units,
-		       entry.settled_units, entry.released_units,
-		       bucket.used_units, bucket.reserved_units, bucket.hard_maximum,
-		       bucket.available_units, bucket.refill_numerator,
-		       bucket.refill_denominator, bucket.refilled_at, bucket.version
-		FROM quota_reservation_entries AS entry
-		JOIN quota_buckets AS bucket
-		  ON bucket.organization_id = entry.organization_id
-		 AND bucket.application_id = entry.application_id
-		 AND bucket.environment_id = entry.environment_id
-		 AND bucket.quota_bucket_id = entry.quota_bucket_id
-		WHERE entry.organization_id = $1 AND entry.application_id = $2
-		  AND entry.environment_id = $3 AND entry.quota_reservation_id = $4
-		ORDER BY bucket.quota_bucket_id COLLATE "C"
-		`+lockClause, reservation.organizationID, reservation.applicationID,
+	rows, err := tx.Query(ctx, lockReservationEntriesQuery(lockBuckets),
+		reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.reservationID)
 	if err != nil {
 		return nil, persistenceFailure("lock quota reservation entries", err)
 	}
+	return scanLockedReservationEntries(rows, reservation)
+}
+
+func scanLockedReservationEntries(rows pgx.Rows, reservation lockedReservation) ([]lockedEntry, error) {
 	defer rows.Close()
 	entries := make([]lockedEntry, 0, len(reservation.entries))
 	for rows.Next() {
@@ -2927,6 +3148,16 @@ type lockedConcurrencyLease struct {
 	releasedAt *time.Time
 }
 
+const lockConcurrencyLeasesSQL = `
+	SELECT concurrency_lease_id, organization_id, application_id,
+	       environment_id, quota_bucket_id, logical_request_id,
+	       acquired_at, expires_at, released_at
+	FROM concurrency_leases
+	WHERE environment_id = $1 AND logical_request_id = $2
+	ORDER BY concurrency_lease_id COLLATE "C"
+	FOR UPDATE
+`
+
 // lockConcurrencyLeases is always called after lockEntries, and acquires
 // lease rows in their globally stable identifier order.
 func lockConcurrencyLeases(
@@ -2935,6 +3166,19 @@ func lockConcurrencyLeases(
 	reservation lockedReservation,
 	entries []lockedEntry,
 ) ([]lockedConcurrencyLease, error) {
+	expectedBuckets, expectedIDs := expectedConcurrencyLeaseState(reservation, entries)
+	rows, err := tx.Query(ctx, lockConcurrencyLeasesSQL,
+		reservation.environmentID, reservation.logicalRequestID)
+	if err != nil {
+		return nil, persistenceFailure("lock concurrency leases", err)
+	}
+	return scanLockedConcurrencyLeases(rows, reservation, expectedBuckets, expectedIDs)
+}
+
+func expectedConcurrencyLeaseState(
+	reservation lockedReservation,
+	entries []lockedEntry,
+) (map[string]struct{}, map[string]string) {
 	expectedBuckets := make(map[string]struct{})
 	for _, entry := range entries {
 		if isConcurrencyMetric(entry.metric) {
@@ -2947,18 +3191,15 @@ func lockConcurrencyLeases(
 			expectedIDs[entry.bucketID] = entry.leaseID
 		}
 	}
-	rows, err := tx.Query(ctx, `
-		SELECT concurrency_lease_id, organization_id, application_id,
-		       environment_id, quota_bucket_id, logical_request_id,
-		       acquired_at, expires_at, released_at
-		FROM concurrency_leases
-		WHERE environment_id = $1 AND logical_request_id = $2
-		ORDER BY concurrency_lease_id COLLATE "C"
-		FOR UPDATE
-	`, reservation.environmentID, reservation.logicalRequestID)
-	if err != nil {
-		return nil, persistenceFailure("lock concurrency leases", err)
-	}
+	return expectedBuckets, expectedIDs
+}
+
+func scanLockedConcurrencyLeases(
+	rows pgx.Rows,
+	reservation lockedReservation,
+	expectedBuckets map[string]struct{},
+	expectedIDs map[string]string,
+) ([]lockedConcurrencyLease, error) {
 	defer rows.Close()
 	leases := make([]lockedConcurrencyLease, 0, len(expectedBuckets))
 	seenBuckets := make(map[string]struct{}, len(expectedBuckets))
