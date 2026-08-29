@@ -84,6 +84,17 @@ jobs:
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Preflight immutable evidence-release support
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > "$RUNNER_TEMP/immutable-releases.json"
+          jq --exit-status '.enabled == true' \
+            "$RUNNER_TEMP/immutable-releases.json" >/dev/null
       - name: Authenticate every fixed evidence run and attempt
         shell: bash
         env:
@@ -231,13 +242,17 @@ jobs:
           jq --exit-status --arg tag "$RELEASE_TAG" --arg commit "$CANDIDATE_COMMIT" \
             '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
             "$RUNNER_TEMP/tag-object.json" >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > "$RUNNER_TEMP/release.json"
           jq --exit-status --arg tag "$RELEASE_TAG" \
             '.tag_name == $tag and .name == ("Latchway " + $tag) and
-             .draft == false and .prerelease == false and
+             .draft == false and .prerelease == false and .immutable == true and
              (.id | type == "number" and . > 0) and
              (.published_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' \
             "$RUNNER_TEMP/release.json" >/dev/null
+          gh release verify "$RELEASE_TAG" --format json \
+            | jq --sort-keys . > "$RUNNER_TEMP/product-release-attestation.json"
           mkdir -p "$RUNNER_TEMP/promotion-release-assets"
           gh release download "$RELEASE_TAG" \
             --pattern latchway-cross-repository-promotion.json \
@@ -252,6 +267,8 @@ jobs:
               '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("promotion asset missing or duplicated") end' \
               "$RUNNER_TEMP/release.json")
             test "$actual" = "$expected"
+            gh release verify-asset "$RELEASE_TAG" "$asset" --format json \
+              > "$RUNNER_TEMP/product-release-asset-${name}.json"
           done
           gh attestation verify "$promotion" \
             --bundle "$promotion_bundle" \
@@ -324,6 +341,7 @@ jobs:
             --argjson release_id "$(jq .id "$RUNNER_TEMP/release.json")" \
             --arg release_url "https://github.com/Latchway/latchway/releases/tag/$RELEASE_TAG" \
             --arg published_at "$(jq --raw-output .published_at "$RUNNER_TEMP/release.json")" \
+            --arg release_attestation_sha256 "$(sha256sum "$RUNNER_TEMP/product-release-attestation.json" | cut -d ' ' -f 1)" \
             --arg image "$image" \
             --arg js "@latchway/client@$javascript_version" \
             --arg rn "@latchway/react-native@$react_native_version" \
@@ -334,7 +352,9 @@ jobs:
               repository: $repository, core_commit: $commit, core_tag: $tag,
               tag_object_sha: $tag_object,
               github_release: {id: $release_id, url: $release_url, tag_name: $tag,
-                draft: false, prerelease: false, published_at: $published_at},
+                draft: false, prerelease: false, immutable: true,
+                published_at: $published_at,
+                release_attestation_sha256: $release_attestation_sha256},
               oci_image_digest: $image,
               registries: {
                 oci: $image, npm_javascript: $js, npm_react_native: $rn,
@@ -364,6 +384,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           destination="$RUNNER_TEMP/final-release-record"
+          durable_parent="$RUNNER_TEMP/durable-release-evidence"
+          durable_root="$durable_parent/latchway-release-evidence-v1"
           mkdir -p "$destination"
           test -d "$RUNNER_TEMP/conformance/latchway-external-evidence"
           cp -- "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
@@ -374,9 +396,34 @@ jobs:
             "$destination/latchway-publication-state.json"
           cp -- "$RUNNER_TEMP/public-registry-byte-proof.json" \
             "$destination/latchway-public-registry-byte-proof.json"
+          cp -- "$RUNNER_TEMP/product-release-attestation.json" \
+            "$destination/latchway-product-release-attestation.json"
+          mkdir -p "$durable_root/candidate" "$durable_root/security" "$durable_root/external" "$durable_root/source"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            "$durable_root/candidate/latchway-candidate.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            "$durable_root/candidate/latchway-candidate.attestation.sigstore.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            "$durable_root/security/latchway-candidate.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/security/security-summary.json" \
+            "$durable_root/security/security-summary.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/security/security-summary.attestation.sigstore.json" \
+            "$durable_root/security/security-summary.attestation.sigstore.json"
+          cp -R -- "$RUNNER_TEMP/security/raw" "$durable_root/security/raw"
+          cp -R -- "$RUNNER_TEMP/conformance/latchway-external-evidence" \
+            "$durable_root/external/latchway-external-evidence"
+          install -m 0600 -- \
+            "$GITHUB_WORKSPACE/docs/release/final-report-metadata.json" \
+            "$durable_root/source/final-report-metadata.json"
+          chmod -R u=rwX,go= "$durable_root"
           tar --sort=name --format=ustar --mtime='UTC 1970-01-01' \
             --owner=0 --group=0 --numeric-owner -cf - \
-            -C "$RUNNER_TEMP/conformance" latchway-external-evidence \
+            -C "$durable_parent" latchway-release-evidence-v1 \
             | gzip -n > "$destination/latchway-release-evidence-v1.tar.gz"
           test -s "$destination/latchway-release-evidence-v1.tar.gz"
       - name: Render the deterministic final completion report
@@ -392,15 +439,18 @@ jobs:
             --release-conformance "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
             --publication-state "$RUNNER_TEMP/publication-state.json" \
             --repository "$GITHUB_WORKSPACE" \
+            --durable-evidence-root "$RUNNER_TEMP/durable-release-evidence/latchway-release-evidence-v1" \
             --commit "$CANDIDATE_COMMIT" \
             --tag "$RELEASE_TAG" \
+            --evidence-tag "evidence/$RELEASE_TAG" \
             --durable-asset "latchway-cross-repository-release.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json" \
             --durable-asset "latchway-cross-repository-release.attestation.sigstore.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json" \
             --durable-asset "latchway-publication-state.json=$RUNNER_TEMP/final-release-record/latchway-publication-state.json" \
             --durable-asset "latchway-public-registry-byte-proof.json=$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
+            --durable-asset "latchway-product-release-attestation.json=$RUNNER_TEMP/final-release-record/latchway-product-release-attestation.json" \
             --durable-asset "latchway-release-evidence-v1.tar.gz=$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz" \
             --output "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
-      - name: Reconcile any existing immutable final assets
+      - name: Reconcile any existing evidence-release completion attestation
         id: final-assets
         shell: bash
         env:
@@ -409,11 +459,32 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
           set -Eeuo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          evidence_tag="evidence/$RELEASE_TAG"
+          set +e
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/existing-evidence-release.json" \
+            2> "$RUNNER_TEMP/existing-evidence-release-error.txt"
+          release_status=$?
+          set -e
+          if [[ "$release_status" -ne 0 ]]; then
+            test "$release_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" \
+              "$RUNNER_TEMP/existing-evidence-release-error.txt"
+            echo "report_exists=false" >> "$GITHUB_OUTPUT"
+            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          notes="Authoritative final evidence for immutable product release $RELEASE_TAG at $CANDIDATE_COMMIT."
+          jq --exit-status --arg tag "$evidence_tag" --arg title "Latchway $RELEASE_TAG final evidence" --arg body "$notes" \
+            '.tag_name == $tag and .name == $title and .body == $body and .prerelease == false and
+             ((.draft == true and .immutable == false) or
+              (.draft == false and .immutable == true))' \
+            "$RUNNER_TEMP/existing-evidence-release.json" >/dev/null
           report="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
           bundle="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json"
-          report_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | length' "$RUNNER_TEMP/release.json")
-          bundle_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.attestation.sigstore.json")] | length' "$RUNNER_TEMP/release.json")
+          report_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | length' "$RUNNER_TEMP/existing-evidence-release.json")
+          bundle_count=$(jq '[.assets[] | select(.name == "COMPLETION_REPORT.attestation.sigstore.json")] | length' "$RUNNER_TEMP/existing-evidence-release.json")
           test "$report_count" -le 1
           test "$bundle_count" -le 1
           if [[ "$report_count" -eq 0 && "$bundle_count" -eq 1 ]]; then
@@ -422,17 +493,17 @@ jobs:
           fi
           if [[ "$report_count" -eq 1 ]]; then
             expected="sha256:$(sha256sum "$report" | cut -d ' ' -f 1)"
-            existing=$(jq --raw-output '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | .[0].digest // "digest-unavailable"' "$RUNNER_TEMP/release.json")
+            existing=$(jq --raw-output '[.assets[] | select(.name == "COMPLETION_REPORT.md")] | .[0].digest // "digest-unavailable"' "$RUNNER_TEMP/existing-evidence-release.json")
             test "$existing" = "$expected"
             mkdir -p "$RUNNER_TEMP/existing-final-assets"
-            gh release download "$RELEASE_TAG" --pattern COMPLETION_REPORT.md --dir "$RUNNER_TEMP/existing-final-assets"
+            gh release download "$evidence_tag" --pattern COMPLETION_REPORT.md --dir "$RUNNER_TEMP/existing-final-assets"
             cmp --silent "$report" "$RUNNER_TEMP/existing-final-assets/COMPLETION_REPORT.md"
             echo "report_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "report_exists=false" >> "$GITHUB_OUTPUT"
           fi
           if [[ "$bundle_count" -eq 1 ]]; then
-            gh release download "$RELEASE_TAG" \
+            gh release download "$evidence_tag" \
               --pattern COMPLETION_REPORT.attestation.sigstore.json \
               --dir "$RUNNER_TEMP/existing-final-assets"
             install -m 0600 -- \
@@ -476,52 +547,253 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/new-final-attestation-verification.json"
-      - name: Upload only missing exact final assets without clobbering
+      - name: Create deterministic checksums for the complete evidence release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          destination="$RUNNER_TEMP/final-release-record"
+          checksum="$destination/SHA256SUMS"
+          : > "$RUNNER_TEMP/evidence-assets-without-checksum.tsv"
+          for asset in \
+            "$destination/COMPLETION_REPORT.md" \
+            "$destination/COMPLETION_REPORT.attestation.sigstore.json" \
+            "$destination/latchway-cross-repository-release.json" \
+            "$destination/latchway-cross-repository-release.attestation.sigstore.json" \
+            "$destination/latchway-publication-state.json" \
+            "$destination/latchway-public-registry-byte-proof.json" \
+            "$destination/latchway-product-release-attestation.json" \
+            "$destination/latchway-release-evidence-v1.tar.gz"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test -s "$asset"
+            name=${asset##*/}
+            printf '%s\t%s\n' "$name" "$asset" >> "$RUNNER_TEMP/evidence-assets-without-checksum.tsv"
+          done
+          test "$(cut -f 1 "$RUNNER_TEMP/evidence-assets-without-checksum.tsv" | sort -u | wc -l | tr -d ' ')" = 8
+          while IFS=$'\t' read -r name asset; do
+            printf '%s  %s\n' "$(sha256sum "$asset" | cut -d ' ' -f 1)" "$name"
+          done < "$RUNNER_TEMP/evidence-assets-without-checksum.tsv" \
+            | LC_ALL=C sort > "$checksum"
+          test "$(wc -l < "$checksum" | tr -d ' ')" = 8
+          (cd "$destination" && sha256sum --check SHA256SUMS)
+      - name: Preflight evidence tag draft and every fixed final asset before mutation
+        id: evidence-release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-          REPORT_EXISTS: ${{ steps.final-assets.outputs.report_exists }}
-          BUNDLE_EXISTS: ${{ steps.final-assets.outputs.bundle_exists }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
           set -Eeuo pipefail
-          report="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
-          bundle="$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json"
-          test -f "$report"
-          test -f "$bundle"
-          if [[ "$REPORT_EXISTS" != true ]]; then
-            gh release upload "$RELEASE_TAG" "$report"
-          fi
-          if [[ "$BUNDLE_EXISTS" != true ]]; then
-            gh release upload "$RELEASE_TAG" "$bundle"
-          fi
+          evidence_tag="evidence/$RELEASE_TAG"
+          title="Latchway $RELEASE_TAG final evidence"
+          notes="Authoritative final evidence for immutable product release $RELEASE_TAG at $CANDIDATE_COMMIT."
+          message="Latchway $RELEASE_TAG final evidence
+
+          Product release: $RELEASE_TAG
+          Candidate commit: $CANDIDATE_COMMIT"
+          : > "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
           for asset in \
+            "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md" \
+            "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.attestation.sigstore.json" \
+            "$RUNNER_TEMP/final-release-record/SHA256SUMS" \
             "$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json" \
             "$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json" \
             "$RUNNER_TEMP/final-release-record/latchway-publication-state.json" \
             "$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-product-release-attestation.json" \
             "$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test -s "$asset"
+            printf '%s\n' "$asset" >> "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
+          done
+          test "$(wc -l < "$RUNNER_TEMP/fixed-final-evidence-assets.txt" | tr -d ' ')" = 9
+
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/evidence-tag-ref.json" \
+            2> "$RUNNER_TEMP/evidence-tag-error.txt"
+          tag_status=$?
+          set -e
+          if [[ "$tag_status" -eq 0 ]]; then
+            tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/evidence-tag-ref.json")
+            test "$(jq --raw-output .object.type "$RUNNER_TEMP/evidence-tag-ref.json")" = tag
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+              > "$RUNNER_TEMP/evidence-tag-object.json"
+            jq --exit-status --arg tag "$evidence_tag" --arg commit "$CANDIDATE_COMMIT" --arg message "$message" \
+              '.tag == $tag and .object.type == "commit" and
+               .object.sha == $commit and .message == $message' \
+              "$RUNNER_TEMP/evidence-tag-object.json" >/dev/null
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            test "$tag_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/evidence-tag-error.txt"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          set +e
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/final-release-preflight.json" \
+            2> "$RUNNER_TEMP/final-release-preflight-error.txt"
+          release_status=$?
+          set -e
+          plan="$RUNNER_TEMP/final-release-asset-plan.tsv"
+          : > "$plan"
+          if [[ "$release_status" -ne 0 ]]; then
+            test "$release_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" \
+              "$RUNNER_TEMP/final-release-preflight-error.txt"
+            while IFS= read -r asset; do
+              printf 'absent\t%s\n' "$asset" >> "$plan"
+            done < "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
+            echo "mode=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$tag_status" -eq 0
+          jq --exit-status --arg tag "$evidence_tag" --arg title "$title" --arg body "$notes" \
+            '.tag_name == $tag and .name == $title and .body == $body and .prerelease == false and
+             ((.draft == true and .immutable == false) or
+              (.draft == false and .immutable == true))' \
+            "$RUNNER_TEMP/final-release-preflight.json" >/dev/null
+          mode=draft
+          if [[ "$(jq --raw-output .immutable "$RUNNER_TEMP/final-release-preflight.json")" == true ]]; then
+            mode=immutable
+          fi
+          while IFS= read -r existing_name; do
+            grep --fixed-strings --line-regexp --quiet \
+              "$RUNNER_TEMP/final-release-record/$existing_name" \
+              "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
+          done < <(jq --raw-output '.assets[].name' "$RUNNER_TEMP/final-release-preflight.json")
+          while IFS= read -r asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/durable-release.json"
             existing=$(jq --raw-output --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | if length == 0 then "absent" elif length == 1 then (.[0].digest // "digest-unavailable") else error("durable release asset duplicated") end' \
-              "$RUNNER_TEMP/durable-release.json")
+              '[.assets[] | select(.name == $name)] |
+               if length == 0 then "absent"
+               elif length == 1 then (.[0].digest // "digest-unavailable")
+               else error("fixed final release asset duplicated") end' \
+              "$RUNNER_TEMP/final-release-preflight.json")
             if [[ "$existing" == absent ]]; then
-              gh release upload "$RELEASE_TAG" "$asset"
+              test "$mode" = draft
+              printf 'absent\t%s\n' "$asset" >> "$plan"
+              continue
             fi
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/durable-release.json"
-            existing=$(jq --raw-output --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("durable release asset missing or duplicated") end' \
-              "$RUNNER_TEMP/durable-release.json")
             test "$existing" = "$expected"
-            mkdir -p "$RUNNER_TEMP/existing-durable-assets"
-            rm -f "$RUNNER_TEMP/existing-durable-assets/$name"
-            gh release download "$RELEASE_TAG" --pattern "$name" --dir "$RUNNER_TEMP/existing-durable-assets"
-            cmp --silent "$asset" "$RUNNER_TEMP/existing-durable-assets/$name"
-          done
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/final-release.json"
-          for asset in "$report" "$bundle"; do
+            download_dir=$(mktemp -d "$RUNNER_TEMP/final-asset-preflight.XXXXXX")
+            gh release download "$evidence_tag" --pattern "$name" --dir "$download_dir"
+            cmp --silent "$asset" "$download_dir/$name"
+            printf 'present\t%s\n' "$asset" >> "$plan"
+          done < "$RUNNER_TEMP/fixed-final-evidence-assets.txt"
+          test "$(wc -l < "$plan" | tr -d ' ')" = 9
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - name: Publish and verify the separate immutable final-evidence release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_MODE: ${{ steps.evidence-release.outputs.mode }}
+          TAG_EXISTS: ${{ steps.evidence-release.outputs.tag_exists }}
+        run: |
+          set -Eeuo pipefail
+          evidence_tag="evidence/$RELEASE_TAG"
+          title="Latchway $RELEASE_TAG final evidence"
+          notes="Authoritative final evidence for immutable product release $RELEASE_TAG at $CANDIDATE_COMMIT."
+          message="Latchway $RELEASE_TAG final evidence
+
+          Product release: $RELEASE_TAG
+          Candidate commit: $CANDIDATE_COMMIT"
+          case "$RELEASE_MODE" in absent|draft|immutable) ;; *) exit 1 ;; esac
+          if [[ "$TAG_EXISTS" != true ]]; then
+            jq --null-input \
+              --arg tag "$evidence_tag" \
+              --arg message "$message" \
+              --arg object "$CANDIDATE_COMMIT" \
+              --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{tag: $tag, message: $message, object: $object, type: "commit",
+                tagger: {name: "github-actions[bot]",
+                  email: "41898282+github-actions[bot]@users.noreply.github.com",
+                  date: $date}}' > "$RUNNER_TEMP/evidence-tag-create.json"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+              --input "$RUNNER_TEMP/evidence-tag-create.json" \
+              > "$RUNNER_TEMP/evidence-tag-result.json"
+            tag_object=$(jq --raw-output '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/evidence-tag-result.json")
+            jq --null-input --arg ref "refs/tags/$evidence_tag" --arg sha "$tag_object" \
+              '{ref: $ref, sha: $sha}' > "$RUNNER_TEMP/evidence-tag-ref-create.json"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              --input "$RUNNER_TEMP/evidence-tag-ref-create.json" >/dev/null
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/final-evidence-tag-ref.json"
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$RUNNER_TEMP/final-evidence-tag-ref.json")
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/final-evidence-tag-ref.json")" = tag
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+            > "$RUNNER_TEMP/final-evidence-tag-object.json"
+          jq --exit-status --arg tag "$evidence_tag" --arg commit "$CANDIDATE_COMMIT" --arg message "$message" \
+            '.tag == $tag and .object.type == "commit" and
+             .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/final-evidence-tag-object.json" >/dev/null
+
+          if [[ "$RELEASE_MODE" == absent ]]; then
+            gh release create "$evidence_tag" --draft --verify-tag \
+              --title "$title" \
+              --notes "$notes"
+          fi
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+              > "$RUNNER_TEMP/evidence-draft.json"
+            jq --exit-status --arg tag "$evidence_tag" --arg title "$title" --arg body "$notes" \
+              '.tag_name == $tag and .name == $title and .body == $body and .draft == true and
+               .prerelease == false and .immutable == false' \
+              "$RUNNER_TEMP/evidence-draft.json" >/dev/null
+          fi
+          plan="$RUNNER_TEMP/final-release-asset-plan.tsv"
+          test -f "$plan"
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            while IFS=$'\t' read -r disposition asset; do
+              case "$disposition" in
+                absent) gh release upload "$evidence_tag" "$asset" ;;
+                present) ;;
+                *) echo "invalid preflight disposition" >&2; exit 1 ;;
+              esac
+            done < "$plan"
+            gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+              > "$RUNNER_TEMP/evidence-draft.json"
+            while IFS=$'\t' read -r _ asset; do
+              name=${asset##*/}
+              expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+              actual=$(jq --raw-output --arg name "$name" \
+                '[.assets[] | select(.name == $name)] |
+                 if length == 1 then (.[0].digest // "digest-unavailable")
+                 else error("draft evidence asset missing or duplicated") end' \
+                "$RUNNER_TEMP/evidence-draft.json")
+              test "$actual" = "$expected"
+            done < "$plan"
+            release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/evidence-draft.json")
+            jq --null-input '{draft: false}' > "$RUNNER_TEMP/publish-evidence-release.json"
+            gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --input "$RUNNER_TEMP/publish-evidence-release.json" \
+              > "$RUNNER_TEMP/published-evidence-release.json"
+          fi
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+            > "$RUNNER_TEMP/final-release.json"
+          jq --exit-status --arg tag "$evidence_tag" --arg title "$title" --arg body "$notes" \
+            '.tag_name == $tag and .name == $title and .body == $body and .draft == false and
+             .prerelease == false and .immutable == true' \
+            "$RUNNER_TEMP/final-release.json" >/dev/null
+          gh release verify "$evidence_tag" --format json \
+            > "$RUNNER_TEMP/evidence-release-attestation.json"
+          while IFS=$'\t' read -r _ asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
             actual=$(jq --raw-output --arg name "$name" \
@@ -530,15 +802,18 @@ jobs:
                else error("final release asset missing or duplicated") end' \
               "$RUNNER_TEMP/final-release.json")
             test "$actual" = "$expected"
-          done
+            gh release verify-asset "$evidence_tag" "$asset" --format json \
+              > "$RUNNER_TEMP/evidence-release-asset-${name}.json"
+          done < "$plan"
       - name: Retain the final report bundle and verified public state
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-final-release-record-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.md
-            ${{ runner.temp }}/final-release-record/COMPLETION_REPORT.attestation.sigstore.json
+            ${{ runner.temp }}/final-release-record/
             ${{ runner.temp }}/publication-state.json
+            ${{ runner.temp }}/evidence-release-attestation.json
+            ${{ runner.temp }}/evidence-release-asset-*.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 90

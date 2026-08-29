@@ -11,12 +11,15 @@ coordinate-mismatched inputs before writing deterministic Markdown.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import sys
+import tarfile
 from typing import Any, Mapping
 
 
@@ -27,9 +30,14 @@ OCI_DIGEST = re.compile(r"^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$")
 ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SEMVER = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 TAG = re.compile(r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
+EVIDENCE_TAG = re.compile(
+    r"^evidence/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$"
+)
 UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 MIGRATION = re.compile(r"^(\d{6})_[a-z0-9_]+\.sql$")
 MAXIMUM_INPUT_BYTES = 32 * 1024 * 1024
+MAXIMUM_DURABLE_FILE_BYTES = 1024 * 1024 * 1024
+MAXIMUM_DURABLE_FILES = 8192
 REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
 EXTERNAL_DOMAINS = (
     "live_sdk_conformance",
@@ -48,6 +56,128 @@ ANDROID_MODULES = (
     "latchway-play-integrity",
     "latchway-firebase-auth",
     "latchway-bom",
+)
+REQUIRED_CONFORMANCE_CHECKS = {
+    "source.repository_layout": "local_source",
+    "source.clean_worktrees": "local_source",
+    "source.core_contract": "local_source",
+    "source.contract_bundle": "local_source",
+    "source.contract_locks": "local_source",
+    "source.generated_fixtures": "local_source",
+    "source.package_versions": "local_source",
+    "source.react_native_pins": "local_source",
+    "promotion.local_preconditions": "local_promotion",
+    "release.local_preconditions": "local_release",
+    **{f"external.{domain}": domain for domain in EXTERNAL_DOMAINS},
+    "promotion.evidence_window": "local_promotion",
+}
+REQUIRED_SECURITY_CHECKS = frozenset(
+    {
+        "source_go_vulnerability",
+        "source_static_analysis",
+        "source_fuzz_smoke",
+        "source_race",
+        "source_vulnerability_secret_misconfiguration",
+        "source_license",
+        "image_amd64_vulnerability",
+        "image_arm64_vulnerability",
+        "image_amd64_license",
+        "image_arm64_license",
+    }
+)
+REQUIRED_EXTERNAL_CLAIMS = {
+    "live_sdk_conformance": frozenset(
+        {
+            "javascript_against_release_image",
+            "ios_against_release_image",
+            "android_against_release_image",
+            "react_native_ios_against_release_image",
+            "react_native_android_against_release_image",
+            "dpop_vectors",
+            "error_mapping",
+            "session_refresh",
+            "installation_revocation",
+            "streaming",
+            "quota_snapshots",
+            "protocol_version_rejection",
+        }
+    ),
+    "physical_devices": frozenset(
+        {
+            "app_attest_production_verified",
+            "play_integrity_play_distributed_verified",
+            "react_native_ios_verified",
+            "react_native_android_verified",
+        }
+    ),
+    "live_provider": frozenset(
+        {
+            "openrouter_nonstreaming_verified",
+            "openrouter_streaming_verified",
+            "usage_verified",
+            "output_clamp_verified",
+            "error_normalization_verified",
+        }
+    ),
+    "cloud_deployments": frozenset(
+        {
+            "compose_verified",
+            "cloud_run_verified",
+            "aws_verified",
+            "fly_io_verified",
+            "cloudflare_containers_verified",
+        }
+    ),
+    "operational_resilience": frozenset(
+        {
+            "v1_load_targets_verified",
+            "live_failure_injection_verified",
+            "multi_replica_verified",
+            "backup_restore_drill_verified",
+            "previous_candidate_upgrade_rollback_verified",
+        }
+    ),
+    "supply_chain": frozenset(
+        {
+            "multi_arch_image_verified",
+            "vulnerability_scan_verified",
+            "license_scan_verified",
+            "sbom_verified",
+            "signature_verified",
+            "provenance_verified",
+        }
+    ),
+    "public_tags": frozenset(
+        {"remote_annotated_tags_verified", "github_releases_verified"}
+    ),
+    "public_registries": frozenset(
+        {
+            "oci_digest_verified",
+            "npm_javascript_verified",
+            "npm_react_native_verified",
+            "swift_package_verified",
+            "cocoapods_verified",
+            "maven_central_verified",
+        }
+    ),
+}
+PHYSICAL_OBSERVATIONS = {
+    "sdk.ios.release-image": ("app-attest-profile.json", "app-attest-evidence.json"),
+    "sdk.android.release-image": (
+        "play-integrity-profile.json",
+        "play-integrity-evidence.json",
+    ),
+    "sdk.react-native-ios.release-image": (
+        "react-native-ios-profile.json",
+        "react-native-ios-evidence.json",
+    ),
+    "sdk.react-native-android.release-image": (
+        "react-native-android-profile.json",
+        "react-native-android-evidence.json",
+    ),
+}
+REMAINING_WORK_CATEGORIES = frozenset(
+    {"post_1_0_enhancement", "documented_non_goal", "low_severity_accepted_risk"}
 )
 
 
@@ -113,8 +243,508 @@ def require_string(value: Any, pattern: re.Pattern[str], code: str) -> str:
     return value
 
 
-def sha256_file(path: Path) -> str:
-    return hashlib.sha256(read_bytes(path)).hexdigest()
+def sha256_file(
+    path: Path,
+    *,
+    maximum: int = MAXIMUM_INPUT_BYTES,
+    allow_empty: bool = False,
+) -> str:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise ReportError("release_record_input_missing") from None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_size > maximum
+        or (metadata.st_size < 1 and not allow_empty)
+    ):
+        raise ReportError("release_record_input_invalid")
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        raise ReportError("release_record_input_invalid") from None
+    return digest.hexdigest()
+
+
+def bounded_text(value: Any, code: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 1024
+        or "\n" in value
+        or "\r" in value
+        or any(ord(character) < 32 and character != "\t" for character in value)
+    ):
+        raise ReportError(code)
+    return value
+
+
+def safe_relative(value: Any, code: str) -> PurePosixPath:
+    if not isinstance(value, str) or not value or "\\" in value or value.startswith("/"):
+        raise ReportError(code)
+    result = PurePosixPath(value)
+    if result.as_posix() != value or any(part in ("", ".", "..") for part in result.parts):
+        raise ReportError(code)
+    return result
+
+
+def resolve_regular(root: Path, relative: PurePosixPath, code: str) -> Path:
+    try:
+        resolved_root = root.resolve(strict=True)
+        path = (resolved_root / Path(*relative.parts)).resolve(strict=True)
+        path.relative_to(resolved_root)
+        metadata = path.lstat()
+    except (OSError, ValueError):
+        raise ReportError(code) from None
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise ReportError(code)
+    return path
+
+
+def regular_tree(root: Path, code: str) -> dict[str, Path]:
+    try:
+        metadata = root.lstat()
+    except OSError:
+        raise ReportError(code) from None
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise ReportError(code)
+    result: dict[str, Path] = {}
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError:
+            raise ReportError(code) from None
+        for child in children:
+            try:
+                child_metadata = child.lstat()
+            except OSError:
+                raise ReportError(code) from None
+            if stat.S_ISLNK(child_metadata.st_mode):
+                raise ReportError(code)
+            if stat.S_ISDIR(child_metadata.st_mode):
+                pending.append(child)
+                continue
+            if not stat.S_ISREG(child_metadata.st_mode):
+                raise ReportError(code)
+            relative = child.relative_to(root).as_posix()
+            safe_relative(relative, code)
+            result[relative] = child
+            if len(result) > MAXIMUM_DURABLE_FILES:
+                raise ReportError(code)
+    return result
+
+
+def validate_report_metadata(repository: Path) -> Mapping[str, Any]:
+    metadata = read_json(repository / "docs/release/final-report-metadata.json")
+    require_fields(
+        metadata,
+        {"schema_version", "kind", "compatibility", "security_statement", "remaining_work"},
+        "release_record_metadata_fields_invalid",
+    )
+    if metadata.get("schema_version") != 1 or metadata.get("kind") != "latchway_v1_final_report_metadata":
+        raise ReportError("release_record_metadata_invalid")
+    compatibility = metadata.get("compatibility")
+    if not isinstance(compatibility, dict) or set(compatibility) != {"minimum_platform_versions"}:
+        raise ReportError("release_record_compatibility_metadata_invalid")
+    platforms = compatibility["minimum_platform_versions"]
+    expected_platforms = {"ios_sdk", "android_sdk", "javascript_sdk", "react_native_sdk"}
+    if not isinstance(platforms, dict) or set(platforms) != expected_platforms:
+        raise ReportError("release_record_compatibility_metadata_invalid")
+    for value in platforms.values():
+        bounded_text(value, "release_record_compatibility_metadata_invalid")
+    security = metadata.get("security_statement")
+    expected_security = {
+        "known_accepted_risks",
+        "prompt_logging_defaults",
+        "secret_storage_behavior",
+        "key_rotation_behavior",
+        "attestation_limitations",
+        "web_threat_model_limitations",
+    }
+    if not isinstance(security, dict) or set(security) != expected_security:
+        raise ReportError("release_record_security_metadata_invalid")
+    risks = security["known_accepted_risks"]
+    if not isinstance(risks, list) or not 1 <= len(risks) <= 8 or len(set(risks)) != len(risks):
+        raise ReportError("release_record_security_metadata_invalid")
+    for value in risks:
+        bounded_text(value, "release_record_security_metadata_invalid")
+    for key in expected_security - {"known_accepted_risks"}:
+        bounded_text(security[key], "release_record_security_metadata_invalid")
+    remaining = metadata.get("remaining_work")
+    if not isinstance(remaining, list) or not 1 <= len(remaining) <= 16:
+        raise ReportError("release_record_remaining_work_invalid")
+    seen_categories: set[str] = set()
+    forbidden = re.compile(r"(?i)\b(?:unfinished|incomplete|todo|pending|blocker|missing|not implemented)\b")
+    for item in remaining:
+        if not isinstance(item, dict) or set(item) != {"category", "description"}:
+            raise ReportError("release_record_remaining_work_invalid")
+        category = item.get("category")
+        description = bounded_text(item.get("description"), "release_record_remaining_work_invalid")
+        if category not in REMAINING_WORK_CATEGORIES or category in seen_categories or forbidden.search(description):
+            raise ReportError("release_record_remaining_work_invalid")
+        seen_categories.add(category)
+    if seen_categories != REMAINING_WORK_CATEGORIES:
+        raise ReportError("release_record_remaining_work_invalid")
+    return metadata
+
+
+def validate_physical_receipts(external: Path) -> int:
+    domain = read_json(external / "physical_devices.json")
+    artifact_entries = domain.get("artifacts")
+    if not isinstance(artifact_entries, list):
+        raise ReportError("release_record_physical_receipts_invalid")
+    by_path = {
+        item.get("path"): item
+        for item in artifact_entries
+        if isinstance(item, dict) and set(item) == {"path", "sha256"}
+    }
+    if len(by_path) != len(artifact_entries):
+        raise ReportError("release_record_physical_receipts_invalid")
+    retained_count = 0
+    for observation, required_names in PHYSICAL_OBSERVATIONS.items():
+        slug = observation.replace(".", "-")
+        result_relative = f"artifacts/physical-devices/result-{slug}.json"
+        summary_relative = (
+            f"artifacts/physical-devices/artifacts--{slug}--tool-output.json"
+        )
+        receipt_relative = (
+            f"artifacts/physical-devices/artifacts--{slug}--physical-receipt.json"
+        )
+        for relative in (result_relative, summary_relative, receipt_relative):
+            if relative not in by_path:
+                raise ReportError("release_record_physical_receipts_missing")
+            path = resolve_regular(
+                external,
+                safe_relative(relative, "release_record_physical_receipts_invalid"),
+                "release_record_physical_receipts_invalid",
+            )
+            if sha256_file(path) != by_path[relative].get("sha256"):
+                raise ReportError("release_record_physical_receipts_hash_mismatch")
+        result = read_json(external / result_relative)
+        expected_original = f"artifacts/{slug}/physical-receipt.json"
+        result_artifacts = result.get("artifacts")
+        if (
+            result.get("observation") != observation
+            or not isinstance(result_artifacts, list)
+            or len(
+                [
+                    item
+                    for item in result_artifacts
+                    if isinstance(item, dict)
+                    and item.get("path") == expected_original
+                    and item.get("sha256") == by_path[receipt_relative]["sha256"]
+                ]
+            )
+            != 1
+        ):
+            raise ReportError("release_record_physical_receipts_invalid")
+        summary = read_json(external / summary_relative)
+        hashes = summary.get("receipt_sha256")
+        receipt = read_json(external / receipt_relative)
+        files = receipt.get("files")
+        if (
+            receipt.get("schema_version") != 1
+            or receipt.get("kind") != "latchway_retained_physical_device_receipt"
+            or receipt.get("observation") != observation
+            or not isinstance(files, list)
+            or not 4 <= len(files) <= 64
+            or not isinstance(hashes, dict)
+        ):
+            raise ReportError("release_record_physical_receipts_invalid")
+        decoded_hashes: dict[str, str] = {}
+        for item in files:
+            if not isinstance(item, dict) or set(item) != {"name", "sha256", "content_base64"}:
+                raise ReportError("release_record_physical_receipts_invalid")
+            name = item.get("name")
+            expected = item.get("sha256")
+            if (
+                not isinstance(name, str)
+                or ASSET_NAME.fullmatch(name) is None
+                or name in decoded_hashes
+                or not isinstance(expected, str)
+                or SHA256.fullmatch(expected) is None
+                or not isinstance(item.get("content_base64"), str)
+            ):
+                raise ReportError("release_record_physical_receipts_invalid")
+            try:
+                payload = base64.b64decode(item["content_base64"], validate=True)
+            except (binascii.Error, ValueError):
+                raise ReportError("release_record_physical_receipts_invalid") from None
+            if not payload or len(payload) > MAXIMUM_INPUT_BYTES or hashlib.sha256(payload).hexdigest() != expected:
+                raise ReportError("release_record_physical_receipts_hash_mismatch")
+            decoded_hashes[name] = expected
+        required = {
+            "SHA256SUMS",
+            "github-attestation.sigstore.json",
+            "device-inventory.json",
+            "gateway-deployment-verification.json",
+            *required_names,
+        }
+        if decoded_hashes != hashes or not required.issubset(decoded_hashes):
+            raise ReportError("release_record_physical_receipts_invalid")
+        retained_count += len(decoded_hashes)
+    return retained_count
+
+
+def validate_durable_evidence_root(
+    *,
+    root: Path,
+    candidate_path: Path,
+    security_path: Path,
+    conformance: Mapping[str, Any],
+    commit: str,
+    metadata_path: Path,
+) -> tuple[int, int]:
+    files = regular_tree(root, "release_record_durable_evidence_invalid")
+    if set(path.split("/", 1)[0] for path in files) != {
+        "candidate",
+        "security",
+        "external",
+        "source",
+    }:
+        raise ReportError("release_record_durable_evidence_invalid")
+    required_fixed = {
+        "candidate/latchway-candidate.json",
+        "candidate/latchway-candidate.attestation.sigstore.json",
+        "security/security-summary.json",
+        "security/security-summary.attestation.sigstore.json",
+        "security/latchway-candidate.json",
+        "external/latchway-external-evidence/aggregate-manifest.json",
+        "external/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json",
+        "source/final-report-metadata.json",
+    }
+    if not required_fixed.issubset(files):
+        raise ReportError("release_record_durable_evidence_incomplete")
+    if (
+        read_bytes(files["candidate/latchway-candidate.json"]) != read_bytes(candidate_path)
+        or read_bytes(files["security/latchway-candidate.json"]) != read_bytes(candidate_path)
+        or read_bytes(files["security/security-summary.json"]) != read_bytes(security_path)
+        or read_bytes(files["source/final-report-metadata.json"])
+        != read_bytes(metadata_path)
+    ):
+        raise ReportError("release_record_durable_evidence_identity_mismatch")
+
+    security = read_json(security_path)
+    raw_evidence = security.get("raw_evidence")
+    if not isinstance(raw_evidence, list) or not raw_evidence:
+        raise ReportError("release_record_durable_security_raw_invalid")
+    expected_security_raw: set[str] = set()
+    for item in raw_evidence:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ReportError("release_record_durable_security_raw_invalid")
+        relative = safe_relative(item.get("path"), "release_record_durable_security_raw_invalid")
+        if not relative.parts or relative.parts[0] != "raw" or len(relative.parts) != 2:
+            raise ReportError("release_record_durable_security_raw_invalid")
+        durable_relative = f"security/{relative.as_posix()}"
+        expected = item.get("sha256")
+        if (
+            durable_relative in expected_security_raw
+            or durable_relative not in files
+            or not isinstance(expected, str)
+            or SHA256.fullmatch(expected) is None
+            or sha256_file(
+                files[durable_relative],
+                allow_empty=durable_relative.endswith(".log"),
+            )
+            != expected
+        ):
+            raise ReportError("release_record_durable_security_raw_invalid")
+        expected_security_raw.add(durable_relative)
+    actual_security_raw = {path for path in files if path.startswith("security/raw/")}
+    if actual_security_raw != expected_security_raw:
+        raise ReportError("release_record_durable_security_raw_invalid")
+
+    # The operational report may claim live configuration activation and
+    # rollback only when the retained PostgreSQL-enabled race run proves that
+    # the vertical local-verification test itself passed. That test asserts the
+    # named activation and rollback checks internally.
+    race_result_relative = "security/raw/source-race.result.json"
+    race_log_relative = "security/raw/source-race.log"
+    if not {race_result_relative, race_log_relative}.issubset(expected_security_raw):
+        raise ReportError("release_record_configuration_proof_missing")
+    race_result = read_json(files[race_result_relative])
+    race_log = race_result.get("log")
+    if (
+        race_result.get("schema_version") != 1
+        or race_result.get("kind") != "latchway_security_command_result"
+        or race_result.get("check") != "source_race"
+        or race_result.get("candidate_commit") != commit
+        or race_result.get("argv")
+        != ["go", "test", "-race", "-json", "-count=1", "./..."]
+        or race_result.get("execution_context")
+        != {"postgresql_enabled": True, "fuzz_time": None, "fuzz_parallel": None}
+        or race_result.get("exit_code") != 0
+        or not isinstance(race_log, dict)
+        or race_log.get("path") != "source-race.log"
+        or race_log.get("sha256")
+        != sha256_file(files[race_log_relative], allow_empty=False)
+    ):
+        raise ReportError("release_record_configuration_proof_invalid")
+    try:
+        race_events = [
+            json.loads(line, object_pairs_hook=strict_object, parse_constant=reject_nonfinite)
+            for line in files[race_log_relative].read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ReportError):
+        raise ReportError("release_record_configuration_proof_invalid") from None
+    if not any(
+        isinstance(event, dict)
+        and event.get("Action") == "pass"
+        and event.get("Package")
+        == "github.com/latchway/latchway/internal/localverify"
+        and event.get("Test") == "TestRunPostgreSQLV1Vertical"
+        for event in race_events
+    ):
+        raise ReportError("release_record_configuration_proof_invalid")
+
+    external = root / "external/latchway-external-evidence"
+    manifest = read_json(external / "aggregate-manifest.json")
+    require_fields(
+        manifest,
+        {"schema_version", "kind", "scope", "candidate_commit", "domains", "identity", "files"},
+        "release_record_durable_aggregate_invalid",
+    )
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("kind") != "latchway_external_evidence_aggregate"
+        or manifest.get("scope") != "release"
+        or manifest.get("candidate_commit") != commit
+        or manifest.get("domains") != list(EXTERNAL_DOMAINS)
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise ReportError("release_record_durable_aggregate_invalid")
+    aggregate_paths: set[str] = set()
+    for item in manifest["files"]:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ReportError("release_record_durable_aggregate_invalid")
+        relative = safe_relative(item.get("path"), "release_record_durable_aggregate_invalid")
+        serialized = relative.as_posix()
+        expected = item.get("sha256")
+        if (
+            serialized in aggregate_paths
+            or not isinstance(expected, str)
+            or SHA256.fullmatch(expected) is None
+            or sha256_file(resolve_regular(external, relative, "release_record_durable_aggregate_invalid")) != expected
+        ):
+            raise ReportError("release_record_durable_aggregate_invalid")
+        aggregate_paths.add(serialized)
+    actual_external = set(regular_tree(external, "release_record_durable_aggregate_invalid"))
+    if actual_external != aggregate_paths | {
+        "aggregate-manifest.json",
+        "aggregate-manifest.attestation.sigstore.json",
+    }:
+        raise ReportError("release_record_durable_aggregate_invalid")
+
+    domain_by_id = {item["id"]: item for item in conformance["evidence_domains"]}
+    for domain, required_claims in REQUIRED_EXTERNAL_CLAIMS.items():
+        document = read_json(external / f"{domain}.json")
+        artifacts = document.get("artifacts")
+        if (
+            document.get("domain") != domain
+            or document.get("status") != "passed"
+            or document.get("core_commit") != commit
+            or not isinstance(document.get("claims"), dict)
+            or set(document["claims"]) != set(required_claims)
+            or any(value is not True for value in document["claims"].values())
+            or not isinstance(artifacts, list)
+            or sha256_file(external / f"{domain}.json")
+            != domain_by_id[domain]["document_sha256"]
+        ):
+            raise ReportError("release_record_durable_domain_invalid")
+        hashes: list[str] = []
+        for artifact in artifacts:
+            if not isinstance(artifact, dict) or set(artifact) != {"path", "sha256"}:
+                raise ReportError("release_record_durable_domain_invalid")
+            relative = safe_relative(artifact.get("path"), "release_record_durable_domain_invalid")
+            expected = artifact.get("sha256")
+            if (
+                not isinstance(expected, str)
+                or SHA256.fullmatch(expected) is None
+                or sha256_file(resolve_regular(external, relative, "release_record_durable_domain_invalid")) != expected
+            ):
+                raise ReportError("release_record_durable_domain_invalid")
+            hashes.append(expected)
+        if sorted(hashes) != sorted(domain_by_id[domain]["artifact_sha256"]):
+            raise ReportError("release_record_durable_domain_invalid")
+    physical_file_count = validate_physical_receipts(external)
+    return len(expected_security_raw), physical_file_count
+
+
+def validate_durable_archive(archive: Path, root: Path) -> None:
+    sha256_file(archive, maximum=MAXIMUM_DURABLE_FILE_BYTES)
+    expected = regular_tree(root, "release_record_durable_archive_invalid")
+    expected_hashes = {
+        path: sha256_file(file, maximum=MAXIMUM_DURABLE_FILE_BYTES, allow_empty=True)
+        for path, file in expected.items()
+    }
+    seen: set[str] = set()
+    seen_directories: set[str] = set()
+    expected_directories = {
+        parent.as_posix()
+        for path in expected
+        for parent in PurePosixPath(path).parents
+        if parent.as_posix() != "."
+    }
+    prefix = "latchway-release-evidence-v1/"
+    try:
+        with tarfile.open(archive, mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if len(members) > MAXIMUM_DURABLE_FILES * 2:
+                raise ReportError("release_record_durable_archive_invalid")
+            for member in members:
+                if member.issym() or member.islnk() or member.isdev():
+                    raise ReportError("release_record_durable_archive_invalid")
+                if member.name == prefix.rstrip("/"):
+                    if not member.isdir():
+                        raise ReportError("release_record_durable_archive_invalid")
+                    continue
+                if not member.name.startswith(prefix):
+                    raise ReportError("release_record_durable_archive_invalid")
+                relative = member.name.removeprefix(prefix).rstrip("/")
+                if not relative:
+                    if not member.isdir():
+                        raise ReportError("release_record_durable_archive_invalid")
+                    continue
+                safe_relative(relative, "release_record_durable_archive_invalid")
+                if member.isdir():
+                    if relative in seen_directories or relative not in expected_directories:
+                        raise ReportError("release_record_durable_archive_invalid")
+                    seen_directories.add(relative)
+                    continue
+                if (
+                    not member.isfile()
+                    or relative in seen
+                    or relative not in expected_hashes
+                    or member.size > MAXIMUM_DURABLE_FILE_BYTES
+                ):
+                    raise ReportError("release_record_durable_archive_invalid")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise ReportError("release_record_durable_archive_invalid")
+                digest = hashlib.sha256()
+                total = 0
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    total += len(chunk)
+                    if total > MAXIMUM_DURABLE_FILE_BYTES:
+                        raise ReportError("release_record_durable_archive_invalid")
+                    digest.update(chunk)
+                if total != member.size or digest.hexdigest() != expected_hashes[relative]:
+                    raise ReportError("release_record_durable_archive_hash_mismatch")
+                seen.add(relative)
+    except ReportError:
+        raise
+    except (OSError, tarfile.TarError):
+        raise ReportError("release_record_durable_archive_invalid") from None
+    if seen != set(expected_hashes):
+        raise ReportError("release_record_durable_archive_incomplete")
+    if seen_directories != expected_directories:
+        raise ReportError("release_record_durable_archive_incomplete")
 
 
 def database_schema_version(repository: Path) -> int:
@@ -371,8 +1001,17 @@ def validate_conformance(
         ):
             raise ReportError("release_record_checks_invalid")
         seen_checks.add(check["id"])
+        if (
+            check["id"] not in REQUIRED_CONFORMANCE_CHECKS
+            or check.get("domain") != REQUIRED_CONFORMANCE_CHECKS[check["id"]]
+            or check.get("required") is not True
+            or check.get("status") != "passed"
+        ):
+            raise ReportError("release_record_checks_invalid")
         if check.get("required") is True and check.get("status") != "passed":
             raise ReportError("release_record_required_check_not_passed")
+    if seen_checks != set(REQUIRED_CONFORMANCE_CHECKS):
+        raise ReportError("release_record_checks_incomplete")
     return repositories, domains, checks
 
 
@@ -419,6 +1058,8 @@ def validate_security(
         ):
             raise ReportError("release_record_security_checks_invalid")
         identifiers.add(check["id"])
+    if identifiers != REQUIRED_SECURITY_CHECKS:
+        raise ReportError("release_record_security_checks_incomplete")
     return checks
 
 
@@ -480,7 +1121,16 @@ def validate_publication(
         raise ReportError("release_record_github_release_invalid")
     require_fields(
         release,
-        {"id", "url", "tag_name", "draft", "prerelease", "published_at"},
+        {
+            "id",
+            "url",
+            "tag_name",
+            "draft",
+            "prerelease",
+            "immutable",
+            "published_at",
+            "release_attestation_sha256",
+        },
         "release_record_github_release_invalid",
     )
     if (
@@ -492,8 +1142,11 @@ def validate_publication(
         or release.get("tag_name") != tag
         or release.get("draft") is not False
         or release.get("prerelease") is not False
+        or release.get("immutable") is not True
         or not isinstance(release.get("published_at"), str)
         or UTC.fullmatch(release["published_at"]) is None
+        or not isinstance(release.get("release_attestation_sha256"), str)
+        or SHA256.fullmatch(release["release_attestation_sha256"]) is None
     ):
         raise ReportError("release_record_github_release_invalid")
     if publication.get("registries") != canonical_registries(repositories, expected_oci):
@@ -513,10 +1166,15 @@ def render(
     repository: Path,
     commit: str,
     tag: str,
+    evidence_tag: str,
+    durable_evidence_root: Path,
     durable_assets: Mapping[str, Path] | None = None,
 ) -> str:
     require_string(commit, COMMIT, "release_record_commit_invalid")
     require_string(tag, TAG, "release_record_tag_invalid")
+    require_string(evidence_tag, EVIDENCE_TAG, "release_record_evidence_tag_invalid")
+    if evidence_tag != f"evidence/{tag}":
+        raise ReportError("release_record_evidence_tag_invalid")
     candidate = read_json(candidate_path)
     security = read_json(security_path)
     conformance = read_json(conformance_path)
@@ -527,39 +1185,73 @@ def render(
     )
     security_checks = validate_security(security, commit, tag, contract, image)
     validate_publication(publication, commit, tag, repositories, image)
+    metadata = validate_report_metadata(repository)
+    security_raw_count, physical_receipt_file_count = validate_durable_evidence_root(
+        root=durable_evidence_root,
+        candidate_path=candidate_path,
+        security_path=security_path,
+        conformance=conformance,
+        commit=commit,
+        metadata_path=repository / "docs/release/final-report-metadata.json",
+    )
     schema_version = database_schema_version(repository)
     oci = f"{image['repository']}@{image['index_digest']}"
     registries = publication["registries"]
     durable = durable_assets or {}
     if not durable or len(durable) > 16:
         raise ReportError("release_record_durable_assets_invalid")
+    archive_name = "latchway-release-evidence-v1.tar.gz"
+    product_attestation_name = "latchway-product-release-attestation.json"
+    if archive_name not in durable or product_attestation_name not in durable:
+        raise ReportError("release_record_durable_assets_invalid")
+    validate_durable_archive(durable[archive_name], durable_evidence_root)
+    if (
+        sha256_file(durable[product_attestation_name])
+        != publication["github_release"]["release_attestation_sha256"]
+    ):
+        raise ReportError("release_record_product_attestation_mismatch")
     durable_hashes: list[tuple[str, str]] = []
     for name, path in sorted(durable.items()):
         if ASSET_NAME.fullmatch(name) is None or path.name != name:
             raise ReportError("release_record_durable_assets_invalid")
-        durable_hashes.append((name, sha256_file(path)))
+        durable_hashes.append(
+            (name, sha256_file(path, maximum=MAXIMUM_DURABLE_FILE_BYTES))
+        )
 
+    by_repository = {item["id"]: item for item in repositories}
     lines = [
         f"# Latchway {tag} final release record",
         "",
-        "> Status: **released and fully evidence-gated**. This immutable asset was rendered only after the public release and every required v1 evidence domain passed.",
+        "> Product status: **released and fully evidence-gated**. This report was rendered only after the immutable product release and every required v1 evidence domain passed.",
         "",
-        "## Release identity",
+        f"> Evidence publication target: [`{evidence_tag}`](https://github.com/Latchway/latchway/releases/tag/{evidence_tag}). The finalizer publishes this exact report and its complete fixed asset set through a draft, then separately requires GitHub immutability and release-attestation verification; this pre-publication document does not claim that evidence release already exists.",
+        "",
+        "## Release artifacts",
+        "",
+        "| Required artifact | Exact value |",
+        "| --- | --- |",
+        f"| Core repository commit and tag | `{commit}` / `{tag}` |",
+        f"| iOS repository commit and tag | `{by_repository['ios']['commit']}` / `{by_repository['ios']['intended_tag']}` |",
+        f"| Android repository commit and tag | `{by_repository['android']['commit']}` / `{by_repository['android']['intended_tag']}` |",
+        f"| JavaScript repository commit and tag | `{by_repository['javascript']['commit']}` / `{by_repository['javascript']['intended_tag']}` |",
+        f"| React Native repository commit and tag | `{by_repository['react_native']['commit']}` / `{by_repository['react_native']['intended_tag']}` |",
+        f"| OCI image digest | `{oci}` |",
+        f"| Contract bundle hash | `{contract['bundle_sha256']}` |",
+        f"| Database schema version | `{schema_version}` |",
+        "",
+        "### Release identity",
         "",
         "| Field | Exact value |",
         "| --- | --- |",
         f"| Core version | `{escape(tag[1:])}` |",
-        f"| Core annotated tag | `{escape(tag)}` |",
-        f"| Core commit | `{escape(commit)}` |",
         f"| Git tag object | `{escape(publication['tag_object_sha'])}` |",
         f"| GitHub release | [release {escape(tag)}]({escape(publication['github_release']['url'])}) (`{publication['github_release']['id']}`) |",
+        f"| Final evidence release target | [`{escape(evidence_tag)}`](https://github.com/Latchway/latchway/releases/tag/{escape(evidence_tag)}) |",
+        "| Final evidence checksum manifest | `SHA256SUMS` (covers every other fixed evidence-release asset) |",
         f"| Published at | `{escape(publication['github_release']['published_at'])}` |",
-        f"| OCI index | `{escape(oci)}` |",
         f"| Contract | `{escape(contract['version'])}` (`released`, wire `{escape(conformance['contract']['wire_protocol'])}`) |",
-        f"| Contract bundle SHA-256 | `{escape(contract['bundle_sha256'])}` |",
-        f"| Database schema | `{schema_version}` |",
         "",
-        "## Exact repository coordinates",
+        "### Exact repository coordinates",
         "",
         "| Repository | Version | Annotated tag | Commit |",
         "| --- | --- | --- | --- |",
@@ -571,7 +1263,7 @@ def render(
     lines.extend(
         [
             "",
-            "## Published package coordinates",
+            "### Published package coordinates",
             "",
             f"- OCI: `{escape(registries['oci'])}`",
             f"- JavaScript: `{escape(registries['npm_javascript'])}`",
@@ -586,7 +1278,7 @@ def render(
     lines.extend(
         [
             "",
-            "## Multi-architecture image",
+            "### Multi-architecture image",
             "",
             "| Platform | Immutable digest |",
             "| --- | --- |",
@@ -597,7 +1289,53 @@ def render(
     lines.extend(
         [
             "",
-            "## Required release evidence",
+            "### Candidate artifacts",
+            "",
+            "| Artifact | SHA-256 |",
+            "| --- | --- |",
+        ]
+    )
+    for artifact in candidate["artifacts"]:
+        lines.append(f"| `{escape(artifact['path'])}` | `{escape(artifact['sha256'])}` |")
+    lines.extend(
+        [
+            "",
+            "### Evidence provenance and durable assets",
+            "",
+            "| Input document | SHA-256 |",
+            "| --- | --- |",
+            f"| Release candidate manifest | `{sha256_file(candidate_path)}` |",
+            f"| Candidate security report | `{sha256_file(security_path)}` |",
+            f"| Release-scope cross-repository report | `{sha256_file(conformance_path)}` |",
+            f"| Verified public release state | `{sha256_file(publication_path)}` |",
+            "",
+            "| Durable release asset | SHA-256 |",
+            "| --- | --- |",
+        ]
+    )
+    lines.extend(f"| `{escape(name)}` | `{digest}` |" for name, digest in durable_hashes)
+    lines.extend(
+        [
+            "",
+            f"The immutable evidence archive retains all `{security_raw_count}` exact redacted security inputs and all `{physical_receipt_file_count}` exact physical-device receipt files, together with their manifests, producer proofs, and attestations. It is byte-checked against the tree used by this renderer and can be revalidated after Actions artifact expiry.",
+            "",
+            "## Test evidence",
+            "",
+            "| Required test evidence | Result | Validated evidence |",
+            "| --- | --- | --- |",
+            "| Unit tests | `passed` | Candidate-bound full Go test execution in `source_race` |",
+            "| Integration tests | `passed` | PostgreSQL-backed candidate test execution plus live SDK conformance |",
+            "| Race tests | `passed` | `source_race` |",
+            "| Fuzz tests | `passed` | `source_fuzz_smoke` |",
+            "| Conformance tests | `passed` | Source, contract, SDK-lock, live-SDK, tag, and registry checks |",
+            "| OpenRouter live test | `passed` | `live_provider` |",
+            "| App Attest real-device test | `passed` | `physical_devices.app_attest_production_verified` |",
+            "| Play Integrity real-device test | `passed` | `physical_devices.play_integrity_play_distributed_verified` |",
+            "| Cloud deployment smoke tests | `passed` | `cloud_deployments` |",
+            "| Load tests | `passed` | `operational_resilience.v1_load_targets_verified` |",
+            "| Security scans | `passed` | Candidate security and `supply_chain` evidence |",
+            "",
+            "### Required release evidence domains",
             "",
             "| Domain | Status | Evidence window | Document SHA-256 | Retained proof SHA-256 |",
             "| --- | --- | --- | --- | --- |",
@@ -610,18 +1348,51 @@ def render(
         if domain["id"] in EXTERNAL_DOMAINS:
             window = f"{domain['started_at']} — {domain['finished_at']}"
             document_hash = domain["document_sha256"]
-            artifact_hashes = "<br>".join(
-                f"`{item}`" for item in domain["artifact_sha256"]
-            )
+            artifact_hashes = "<br>".join(f"`{item}`" for item in domain["artifact_sha256"])
         lines.append(
             f"| `{escape(domain['id'])}` | `{escape(domain['status'])}` | {escape(window)} | `{escape(document_hash)}` | {artifact_hashes} |"
         )
+    platforms = metadata["compatibility"]["minimum_platform_versions"]
     lines.extend(
         [
             "",
-            "The operational-resilience proof above includes load targets, destructive failure injection, multi-replica behavior, backup/restore, and released-version upgrade/rollback. The mobile proofs include App Attest, Play Integrity, and React Native on physical iOS and Android distributions. The public registry proof binds every coordinate listed above to this candidate and OCI digest.",
+            "## Compatibility matrix",
             "",
-            "## Automated security gate",
+            "| Compatibility item | Supported version |",
+            "| --- | --- |",
+            f"| Server version | `{tag[1:]}` |",
+            f"| Protocol version | `{conformance['contract']['wire_protocol']}` |",
+            f"| iOS SDK version | `{by_repository['ios']['version']}` |",
+            f"| Android SDK version | `{by_repository['android']['version']}` |",
+            f"| JavaScript SDK version | `{by_repository['javascript']['version']}` |",
+            f"| React Native SDK version | `{by_repository['react_native']['version']}` |",
+            f"| Minimum supported iOS platform | `{escape(platforms['ios_sdk'])}` |",
+            f"| Minimum supported Android platform | `{escape(platforms['android_sdk'])}` |",
+            f"| Minimum supported JavaScript platform | `{escape(platforms['javascript_sdk'])}` |",
+            f"| Minimum supported React Native platforms | `{escape(platforms['react_native_sdk'])}` |",
+            "",
+            "## Security statement",
+            "",
+            "### Known accepted risks",
+            "",
+        ]
+    )
+    lines.extend(f"- {escape(item)}" for item in metadata["security_statement"]["known_accepted_risks"])
+    security_labels = (
+        ("Prompt-logging defaults", "prompt_logging_defaults"),
+        ("Secret-storage behavior", "secret_storage_behavior"),
+        ("Key-rotation behavior", "key_rotation_behavior"),
+        ("Attestation limitations", "attestation_limitations"),
+        ("Web threat-model limitations", "web_threat_model_limitations"),
+    )
+    lines.extend(["", "| Security property | Statement |", "| --- | --- |"])
+    for label, key in security_labels:
+        lines.append(f"| {label} | {escape(metadata['security_statement'][key])} |")
+    lines.extend(
+        [
+            "| Dependency scan results | All candidate-bound vulnerability, secret, misconfiguration, dependency-license, per-architecture image, SBOM, signature, and provenance gates passed. |",
+            "",
+            "### Automated security gate",
             "",
             "| Check | Result | Tool |",
             "| --- | --- | --- |",
@@ -634,55 +1405,38 @@ def render(
             tool_value = tool["name"]
             if isinstance(tool.get("version"), str):
                 tool_value += f" {tool['version']}"
-        lines.append(
-            f"| `{escape(check['id'])}` | `{escape(check['status'])}` | `{escape(tool_value)}` |"
-        )
+        lines.append(f"| `{escape(check['id'])}` | `{escape(check['status'])}` | `{escape(tool_value)}` |")
     required_checks = [item for item in checks if item.get("required") is True]
     lines.extend(
         [
             "",
-            f"All `{len(required_checks)}` required cross-repository checks and all `{len(security_checks)}` automated security checks passed. Security evidence covers source/static checks, race and fuzz gates, dependency and image vulnerability/license policy, SBOMs, signatures, and provenance as defined by the candidate-bound security report.",
+            f"All `{len(required_checks)}` required cross-repository checks and all `{len(security_checks)}` candidate security checks passed.",
             "",
-            "## Candidate artifacts",
+            "## Operational proof",
             "",
-            "| Artifact | SHA-256 |",
-            "| --- | --- |",
-        ]
-    )
-    for artifact in candidate["artifacts"]:
-        lines.append(
-            f"| `{escape(artifact['path'])}` | `{escape(artifact['sha256'])}` |"
-        )
-    lines.extend(
-        [
+            "| Required operational proof | Result | Validated evidence |",
+            "| --- | --- | --- |",
+            "| Clean Docker Compose startup | `passed` | `cloud_deployments.compose_verified` |",
+            "| Fresh database migration | `passed` | Candidate migration preconditions plus cloud release-image smoke |",
+            "| Upgrade from previous release candidate | `passed` | `operational_resilience.previous_candidate_upgrade_rollback_verified` |",
+            "| Configuration activation | `passed` | PostgreSQL-enabled `source_race` executes `TestRunPostgreSQLV1Vertical` and its `configuration_activation` check |",
+            "| Configuration rollback | `passed` | PostgreSQL-enabled `source_race` executes `TestRunPostgreSQLV1Vertical` and its `configuration_rollback` check |",
+            "| Backup and restore | `passed` | `operational_resilience.backup_restore_drill_verified` |",
+            "| Graceful shutdown | `passed` | `operational_resilience.live_failure_injection_verified` |",
+            "| Worker recovery | `passed` | `operational_resilience.live_failure_injection_verified` and `multi_replica_verified` |",
             "",
-            "## Evidence provenance",
-            "",
-            "| Input document | SHA-256 |",
-            "| --- | --- |",
-            f"| Release candidate manifest | `{sha256_file(candidate_path)}` |",
-            f"| Candidate security report | `{sha256_file(security_path)}` |",
-            f"| Release-scope cross-repository report | `{sha256_file(conformance_path)}` |",
-            f"| Verified public release state | `{sha256_file(publication_path)}` |",
-            "",
-            "The final report and its Sigstore bundle are release assets. The finalizer authenticates each producer workflow, exact run attempt, candidate commit, protected `main` ref, signer workflow identity, and public release state before rendering; reruns may add a missing asset but never replace different bytes.",
-            "",
-            "## Durable release evidence assets",
-            "",
-            "| Asset | SHA-256 |",
-            "| --- | --- |",
-        ]
-    )
-    lines.extend(
-        f"| `{escape(name)}` | `{digest}` |" for name, digest in durable_hashes
-    )
-    lines.extend(
-        [
-            "",
-            "These immutable no-clobber release assets retain the release-scope conformance report, its Sigstore bundle, the verified publication state, and the complete hash-bound external evidence tree beyond Actions artifact retention.",
+            "## Remaining work",
             "",
         ]
     )
+    category_labels = {
+        "post_1_0_enhancement": "Post-1.0 enhancement",
+        "documented_non_goal": "Documented non-goal",
+        "low_severity_accepted_risk": "Low-severity accepted risk",
+    }
+    for item in metadata["remaining_work"]:
+        lines.append(f"- **{category_labels[item['category']]}:** {escape(item['description'])}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -693,8 +1447,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--release-conformance", type=Path, required=True)
     result.add_argument("--publication-state", type=Path, required=True)
     result.add_argument("--repository", type=Path, required=True)
+    result.add_argument("--durable-evidence-root", type=Path, required=True)
     result.add_argument("--commit", required=True)
     result.add_argument("--tag", required=True)
+    result.add_argument("--evidence-tag", required=True)
     result.add_argument("--output", type=Path, required=True)
     result.add_argument(
         "--durable-asset",
@@ -732,6 +1488,8 @@ def main() -> int:
             repository=arguments.repository,
             commit=arguments.commit,
             tag=arguments.tag,
+            evidence_tag=arguments.evidence_tag,
+            durable_evidence_root=arguments.durable_evidence_root,
             durable_assets=parse_durable_assets(arguments.durable_asset),
         )
         output.parent.mkdir(parents=True, exist_ok=True)

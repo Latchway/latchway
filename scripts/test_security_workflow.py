@@ -33,7 +33,12 @@ class SecurityWorkflowTests(unittest.TestCase):
         dispatch = workflow["on"]["workflow_dispatch"]
         self.assertEqual(
             set(dispatch["inputs"]),
-            {"candidate_commit", "intended_tag", "candidate_run_id"},
+            {
+                "candidate_commit",
+                "intended_tag",
+                "candidate_run_id",
+                "candidate_run_attempt",
+            },
         )
         job = workflow["jobs"]["candidate"]
         self.assertEqual(
@@ -97,7 +102,7 @@ class SecurityWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             final_upload["with"]["name"],
-            "latchway-security-${{ inputs.candidate_commit }}",
+            "latchway-security-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
         )
         raw_upload = next(
             step
@@ -112,9 +117,13 @@ class SecurityWorkflowTests(unittest.TestCase):
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("security_evidence_run_id", inputs)
         self.assertTrue(inputs["security_evidence_run_id"]["required"])
+        self.assertIn("security_evidence_run_attempt", inputs)
+        self.assertTrue(inputs["security_evidence_run_attempt"]["required"])
         job_steps = steps(workflow, "promote")
         names = [step.get("name", "") for step in job_steps]
-        run_check = names.index("Require the fixed successful security workflow run")
+        run_check = names.index(
+            "Require the fixed successful producer workflow runs and attempts"
+        )
         download = names.index("Download exact current-candidate security evidence")
         attestation = names.index("Verify candidate and promotion attestations")
         binding = names.index("Recompute exact current-candidate security evidence")
@@ -127,7 +136,11 @@ class SecurityWorkflowTests(unittest.TestCase):
         self.assertLess(binding, first_mutation)
 
         serialized = (WORKFLOWS / "promote-release.yml").read_text(encoding="utf-8")
-        self.assertIn('.path == ".github/workflows/security.yml"', serialized)
+        self.assertIn(".path == $path and .state == \"active\"", serialized)
+        self.assertIn(
+            'verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml',
+            serialized,
+        )
         self.assertIn(
             "--signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/security.yml\"",
             serialized,

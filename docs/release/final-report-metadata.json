@@ -1,0 +1,37 @@
+{
+  "compatibility": {
+    "minimum_platform_versions": {
+      "android_sdk": "Android API 23",
+      "ios_sdk": "iOS 15.0",
+      "javascript_sdk": "Node.js 24.19.0",
+      "react_native_sdk": "React Native 0.82.x; iOS 15.0; Android API 24"
+    }
+  },
+  "kind": "latchway_v1_final_report_metadata",
+  "remaining_work": [
+    {
+      "category": "post_1_0_enhancement",
+      "description": "Additional provider-specific optimizations and platform integrations beyond the published version 1 compatibility surface."
+    },
+    {
+      "category": "documented_non_goal",
+      "description": "Client-controlled upstream credentials, destinations, routes, physical models, pricing, and quota policy remain outside the client trust boundary."
+    },
+    {
+      "category": "low_severity_accepted_risk",
+      "description": "Web attestation remains a replay-resistant risk signal and is not represented as hardware-backed native device identity."
+    }
+  ],
+  "schema_version": 1,
+  "security_statement": {
+    "attestation_limitations": "Production App Attest and Play Integrity prove the configured application and device verdicts for a bound challenge; they do not prove a human identity, and availability remains subject to the platform provider and eligible hardware.",
+    "key_rotation_behavior": "The worker rotates gateway signing keys with an overlap window, keeps previously issued sessions verifiable through the retained public keys, audits rotation, and supports operator-triggered rotation and retirement.",
+    "known_accepted_risks": [
+      "Web App Check and Turnstile verdicts are intentionally treated as lower-trust risk signals than native hardware-backed attestation.",
+      "An upstream provider can retain request content under its own account policy after Latchway dispatches an authorized request."
+    ],
+    "prompt_logging_defaults": "Prompt and response body logging is disabled. Normal request, usage, audit, and telemetry records exclude prompt bodies, provider credentials, identity tokens, attestation evidence, and DPoP proofs.",
+    "secret_storage_behavior": "Committed and activated configuration stores bounded secret references, never plaintext upstream or identity-provider credentials. Runtime secret values are resolved only by the configured secret provider and are redacted from Admin responses, logs, audit records, and release evidence.",
+    "web_threat_model_limitations": "Web clients cannot provide Secure Enclave or StrongBox-equivalent identity. Firebase App Check and Turnstile are combined with identity, DPoP, origin/action/hostname binding, replay controls, rate limits, and server-owned policy rather than treated as native device proof."
+  }
+}

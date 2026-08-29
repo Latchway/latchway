@@ -115,10 +115,31 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                         else f"{titles[repository_id]} v1.0.0\n\nCore promotion: v1.0.0\nPromotion evidence SHA-256: {promotion_hash}"
                     ),
                 }).encode(),
-                json.dumps({"tag_name": "v1.0.0", "draft": False, "prerelease": False}).encode(),
+                json.dumps({"tag_name": "v1.0.0", "draft": False, "prerelease": False, "immutable": True}).encode(),
             ))
-        with mock.patch.object(observer, "_gh_json", side_effect=responses), mock.patch.object(observer, "emit"):
+        attestation = b'{"verification":"passed"}\n'
+        with mock.patch.object(observer, "_gh_json", side_effect=responses), mock.patch.object(
+            observer, "_verify_release_attestation", return_value=attestation
+        ), mock.patch.object(observer, "emit") as emit:
             observer.observe_public_tags()
+        release_calls = [
+            call
+            for call in emit.call_args_list
+            if call.args[0].startswith("publication.github-release.")
+        ]
+        self.assertEqual(len(release_calls), 5)
+        proof = json.loads(release_calls[0].args[1])
+        self.assertEqual(proof["release"]["immutable"], True)
+        self.assertEqual(
+            base64.b64decode(
+                proof["release_attestation"]["content_base64"], validate=True
+            ),
+            attestation,
+        )
+        self.assertEqual(
+            proof["release_attestation"]["sha256"],
+            hashlib.sha256(attestation).hexdigest(),
+        )
 
     def test_reviewed_zip_rejects_duplicate_and_symlink_members(self) -> None:
         for mode in ("duplicate", "symlink"):
@@ -668,11 +689,56 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             MODULE.Observer._validate_tag_object(
                 json.dumps(tag_object).encode(), tag, commit
             )
-        release = {"tag_name": tag, "draft": False, "prerelease": False}
+        release = {
+            "tag_name": tag,
+            "draft": False,
+            "prerelease": False,
+            "immutable": True,
+        }
         MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
         release["prerelease"] = True
         with self.assertRaisesRegex(MODULE.ObservationError, "github_release_invalid"):
             MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
+        release["prerelease"] = False
+        release["immutable"] = False
+        with self.assertRaisesRegex(MODULE.ObservationError, "github_release_invalid"):
+            MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
+
+    def test_release_attestation_verification_is_required_and_retained_as_json(self) -> None:
+        observer = self.bare_observer("public_tags")
+        verified = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b'{"verified":true}\n', stderr=b""
+        )
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "test-token"}), mock.patch.object(
+            MODULE.shutil, "which", return_value="/usr/bin/gh"
+        ), mock.patch.object(MODULE.subprocess, "run", return_value=verified) as run:
+            payload = observer._verify_release_attestation(
+                "Latchway/latchway", "v1.0.0"
+            )
+        self.assertEqual(payload, verified.stdout)
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command[1:],
+            (
+                "release",
+                "verify",
+                "v1.0.0",
+                "--repo",
+                "Latchway/latchway",
+                "--format",
+                "json",
+            ),
+        )
+
+        rejected = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout=b"", stderr=b"not immutable"
+        )
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "test-token"}), mock.patch.object(
+            MODULE.shutil, "which", return_value="/usr/bin/gh"
+        ), mock.patch.object(MODULE.subprocess, "run", return_value=rejected), self.assertRaisesRegex(
+            MODULE.ObservationError, "github_release_attestation_invalid"
+        ):
+            observer._verify_release_attestation("Latchway/latchway", "v1.0.0")
 
     def test_public_registry_validators_reject_coordinate_tampering(self) -> None:
         coordinate = {"version": "1.0.0", "commit": "a" * 40}
@@ -959,6 +1025,76 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             observer._load_physical_receipt(
                 root, MODULE.LIVE_SDK_RECEIPTS["ios"]
             )
+
+    def test_physical_machine_result_retains_exact_hash_bound_receipt_bytes(self) -> None:
+        observer = self.bare_observer("physical_devices")
+        observation = "sdk.ios.release-image"
+        retained = {
+            "SHA256SUMS": b"checksums\n",
+            "github-attestation.sigstore.json": b'{"bundle":"verified"}\n',
+            "app-attest-profile.json": b'{"profile":true}\n',
+            "app-attest-evidence.json": b'{"evidence":true}\n',
+        }
+        hashes = {
+            name: hashlib.sha256(payload).hexdigest()
+            for name, payload in retained.items()
+        }
+        observer.emit(
+            observation,
+            MODULE.canonical_json({"receipt_sha256": hashes}),
+            started=self.workflow_started,
+            finished=self.workflow_finished,
+            version="1.0.0",
+            invocation=("python3", "scripts/device-evidence.py", "verify"),
+            retained_inputs=retained,
+        )
+        result_path = observer.output / MODULE.EVIDENCE.result_name(observation)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(result["artifacts"]), 2)
+        retained_entry = next(
+            item
+            for item in result["artifacts"]
+            if item["path"].endswith("physical-receipt.json")
+        )
+        envelope_path = observer.output / retained_entry["path"]
+        envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        self.assertEqual(envelope["observation"], observation)
+        self.assertEqual(
+            {
+                item["name"]: base64.b64decode(item["content_base64"], validate=True)
+                for item in envelope["files"]
+            },
+            retained,
+        )
+        envelope_path.write_text('{"substituted":true}\n', encoding="utf-8")
+        with self.assertRaisesRegex(
+            MODULE.EVIDENCE.EvidenceError, "result_artifact_hash_mismatch"
+        ):
+            MODULE.EVIDENCE.validate_result(
+                result_path,
+                observer.output,
+                "physical_devices",
+                observation,
+                observer.identity,
+                self.candidate_created,
+                self.now,
+            )
+
+    def test_invalid_retained_receipt_is_rejected_before_any_output(self) -> None:
+        observer = self.bare_observer("physical_devices")
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "observation_retained_input_set_invalid"
+        ):
+            observer.emit(
+                "sdk.ios.release-image",
+                MODULE.canonical_json({"receipt_sha256": {}}),
+                started=self.workflow_started,
+                finished=self.workflow_finished,
+                version="1.0.0",
+                invocation=("python3", "scripts/device-evidence.py", "verify"),
+                retained_inputs={"../escape.json": b"not written\n"},
+            )
+        self.assertEqual(list(observer.output.rglob("*")), [])
 
     def test_live_sdk_configuration_rejects_incomplete_or_malformed_receipt_identity(self) -> None:
         observer = self.bare_observer("live_sdk_conformance")

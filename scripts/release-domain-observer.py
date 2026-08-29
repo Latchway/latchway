@@ -546,14 +546,58 @@ class Observer:
         version: str,
         invocation: Sequence[str],
         cwd: Path | None = None,
+        retained_inputs: Mapping[str, bytes] | None = None,
     ) -> None:
         if observation not in EVIDENCE.expected_observations(self.domain):
             raise ObservationError("observation_invalid")
         EVIDENCE.scan_safe(payload)
         slug = observation.replace(".", "-")
         relative = f"artifacts/{slug}/tool-output.json"
-        artifact = self.output / relative
-        write_bytes(artifact, payload)
+        artifacts = [
+            {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
+        ]
+        retained = retained_inputs or {}
+        if len(retained) > 64:
+            raise ObservationError("observation_retained_input_set_invalid")
+        retained_files: list[dict[str, str]] = []
+        for name, retained_payload in sorted(retained.items()):
+            if (
+                not isinstance(name, str)
+                or EVIDENCE.ARTIFACT_NAME.fullmatch(name) is None
+                or not isinstance(retained_payload, bytes)
+            ):
+                raise ObservationError("observation_retained_input_set_invalid")
+            EVIDENCE.scan_safe(retained_payload)
+            retained_files.append(
+                {
+                    "name": name,
+                    "sha256": hashlib.sha256(retained_payload).hexdigest(),
+                    "content_base64": base64.b64encode(retained_payload).decode("ascii"),
+                }
+            )
+        if retained_files:
+            retained_payload = canonical_json(
+                {
+                    "schema_version": 1,
+                    "kind": "latchway_retained_physical_device_receipt",
+                    "observation": observation,
+                    "files": retained_files,
+                }
+            )
+            EVIDENCE.scan_safe(retained_payload)
+            retained_relative = f"artifacts/{slug}/physical-receipt.json"
+            artifacts.append(
+                {
+                    "path": retained_relative,
+                    "sha256": hashlib.sha256(retained_payload).hexdigest(),
+                }
+            )
+        # Validate and construct every output before the first filesystem
+        # mutation so an invalid retained receipt cannot leave a partial
+        # machine-result directory behind.
+        write_bytes(self.output / relative, payload)
+        if retained_files:
+            write_bytes(self.output / retained_relative, retained_payload)
         descriptor = {
             "tool": EVIDENCE.OBSERVATION_TOOLS[observation],
             "argv": [Path(invocation[0]).name, *invocation[1:]],
@@ -573,7 +617,7 @@ class Observer:
                 "invocation_sha256": hashlib.sha256(canonical_json(descriptor)).hexdigest(),
             },
             "exit_code": 0,
-            "artifacts": [{"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}],
+            "artifacts": artifacts,
         }
         EVIDENCE.write_exclusive(self.output / EVIDENCE.result_name(observation), result)
 
@@ -994,17 +1038,42 @@ class Observer:
                 invocation=("gh", "api", repository, "annotated-tag", tag),
             )
 
-            release_payload = self._gh_json(("api", f"repos/{repository}/releases/tags/{tag}"))
-            self._validate_release(release_payload, tag)
+            release_payload = self._gh_json(
+                (
+                    "api",
+                    "-H",
+                    "X-GitHub-Api-Version: 2026-03-10",
+                    f"repos/{repository}/releases/tags/{tag}",
+                )
+            )
+            release = self._validate_release(release_payload, tag)
+            release_attestation = self._verify_release_attestation(repository, tag)
+            retained_release_proof = canonical_json(
+                {
+                    "schema_version": 1,
+                    "kind": "latchway_immutable_github_release_proof",
+                    "repository": repository,
+                    "tag": tag,
+                    "release": release,
+                    # Preserve the exact cryptographically verified CLI output,
+                    # not merely a summary that cannot be re-audited later.
+                    "release_attestation": {
+                        "sha256": hashlib.sha256(release_attestation).hexdigest(),
+                        "content_base64": base64.b64encode(release_attestation).decode(
+                            "ascii"
+                        ),
+                    },
+                }
+            )
             observation = f"publication.github-release.{repository_id}"
             now = datetime.now(timezone.utc).replace(microsecond=0)
             self.emit(
                 observation,
-                release_payload,
+                retained_release_proof,
                 started=now,
                 finished=now + EVIDENCE.timedelta(seconds=1),
                 version="system",
-                invocation=("gh", "api", repository, "release", tag),
+                invocation=("gh", "release", "verify", tag, "--repo", repository),
             )
 
     @staticmethod
@@ -1041,9 +1110,42 @@ class Observer:
             or value.get("tag_name") != tag
             or value.get("draft") is not False
             or value.get("prerelease") is not False
+            or value.get("immutable") is not True
         ):
             raise ObservationError("github_release_invalid")
         return value
+
+    def _verify_release_attestation(self, repository: str, tag: str) -> bytes:
+        executable = shutil.which("gh")
+        if executable is None:
+            raise ObservationError("observation_tool_unavailable")
+        result = subprocess.run(
+            (
+                executable,
+                "release",
+                "verify",
+                tag,
+                "--repo",
+                repository,
+                "--format",
+                "json",
+            ),
+            check=False,
+            capture_output=True,
+            timeout=60,
+            env=command_environment({"GH_TOKEN": self._github_token()}),
+        )
+        if (
+            result.returncode != 0
+            or not result.stdout
+            or len(result.stdout) > EVIDENCE.MAXIMUM_RESULT_BYTES
+        ):
+            raise ObservationError("github_release_attestation_invalid")
+        EVIDENCE.scan_safe(result.stdout)
+        value = load_output(result.stdout, "github_release_attestation_invalid")
+        if not isinstance(value, (dict, list)) or not value:
+            raise ObservationError("github_release_attestation_invalid")
+        return result.stdout
 
     def _gh_json(self, arguments: Sequence[str]) -> bytes:
         executable = shutil.which("gh")
@@ -1438,7 +1540,14 @@ class Observer:
     def _release_asset_bytes(self, repository_id: str, name: str) -> tuple[bytes, dict[str, Any]]:
         coordinate = self.identity["repositories"][repository_id]
         repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
-        release_payload = self._gh_json(("api", f"repos/{repository}/releases/tags/{coordinate['tag']}"))
+        release_payload = self._gh_json(
+            (
+                "api",
+                "-H",
+                "X-GitHub-Api-Version: 2026-03-10",
+                f"repos/{repository}/releases/tags/{coordinate['tag']}",
+            )
+        )
         release = self._validate_release(release_payload, coordinate["tag"])
         assets = release.get("assets")
         matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == name] if isinstance(assets, list) else []
@@ -1797,6 +1906,10 @@ class Observer:
                     policy["evidence"],
                 ),
                 "cwd": self.repositories[policy["repository_id"]],
+                # Retain the exact, already secret-scanned physical receipt
+                # bytes as hash-bound machine-result inputs. Actions artifacts
+                # are transport, not the durable release record.
+                "retained_inputs": item["receipt"]["payloads"],
             }
 
         if include_javascript:
@@ -1844,6 +1957,7 @@ class Observer:
                 version=item["version"],
                 invocation=item["invocation"],
                 cwd=item["cwd"],
+                retained_inputs=item.get("retained_inputs"),
             )
 
         if not include_javascript:

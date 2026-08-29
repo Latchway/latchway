@@ -264,6 +264,33 @@ class ReleaseDomainEvidenceTests(unittest.TestCase):
                         artifact["sha256"],
                     )
 
+    def test_physical_receipt_envelope_survives_finalization_byte_for_byte(self) -> None:
+        fixture = self.fixture("physical_devices")
+        observation = MODULE.expected_observations(fixture.domain)[0]
+        slug = observation.replace(".", "-")
+        relative = f"artifacts/{slug}/physical-receipt.json"
+        envelope = fixture.raw / relative
+        payload = b'{"kind":"latchway_retained_physical_device_receipt","raw":"exact"}\n'
+        envelope.write_bytes(payload)
+        result_path = fixture.raw / MODULE.result_name(observation)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["artifacts"].append(
+            {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
+        )
+        fixture.write(result_path, result)
+
+        document = fixture.finalize()
+        retained_relative = (
+            "artifacts/physical-devices/"
+            f"artifacts--{slug}--physical-receipt.json"
+        )
+        retained = fixture.root / "output" / retained_relative
+        self.assertEqual(retained.read_bytes(), payload)
+        entry = next(
+            item for item in document["artifacts"] if item["path"] == retained_relative
+        )
+        self.assertEqual(entry["sha256"], hashlib.sha256(payload).hexdigest())
+
     def test_rejects_nonzero_machine_exit_and_self_asserted_fields(self) -> None:
         fixture = self.fixture()
         result = fixture.raw / MODULE.result_name(MODULE.expected_observations(fixture.domain)[0])

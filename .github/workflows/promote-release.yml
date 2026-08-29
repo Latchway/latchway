@@ -225,6 +225,119 @@ jobs:
             --source-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
+      - name: Preflight immutable releases and every fixed core release asset
+        id: immutable-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_DIR: ${{ runner.temp }}/latchway-candidate
+          SECURITY_DIR: ${{ runner.temp }}/latchway-security
+          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+        run: |
+          set -Eeuo pipefail
+          for repository in \
+            Latchway/latchway \
+            Latchway/latchway-js \
+            Latchway/latchway-ios-sdk \
+            Latchway/latchway-android \
+            Latchway/latchway-react-native-sdk; do
+            token="$GH_TOKEN"
+            if [[ "$repository" != Latchway/latchway ]]; then token="$DISPATCH_TOKEN"; fi
+            slug=${repository##*/}
+            GH_TOKEN="$token" gh api \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$repository/immutable-releases" \
+              > "$RUNNER_TEMP/$slug-immutable-releases.json"
+            jq --exit-status '.enabled == true' \
+              "$RUNNER_TEMP/$slug-immutable-releases.json" >/dev/null
+          done
+
+          install -m 0600 -- \
+            "$PROMOTION_REPORT" \
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+          assets=(
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-candidate.json"
+            "$CANDIDATE_DIR/latchway-candidate.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-contract.tar.gz"
+            "$CANDIDATE_DIR/latchway-linux-amd64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-license.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-license.json"
+            "$SECURITY_DIR/security-summary.json"
+            "$SECURITY_DIR/security-summary.attestation.sigstore.json"
+          )
+          : > "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          declare -A names=()
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test -s "$asset"
+            name=${asset##*/}
+            test -z "${names[$name]:-}"
+            names[$name]=1
+            printf '%s\n' "$asset" >> "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          done
+          test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d ' ')" = 13
+
+          set +e
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/preflight-release.json" \
+            2> "$RUNNER_TEMP/preflight-release-error.txt"
+          release_status=$?
+          set -e
+          if [[ "$release_status" -ne 0 ]]; then
+            test "$release_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" \
+              "$RUNNER_TEMP/preflight-release-error.txt"
+            echo "mode=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg title "Latchway $INTENDED_TAG" \
+            --argjson prerelease "$expected_prerelease" \
+            '.tag_name == $tag and .name == $title and
+             .prerelease == $prerelease and
+             ((.draft == true and .immutable == false) or
+              (.draft == false and .immutable == true))' \
+            "$RUNNER_TEMP/preflight-release.json" >/dev/null
+          mode=draft
+          if [[ "$(jq --raw-output .immutable "$RUNNER_TEMP/preflight-release.json")" == true ]]; then
+            mode=immutable
+          fi
+          while IFS= read -r existing_name; do
+            test -n "${names[$existing_name]:-}"
+          done < <(jq --raw-output '.assets[].name' "$RUNNER_TEMP/preflight-release.json")
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 0 then "absent"
+              elif length == 1 then (.[0].digest // "digest-unavailable")
+              else error("duplicate fixed core release asset") end
+            ' "$RUNNER_TEMP/preflight-release.json")
+            if [[ "$mode" == immutable ]]; then test "$existing" = "$expected"; fi
+            if [[ "$existing" != absent ]]; then
+              test "$existing" = "$expected"
+              download_dir=$(mktemp -d "$RUNNER_TEMP/product-asset-preflight.XXXXXX")
+              gh release download "$INTENDED_TAG" --pattern "$name" --dir "$download_dir"
+              cmp --silent "$asset" "$download_dir/$name"
+            fi
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - name: Verify any existing core release tag
         id: release-state
         shell: bash
@@ -356,72 +469,89 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          CANDIDATE_DIR: ${{ runner.temp }}/latchway-candidate
-          SECURITY_DIR: ${{ runner.temp }}/latchway-security
-          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+          RELEASE_MODE: ${{ steps.immutable-release.outputs.mode }}
         run: |
           set -Eeuo pipefail
-          cp -- "$PROMOTION_REPORT" "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
-          cp -- \
-            "$RUNNER_TEMP/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
-            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
-          set +e
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
-            > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/release-error.txt"
-          release_status=$?
-          set -e
-          if [[ "$release_status" -eq 0 ]]; then
-            expected_prerelease=false
-            if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
-            jq --exit-status \
-              --arg tag "$INTENDED_TAG" \
-              --arg title "Latchway $INTENDED_TAG" \
-              --argjson prerelease "$expected_prerelease" \
-              '.tag_name == $tag and .name == $title and .draft == false and .prerelease == $prerelease' \
+          case "$RELEASE_MODE" in
+            absent|draft|immutable) ;;
+            *) echo "invalid immutable-release preflight mode" >&2; exit 1 ;;
+          esac
+          if [[ "$RELEASE_MODE" == absent ]]; then
+            create=(gh release create "$INTENDED_TAG" --draft --verify-tag --generate-notes --title "Latchway $INTENDED_TAG")
+            if [[ "$INTENDED_TAG" == *-* ]]; then create+=(--prerelease); fi
+            "${create[@]}"
+          fi
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/release.json"
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            jq --exit-status '.draft == true and .immutable == false' \
               "$RUNNER_TEMP/release.json" >/dev/null
-          else
-            test "$release_status" -eq 1
-            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/release-error.txt"
+            : > "$RUNNER_TEMP/product-release-upload-plan.tsv"
+            while IFS= read -r asset; do
+              name=${asset##*/}
+              expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+              existing=$(jq --raw-output --arg name "$name" '
+                [.assets[] | select(.name == $name)] |
+                if length == 0 then "absent"
+                elif length == 1 then (.[0].digest // "digest-unavailable")
+                else error("duplicate fixed core release asset") end
+              ' "$RUNNER_TEMP/release.json")
+              if [[ "$existing" == absent ]]; then
+                printf 'absent\t%s\n' "$asset" >> "$RUNNER_TEMP/product-release-upload-plan.tsv"
+              else
+                test "$existing" = "$expected"
+                printf 'present\t%s\n' "$asset" >> "$RUNNER_TEMP/product-release-upload-plan.tsv"
+              fi
+            done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+            while IFS=$'\t' read -r disposition asset; do
+              if [[ "$disposition" == absent ]]; then
+                gh release upload "$INTENDED_TAG" "$asset"
+              else
+                test "$disposition" = present
+              fi
+            done < "$RUNNER_TEMP/product-release-upload-plan.tsv"
+            gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+              > "$RUNNER_TEMP/release.json"
+            while IFS= read -r asset; do
+              name=${asset##*/}
+              expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+              existing=$(jq --raw-output --arg name "$name" \
+                '[.assets[] | select(.name == $name)] |
+                 if length == 1 then (.[0].digest // "digest-unavailable")
+                 else error("fixed core release asset missing after upload") end' \
+                "$RUNNER_TEMP/release.json")
+              test "$existing" = "$expected"
+            done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+            release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/release.json")
+            jq --null-input '{draft: false}' > "$RUNNER_TEMP/publish-release.json"
+            gh api --method PATCH \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --input "$RUNNER_TEMP/publish-release.json" \
+              > "$RUNNER_TEMP/published-release.json"
           fi
-          if [[ "$release_status" -ne 0 && "$INTENDED_TAG" == *-* ]]; then
-            gh release create "$INTENDED_TAG" --verify-tag --generate-notes --prerelease --title "Latchway $INTENDED_TAG"
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
-          elif [[ "$release_status" -ne 0 ]]; then
-            gh release create "$INTENDED_TAG" --verify-tag --generate-notes --title "Latchway $INTENDED_TAG"
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
-          fi
-          assets=(
-            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
-            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
-            "$CANDIDATE_DIR/latchway-candidate.json"
-            "$CANDIDATE_DIR/latchway-candidate.attestation.sigstore.json"
-            "$CANDIDATE_DIR/latchway-contract.tar.gz"
-            "$CANDIDATE_DIR/latchway-linux-amd64.spdx.json"
-            "$CANDIDATE_DIR/latchway-linux-arm64.spdx.json"
-            "$CANDIDATE_DIR/latchway-linux-amd64-vulnerability.json"
-            "$CANDIDATE_DIR/latchway-linux-arm64-vulnerability.json"
-            "$CANDIDATE_DIR/latchway-linux-amd64-license.json"
-            "$CANDIDATE_DIR/latchway-linux-arm64-license.json"
-            "$SECURITY_DIR/security-summary.json"
-            "$SECURITY_DIR/security-summary.attestation.sigstore.json"
-          )
-          for asset in "${assets[@]}"; do
-            test -f "$asset"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/release.json"
+          jq --exit-status '.draft == false and .immutable == true' \
+            "$RUNNER_TEMP/release.json" >/dev/null
+          while IFS= read -r asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
-            existing=$(jq --raw-output --arg name "$name" '
-              [.assets[] | select(.name == $name)] |
-              if length == 0 then "absent"
-              elif length == 1 then (.[] | .digest // "digest-unavailable")
-              else error("duplicate release asset") end
-            ' "$RUNNER_TEMP/release.json")
-            if [[ "$existing" == absent ]]; then
-              gh release upload "$INTENDED_TAG" "$asset"
-              gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/release.json"
-              existing=$(jq --raw-output --arg name "$name" '[.assets[] | select(.name == $name)] | if length == 1 then (.[] | .digest // "digest-unavailable") else error("release asset missing after upload") end' "$RUNNER_TEMP/release.json")
-            fi
+            existing=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] |
+               if length == 1 then (.[0].digest // "digest-unavailable")
+               else error("immutable core release asset missing or duplicated") end' \
+              "$RUNNER_TEMP/release.json")
             test "$existing" = "$expected"
-          done
+            gh release verify-asset "$INTENDED_TAG" "$asset" --format json \
+              > "$RUNNER_TEMP/product-release-asset-${name}.json"
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          gh release verify "$INTENDED_TAG" --format json \
+            > "$RUNNER_TEMP/product-release-attestation.json"
       - name: Dispatch exact evidence-bound SDK publications
         shell: bash
         env:

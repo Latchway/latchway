@@ -64,6 +64,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         candidate_attestation = names.index("Verify candidate and promotion attestations")
         bindings = names.index("Verify the candidate artifact and exact aggregate bindings")
         image_provenance = names.index("Verify the exact candidate image signature and provenance")
+        immutable_preflight = names.index(
+            "Preflight immutable releases and every fixed core release asset"
+        )
         existing_tag = names.index("Verify any existing core release tag")
         oci_promotion = names.index("Promote only the verified index digest to stable OCI tags")
         tag_creation = names.index("Create the evidence-gated annotated core tag")
@@ -71,7 +74,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         sdk_dispatch = names.index("Dispatch exact evidence-bound SDK publications")
         self.assertLess(candidate_attestation, bindings)
         self.assertLess(bindings, image_provenance)
-        self.assertLess(image_provenance, existing_tag)
+        self.assertLess(image_provenance, immutable_preflight)
+        self.assertLess(immutable_preflight, existing_tag)
         self.assertLess(existing_tag, oci_promotion)
         self.assertLess(oci_promotion, tag_creation)
         self.assertLess(tag_creation, release_creation)
@@ -86,6 +90,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("--deny-self-hosted-runners", serialized)
         self.assertIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", serialized)
+        self.assertIn("repos/$repository/immutable-releases", serialized)
+        self.assertIn('gh release create "$INTENDED_TAG" --draft', serialized)
+        self.assertIn('.immutable == true', serialized)
+        self.assertIn('gh release verify "$INTENDED_TAG"', serialized)
         self.assertNotIn("continue-on-error", serialized)
 
     def test_cross_repository_promotion_is_mandatory_and_attested(self) -> None:
@@ -219,6 +227,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('"--signer-digest"', observer_text)
         self.assertIn('"refs/heads/main"', observer_text)
         self.assertIn("scripts/live-conformance.mjs", observer_text)
+        self.assertIn("latchway_retained_physical_device_receipt", observer_text)
+        self.assertIn('"retained_inputs": item["receipt"]["payloads"]', observer_text)
+        self.assertIn('"X-GitHub-Api-Version: 2026-03-10"', observer_text)
+        self.assertIn('"release", "verify"', observer_text)
         self.assertNotIn("machine_results_run_id", producer_text)
         self.assertNotIn("continue-on-error", producer_text)
         sdk_step = producer_job["steps"][sdk_executed]

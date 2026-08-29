@@ -56,21 +56,37 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             self.assertIn(workflow, self.text)
 
     def test_attested_release_evidence_precedes_render_and_mutation(self) -> None:
+        immutable_support = self.names.index(
+            "Preflight immutable evidence-release support"
+        )
         provenance = self.names.index("Authenticate every fixed evidence run and attempt")
         attestations = self.names.index(
             "Verify all evidence signer identities and immutable source bindings"
         )
         public = self.names.index("Verify exact public tag release OCI and npm state")
         render = self.names.index("Render the deterministic final completion report")
-        reconcile = self.names.index("Reconcile any existing immutable final assets")
+        reconcile = self.names.index(
+            "Reconcile any existing evidence-release completion attestation"
+        )
         attest = self.names.index("Attest the exact final completion report when absent")
-        upload = self.names.index("Upload only missing exact final assets without clobbering")
+        checksums = self.names.index(
+            "Create deterministic checksums for the complete evidence release"
+        )
+        preflight = self.names.index(
+            "Preflight evidence tag draft and every fixed final asset before mutation"
+        )
+        publish = self.names.index(
+            "Publish and verify the separate immutable final-evidence release"
+        )
+        self.assertLess(immutable_support, provenance)
         self.assertLess(provenance, attestations)
         self.assertLess(attestations, public)
         self.assertLess(public, render)
         self.assertLess(render, reconcile)
         self.assertLess(reconcile, attest)
-        self.assertLess(attest, upload)
+        self.assertLess(attest, checksums)
+        self.assertLess(checksums, preflight)
+        self.assertLess(preflight, publish)
         self.assertEqual(self.text.count("--deny-self-hosted-runners"), 8)
         self.assertGreaterEqual(self.text.count('--source-ref refs/heads/main'), 6)
         self.assertGreaterEqual(self.text.count('--source-digest "$CANDIDATE_COMMIT"'), 6)
@@ -94,16 +110,32 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             'scripts/verify-public-registry-proof.py',
             'latchway-public-registry-byte-proof.json',
             'latchway-release-evidence-v1.tar.gz',
+            'latchway-product-release-attestation.json',
+            '$RUNNER_TEMP/security/raw',
+            'latchway-release-evidence-v1',
+            '--durable-evidence-root',
+            '--evidence-tag "evidence/$RELEASE_TAG"',
+            '.immutable == true',
+            'gh release verify "$RELEASE_TAG"',
         ):
             self.assertIn(value, self.text)
         self.assertNotIn("registry_coordinates", self.workflow["on"]["workflow_dispatch"]["inputs"])
 
     def test_rerun_verifies_existing_bytes_and_never_clobbers(self) -> None:
         reconcile = self.steps[
-            self.names.index("Reconcile any existing immutable final assets")
+            self.names.index(
+                "Reconcile any existing evidence-release completion attestation"
+            )
         ]["run"]
-        upload = self.steps[
-            self.names.index("Upload only missing exact final assets without clobbering")
+        preflight = self.steps[
+            self.names.index(
+                "Preflight evidence tag draft and every fixed final asset before mutation"
+            )
+        ]["run"]
+        publish = self.steps[
+            self.names.index(
+                "Publish and verify the separate immutable final-evidence release"
+            )
         ]["run"]
         for value in (
             'test "$existing" = "$expected"',
@@ -114,9 +146,32 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
             "attestation bundle exists without its report",
         ):
             self.assertIn(value, reconcile)
-        self.assertIn('if [[ "$REPORT_EXISTS" != true ]]', upload)
-        self.assertIn('if [[ "$BUNDLE_EXISTS" != true ]]', upload)
-        self.assertIn("final release asset missing or duplicated", upload)
+        for value in (
+            "COMPLETION_REPORT.md",
+            "COMPLETION_REPORT.attestation.sigstore.json",
+            "latchway-cross-repository-release.json",
+            "latchway-cross-repository-release.attestation.sigstore.json",
+            "latchway-publication-state.json",
+            "latchway-public-registry-byte-proof.json",
+            "latchway-product-release-attestation.json",
+            "latchway-release-evidence-v1.tar.gz",
+            "SHA256SUMS",
+            'test "$existing" = "$expected"',
+            "cmp --silent",
+            "fixed final release asset duplicated",
+            "final-release-asset-plan.tsv",
+        ):
+            self.assertIn(value, preflight)
+        self.assertEqual(preflight.count("gh release upload"), 0)
+        self.assertIn("done < \"$plan\"", publish)
+        self.assertIn('absent) gh release upload "$evidence_tag" "$asset"', publish)
+        self.assertIn("final release asset missing or duplicated", publish)
+        self.assertIn('gh release create "$evidence_tag" --draft', publish)
+        self.assertIn("'{draft: false}'", publish)
+        self.assertIn('.immutable == true', publish)
+        self.assertIn('gh release verify "$evidence_tag"', publish)
+        self.assertIn('gh release verify-asset "$evidence_tag"', publish)
+        self.assertNotIn('gh release upload "$RELEASE_TAG"', self.text)
         for forbidden in ("--clobber", "gh release delete", "git push --force", "continue-on-error"):
             self.assertNotIn(forbidden, self.text)
 
@@ -124,6 +179,19 @@ class FinalizeReleaseRecordWorkflowTests(unittest.TestCase):
         actions = [item["uses"] for item in self.steps if "uses" in item]
         self.assertTrue(actions)
         self.assertTrue(all(PINNED_ACTION.fullmatch(item) for item in actions), actions)
+
+    def test_two_release_model_is_documented(self) -> None:
+        document = (ROOT / "docs/release/immutable-evidence-release.md").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            "`vX.Y.Z` is the product release",
+            "`evidence/vX.Y.Z` is the final-evidence release",
+            "draft",
+            "immutable: true",
+            "exact physical-device receipt/proof bytes",
+        ):
+            self.assertIn(value, document)
 
 
 if __name__ == "__main__":

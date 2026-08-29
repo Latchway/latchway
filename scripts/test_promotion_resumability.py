@@ -23,11 +23,15 @@ class PromotionResumabilityTests(unittest.TestCase):
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
     def test_existing_exact_tag_is_verified_and_creation_is_conditional(self) -> None:
+        preflight = self.names.index(
+            "Preflight immutable releases and every fixed core release asset"
+        )
         state = self.names.index("Verify any existing core release tag")
         image = self.names.index("Promote only the verified index digest to stable OCI tags")
         create = self.names.index("Create the evidence-gated annotated core tag")
         final_tag = self.names.index("Re-fetch and verify the immutable annotated core tag")
         release = self.names.index("Publish the immutable release record")
+        self.assertLess(preflight, state)
         self.assertLess(state, image)
         self.assertLess(image, create)
         self.assertLess(create, final_tag)
@@ -62,20 +66,36 @@ class PromotionResumabilityTests(unittest.TestCase):
         self.assertLess(script.index("imagetools inspect --raw"), script.index("imagetools create"))
 
     def test_release_is_reconciled_without_overwriting_assets(self) -> None:
+        preflight = self.steps[
+            self.names.index(
+                "Preflight immutable releases and every fixed core release asset"
+            )
+        ]["run"]
         script = self.steps[self.names.index("Publish the immutable release record")]["run"]
         for value in (
-            'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG"',
-            'grep --fixed-strings --quiet "HTTP 404"',
-            '.tag_name == $tag',
-            '.draft == false',
-            '.prerelease == $prerelease',
+            'gh release create "$INTENDED_TAG" --draft',
+            '.draft == true and .immutable == false',
             'existing=$(jq --raw-output',
             'test "$existing" = "$expected"',
             'gh release upload "$INTENDED_TAG" "$asset"',
-            "latchway-candidate.attestation.sigstore.json",
-            "latchway-cross-repository-promotion.attestation.sigstore.json",
+            "'{draft: false}'",
+            '.draft == false and .immutable == true',
+            'gh release verify "$INTENDED_TAG"',
+            'gh release verify-asset "$INTENDED_TAG"',
         ):
             self.assertIn(value, script)
+        for value in (
+            '"repos/$repository/immutable-releases"',
+            'X-GitHub-Api-Version: 2026-03-10',
+            '.enabled == true',
+            "latchway-candidate.attestation.sigstore.json",
+            "latchway-cross-repository-promotion.attestation.sigstore.json",
+            'test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d \' \')" = 13',
+            "gh release download",
+            "cmp --silent",
+        ):
+            self.assertIn(value, preflight)
+        self.assertEqual(preflight.count("gh release upload"), 0)
         self.assertNotIn("--clobber", script)
         self.assertNotIn("gh release delete", script)
         self.assertNotIn("git push --force", self.text)

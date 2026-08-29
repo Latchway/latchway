@@ -44,6 +44,7 @@ MAXIMUM_AGE = timedelta(days=7)
 MAXIMUM_RESULT_BYTES = 2 * 1024 * 1024
 MAXIMUM_RAW_BYTES = 32 * 1024 * 1024
 MAXIMUM_DOMAIN_BYTES = 64 * 1024 * 1024
+MAXIMUM_ARTIFACTS_PER_RESULT = 8
 REPOSITORY = "Latchway/latchway"
 WORKFLOW = ".github/workflows/release-domain-observations.yml"
 FINALIZER_WORKFLOW = ".github/workflows/release-domain-evidence.yml"
@@ -392,7 +393,10 @@ def validate_result(
     ):
         raise EvidenceError("result_time_invalid")
     artifacts = value["artifacts"]
-    if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 8:
+    if (
+        not isinstance(artifacts, list)
+        or not 1 <= len(artifacts) <= MAXIMUM_ARTIFACTS_PER_RESULT
+    ):
         raise EvidenceError("result_artifacts_invalid")
     prefix = f"artifacts/{observation.replace('.', '-')}/"
     normalized: list[dict[str, str]] = []
