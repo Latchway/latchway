@@ -1,5 +1,24 @@
 # Implementation status
 
+## Local working-tree update — administrator lifecycle (2026-08-29)
+
+Draft contract `0.5.1` adds the canonical owner-authorized administrator
+lifecycle without changing wire protocol `1`: bounded tenant-scoped listing,
+local-account creation, organization-role changes, disable/re-enable, and
+owner-driven password reset. Mutations recheck the active owner under row locks,
+preserve at least one active owner, revoke affected sessions and API tokens in
+the same transaction, and emit value-free audit changes. A global password
+reset fails closed when the target belongs to another organization.
+
+The CLI and embedded console use only these Admin API operations. CLI passwords
+come only from stdin, a regular file, a file descriptor, or a named environment
+variable; neither surface stores or returns password material. Focused Go,
+contract, console unit, lint, typecheck, and Playwright tests pass. The
+PostgreSQL integration proof covers role/capability checks, tenant isolation,
+credential revocation, re-enable, and concurrent final-owner protection, but is
+skipped when `LATCHWAY_TEST_DATABASE_URL` is absent. Contract bundle, SDK locks,
+live conformance, and release evidence remain deliberately unsealed.
+
 ## Local working-tree update — operational resilience evidence (2026-08-29)
 
 The core repository now contains a fail-closed operational-resilience evidence

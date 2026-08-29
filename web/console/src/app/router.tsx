@@ -9,6 +9,7 @@ import { AppShell } from "./app-shell";
 import { NotFoundPage } from "../pages/not-found-page";
 import { OverviewPage } from "../pages/overview-page";
 import { SystemHealthPage } from "../pages/system-health-page";
+import { AdministratorsPage } from "../pages/administrators-page";
 import {
   AuditPageView,
   InstallationsPage,
@@ -42,6 +43,7 @@ const systemHealthRoute = createRoute({
 
 const setupRoute = createRoute({ component: SetupWizardPage, getParentRoute: () => rootRoute, path: "/setup" });
 const configurationRoute = createRoute({ component: ConfigurationEditorPage, getParentRoute: () => rootRoute, path: "/configuration" });
+const administratorsRoute = createRoute({ component: AdministratorsPage, getParentRoute: () => rootRoute, path: "/administrators" });
 const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users" });
 const installationsRoute = createRoute({ component: InstallationsPage, getParentRoute: () => rootRoute, path: "/installations" });
 const requestsRoute = createRoute({ component: RequestsPage, getParentRoute: () => rootRoute, path: "/requests" });
@@ -51,7 +53,7 @@ const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: (
 const auditRoute = createRoute({ component: AuditPageView, getParentRoute: () => rootRoute, path: "/audit" });
 
 const routeTree = rootRoute.addChildren([
-  indexRoute, setupRoute, configurationRoute, usersRoute, installationsRoute,
+  indexRoute, setupRoute, configurationRoute, administratorsRoute, usersRoute, installationsRoute,
   requestsRoute, usageRoute, routeSimulatorRoute, selfTestsRoute, auditRoute,
   systemHealthRoute
 ]);

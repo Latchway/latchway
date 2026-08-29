@@ -339,6 +339,29 @@ def validate_admin_user_override_contract(path: Path, spec: dict[str, Any]) -> N
         raise ValueError(f"{path}: UserLimitOverride properties drifted")
 
 
+def validate_admin_administrator_contract(path: Path, spec: dict[str, Any]) -> None:
+    operations = {
+        ("/admin/v1/administrators", "get"),
+        ("/admin/v1/administrators", "post"),
+        ("/admin/v1/administrators/{adminUserId}/role", "put"),
+        ("/admin/v1/administrators/{adminUserId}/disable", "post"),
+        ("/admin/v1/administrators/{adminUserId}/enable", "post"),
+        ("/admin/v1/administrators/{adminUserId}/reset-password", "post"),
+    }
+    for route, method in operations:
+        if not isinstance(spec.get("paths", {}).get(route, {}).get(method), dict):
+            raise ValueError(f"{path}: missing administrator lifecycle operation {method.upper()} {route}")
+
+    schemas = spec.get("components", {}).get("schemas", {})
+    administrator = schemas.get("Administrator", {})
+    if "password" in administrator.get("properties", {}) or "password_hash" in administrator.get("properties", {}):
+        raise ValueError(f"{path}: administrator response exposes credential material")
+    for name in ("CreateAdministratorRequest", "ResetAdministratorPasswordRequest"):
+        password = schemas.get(name, {}).get("properties", {}).get("password", {})
+        if password.get("writeOnly") is not True or password.get("minLength") != 12 or password.get("maxLength") != 1024:
+            raise ValueError(f"{path}: {name} password must remain bounded and write-only")
+
+
 def validate_admin_secret_contract(path: Path, spec: dict[str, Any]) -> None:
     schemas = spec.get("components", {}).get("schemas", {})
     secret_value = schemas.get("SecretValue", {})
@@ -529,7 +552,7 @@ def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "0.5.0" or manifest["wire_protocol"]["current"] != 1:
+    if contract_version != "0.5.1" or manifest["wire_protocol"]["current"] != 1:
         raise ValueError("unexpected contract or wire protocol version")
 
     client_path = API / "client.openapi.yaml"
@@ -541,6 +564,7 @@ def main() -> None:
     validate_problem_operation_id_contract(client_path, client)
     validate_problem_operation_id_contract(admin_path, admin)
     validate_admin_user_override_contract(admin_path, admin)
+    validate_admin_administrator_contract(admin_path, admin)
     validate_admin_secret_contract(admin_path, admin)
 
     registry = load_document(API / "error-codes.yaml")

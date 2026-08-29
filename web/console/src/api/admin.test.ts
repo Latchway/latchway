@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { adminRequest, RevisionSchema, UserSchema } from "./admin";
+import { adminRequest, AdministratorSchema, RevisionSchema, UserSchema } from "./admin";
 import { loginAdministrator } from "./auth";
 
 const csrf = "csrf_0123456789abcdefghijklmnopqrstuvwxyz";
@@ -67,6 +67,18 @@ describe("canonical Admin API browser client", () => {
     await expect(adminRequest("/admin/v1/users/usr_0123456789abcdef", UserSchema, {}, fetcher)).rejects.toMatchObject({
       problem: { code: "invalid_response" }
     });
+  });
+
+  it("accepts only redaction-safe administrator metadata", () => {
+    const administrator = {
+      created_at: "2026-08-29T00:00:00Z", display_name: "Owner",
+      email: "owner@example.test", id: "adm_0123456789abcdef",
+      membership_id: "amb_0123456789abcdef", organization_id: "org_0123456789abcdef",
+      password_reset_required: false, role: "owner", status: "active",
+      updated_at: "2026-08-29T00:00:00Z"
+    };
+    expect(AdministratorSchema.parse(administrator)).toEqual(administrator);
+    expect(() => AdministratorSchema.parse({ ...administrator, password: "must-not-render" })).toThrow();
   });
 });
 

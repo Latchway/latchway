@@ -8,9 +8,9 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Changed
 
-- Advance contract 0.5.0 for closed, provider-specific Apple App
+- Advance contract 0.5.1 for closed, provider-specific Apple App
   Attest and Google Play Integrity configuration while retaining wire protocol
-  version 1.
+  version 1; contract 0.5.0 remains the preceding sealed local checkpoint.
 - Advance the draft contract to 0.4.0 for physical-model-bound input
   accounting profiles and a restricted, conservative OpenAI Chat preflight
   that enables hard calendar input/total quotas and input-priced cost
@@ -18,6 +18,13 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Added
 
+- Canonical administrator lifecycle across PostgreSQL, Admin API, CLI, and the
+  embedded console: bounded listing, local-account creation, role changes,
+  disable/re-enable, owner password reset, last-active-owner protection, scoped
+  credential revocation, tenant isolation, and value-free audit records.
+- Add calendar week windows and optional server-owned IANA timezones to quota
+  configuration and route-simulation output; an omitted timezone canonicalizes
+  to UTC and no client-supplied timezone participates in enforcement.
 - Restricted generic HTTP execution at `/proxy/{feature}/{path...}` with exact
   feature binding, generic protected destinations, method/path/body/header
   allowlists, per-route response and SSE bounds, unknown-usage settlement, and

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Client API
-  version: 0.5.0
+  version: 0.5.1
   summary: DPoP-bound client sessions and AI-compatible proxy routes.
   description: |
     Normative draft for wire protocol version 1. Identity, attestation and DPoP
@@ -696,7 +696,7 @@ components:
       properties:
         request_id: { type: string }
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.0 }
+        contract_version: { type: string, const: 0.5.1 }
         protocol_version: { type: integer, const: 1 }
         installation: { $ref: '#/components/schemas/InstallationSummary' }
         session:
@@ -713,7 +713,7 @@ components:
       required: [server_version, contract_version, supported_protocol_versions, session_endpoint, dpop_algorithms, maximum_clock_skew_seconds]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.0 }
+        contract_version: { type: string, const: 0.5.1 }
         supported_protocol_versions:
           type: array
           minItems: 1

@@ -6,7 +6,7 @@ import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
 
-type ConsoleRoute = "/" | "/setup" | "/configuration" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
+type ConsoleRoute = "/" | "/setup" | "/configuration" | "/administrators" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
 
 interface NavigationLinkProps {
   children: ReactNode;
@@ -114,6 +114,9 @@ export function AppShell() {
           {!needsAccess ? <>
             <NavigationLink description="Guided native first run" to="/setup">Setup wizard</NavigationLink>
             <NavigationLink description="Validate, diff, and activate" to="/configuration">Configuration</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Administration</p>
+            <NavigationLink description="Accounts and roles" to="/administrators">Administrators</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">Identity</p>
             <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>

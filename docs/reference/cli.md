@@ -22,6 +22,14 @@ accepted as a flag, printed, or included in a browser `Origin` header. Commands
 return a non-zero status for invalid input, denied operations, invalid server
 documents, and RFC 9457 failures.
 
+Version 1 deliberately does not persist an administrator password, session
+cookie, CSRF token, or API token. A password-based `latchway login` would need
+to retain a bearer-equivalent cookie and CSRF secret across processes, and the
+project does not yet have a reviewed portable OS credential-store or device
+authorization flow. Use a scoped API token supplied by a secret manager and
+revoke it through the canonical Admin API when it is no longer needed. Browser
+sessions remain confined to the console and its logout endpoint.
+
 Generate completion with Cobra's built-in commands:
 
 ```bash
@@ -30,6 +38,33 @@ latchway completion zsh
 latchway completion fish
 latchway completion powershell
 ```
+
+## Administrator lifecycle
+
+Only an active owner, or an owner API token scoped with `manage_owners`, can
+list or mutate administrator memberships. Passwords are write-only and must
+come from stdin, a regular file, a file descriptor, or a named environment
+variable; they are never accepted as command arguments or returned.
+
+```bash
+latchway admin accounts list
+latchway admin accounts create \
+  --email operator@example.com \
+  --display-name Operator \
+  --role operator \
+  --value-file ./new-administrator-password
+latchway admin accounts role adm_... --role admin
+latchway admin accounts disable adm_...
+latchway admin accounts enable adm_...
+printf '%s' "$NEW_ADMIN_PASSWORD" | \
+  latchway admin accounts reset-password adm_... --from-stdin
+```
+
+Disabling a membership revokes its sessions and API tokens in that
+organization. Password reset also revokes affected credentials. The final
+active owner cannot be demoted or disabled. Because a local password belongs
+to the global administrator identity, an owner-driven reset is rejected when
+that identity also belongs to another organization.
 
 ## Immutable configuration
 

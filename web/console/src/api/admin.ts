@@ -16,6 +16,26 @@ const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
 
+export const AdministratorSchema = z
+  .object({
+    created_at: Instant,
+    disabled_at: OptionalInstant,
+    display_name: z.string().min(1).max(200),
+    email: z.email().max(320),
+    id: OpaqueID,
+    membership_id: OpaqueID,
+    organization_id: OpaqueID,
+    password_reset_required: z.boolean(),
+    role: z.enum(["owner", "admin", "operator", "viewer"]),
+    status: z.enum(["active", "disabled"]),
+    updated_at: Instant
+  })
+  .strict();
+
+export const AdministratorPageSchema = z
+  .object({ items: z.array(AdministratorSchema).max(200), page: PageInfo })
+  .strict();
+
 export const UserSchema = z
   .object({
     created_at: Instant,
@@ -293,6 +313,8 @@ export const ConfigurationPlanSchema = z
   .strict();
 
 export type ApplicationUser = z.infer<typeof UserSchema>;
+export type Administrator = z.infer<typeof AdministratorSchema>;
+export type AdministratorPage = z.infer<typeof AdministratorPageSchema>;
 export type ApplicationUserPage = z.infer<typeof UserPageSchema>;
 export type Installation = z.infer<typeof InstallationSchema>;
 export type InstallationPage = z.infer<typeof InstallationPageSchema>;

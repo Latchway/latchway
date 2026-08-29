@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const ids = {
   admin: "adm_0123456789abcdef",
+  administrator: "adm_1123456789abcdef",
   application: "app_01J00000000000000000000000",
   environment: "env_0123456789abcdef",
   organization: "org_0123456789abcdef",
@@ -32,11 +33,12 @@ function problem(route: Route, code: string, status: number, detail: string) {
 async function installAdminFixture(page: Page) {
   let authenticated = false;
   const mutations: Array<{ path: string; csrf: string | null }> = [];
+  const administratorBodies: Array<Record<string, unknown>> = [];
   const revisionBodies: unknown[] = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
-    capabilities: ["activate_configuration", "inspect_users", "manage_secrets", "revoke_installations", "run_self_tests"],
+    capabilities: ["activate_configuration", "inspect_users", "manage_owners", "manage_secrets", "revoke_installations", "run_self_tests"],
     expires_at: null,
     memberships: [{ organization_id: ids.organization, role: "owner" }],
     organization_id: ids.organization
@@ -51,6 +53,15 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === "/admin/v1/auth/session") return authenticated ? json(route, 200, session) : problem(route, "authentication_required", 401, "Sign in.");
     if (url.pathname === "/admin/v1/auth/login") { authenticated = true; return json(route, 200, session, { "X-CSRF-Token": csrf }); }
     if (url.pathname === "/admin/v1/auth/logout") { authenticated = false; return route.fulfill({ status: 204 }); }
+    if (url.pathname === "/admin/v1/administrators" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Owner", email: "owner@example.test", id: ids.admin, membership_id: "amb_0123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: "owner", status: "active", updated_at: instant }], page: { has_more: false } });
+    if (url.pathname === "/admin/v1/administrators" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; administratorBodies.push(body);
+      return json(route, 201, { created_at: instant, display_name: body.display_name, email: body.email, id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: body.role, status: "active", updated_at: instant });
+    }
+    if (url.pathname.startsWith(`/admin/v1/administrators/${ids.administrator}/`)) {
+      const action = url.pathname.split("/").at(-1); const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>; administratorBodies.push({ action, ...body });
+      return json(route, 200, { created_at: instant, display_name: "Second Owner", email: "second-owner@example.test", id: ids.administrator, membership_id: "amb_1123456789abcdef", organization_id: ids.organization, password_reset_required: false, role: action === "role" ? body.role : "operator", status: action === "disable" ? "disabled" : "active", updated_at: instant, ...(action === "disable" ? { disabled_at: instant } : {}) });
+    }
     if (url.pathname === "/admin/v1/applications") return json(route, 201, { created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" });
     if (url.pathname === `/admin/v1/applications/${ids.application}/environments`) return json(route, 201, { application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" });
     if (url.pathname === "/admin/v1/secrets") return json(route, 201, { algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment, id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1 });
@@ -72,7 +83,7 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { mutations, revisionBodies, selfTestBodies };
+  return { administratorBodies, mutations, revisionBodies, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -203,4 +214,32 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
     upstream: "openrouter"
   }]);
   expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
+});
+
+test("owner manages administrators without persisting password material", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: /^Administrators/ }).click();
+  await page.getByLabel("Email", { exact: true }).fill("second-owner@example.test");
+  await page.getByLabel("Display name").fill("Second Owner");
+  await page.locator('select[name="role"]').selectOption("viewer");
+  await page.getByLabel("Initial password").fill("temporary administrator password");
+  await page.getByRole("button", { name: "Create administrator" }).click();
+  await expect(page.getByText("second-owner@example.test")).toBeVisible();
+  await page.getByLabel("Role for second-owner@example.test").selectOption("operator");
+  await page.getByRole("button", { name: "Reset password" }).last().click();
+  await page.getByLabel("Replacement password").fill("replacement administrator password");
+  await page.getByRole("button", { name: "Reset and revoke credentials" }).click();
+  await page.getByRole("button", { name: "Disable" }).last().click();
+  await expect(page.getByRole("button", { name: "Enable" })).toBeVisible();
+  expect(fixture.administratorBodies).toEqual([
+    { display_name: "Second Owner", email: "second-owner@example.test", password: "temporary administrator password", role: "viewer" },
+    { action: "role", role: "operator" },
+    { action: "reset-password", password: "replacement administrator password" },
+    { action: "disable" }
+  ]);
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
 });

@@ -1,9 +1,15 @@
 # Protocol compatibility
 
-## Contract 0.5 working-tree note
+## Contract 0.5.1 working-tree note
 
-The normative `api/` sources are currently draft contract `0.5.0` with wire
-protocol `1`. The local restricted opaque HTTP implementation replaces a
+The normative `api/` sources are currently draft contract `0.5.1` with wire
+protocol `1`. Contract `0.5.0` remains the preceding sealed local checkpoint;
+its sources are not rewritten. Contract `0.5.1` adds the owner-authorized,
+tenant-scoped administrator lifecycle. It also adds calendar week windows and
+an optional server-owned IANA timezone to quota configuration and
+route-simulation output; omission canonicalizes to UTC and clients do not
+supply the timezone. The existing client wire remains unchanged.
+The local restricted opaque HTTP implementation replaces a
 reserved, non-executable `/proxy/` template with the exact feature-bound shape
 `/proxy/{feature}/{remainingPath...}`. Because no opaque endpoint or released
 server/client compatibility pair previously executed that template, this does
@@ -12,7 +18,7 @@ Existing session and DPoP transports are unchanged; a client using the new
 opaque capability requires a server build that contains the executable
 adapter. Local core validation is recorded in `STATUS.md`; cross-SDK and
 published compatibility evidence remains open. The immutable contract `0.4.0`
-checkpoint below remains historical evidence until the broader `0.5.0`
+checkpoint below remains historical evidence until the broader `0.5.1`
 compatibility record is consolidated.
 
 The same working tree also extends the already-defined input/total quota
@@ -29,7 +35,7 @@ with endpoint DPoP proof carried separately. The server never accepted the
 previously advertised optional identity or attestation fields, and refresh has
 no challenge to bind that evidence. Identity reauthentication and attestation
 renewal or step-up therefore require a new challenge and exchange. This is a
-pre-release interoperability and security correction under contract `0.5.0`;
+pre-release interoperability and security correction retained in contract `0.5.1`;
 wire protocol `1` remains unchanged. ADR 0020 records the decision. Passing
 cross-SDK and live-server evidence is still required before compatibility is
 reported.

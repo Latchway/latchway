@@ -29,6 +29,12 @@ var (
 	// ErrAdminNotFound indicates that a requested administrative resource does
 	// not exist.
 	ErrAdminNotFound = errors.New("admin resource not found")
+	// ErrAdminConflict indicates that an administrator lifecycle mutation
+	// conflicts with an existing account or membership.
+	ErrAdminConflict = errors.New("admin resource conflict")
+	// ErrLastActiveOwner protects every organization from losing its final
+	// usable owner through a concurrent role or status mutation.
+	ErrLastActiveOwner = errors.New("cannot remove the last active owner")
 )
 
 var slugPattern = regexp.MustCompile("^[a-z][a-z0-9-]{1,62}$")

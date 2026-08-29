@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 0.5.0
+  version: 0.5.1
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -29,6 +29,7 @@ tags:
   - name: Configuration
   - name: Secrets
   - name: API tokens
+  - name: Administrators
   - name: Users
   - name: Installations
   - name: Requests
@@ -528,6 +529,124 @@ paths:
       responses:
         '204': { description: Token revoked. }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators:
+    get:
+      tags: [Administrators]
+      operationId: listAdministrators
+      summary: List administrator memberships in the active organization.
+      description: Requires the `manage_owners` capability. Credential material is never returned.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Bounded administrator membership page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdministratorPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Administrators]
+      operationId: createAdministrator
+      summary: Create a local administrator and its first organization membership.
+      description: |
+        Requires `manage_owners`. An email already used by any administrator is
+        rejected rather than changing credentials belonging to another tenant.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAdministratorRequest' }
+      responses:
+        '201':
+          description: Administrator and active organization membership created transactionally.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/role:
+    put:
+      tags: [Administrators]
+      operationId: changeAdministratorRole
+      summary: Replace an administrator's role in the active organization.
+      description: The final active owner cannot be demoted.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeAdministratorRoleRequest' }
+      responses:
+        '200':
+          description: Updated administrator membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/disable:
+    post:
+      tags: [Administrators]
+      operationId: disableAdministrator
+      summary: Disable an administrator membership and revoke its scoped credentials.
+      description: The final active owner cannot be disabled. Existing sessions and API tokens in the organization are revoked transactionally.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Disabled administrator membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/enable:
+    post:
+      tags: [Administrators]
+      operationId: enableAdministrator
+      summary: Re-enable an administrator membership for future authentication.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enabled administrator membership. Revoked credentials remain revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/reset-password:
+    post:
+      tags: [Administrators]
+      operationId: resetAdministratorPassword
+      summary: Replace a local password and revoke every active administrator credential.
+      description: |
+        Requires `manage_owners`. Because local passwords are global to an
+        administrator identity, owner-driven reset is rejected when the target
+        has any membership in another organization. The password is write-only;
+        session and API-token revocation is atomic with the credential change.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetAdministratorPasswordRequest' }
+      responses:
+        '200':
+          description: Password replaced and credentials revoked without returning credential material.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users:
     get:
       tags: [Users]
@@ -890,6 +1009,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/TokenID' }
+    AdminUserID:
+      name: adminUserId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AdminUserID' }
     UserID:
       name: userId
       in: path
@@ -964,6 +1088,9 @@ components:
     TokenID:
       type: string
       pattern: '^tok_[A-Za-z0-9_-]{16,128}$'
+    AdminUserID:
+      type: string
+      pattern: '^adm_[A-Za-z0-9_-]{16,128}$'
     UserID:
       type: string
       pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
@@ -1306,6 +1433,63 @@ components:
       properties:
         token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
         metadata: { $ref: '#/components/schemas/ApiTokenMetadata' }
+    AdministratorRole:
+      type: string
+      enum: [owner, admin, operator, viewer]
+    Administrator:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - membership_id
+        - organization_id
+        - email
+        - display_name
+        - role
+        - status
+        - password_reset_required
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/AdminUserID' }
+        membership_id: { type: string, pattern: '^amb_[A-Za-z0-9_-]{16,128}$' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        status: { type: string, enum: [active, disabled] }
+        password_reset_required: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time }
+    AdministratorPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Administrator' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    CreateAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required: [email, display_name, password, role]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+    ChangeAdministratorRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+    ResetAdministratorPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
     ApplicationUser:
       type: object
       additionalProperties: false
@@ -1510,7 +1694,7 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.0 }
+        contract_version: { type: string, const: 0.5.1 }
         protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
