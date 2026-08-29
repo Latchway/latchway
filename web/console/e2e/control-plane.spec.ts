@@ -10,6 +10,9 @@ const ids = {
   override: "uov_0123456789abcdef",
   revision: "rev_0123456789abcdef",
   activeRevision: "rev_1123456789abcdef",
+  draftRevision: "rev_2123456789abcdef",
+  request: "req_0123456789abcdef",
+  attempt: "atm_0123456789abcdef",
   secret: "sec_0123456789abcdef",
   rotatedSecret: "sec_1123456789abcdef",
   unusedSecret: "sec_2123456789abcdef",
@@ -45,6 +48,8 @@ async function installAdminFixture(page: Page) {
   const environmentBodies: Array<Record<string, unknown>> = [];
   const overrideBodies: Array<Record<string, unknown>> = [];
   const revisionBodies: unknown[] = [];
+  const configurationPatchBodies: unknown[] = [];
+  const configurationETags: Array<{ etag: string | null; path: string }> = [];
   const rollbackBodies: Array<Record<string, unknown>> = [];
   const secretBodies: Array<Record<string, unknown>> = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
@@ -56,9 +61,21 @@ async function installAdminFixture(page: Page) {
   let userOverride: Record<string, unknown> | undefined;
   const configurationDocument = {
     apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig",
-    metadata: { application: "mobile-app", environment: "production", organization: "example" },
-    spec: { attestationPolicies: [], features: [], identityProviders: [], limitPlans: [], models: [], upstreams: [] }
+    metadata: { application: "mobile-app", environment: "production", labels: { retained: "yes" }, organization: "example" },
+    spec: {
+      attestationPolicies: [{ id: "native", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } }],
+      features: [{ access: { expression: "principal.authenticated" }, attestationPolicy: "native", id: "assistant", limitPlan: { expression: "'free'" }, protocol: "openai_responses", routes: [{ id: "primary", model: "assistant_default", priority: 10, when: "true" }] }],
+      identityProviders: [{ id: "firebase", projectId: "example-mobile", type: "firebase" }],
+      inputAccountingProfiles: [{ id: "assistant_input", maximumContextTokens: 128000, maximumFramingTokensPerMessage: 4, maximumFramingTokensPerRequest: 8, method: "utf8_byte_bpe_declared_framing_v1", physicalModel: "gpt-5-mini", protocol: "openai_responses" }],
+      limitPlans: [{ id: "free", limits: [{ algorithm: "calendar", hard: true, maximum: 100, metric: "logical_requests", scope: ["user", "feature"], timezone: "UTC", window: "1d" }] }],
+      models: [{ capabilities: ["openai_responses"], id: "assistant_default", inputAccountingRef: "assistant_input", pricingRef: "operator_pricing", upstream: "openai", upstreamModel: "gpt-5-mini" }],
+      pricingCatalogs: [{ currency: "USD", entries: [{ inputNanoUsdPerMillion: 250000, model: "assistant_default", outputNanoUsdPerMillion: 2000000, requestNanoUsd: 0 }], id: "operator_pricing" }],
+      upstreams: [{ authentication: { type: "none" }, baseUrl: "https://api.openai.com/v1", id: "openai", type: "openai_compatible" }]
+    }
   };
+  let activeConfigurationDocument: unknown = configurationDocument;
+  let activeConfigurationRevisionID = ids.activeRevision;
+  let activeConfigurationVersion = 2;
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
     capabilities: ["activate_configuration", "inspect_users", "manage_owners", "manage_secrets", "revoke_installations", "run_self_tests"],
@@ -133,11 +150,16 @@ async function installAdminFixture(page: Page) {
     }
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, { items: [{ activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }], page: { has_more: false } });
     if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "POST") {
-      const document = JSON.parse(request.postData() ?? "{}").document as unknown;
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      if (body.base_revision_id === activeConfigurationRevisionID) {
+        revisionBodies.push(body);
+        return json(route, 201, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-1"' });
+      }
+      const document = body.document as unknown;
       revisionBodies.push(document);
       return json(route, 201, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.revision, state: "draft", version: 1 }, { ETag: '"revision-etag"' });
     }
-    if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.activeRevision, state: "active", version: 2 }, { ETag: '"active-revision-etag"' });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: activeConfigurationRevisionID, state: "active", version: activeConfigurationVersion }, { ETag: '"active-revision-etag"' });
     if (url.pathname === `/admin/v1/environments/${ids.environment}/rollback` && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; rollbackBodies.push({ etag: request.headers()["if-match"], ...body });
       return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 3 }, { ETag: '"restored-revision-etag"' });
@@ -145,6 +167,49 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/plan`) return problem(route, "resource_not_found", 404, "No active configuration exists.");
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/activate`) return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: {}, environment_id: ids.environment, id: ids.revision, state: "active", version: 1 });
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}` && request.method() === "PATCH") {
+      activeConfigurationDocument = JSON.parse(request.postData() ?? "{}");
+      configurationPatchBodies.push(activeConfigurationDocument);
+      configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
+      return json(route, 200, { created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "draft", version: 3 }, { ETag: '"draft-etag-2"' });
+    }
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/plan`) return json(route, 200, { changes: [{ operation: "replace", path: "/spec/upstreams/0/baseUrl" }], from_revision_id: ids.activeRevision, to_revision_id: ids.draftRevision, warnings: [] });
+    if (url.pathname === `/admin/v1/config-revisions/${ids.draftRevision}/activate`) {
+      configurationETags.push({ etag: request.headers()["if-match"] ?? null, path: url.pathname });
+      activeConfigurationRevisionID = ids.draftRevision;
+      activeConfigurationVersion = 3;
+      return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: activeConfigurationDocument, environment_id: ids.environment, id: ids.draftRevision, state: "active", version: 3 }, { ETag: '"targeted-active-etag"' });
+    }
+    if (url.pathname === "/admin/v1/usage/summary") return json(route, 200, {
+      analytics: {
+        active_users: 2, attestation_failure_rate: { denominator: 4, numerator: 1, parts_per_million: 250000 },
+        by_feature: { items: [{ active_users: 2, key: "assistant", request_count: 3, values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 } }], limit: 50, truncated: false },
+        by_model: { items: [{ active_users: 2, key: "assistant_default", request_count: 3, values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 } }], limit: 50, truncated: false },
+        by_selected_plan: { items: [{ active_users: 2, key: "free", request_count: 3, values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 } }], limit: 50, truncated: false },
+        cost_per_active_user_nano_usd: { denominator: 2, numerator: 900 }, failure_rate: { denominator: 3, numerator: 1, parts_per_million: 333333 }, fallback_rate: { denominator: 3, numerator: 1, parts_per_million: 333333 }, quota_denial_rate: { denominator: 3, numerator: 0, parts_per_million: 0 }, request_count: 3,
+        request_latency: { p50_ms: 100, p95_ms: 300, p99_ms: 500, samples: 3 }, requests_per_active_user: { denominator: 2, numerator: 3 }, time_to_first_token: { p50_ms: 20, p95_ms: 40, p99_ms: 60, samples: 3 },
+        usage_by_provenance: [
+          { cost_source: "openrouter_usage_cost", provenance: "upstream_reported", values: { cost_nano_usd: 700, input_tokens: 10, logical_requests: 2, output_tokens: 20, total_tokens: 30 } },
+          { cost_source: "operator_pricing", provenance: "calculated", values: { cost_nano_usd: 200, input_tokens: 0, logical_requests: 1, output_tokens: 0, total_tokens: 0 } },
+          { provenance: "estimated", values: { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 } },
+          { provenance: "unknown", values: { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 } }
+        ]
+      }, end: "2026-08-29T01:00:00Z", provenance: ["upstream_reported", "calculated"], start: instant,
+      values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 }
+    });
+    if (url.pathname === "/admin/v1/usage/timeseries") return json(route, 200, { interval: url.searchParams.get("interval") ?? "hour", points: [{ timestamp: instant, values: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 3, output_tokens: 20, total_tokens: 30 } }] });
+    const requestDetail = {
+      attempts: [{ completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", id: ids.attempt, model: "openai/gpt", started_at: instant, status: "succeeded", upstream: "openrouter", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "upstream_reported" }],
+      completed_at: "2026-08-29T00:00:03Z", environment_id: ids.environment, feature: "assistant", id: ids.request, installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: instant, status: "succeeded", usage: { cost_nano_usd: 900, input_tokens: 10, logical_requests: 1, output_tokens: 20, total_tokens: 30 }, user_id: ids.user
+    };
+    if (url.pathname === "/admin/v1/requests") return json(route, 200, { items: [requestDetail], page: { has_more: false } });
+    if (url.pathname === `/admin/v1/requests/${ids.request}`) return json(route, 200, requestDetail);
+    if (url.pathname === `/admin/v1/config-revisions/${activeConfigurationRevisionID}/simulate`) return json(route, 200, {
+      allowed: true, application_id: ids.application, environment_id: ids.environment, environment_kind: "production", explanation: ["production policy allowed"],
+      facts: { application_id: ids.application, authenticated: true, environment_id: ids.environment, environment_kind: "production", feature: "assistant", framing_unit_count: 1, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 0, requested_output_max: 0, revision_id: activeConfigurationRevisionID, rewritten_request_bytes: 1024, streaming: false, trust_level: "app_verified" },
+      fact_usage: [], feature: "assistant", limit_plan: "free", limits: [], model: "assistant_default", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses", revision_id: activeConfigurationRevisionID, route: "primary", upstream: "openai", warnings: []
+    });
     if (url.pathname === "/admin/v1/self-tests") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       selfTestBodies.push(body);
@@ -162,7 +227,7 @@ async function installAdminFixture(page: Page) {
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { administratorBodies, apiTokenBodies, applicationBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies };
+  return { administratorBodies, apiTokenBodies, applicationBodies, configurationETags, configurationPatchBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -348,6 +413,73 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await page.getByRole("button", { name: "Rollback to this revision" }).click();
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
   expect(fixture.rollbackBodies).toEqual([{ etag: '"active-revision-etag"', revision_id: ids.revision }]);
+
+  expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
+});
+
+test("owner activates a targeted configuration merge and uses focused observability context", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+
+  await page.getByRole("link", { name: /^Upstreams/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load active configuration" }).click();
+  await page.getByRole("button", { name: "Delete openai" }).click();
+  await expect(page.getByRole("heading", { name: "Stage deletion of openai" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel deletion" }).click();
+  expect(fixture.configurationPatchBodies).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Edit openai" }).click();
+  const upstream = JSON.parse(await page.getByLabel("Resource JSON").inputValue()) as Record<string, unknown>;
+  upstream.baseUrl = "https://gateway.example.test/v1";
+  await page.getByLabel("Resource JSON").fill(JSON.stringify(upstream, null, 2));
+  await page.getByRole("button", { name: "Stage resource" }).click();
+  await expect(page.getByText("Staged changes", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Validate and activate" }).click();
+  await expect(page.locator(".resource-result")).toContainText(`Revision ${ids.draftRevision} is active`);
+
+  const patched = fixture.configurationPatchBodies[0] as { metadata: unknown; spec: { identityProviders: unknown; upstreams: Array<Record<string, unknown>> } };
+  expect(patched.spec.upstreams[0]).toEqual(expect.objectContaining({ baseUrl: "https://gateway.example.test/v1", id: "openai", type: "openai_compatible" }));
+  expect(patched.metadata).toEqual({ application: "mobile-app", environment: "production", labels: { retained: "yes" }, organization: "example" });
+  expect(patched.spec.identityProviders).toEqual([{ id: "firebase", projectId: "example-mobile", type: "firebase" }]);
+  expect(fixture.configurationETags).toEqual([
+    { etag: '"draft-etag-1"', path: `/admin/v1/config-revisions/${ids.draftRevision}` },
+    { etag: '"draft-etag-2"', path: `/admin/v1/config-revisions/${ids.draftRevision}/activate` }
+  ]);
+
+  await page.getByRole("link", { name: /^Cost/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load cost" }).click();
+  await expect(page.getByRole("heading", { name: "Cost provenance" })).toBeVisible();
+  await expect(page.getByText("openrouter_usage_cost")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Latency distributions" })).toHaveCount(0);
+
+  await page.getByRole("link", { name: /^Attestation failures/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load attestation failures" }).click();
+  await expect(page.getByRole("heading", { name: "Attestation rejection aggregate" })).toBeVisible();
+  await expect(page.getByText(/contains no raw App Attest assertion/)).toBeVisible();
+
+  await page.getByRole("link", { name: /^Requests/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "List requests" }).click();
+  await page.getByRole("button", { name: ids.request }).click();
+  await expect(page.getByRole("heading", { name: "Aggregate usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
+  await expect(page.getByText("2.5 s")).toBeVisible();
+  await expect(page.getByText(/does not expose route IDs, upstream HTTP status/)).toBeVisible();
+
+  await page.getByRole("link", { name: /^Route simulator/ }).click();
+  await page.getByLabel("Environment context ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load active route context" }).click();
+  await expect(page.getByText(/Selected active revision/)).toContainText("1 feature");
+  await expect(page.getByLabel("Revision ID")).toHaveValue(ids.draftRevision);
+  await expect(page.getByLabel("Feature")).toHaveValue("assistant");
+  await page.getByRole("button", { name: "Simulate route" }).click();
+  await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
 
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });

@@ -41,8 +41,16 @@ schema-backed configuration document; users; installations; request attempts;
 usage analytics; audit; the exact production route simulator; bounded
 self-tests; and build/schema status. Literal named navigation for identity, AI
 configuration, governance, observability, and operations maps to those
-canonical workflows. Named configuration areas deliberately reuse the complete
-document editor instead of constructing partial client-owned configuration.
+canonical workflows. Named configuration areas use dedicated resource editors:
+each merges only its canonical slice into a preserved clone of the full active
+document, then performs server clone, full-document PATCH, validation, plan,
+and optional activation with the successive strong ETags. Focused Cost,
+Latency, Errors, and Attestation failures pages use the canonical aggregate
+endpoints without aliasing the whole Usage screen. Request selection loads the
+exact detail endpoint and renders bounded aggregate/attempt timing, usage,
+cost, and provenance; route/HTTP/failure fields remain absent because the v1
+API does not expose them. The route simulator can bind its inputs to an exact
+active environment revision and feature list and cross-checks the response.
 Every mutation uses `/admin/v1/*`; browser code has no database client,
 connection string, or local policy evaluator.
 
@@ -64,7 +72,10 @@ activation with a strong ETag; application/environment creation; secret
 create/rotate and deliberate exact-current-ID deletion; cancellation without a
 mutation; write-only form clearing and absence of DOM/Web Storage retention;
 user override replacement/clear; fresh-ETag rollback; user blocking; CSRF on
-every cookie mutation; and server-side logout in Chromium.
+every cookie mutation; and server-side logout in Chromium. It also proves
+cancellation and activation of a targeted resource merge, full-document
+preservation, the successive draft/activation ETags, focused observability
+navigation, exact request detail, and active route-context simulation.
 
 The release and CI workflows additionally run
 `TestConsoleFirstRunAgainstLiveStack` with an isolated PostgreSQL schema. That

@@ -7,6 +7,8 @@ import {
   InstallationSchema,
   queryPath,
   RequestPageSchema,
+  RequestSchema,
+  RevisionSchema,
   RouteSimulationSchema,
   SelfTestSchema,
   UsageSummarySchema,
@@ -28,9 +30,11 @@ import {
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
 
-const environmentPattern = "env_[A-Za-z0-9_-]{16,128}";
+const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
+const environmentInputPattern = environmentPattern.source;
 const revisionPattern = "rev_[A-Za-z0-9_-]{16,128}";
-const identifierPattern = "[a-z][a-z0-9_-]{0,62}";
+const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
+const identifierInputPattern = identifierPattern.source;
 
 function PageHeading({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
@@ -85,6 +89,14 @@ function time(value?: string): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
+function duration(startedAt: string, completedAt?: string): string {
+  if (!completedAt) return "In progress";
+  const milliseconds = Date.parse(completedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+  if (milliseconds < 1_000) return `${milliseconds.toLocaleString()} ms`;
+  return `${(milliseconds / 1_000).toLocaleString(undefined, { maximumFractionDigits: 3 })} s`;
+}
+
 function ratio(value: { numerator: number; denominator: number }, suffix = ""): string {
   if (value.denominator === 0) return "—";
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value.numerator / value.denominator)}${suffix}`;
@@ -96,6 +108,10 @@ function rate(value: { parts_per_million: number }): string {
 
 function FormActions({ busy, children = "Load" }: { busy: boolean; children?: ReactNode }) {
   return <button className="primary-action" disabled={busy} type="submit">{busy ? "Working…" : children}</button>;
+}
+
+function BreakdownLimitNotice({ label, limit, truncated }: { label: string; limit: number; truncated: boolean }) {
+  return truncated ? <p>Showing the first {limit.toLocaleString()} {label} rows.</p> : null;
 }
 
 export function UsersPage() {
@@ -136,7 +152,7 @@ export function UsersPage() {
   return <div className="control-page">
     <PageHeading eyebrow="Identity" title="Application users">Pseudonymous identities, normalized claims, status, and overrides. Raw provider subjects and tokens never appear here.</PageHeading>
     <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
       <FormActions busy={busy}>List users</FormActions>
     </form>
     <ProblemNotice problem={problem} />
@@ -180,7 +196,7 @@ export function InstallationsPage() {
   return <div className="control-page">
     <PageHeading eyebrow="Identity" title="Installations">Installation-bound public keys and normalized trust status without raw attestation evidence or DPoP proofs.</PageHeading>
     <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List installations</FormActions>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List installations</FormActions>
     </form>
     <ProblemNotice problem={problem} />
     {page ? <><Table headers={["Installation", "Platform", "Status", "Trust", "Last seen", ""]} rows={page.items.map((item) => [
@@ -198,6 +214,7 @@ export function RequestsPage() {
   const [selected, setSelected] = useState<LogicalRequest>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
+  const [detailBusy, setDetailBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired />;
   async function load(cursor?: string): Promise<void> {
     setBusy(true); setProblem(undefined);
@@ -206,16 +223,78 @@ export function RequestsPage() {
       setPage(result.data); setSelected(undefined);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
+  async function loadRequest(requestID: string): Promise<void> {
+    setDetailBusy(true); setProblem(undefined);
+    try {
+      const response = await adminRequest(`/admin/v1/requests/${requestID}`, RequestSchema);
+      if (response.data.id !== requestID || response.data.environment_id !== environment) throw new Error("request_context");
+      setSelected(response.data);
+    }
+    catch (error) {
+      setSelected(undefined);
+      setProblem(error instanceof Error && error.message === "request_context" ? { code: "invalid_response", detail: "The request detail did not match the selected request and environment.", retryable: true, status: 0, title: "Request detail mismatch" } : problemFromError(error));
+    }
+    finally { setDetailBusy(false); }
+  }
   return <div className="control-page">
     <PageHeading eyebrow="Observability" title="Requests">Logical request metadata, attempts, usage, and provenance. Prompt and response bodies remain excluded.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}><label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List requests</FormActions></form>
+    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List requests</FormActions></form>
     <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Request", "Feature", "Protocol", "Status", "Attempts", "Started"]} rows={page.items.map((request) => [<button className="link-button" onClick={() => setSelected(request)} type="button">{request.id}</button>, request.feature, request.protocol, request.status, request.attempts.length, time(request.started_at)])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
-    {selected ? <aside className="detail-card"><h2>Request attempts</h2><Table headers={["Attempt", "Upstream", "Model", "Status", "Usage source", "Cost provenance", "Cost source"]} rows={selected.attempts.map((attempt) => [attempt.id, attempt.upstream, attempt.model, attempt.status, attempt.usage_provenance, attempt.cost_provenance, attempt.cost_source ?? "—"])} /></aside> : null}
+    {page ? <><Table headers={["Request", "Feature", "Protocol", "Status", "Attempts", "Started"]} rows={page.items.map((request) => [<button className="link-button" disabled={detailBusy} onClick={() => void loadRequest(request.id)} type="button">{request.id}</button>, request.feature, request.protocol, request.status, request.attempts.length, time(request.started_at)])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
+    {detailBusy ? <p role="status">Loading exact request detail…</p> : null}
+    {selected ? <aside className="detail-card"><h2>Request detail</h2>
+      <dl><div><dt>Request</dt><dd>{selected.id}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id}</dd></div><div><dt>Feature</dt><dd>{selected.feature}</dd></div><div><dt>Protocol</dt><dd>{selected.protocol}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div><div><dt>Started</dt><dd>{time(selected.started_at)}</dd></div><div><dt>Completed</dt><dd>{time(selected.completed_at)}</dd></div><div><dt>Duration</dt><dd>{duration(selected.started_at, selected.completed_at)}</dd></div></dl>
+      <h3>Aggregate usage</h3><Table headers={["Logical requests", "Input tokens", "Output tokens", "Total tokens", "Cost nano-USD"]} rows={selected.usage ? [[selected.usage.logical_requests, selected.usage.input_tokens, selected.usage.output_tokens, selected.usage.total_tokens, selected.usage.cost_nano_usd]] : []} />
+      <h3>Ordered upstream attempts</h3><Table headers={["#", "Attempt", "Started", "Completed", "Duration", "Upstream", "Model", "Status", "Input", "Output", "Total", "Cost nUSD", "Usage provenance", "Cost provenance", "Cost source"]} rows={selected.attempts.map((attempt, index) => [index + 1, attempt.id, time(attempt.started_at), time(attempt.completed_at), duration(attempt.started_at, attempt.completed_at), attempt.upstream, attempt.model, attempt.status, attempt.usage?.input_tokens ?? "—", attempt.usage?.output_tokens ?? "—", attempt.usage?.total_tokens ?? "—", attempt.usage?.cost_nano_usd ?? "—", attempt.usage_provenance, attempt.cost_provenance, attempt.cost_source ?? "—"])} />
+      <p><small>The Admin API does not expose route IDs, upstream HTTP status, or public failure codes for request attempts. Prompt/response bodies and identity subjects remain excluded.</small></p>
+    </aside> : null}
   </div>;
 }
 
-export function UsagePage() {
+type AnalyticsFocus = "attestation" | "cost" | "errors" | "latency" | "usage";
+
+const analyticsCopy: Record<AnalyticsFocus, { button: string; description: string; title: string }> = {
+  attestation: { button: "Load attestation failures", description: "Focused aggregate of rejected platform-proof evaluations. Raw attestation evidence remains excluded.", title: "Attestation failures" },
+  cost: { button: "Load cost", description: "Integer nano-USD totals, model and feature attribution, and fixed provenance without presenting estimates as observed provider cost.", title: "Cost" },
+  errors: { button: "Load errors", description: "Focused request failure, quota-denial, and fallback rates with exact bounded numerators and denominators.", title: "Errors" },
+  latency: { button: "Load latency", description: "Focused request and time-to-first-token distributions with sample counts and request-volume context.", title: "Latency" },
+  usage: { button: "Load usage", description: "Immutable logical request and token aggregates with explicit provenance and bounded breakdowns.", title: "Usage" }
+};
+
+function FocusedAnalytics({ focus, series, summary }: { focus: AnalyticsFocus; series?: UsageTimeseries; summary: UsageSummary }) {
+  if (focus === "cost") return <>
+    <section className="metric-grid"><article><span>Total cost</span><strong>{summary.values.cost_nano_usd.toLocaleString()} nUSD</strong></article><article><span>Cost / active user</span><strong>{ratio(summary.analytics.cost_per_active_user_nano_usd, " nUSD")}</strong></article><article><span>Requests</span><strong>{summary.analytics.request_count.toLocaleString()}</strong></article></section>
+    <section className="detail-card"><h2>Cost by feature</h2><Table headers={["Feature", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_feature.items.map((item) => [item.key, item.request_count, item.active_users, item.values.cost_nano_usd])} /><BreakdownLimitNotice label="feature" limit={summary.analytics.by_feature.limit} truncated={summary.analytics.by_feature.truncated} /></section>
+    <section className="detail-card"><h2>Cost by model</h2><Table headers={["Model", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_model.items.map((item) => [item.key, item.request_count, item.active_users, item.values.cost_nano_usd])} /><BreakdownLimitNotice label="model" limit={summary.analytics.by_model.limit} truncated={summary.analytics.by_model.truncated} /></section>
+    <section className="detail-card"><h2>Cost by selected plan</h2><Table headers={["Selected plan", "Requests", "Active users", "Cost nano-USD"]} rows={summary.analytics.by_selected_plan.items.map((item) => [item.key, item.request_count, item.active_users, item.values.cost_nano_usd])} /><BreakdownLimitNotice label="selected-plan" limit={summary.analytics.by_selected_plan.limit} truncated={summary.analytics.by_selected_plan.truncated} /></section>
+    <section className="detail-card"><h2>Cost provenance</h2><Table headers={["Provenance", "Fixed source", "Cost nano-USD"]} rows={summary.analytics.usage_by_provenance.map((item) => [item.provenance, item.cost_source ?? "—", item.values.cost_nano_usd])} /></section>
+    {series ? <Table headers={["Bucket", "Cost nano-USD"]} rows={series.points.map((point) => [time(point.timestamp), point.values.cost_nano_usd])} /> : null}
+  </>;
+  if (focus === "latency") return <>
+    <section className="metric-grid"><article><span>Request p95</span><strong>{summary.analytics.request_latency.p95_ms.toLocaleString()} ms</strong></article><article><span>TTFT p95</span><strong>{summary.analytics.time_to_first_token.p95_ms.toLocaleString()} ms</strong></article><article><span>Request samples</span><strong>{summary.analytics.request_latency.samples.toLocaleString()}</strong></article><article><span>TTFT samples</span><strong>{summary.analytics.time_to_first_token.samples.toLocaleString()}</strong></article></section>
+    <section className="detail-card"><h2>Latency distributions</h2><Table headers={["Measure", "Samples", "p50 ms", "p95 ms", "p99 ms"]} rows={[["Request latency", summary.analytics.request_latency.samples, summary.analytics.request_latency.p50_ms, summary.analytics.request_latency.p95_ms, summary.analytics.request_latency.p99_ms], ["Time to first token", summary.analytics.time_to_first_token.samples, summary.analytics.time_to_first_token.p50_ms, summary.analytics.time_to_first_token.p95_ms, summary.analytics.time_to_first_token.p99_ms]]} /></section>
+    {series ? <section className="detail-card"><h2>Request-volume context</h2><Table headers={["Bucket", "Requests"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests])} /></section> : null}
+  </>;
+  if (focus === "errors") return <>
+    <section className="metric-grid"><article><span>Failure rate</span><strong>{rate(summary.analytics.failure_rate)}</strong></article><article><span>Quota-denial rate</span><strong>{rate(summary.analytics.quota_denial_rate)}</strong></article><article><span>Fallback rate</span><strong>{rate(summary.analytics.fallback_rate)}</strong></article><article><span>Requests</span><strong>{summary.analytics.request_count.toLocaleString()}</strong></article></section>
+    <section className="detail-card"><h2>Error and recovery rates</h2><Table headers={["Measure", "Rate", "Events", "Denominator"]} rows={[["Failures", rate(summary.analytics.failure_rate), summary.analytics.failure_rate.numerator, summary.analytics.failure_rate.denominator], ["Quota denials", rate(summary.analytics.quota_denial_rate), summary.analytics.quota_denial_rate.numerator, summary.analytics.quota_denial_rate.denominator], ["Fallbacks", rate(summary.analytics.fallback_rate), summary.analytics.fallback_rate.numerator, summary.analytics.fallback_rate.denominator]]} /></section>
+    {series ? <section className="detail-card"><h2>Request-volume context</h2><Table headers={["Bucket", "Requests"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests])} /></section> : null}
+  </>;
+  if (focus === "attestation") return <>
+    <section className="metric-grid"><article><span>Attestation-failure rate</span><strong>{rate(summary.analytics.attestation_failure_rate)}</strong></article><article><span>Rejected proofs</span><strong>{summary.analytics.attestation_failure_rate.numerator.toLocaleString()}</strong></article><article><span>Proof evaluations</span><strong>{summary.analytics.attestation_failure_rate.denominator.toLocaleString()}</strong></article></section>
+    <section className="detail-card"><h2>Attestation rejection aggregate</h2><p>This aggregate contains no raw App Attest assertion, Play Integrity token, App Check token, Turnstile token, DPoP proof, or external subject.</p><Table headers={["Measure", "Value"]} rows={[["Rate", rate(summary.analytics.attestation_failure_rate)], ["Rejected", summary.analytics.attestation_failure_rate.numerator], ["Evaluated", summary.analytics.attestation_failure_rate.denominator], ["Parts per million", summary.analytics.attestation_failure_rate.parts_per_million]]} /></section>
+  </>;
+  return <>
+    <section className="metric-grid"><article><span>Active AI users</span><strong>{summary.analytics.active_users.toLocaleString()}</strong></article><article><span>Requests / active user</span><strong>{ratio(summary.analytics.requests_per_active_user)}</strong></article><article><span>Logical requests</span><strong>{summary.values.logical_requests.toLocaleString()}</strong></article><article><span>Input tokens</span><strong>{summary.values.input_tokens.toLocaleString()}</strong></article><article><span>Output tokens</span><strong>{summary.values.output_tokens.toLocaleString()}</strong></article><article><span>Total tokens</span><strong>{summary.values.total_tokens.toLocaleString()}</strong></article></section>
+    <section className="detail-card"><h2>Feature usage</h2><Table headers={["Feature", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_feature.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.total_tokens])} /><BreakdownLimitNotice label="feature" limit={summary.analytics.by_feature.limit} truncated={summary.analytics.by_feature.truncated} /></section>
+    <section className="detail-card"><h2>Model usage</h2><Table headers={["Model", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_model.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.total_tokens])} /><BreakdownLimitNotice label="model" limit={summary.analytics.by_model.limit} truncated={summary.analytics.by_model.truncated} /></section>
+    <section className="detail-card"><h2>Selected-plan usage</h2><Table headers={["Selected plan", "Active users", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.by_selected_plan.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.total_tokens])} /><BreakdownLimitNotice label="selected-plan" limit={summary.analytics.by_selected_plan.limit} truncated={summary.analytics.by_selected_plan.truncated} /></section>
+    <section className="detail-card"><h2>Usage provenance</h2><Table headers={["Provenance", "Requests", "Input", "Output", "Total"]} rows={summary.analytics.usage_by_provenance.map((item) => [item.provenance, item.values.logical_requests, item.values.input_tokens, item.values.output_tokens, item.values.total_tokens])} /></section>
+    {series ? <Table headers={["Bucket", "Requests", "Input", "Output", "Total"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests, point.values.input_tokens, point.values.output_tokens, point.values.total_tokens])} /> : null}
+  </>;
+}
+
+function AnalyticsPage({ focus }: { focus: AnalyticsFocus }) {
   const session = useConsoleSession();
   const now = new Date(); const yesterday = new Date(now.getTime() - 86_400_000);
   const [environment, setEnvironment] = useState("");
@@ -236,24 +315,25 @@ export function UsagePage() {
       setSummary(summaryResult.data); setSeries(seriesResult.data);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
+  const copy = analyticsCopy[focus];
   return <div className="control-page">
-    <PageHeading eyebrow="Observability" title="Usage and cost">Immutable logical request, token, and integer nano-USD aggregates with explicit provenance.</PageHeading>
+    <PageHeading eyebrow="Observability" title={copy.title}>{copy.description}</PageHeading>
     <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-      <label>Environment ID<input pattern={environmentPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
+      <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label>
       <label>Start<input required type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} /></label>
       <label>End<input required type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
       <label>Interval<select value={interval} onChange={(event) => setInterval(event.target.value as "hour" | "day")}><option value="hour">Hourly</option><option value="day">Daily</option></select></label>
-      <FormActions busy={busy}>Load usage</FormActions>
+      <FormActions busy={busy}>{copy.button}</FormActions>
     </form><ProblemNotice problem={problem} />
-    {summary ? <><section className="metric-grid"><article><span>Active AI users</span><strong>{summary.analytics.active_users.toLocaleString()}</strong></article><article><span>Requests / active user</span><strong>{ratio(summary.analytics.requests_per_active_user)}</strong></article><article><span>Cost / active user</span><strong>{ratio(summary.analytics.cost_per_active_user_nano_usd, " nUSD")}</strong></article><article><span>Total tokens</span><strong>{summary.values.total_tokens.toLocaleString()}</strong></article><article><span>Request p95</span><strong>{summary.analytics.request_latency.p95_ms.toLocaleString()} ms</strong></article><article><span>TTFT p95</span><strong>{summary.analytics.time_to_first_token.p95_ms.toLocaleString()} ms</strong></article><article><span>Failure rate</span><strong>{rate(summary.analytics.failure_rate)}</strong></article><article><span>Quota-denial rate</span><strong>{rate(summary.analytics.quota_denial_rate)}</strong></article><article><span>Attestation-failure rate</span><strong>{rate(summary.analytics.attestation_failure_rate)}</strong></article><article><span>Fallback rate</span><strong>{rate(summary.analytics.fallback_rate)}</strong></article></section>
-      <section className="detail-card"><h2>Feature usage</h2><Table headers={["Feature", "Active users", "Requests", "Input", "Output", "Cost nano-USD"]} rows={summary.analytics.by_feature.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.cost_nano_usd])} />{summary.analytics.by_feature.truncated ? <p>Showing the first {summary.analytics.by_feature.limit} feature rows.</p> : null}</section>
-      <section className="detail-card"><h2>Model usage</h2><Table headers={["Model", "Active users", "Requests", "Input", "Output", "Cost nano-USD"]} rows={summary.analytics.by_model.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.cost_nano_usd])} />{summary.analytics.by_model.truncated ? <p>Showing the first {summary.analytics.by_model.limit} model rows.</p> : null}</section>
-      <section className="detail-card"><h2>Selected-plan usage</h2><Table headers={["Selected plan", "Active users", "Requests", "Input", "Output", "Cost nano-USD"]} rows={summary.analytics.by_selected_plan.items.map((item) => [item.key, item.active_users, item.request_count, item.values.input_tokens, item.values.output_tokens, item.values.cost_nano_usd])} />{summary.analytics.by_selected_plan.truncated ? <p>Showing the first {summary.analytics.by_selected_plan.limit} plan rows.</p> : null}</section>
-      <section className="detail-card"><h2>Latency distributions</h2><Table headers={["Measure", "Samples", "p50 ms", "p95 ms", "p99 ms"]} rows={[["Request latency", summary.analytics.request_latency.samples, summary.analytics.request_latency.p50_ms, summary.analytics.request_latency.p95_ms, summary.analytics.request_latency.p99_ms], ["Time to first token", summary.analytics.time_to_first_token.samples, summary.analytics.time_to_first_token.p50_ms, summary.analytics.time_to_first_token.p95_ms, summary.analytics.time_to_first_token.p99_ms]]} /></section>
-      <section className="detail-card"><h2>Usage provenance</h2><p>Estimated and provider-reported measurements remain separate; no estimate is presented as observed provider usage.</p><Table headers={["Provenance", "Cost source", "Requests", "Input", "Output", "Total", "Cost nano-USD"]} rows={summary.analytics.usage_by_provenance.map((item) => [item.provenance, item.cost_source ?? "—", item.values.logical_requests, item.values.input_tokens, item.values.output_tokens, item.values.total_tokens, item.values.cost_nano_usd])} /></section></> : null}
-    {series ? <Table headers={["Bucket", "Requests", "Input", "Output", "Total", "Cost nano-USD"]} rows={series.points.map((point) => [time(point.timestamp), point.values.logical_requests, point.values.input_tokens, point.values.output_tokens, point.values.total_tokens, point.values.cost_nano_usd])} /> : null}
+    {summary ? <FocusedAnalytics focus={focus} series={series} summary={summary} /> : null}
   </div>;
 }
+
+export function UsagePage() { return <AnalyticsPage focus="usage" />; }
+export function CostPage() { return <AnalyticsPage focus="cost" />; }
+export function LatencyPage() { return <AnalyticsPage focus="latency" />; }
+export function ErrorsPage() { return <AnalyticsPage focus="errors" />; }
+export function AttestationFailuresPage() { return <AnalyticsPage focus="attestation" />; }
 
 export function AuditPageView() {
   const session = useConsoleSession(); const organization = session.data?.session?.organization_id ?? "";
@@ -272,25 +352,44 @@ export function AuditPageView() {
 
 export function RouteSimulatorPage() {
   const session = useConsoleSession(); const [result, setResult] = useState<RouteSimulation>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const [environment, setEnvironment] = useState(""); const [revision, setRevision] = useState(""); const [feature, setFeature] = useState("");
+  const [contextRevision, setContextRevision] = useState<string>(); const [contextFeatures, setContextFeatures] = useState<string[]>([]);
   if (session.data?.mode !== "configured") return <AccessRequired />;
+  async function loadContext(): Promise<void> {
+    if (!environmentPattern.test(environment)) { setProblem({ code: "request_invalid", detail: "Enter a canonical environment ID before loading route context.", retryable: false, status: 0, title: "Invalid route context" }); return; }
+    setBusy(true); setProblem(undefined); setResult(undefined);
+    try {
+      const active = await adminRequest(`/admin/v1/environments/${environment}/config`, RevisionSchema);
+      const spec = active.data.document.spec;
+      if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error("context");
+      const configuredFeatures = (spec as Record<string, unknown>).features;
+      if (!Array.isArray(configuredFeatures) || configuredFeatures.length > 256) throw new Error("context");
+      const ids = configuredFeatures.map((item) => item && typeof item === "object" && !Array.isArray(item) ? String((item as Record<string, unknown>).id ?? "") : "");
+      if (ids.some((id) => !identifierPattern.test(id)) || new Set(ids).size !== ids.length) throw new Error("context");
+      setContextRevision(active.data.id); setContextFeatures(ids); setRevision(active.data.id); setFeature(ids[0] ?? "");
+    } catch (error) { setProblem(error instanceof Error && error.message === "context" ? { code: "invalid_response", detail: "The active revision did not contain a bounded canonical feature list.", retryable: true, status: 0, title: "Route context unavailable" } : problemFromError(error)); }
+    finally { setBusy(false); }
+  }
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault(); setBusy(true); setProblem(undefined); const form = new FormData(event.currentTarget);
     try {
       const claims = JSON.parse(String(form.get("claims") ?? "{}")) as unknown;
       if (!claims || Array.isArray(claims) || typeof claims !== "object" || Object.keys(claims).length > 64) throw new Error("claims");
-      const revision = String(form.get("revision"));
+      if (contextRevision && revision !== contextRevision) throw new Error("context_selection");
       const response = await adminRequest(`/admin/v1/config-revisions/${revision}/simulate`, RouteSimulationSchema, { method: "POST", body: {
-        feature: String(form.get("feature")), platform: String(form.get("platform")), trust_level: String(form.get("trust")),
+        feature, platform: String(form.get("platform")), trust_level: String(form.get("trust")),
         principal: { authenticated: form.get("authenticated") === "on", claims },
         request: { streaming: form.get("streaming") === "on", app_version: String(form.get("app_version") ?? ""), requested_input_tokens: Number(form.get("requested_input") ?? 0), requested_output_max: Number(form.get("requested_output") ?? 0), rewritten_request_bytes: Number(form.get("rewritten_request_bytes") ?? 0), framing_unit_count: Number(form.get("framing_unit_count") ?? 0) }
       }});
+      if (response.data.revision_id !== revision || response.data.feature !== feature || (environment && response.data.environment_id !== environment)) throw new Error("context_result");
       setResult(response.data);
-    } catch (error) { setProblem(error instanceof SyntaxError || (error instanceof Error && error.message === "claims") ? { code: "invalid_claims", detail: "Normalized claims must be one JSON object with at most 64 properties.", retryable: false, status: 0, title: "Invalid simulator input" } : problemFromError(error)); }
+    } catch (error) { setProblem(error instanceof SyntaxError || (error instanceof Error && error.message === "claims") ? { code: "invalid_claims", detail: "Normalized claims must be one JSON object with at most 64 properties.", retryable: false, status: 0, title: "Invalid simulator input" } : error instanceof Error && error.message === "context_selection" ? { code: "context_mismatch", detail: "The revision no longer matches the loaded active environment context. Reload context before simulating.", retryable: false, status: 0, title: "Route context changed" } : error instanceof Error && error.message === "context_result" ? { code: "invalid_response", detail: "The simulation result did not match the selected revision, feature, and environment context.", retryable: true, status: 0, title: "Route context mismatch" } : problemFromError(error)); }
     finally { setBusy(false); }
   }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Route simulator">The server executes the exact compiled production CEL and resolver. This performs no quota reservation and no upstream dispatch.</PageHeading>
+    <section className="filter-bar"><label>Environment context ID<input pattern={environmentInputPattern} value={environment} onChange={(event) => { setEnvironment(event.target.value); setContextRevision(undefined); setContextFeatures([]); }} /></label><button className="secondary-action" disabled={busy || !environment} onClick={() => void loadContext()} type="button">Load active route context</button>{contextRevision ? <span>Selected active revision <code>{contextRevision}</code> with {contextFeatures.length} feature{contextFeatures.length === 1 ? "" : "s"}.</span> : null}</section>
     <form className="control-form" onSubmit={(event) => void submit(event)}>
-      <div className="form-field-grid"><label>Revision ID<input name="revision" pattern={revisionPattern} required /></label><label>Feature<input name="feature" pattern="[a-z][a-z0-9_-]{0,62}" required /></label></div>
+      <div className="form-field-grid"><label>Revision ID<input name="revision" pattern={revisionPattern} required value={revision} onChange={(event) => setRevision(event.target.value)} /></label><label>Feature<input list="route-context-feature-options" name="feature" pattern={identifierInputPattern} required value={feature} onChange={(event) => setFeature(event.target.value)} /><datalist id="route-context-feature-options">{contextFeatures.map((id) => <option key={id} value={id} />)}</datalist></label></div>
       <div className="form-field-grid"><label>Platform<select name="platform" defaultValue="react_native_ios"><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="node">Node</option></select></label><label>Trust level<select name="trust" defaultValue="app_verified"><option value="none">None</option><option value="identity_only">Identity only</option><option value="app_verified">App verified</option><option value="device_verified">Device verified</option><option value="strong_device_verified">Strong device verified</option><option value="debug">Debug</option></select></label></div>
       <label>Normalized claims JSON<textarea defaultValue="{}" name="claims" rows={6} spellCheck={false} /></label>
       <div className="form-field-grid"><label>App version (explanatory)<input maxLength={128} name="app_version" /></label><label>Requested input tokens (explanatory)<input min={0} name="requested_input" type="number" /></label><label>Requested output maximum<input min={0} name="requested_output" type="number" /></label></div>
@@ -324,7 +423,7 @@ export function SelfTestsPage() {
   }
   async function refresh(): Promise<void> { if (!run) return; setBusy(true); try { setRun((await adminRequest(`/admin/v1/self-tests/${run.id}`, SelfTestSchema)).data); } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); } }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
-    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierPattern} required /></label><label>Model ID<input name="model" pattern={identifierPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the configured two-request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
+    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the configured two-request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
     {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
   </div>;
 }

@@ -1,6 +1,6 @@
 # Implementation status
 
-## Local working-tree update — core dashboard resource workflows (2026-08-29)
+## Local working-tree update — structured dashboard operations (2026-08-29)
 
 The embedded same-origin console now has tenant-scoped application browse/create
 and application-scoped environment browse/create; metadata-only secret
@@ -13,20 +13,32 @@ secret ID, requires the logical name, supports cancellation without a mutation,
 and rechecks the loaded name-to-ID binding before sending `DELETE`.
 
 The authenticated sidebar now maps every named v1 dashboard area literally.
-Named configuration areas transparently reuse the complete schema-backed
-pull/validate/redacted-diff/ETag/activate editor and disclose their canonical
-JSON paths; they do not manufacture partial client configuration. Named cost,
-latency, error, and attestation-failure entries reuse the canonical bounded
-usage analytics source. Rollback fetches the active revision again on click and
+Identity providers, attestation, features, nested routes, upstreams,
+models/input profiles/pricing catalogs, access, limit plans, and abuse
+composition have dedicated canonical-resource editors. Each stages only its
+owned slice into a preserved clone of the full active document, asks the server
+to clone that exact base, sends the full replacement document directly under
+the draft strong ETag, validates, plans, and optionally activates under the
+newest ETag. Canonical add templates contain every schema-required field, and
+weak/stale ETags fail before activation.
+
+Cost, latency, errors, and attestation failures are focused pages over the
+bounded analytics API rather than whole-Usage aliases. Route simulation can
+load and cross-check an exact active environment/revision/feature context.
+Request selection loads the exact detail endpoint and renders request timing,
+aggregate usage, and ordered attempt timing/upstream/model/status/usage/cost
+provenance without bodies or subjects. Route ID, upstream HTTP status, and
+public attempt failure code remain absent because the v1 Admin API does not
+expose them. Rollback still fetches the active revision again on click and
 sends that fresh strong ETag with the exact previously activated target.
 
-Console lint, typecheck, all 39 unit tests, and all five fixture-backed Chromium
+Console lint, typecheck, all 54 unit tests, and all six fixture-backed Chromium
 flows pass; the separate live-stack Chromium flow remains intentionally skipped
 outside its PostgreSQL harness. Focused PostgreSQL Admin API, control-plane,
 configuration, and user-override tests pass against the required local database,
 and contract validation passes. These are local workflow and browser-boundary
-results, not provider, physical-device, structured per-resource editor, cloud,
-cross-repository, publication, or release evidence.
+results, not provider, physical-device, cloud, cross-repository, publication,
+or release evidence.
 
 ## Local working-tree update — token-mode CLI and API-token console (2026-08-29)
 
@@ -288,10 +300,10 @@ Two independent builds of the current bundle were byte-identical. That bundle is
 - Schema version 9 has one bounded recovery limitation: if a per-request-only entryless attempt expires, the worker cannot reconstruct the adapter-applied cap and therefore cannot add an unknown-output usage row. No durable capacity exists to recover or mutate for that rule shape; normal known settlement persists provider usage.
 - Apple App Attest, Play Integrity, and other native production attestation verification are not implemented in the server. The validated debug provider is test/development evidence only.
 - The override Admin API and CLI slice plus the core dashboard resource tranche
-  are implemented. Dedicated structured editors for each configuration area,
-  remaining Admin/CLI ergonomics, richer trace visualization, telemetry gaps,
-  the remaining durable jobs, current-image deployment smoke tests, and
-  operational recovery gates remain.
+  and dedicated structured configuration editors are implemented. Remaining
+  Admin/CLI ergonomics, attempt route/HTTP/public-failure API fields, richer
+  trace visualization, telemetry gaps, the remaining durable jobs,
+  current-image deployment smoke tests, and operational recovery gates remain.
 - Session refresh is intentionally credential-rotation-only. Identity
   reauthentication and attestation renewal or step-up require a new bound
   challenge and exchange as recorded in ADR 0020.

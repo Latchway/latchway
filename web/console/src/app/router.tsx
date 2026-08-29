@@ -12,8 +12,12 @@ import { SystemHealthPage } from "../pages/system-health-page";
 import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
 import {
+  AttestationFailuresPage,
   AuditPageView,
+  CostPage,
+  ErrorsPage,
   InstallationsPage,
+  LatencyPage,
   RequestsPage,
   RouteSimulatorPage,
   SelfTestsPage,
@@ -81,10 +85,10 @@ const userOverridesRoute = createRoute({ component: UserOverridesPage, getParent
 const abuseControlsRoute = createRoute({ component: AbuseControlsConfigurationPage, getParentRoute: () => rootRoute, path: "/abuse-controls" });
 const requestsRoute = createRoute({ component: RequestsPage, getParentRoute: () => rootRoute, path: "/requests" });
 const usageRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/usage" });
-const costRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/cost" });
-const latencyRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/latency" });
-const errorsRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/errors" });
-const attestationFailuresRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/attestation-failures" });
+const costRoute = createRoute({ component: CostPage, getParentRoute: () => rootRoute, path: "/cost" });
+const latencyRoute = createRoute({ component: LatencyPage, getParentRoute: () => rootRoute, path: "/latency" });
+const errorsRoute = createRoute({ component: ErrorsPage, getParentRoute: () => rootRoute, path: "/errors" });
+const attestationFailuresRoute = createRoute({ component: AttestationFailuresPage, getParentRoute: () => rootRoute, path: "/attestation-failures" });
 const configurationRevisionsRoute = createRoute({ component: ConfigurationRevisionsPage, getParentRoute: () => rootRoute, path: "/configuration-revisions" });
 const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator" });
 const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests" });
