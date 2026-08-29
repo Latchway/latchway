@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -147,6 +148,79 @@ func (target *Target) WithHeaderDispatchWithBeforeRoundTrip(
 	})
 }
 
+// WithBasicDispatch sends a prepared request with one scoped HTTP Basic
+// credential. The consumer must inspect and relay the response synchronously.
+func (target *Target) WithBasicDispatch(
+	ctx context.Context,
+	prepared PreparedRequest,
+	username string,
+	password []byte,
+	consume func(*DispatchedResponse) error,
+) error {
+	return target.withCredentialDispatch(ctx, prepared, nil, consume, func(headers http.Header, operation func() error) error {
+		return withBasicCredential(headers, username, password, operation)
+	})
+}
+
+// WithBasicDispatchWithBeforeRoundTrip sends a prepared request with one
+// scoped HTTP Basic credential. The password remains inside the caller's
+// secret-use callback, and the derived Authorization value is removed only
+// after the response body has been closed.
+func (target *Target) WithBasicDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	prepared PreparedRequest,
+	username string,
+	password []byte,
+	beforeRoundTrip func() error,
+	consume func(*DispatchedResponse) error,
+) error {
+	if beforeRoundTrip == nil {
+		return errors.New("invalid before-round-trip callback")
+	}
+	return target.withCredentialDispatch(ctx, prepared, beforeRoundTrip, consume, func(headers http.Header, operation func() error) error {
+		return withBasicCredential(headers, username, password, operation)
+	})
+}
+
+// HeaderCredential is one fixed header and its scoped secret value. Callers
+// must not retain values after WithHeadersDispatchWithBeforeRoundTrip returns.
+type HeaderCredential struct {
+	Name  string
+	Value []byte
+}
+
+// WithHeadersDispatch sends a prepared request with between one and eight
+// independently configured credential headers. The consumer must inspect and
+// relay the response synchronously.
+func (target *Target) WithHeadersDispatch(
+	ctx context.Context,
+	prepared PreparedRequest,
+	credentials []HeaderCredential,
+	consume func(*DispatchedResponse) error,
+) error {
+	return target.withCredentialDispatch(ctx, prepared, nil, consume, func(headers http.Header, operation func() error) error {
+		return withHeaderCredentials(headers, credentials, operation)
+	})
+}
+
+// WithHeadersDispatchWithBeforeRoundTrip applies between one and eight
+// independently configured credential headers for exactly one synchronous
+// dispatch/consume operation.
+func (target *Target) WithHeadersDispatchWithBeforeRoundTrip(
+	ctx context.Context,
+	prepared PreparedRequest,
+	credentials []HeaderCredential,
+	beforeRoundTrip func() error,
+	consume func(*DispatchedResponse) error,
+) error {
+	if beforeRoundTrip == nil {
+		return errors.New("invalid before-round-trip callback")
+	}
+	return target.withCredentialDispatch(ctx, prepared, beforeRoundTrip, consume, func(headers http.Header, operation func() error) error {
+		return withHeaderCredentials(headers, credentials, operation)
+	})
+}
+
 type credentialScope func(http.Header, func() error) error
 
 func (target *Target) withCredentialDispatch(
@@ -248,6 +322,66 @@ func withBearerCredential(headers http.Header, credential []byte, operation func
 	}
 	headers.Set("Authorization", "Bearer "+string(credential))
 	defer headers.Del("Authorization")
+	return operation()
+}
+
+func withBasicCredential(headers http.Header, username string, password []byte, operation func() error) error {
+	if headers == nil || operation == nil || len(headerValues(headers, "Authorization")) != 0 ||
+		!validBasicUsername(username) || len(password) == 0 || len(password) > maximumForwardedHeaderBytes {
+		return errors.New("invalid basic credential scope")
+	}
+	plainLength := len(username) + 1 + len(password)
+	if base64.StdEncoding.EncodedLen(plainLength) > maximumForwardedHeaderBytes-len("Basic ") {
+		return errors.New("invalid basic credential scope")
+	}
+	plain := make([]byte, 0, plainLength)
+	plain = append(plain, username...)
+	plain = append(plain, ':')
+	plain = append(plain, password...)
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(plain)))
+	base64.StdEncoding.Encode(encoded, plain)
+	for index := range plain {
+		plain[index] = 0
+	}
+	headers.Set("Authorization", "Basic "+string(encoded))
+	defer func() {
+		headers.Del("Authorization")
+		for index := range encoded {
+			encoded[index] = 0
+		}
+	}()
+	return operation()
+}
+
+func withHeaderCredentials(headers http.Header, credentials []HeaderCredential, operation func() error) error {
+	if headers == nil || operation == nil || len(credentials) < 1 || len(credentials) > 8 {
+		return errors.New("invalid header credential scope")
+	}
+	canonicalNames := make([]string, len(credentials))
+	seen := make(map[string]struct{}, len(credentials))
+	totalBytes := 0
+	for index, credential := range credentials {
+		canonical := http.CanonicalHeaderKey(credential.Name)
+		totalBytes += len(canonical) + len(credential.Value)
+		if strings.TrimSpace(credential.Name) != credential.Name || !validHeaderName(credential.Name) ||
+			isForbiddenCredentialHeader(canonical) || len(headerValues(headers, canonical)) != 0 ||
+			!validHeaderCredential(credential.Value) || totalBytes > maximumForwardedHeaderBytes {
+			return errors.New("invalid header credential scope")
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return errors.New("invalid header credential scope")
+		}
+		seen[canonical] = struct{}{}
+		canonicalNames[index] = canonical
+	}
+	for index, credential := range credentials {
+		headers.Set(canonicalNames[index], string(credential.Value))
+	}
+	defer func() {
+		for _, name := range canonicalNames {
+			headers.Del(name)
+		}
+	}()
 	return operation()
 }
 

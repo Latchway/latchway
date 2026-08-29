@@ -1,7 +1,9 @@
 package upstream
 
 import (
+	"encoding/base64"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +72,122 @@ func TestBearerCredentialScopeIsEphemeralAndRejectsIncomingValue(t *testing.T) {
 	headers.Set("Authorization", "client value")
 	if err := withBearerCredential(headers, []byte("server-secret"), func() error { return nil }); err == nil {
 		t.Fatal("preexisting authorization value accepted")
+	}
+}
+
+func TestBasicCredentialScopeIsEphemeralAndFailClosed(t *testing.T) {
+	t.Parallel()
+
+	password := []byte{'p', 0, 'a', 's', 's'}
+	want := "Basic " + base64.StdEncoding.EncodeToString(append([]byte("user:"), password...))
+	headers := make(http.Header)
+	if err := withBasicCredential(headers, "user", password, func() error {
+		if values := headers.Values("Authorization"); len(values) != 1 || values[0] != want {
+			t.Fatalf("authorization values inside scope = %#v, want %q", values, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if values := headers.Values("Authorization"); len(values) != 0 {
+		t.Fatalf("authorization survived scope = %#v", values)
+	}
+
+	for _, test := range []struct {
+		name     string
+		username string
+		password []byte
+		headers  http.Header
+	}{
+		{name: "empty username", password: []byte("secret")},
+		{name: "colon in username", username: "user:name", password: []byte("secret")},
+		{name: "space in username", username: "user name", password: []byte("secret")},
+		{name: "control in username", username: "user\n", password: []byte("secret")},
+		{name: "oversized username", username: strings.Repeat("u", 257), password: []byte("secret")},
+		{name: "empty password", username: "user"},
+		{name: "oversized password", username: "user", password: make([]byte, maximumForwardedHeaderBytes+1)},
+		{name: "preexisting authorization", username: "user", password: []byte("secret"), headers: http.Header{"Authorization": {"client"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if test.headers == nil {
+				test.headers = make(http.Header)
+			}
+			before := test.headers.Clone()
+			if err := withBasicCredential(test.headers, test.username, test.password, func() error {
+				t.Fatal("operation ran for invalid Basic credential")
+				return nil
+			}); err == nil {
+				t.Fatal("invalid Basic credential accepted")
+			}
+			if got, want := test.headers.Get("Authorization"), before.Get("Authorization"); got != want {
+				t.Fatalf("authorization mutated on failure = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestMultipleHeaderCredentialScopeIsAtomicEphemeralAndBounded(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{"X-Static": {"configured"}}
+	credentials := []HeaderCredential{
+		{Name: "X-Provider-Key", Value: []byte("server secret")},
+		{Name: "x-provider-tenant", Value: []byte("tenant secret")},
+	}
+	if err := withHeaderCredentials(headers, credentials, func() error {
+		if headers.Get("X-Provider-Key") != "server secret" || headers.Get("X-Provider-Tenant") != "tenant secret" {
+			t.Fatalf("credential headers inside scope = %#v", headers)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if headers.Get("X-Provider-Key") != "" || headers.Get("X-Provider-Tenant") != "" || headers.Get("X-Static") != "configured" {
+		t.Fatalf("headers after scope = %#v", headers)
+	}
+
+	nine := make([]HeaderCredential, 9)
+	for index := range nine {
+		nine[index] = HeaderCredential{Name: "X-Key-" + string(rune('A'+index)), Value: []byte("secret")}
+	}
+	for _, test := range []struct {
+		name        string
+		headers     http.Header
+		credentials []HeaderCredential
+	}{
+		{name: "empty"},
+		{name: "too many", credentials: nine},
+		{name: "duplicate case variant", credentials: []HeaderCredential{{Name: "X-Provider-Key", Value: []byte("one")}, {Name: "x-provider-key", Value: []byte("two")}}},
+		{name: "forbidden", credentials: []HeaderCredential{{Name: "Content-Type", Value: []byte("secret")}}},
+		{name: "malformed value", credentials: []HeaderCredential{{Name: "X-Provider-Key", Value: []byte("secret\nvalue")}}},
+		{name: "preexisting collision", headers: http.Header{"X-Provider-Key": {"static"}}, credentials: []HeaderCredential{{Name: "x-provider-key", Value: []byte("secret")}}},
+		{name: "aggregate too large", credentials: []HeaderCredential{
+			{Name: "X-Provider-Key", Value: []byte(strings.Repeat("a", maximumForwardedHeaderBytes/2))},
+			{Name: "X-Provider-Tenant", Value: []byte(strings.Repeat("b", maximumForwardedHeaderBytes/2))},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if test.headers == nil {
+				test.headers = make(http.Header)
+			}
+			before := test.headers.Clone()
+			if err := withHeaderCredentials(test.headers, test.credentials, func() error {
+				t.Fatal("operation ran for invalid multiple-header credentials")
+				return nil
+			}); err == nil {
+				t.Fatal("invalid multiple-header credentials accepted")
+			}
+			if len(test.headers) != len(before) {
+				t.Fatalf("headers mutated on failure: before=%#v after=%#v", before, test.headers)
+			}
+			for name, values := range before {
+				if got := test.headers.Values(name); strings.Join(got, "\x00") != strings.Join(values, "\x00") {
+					t.Fatalf("%s mutated on failure: before=%#v after=%#v", name, values, got)
+				}
+			}
+		})
 	}
 }
 

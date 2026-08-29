@@ -283,23 +283,24 @@ func TestRelayResponseCancellationClosesBodyBeforeClientStart(t *testing.T) {
 	waitForResponseRead(t, body)
 }
 
-func TestRelayResponseIdleTimeoutClosesBodyBeforeClientStart(t *testing.T) {
+func TestRelayResponseFirstByteTimeoutClosesBodyBeforeClientStart(t *testing.T) {
 	t.Parallel()
 
 	body := newBlockingResponseBody()
 	writer := newRelayResponseWriter()
 	var upstreamCancelCalls atomic.Int32
 	config := validRelayConfig()
-	config.IdleTimeout = 20 * time.Millisecond
+	config.FirstByteTimeout = 20 * time.Millisecond
+	config.IdleTimeout = time.Second
 	dispatched := validRelayResponse(body)
 	dispatched.cancel = sync.OnceFunc(func() { upstreamCancelCalls.Add(1) })
 	started := time.Now()
 	outcome, err := RelayResponse(context.Background(), writer, dispatched, &recordingResponseObserver{}, config)
-	if !errors.Is(err, ErrResponseIdleTimeout) || outcome.ClientStarted || writer.started {
-		t.Fatalf("idle relay: outcome=%#v writer_started=%t err=%v", outcome, writer.started, err)
+	if !errors.Is(err, ErrResponseFirstByteTimeout) || outcome.ClientStarted || writer.started {
+		t.Fatalf("first-byte relay: outcome=%#v writer_started=%t err=%v", outcome, writer.started, err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("idle timeout returned after %v", elapsed)
+		t.Fatalf("first-byte timeout returned after %v", elapsed)
 	}
 	if body.closeCalls.Load() != 1 {
 		t.Fatalf("body close calls = %d", body.closeCalls.Load())
@@ -308,6 +309,35 @@ func TestRelayResponseIdleTimeoutClosesBodyBeforeClientStart(t *testing.T) {
 		t.Fatalf("upstream cancel calls = %d", upstreamCancelCalls.Load())
 	}
 	waitForResponseRead(t, body)
+}
+
+func TestRelayResponseIdleTimeoutClosesBodyAfterClientStart(t *testing.T) {
+	t.Parallel()
+
+	blocked := newBlockingResponseBody()
+	body := &firstChunkThenBlockingResponseBody{blockingResponseBody: blocked}
+	writer := newRelayResponseWriter()
+	var upstreamCancelCalls atomic.Int32
+	config := validRelayConfig()
+	config.FirstByteTimeout = time.Second
+	config.IdleTimeout = 20 * time.Millisecond
+	dispatched := validRelayResponse(body)
+	dispatched.cancel = sync.OnceFunc(func() { upstreamCancelCalls.Add(1) })
+	started := time.Now()
+	outcome, err := RelayResponse(context.Background(), writer, dispatched, &recordingResponseObserver{}, config)
+	if !errors.Is(err, ErrResponseIdleTimeout) || !outcome.ClientStarted || !writer.started || outcome.BodyBytes != int64(len("first")) {
+		t.Fatalf("idle relay: outcome=%#v writer_started=%t err=%v", outcome, writer.started, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("idle timeout returned after %v", elapsed)
+	}
+	if blocked.closeCalls.Load() != 1 {
+		t.Fatalf("body close calls = %d", blocked.closeCalls.Load())
+	}
+	if upstreamCancelCalls.Load() != 1 {
+		t.Fatalf("upstream cancel calls = %d", upstreamCancelCalls.Load())
+	}
+	waitForResponseRead(t, blocked)
 }
 
 func TestRelayResponseRejectsProviderErrorBodyBeforeClientStart(t *testing.T) {
@@ -604,6 +634,8 @@ func TestRelayResponseClosesBodyForInvalidInputs(t *testing.T) {
 
 	missingIdleTimeout := validRelayConfig()
 	missingIdleTimeout.IdleTimeout = 0
+	negativeFirstByteTimeout := validRelayConfig()
+	negativeFirstByteTimeout.FirstByteTimeout = -time.Second
 	missingWriteTimeout := validRelayConfig()
 	missingWriteTimeout.ClientWriteTimeout = 0
 	missingBodyLimit := validRelayConfig()
@@ -656,6 +688,14 @@ func TestRelayResponseClosesBodyForInvalidInputs(t *testing.T) {
 			},
 			observer: func() protocol.ResponseObserver { return &recordingResponseObserver{} },
 			config:   missingIdleTimeout,
+		},
+		{
+			name: "negative first-byte timeout",
+			response: func(body *scriptedResponseBody) *DispatchedResponse {
+				return validRelayResponse(body)
+			},
+			observer: func() protocol.ResponseObserver { return &recordingResponseObserver{} },
+			config:   negativeFirstByteTimeout,
 		},
 		{
 			name: "non-positive client write timeout",
@@ -787,6 +827,7 @@ func testDispatchedResponse(response *http.Response, cancel context.CancelFunc) 
 
 func validRelayConfig() ResponseRelayConfig {
 	return ResponseRelayConfig{
+		FirstByteTimeout:   time.Second,
 		IdleTimeout:        time.Second,
 		ClientWriteTimeout: time.Second,
 		MaxBodyBytes:       1 << 20,
@@ -833,6 +874,19 @@ type blockingResponseBody struct {
 	finishOnce   sync.Once
 	closeOnce    sync.Once
 	closeCalls   atomic.Int32
+}
+
+type firstChunkThenBlockingResponseBody struct {
+	*blockingResponseBody
+	firstReturned bool
+}
+
+func (body *firstChunkThenBlockingResponseBody) Read(destination []byte) (int, error) {
+	if !body.firstReturned {
+		body.firstReturned = true
+		return copy(destination, "first"), nil
+	}
+	return body.blockingResponseBody.Read(destination)
 }
 
 func newBlockingResponseBody() *blockingResponseBody {
@@ -955,3 +1009,4 @@ var _ http.ResponseWriter = (*relayResponseWriter)(nil)
 var _ protocol.ResponseObserver = (*recordingResponseObserver)(nil)
 var _ io.ReadCloser = (*scriptedResponseBody)(nil)
 var _ io.ReadCloser = (*blockingResponseBody)(nil)
+var _ io.ReadCloser = (*firstChunkThenBlockingResponseBody)(nil)

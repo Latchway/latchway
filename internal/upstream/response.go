@@ -30,6 +30,10 @@ var (
 	// ErrResponseIdleTimeout indicates that no upstream body progress occurred
 	// before the configured stream idle deadline.
 	ErrResponseIdleTimeout = errors.New("upstream response idle timeout")
+	// ErrResponseFirstByteTimeout indicates that response headers arrived but
+	// the upstream did not produce its first body byte before the configured
+	// deadline. It is distinct from both response-header and stream-idle waits.
+	ErrResponseFirstByteTimeout = errors.New("upstream response first byte timeout")
 	// ErrResponseBodyTooLarge indicates that the upstream body exceeded the
 	// administrator-owned response limit. A streaming response may already have
 	// started when an unknown-length body crosses the limit.
@@ -46,6 +50,7 @@ var (
 // OnFirstByte, when set, runs exactly once immediately before the response is
 // committed for a non-empty body.
 type ResponseRelayConfig struct {
+	FirstByteTimeout   time.Duration
 	IdleTimeout        time.Duration
 	ClientWriteTimeout time.Duration
 	MaxBodyBytes       int64
@@ -96,7 +101,7 @@ func RelayResponse(
 
 	if nilInterface(ctx) || nilInterface(destination) || response == nil || body == nil ||
 		response.StatusCode < http.StatusOK || response.StatusCode > 599 ||
-		nilInterface(observer) || config.IdleTimeout <= 0 || config.ClientWriteTimeout <= 0 ||
+		nilInterface(observer) || config.FirstByteTimeout < 0 || config.IdleTimeout <= 0 || config.ClientWriteTimeout <= 0 ||
 		config.MaxBodyBytes <= 0 || cancelUpstream == nil {
 		return outcome, ErrInvalidResponseRelay
 	}
@@ -121,7 +126,18 @@ func RelayResponse(
 	firstBytePending := true
 
 	for {
-		count, readErr, waitErr := readResponseChunk(ctx, body, buffer, config.IdleTimeout, abortUpstream)
+		readTimeout := config.IdleTimeout
+		timeoutError := ErrResponseIdleTimeout
+		if firstBytePending {
+			// A zero value preserves the bounded pre-v1 caller behavior while
+			// active configuration migrates from one combined first-byte/idle
+			// setting. Production route wiring supplies this explicitly.
+			if config.FirstByteTimeout > 0 {
+				readTimeout = config.FirstByteTimeout
+			}
+			timeoutError = ErrResponseFirstByteTimeout
+		}
+		count, readErr, waitErr := readResponseChunk(ctx, body, buffer, readTimeout, timeoutError, abortUpstream)
 		if waitErr != nil {
 			return outcome, waitErr
 		}
@@ -221,7 +237,8 @@ func readResponseChunk(
 	ctx context.Context,
 	body *onceReadCloser,
 	buffer []byte,
-	idleTimeout time.Duration,
+	readTimeout time.Duration,
+	timeoutError error,
 	abort func(),
 ) (int, error, error) {
 	if err := ctx.Err(); err != nil {
@@ -231,7 +248,7 @@ func readResponseChunk(
 
 	idleExpired := false
 	timerDone := make(chan struct{})
-	timer := time.AfterFunc(idleTimeout, func() {
+	timer := time.AfterFunc(readTimeout, func() {
 		idleExpired = true
 		abort()
 		close(timerDone)
@@ -249,7 +266,7 @@ func readResponseChunk(
 		<-contextAbortDone
 	}
 	if idleExpired {
-		return 0, nil, ErrResponseIdleTimeout
+		return 0, nil, timeoutError
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err

@@ -176,6 +176,19 @@ func validHeaderCredential(credential []byte) bool {
 	return true
 }
 
+func validBasicUsername(username string) bool {
+	if len(username) == 0 || len(username) > 256 {
+		return false
+	}
+	for index := 0; index < len(username); index++ {
+		character := username[index]
+		if character < 0x21 || character > 0x7e || character == ':' {
+			return false
+		}
+	}
+	return true
+}
+
 func validStaticHeaderValue(value string) bool {
 	return len(value) <= 2048 && validHeaderValue(value)
 }
