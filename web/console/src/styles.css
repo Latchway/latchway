@@ -1053,6 +1053,29 @@ a {
   background: var(--paper);
 }
 
+.resource-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.small-action--danger {
+  color: var(--red);
+}
+
+.primary-action--danger {
+  background: var(--red);
+}
+
+.primary-action--danger:hover:not(:disabled) {
+  background: #742c29;
+}
+
+.destructive-confirmation {
+  border-color: #edc3bf;
+  background: var(--red-light);
+}
+
 .topbar__error {
   margin-left: 1rem;
   color: var(--red);

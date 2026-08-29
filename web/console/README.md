@@ -34,10 +34,16 @@ A separate secure double-submit cookie lets a refreshed tab recover the CSRF
 token without making the administrator credential script-readable. Sign out
 revokes the server-side session and clears both cookies.
 
-Authenticated routes cover first-run setup, the complete schema-backed
-configuration document, users, installations, request attempts, usage, audit,
-the exact production route simulator, bounded self-tests, and build/schema
-status. Every mutation uses `/admin/v1/*`; browser code has no database client,
+Authenticated routes cover applications and environments; write-only secret
+metadata/create/rotate/delete; user override inspect/set/clear; immutable
+configuration history and exact-ETag rollback; first-run setup; the complete
+schema-backed configuration document; users; installations; request attempts;
+usage analytics; audit; the exact production route simulator; bounded
+self-tests; and build/schema status. Literal named navigation for identity, AI
+configuration, governance, observability, and operations maps to those
+canonical workflows. Named configuration areas deliberately reuse the complete
+document editor instead of constructing partial client-owned configuration.
+Every mutation uses `/admin/v1/*`; browser code has no database client,
 connection string, or local policy evaluator.
 
 ## Validation
@@ -54,9 +60,11 @@ pnpm verify:reproducible
 The fast component and default Playwright tests mock only the HTTP boundary and
 verify the exact canonical endpoint paths. Zod validates all server payloads
 before UI code consumes them. The default Playwright gate proves first-run
-activation with a strong ETag, write-only
-credential clearing, user blocking, CSRF on every cookie mutation, absence of
-Web Storage credentials, and server-side logout in Chromium.
+activation with a strong ETag; application/environment creation; secret
+create/rotate and deliberate exact-current-ID deletion; cancellation without a
+mutation; write-only form clearing and absence of DOM/Web Storage retention;
+user override replacement/clear; fresh-ETag rollback; user blocking; CSRF on
+every cookie mutation; and server-side logout in Chromium.
 
 The release and CI workflows additionally run
 `TestConsoleFirstRunAgainstLiveStack` with an isolated PostgreSQL schema. That

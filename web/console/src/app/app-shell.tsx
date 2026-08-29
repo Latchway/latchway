@@ -6,7 +6,38 @@ import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
 
-type ConsoleRoute = "/" | "/setup" | "/configuration" | "/administrators" | "/api-tokens" | "/users" | "/installations" | "/requests" | "/usage" | "/route-simulator" | "/self-tests" | "/audit" | "/system-health";
+type ConsoleRoute =
+  | "/"
+  | "/applications"
+  | "/environments"
+  | "/setup"
+  | "/administrators"
+  | "/api-tokens"
+  | "/authentication-providers"
+  | "/attestation"
+  | "/users"
+  | "/installations"
+  | "/features"
+  | "/routes"
+  | "/upstreams"
+  | "/models-pricing"
+  | "/secrets"
+  | "/configuration"
+  | "/access-policies"
+  | "/limit-plans"
+  | "/user-overrides"
+  | "/abuse-controls"
+  | "/requests"
+  | "/usage"
+  | "/cost"
+  | "/latency"
+  | "/errors"
+  | "/attestation-failures"
+  | "/configuration-revisions"
+  | "/route-simulator"
+  | "/self-tests"
+  | "/audit"
+  | "/system-health";
 
 interface NavigationLinkProps {
   children: ReactNode;
@@ -112,22 +143,44 @@ export function AppShell() {
           </NavigationLink>
 
           {!needsAccess ? <>
+            <NavigationLink description="Tenant application resources" to="/applications">Applications</NavigationLink>
+            <NavigationLink description="Application deployment scopes" to="/environments">Environments</NavigationLink>
             <NavigationLink description="Guided native first run" to="/setup">Setup wizard</NavigationLink>
-            <NavigationLink description="Validate, diff, and activate" to="/configuration">Configuration</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">Administration</p>
             <NavigationLink description="Accounts and roles" to="/administrators">Administrators</NavigationLink>
             <NavigationLink description="Scoped automation credentials" to="/api-tokens">API tokens</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">Identity</p>
+            <NavigationLink description="Issuer and claim trust" to="/authentication-providers">Authentication providers</NavigationLink>
+            <NavigationLink description="Platform proof policies" to="/attestation">Attestation</NavigationLink>
             <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>
             <NavigationLink description="Trust and revocation" to="/installations">Installations</NavigationLink>
 
+            <p className="nav-group-label nav-group-label--spaced">AI Configuration</p>
+            <NavigationLink description="Client-visible capabilities" to="/features">Features</NavigationLink>
+            <NavigationLink description="Ordered production resolution" to="/routes">Routes</NavigationLink>
+            <NavigationLink description="Provider destinations" to="/upstreams">Upstreams</NavigationLink>
+            <NavigationLink description="Physical models and rates" to="/models-pricing">Models &amp; pricing</NavigationLink>
+            <NavigationLink description="Write-only credentials" to="/secrets">Secrets</NavigationLink>
+            <NavigationLink description="Validate, diff, and activate" to="/configuration">Full configuration</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Governance</p>
+            <NavigationLink description="Per-feature authorization" to="/access-policies">Access policies</NavigationLink>
+            <NavigationLink description="Durable quota policies" to="/limit-plans">Limit plans</NavigationLink>
+            <NavigationLink description="Per-user plan selection" to="/user-overrides">User overrides</NavigationLink>
+            <NavigationLink description="Composed protective controls" to="/abuse-controls">Abuse controls</NavigationLink>
+
             <p className="nav-group-label nav-group-label--spaced">Observability</p>
             <NavigationLink description="Metadata and attempts" to="/requests">Requests</NavigationLink>
-            <NavigationLink description="Tokens and cost" to="/usage">Usage</NavigationLink>
+            <NavigationLink description="Trusted token accounting" to="/usage">Usage</NavigationLink>
+            <NavigationLink description="Nano-USD and provenance" to="/cost">Cost</NavigationLink>
+            <NavigationLink description="Request and first-token timing" to="/latency">Latency</NavigationLink>
+            <NavigationLink description="Failure and denial rates" to="/errors">Errors</NavigationLink>
+            <NavigationLink description="Rejected platform proofs" to="/attestation-failures">Attestation failures</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">Operations</p>
+            <NavigationLink description="History and safe rollback" to="/configuration-revisions">Configuration revisions</NavigationLink>
             <NavigationLink description="Exact production resolver" to="/route-simulator">Route simulator</NavigationLink>
             <NavigationLink description="Bounded diagnostics" to="/self-tests">Self-tests</NavigationLink>
             <NavigationLink description="Redacted change history" to="/audit">Audit log</NavigationLink>

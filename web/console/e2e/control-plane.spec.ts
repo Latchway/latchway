@@ -7,8 +7,12 @@ const ids = {
   application: "app_01J00000000000000000000000",
   environment: "env_0123456789abcdef",
   organization: "org_0123456789abcdef",
+  override: "uov_0123456789abcdef",
   revision: "rev_0123456789abcdef",
+  activeRevision: "rev_1123456789abcdef",
   secret: "sec_0123456789abcdef",
+  rotatedSecret: "sec_1123456789abcdef",
+  unusedSecret: "sec_2123456789abcdef",
   selfTest: "tst_0123456789abcdef",
   user: "usr_0123456789abcdef"
 };
@@ -37,9 +41,24 @@ async function installAdminFixture(page: Page) {
   const mutations: Array<{ path: string; csrf: string | null }> = [];
   const administratorBodies: Array<Record<string, unknown>> = [];
   const apiTokenBodies: Array<Record<string, unknown>> = [];
+  const applicationBodies: Array<Record<string, unknown>> = [];
+  const environmentBodies: Array<Record<string, unknown>> = [];
+  const overrideBodies: Array<Record<string, unknown>> = [];
   const revisionBodies: unknown[] = [];
+  const rollbackBodies: Array<Record<string, unknown>> = [];
+  const secretBodies: Array<Record<string, unknown>> = [];
   const selfTestBodies: Array<Record<string, unknown>> = [];
   let apiTokens: Array<Record<string, unknown>> = [];
+  let secretItems: Array<Record<string, unknown>> = [{
+    algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment,
+    id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1
+  }];
+  let userOverride: Record<string, unknown> | undefined;
+  const configurationDocument = {
+    apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig",
+    metadata: { application: "mobile-app", environment: "production", organization: "example" },
+    spec: { attestationPolicies: [], features: [], identityProviders: [], limitPlans: [], models: [], upstreams: [] }
+  };
   const session = {
     administrator: { email: "owner@example.test", enabled: true, id: ids.admin },
     capabilities: ["activate_configuration", "inspect_users", "manage_owners", "manage_secrets", "revoke_installations", "run_self_tests"],
@@ -79,13 +98,49 @@ async function installAdminFixture(page: Page) {
       apiTokens = apiTokens.map((token) => token.id === ids.apiToken ? { ...token, revoked: true } : token);
       return route.fulfill({ status: 204 });
     }
-    if (url.pathname === "/admin/v1/applications") return json(route, 201, { created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" });
-    if (url.pathname === `/admin/v1/applications/${ids.application}/environments`) return json(route, 201, { application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" });
-    if (url.pathname === "/admin/v1/secrets") return json(route, 201, { algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment, id: ids.secret, master_key_id: "master-key", name: "primary_api_key", version: 1 });
-    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions`) {
+    if (url.pathname === "/admin/v1/applications" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, display_name: "Mobile App", id: ids.application, organization_id: ids.organization, slug: "mobile-app" }], page: { has_more: false } });
+    if (url.pathname === "/admin/v1/applications" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; applicationBodies.push(body);
+      return json(route, 201, { created_at: instant, display_name: body.display_name, id: ids.application, organization_id: ids.organization, slug: body.slug });
+    }
+    if (url.pathname === `/admin/v1/applications/${ids.application}/environments` && request.method() === "GET") return json(route, 200, { items: [{ application_id: ids.application, created_at: instant, display_name: "Production", id: ids.environment, kind: "production", slug: "production" }] });
+    if (url.pathname === `/admin/v1/applications/${ids.application}/environments` && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; environmentBodies.push(body);
+      return json(route, 201, { application_id: ids.application, created_at: instant, display_name: body.display_name, id: ids.environment, kind: body.kind, slug: body.slug });
+    }
+    if (url.pathname === "/admin/v1/secrets" && request.method() === "GET") return json(route, 200, { items: secretItems, page: { has_more: false } });
+    if (url.pathname === "/admin/v1/secrets" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; secretBodies.push(body);
+      const created = { algorithm: "xchacha20poly1305", created_at: instant, environment_id: ids.environment, id: body.name === "primary_api_key" ? ids.secret : ids.unusedSecret, master_key_id: "master-key", name: body.name, version: 1 };
+      secretItems = [created, ...secretItems.filter((item) => item.name !== body.name)];
+      return json(route, 201, created);
+    }
+    if (url.pathname.startsWith("/admin/v1/secrets/") && url.pathname.endsWith("/rotate") && request.method() === "POST") {
+      const currentID = url.pathname.split("/").at(-2) ?? "";
+      const current = secretItems.find((item) => item.id === currentID);
+      if (!current) return problem(route, "resource_conflict", 409, "The secret version is stale.");
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; secretBodies.push({ action: "rotate", secret_id: currentID, ...body });
+      const rotated = { ...current, id: ids.rotatedSecret, rotated_at: instant, version: Number(current.version) + 1 };
+      secretItems = secretItems.map((item) => item.id === currentID ? rotated : item);
+      return json(route, 201, rotated);
+    }
+    if (url.pathname.startsWith("/admin/v1/secrets/") && request.method() === "DELETE") {
+      const currentID = url.pathname.split("/").at(-1) ?? "";
+      if (!secretItems.some((item) => item.id === currentID)) return problem(route, "resource_conflict", 409, "The secret version is stale.");
+      secretBodies.push({ action: "delete", secret_id: currentID });
+      secretItems = secretItems.filter((item) => item.id !== currentID);
+      return route.fulfill({ status: 204 });
+    }
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "GET") return json(route, 200, { items: [{ activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "superseded", version: 1 }], page: { has_more: false } });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config-revisions` && request.method() === "POST") {
       const document = JSON.parse(request.postData() ?? "{}").document as unknown;
       revisionBodies.push(document);
       return json(route, 201, { created_at: instant, created_by: ids.admin, document, environment_id: ids.environment, id: ids.revision, state: "draft", version: 1 }, { ETag: '"revision-etag"' });
+    }
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/config` && request.method() === "GET") return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.activeRevision, state: "active", version: 2 }, { ETag: '"active-revision-etag"' });
+    if (url.pathname === `/admin/v1/environments/${ids.environment}/rollback` && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; rollbackBodies.push({ etag: request.headers()["if-match"], ...body });
+      return json(route, 200, { activated_at: instant, created_at: instant, created_by: ids.admin, document: configurationDocument, environment_id: ids.environment, id: ids.revision, state: "active", version: 3 }, { ETag: '"restored-revision-etag"' });
     }
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/validate`) return json(route, 200, { checked_at: instant, issues: [], valid: true });
     if (url.pathname === `/admin/v1/config-revisions/${ids.revision}/plan`) return problem(route, "resource_not_found", 404, "No active configuration exists.");
@@ -96,11 +151,18 @@ async function installAdminFixture(page: Page) {
       const kind = typeof body.kind === "string" ? body.kind : "local";
       return json(route, 202, { checks: [{ name: kind === "local" ? "database" : "usage", safe_detail: kind === "local" ? "PostgreSQL transaction completed." : "Bounded provider usage passed.", state: "passed" }], completed_at: instant, created_at: instant, id: ids.selfTest, kind, state: "passed" });
     }
+    if (url.pathname === `/admin/v1/users/${ids.user}` && request.method() === "GET") return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "active", ...(userOverride ? { limit_plan_override: userOverride } : {}) });
+    if (url.pathname === `/admin/v1/users/${ids.user}/limit-override` && request.method() === "PUT") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>; overrideBodies.push(body);
+      userOverride = { created_at: instant, id: ids.override, limit_plan: body.limit_plan, reason: body.reason, ...(body.expires_at ? { expires_at: body.expires_at } : {}) };
+      return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], limit_plan_override: userOverride, normalized_claims: { plan: "standard" }, status: "active" });
+    }
+    if (url.pathname === `/admin/v1/users/${ids.user}/limit-override` && request.method() === "DELETE") { overrideBodies.push({ action: "clear", user_id: ids.user }); userOverride = undefined; return route.fulfill({ status: 204 }); }
     if (url.pathname === "/admin/v1/users" && request.method() === "GET") return json(route, 200, { items: [{ created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "active" }], page: { has_more: false } });
     if (url.pathname === `/admin/v1/users/${ids.user}/block`) return json(route, 200, { created_at: instant, environment_id: ids.environment, id: ids.user, identity_providers: ["firebase"], normalized_claims: { plan: "standard" }, status: "blocked" });
     return problem(route, "resource_not_found", 404, "Fixture endpoint not found.");
   });
-  return { administratorBodies, apiTokenBodies, mutations, revisionBodies, selfTestBodies };
+  return { administratorBodies, apiTokenBodies, applicationBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies };
 }
 
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
@@ -206,6 +268,88 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+});
+
+test("owner completes resource, secret, override, and exact-ETag rollback workflows", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("owner@example.test");
+  await page.getByLabel("Password").fill("test-only-owner-password");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+
+  await page.getByRole("link", { name: /^Applications/ }).click();
+  await page.getByRole("button", { name: "Load applications" }).click();
+  await expect(page.getByText(ids.application)).toBeVisible();
+  await page.getByLabel("Display name").fill("Resource App");
+  await page.getByLabel("Slug").fill("resource-app");
+  await page.getByRole("button", { name: "Create application" }).click();
+  expect(fixture.applicationBodies.at(-1)).toEqual({ display_name: "Resource App", organization_id: ids.organization, slug: "resource-app" });
+
+  await page.getByRole("link", { name: /^Environments/ }).click();
+  await page.getByLabel("Application ID").fill(ids.application);
+  await page.getByRole("button", { name: "Load environments" }).click();
+  await expect(page.getByText(ids.environment)).toBeVisible();
+  await page.getByLabel("Display name").fill("Staging");
+  await page.getByLabel("Slug").fill("staging");
+  await page.getByLabel("Kind").selectOption("staging");
+  await page.getByRole("button", { name: "Create environment" }).click();
+  expect(fixture.environmentBodies.at(-1)).toEqual({ display_name: "Staging", kind: "staging", slug: "staging" });
+
+  await page.getByRole("link", { name: /^Secrets/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load secret metadata" }).click();
+  await expect(page.getByText(ids.secret)).toBeVisible();
+  await page.getByLabel("Secret name").fill("unused_provider_key");
+  await page.getByLabel("Secret value").fill("transient-create-secret");
+  await page.getByRole("button", { name: "Create secret" }).click();
+  await expect(page.getByLabel("Secret value")).toHaveValue("");
+  await expect(page.getByText(ids.unusedSecret)).toBeVisible();
+  expect(await page.locator("body").innerText()).not.toContain("transient-create-secret");
+
+  const primaryRow = page.getByRole("row", { name: /primary_api_key/ });
+  await primaryRow.getByRole("button", { name: "Rotate" }).click();
+  await page.getByLabel("Replacement secret value").fill("transient-rotation-secret");
+  await page.getByRole("button", { name: "Rotate secret" }).click();
+  await expect(page.getByText(ids.rotatedSecret)).toBeVisible();
+  expect(await page.locator("body").innerText()).not.toContain("transient-rotation-secret");
+
+  const unusedRow = page.getByRole("row", { name: /unused_provider_key/ });
+  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
+  await expect(page.getByText(ids.unusedSecret, { exact: true }).last()).toBeVisible();
+  await page.getByRole("button", { name: "Cancel deletion" }).click();
+  expect(fixture.secretBodies.some((body) => body.action === "delete")).toBe(false);
+  await unusedRow.getByRole("button", { name: "Delete unreferenced" }).click();
+  await page.getByLabel("Type unused_provider_key to confirm").fill("unused_provider_key");
+  await page.getByRole("button", { name: "Permanently delete secret" }).click();
+  await expect(page.getByText(ids.unusedSecret)).toHaveCount(0);
+  expect(fixture.secretBodies.at(-1)).toEqual({ action: "delete", secret_id: ids.unusedSecret });
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+
+  await page.getByRole("link", { name: /^User overrides/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByLabel("User ID").fill(ids.user);
+  await page.getByRole("button", { name: "Inspect override" }).click();
+  await expect(page.getByText("No override")).toBeVisible();
+  await page.getByLabel("Limit plan").fill("subscriber");
+  await page.getByLabel("Reason").fill("support-approved");
+  await page.getByRole("button", { name: "Set override" }).click();
+  await expect(page.getByText("Reason: support-approved")).toBeVisible();
+  await page.getByRole("button", { name: "Clear override" }).click();
+  await expect(page.getByText("No override")).toBeVisible();
+  expect(fixture.overrideBodies).toEqual([
+    { limit_plan: "subscriber", reason: "support-approved" },
+    { action: "clear", user_id: ids.user }
+  ]);
+
+  await page.getByRole("link", { name: /^Configuration revisions/ }).click();
+  await page.getByLabel("Environment ID").fill(ids.environment);
+  await page.getByRole("button", { name: "Load newest revision" }).click();
+  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
+  await page.getByRole("button", { name: "Rollback to this revision" }).click();
+  await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
+  expect(fixture.rollbackBodies).toEqual([{ etag: '"active-revision-etag"', revision_id: ids.revision }]);
+
+  expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
 
 test("credential-aware self-test sends configured identifiers and a numeric cost ceiling", async ({ page }) => {

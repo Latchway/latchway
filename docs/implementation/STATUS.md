@@ -1,5 +1,33 @@
 # Implementation status
 
+## Local working-tree update — core dashboard resource workflows (2026-08-29)
+
+The embedded same-origin console now has tenant-scoped application browse/create
+and application-scoped environment browse/create; metadata-only secret
+list/create/rotate/permanent-delete; environment/user-scoped limit-override
+inspect/set/clear; and immutable configuration-revision history with exact
+rollback. Secret plaintext is never persisted in browser storage and is cleared
+from its uncontrolled password input before the request completes. Permanent
+deletion is not one-click: an in-page confirmation displays the exact current
+secret ID, requires the logical name, supports cancellation without a mutation,
+and rechecks the loaded name-to-ID binding before sending `DELETE`.
+
+The authenticated sidebar now maps every named v1 dashboard area literally.
+Named configuration areas transparently reuse the complete schema-backed
+pull/validate/redacted-diff/ETag/activate editor and disclose their canonical
+JSON paths; they do not manufacture partial client configuration. Named cost,
+latency, error, and attestation-failure entries reuse the canonical bounded
+usage analytics source. Rollback fetches the active revision again on click and
+sends that fresh strong ETag with the exact previously activated target.
+
+Console lint, typecheck, all 39 unit tests, and all five fixture-backed Chromium
+flows pass; the separate live-stack Chromium flow remains intentionally skipped
+outside its PostgreSQL harness. Focused PostgreSQL Admin API, control-plane,
+configuration, and user-override tests pass against the required local database,
+and contract validation passes. These are local workflow and browser-boundary
+results, not provider, physical-device, structured per-resource editor, cloud,
+cross-repository, publication, or release evidence.
+
 ## Local working-tree update — token-mode CLI and API-token console (2026-08-29)
 
 The CLI now validates an environment-supplied scoped bearer with the canonical
@@ -259,7 +287,11 @@ Two independent builds of the current bundle were byte-identical. That bundle is
 - Hard calendar request/input/output/total/cost rules, bounded rolling request/input/output/total token buckets, per-request input/output/total bounds, durable request/stream concurrency leases, configured integer nano-USD attribution, supported context-stable quota snapshots, and bounded user limit-plan overrides are executable within their recorded capability gates. Input/total activation and nonzero input-priced hard cost require the restricted exact-model trusted preflight. Other cost algorithms, upstream-reported pricing, and the remaining multi-attempt/retry-cost work remain open.
 - Schema version 9 has one bounded recovery limitation: if a per-request-only entryless attempt expires, the worker cannot reconstruct the adapter-applied cap and therefore cannot add an unknown-output usage row. No durable capacity exists to recover or mutate for that rule shape; normal known settlement persists provider usage.
 - Apple App Attest, Play Integrity, and other native production attestation verification are not implemented in the server. The validated debug provider is test/development evidence only.
-- The override Admin API and CLI slice is implemented, but broader Admin API/dashboard/CLI resources, telemetry, the remaining durable jobs, current-image deployment smoke tests, and operational recovery gates remain.
+- The override Admin API and CLI slice plus the core dashboard resource tranche
+  are implemented. Dedicated structured editors for each configuration area,
+  remaining Admin/CLI ergonomics, richer trace visualization, telemetry gaps,
+  the remaining durable jobs, current-image deployment smoke tests, and
+  operational recovery gates remain.
 - Session refresh is intentionally credential-rotation-only. Identity
   reauthentication and attestation renewal or step-up require a new bound
   challenge and exchange as recorded in ADR 0020.

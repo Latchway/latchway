@@ -312,4 +312,23 @@ describe("AppShell", () => {
     expect(urls).toContain("/readyz");
     expect(urls).toContain("/admin/v1/auth/session");
   });
+
+  it("maps every named v1 dashboard area to literal authenticated navigation", async () => {
+    installConfiguredFetch();
+    renderConsole("/applications");
+
+    expect(await screen.findByRole("heading", { name: "Applications" })).toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
+    const labels = [
+      "Applications", "Environments", "Authentication providers", "Attestation",
+      "Users", "Installations", "Features", "Routes", "Upstreams", "Models & pricing",
+      "Secrets", "Access policies", "Limit plans", "User overrides", "Abuse controls",
+      "Requests", "Usage", "Cost", "Latency", "Errors", "Attestation failures",
+      "Configuration revisions", "Route simulator", "Self-tests", "Audit log", "System health"
+    ];
+    for (const label of labels) {
+      expect(within(navigation).getByText(label, { exact: true }).closest("a")).toBeTruthy();
+    }
+    expect(within(navigation).getByText("Applications", { exact: true }).closest("a")).toHaveAttribute("aria-current", "page");
+  });
 });
