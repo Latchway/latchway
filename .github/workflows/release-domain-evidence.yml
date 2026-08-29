@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - live_sdk_conformance
+          - physical_devices
           - live_provider
           - supply_chain
           - public_tags

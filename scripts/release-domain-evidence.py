@@ -69,6 +69,12 @@ CLAIM_REQUIREMENTS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
         "quota_snapshots": ("sdk.behavior.quota-snapshots",),
         "protocol_version_rejection": ("sdk.behavior.protocol-version-rejection",),
     },
+    "physical_devices": {
+        "app_attest_production_verified": ("sdk.ios.release-image",),
+        "play_integrity_play_distributed_verified": ("sdk.android.release-image",),
+        "react_native_ios_verified": ("sdk.react-native-ios.release-image",),
+        "react_native_android_verified": ("sdk.react-native-android.release-image",),
+    },
     "live_provider": {
         "openrouter_nonstreaming_verified": (
             "provider.gateway-identity",
@@ -128,6 +134,11 @@ OBSERVATION_TOOLS: Mapping[str, str] = {
     **{
         observation: "latchway-live-sdk-harness"
         for requirements in CLAIM_REQUIREMENTS["live_sdk_conformance"].values()
+        for observation in requirements
+    },
+    **{
+        observation: "latchway-live-sdk-harness"
+        for requirements in CLAIM_REQUIREMENTS["physical_devices"].values()
         for observation in requirements
     },
     **{

@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -55,6 +56,194 @@ SDK_BEHAVIOR_KEYS = {
     "sdk.behavior.quota-snapshots": "quota_snapshots",
     "sdk.behavior.protocol-version-rejection": "protocol_version_rejection",
 }
+LIVE_SDK_ENVIRONMENT_KEYS = frozenset(
+    {
+        "LATCHWAY_LIVE_SDK_APPLICATION_ID",
+        "LATCHWAY_LIVE_SDK_FEATURE",
+        "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
+        "LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER",
+        "LATCHWAY_LIVE_SDK_ENVIRONMENT",
+        "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
+        "LATCHWAY_LIVE_SDK_MODEL",
+        "LATCHWAY_LIVE_SDK_IDENTITY_TOKEN",
+        "LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN",
+    }
+)
+LIVE_SDK_JAVASCRIPT_TESTS = (
+    "dpop_authorized_request",
+    "dpop_replay_rejected",
+    "tampered_dpop_rejected",
+    "canonical_error_mapping",
+    "session_refresh_rotation",
+    "protocol_version_rejection",
+    "streamed_request",
+    "quota",
+    "installation_revocation",
+)
+LIVE_SDK_COMMON_PHYSICAL_TESTS = frozenset(
+    {
+        "physical_device",
+        "identifier_pins",
+        "dpop_authorized_request",
+        "dpop_replay_rejected",
+        "tampered_dpop_rejected",
+        "streamed_request",
+        "quota",
+        "canonical_error_mapping",
+        "session_refresh_rotation",
+        "installation_revocation",
+        "protocol_version_rejection",
+    }
+)
+LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
+    "ios": {
+        "repository_id": "ios",
+        "repository": "Latchway/latchway-ios-sdk",
+        "workflow": ".github/workflows/physical-app-attest.yml",
+        "artifact_prefix": "app-attest-physical",
+        "run_prefix": "app-attest",
+        "platform": "ios_app_attest",
+        "observation": "sdk.ios.release-image",
+        "profile": "app-attest-profile.json",
+        "evidence": "app-attest-evidence.json",
+        "mapped_error_type": "swift_latchway_problem",
+        "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
+        | {
+            "app_attest_supported",
+            "secure_enclave_key",
+            "app_attest_registration",
+            "session_created",
+            "app_attest_assertion",
+        },
+        "manifest": frozenset(
+            {
+                "app-attest-evidence.json",
+                "app-attest-junit.xml",
+                "app-attest-observation.json",
+                "app-attest-profile.json",
+                "app-attest-validation.json",
+                "gateway-client-policy.json",
+                "gateway-deployment-public-key.pem",
+                "gateway-deployment-statement.json",
+                "gateway-deployment-statement.sig",
+                "gateway-deployment-verification.json",
+                "device-inventory.json",
+            }
+        ),
+    },
+    "android": {
+        "repository_id": "android",
+        "repository": "Latchway/latchway-android",
+        "workflow": ".github/workflows/physical-play-integrity.yml",
+        "artifact_prefix": "play-integrity-physical",
+        "run_prefix": "play-integrity",
+        "platform": "android_play_integrity",
+        "observation": "sdk.android.release-image",
+        "profile": "play-integrity-profile.json",
+        "evidence": "play-integrity-evidence.json",
+        "mapped_error_type": "kotlin_latchway_exception",
+        "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
+        | {
+            "play_install_source",
+            "play_integrity_standard_request",
+            "hardware_backed_key",
+            "session_created",
+        },
+        "manifest": frozenset(
+            {
+                "device-inventory.json",
+                "gateway-client-policy.json",
+                "gateway-deployment-public-key.pem",
+                "gateway-deployment-statement.json",
+                "gateway-deployment-statement.sig",
+                "gateway-deployment-verification.json",
+                "installed-apk-set.sha256",
+                "play-integrity-evidence.json",
+                "play-integrity-junit.xml",
+                "play-integrity-observation.json",
+                "play-integrity-profile.json",
+                "play-integrity-validation.json",
+            }
+        ),
+    },
+    "react_native_ios": {
+        "repository_id": "react_native",
+        "repository": "Latchway/latchway-react-native-sdk",
+        "workflow": ".github/workflows/physical-device-evidence.yml",
+        "artifact_prefix": "react-native-ios-physical",
+        "run_prefix": "rn-ios",
+        "platform": "react_native_ios_app_attest",
+        "observation": "sdk.react-native-ios.release-image",
+        "profile": "react-native-ios-profile.json",
+        "evidence": "react-native-ios-evidence.json",
+        "mapped_error_type": "react_native_latchway_error",
+        "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
+        | {
+            "native_evidence_linked",
+            "react_native_bridge",
+            "app_attest_session",
+            "secure_enclave_key",
+        },
+        "manifest": frozenset(
+            {
+                "device-inventory.json",
+                "gateway-client-policy.json",
+                "gateway-deployment-public-key.pem",
+                "gateway-deployment-statement.json",
+                "gateway-deployment-statement.sig",
+                "gateway-deployment-verification.json",
+                "linked-ios-native-evidence.json",
+                "linked-ios-native-profile.json",
+                "react-native-ios-collection.json",
+                "react-native-ios-evidence.json",
+                "react-native-ios-junit.xml",
+                "react-native-ios-observation.json",
+                "react-native-ios-profile.json",
+                "react-native-ios-run.json",
+                "react-native-ios-validation.json",
+            }
+        ),
+    },
+    "react_native_android": {
+        "repository_id": "react_native",
+        "repository": "Latchway/latchway-react-native-sdk",
+        "workflow": ".github/workflows/physical-device-evidence.yml",
+        "artifact_prefix": "react-native-android-physical",
+        "run_prefix": "rn-android",
+        "platform": "react_native_android_play_integrity",
+        "observation": "sdk.react-native-android.release-image",
+        "profile": "react-native-android-profile.json",
+        "evidence": "react-native-android-evidence.json",
+        "mapped_error_type": "react_native_latchway_error",
+        "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
+        | {
+            "native_evidence_linked",
+            "react_native_bridge",
+            "play_integrity_session",
+            "hardware_backed_key",
+        },
+        "manifest": frozenset(
+            {
+                "device-inventory.json",
+                "gateway-client-policy.json",
+                "gateway-deployment-public-key.pem",
+                "gateway-deployment-statement.json",
+                "gateway-deployment-statement.sig",
+                "gateway-deployment-verification.json",
+                "installed-apk-set.sha256",
+                "linked-android-native-evidence.json",
+                "linked-android-native-profile.json",
+                "react-native-android-collection.json",
+                "react-native-android-evidence.json",
+                "react-native-android-junit.xml",
+                "react-native-android-observation.json",
+                "react-native-android-profile.json",
+                "react-native-android-run.json",
+                "react-native-android-validation.json",
+            }
+        ),
+    },
+}
 SAFE_ENVIRONMENT_KEYS = (
     "ANDROID_HOME",
     "ANDROID_SDK_ROOT",
@@ -82,7 +271,7 @@ ALLOWED_ENVIRONMENT_OVERRIDES = frozenset(
         "NPM_CONFIG_PROVENANCE",
         "NPM_CONFIG_USERCONFIG",
     )
-)
+) | LIVE_SDK_ENVIRONMENT_KEYS
 
 
 class ObservationError(EVIDENCE.EvidenceError):
@@ -221,6 +410,8 @@ class Observer:
         candidate: Path,
         output: Path,
         repositories: Mapping[str, Path],
+        live_sdk_receipts: Mapping[str, Path] | None = None,
+        live_sdk_runs: Mapping[str, tuple[str, str]] | None = None,
         now: datetime,
     ):
         EVIDENCE.protected_context()
@@ -233,6 +424,8 @@ class Observer:
         self.candidate_path = candidate
         self.output = output
         self.repositories = dict(repositories)
+        self.live_sdk_receipts = dict(live_sdk_receipts or {})
+        self.live_sdk_runs = dict(live_sdk_runs or {})
         self.now = now
         self.identity, self.candidate, self.candidate_created = EVIDENCE.identity_from_inputs(
             source, candidate, now
@@ -952,35 +1145,1074 @@ class Observer:
             raise ObservationError("swift_registry_resolution_invalid")
 
     def observe_live_sdk_conformance(self) -> None:
-        # Native and React Native release-image observations must come from the
-        # SDK repositories' protected self-hosted physical workflows.  The
-        # core hosted observer intentionally cannot substitute a simulator or
-        # fixture for those receipts.  A separate consumer is required to
-        # authenticate and merge those exact SDK attestations with a real JS
-        # live run before this domain can be finalized.
-        raise ObservationError("live_sdk_external_receipts_required")
+        self._observe_sdk_conformance(include_javascript=True)
+
+    def observe_physical_devices(self) -> None:
+        self._observe_sdk_conformance(include_javascript=False)
+
+    def _observe_sdk_conformance(self, *, include_javascript: bool) -> None:
+        gateway, token, javascript_environment, runs = self._live_sdk_configuration(
+            require_javascript=include_javascript
+        )
+
+        run_cache: dict[tuple[str, int], tuple[datetime, datetime]] = {}
+        receipts: dict[str, dict[str, Any]] = {}
+        for receipt_id, policy in LIVE_SDK_RECEIPTS.items():
+            run_key = "react_native" if receipt_id.startswith("react_native_") else receipt_id
+            run_id, run_attempt = runs[run_key]
+            coordinate = self.identity["repositories"][policy["repository_id"]]
+            cache_key = (policy["repository"], run_id)
+            if cache_key not in run_cache:
+                metadata = self._github_api(
+                    f"repos/{policy['repository']}/actions/runs/{run_id}", token
+                )
+                run_cache[cache_key] = self._validate_sdk_run_metadata(
+                    metadata,
+                    repository=policy["repository"],
+                    workflow=policy["workflow"],
+                    commit=coordinate["commit"],
+                    run_id=run_id,
+                    run_attempt=run_attempt,
+                    candidate_created=self.candidate_created,
+                    now=self.now,
+                )
+            workflow_started, workflow_finished = run_cache[cache_key]
+            artifact_name = (
+                f"{policy['artifact_prefix']}-{run_id}-{run_attempt}"
+            )
+            artifact = self._github_api(
+                f"repos/{policy['repository']}/actions/runs/{run_id}/artifacts"
+                f"?name={artifact_name}&per_page=100",
+                token,
+            )
+            self._validate_sdk_artifact_metadata(
+                artifact,
+                repository=policy["repository"],
+                commit=coordinate["commit"],
+                run_id=run_id,
+                name=artifact_name,
+            )
+            receipt = self._load_physical_receipt(
+                self.live_sdk_receipts[receipt_id], policy
+            )
+            self._verify_physical_attestations(
+                receipt,
+                policy=policy,
+                commit=coordinate["commit"],
+                token=token,
+            )
+            self._rerun_physical_validator(
+                receipt,
+                policy=policy,
+                commit=coordinate["commit"],
+                expected_run=f"{policy['run_prefix']}-{run_id}-{run_attempt}",
+            )
+            profile, evidence, summary, started, finished = (
+                self._validate_physical_receipt(
+                    receipt,
+                    policy=policy,
+                    gateway=gateway,
+                    run_id=run_id,
+                    run_attempt=run_attempt,
+                    artifact_name=artifact_name,
+                    workflow_started=workflow_started,
+                    workflow_finished=workflow_finished,
+                )
+            )
+            self._rerun_gateway_deployment_validator(
+                receipt,
+                policy=policy,
+                profile=profile,
+            )
+            receipts[receipt_id] = {
+                "receipt": receipt,
+                "profile": profile,
+                "evidence": evidence,
+                "summary": summary,
+                "started": started,
+                "finished": finished,
+            }
+
+        self._validate_common_gateway_binding(
+            receipts,
+            gateway,
+            javascript_environment if include_javascript else None,
+        )
+        self._validate_react_native_links(receipts)
+        platform_records = {}
+        for receipt_id, item in receipts.items():
+            policy = LIVE_SDK_RECEIPTS[receipt_id]
+            platform_records[policy["observation"]] = {
+                "summary": item["summary"],
+                "started": item["started"],
+                "finished": item["finished"],
+                "version": self.identity["repositories"][policy["repository_id"]][
+                    "version"
+                ],
+                "invocation": (
+                    "python3",
+                    "scripts/device-evidence.py",
+                    "verify",
+                    policy["profile"],
+                    policy["evidence"],
+                ),
+                "cwd": self.repositories[policy["repository_id"]],
+            }
+
+        if include_javascript:
+            javascript_payload, javascript_started, javascript_finished = (
+                self._run_javascript_live_harness(
+                    gateway=gateway, environment=javascript_environment
+                )
+            )
+            javascript_report = self._validate_javascript_report(
+                javascript_payload, self.identity, gateway
+            )
+            javascript_summary = self._platform_summary(
+                platform="javascript",
+                repository="Latchway/latchway-js",
+                workflow="scripts/live-conformance.mjs",
+                run_id=None,
+                run_attempt=None,
+                artifact_name=None,
+                profile=None,
+                evidence=javascript_report,
+                receipt_hashes={},
+            )
+            platform_records["sdk.javascript.release-image"] = {
+                "summary": javascript_summary,
+                "started": javascript_started,
+                "finished": javascript_finished,
+                "version": self.identity["repositories"]["javascript"]["version"],
+                "invocation": (
+                    "node",
+                    "scripts/live-conformance.mjs",
+                    "--candidate-manifest",
+                    "candidate-manifest.json",
+                    "--gateway",
+                    gateway,
+                ),
+                "cwd": self.repositories["javascript"],
+            }
+
+        for observation, item in platform_records.items():
+            self.emit(
+                observation,
+                canonical_json(item["summary"]),
+                started=item["started"],
+                finished=item["finished"],
+                version=item["version"],
+                invocation=item["invocation"],
+                cwd=item["cwd"],
+            )
+
+        if not include_javascript:
+            return
+
+        earliest = min(item["started"] for item in platform_records.values())
+        latest = max(item["finished"] for item in platform_records.values())
+        platform_summaries = [
+            platform_records[observation]["summary"]
+            for observation in sorted(platform_records)
+        ]
+        for observation, behavior in SDK_BEHAVIOR_KEYS.items():
+            payload = self._behavior_summary(
+                behavior, platform_summaries, self.identity
+            )
+            self.emit(
+                observation,
+                canonical_json(payload),
+                started=earliest,
+                finished=latest,
+                version="1.0.0",
+                invocation=("latchway-live-sdk-harness", "derive", behavior),
+            )
+
+    def _live_sdk_configuration(
+        self, *, require_javascript: bool,
+    ) -> tuple[str, str, dict[str, str], dict[str, tuple[int, int]]]:
+        if (
+            set(self.live_sdk_receipts) != set(LIVE_SDK_RECEIPTS)
+            or set(self.live_sdk_runs) != {"ios", "android", "react_native"}
+        ):
+            raise ObservationError("live_sdk_receipt_configuration_missing")
+        for path in self.live_sdk_receipts.values():
+            if not path.is_absolute() or not path.is_dir() or path.is_symlink():
+                raise ObservationError("live_sdk_receipt_directory_invalid")
+        parsed_runs: dict[str, tuple[int, int]] = {}
+        for name, values in self.live_sdk_runs.items():
+            if (
+                not isinstance(values, tuple)
+                or len(values) != 2
+                or not isinstance(values[0], str)
+                or not isinstance(values[1], str)
+                or EVIDENCE.RUN_ID.fullmatch(values[0]) is None
+                or re.fullmatch(r"[1-9][0-9]{0,5}", values[1]) is None
+            ):
+                raise ObservationError("live_sdk_run_identity_invalid")
+            parsed_runs[name] = (int(values[0]), int(values[1]))
+
+        required = {"GH_TOKEN", "LATCHWAY_BASE_URL"}
+        if require_javascript:
+            required |= set(LIVE_SDK_ENVIRONMENT_KEYS)
+        if any(not os.environ.get(name) for name in required):
+            raise ObservationError("live_sdk_configuration_missing")
+        gateway = os.environ["LATCHWAY_BASE_URL"].rstrip("/")
+        parsed = urlsplit(gateway)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ObservationError("live_sdk_gateway_invalid")
+        javascript_environment = (
+            {key: os.environ[key] for key in sorted(LIVE_SDK_ENVIRONMENT_KEYS)}
+            if require_javascript
+            else {}
+        )
+        return gateway, os.environ["GH_TOKEN"], javascript_environment, parsed_runs
+
+    def _github_api(self, endpoint: str, token: str) -> Any:
+        payload, _, _ = self._execute_command(
+            (
+                "gh",
+                "api",
+                "--method",
+                "GET",
+                "-H",
+                "Accept: application/vnd.github+json",
+                "-H",
+                "X-GitHub-Api-Version: 2022-11-28",
+                endpoint,
+            ),
+            environment={"GH_TOKEN": token},
+            timeout=60,
+        )
+        return load_output(payload, "live_sdk_github_metadata_invalid")
 
     @staticmethod
-    def _validate_sdk_report(
-        payload: bytes,
-        observation: str,
-        identity: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        report = load_output(payload, "live_sdk_report_invalid")
-        if not isinstance(report, dict):
-            raise ObservationError("live_sdk_report_invalid")
+    def _validate_sdk_run_metadata(
+        value: Any,
+        *,
+        repository: str,
+        workflow: str,
+        commit: str,
+        run_id: int,
+        run_attempt: int,
+        candidate_created: datetime,
+        now: datetime,
+    ) -> tuple[datetime, datetime]:
         if (
-            report.get("candidate") != identity
-            or report.get("platform_observation") != observation
-            or not isinstance(report.get("behaviors"), dict)
+            not isinstance(value, dict)
+            or not isinstance(value.get("id"), int)
+            or isinstance(value.get("id"), bool)
+            or value["id"] != run_id
+            or not isinstance(value.get("run_attempt"), int)
+            or isinstance(value.get("run_attempt"), bool)
+            or value["run_attempt"] != run_attempt
+            or value.get("event") != "workflow_dispatch"
+            or value.get("status") != "completed"
+            or value.get("conclusion") != "success"
+            or value.get("head_sha") != commit
+            or value.get("head_branch") != "main"
+            or value.get("path") != workflow
+            or nested(value, "repository", "full_name") != repository
+            or nested(value, "head_repository", "full_name") != repository
         ):
-            raise ObservationError("live_sdk_report_identity_invalid")
-        if set(report["behaviors"]) != set(SDK_BEHAVIOR_KEYS.values()):
-            raise ObservationError("live_sdk_behavior_set_invalid")
-        if any(value is not True for value in report["behaviors"].values()):
-            raise ObservationError("live_sdk_behavior_missing")
+            raise ObservationError("live_sdk_run_metadata_invalid")
+        try:
+            created = EVIDENCE.parse_time(
+                value.get("created_at"), "live_sdk_run_metadata_invalid"
+            )
+            started = EVIDENCE.parse_time(
+                value.get("run_started_at"), "live_sdk_run_metadata_invalid"
+            )
+            finished = EVIDENCE.parse_time(
+                value.get("updated_at"), "live_sdk_run_metadata_invalid"
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_run_metadata_invalid") from None
+        if (
+            created < candidate_created
+            or created > started
+            or started >= finished
+            or finished > now
+            or now - finished > EVIDENCE.MAXIMUM_AGE
+            or finished - started > EVIDENCE.timedelta(hours=2)
+        ):
+            raise ObservationError("live_sdk_run_metadata_invalid")
+        return started, finished
+
+    @staticmethod
+    def _validate_sdk_artifact_metadata(
+        value: Any,
+        *,
+        repository: str,
+        commit: str,
+        run_id: int,
+        name: str,
+    ) -> None:
+        artifacts = value.get("artifacts") if isinstance(value, dict) else None
+        if (
+            not isinstance(value, dict)
+            or not isinstance(value.get("total_count"), int)
+            or isinstance(value.get("total_count"), bool)
+            or value["total_count"] != 1
+            or not isinstance(artifacts, list)
+            or len(artifacts) != 1
+        ):
+            raise ObservationError("live_sdk_artifact_metadata_invalid")
+        artifact = artifacts[0]
+        download = artifact.get("archive_download_url") if isinstance(artifact, dict) else None
+        if (
+            not isinstance(artifact, dict)
+            or artifact.get("name") != name
+            or artifact.get("expired") is not False
+            or not isinstance(artifact.get("id"), int)
+            or isinstance(artifact.get("id"), bool)
+            or artifact["id"] < 1
+            or not isinstance(artifact.get("size_in_bytes"), int)
+            or isinstance(artifact.get("size_in_bytes"), bool)
+            or not 1 <= artifact["size_in_bytes"] <= EVIDENCE.MAXIMUM_DOMAIN_BYTES
+            or not isinstance(nested(artifact, "workflow_run", "id"), int)
+            or isinstance(nested(artifact, "workflow_run", "id"), bool)
+            or nested(artifact, "workflow_run", "id") != run_id
+            or nested(artifact, "workflow_run", "head_sha") != commit
+            or not isinstance(download, str)
+            or download
+            != (
+                f"https://api.github.com/repos/{repository}/actions/artifacts/"
+                f"{artifact['id']}/zip"
+            )
+        ):
+            raise ObservationError("live_sdk_artifact_metadata_invalid")
+
+    @staticmethod
+    def _parse_checksum_manifest(payload: bytes, expected: set[str]) -> dict[str, str]:
+        EVIDENCE.scan_safe(payload)
+        try:
+            text = payload.decode("ascii")
+        except UnicodeDecodeError:
+            raise ObservationError("live_sdk_checksum_manifest_invalid") from None
+        if not text.endswith("\n"):
+            raise ObservationError("live_sdk_checksum_manifest_invalid")
+        checksums: dict[str, str] = {}
+        for line in text.splitlines():
+            match = re.fullmatch(
+                r"([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]{0,127})", line
+            )
+            if match is None or match.group(2) in checksums:
+                raise ObservationError("live_sdk_checksum_manifest_invalid")
+            checksums[match.group(2)] = match.group(1)
+        if set(checksums) != expected:
+            raise ObservationError("live_sdk_checksum_manifest_invalid")
+        return checksums
+
+    def _load_physical_receipt(
+        self, root: Path, policy: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        expected_manifest = set(policy["manifest"])
+        expected_files = expected_manifest | {
+            "SHA256SUMS",
+            "github-attestation.sigstore.json",
+        }
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            raise ObservationError("live_sdk_receipt_directory_invalid") from None
+        if {child.name for child in children} != expected_files:
+            raise ObservationError("live_sdk_receipt_file_set_invalid")
+        payloads: dict[str, bytes] = {}
+        total_bytes = 0
+        for child in children:
+            try:
+                child.relative_to(root)
+            except ValueError:
+                raise ObservationError("live_sdk_receipt_file_invalid") from None
+            try:
+                payload = EVIDENCE.read_bytes(child, EVIDENCE.MAXIMUM_RAW_BYTES)
+                EVIDENCE.scan_safe(payload)
+            except EVIDENCE.EvidenceError:
+                raise ObservationError("live_sdk_receipt_file_invalid") from None
+            total_bytes += len(payload)
+            if total_bytes > EVIDENCE.MAXIMUM_DOMAIN_BYTES:
+                raise ObservationError("live_sdk_receipt_file_invalid")
+            payloads[child.name] = payload
+        checksums = self._parse_checksum_manifest(
+            payloads["SHA256SUMS"], expected_manifest
+        )
+        for name, expected in checksums.items():
+            if hashlib.sha256(payloads[name]).hexdigest() != expected:
+                raise ObservationError("live_sdk_receipt_checksum_mismatch")
+        return {
+            "root": root,
+            "payloads": payloads,
+            "checksums": checksums,
+            "initial_hashes": {
+                name: hashlib.sha256(payload).hexdigest()
+                for name, payload in payloads.items()
+            },
+        }
+
+    def _verify_physical_attestations(
+        self,
+        receipt: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any],
+        commit: str,
+        token: str,
+    ) -> None:
+        root = receipt["root"]
+        bundle = root / "github-attestation.sigstore.json"
+        for subject_name in (policy["profile"], policy["evidence"], "SHA256SUMS"):
+            payload, _, _ = self._execute_command(
+                (
+                    "gh",
+                    "attestation",
+                    "verify",
+                    str(root / subject_name),
+                    "--bundle",
+                    str(bundle),
+                    "--repo",
+                    policy["repository"],
+                    "--signer-workflow",
+                    f"{policy['repository']}/{policy['workflow']}",
+                    "--source-digest",
+                    commit,
+                    "--signer-digest",
+                    commit,
+                    "--source-ref",
+                    "refs/heads/main",
+                    "--format",
+                    "json",
+                ),
+                environment={"GH_TOKEN": token},
+                timeout=120,
+            )
+            result = load_output(payload, "live_sdk_attestation_invalid")
+            if not isinstance(result, list) or not result:
+                raise ObservationError("live_sdk_attestation_invalid")
+
+    def _rerun_physical_validator(
+        self,
+        receipt: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any],
+        commit: str,
+        expected_run: str,
+    ) -> None:
+        repository = self.repositories[policy["repository_id"]]
+        with tempfile.TemporaryDirectory(
+            prefix="latchway-live-sdk-validator-",
+            dir=os.environ.get("RUNNER_TEMP") or None,
+        ) as temporary:
+            temporary_root = Path(temporary)
+            summary_path = temporary_root / "summary.json"
+            command = (
+                "python3",
+                str(repository / "scripts" / "device-evidence.py"),
+                "verify",
+                "--schema",
+                str(repository / "Conformance" / "physical-device-evidence.schema.json"),
+                "--profile",
+                str(receipt["root"] / policy["profile"]),
+                "--evidence",
+                str(receipt["root"] / policy["evidence"]),
+                "--junit",
+                str(temporary_root / "junit.xml"),
+                "--summary",
+                str(summary_path),
+            )
+            self._execute_command(
+                command, cwd=repository, timeout=120
+            )
+            summary = load_output(
+                EVIDENCE.read_bytes(summary_path),
+                "live_sdk_validator_summary_invalid",
+            )
+            evidence_hash = hashlib.sha256(
+                receipt["payloads"][policy["evidence"]]
+            ).hexdigest()
+            if (
+                not isinstance(summary, dict)
+                or summary.get("valid") is not True
+                or summary.get("errors") != []
+                or summary.get("platform") != policy["platform"]
+                or summary.get("source_commit") != commit
+                or summary.get("run_id") != expected_run
+                or summary.get("evidence_sha256") != evidence_hash
+            ):
+                raise ObservationError("live_sdk_validator_summary_invalid")
+        self._ensure_receipt_unchanged(receipt)
+
+    def _rerun_gateway_deployment_validator(
+        self,
+        receipt: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any],
+        profile: Mapping[str, Any],
+    ) -> None:
+        repository = self.repositories[policy["repository_id"]]
+        pins = profile["expected_pins"]
+        root = receipt["root"]
+        command = (
+            "python3",
+            str(repository / "scripts" / "verify-gateway-deployment.py"),
+            "--statement",
+            str(root / "gateway-deployment-statement.json"),
+            "--signature",
+            str(root / "gateway-deployment-statement.sig"),
+            "--public-key",
+            str(root / "gateway-deployment-public-key.pem"),
+            "--public-key-sha256",
+            pins["gateway_deployment_public_key_sha256"],
+            "--client-policy",
+            str(root / "gateway-client-policy.json"),
+            "--key-id",
+            pins["gateway_deployment_key_id"],
+            "--gateway-origin",
+            pins["gateway_origin"],
+            "--environment",
+            pins["gateway_environment"],
+            "--core-commit",
+            self.identity["core_commit"],
+            "--contract-version",
+            self.identity["contract_version"],
+            "--contract-bundle-sha256",
+            self.identity["bundle_sha256"],
+            "--gateway-image-digest",
+            self.candidate["image"]["index_digest"],
+            "--gateway-configuration-sha256",
+            pins["gateway_configuration_sha256"],
+        )
+        payload, _, _ = self._execute_command(
+            command,
+            cwd=repository,
+            timeout=120,
+        )
+        if payload != receipt["payloads"]["gateway-deployment-verification.json"]:
+            raise ObservationError("live_sdk_gateway_verification_invalid")
+        self._ensure_receipt_unchanged(receipt)
+
+    @staticmethod
+    def _ensure_receipt_unchanged(receipt: Mapping[str, Any]) -> None:
+        root = receipt["root"]
+        try:
+            names = {path.name for path in root.iterdir()}
+        except OSError:
+            raise ObservationError("live_sdk_receipt_changed") from None
+        if names != set(receipt["initial_hashes"]):
+            raise ObservationError("live_sdk_receipt_changed")
+        for name, expected in receipt["initial_hashes"].items():
+            try:
+                actual = EVIDENCE.sha256_file(
+                    root / name, EVIDENCE.MAXIMUM_RAW_BYTES
+                )
+            except EVIDENCE.EvidenceError:
+                raise ObservationError("live_sdk_receipt_changed") from None
+            if actual != expected:
+                raise ObservationError("live_sdk_receipt_changed")
+
+    def _validate_physical_receipt(
+        self,
+        receipt: Mapping[str, Any],
+        *,
+        policy: Mapping[str, Any],
+        gateway: str,
+        run_id: int,
+        run_attempt: int,
+        artifact_name: str,
+        workflow_started: datetime,
+        workflow_finished: datetime,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any],
+        dict[str, Any],
+        datetime,
+        datetime,
+    ]:
+        profile = load_output(
+            receipt["payloads"][policy["profile"]],
+            "live_sdk_profile_invalid",
+        )
+        evidence = load_output(
+            receipt["payloads"][policy["evidence"]],
+            "live_sdk_evidence_invalid",
+        )
+        coordinate = self.identity["repositories"][policy["repository_id"]]
+        source = profile.get("source") if isinstance(profile, dict) else None
+        expected_pins = profile.get("expected_pins") if isinstance(profile, dict) else None
+        image_digest = self.candidate["image"]["index_digest"]
+        expected_source = {
+            "commit": coordinate["commit"],
+            "core_commit": self.identity["core_commit"],
+            "sdk_version": coordinate["version"],
+            "contract_version": self.identity["contract_version"],
+            "contract_bundle_sha256": self.identity["bundle_sha256"],
+            "gateway_image_digest": image_digest,
+            "gateway_origin": gateway,
+        }
+        if (
+            not isinstance(profile, dict)
+            or profile.get("platform") != policy["platform"]
+            or profile.get("repository") != policy["repository"]
+            or not isinstance(source, dict)
+            or source.get("worktree_clean") is not True
+            or any(source.get(key) != value for key, value in expected_source.items())
+            or not isinstance(expected_pins, dict)
+            or expected_pins.get("source_commit") != coordinate["commit"]
+            or expected_pins.get("core_commit") != self.identity["core_commit"]
+            or expected_pins.get("contract_bundle_sha256")
+            != self.identity["bundle_sha256"]
+            or expected_pins.get("gateway_image_digest") != image_digest
+            or expected_pins.get("gateway_origin") != gateway
+        ):
+            raise ObservationError("live_sdk_profile_identity_invalid")
+        expected_run = f"{policy['run_prefix']}-{run_id}-{run_attempt}"
+        try:
+            evidence_started = EVIDENCE.parse_time(
+                nested(evidence, "run", "started_at"),
+                "live_sdk_evidence_time_invalid",
+            )
+            evidence_finished = EVIDENCE.parse_time(
+                nested(evidence, "run", "completed_at"),
+                "live_sdk_evidence_time_invalid",
+            )
+            evidence_generated = EVIDENCE.parse_time(
+                evidence.get("generated_at") if isinstance(evidence, dict) else None,
+                "live_sdk_evidence_time_invalid",
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_evidence_time_invalid") from None
+        if (
+            workflow_started > evidence_started
+            or evidence_started < self.candidate_created
+            or evidence_started >= evidence_finished
+            or evidence_finished > evidence_generated
+            or evidence_generated > workflow_finished
+            or workflow_finished > self.now
+            or evidence_finished - evidence_started > EVIDENCE.timedelta(hours=2)
+            or evidence_generated - evidence_finished > EVIDENCE.timedelta(hours=1)
+            or self.now - workflow_finished > EVIDENCE.MAXIMUM_AGE
+        ):
+            raise ObservationError("live_sdk_evidence_time_invalid")
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("platform") != policy["platform"]
+            or evidence.get("release_eligible") is not True
+            or evidence.get("source") != source
+            or nested(evidence, "run", "id") != expected_run
+            or nested(evidence, "run", "mode") != "release"
+            or nested(evidence, "device", "physical") is not True
+            or nested(evidence, "device", "simulator") is not False
+            or nested(evidence, "device", "emulator") is not False
+            or nested(evidence, "device", "testing") is not False
+            or nested(evidence, "device", "debugger_attached") is not False
+            or nested(evidence, "provider", "environment") != "production"
+            or nested(evidence, "provider", "request_hash_bound") is not True
+        ):
+            raise ObservationError("live_sdk_evidence_identity_invalid")
+        self._validate_concrete_tests(
+            evidence.get("tests"),
+            expected=set(policy["tests"]),
+            mapped_error_type=policy["mapped_error_type"],
+            javascript=False,
+        )
+        summary = self._platform_summary(
+            platform=policy["platform"],
+            repository=policy["repository"],
+            workflow=policy["workflow"],
+            run_id=run_id,
+            run_attempt=run_attempt,
+            artifact_name=artifact_name,
+            profile=profile,
+            evidence=evidence,
+            receipt_hashes=receipt["initial_hashes"],
+        )
+        return profile, evidence, summary, evidence_started, evidence_generated
+
+    @staticmethod
+    def _validate_concrete_tests(
+        value: Any,
+        *,
+        expected: set[str],
+        mapped_error_type: str,
+        javascript: bool,
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, list):
+            raise ObservationError("live_sdk_test_set_invalid")
+        tests: dict[str, dict[str, Any]] = {}
+        for test in value:
+            if (
+                not isinstance(test, dict)
+                or not isinstance(test.get("id"), str)
+                or test["id"] in tests
+                or test.get("status") != "passed"
+            ):
+                raise ObservationError("live_sdk_test_set_invalid")
+            tests[test["id"]] = test
+        if set(tests) != expected:
+            raise ObservationError("live_sdk_test_set_invalid")
+        request_id = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+        negative = {
+            "dpop_replay_rejected": (401, "dpop_replayed"),
+            "tampered_dpop_rejected": (401, "dpop_invalid"),
+            "canonical_error_mapping": (404, "feature_not_found"),
+            "installation_revocation": (403, "installation_revoked"),
+            "protocol_version_rejection": (426, "protocol_version_unsupported"),
+        }
+        for identifier, (status, code) in negative.items():
+            test = tests.get(identifier, {})
+            if (
+                test.get("http_status") != status
+                or test.get("error_code") != code
+                or request_id.fullmatch(str(test.get("request_id", ""))) is None
+            ):
+                raise ObservationError("live_sdk_concrete_behavior_invalid")
+        if (
+            tests["canonical_error_mapping"].get("mapped_error_type")
+            != mapped_error_type
+            or tests["protocol_version_rejection"].get("protocol_version_sent")
+            != 0
+        ):
+            raise ObservationError("live_sdk_concrete_behavior_invalid")
+        rotation = tests["session_refresh_rotation"]
+        hashes = (
+            rotation.get("credential_before_sha256"),
+            rotation.get("credential_after_sha256"),
+            rotation.get("installation_before_sha256"),
+            rotation.get("installation_after_sha256"),
+        )
+        if (
+            any(EVIDENCE.SHA256.fullmatch(str(item)) is None for item in hashes)
+            or hashes[0] == hashes[1]
+            or hashes[2] != hashes[3]
+        ):
+            raise ObservationError("live_sdk_concrete_behavior_invalid")
+        authorized = tests["dpop_authorized_request"]
+        streamed = tests["streamed_request"]
+        if (
+            not isinstance(authorized.get("http_status"), int)
+            or not 200 <= authorized["http_status"] < 300
+            or request_id.fullmatch(str(authorized.get("request_id", ""))) is None
+            or not isinstance(streamed.get("http_status"), int)
+            or not 200 <= streamed["http_status"] < 300
+            or request_id.fullmatch(str(streamed.get("request_id", ""))) is None
+        ):
+            raise ObservationError("live_sdk_concrete_behavior_invalid")
+        if javascript:
+            quota = tests["quota"]
+            if (
+                not isinstance(streamed.get("byte_count"), int)
+                or isinstance(streamed.get("byte_count"), bool)
+                or not 1 <= streamed["byte_count"] <= 1_048_576
+                or not isinstance(quota.get("limit_count"), int)
+                or isinstance(quota.get("limit_count"), bool)
+                or quota["limit_count"] < 1
+                or not isinstance(quota.get("metrics"), list)
+                or not quota["metrics"]
+                or any(not isinstance(item, str) or not item for item in quota["metrics"])
+            ):
+                raise ObservationError("live_sdk_concrete_behavior_invalid")
+        return tests
+
+    @staticmethod
+    def _validate_common_gateway_binding(
+        receipts: Mapping[str, Mapping[str, Any]],
+        gateway: str,
+        javascript_environment: Mapping[str, str] | None,
+    ) -> None:
+        keys = (
+            "gateway_image_digest",
+            "gateway_configuration_sha256",
+            "gateway_origin",
+            "gateway_environment",
+            "gateway_deployment_key_id",
+            "gateway_deployment_statement_sha256",
+            "gateway_deployment_public_key_sha256",
+            "error_mapping_feature",
+        )
+        bindings = []
+        for item in receipts.values():
+            pins = item["profile"].get("expected_pins")
+            if not isinstance(pins, dict) or any(not pins.get(key) for key in keys):
+                raise ObservationError("live_sdk_gateway_binding_invalid")
+            bindings.append(tuple(pins[key] for key in keys))
+        if not bindings or any(binding != bindings[0] for binding in bindings[1:]) or bindings[0][2] != gateway:
+            raise ObservationError("live_sdk_gateway_binding_invalid")
+        if javascript_environment is not None and (
+            bindings[0][3]
+            != javascript_environment["LATCHWAY_LIVE_SDK_ENVIRONMENT"]
+            or bindings[0][7]
+            != javascript_environment["LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE"]
+        ):
+            raise ObservationError("live_sdk_gateway_binding_invalid")
+
+    @staticmethod
+    def _validate_react_native_links(
+        receipts: Mapping[str, Mapping[str, Any]]
+    ) -> None:
+        links = (
+            (
+                "react_native_ios",
+                "ios",
+                "linked-ios-native-profile.json",
+                "linked-ios-native-evidence.json",
+            ),
+            (
+                "react_native_android",
+                "android",
+                "linked-android-native-profile.json",
+                "linked-android-native-evidence.json",
+            ),
+        )
+        for react_native, native, linked_profile, linked_evidence in links:
+            rn = receipts[react_native]
+            source = receipts[native]
+            rn_payloads = rn["receipt"]["payloads"]
+            source_payloads = source["receipt"]["payloads"]
+            native_policy = LIVE_SDK_RECEIPTS[native]
+            if (
+                rn_payloads[linked_profile] != source_payloads[native_policy["profile"]]
+                or rn_payloads[linked_evidence]
+                != source_payloads[native_policy["evidence"]]
+                or nested(rn["profile"], "expected_pins", "native_evidence_sha256")
+                != hashlib.sha256(rn_payloads[linked_evidence]).hexdigest()
+                or nested(rn["profile"], "expected_pins", "native_sdk_version")
+                != nested(source["profile"], "source", "sdk_version")
+            ):
+                raise ObservationError("live_sdk_native_link_invalid")
+
+    def _run_javascript_live_harness(
+        self, *, gateway: str, environment: Mapping[str, str]
+    ) -> tuple[bytes, datetime, datetime]:
+        repository = self.repositories["javascript"]
+        with tempfile.TemporaryDirectory(
+            prefix="latchway-live-javascript-",
+            dir=os.environ.get("RUNNER_TEMP") or None,
+        ) as temporary:
+            manifest = Path(temporary) / "candidate-manifest.json"
+            write_bytes(
+                manifest,
+                canonical_json(
+                    {
+                        "schema_version": 1,
+                        "kind": "latchway_live_sdk_candidate",
+                        "candidate": self.identity,
+                        "gateway_origin": gateway,
+                    }
+                ),
+            )
+            return self._execute_command(
+                (
+                    "node",
+                    str(repository / "scripts" / "live-conformance.mjs"),
+                    "--candidate-manifest",
+                    str(manifest),
+                    "--gateway",
+                    gateway,
+                ),
+                cwd=repository,
+                environment=environment,
+                timeout=20 * 60,
+            )
+
+    @classmethod
+    def _validate_javascript_report(
+        cls, payload: bytes, identity: Mapping[str, Any], gateway: str
+    ) -> dict[str, Any]:
+        report = load_output(payload, "live_sdk_javascript_report_invalid")
+        build = nested(report, "gateway", "build")
+        if (
+            not isinstance(report, dict)
+            or set(report)
+            != {
+                "schema_version",
+                "kind",
+                "platform",
+                "candidate",
+                "gateway",
+                "tests",
+                "redaction",
+            }
+            or report.get("schema_version") != 1
+            or report.get("kind") != "latchway_live_javascript_observation"
+            or report.get("platform") != "javascript"
+            or report.get("candidate") != identity
+            or nested(report, "gateway", "origin") != gateway
+            or nested(report, "gateway", "status") != "ok"
+            or not isinstance(build, dict)
+            or build.get("commit") != identity["core_commit"]
+            or build.get("version") != identity["repositories"]["core"]["version"]
+            or build.get("contract_version") != identity["contract_version"]
+            or str(build.get("protocol_version")) != "1"
+            or not isinstance(report.get("redaction"), dict)
+            or any(value is not False for value in report["redaction"].values())
+        ):
+            raise ObservationError("live_sdk_javascript_report_invalid")
+        cls._validate_concrete_tests(
+            report.get("tests"),
+            expected=set(LIVE_SDK_JAVASCRIPT_TESTS),
+            mapped_error_type="javascript_latchway_error",
+            javascript=True,
+        )
         return report
 
+    def _platform_summary(
+        self,
+        *,
+        platform: str,
+        repository: str,
+        workflow: str,
+        run_id: int | None,
+        run_attempt: int | None,
+        artifact_name: str | None,
+        profile: Mapping[str, Any] | None,
+        evidence: Mapping[str, Any],
+        receipt_hashes: Mapping[str, str],
+    ) -> dict[str, Any]:
+        tests = evidence.get("tests")
+        concrete = [
+            self._redacted_test_record(test)
+            for test in tests
+            if isinstance(test, dict) and test.get("id") in self._behavior_test_ids()
+        ]
+        source = (
+            profile.get("source", {}) if profile is not None else {
+                "commit": self.identity["repositories"]["javascript"]["commit"],
+                "core_commit": self.identity["core_commit"],
+                "sdk_version": self.identity["repositories"]["javascript"]["version"],
+                "contract_version": self.identity["contract_version"],
+                "contract_bundle_sha256": self.identity["bundle_sha256"],
+                "gateway_image_digest": self.candidate["image"]["index_digest"],
+                "gateway_origin": nested(evidence, "gateway", "origin"),
+            }
+        )
+        summary = {
+            "schema_version": 1,
+            "kind": "latchway_live_sdk_validated_platform",
+            "platform": platform,
+            "candidate": self.identity,
+            "producer": {
+                "repository": repository,
+                "workflow": workflow,
+                "run_id": run_id,
+                "run_attempt": run_attempt,
+                "artifact_name": artifact_name,
+            },
+            "source": {
+                key: source.get(key)
+                for key in (
+                    "commit",
+                    "core_commit",
+                    "sdk_version",
+                    "contract_version",
+                    "contract_bundle_sha256",
+                    "gateway_image_digest",
+                    "gateway_configuration_sha256",
+                    "gateway_origin",
+                )
+                if source.get(key) is not None
+            },
+            "receipt_sha256": dict(sorted(receipt_hashes.items())),
+            "concrete_tests": sorted(concrete, key=lambda item: item["id"]),
+        }
+        EVIDENCE.scan_safe(canonical_json(summary))
+        return summary
+
+    @staticmethod
+    def _behavior_test_ids() -> frozenset[str]:
+        return frozenset(
+            {
+                "dpop_authorized_request",
+                "dpop_replay_rejected",
+                "tampered_dpop_rejected",
+                "canonical_error_mapping",
+                "session_refresh_rotation",
+                "installation_revocation",
+                "streamed_request",
+                "quota",
+                "protocol_version_rejection",
+            }
+        )
+
+    @staticmethod
+    def _redacted_test_record(test: Mapping[str, Any]) -> dict[str, Any]:
+        safe_fields = (
+            "id",
+            "http_status",
+            "error_code",
+            "mapped_error_type",
+            "credential_before_sha256",
+            "credential_after_sha256",
+            "installation_before_sha256",
+            "installation_after_sha256",
+            "protocol_version_sent",
+            "byte_count",
+            "feature",
+            "limit_count",
+            "metrics",
+        )
+        value = {key: test[key] for key in safe_fields if key in test}
+        request_id = test.get("request_id")
+        if isinstance(request_id, str):
+            value["request_id_sha256"] = hashlib.sha256(
+                request_id.encode("utf-8")
+            ).hexdigest()
+        value["record_sha256"] = hashlib.sha256(canonical_json(test)).hexdigest()
+        return value
+
+    @classmethod
+    def _behavior_summary(
+        cls,
+        behavior: str,
+        platform_summaries: Sequence[Mapping[str, Any]],
+        identity: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        mapping = {
+            "dpop_vectors": {
+                "dpop_authorized_request",
+                "dpop_replay_rejected",
+                "tampered_dpop_rejected",
+            },
+            "error_mapping": {"canonical_error_mapping"},
+            "session_refresh": {"session_refresh_rotation"},
+            "installation_revocation": {"installation_revocation"},
+            "streaming": {"streamed_request"},
+            "quota_snapshots": {"quota"},
+            "protocol_version_rejection": {"protocol_version_rejection"},
+        }
+        selected = []
+        for platform in platform_summaries:
+            tests = [
+                test
+                for test in platform["concrete_tests"]
+                if test.get("id") in mapping[behavior]
+            ]
+            if {test.get("id") for test in tests} != mapping[behavior]:
+                raise ObservationError("live_sdk_behavior_set_invalid")
+            selected.append(
+                {
+                    "platform": platform["platform"],
+                    "producer": platform["producer"],
+                    "tests": tests,
+                }
+            )
+        if len(selected) != 5:
+            raise ObservationError("live_sdk_behavior_set_invalid")
+        result = {
+            "schema_version": 1,
+            "kind": "latchway_live_sdk_validated_behavior",
+            "behavior": behavior,
+            "candidate": identity,
+            "platforms": selected,
+        }
+        EVIDENCE.scan_safe(canonical_json(result))
+        return result
 
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
@@ -990,6 +2222,14 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--output-directory", type=Path, required=True)
     for repository_id in REPOSITORY_NAMES:
         value.add_argument(f"--{repository_id.replace('_', '-')}-repo", type=Path, required=True)
+    for receipt_id in LIVE_SDK_RECEIPTS:
+        value.add_argument(
+            f"--{receipt_id.replace('_', '-')}-receipt-directory", type=Path
+        )
+    for run_id in ("ios", "android", "react_native"):
+        option = run_id.replace("_", "-")
+        value.add_argument(f"--{option}-run-id")
+        value.add_argument(f"--{option}-run-attempt")
     return value
 
 
@@ -999,6 +2239,20 @@ def main() -> int:
         repository_id: getattr(arguments, f"{repository_id}_repo")
         for repository_id in REPOSITORY_NAMES
     }
+    live_sdk_receipts = {
+        receipt_id: getattr(arguments, f"{receipt_id}_receipt_directory")
+        for receipt_id in LIVE_SDK_RECEIPTS
+        if getattr(arguments, f"{receipt_id}_receipt_directory") is not None
+    }
+    live_sdk_runs = {
+        run_id: (
+            getattr(arguments, f"{run_id}_run_id"),
+            getattr(arguments, f"{run_id}_run_attempt"),
+        )
+        for run_id in ("ios", "android", "react_native")
+        if getattr(arguments, f"{run_id}_run_id") is not None
+        or getattr(arguments, f"{run_id}_run_attempt") is not None
+    }
     try:
         observer = Observer(
             domain=arguments.domain,
@@ -1006,11 +2260,17 @@ def main() -> int:
             candidate=arguments.candidate_manifest,
             output=arguments.output_directory,
             repositories=repositories,
+            live_sdk_receipts=live_sdk_receipts,
+            live_sdk_runs=live_sdk_runs,
             now=datetime.now(timezone.utc).replace(microsecond=0),
         )
         observer.observe()
     except (ObservationError, EVIDENCE.EvidenceError, OSError) as error:
-        code = str(error) if isinstance(error, EVIDENCE.EvidenceError) else "observation_io_failed"
+        code = (
+            str(error)
+            if isinstance(error, (ObservationError, EVIDENCE.EvidenceError))
+            else "observation_io_failed"
+        )
         print(f"release domain observation rejected: {code}", file=sys.stderr)
         return 1
     print(json.dumps({"domain": arguments.domain, "observations": len(EVIDENCE.expected_observations(arguments.domain))}, sort_keys=True))

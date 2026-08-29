@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - live_sdk_conformance
+          - physical_devices
           - live_provider
           - supply_chain
           - public_tags
@@ -40,6 +41,30 @@ on:
       candidate_run_id:
         description: Successful attested immutable-candidate run ID
         required: true
+        type: string
+      ios_physical_run_id:
+        description: Exact successful Physical App Attest evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      ios_physical_run_attempt:
+        description: Exact Physical App Attest run attempt (SDK/device domains only)
+        required: false
+        type: string
+      android_physical_run_id:
+        description: Exact successful Physical Play Integrity evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      android_physical_run_attempt:
+        description: Exact Physical Play Integrity run attempt (SDK/device domains only)
+        required: false
+        type: string
+      react_native_physical_run_id:
+        description: Exact successful Physical React Native evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      react_native_physical_run_attempt:
+        description: Exact Physical React Native run attempt (SDK/device domains only)
+        required: false
         type: string
 
 permissions:
@@ -109,12 +134,27 @@ jobs:
           REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
           SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
+          IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
+          ANDROID_PHYSICAL_RUN_ID: ${{ inputs.android_physical_run_id }}
+          ANDROID_PHYSICAL_RUN_ATTEMPT: ${{ inputs.android_physical_run_attempt }}
+          REACT_NATIVE_PHYSICAL_RUN_ID: ${{ inputs.react_native_physical_run_id }}
+          REACT_NATIVE_PHYSICAL_RUN_ATTEMPT: ${{ inputs.react_native_physical_run_attempt }}
         run: |
           for value in "$CANDIDATE_COMMIT" "$JAVASCRIPT_COMMIT" "$IOS_COMMIT" "$ANDROID_COMMIT" "$REACT_NATIVE_COMMIT"; do
             [[ "$value" =~ ^[0-9a-f]{40}$ ]]
           done
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          if [[ "$EVIDENCE_DOMAIN" == live_sdk_conformance || "$EVIDENCE_DOMAIN" == physical_devices ]]; then
+            for value in "$IOS_PHYSICAL_RUN_ID" "$ANDROID_PHYSICAL_RUN_ID" "$REACT_NATIVE_PHYSICAL_RUN_ID"; do
+              [[ "$value" =~ ^[1-9][0-9]{0,19}$ ]]
+            done
+            for value in "$IOS_PHYSICAL_RUN_ATTEMPT" "$ANDROID_PHYSICAL_RUN_ATTEMPT" "$REACT_NATIVE_PHYSICAL_RUN_ATTEMPT"; do
+              [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]]
+            done
+          fi
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
           test "$(git -C latchway-js rev-parse --verify HEAD)" = "$JAVASCRIPT_COMMIT"
@@ -159,11 +199,59 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
-      - name: Refuse hosted substitution for live SDK physical evidence
+      - name: Download exact iOS physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-attest-physical-${{ inputs.ios_physical_run_id }}-${{ inputs.ios_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/ios
+          repository: Latchway/latchway-ios-sdk
+          run-id: ${{ inputs.ios_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact Android physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: play-integrity-physical-${{ inputs.android_physical_run_id }}-${{ inputs.android_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/android
+          repository: Latchway/latchway-android
+          run-id: ${{ inputs.android_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact React Native iOS physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: react-native-ios-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/react-native-ios
+          repository: Latchway/latchway-react-native-sdk
+          run-id: ${{ inputs.react_native_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact React Native Android physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: react-native-android-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/react-native-android
+          repository: Latchway/latchway-react-native-sdk
+          run-id: ${{ inputs.react_native_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
         if: inputs.domain == 'live_sdk_conformance'
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        if: inputs.domain == 'live_sdk_conformance'
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: latchway-js/pnpm-lock.yaml
+      - name: Build the exact JavaScript SDK live harness
+        if: inputs.domain == 'live_sdk_conformance'
+        working-directory: latchway-js
         run: |
-          echo "live SDK evidence requires authenticated iOS, Android, and React Native physical-workflow receipts plus a real JavaScript live harness" >&2
-          exit 1
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         if: inputs.domain == 'supply_chain'
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -172,14 +260,61 @@ jobs:
         if: inputs.domain == 'live_provider'
         working-directory: latchway
         run: go build -trimpath -o "$RUNNER_TEMP/latchway" ./cmd/latchway
-      - name: Execute only the fixed domain observation plan
+      - name: Execute the fixed SDK or physical-device observation plan
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          GH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+          LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+          LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
+          LATCHWAY_LIVE_SDK_APPLICATION_ID: ${{ vars.LATCHWAY_LIVE_SDK_APPLICATION_ID }}
+          LATCHWAY_LIVE_SDK_FEATURE: ${{ vars.LATCHWAY_LIVE_SDK_FEATURE }}
+          LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE: ${{ vars.LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE }}
+          LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER: ${{ vars.LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER }}
+          LATCHWAY_LIVE_SDK_ENVIRONMENT: ${{ vars.LATCHWAY_LIVE_SDK_ENVIRONMENT }}
+          LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER: ${{ vars.LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER }}
+          LATCHWAY_LIVE_SDK_MODEL: ${{ vars.LATCHWAY_LIVE_SDK_MODEL }}
+          LATCHWAY_LIVE_SDK_IDENTITY_TOKEN: ${{ inputs.domain == 'live_sdk_conformance' && secrets.LATCHWAY_LIVE_SDK_IDENTITY_TOKEN || '' }}
+          LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN: ${{ inputs.domain == 'live_sdk_conformance' && secrets.LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN || '' }}
+          IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
+          IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
+          ANDROID_PHYSICAL_RUN_ID: ${{ inputs.android_physical_run_id }}
+          ANDROID_PHYSICAL_RUN_ATTEMPT: ${{ inputs.android_physical_run_attempt }}
+          REACT_NATIVE_PHYSICAL_RUN_ID: ${{ inputs.react_native_physical_run_id }}
+          REACT_NATIVE_PHYSICAL_RUN_ATTEMPT: ${{ inputs.react_native_physical_run_attempt }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/observation-artifact"
+          test -n "$GH_TOKEN"
+          python3 latchway/scripts/release-domain-observer.py \
+            --domain "$EVIDENCE_DOMAIN" \
+            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --output-directory "$RUNNER_TEMP/observation-artifact/raw" \
+            --core-repo "$GITHUB_WORKSPACE/latchway" \
+            --javascript-repo "$GITHUB_WORKSPACE/latchway-js" \
+            --ios-repo "$GITHUB_WORKSPACE/latchway-ios-sdk" \
+            --android-repo "$GITHUB_WORKSPACE/latchway-android" \
+            --react-native-repo "$GITHUB_WORKSPACE/latchway-react-native-sdk" \
+            --ios-receipt-directory "$RUNNER_TEMP/physical/ios" \
+            --android-receipt-directory "$RUNNER_TEMP/physical/android" \
+            --react-native-ios-receipt-directory "$RUNNER_TEMP/physical/react-native-ios" \
+            --react-native-android-receipt-directory "$RUNNER_TEMP/physical/react-native-android" \
+            --ios-run-id "$IOS_PHYSICAL_RUN_ID" \
+            --ios-run-attempt "$IOS_PHYSICAL_RUN_ATTEMPT" \
+            --android-run-id "$ANDROID_PHYSICAL_RUN_ID" \
+            --android-run-attempt "$ANDROID_PHYSICAL_RUN_ATTEMPT" \
+            --react-native-run-id "$REACT_NATIVE_PHYSICAL_RUN_ID" \
+            --react-native-run-attempt "$REACT_NATIVE_PHYSICAL_RUN_ATTEMPT"
+      - name: Execute the fixed non-SDK domain observation plan
+        if: inputs.domain != 'live_sdk_conformance' && inputs.domain != 'physical_devices'
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
           GH_TOKEN: ${{ github.token }}
           LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
           LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
-          LATCHWAY_ADMIN_API_TOKEN: ${{ secrets.LATCHWAY_LIVE_PROVIDER_ADMIN_API_TOKEN }}
+          LATCHWAY_ADMIN_API_TOKEN: ${{ inputs.domain == 'live_provider' && secrets.LATCHWAY_LIVE_PROVIDER_ADMIN_API_TOKEN || '' }}
           LATCHWAY_PROVIDER_ENVIRONMENT_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_ENVIRONMENT_ID }}
           LATCHWAY_PROVIDER_UPSTREAM_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_UPSTREAM_ID }}
           LATCHWAY_PROVIDER_MODEL_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_MODEL_ID }}

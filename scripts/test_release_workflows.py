@@ -127,6 +127,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             domains,
             [
                 "live_sdk_conformance",
+                "physical_devices",
                 "live_provider",
                 "supply_chain",
                 "public_tags",
@@ -163,26 +164,72 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("$EVIDENCE_DOMAIN.attestation.sigstore.json", serialized)
 
         producer = load_workflow("release-domain-observations.yml")
+        producer_domains = producer["on"]["workflow_dispatch"]["inputs"]["domain"][
+            "options"
+        ]
+        self.assertIn("physical_devices", producer_domains)
         producer_job = producer["jobs"]["observe"]
         self.assertEqual(producer_job["environment"], "release-evidence")
         self.assertEqual(producer_job["if"], "github.ref == 'refs/heads/main'")
         producer_names = [step.get("name", "") for step in producer_job["steps"]]
-        executed = producer_names.index("Execute only the fixed domain observation plan")
+        sdk_executed = producer_names.index(
+            "Execute the fixed SDK or physical-device observation plan"
+        )
+        other_executed = producer_names.index(
+            "Execute the fixed non-SDK domain observation plan"
+        )
         manifested = producer_names.index("Produce the exact machine-results manifest")
         attested = producer_names.index("Attest the exact machine-results manifest")
         retained = producer_names.index("Retain only the attested machine-result set")
-        self.assertLess(executed, manifested)
+        self.assertLess(sdk_executed, manifested)
+        self.assertLess(other_executed, manifested)
         self.assertLess(manifested, attested)
         self.assertLess(attested, retained)
         producer_text = (WORKFLOWS / "release-domain-observations.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/release-domain-observer.py", producer_text)
-        self.assertIn(
-            "Refuse hosted substitution for live SDK physical evidence",
-            producer_text,
+        self.assertNotIn("Refuse hosted substitution", producer_text)
+        for value in (
+            "ios_physical_run_id",
+            "ios_physical_run_attempt",
+            "android_physical_run_id",
+            "android_physical_run_attempt",
+            "react_native_physical_run_id",
+            "react_native_physical_run_attempt",
+            "LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN",
+            "app-attest-physical-${{ inputs.ios_physical_run_id }}-${{ inputs.ios_physical_run_attempt }}",
+            "play-integrity-physical-${{ inputs.android_physical_run_id }}-${{ inputs.android_physical_run_attempt }}",
+            "react-native-ios-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}",
+            "react-native-android-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}",
+            "repository: Latchway/latchway-ios-sdk",
+            "repository: Latchway/latchway-android",
+            "repository: Latchway/latchway-react-native-sdk",
+            "pnpm build",
+        ):
+            self.assertIn(value, producer_text)
+        observer_text = (ROOT / "scripts" / "release-domain-observer.py").read_text(
+            encoding="utf-8"
         )
-        self.assertIn("live SDK evidence requires authenticated", producer_text)
+        for workflow in (
+            ".github/workflows/physical-app-attest.yml",
+            ".github/workflows/physical-play-integrity.yml",
+            ".github/workflows/physical-device-evidence.yml",
+        ):
+            self.assertIn(workflow, observer_text)
+        self.assertIn('"--source-digest"', observer_text)
+        self.assertIn('"--signer-digest"', observer_text)
+        self.assertIn('"refs/heads/main"', observer_text)
+        self.assertIn("scripts/live-conformance.mjs", observer_text)
         self.assertNotIn("machine_results_run_id", producer_text)
         self.assertNotIn("continue-on-error", producer_text)
+        sdk_step = producer_job["steps"][sdk_executed]
+        other_step = producer_job["steps"][other_executed]
+        self.assertEqual(
+            sdk_step["env"]["GH_TOKEN"],
+            "${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}",
+        )
+        self.assertNotIn("LATCHWAY_ADMIN_API_TOKEN", sdk_step["env"])
+        self.assertEqual(other_step["env"]["GH_TOKEN"], "${{ github.token }}")
+        self.assertNotIn("LATCHWAY_LIVE_SDK_IDENTITY_TOKEN", other_step["env"])
 
         release_text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
         source_text = (WORKFLOWS / "cross-repository-conformance.yml").read_text(encoding="utf-8")

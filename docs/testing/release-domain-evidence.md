@@ -1,9 +1,10 @@
 # Protected release-domain evidence
 
-`scripts/release-domain-evidence.py` is the producer/finalizer for the five
+`scripts/release-domain-evidence.py` is the producer/finalizer for six
 cross-repository domains that previously had only an envelope validator:
 
 - `live_sdk_conformance`;
+- `physical_devices`;
 - `live_provider`;
 - `supply_chain`;
 - `public_tags`; and
@@ -16,10 +17,10 @@ producer and `.github/workflows/release-domain-evidence.yml` finalizer are both
 restricted to the `release-evidence` GitHub environment and
 `refs/heads/main`. Configure that environment with required reviewers and
 prevent unreviewed deployments before using either workflow for a release.
-Four domains have executable protected observation plans. The live-SDK domain
-has the same strict result/finalization contract but is intentionally blocked
-until the existing self-hosted SDK receipts and a real JavaScript live harness
-can be authenticated and merged without treating hosted fixtures as devices.
+All six domains have executable protected observation plans. Live-SDK and
+physical-device evidence consume authenticated outputs from the existing
+self-hosted device workflows; the hosted core workflow never represents a
+simulator or fixture as a physical-device run.
 
 ## Trust and identity model
 
@@ -44,6 +45,45 @@ cannot substitute a different SDK checkout. It also rehashes the source and
 candidate documents after every command. Observation subprocesses receive an
 explicit allowlisted environment; unrelated runner credentials and secret
 variables are not inherited, and tool-version probes are not run implicitly.
+
+For `live_sdk_conformance` and `physical_devices`, dispatch also supplies exact
+run IDs and run attempts for iOS App Attest, Android Play Integrity, and the
+two-job React Native physical workflow. A protected
+`LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN` must have only Actions read
+access to the three SDK repositories. The producer queries the Actions API and
+requires the exact repository, workflow path, `workflow_dispatch` event,
+`main` branch, successful conclusion, source commit, run ID, and attempt. It
+also requires the completed workflow and device timestamps to fall after the
+candidate was created, inside the bounded evidence window. It then downloads
+only these derived artifact names:
+
+- `app-attest-physical-<run>-<attempt>`;
+- `play-integrity-physical-<run>-<attempt>`;
+- `react-native-ios-physical-<run>-<attempt>`; and
+- `react-native-android-physical-<run>-<attempt>`.
+
+Every receipt has an exact file set and an attested `SHA256SUMS`. The observer
+verifies the profile, evidence, and checksum subjects against the retained
+Sigstore bundle, pinning the exact SDK repository, protected physical workflow,
+`refs/heads/main`, and both source and signer digest to the SDK commit. These
+physical producers intentionally use protected self-hosted runners, so this
+verification does not apply the hosted-runner rejection used for core source,
+candidate, machine-result, and final evidence attestations. The checked-out
+SDK's `device-evidence.py verify` is rerun, and the receipt is rehashed after
+the verifier exits. The checked-out SDK's gateway-deployment verifier is also
+rerun against the retained signed statement, pinned P-256 public key, client
+policy, configuration hash, image digest, core/contract identity, and gateway
+origin; its canonical output must byte-match the retained verification result.
+
+Profiles and evidence bind the exact core/SDK commits, package and contract
+versions, contract bundle, OCI index digest, gateway origin and configuration,
+production distribution, hardware-backed provider, and physical-device state.
+React Native's linked native profile/evidence bytes must exactly equal the
+independently authenticated iOS or Android receipt and its native hash/version
+pins. The live-SDK domain additionally builds the exact JavaScript checkout
+and runs `scripts/live-conformance.mjs` against the same HTTPS gateway. Its
+protected credentials appear only in the allowlisted child environment, never
+in argv or retained output.
 
 The producer revalidates the source report and candidate manifest using the
 same strict validators as the operational-resilience finalizer. Consequently
@@ -154,8 +194,13 @@ not workflow input. They are defined by `CLAIM_REQUIREMENTS` and
 - Live SDK evidence requires five release-image platform runs and explicit
   DPoP-vector, error-mapping, refresh, revocation, streaming, quota-snapshot,
   and protocol-version-rejection results. The fixed tool is
-  `latchway-live-sdk-harness`. The generic hosted producer currently refuses
-  this domain; see the explicit prerequisite below.
+  `latchway-live-sdk-harness`. Native and React Native observations come only
+  from authenticated physical receipts; JavaScript comes only from the real
+  live harness.
+- Physical-device evidence reuses the four authenticated native/React Native
+  platform observations and derives only the canonical physical-device
+  claims. It is finalized and attested independently as
+  `physical_devices.json`; the live-SDK document is not a substitute.
 - Live provider evidence first verifies the HTTPS gateway `/healthz` build
   commit, package version, contract version, and wire protocol against the
   candidate identity, then requires the five bounded OpenRouter Admin
@@ -179,7 +224,8 @@ an accepted input, and the finalizer has no artifact-name escape hatch for one.
 
 First dispatch `Protected release-domain observations` after the relevant
 external operation exists, supplying the exact five repository commits and the
-source/candidate run IDs. Then dispatch `Protected release-domain evidence`
+source/candidate run IDs. For live SDK or physical-device evidence, also supply
+the three physical run IDs and exact attempts. Then dispatch `Protected release-domain evidence`
 with that successful observation run ID. Artifact names are derived, not user
 supplied. Neither job runs in ordinary CI. The bounded live-provider token is
 read only from the protected environment and must never be copied into raw
@@ -206,18 +252,12 @@ This tooling makes absent proof fail closed; it does not make external proof
 appear. Before version 1 release evidence can pass, the responsible protected
 producers must still execute against the exact candidate:
 
-- all five live SDK/platform paths. Core does not run native/RN fixture scripts
-  on a generic hosted macOS runner. A remaining producer tranche must consume
-  the exact attested artifacts from iOS
-  `.github/workflows/physical-app-attest.yml`, Android
-  `.github/workflows/physical-play-integrity.yml`, and React Native
-  `.github/workflows/physical-device-evidence.yml`, pinning each SDK workflow,
-  source and signer digest to the source identity without rejecting their
-  intentional self-hosted runners. It must combine those receipts with a real
-  JavaScript live harness and cover error mapping, refresh, installation
-  revocation, and protocol-version rejection. Until then the protected hosted
-  producer exits with `live_sdk_external_receipts_required` and no machine
-  manifest can be attested for this domain;
+- all five live SDK/platform paths. The producer is implemented, but real
+  evidence still requires protected physical iOS/Android runners and devices,
+  production-signed or Play-distributed apps, configured App Attest and Play
+  Integrity services, exact retained native receipts for React Native linkage,
+  the cross-repository Actions-read token, a deployed candidate gateway, and
+  protected JavaScript identity and attestation credentials;
 - a bounded live OpenRouter self-test using an operator-owned credential;
 - image signature/provenance and scan tools against the published candidate;
   and
