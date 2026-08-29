@@ -1,27 +1,36 @@
-name: Release
+name: Release candidate
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Exact 40-character core commit to build
+        required: true
+        type: string
+      intended_tag:
+        description: Intended public tag, created only by the promotion workflow
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-candidate-${{ inputs.candidate_commit }}
   cancel-in-progress: false
 
 jobs:
   verify:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 75
     services:
       postgres:
         image: postgres:18.6-alpine
         env:
           POSTGRES_DB: latchway
           POSTGRES_USER: latchway
-          POSTGRES_PASSWORD: latchway-release
+          POSTGRES_PASSWORD: latchway-candidate
         ports:
           - 5432:5432
         options: >-
@@ -30,12 +39,27 @@ jobs:
           --health-timeout 3s
           --health-retries 30
     env:
-      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-release@127.0.0.1:5432/latchway?sslmode=disable
+      LATCHWAY_TEST_DATABASE_URL: postgres://latchway:latchway-candidate@127.0.0.1:5432/latchway?sslmode=disable
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check out the exact untagged candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ inputs.candidate_commit }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Reject mutable or mismatched candidate coordinates
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          python3 scripts/release-preflight.py \
+            --candidate \
+            --commit "$CANDIDATE_COMMIT" \
+            "$INTENDED_TAG"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -45,11 +69,14 @@ jobs:
           node-version: 24.19.0
           cache: pnpm
           cache-dependency-path: web/console/pnpm-lock.yaml
-      - name: Verify release source and tag
-        run: python3 scripts/release-preflight.py "$GITHUB_REF_NAME"
-      - name: Validate normative contracts
+      - name: Validate normative contracts and release tooling
         run: |
           python3 scripts/validate-contracts.py
+          python3 -m unittest \
+            scripts/test_release_candidate.py \
+            scripts/test_release_preflight.py \
+            scripts/test_cross_repo_conformance.py \
+            scripts/test_deployment_evidence.py
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-b
           diff --recursive --brief /tmp/contract-a /tmp/contract-b
@@ -62,27 +89,6 @@ jobs:
           go test -count=1 ./...
           go test -race -count=1 ./...
           make fuzz-smoke
-      - name: Run deterministic failure and replica gates
-        run: >-
-          scripts/run-failure-gates.sh
-          -scope automated
-          -output /tmp/latchway-failure-release.json
-      - name: Retain machine-readable reliability evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: latchway-failure-evidence-${{ github.ref_name }}
-          path: |
-            /tmp/latchway-failure-release.json
-            /tmp/latchway-failure-release.json.junit.xml
-            /tmp/latchway-failure-release.logs
-          if-no-files-found: error
-          retention-days: 90
-      - name: Scan reachable release-binary vulnerabilities
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
-          govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
       - name: Test console
         run: |
           corepack enable
@@ -90,21 +96,63 @@ jobs:
           pnpm --dir web/console install --frozen-lockfile
           pnpm --dir web/console check
           pnpm --dir web/console verify:reproducible
+      - name: Run deterministic automated failure and replica gates
+        run: >-
+          scripts/run-failure-gates.sh
+          -scope automated
+          -output /tmp/latchway-failure-candidate.json
+      - name: Run the complete isolated v1 load gate
+        run: >-
+          scripts/run-local-load-gates.sh
+          -acknowledge-load
+          -evidence-dir /tmp/latchway-load-candidate
+      - name: Retain local reliability evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-candidate-reliability-${{ inputs.candidate_commit }}
+          path: |
+            /tmp/latchway-failure-candidate.json
+            /tmp/latchway-failure-candidate.json.junit.xml
+            /tmp/latchway-failure-candidate.logs
+            /tmp/latchway-load-candidate/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Scan the reachable release binary
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/latchway-govulncheck" ./cmd/latchway
+          govulncheck -mode=binary "${RUNNER_TEMP}/latchway-govulncheck"
 
   image:
+    if: github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
       packages: write
       id-token: write
       attestations: write
       artifact-metadata: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check out the exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ inputs.candidate_commit }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Revalidate candidate identity
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          python3 scripts/release-preflight.py \
+            --candidate \
+            --commit "$CANDIDATE_COMMIT" \
+            "$INTENDED_TAG"
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
       - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
@@ -112,218 +160,208 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Resolve immutable image name
-        id: image-name
-        shell: bash
-        run: echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
-        id: metadata
-        with:
-          images: ${{ steps.image-name.outputs.value }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - name: Resolve reproducible build metadata
-        id: build-metadata
+        id: metadata
         shell: bash
+        env:
+          INTENDED_TAG: ${{ inputs.intended_tag }}
         run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          echo "date=$(git show -s --format=%cI "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
-      # Publish only a commit-scoped candidate tag. Public semver tags are
-      # promoted from this exact index digest after both published children
-      # pass smoke, vulnerability, license, and SBOM gates.
-      - name: Publish immutable multi-architecture candidate
+          echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
+          echo "version=${INTENDED_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Publish only the immutable multi-architecture candidate
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         id: build
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.image-name.outputs.value }}:candidate-${{ github.sha }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          tags: ${{ steps.metadata.outputs.image }}:candidate-${{ inputs.candidate_commit }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.candidate_commit }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+            org.opencontainers.image.created=${{ steps.metadata.outputs.date }}
           build-args: |
-            VERSION=${{ steps.build-metadata.outputs.version }}
-            COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ steps.build-metadata.outputs.date }}
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ inputs.candidate_commit }}
+            BUILD_DATE=${{ steps.metadata.outputs.date }}
             SOURCE=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
       - name: Resolve exact published platform children
-        id: platform-digests
+        id: platforms
         shell: bash
         env:
-          IMAGE: ${{ steps.image-name.outputs.value }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
           INDEX_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker buildx imagetools inspect --raw "$IMAGE@$INDEX_DIGEST" > "$RUNNER_TEMP/latchway-index.json"
           python3 scripts/resolve-oci-platform-digests.py \
             "$RUNNER_TEMP/latchway-index.json" \
             linux/amd64 linux/arm64 >> "$GITHUB_OUTPUT"
-      - name: Pull exact published children
+      - name: Pull exact candidate children
         shell: bash
         env:
-          IMAGE: ${{ steps.image-name.outputs.value }}
-          AMD64_DIGEST: ${{ steps.platform-digests.outputs.linux_amd64 }}
-          ARM64_DIGEST: ${{ steps.platform-digests.outputs.linux_arm64 }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          AMD64_DIGEST: ${{ steps.platforms.outputs.linux_amd64 }}
+          ARM64_DIGEST: ${{ steps.platforms.outputs.linux_arm64 }}
         run: |
           docker pull --platform linux/amd64 "$IMAGE@$AMD64_DIGEST"
-          docker tag "$IMAGE@$AMD64_DIGEST" latchway:release-amd64
+          docker tag "$IMAGE@$AMD64_DIGEST" latchway:candidate-amd64
           docker pull --platform linux/arm64 "$IMAGE@$ARM64_DIGEST"
-          docker tag "$IMAGE@$ARM64_DIGEST" latchway:release-arm64
-      - name: Smoke the exact published amd64 child
-        run: scripts/container-smoke.sh latchway:release-amd64
-      - name: Smoke the exact published arm64 child under QEMU
-        run: scripts/container-smoke.sh latchway:release-arm64
-      - name: Scan published amd64 child for critical and high vulnerabilities
+          docker tag "$IMAGE@$ARM64_DIGEST" latchway:candidate-arm64
+      - name: Smoke both exact candidate children
+        run: |
+          scripts/container-smoke.sh latchway:candidate-amd64
+          scripts/container-smoke.sh latchway:candidate-arm64
+      - name: Scan amd64 vulnerabilities
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           version: v0.74.0
-          image-ref: latchway:release-amd64
-          format: table
+          image-ref: latchway:candidate-amd64
+          format: json
+          output: latchway-linux-amd64-vulnerability.json
           scanners: vuln
           vuln-type: os,library
           severity: CRITICAL,HIGH
           ignore-unfixed: false
           exit-code: "1"
-      - name: Scan published arm64 child for critical and high vulnerabilities
+      - name: Scan arm64 vulnerabilities
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           version: v0.74.0
-          image-ref: latchway:release-arm64
-          format: table
+          image-ref: latchway:candidate-arm64
+          format: json
+          output: latchway-linux-arm64-vulnerability.json
           scanners: vuln
           vuln-type: os,library
           severity: CRITICAL,HIGH
           ignore-unfixed: false
           exit-code: "1"
-      - name: Enforce amd64 child license policy
+      - name: Enforce amd64 license policy
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           version: v0.74.0
-          image-ref: latchway:release-amd64
-          format: table
+          image-ref: latchway:candidate-amd64
+          format: json
+          output: latchway-linux-amd64-license.json
           scanners: license
           severity: CRITICAL,HIGH
           exit-code: "1"
-      - name: Enforce arm64 child license policy
+      - name: Enforce arm64 license policy
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           version: v0.74.0
-          image-ref: latchway:release-arm64
-          format: table
+          image-ref: latchway:candidate-arm64
+          format: json
+          output: latchway-linux-arm64-license.json
           scanners: license
           severity: CRITICAL,HIGH
           exit-code: "1"
-      - name: Generate exact amd64 SPDX SBOM
+      - name: Generate exact platform SPDX SBOMs
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: latchway:release-amd64
+          image: latchway:candidate-amd64
           format: spdx-json
           output-file: latchway-linux-amd64.spdx.json
           upload-artifact: false
       - name: Generate exact arm64 SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: latchway:release-arm64
+          image: latchway:candidate-arm64
           format: spdx-json
           output-file: latchway-linux-arm64.spdx.json
           upload-artifact: false
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign and verify the image digest with GitHub OIDC
+      - name: Sign and verify the candidate index with GitHub OIDC
         shell: bash
         env:
-          IMAGE: ${{ steps.image-name.outputs.value }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
         run: |
           cosign sign --yes "$IMAGE@$DIGEST"
           cosign verify \
-            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$IMAGE@$DIGEST"
-      - name: Publish SLSA provenance attestation
+      - name: Publish index provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-name: ${{ steps.image-name.outputs.value }}
+          subject-name: ${{ steps.metadata.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-      - name: Publish amd64 SBOM attestation
+      - name: Publish exact platform SBOM attestations
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-name: ${{ steps.image-name.outputs.value }}
-          subject-digest: ${{ steps.platform-digests.outputs.linux_amd64 }}
+          subject-name: ${{ steps.metadata.outputs.image }}
+          subject-digest: ${{ steps.platforms.outputs.linux_amd64 }}
           sbom-path: latchway-linux-amd64.spdx.json
           push-to-registry: true
-      - name: Publish arm64 SBOM attestation
+      - name: Publish exact arm64 SBOM attestation
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-name: ${{ steps.image-name.outputs.value }}
-          subject-digest: ${{ steps.platform-digests.outputs.linux_arm64 }}
+          subject-name: ${{ steps.metadata.outputs.image }}
+          subject-digest: ${{ steps.platforms.outputs.linux_arm64 }}
           sbom-path: latchway-linux-arm64.spdx.json
           push-to-registry: true
-      - name: Promote the gated and attested index to public release tags
+      - name: Build the hash-bound candidate manifest
         shell: bash
         env:
-          FINAL_TAGS: ${{ steps.metadata.outputs.tags }}
-          IMAGE: ${{ steps.image-name.outputs.value }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          IMAGE: ${{ steps.metadata.outputs.image }}
           INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+          AMD64_DIGEST: ${{ steps.platforms.outputs.linux_amd64 }}
+          ARM64_DIGEST: ${{ steps.platforms.outputs.linux_arm64 }}
         run: |
-          while IFS= read -r target; do
-            test -n "$target" || continue
-            case "$target" in
-              "$IMAGE":*) ;;
-              *) echo "refusing unexpected release tag" >&2; exit 1 ;;
-            esac
-            docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
-            actual="sha256:$(docker buildx imagetools inspect --raw "$target" | sha256sum | cut -d ' ' -f 1)"
-            test "$actual" = "$INDEX_DIGEST"
-          done < <(printf '%s\n' "$FINAL_TAGS")
-      - name: Record exact image coordinates
-        shell: bash
-        env:
-          IMAGE: ${{ steps.image-name.outputs.value }}
-          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
-          AMD64_DIGEST: ${{ steps.platform-digests.outputs.linux_amd64 }}
-          ARM64_DIGEST: ${{ steps.platform-digests.outputs.linux_arm64 }}
-        run: |
-          printf '%s@%s\n' "$IMAGE" "$INDEX_DIGEST" > latchway-image.txt
-          jq --null-input \
-            --arg image "$IMAGE" \
-            --arg index "$INDEX_DIGEST" \
-            --arg amd64 "$AMD64_DIGEST" \
-            --arg arm64 "$ARM64_DIGEST" \
-            '{schema_version: 1, image: $image, index_digest: $index, platforms: {"linux/amd64": $amd64, "linux/arm64": $arm64}}' \
-            > latchway-image-platforms.json
-      - name: Build deterministic contract release asset
-        shell: bash
-        run: |
-          mkdir -p dist/release
-          python3 scripts/build-contract-bundle.py --output-directory dist/release
-          sha256sum dist/release/* > dist/release/SHA256SUMS
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+          mkdir -p dist/candidate
+          python3 scripts/build-contract-bundle.py --output-directory dist/candidate
+          bundle_name=$(jq --raw-output '.bundle.file_name' api/protocol-version.json)
+          test -f "dist/candidate/$bundle_name"
+          cp -- "dist/candidate/$bundle_name" latchway-contract.tar.gz
+          python3 scripts/release-candidate.py \
+            --create \
+            --manifest latchway-candidate.json \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --image "$IMAGE" \
+            --index-digest "$INDEX_DIGEST" \
+            --amd64-digest "$AMD64_DIGEST" \
+            --arm64-digest "$ARM64_DIGEST" \
+            --contract-bundle latchway-contract.tar.gz \
+            --sbom-amd64 latchway-linux-amd64.spdx.json \
+            --sbom-arm64 latchway-linux-arm64.spdx.json \
+            --vulnerability-amd64 latchway-linux-amd64-vulnerability.json \
+            --vulnerability-arm64 latchway-linux-arm64-vulnerability.json \
+            --license-amd64 latchway-linux-amd64-license.json \
+            --license-arm64 latchway-linux-arm64-license.json
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest latchway-candidate.json \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --image "$IMAGE"
+      - name: Attest the candidate manifest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          name: latchway-${{ github.ref_name }}-supply-chain
+          subject-path: latchway-candidate.json
+      - name: Retain immutable candidate evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}
           path: |
+            latchway-candidate.json
+            latchway-contract.tar.gz
             latchway-linux-amd64.spdx.json
             latchway-linux-arm64.spdx.json
-            latchway-image.txt
-            latchway-image-platforms.json
-            dist/release/
+            latchway-linux-amd64-vulnerability.json
+            latchway-linux-arm64-vulnerability.json
+            latchway-linux-amd64-license.json
+            latchway-linux-arm64-license.json
           if-no-files-found: error
+          compression-level: 0
           retention-days: 90
-      - name: Create GitHub release from the verified tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          --verify-tag
-          --generate-notes
-          --title "Latchway $GITHUB_REF_NAME"
-          latchway-linux-amd64.spdx.json
-          latchway-linux-arm64.spdx.json
-          latchway-image.txt
-          latchway-image-platforms.json
-          dist/release/*

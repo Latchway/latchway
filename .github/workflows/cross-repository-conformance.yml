@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Evidence scope; release additionally requires every external domain
+        description: Source alignment, prepublication promotion, or postpublication release proof
         required: true
         default: source
         type: choice
         options:
           - source
+          - promotion
           - release
       core_ref:
         description: Immutable core commit or annotated tag
@@ -37,11 +38,15 @@ on:
         default: main
         type: string
       core_release_tag:
-        description: Required canonical core tag when scope is release
+        description: Intended core tag for promotion; existing annotated tag for release
+        required: false
+        type: string
+      candidate_oci_image_digest:
+        description: Exact ghcr.io/latchway/latchway@sha256 digest for promotion or release
         required: false
         type: string
       external_evidence_run_id:
-        description: Optional run ID containing the combined external evidence artifact
+        description: Required run ID containing combined evidence for promotion or release
         required: false
         type: string
       external_evidence_artifact:
@@ -53,6 +58,8 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: cross-repository-conformance-${{ github.run_id }}
@@ -60,6 +67,7 @@ concurrency:
 
 jobs:
   evidence:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -103,8 +111,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Download independently produced external evidence
-        if: inputs.scope == 'release' && inputs.external_evidence_run_id != ''
-        continue-on-error: true
+        if: inputs.scope != 'source'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.external_evidence_artifact }}
@@ -116,8 +123,18 @@ jobs:
         env:
           EVIDENCE_SCOPE: ${{ inputs.scope }}
           CORE_RELEASE_TAG: ${{ inputs.core_release_tag }}
+          CANDIDATE_OCI_IMAGE_DIGEST: ${{ inputs.candidate_oci_image_digest }}
           EXTERNAL_EVIDENCE_RUN_ID: ${{ inputs.external_evidence_run_id }}
         run: |
+          if [[ "$EVIDENCE_SCOPE" == source ]]; then
+            test -z "$CORE_RELEASE_TAG"
+            test -z "$CANDIDATE_OCI_IMAGE_DIGEST"
+            test -z "$EXTERNAL_EVIDENCE_RUN_ID"
+          else
+            [[ "$CORE_RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+            [[ "$CANDIDATE_OCI_IMAGE_DIGEST" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+            [[ "$EXTERNAL_EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          fi
           arguments=(
             --workspace-root "$GITHUB_WORKSPACE"
             --core-repo "$GITHUB_WORKSPACE/latchway"
@@ -128,13 +145,19 @@ jobs:
             --scope "$EVIDENCE_SCOPE"
             --output "$RUNNER_TEMP/latchway-cross-repository.json"
           )
-          if [[ "$EVIDENCE_SCOPE" == release ]]; then
-            arguments+=(--release-tag "$CORE_RELEASE_TAG")
-            if [[ -n "$EXTERNAL_EVIDENCE_RUN_ID" ]]; then
-              arguments+=(--external-evidence-dir "$RUNNER_TEMP/latchway-external-evidence")
-            fi
+          if [[ "$EVIDENCE_SCOPE" != source ]]; then
+            arguments+=(
+              --release-tag "$CORE_RELEASE_TAG"
+              --oci-image-digest "$CANDIDATE_OCI_IMAGE_DIGEST"
+              --external-evidence-dir "$RUNNER_TEMP/latchway-external-evidence"
+            )
           fi
           python3 latchway/scripts/cross-repo-conformance.py "${arguments[@]}"
+      - name: Attest the exact promotion or release report
+        if: inputs.scope != 'source'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/latchway-cross-repository.json
       - name: Retain deterministic JSON and JUnit evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
