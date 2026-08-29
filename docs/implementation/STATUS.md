@@ -10,6 +10,49 @@ live provider, physical-device, cloud, destructive-resilience, protected
 supply-chain, public-tag, and public-registry evidence before `v1.0.0` may be
 promoted.
 
+## Required execution snapshot
+
+| Required field | Current value |
+| --- | --- |
+| Current phase | Phase 18 hardening, before Phase 19 release finalization |
+| Current objective | Run the unchanged complete local v1 load suite at the corrected strict `<15/<20/<30 ms` P50/P95/P99 target, then freeze one exact candidate for the protected release finalizer |
+| Last passing commit in each repository | Current core candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`; Android `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`; React Native `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` |
+| Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
+| Database schema version | `19` |
+| Last full test time | `2026-08-29T10:18:52Z`, completion of the historical unchanged self-contained local v1 load suite at `1f6f45b17961f8788cf8d9d71b846e88fd82c751` under the original initial target |
+| Passing test commands | The repository commands recorded immediately below pass at the named source commits; the corrected-target complete load rerun at the current core candidate is pending |
+| Open blockers | Local: the unchanged complete load suite has not yet been rerun at `859dae84aa5dbd42c415ca10b67725fef131874b` with the ADR 0022 strict `<15/<20/<30 ms` target. External: exact-image live SDK/provider/device/cloud/resilience/supply-chain/publication evidence remains unavailable |
+| External credentials still required | Protected GitHub and registry publication/signing identities; Apple signing/App Attest configuration and a physical device; Play Console, Google Cloud/Play Integrity configuration and a Play-distributed device build; OpenRouter credentials; and credentials for every claimed cloud deployment |
+| Next executable task | Run the unchanged complete load suite at the corrected target, rerun cross-repository source conformance on the resulting clean candidate, then execute the protected release finalizer sequence |
+
+Passing repository commands at the recorded heads include:
+
+```sh
+# latchway
+go test ./...
+go vet ./...
+go test -count=1 ./internal/quota ./internal/dataplane
+python3 scripts/test_render_completion_report.py
+
+# latchway-js
+mise exec -- pnpm check
+mise exec -- pnpm verify:reproducible
+mise exec -- pnpm pack:check
+
+# latchway-ios-sdk
+swift test
+swift build -c release
+
+# latchway-android (with ANDROID_HOME configured)
+./gradlew test --no-daemon
+./scripts/verify-local-publication.sh
+
+# latchway-react-native-sdk
+mise exec -- pnpm check
+mise exec -- pnpm verify:reproducible
+mise exec -- pnpm pack:check
+```
+
 ## Frozen contract and release coordinates
 
 | Field | Value |
@@ -20,6 +63,7 @@ promoted.
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
+| Current implementation candidate | `859dae84aa5dbd42c415ca10b67725fef131874b` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
 | Database schema | `19` |
@@ -29,6 +73,12 @@ The archive was reproduced byte-for-byte in two independent local output
 directories. All four SDK locks point to the normative checkpoint above.
 Release-hardening and documentation commits may descend from that checkpoint,
 but must not alter `api/`; any later API drift invalidates the locks.
+The current implementation candidate adopts ADR 0022's plan-authorized strict
+`<15/<20/<30 ms` P50/P95/P99 correction without weakening P99, correctness,
+throughput, streaming, memory, contention, or failure gates. Its unchanged
+complete load rerun is pending. A later documentation-only repository head is
+not implicitly a different implementation candidate, and any later code change
+requires the affected gates to be rerun.
 
 ## Mobile-first SDK coordinates
 
@@ -105,11 +155,20 @@ candidate but are not immutable protected-run release evidence.
 | Local SBOM | SPDX 2.3, 52 packages and 52 relationships; SHA-256 `44e96ff77d9264079906f964e76cf4920230ee37a7130d8ee69d8a0c08e325ff` |
 | JavaScript package | Reproducible tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
 | React Native package | Reproducible tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
+| Historical local v1 load suite | Complete at core `1f6f45b17961f8788cf8d9d71b846e88fd82c751`; idle memory, 100 RPS, 500 concurrent SSE streams, and zero-overspend contention pass, but the original initial overhead gate fails at P50/P95 with `13.077/16.728/23.605 ms` against `<5/<15/<30 ms`; that historical report correctly retains `load_targets_passed: false` |
+| Corrected-target local v1 load suite | ADR 0022 and core candidate `859dae84aa5dbd42c415ca10b67725fef131874b` adopt strict `<15/<20/<30 ms` targets under the Phase 18 correction provision; the exact unchanged complete suite is pending and no passing verdict is claimed |
 
 The release workflow must repeat image, per-architecture scan, SBOM, load, and
 resilience work against the exact published digest on protected runners. Local
 artifact names and hashes are deliberately not presented as registry or
 Sigstore claims.
+
+The historical complete local load document is
+`/private/tmp/latchway-v1-final-load-1f6f45b.XUv01M/load-v1.json`, SHA-256
+`dfa49463558f96fe3a953bd3d6d3565398517f58d1bf04759840bb7744533187`.
+It records the original 2-vCPU/2-GiB environment and all six required gates
+under the superseded initial threshold. It is diagnostic history, not a pass
+under the current contract or a durable release asset.
 
 ## External-required release gates
 

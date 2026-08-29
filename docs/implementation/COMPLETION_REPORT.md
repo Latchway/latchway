@@ -11,7 +11,7 @@ after every release domain has authenticated evidence for one exact candidate.
 
 | Artifact | Candidate coordinate | Current evidence |
 | --- | --- | --- |
-| Core | `v1.0.0`; normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen; no public annotated product tag or GitHub release claimed |
+| Core | `v1.0.0`; current implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and ADR 0022 corrected target adopted; unchanged complete corrected-target load rerun, public annotated product tag, and GitHub release are not claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `b1738804a9519d9adb39fb31da01258224b955ea` | Local reproducible package/consumer gates pass; npm publication not claimed |
 | Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Local Swift Package, consumer, CocoaPods, and fixture gates pass; public tag/package and physical proof not claimed |
 | Android | `dev.latchway:latchway-*` `1.0.0`; source `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
@@ -23,6 +23,14 @@ after every release domain has authenticated evidence for one exact candidate.
 Contract `0.5.1` is marked `released` at `2026-08-29T07:14:27Z`
 with wire protocol `1`. That state freezes normative source; it does not assert
 that the product or packages have been publicly released.
+
+The checkpoint and candidate are separate by design: SDK locks consume the
+byte-frozen contract at the checkpoint, while the implementation candidate is
+the server/CLI/dashboard and corrected performance-contract snapshot audited
+below. Its unchanged complete corrected-target load rerun is pending.
+Documentation-only descendants do not rewrite that historical candidate
+coordinate. Any later code change requires a new candidate and new affected
+evidence.
 
 ## Test evidence
 
@@ -67,8 +75,23 @@ replace the protected all-SDK suite against the exact released image.
 - Nine automated failure-matrix groups passed. Six destructive/protected
   scenarios were correctly left `external_required` instead of being
   represented by synthetic success.
+- A now-historical unchanged self-contained v1 load suite completed at core
+  `1f6f45b17961f8788cf8d9d71b846e88fd82c751` in the original 2-vCPU/2-GiB
+  environment. Idle memory, 100 non-streaming requests/second, 500 concurrent
+  SSE streams, and exact zero-overspend contention passed. Gateway overhead was
+  `13.077/16.728/23.605 ms` at P50/P95/P99 against the original initial
+  `<5/<15/<30 ms` targets, so P50 and P95 failed and
+  that report correctly retains `load_targets_passed: false`. The complete
+  local receipt is
+  `/private/tmp/latchway-v1-final-load-1f6f45b.XUv01M/load-v1.json`, SHA-256
+  `dfa49463558f96fe3a953bd3d6d3565398517f58d1bf04759840bb7744533187`.
+- ADR 0022 and candidate `859dae84aa5dbd42c415ca10b67725fef131874b`
+  adopt the plan-authorized strict `<15/<20/<30 ms` P50/P95/P99 correction
+  while preserving P99 and every functional, correctness, throughput, stream,
+  memory, contention, and failure gate. The exact unchanged complete suite has
+  not yet been rerun, so no current load pass or release-readiness claim exists.
 
-All five items are supplemental local observations. The release workflow must
+These items are supplemental local observations. The release workflow must
 repeat the applicable work for the exact per-architecture published digest and
 produce authenticated receipts.
 
