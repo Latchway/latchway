@@ -14,8 +14,8 @@ registries.
 | Contract released at | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Current implementation candidate | `859dae84aa5dbd42c415ca10b67725fef131874b` |
-| Passing local source/load checkpoint | `00197f916cd50803093a5e73bbac725e97c394e3` |
+| Current implementation and release-tooling candidate | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
 | Database schema | `19` |
@@ -40,18 +40,18 @@ rerun the affected evidence.
 
 | Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |
 | --- | --- | --- | --- | --- |
-| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Passing local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`; implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
+| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Passing local source/load and release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
 | JavaScript | `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
-| Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
-| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
+| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `dbfcc2936d3f74f61201bb8933fabd40937a70fb` | Android API 23+; Java 17; compile SDK 37 |
+| React Native | `@latchway/react-native` | `1.0.0` | `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:
 
 - JavaScript: `b1738804a9519d9adb39fb31da01258224b955ea`
-- Swift: `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`
-- Android: `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`
+- Swift: `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96`
+- Android: `dbfcc2936d3f74f61201bb8933fabd40937a70fb`
 
 ## Shared fixture identity
 

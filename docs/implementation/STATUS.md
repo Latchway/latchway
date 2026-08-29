@@ -14,16 +14,16 @@ promoted.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 19 final local source validation before protected release finalization |
-| Current objective | Revalidate cross-repository source conformance at the passing load checkpoint, then freeze one exact candidate for the protected external release finalizer |
-| Last passing commit in each repository | Core local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3` (implementation/performance candidate `859dae84aa5dbd42c415ca10b67725fef131874b`); JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`; Android `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`; React Native `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` |
+| Current phase | Phase 19 exact local candidate complete; protected release finalization pending |
+| Current objective | Revalidate the synchronized documentation descendant, then move the exact signed candidate through protected `main`, external evidence, promotion, and publication |
+| Last passing commit in each repository | Core source/load/release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96`; Android `dbfcc2936d3f74f61201bb8933fabd40937a70fb`; React Native `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `19` |
-| Last full test time | `2026-08-29T10:44:09Z`, successful completion of the unchanged self-contained local v1 load suite at `00197f916cd50803093a5e73bbac725e97c394e3` |
+| Last full test time | `2026-08-29T11:18:10Z`, successful completion of the non-root self-contained local v1 load suite at `73743b1633e4521aeda7ba1228cd18b78ef3a185`; mobile/package validation completed at the synchronized SDK heads |
 | Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
-| Open blockers | Local implementation/load blockers: none. Release blockers: exact-image live SDK/provider/device/cloud/resilience/supply-chain/publication evidence remains unavailable |
+| Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: the protected branch has not received the local candidate, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
 | External credentials still required | Protected GitHub and registry publication/signing identities; Apple signing/App Attest configuration and a physical device; Play Console, Google Cloud/Play Integrity configuration and a Play-distributed device build; OpenRouter credentials; and credentials for every claimed cloud deployment |
-| Next executable task | Run final cross-repository source conformance and clean/DCO checks at the documentation descendant, then execute the protected external release finalizer sequence |
+| Next executable task | With a valid GitHub session, push the signed candidate commits, merge them through protected `main`, and dispatch the exact-candidate release/evidence sequence; connect the physical devices and provider/cloud credentials for their protected domains |
 
 Passing repository commands at the recorded heads include:
 
@@ -65,8 +65,8 @@ mise exec -- pnpm pack:check
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Current implementation candidate | `859dae84aa5dbd42c415ca10b67725fef131874b` |
-| Passing local source/load checkpoint | `00197f916cd50803093a5e73bbac725e97c394e3` |
+| Current implementation and release-tooling candidate | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
 | Database schema | `19` |
@@ -89,9 +89,9 @@ gates to be rerun.
 | Component | Version | Source commit | Local status |
 | --- | --- | --- | --- |
 | JavaScript `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Source, tests, examples, exports, package closure, reproducibility, and clean-consumer gates pass |
-| Swift package / `Latchway` pod | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Swift tests, release build, package consumer, CocoaPods lint, fixture, and contract gates pass |
-| Android `dev.latchway:latchway-*` | `1.0.0` | `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Unit, device-evidence fixture, assemble, lint, local Maven, and offline-consumer gates pass |
-| React Native `@latchway/react-native` | `1.0.0` | `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | JavaScript, codegen, native bridge, example, package closure, reproducibility, podspec, and evidence-export gates pass |
+| Swift package / `Latchway` pod | `1.0.0` | `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96` | 65 Swift tests, release build, package consumer, CocoaPods lint, fixture, contract, and unsupported-device fail-closed gates pass |
+| Android `dev.latchway:latchway-*` | `1.0.0` | `dbfcc2936d3f74f61201bb8933fabd40937a70fb` | 76 JVM tests, device-evidence fixtures including explicit emulator rejection, assemble, lint, local Maven, and offline-consumer gates pass |
+| React Native `@latchway/react-native` | `1.0.0` | `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` | JavaScript, codegen, exact native pins, bridge, New Architecture examples, package closure, reproducibility, podspec, and evidence-export gates pass |
 
 The React Native compatibility manifest pins the exact JavaScript, Swift, and
 Android source commits above. The native Android SDK supports API 23 or newer;
@@ -150,17 +150,19 @@ candidate but are not immutable protected-run release evidence.
 
 | Area | Local result |
 | --- | --- |
-| Runtime image | `latchway:v1-local-source`, image ID `sha256:d0b3ede4d520bb2a5443c8c9fe69c50e8614a2a20e05c81a6d8c3427562e87f7`, configured user `65532:65532` |
-| Container smoke | PostgreSQL start/migrate, health, readiness, doctor, version, read-only root filesystem, dropped capabilities, and graceful stop passed |
-| Multi-architecture build | Local OCI layout contains `linux/amd64` and `linux/arm64`; archive SHA-256 `926ada1aeba3887384ac9d4b010a94b2899b83134094d833ba4bff2a30ff4743` |
-| Failure matrix | Nine automated semantic groups passed; six destructive or protected-infrastructure scenarios were correctly classified `external_required` |
-| Go vulnerability scan | `govulncheck` reported zero reachable vulnerabilities in the locally built binary |
-| Container vulnerability scan | Trivy reported zero `HIGH` or `CRITICAL` findings in the exported local image |
-| Local SBOM | SPDX 2.3, 52 packages and 52 relationships; SHA-256 `44e96ff77d9264079906f964e76cf4920230ee37a7130d8ee69d8a0c08e325ff` |
+| Runtime image | Exact core checkout `73743b1633e4521aeda7ba1228cd18b78ef3a185` built and ran as version `1.0.0`, configured user `65532:65532` |
+| Container smoke | Fresh schema-19 migration, health, readiness, doctor, read-only root filesystem, dropped capabilities, SIGTERM restart, and isolated cleanup passed; receipt SHA-256 `1db12c4f130547a75d7599b13c93ee81f714355a6aa9a366e6365e9263a9e162` |
+| Multi-architecture build | Exact local OCI layout at `73743b1633e4521aeda7ba1228cd18b78ef3a185` contains `linux/amd64` and `linux/arm64`; archive SHA-256 `35dab580a652d7c930975b52ca5a97379606a3fec54b68046eddffeb0ac0f031`, index `sha256:09bb1ae785197251342fc88bc370d7d7f2a0e13bd8df948418c7803d9dc9587b` |
+| Failure matrix | At exact core checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`, nine automated semantic groups passed; six destructive or protected-infrastructure scenarios were correctly classified `external_required` |
+| Local recovery drill | Backup, fresh restore with identical state fingerprint, current upgrade, and distinct-ancestor application rollback passed; receipt SHA-256 `40b43fecde7f111575ba9b1d8a23bb49860ef9048b3acdabf80d111a732b99c3` |
+| Go vulnerability scan | Exact-source `CGO_ENABLED=0`, `-trimpath` binary scan with pinned `govulncheck v1.1.4` reported zero called-symbol findings; result SHA-256 `172a57db4d2b0d373e3d2dbdac765ec52d2e2c0e5301731ec10422bbdde1e6b6` |
+| Container/source vulnerability and license scans | Pinned Trivy `0.74.0` reported zero blocked `HIGH` or `CRITICAL` findings for both architectures and source policy/license gates |
+| Local SBOM/provenance | Each platform has a subject-bound embedded SPDX statement and SLSA predicate; standalone SPDX 2.3 files contain 52 packages with amd64 SHA-256 `61346f0a2aaca142e040d34613077418c352707615b6317f259cc94c8eee565a` and arm64 SHA-256 `113bde74dd53a7cb213748a7ba9c5b2414bd2786c2a8513b149992916a9bd7da` |
 | JavaScript package | Reproducible tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
-| React Native package | Reproducible tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
+| React Native package | Reproducible exact-native-pin tarball SHA-256 `cd7c63d5047e2ab3ce413365fd81b08996a6c31643512f7568942d5a49db461b` |
+| Mobile source/package evidence | Swift, Android, React Native, New Architecture examples, clean consumers, fail-closed simulator/emulator paths, and exact source pins passed; local prepublication receipt SHA-256 `763c94234e7585bd18799276b681ec9484ae0f8cd434e0143582894fdf9c9c33` explicitly retains `release_eligible: false` until physical proofs exist |
 | Historical local v1 load suite | Complete at core `1f6f45b17961f8788cf8d9d71b846e88fd82c751`; idle memory, 100 RPS, 500 concurrent SSE streams, and zero-overspend contention pass, but the original initial overhead gate fails at P50/P95 with `13.077/16.728/23.605 ms` against `<5/<15/<30 ms`; that historical report correctly retains `load_targets_passed: false` |
-| Corrected-target local v1 load suite | Passed at clean source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`: `complete_suite: true`, `load_targets_passed: true`, overhead `10.313125/16.879209/22.149626 ms` against strict `<15/<20/<30 ms`, 6,000/6,000 non-streaming requests with `5.858971 ms` maximum scheduler lag, `5.876054 ms` maximum start lag, and exact terminal quota, 500 SSE streams for 60 seconds with `65.75 MiB` growth and no premature completion, and exact 64 accepted/64 denied/0 unexpected contention |
+| Corrected-target non-root local v1 load suite | Passed at clean source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`: `complete_suite: true`, `load_targets_passed: true`, overhead `10.908333/15.156082/18.917875 ms` against strict `<15/<20/<30 ms`, 6,000/6,000 non-streaming requests with exact terminal quota, 500 SSE streams for 60 seconds with `70.875 MiB` growth and no premature completion, and exact 64 accepted/64 denied/0 unexpected contention |
 
 The release workflow must repeat image, per-architecture scan, SBOM, load, and
 resilience work against the exact published digest on protected runners. Local
@@ -174,22 +176,20 @@ It records the original 2-vCPU/2-GiB environment and all six required gates
 under the superseded initial threshold. It is diagnostic history, not a pass
 under the current contract or a durable release asset.
 
-The passing corrected-target receipt is
-`/private/tmp/latchway-v1-final-load-00197f9-repeat.fh68aD/load-v1.json`,
-SHA-256
-`40fd96c97ef2dbfcb661b5dc38a086c72b47a149dac1899dbe465306ecd76f1c`.
-It ran from `2026-08-29T10:41:44Z` through `2026-08-29T10:44:09Z`, recorded
-idle RSS `170.38671875 MiB`, peak stream RSS `121.75390625 MiB`, stream plateau
-slope `-2.6650677806911576 MiB/min`, and exact terminal quotas. It is still a
+The current passing corrected-target receipt is
+`/private/tmp/latchway-load-nonroot-73743b-repeat/load-v1.json`, SHA-256
+`3e6acfb06053d7a3dab3b336a419b2a9a24710a45443917b80a47f8bb416c34a`.
+It ran from `2026-08-29T11:15:44Z` through `2026-08-29T11:18:10Z`, recorded
+idle RSS `170.84765625 MiB`, peak stream RSS `119.68359375 MiB`, stream plateau
+slope `-0.09072579646475752 MiB/min`, and exact terminal quotas. It is still a
 local receipt, not protected exact-image release evidence.
 
-One prior same-commit corrected-target run is retained transparently at
-`/private/tmp/latchway-v1-final-load-00197f9.jHpkKX/load-v1.json`, SHA-256
-`d297ca178dc611437aa0d828671551250c9e549f1d2b243eb4bf59f4f4688b79`.
-It passed corrected latency (`10.295/14.632/21.593 ms`), request outcomes,
-terminal quotas, streams, memory, and contention, but was correctly rejected
-because one host scheduler/start pause reached `199.7 ms` against the unchanged
-`25 ms` bound. It is not counted as a pass.
+One exact-checkpoint diagnostic is retained transparently with JSON SHA-256
+`7af0b4206ef2477a49b77d31bd672e0e833de270ad9597a2e00d9684ce0d5ce6`.
+It passed P50/P95, request outcomes, terminal quotas, streams, memory, and
+contention, but was correctly rejected because a single host-scheduler P99
+outlier reached `59.861333 ms` against the unchanged `30 ms` bound. It is not
+counted as a pass.
 
 ## External-required release gates
 

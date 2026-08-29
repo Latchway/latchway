@@ -11,13 +11,13 @@ after every release domain has authenticated evidence for one exact candidate.
 
 | Artifact | Candidate coordinate | Current evidence |
 | --- | --- | --- |
-| Core | `v1.0.0`; passing local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`; implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged complete corrected-target local load passed; protected exact-image evidence, public annotated product tag, and GitHub release are not claimed |
+| Core | `v1.0.0`; passing local source/load and release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged; non-root corrected-target load, local multi-architecture supply-chain, Compose, failure-matrix, and recovery drills passed; protected exact-image evidence, public annotated product tag, and GitHub release are not claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `b1738804a9519d9adb39fb31da01258224b955ea` | Local reproducible package/consumer gates pass; npm publication not claimed |
-| Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Local Swift Package, consumer, CocoaPods, and fixture gates pass; public tag/package and physical proof not claimed |
-| Android | `dev.latchway:latchway-*` `1.0.0`; source `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
-| React Native | `@latchway/react-native@1.0.0`; source `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` | Local JavaScript, native bridge, example, package, and evidence-export gates pass; npm and physical-device proof not claimed |
+| Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96` | Local Swift Package, consumer, CocoaPods, fixture, and unsupported-device fail-closed gates pass; public tag/package and physical proof not claimed |
+| Android | `dev.latchway:latchway-*` `1.0.0`; source `dbfcc2936d3f74f61201bb8933fabd40937a70fb` | Local Gradle, Maven-layout, consumer, and explicit emulator-rejection gates pass; Maven Central and Play-distributed proof not claimed |
+| React Native | `@latchway/react-native@1.0.0`; source `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` | Local JavaScript, exact native pins, bridge, New Architecture examples, package, and evidence-export gates pass; npm and physical-device proof not claimed |
 | Contract bundle | `latchway-contract-0.5.1.tar.gz` | Two local builds are byte-identical at SHA-256 `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`; no public release asset claimed |
-| OCI image | Intended `ghcr.io/latchway/latchway:v1.0.0` | Supplemental local image ID `sha256:d0b3ede4d520bb2a5443c8c9fe69c50e8614a2a20e05c81a6d8c3427562e87f7`; no registry `RepoDigest` claimed |
+| OCI image | Intended `ghcr.io/latchway/latchway:v1.0.0` | Supplemental local multi-architecture index `sha256:09bb1ae785197251342fc88bc370d7d7f2a0e13bd8df948418c7803d9dc9587b`; no registry `RepoDigest` claimed |
 | Database | Schema `19` | Migration sources and local migration/runtime tests present; exact cloud/released-image migration receipts pending |
 
 Contract `0.5.1` is marked `released` at `2026-08-29T07:14:27Z`
@@ -54,9 +54,9 @@ and new affected evidence.
 | Repository | Local evidence |
 | --- | --- |
 | JavaScript | 36 Vitest and 11 Node tests plus lint, typecheck, build, examples, exports, contract, package closure, clean consumer, and reproducibility; tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
-| Swift/iOS | 64 Swift tests, release build, consumer, CocoaPods lint, contract archive, fixture, and device-evidence schema tests; one environment-dependent test skip was recorded |
+| Swift/iOS | 65 Swift tests, release build, consumer, CocoaPods lint, contract archive, fixture, unsupported-device fail-closed, and device-evidence schema tests pass |
 | Android | 670 Gradle tasks for test/assemble/lint, release/adversarial and device-evidence suites, local Maven publication, and offline consumers pass at the synchronized source |
-| React Native | 33 Vitest, 20 Node, 13 Python device-evidence, and 7 physical-evidence-export tests plus lint, typecheck, codegen, build, example/native consumers, podspec, package closure, and reproducibility; tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
+| React Native | 33 Vitest, 20 Node, and the device-finalization/export/gateway suites plus lint, typecheck, codegen, build, New Architecture examples, native consumers, podspec, package closure, and reproducibility; tarball SHA-256 `cd7c63d5047e2ab3ce413365fd81b08996a6c31643512f7568942d5a49db461b` |
 
 Repository-local results demonstrate source and package integrity. They do not
 replace the protected all-SDK suite against the exact released image.
@@ -66,15 +66,27 @@ replace the protected all-SDK suite against the exact released image.
 - A local production image started with PostgreSQL, migrated to schema 19,
   passed health/readiness/doctor/version, ran as `65532:65532` with a read-only
   root filesystem and dropped capabilities, and stopped gracefully.
-- A local OCI layout contained both `linux/amd64` and `linux/arm64`; archive
-  SHA-256 was `926ada1aeba3887384ac9d4b010a94b2899b83134094d833ba4bff2a30ff4743`.
-- `govulncheck` found zero reachable vulnerabilities in the local binary. Trivy
-  found zero `HIGH` or `CRITICAL` findings in the exported local image.
-- The local SPDX 2.3 SBOM contained 52 packages and 52 relationships and had
-  SHA-256 `44e96ff77d9264079906f964e76cf4920230ee37a7130d8ee69d8a0c08e325ff`.
-- Nine automated failure-matrix groups passed. Six destructive/protected
-  scenarios were correctly left `external_required` instead of being
-  represented by synthetic success.
+- The exact local candidate OCI layout contained both `linux/amd64` and
+  `linux/arm64`; archive SHA-256 was
+  `35dab580a652d7c930975b52ca5a97379606a3fec54b68046eddffeb0ac0f031`
+  and index digest was
+  `sha256:09bb1ae785197251342fc88bc370d7d7f2a0e13bd8df948418c7803d9dc9587b`.
+- Pinned `govulncheck v1.1.4` binary mode found zero called-symbol findings in
+  the exact-source Go 1.27 binary. Pinned Trivy `0.74.0` found zero blocked
+  `HIGH` or `CRITICAL` vulnerability, policy, or license findings in either
+  architecture or the source tree.
+- Both platforms have subject-bound embedded SPDX and SLSA statements.
+  Standalone SPDX 2.3 SBOMs contain 52 packages; amd64 SHA-256 is
+  `61346f0a2aaca142e040d34613077418c352707615b6317f259cc94c8eee565a`
+  and arm64 SHA-256 is
+  `113bde74dd53a7cb213748a7ba9c5b2414bd2786c2a8513b149992916a9bd7da`.
+- At core checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`, nine
+  automated failure-matrix groups passed. Six destructive/protected scenarios
+  were correctly left `external_required` instead of being represented by
+  synthetic success. A local backup, fresh restore with an identical state
+  fingerprint, current upgrade, and distinct-ancestor application rollback
+  also passed; its receipt SHA-256 is
+  `40b43fecde7f111575ba9b1d8a23bb49860ef9048b3acdabf80d111a732b99c3`.
 - A now-historical unchanged self-contained v1 load suite completed at core
   `1f6f45b17961f8788cf8d9d71b846e88fd82c751` in the original 2-vCPU/2-GiB
   environment. Idle memory, 100 non-streaming requests/second, 500 concurrent
@@ -85,32 +97,32 @@ replace the protected all-SDK suite against the exact released image.
   local receipt is
   `/private/tmp/latchway-v1-final-load-1f6f45b.XUv01M/load-v1.json`, SHA-256
   `dfa49463558f96fe3a953bd3d6d3565398517f58d1bf04759840bb7744533187`.
-- ADR 0022 and candidate `859dae84aa5dbd42c415ca10b67725fef131874b`
+- ADR 0022 and the current release-tooling candidate
+  `73743b1633e4521aeda7ba1228cd18b78ef3a185`
   adopt the plan-authorized strict `<15/<20/<30 ms` P50/P95/P99 correction
   while preserving P99 and every functional, correctness, throughput, stream,
   memory, contention, and failure gate.
-- The exact unchanged complete local suite passed at clean source/load
-  checkpoint `00197f916cd50803093a5e73bbac725e97c394e3` from
-  `2026-08-29T10:41:44Z` through `2026-08-29T10:44:09Z` with
+- The exact non-root complete local suite passed at clean source/load
+  checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185` from
+  `2026-08-29T11:15:44Z` through `2026-08-29T11:18:10Z` with
   `complete_suite: true` and `load_targets_passed: true`. P50/P95/P99 overhead
-  was `10.313125/16.879209/22.149626 ms` over 1,000 samples. Idle RSS was
-  `170.38671875 MiB`. The 100-RPS gate completed 6,000/6,000 requests with
-  `5.858971 ms` maximum scheduler lag, `5.876054 ms` maximum start lag, and
+  was `10.908333/15.156082/18.917875 ms` over 1,000 samples. Idle RSS was
+  `170.84765625 MiB`. The 100-RPS gate completed 6,000/6,000 requests with
   exact terminal quota. The 500-stream gate held for 60 seconds with
-  `65.75 MiB` growth, `121.75390625 MiB` peak RSS,
-  `-2.6650677806911576 MiB/min` slope, no premature completion, and exact
+  `70.875 MiB` growth, `119.68359375 MiB` peak RSS,
+  `-0.09072579646475752 MiB/min` slope, no premature completion, and exact
   terminal quota. Contention was exactly 64 accepted, 64 denied, zero
   unexpected, 64 used, and zero reserved.
   The local receipt is
-  `/private/tmp/latchway-v1-final-load-00197f9-repeat.fh68aD/load-v1.json`,
+  `/private/tmp/latchway-load-nonroot-73743b-repeat/load-v1.json`,
   SHA-256
-  `40fd96c97ef2dbfcb661b5dc38a086c72b47a149dac1899dbe465306ecd76f1c`.
-- A prior same-commit run, SHA-256
-  `d297ca178dc611437aa0d828671551250c9e549f1d2b243eb4bf59f4f4688b79`,
-  passed corrected latency (`10.295/14.632/21.593 ms`) plus request outcomes,
-  terminal quota, stream, memory, and contention checks, but was correctly
-  rejected only because one host scheduler/start pause reached `199.7 ms`
-  against the unchanged `25 ms` bound. It is not counted as passing evidence.
+  `3e6acfb06053d7a3dab3b336a419b2a9a24710a45443917b80a47f8bb416c34a`.
+- One exact-checkpoint diagnostic, SHA-256
+  `7af0b4206ef2477a49b77d31bd672e0e833de270ad9597a2e00d9684ce0d5ce6`,
+  passed P50/P95 plus every functional, quota, stream, memory, throughput, and
+  contention check, but was correctly rejected because a single host-scheduler
+  P99 outlier reached `59.861333 ms` against the unchanged `30 ms` bound. It is
+  not counted as passing evidence.
 
 The passing suite is supplemental local evidence. Protected execution against
 the exact published per-architecture image remains required and no public
@@ -166,8 +178,8 @@ source commits shown under Release artifacts.
 | Clean Compose startup | Local production image/PostgreSQL smoke passed | Protected exact-image Compose receipt |
 | Fresh migration | Local schema-19 migration passed | Exact-image cloud/platform migration receipts |
 | Configuration activation/rollback | Canonical Admin API and local concurrency/browser tests pass | Exact-candidate deployment observation under load |
-| Backup/restore | Isolated drill tooling, validation, and documentation are implemented | Protected backup/restore drill receipt |
-| Upgrade/application rollback | Previous-candidate discovery, authentication, and drill tooling are implemented | Successful distinct-ancestor candidate drill |
+| Backup/restore | Isolated backup into a fresh database restored an identical state fingerprint and passed doctor/health/readiness | Protected exact-image backup/restore drill receipt |
+| Upgrade/application rollback | Current schema upgrade and distinct-ancestor application rollback passed locally | Released previous/current digest- and attestation-bound drill |
 | Graceful shutdown | Local container stop passed | Exact-candidate shutdown under protected load |
 | Worker recovery/multi-replica | Jobs, heartbeats, shared replay/quota state, and failure producers are implemented | Destructive protected multi-replica/failure receipts |
 | Cloud deployments | Compose, Cloud Run, AWS, Fly.io, and Cloudflare assets validate locally | Provider-issued exact-image smoke receipts for all claimed platforms |
