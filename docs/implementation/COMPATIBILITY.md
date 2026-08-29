@@ -14,7 +14,7 @@ registries.
 | Contract released at | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Current implementation and release-tooling candidate | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Current canonical RC source and release-tooling checkpoint | `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (`1.0.0-rc.1`) |
 | Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
@@ -27,11 +27,12 @@ frozen. It does not mean that server `v1.0.0`, its OCI image, or any SDK package
 has been publicly tagged or published.
 
 The normative checkpoint identifies the byte-frozen `api/` contract consumed
-by every SDK lock. The current implementation candidate identifies the server,
-CLI, dashboard, release-hardening code, and ADR 0022 corrected load contract.
-They are deliberately different coordinates. The unchanged complete local
-corrected-target load suite passes at the source/load checkpoint, but that is
-not protected exact-image release evidence or a support claim.
+by every SDK lock. The canonical RC checkpoint identifies the server, CLI,
+dashboard, and current release-hardening source. The separate source/load
+checkpoint identifies the implementation and ADR 0022 corrected load contract
+that passed the unchanged complete local suite. They are deliberately different
+coordinates; neither local result is protected exact-image release evidence or
+a support claim.
 Documentation-only descendants may follow the candidate without changing that
 implementation claim; a later code change must become a new candidate and
 rerun the affected evidence.
@@ -47,18 +48,18 @@ compatibility coordinate.
 
 | Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |
 | --- | --- | --- | --- | --- |
-| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Passing local source/load and release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
-| JavaScript | `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
-| Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
-| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `dbfcc2936d3f74f61201bb8933fabd40937a70fb` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0-rc.1` (intended stable `1.0.0`) | Canonical RC checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c`; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
+| JavaScript | `@latchway/client` | `1.0.0` | `e47676775e8e902cf868646348174e2b898162c1` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
+| Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
+| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Android API 23+; Java 17; compile SDK 37 |
+| React Native | `@latchway/react-native` | `1.0.0` | `649156466a1a58a062bf7832f0a6a7fb257b7339` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:
 
-- JavaScript: `b1738804a9519d9adb39fb31da01258224b955ea`
-- Swift: `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96`
-- Android: `dbfcc2936d3f74f61201bb8933fabd40937a70fb`
+- JavaScript: `e47676775e8e902cf868646348174e2b898162c1`
+- Swift: `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`
+- Android: `a41c0a5fd648365258695b2fe0abda44b618b9d6`
 
 ## Shared fixture identity
 

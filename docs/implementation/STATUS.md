@@ -16,10 +16,10 @@ promoted.
 | --- | --- |
 | Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
 | Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
-| Last passing commit in each repository | Core source/load/release-tooling checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96`; Android `dbfcc2936d3f74f61201bb8933fabd40937a70fb`; React Native `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` |
+| Last passing commit in each repository | Core canonical RC source/release-tooling checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `e47676775e8e902cf868646348174e2b898162c1`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `649156466a1a58a062bf7832f0a6a7fb257b7339` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `19` |
-| Last full test time | `2026-08-29T11:18:10Z`, successful completion of the non-root self-contained local v1 load suite at `73743b1633e4521aeda7ba1228cd18b78ef3a185`; mobile/package validation completed at the synchronized SDK heads |
+| Last full test time | `2026-08-29T22:42:36Z`, successful RC source/release validation (all Go tests, vet, 196 Python tests, console build, frozen API) plus synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
 | Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: protected `main` has not retained the required canonical RC candidate run or its stable descendant run, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
 | External credentials still required | Protected GitHub repository settings, runners, and registry publication/signing identities; Apple Distribution signing and production App Attest configuration (a physical iPhone is connected); a physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
@@ -66,7 +66,7 @@ mise exec -- pnpm pack:check
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Current implementation and release-tooling candidate | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Current canonical RC source and release-tooling checkpoint | `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (`1.0.0-rc.1`) |
 | Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
@@ -89,10 +89,10 @@ gates to be rerun.
 
 | Component | Version | Source commit | Local status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Source, tests, examples, exports, package closure, reproducibility, and clean-consumer gates pass |
-| Swift package / `Latchway` pod | `1.0.0` | `0163f91f6f2bb5be6e021dd1c79a8837f5e25f96` | 65 Swift tests, release build, package consumer, CocoaPods lint, fixture, contract, and unsupported-device fail-closed gates pass |
-| Android `dev.latchway:latchway-*` | `1.0.0` | `dbfcc2936d3f74f61201bb8933fabd40937a70fb` | 76 JVM tests, device-evidence fixtures including explicit emulator rejection, assemble, lint, local Maven, and offline-consumer gates pass |
-| React Native `@latchway/react-native` | `1.0.0` | `a99cfbdc5a094ffa7d498cc784d9f7baca197aba` | JavaScript, codegen, exact native pins, bridge, New Architecture examples, package closure, reproducibility, podspec, and evidence-export gates pass |
+| JavaScript `@latchway/client` | `1.0.0` | `e47676775e8e902cf868646348174e2b898162c1` | Source, tests, examples, exports, package closure, reproducibility, clean-consumer, workflow-owned tag, and private-core evidence gates pass |
+| Swift package / `Latchway` pod | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | 65 Swift tests, release build, package consumer, CocoaPods lint, fixture, contract, unsupported-device fail-closed, and private-core evidence gates pass |
+| Android `dev.latchway:latchway-*` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | 76 JVM tests, 670 Gradle task gate, stable API 37.0 installer, device-evidence fixtures, assemble/lint/local Maven/offline-consumer, and private-core evidence gates pass |
+| React Native `@latchway/react-native` | `1.0.0` | `649156466a1a58a062bf7832f0a6a7fb257b7339` | JavaScript, codegen, synchronized exact native pins, bridge, New Architecture examples, package closure, reproducibility, podspec, workflow-owned tag, and private-sibling checkout gates pass |
 
 The React Native compatibility manifest pins the exact JavaScript, Swift, and
 Android source commits above. The native Android SDK supports API 23 or newer;
