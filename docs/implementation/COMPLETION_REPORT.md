@@ -11,7 +11,7 @@ after every release domain has authenticated evidence for one exact candidate.
 
 | Artifact | Candidate coordinate | Current evidence |
 | --- | --- | --- |
-| Core | `v1.0.0`; current implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and ADR 0022 corrected target adopted; unchanged complete corrected-target load rerun, public annotated product tag, and GitHub release are not claimed |
+| Core | `v1.0.0`; passing local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`; implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged complete corrected-target local load passed; protected exact-image evidence, public annotated product tag, and GitHub release are not claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `b1738804a9519d9adb39fb31da01258224b955ea` | Local reproducible package/consumer gates pass; npm publication not claimed |
 | Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | Local Swift Package, consumer, CocoaPods, and fixture gates pass; public tag/package and physical proof not claimed |
 | Android | `dev.latchway:latchway-*` `1.0.0`; source `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Local Gradle, Maven-layout, and consumer gates pass; Maven Central and Play-distributed proof not claimed |
@@ -26,11 +26,11 @@ that the product or packages have been publicly released.
 
 The checkpoint and candidate are separate by design: SDK locks consume the
 byte-frozen contract at the checkpoint, while the implementation candidate is
-the server/CLI/dashboard and corrected performance-contract snapshot audited
-below. Its unchanged complete corrected-target load rerun is pending.
-Documentation-only descendants do not rewrite that historical candidate
-coordinate. Any later code change requires a new candidate and new affected
-evidence.
+the server/CLI/dashboard and corrected performance-contract snapshot. The
+source/load checkpoint is the clean documentation descendant that passed the
+unchanged complete local suite. Documentation-only descendants do not rewrite
+those historical coordinates. Any later code change requires a new candidate
+and new affected evidence.
 
 ## Test evidence
 
@@ -88,8 +88,33 @@ replace the protected all-SDK suite against the exact released image.
 - ADR 0022 and candidate `859dae84aa5dbd42c415ca10b67725fef131874b`
   adopt the plan-authorized strict `<15/<20/<30 ms` P50/P95/P99 correction
   while preserving P99 and every functional, correctness, throughput, stream,
-  memory, contention, and failure gate. The exact unchanged complete suite has
-  not yet been rerun, so no current load pass or release-readiness claim exists.
+  memory, contention, and failure gate.
+- The exact unchanged complete local suite passed at clean source/load
+  checkpoint `00197f916cd50803093a5e73bbac725e97c394e3` from
+  `2026-08-29T10:41:44Z` through `2026-08-29T10:44:09Z` with
+  `complete_suite: true` and `load_targets_passed: true`. P50/P95/P99 overhead
+  was `10.313125/16.879209/22.149626 ms` over 1,000 samples. Idle RSS was
+  `170.38671875 MiB`. The 100-RPS gate completed 6,000/6,000 requests with
+  `5.858971 ms` maximum scheduler lag, `5.876054 ms` maximum start lag, and
+  exact terminal quota. The 500-stream gate held for 60 seconds with
+  `65.75 MiB` growth, `121.75390625 MiB` peak RSS,
+  `-2.6650677806911576 MiB/min` slope, no premature completion, and exact
+  terminal quota. Contention was exactly 64 accepted, 64 denied, zero
+  unexpected, 64 used, and zero reserved.
+  The local receipt is
+  `/private/tmp/latchway-v1-final-load-00197f9-repeat.fh68aD/load-v1.json`,
+  SHA-256
+  `40fd96c97ef2dbfcb661b5dc38a086c72b47a149dac1899dbe465306ecd76f1c`.
+- A prior same-commit run, SHA-256
+  `d297ca178dc611437aa0d828671551250c9e549f1d2b243eb4bf59f4f4688b79`,
+  passed corrected latency (`10.295/14.632/21.593 ms`) plus request outcomes,
+  terminal quota, stream, memory, and contention checks, but was correctly
+  rejected only because one host scheduler/start pause reached `199.7 ms`
+  against the unchanged `25 ms` bound. It is not counted as passing evidence.
+
+The passing suite is supplemental local evidence. Protected execution against
+the exact published per-architecture image remains required and no public
+release-readiness claim follows from the local result.
 
 These items are supplemental local observations. The release workflow must
 repeat the applicable work for the exact per-architecture published digest and

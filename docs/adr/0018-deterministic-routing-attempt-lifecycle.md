@@ -158,6 +158,8 @@ Accepted on 2026-08-28 and implemented and locally validated for contract
 and sticky selection, bounded same-route retry, configured fallback,
 per-attempt accounting, immutable request rendering, and response-commitment
 guards are executable only through the closed policies described above. Their
-normal, adversarial, PostgreSQL, race, and conformance tests pass. Live-provider
-and exact-release-image observations remain separate release evidence and are
-not implied by this ADR status.
+normal, adversarial, PostgreSQL, race, and conformance tests pass, and the
+complete corrected-target local load suite passed at source checkpoint
+`00197f916cd50803093a5e73bbac725e97c394e3`. Live-provider and
+exact-release-image observations remain separate release evidence and are not
+implied by this ADR status.

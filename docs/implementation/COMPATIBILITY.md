@@ -15,6 +15,7 @@ registries.
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Current implementation candidate | `859dae84aa5dbd42c415ca10b67725fef131874b` |
+| Passing local source/load checkpoint | `00197f916cd50803093a5e73bbac725e97c394e3` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
 | Database schema | `19` |
@@ -28,17 +29,18 @@ has been publicly tagged or published.
 The normative checkpoint identifies the byte-frozen `api/` contract consumed
 by every SDK lock. The current implementation candidate identifies the server,
 CLI, dashboard, release-hardening code, and ADR 0022 corrected load contract.
-They are deliberately different coordinates. The unchanged complete
-corrected-target load suite is pending, so this coordinate is not a release or
-support claim. Documentation-only descendants may follow the candidate without
-changing that implementation claim; a later code change must become a new
-candidate and rerun the affected evidence.
+They are deliberately different coordinates. The unchanged complete local
+corrected-target load suite passes at the source/load checkpoint, but that is
+not protected exact-image release evidence or a support claim.
+Documentation-only descendants may follow the candidate without changing that
+implementation claim; a later code change must become a new candidate and
+rerun the affected evidence.
 
 ## Version 1 component matrix
 
 | Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |
 | --- | --- | --- | --- | --- |
-| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Current implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
+| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0` | Passing local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`; implementation candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
 | JavaScript | `@latchway/client` | `1.0.0` | `b1738804a9519d9adb39fb31da01258224b955ea` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
 | Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `dc409a5d95efcc9c9b7d8d023d1155653bb680cb` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
 | Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029` | Android API 23+; Java 17; compile SDK 37 |

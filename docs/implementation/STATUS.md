@@ -14,16 +14,16 @@ promoted.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 18 hardening, before Phase 19 release finalization |
-| Current objective | Run the unchanged complete local v1 load suite at the corrected strict `<15/<20/<30 ms` P50/P95/P99 target, then freeze one exact candidate for the protected release finalizer |
-| Last passing commit in each repository | Current core candidate `859dae84aa5dbd42c415ca10b67725fef131874b`; JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`; Android `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`; React Native `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` |
+| Current phase | Phase 19 final local source validation before protected release finalization |
+| Current objective | Revalidate cross-repository source conformance at the passing load checkpoint, then freeze one exact candidate for the protected external release finalizer |
+| Last passing commit in each repository | Core local source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3` (implementation/performance candidate `859dae84aa5dbd42c415ca10b67725fef131874b`); JavaScript `b1738804a9519d9adb39fb31da01258224b955ea`; Swift/iOS `dc409a5d95efcc9c9b7d8d023d1155653bb680cb`; Android `e2a0e0c288f0d0b9b6d8104c48f08f764f06c029`; React Native `945e45f8df6f1f2bd7bdceb3d89903988f0b8aad` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `19` |
-| Last full test time | `2026-08-29T10:18:52Z`, completion of the historical unchanged self-contained local v1 load suite at `1f6f45b17961f8788cf8d9d71b846e88fd82c751` under the original initial target |
-| Passing test commands | The repository commands recorded immediately below pass at the named source commits; the corrected-target complete load rerun at the current core candidate is pending |
-| Open blockers | Local: the unchanged complete load suite has not yet been rerun at `859dae84aa5dbd42c415ca10b67725fef131874b` with the ADR 0022 strict `<15/<20/<30 ms` target. External: exact-image live SDK/provider/device/cloud/resilience/supply-chain/publication evidence remains unavailable |
+| Last full test time | `2026-08-29T10:44:09Z`, successful completion of the unchanged self-contained local v1 load suite at `00197f916cd50803093a5e73bbac725e97c394e3` |
+| Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
+| Open blockers | Local implementation/load blockers: none. Release blockers: exact-image live SDK/provider/device/cloud/resilience/supply-chain/publication evidence remains unavailable |
 | External credentials still required | Protected GitHub and registry publication/signing identities; Apple signing/App Attest configuration and a physical device; Play Console, Google Cloud/Play Integrity configuration and a Play-distributed device build; OpenRouter credentials; and credentials for every claimed cloud deployment |
-| Next executable task | Run the unchanged complete load suite at the corrected target, rerun cross-repository source conformance on the resulting clean candidate, then execute the protected release finalizer sequence |
+| Next executable task | Run final cross-repository source conformance and clean/DCO checks at the documentation descendant, then execute the protected external release finalizer sequence |
 
 Passing repository commands at the recorded heads include:
 
@@ -33,6 +33,8 @@ go test ./...
 go vet ./...
 go test -count=1 ./internal/quota ./internal/dataplane
 python3 scripts/test_render_completion_report.py
+# Run only with a new empty absolute evidence directory.
+./scripts/run-local-load-gates.sh -acknowledge-load -evidence-dir /absolute/empty/evidence-dir
 
 # latchway-js
 mise exec -- pnpm check
@@ -64,6 +66,7 @@ mise exec -- pnpm pack:check
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Current implementation candidate | `859dae84aa5dbd42c415ca10b67725fef131874b` |
+| Passing local source/load checkpoint | `00197f916cd50803093a5e73bbac725e97c394e3` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
 | Database schema | `19` |
@@ -75,10 +78,11 @@ Release-hardening and documentation commits may descend from that checkpoint,
 but must not alter `api/`; any later API drift invalidates the locks.
 The current implementation candidate adopts ADR 0022's plan-authorized strict
 `<15/<20/<30 ms` P50/P95/P99 correction without weakening P99, correctness,
-throughput, streaming, memory, contention, or failure gates. Its unchanged
-complete load rerun is pending. A later documentation-only repository head is
-not implicitly a different implementation candidate, and any later code change
-requires the affected gates to be rerun.
+throughput, streaming, memory, contention, or failure gates. The unchanged
+complete local load suite passes at the source/load checkpoint above. A later
+documentation-only repository head is not implicitly a different
+implementation candidate, and any later code change requires the affected
+gates to be rerun.
 
 ## Mobile-first SDK coordinates
 
@@ -156,7 +160,7 @@ candidate but are not immutable protected-run release evidence.
 | JavaScript package | Reproducible tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
 | React Native package | Reproducible tarball SHA-256 `4630ba1902efc755b5d3d5595200f4dc39189aa9c5963c72ae1e9d4adcb78fff` |
 | Historical local v1 load suite | Complete at core `1f6f45b17961f8788cf8d9d71b846e88fd82c751`; idle memory, 100 RPS, 500 concurrent SSE streams, and zero-overspend contention pass, but the original initial overhead gate fails at P50/P95 with `13.077/16.728/23.605 ms` against `<5/<15/<30 ms`; that historical report correctly retains `load_targets_passed: false` |
-| Corrected-target local v1 load suite | ADR 0022 and core candidate `859dae84aa5dbd42c415ca10b67725fef131874b` adopt strict `<15/<20/<30 ms` targets under the Phase 18 correction provision; the exact unchanged complete suite is pending and no passing verdict is claimed |
+| Corrected-target local v1 load suite | Passed at clean source/load checkpoint `00197f916cd50803093a5e73bbac725e97c394e3`: `complete_suite: true`, `load_targets_passed: true`, overhead `10.313125/16.879209/22.149626 ms` against strict `<15/<20/<30 ms`, 6,000/6,000 non-streaming requests with `5.858971 ms` maximum scheduler lag, `5.876054 ms` maximum start lag, and exact terminal quota, 500 SSE streams for 60 seconds with `65.75 MiB` growth and no premature completion, and exact 64 accepted/64 denied/0 unexpected contention |
 
 The release workflow must repeat image, per-architecture scan, SBOM, load, and
 resilience work against the exact published digest on protected runners. Local
@@ -169,6 +173,23 @@ The historical complete local load document is
 It records the original 2-vCPU/2-GiB environment and all six required gates
 under the superseded initial threshold. It is diagnostic history, not a pass
 under the current contract or a durable release asset.
+
+The passing corrected-target receipt is
+`/private/tmp/latchway-v1-final-load-00197f9-repeat.fh68aD/load-v1.json`,
+SHA-256
+`40fd96c97ef2dbfcb661b5dc38a086c72b47a149dac1899dbe465306ecd76f1c`.
+It ran from `2026-08-29T10:41:44Z` through `2026-08-29T10:44:09Z`, recorded
+idle RSS `170.38671875 MiB`, peak stream RSS `121.75390625 MiB`, stream plateau
+slope `-2.6650677806911576 MiB/min`, and exact terminal quotas. It is still a
+local receipt, not protected exact-image release evidence.
+
+One prior same-commit corrected-target run is retained transparently at
+`/private/tmp/latchway-v1-final-load-00197f9.jHpkKX/load-v1.json`, SHA-256
+`d297ca178dc611437aa0d828671551250c9e549f1d2b243eb4bf59f4f4688b79`.
+It passed corrected latency (`10.295/14.632/21.593 ms`), request outcomes,
+terminal quotas, streams, memory, and contention, but was correctly rejected
+because one host scheduler/start pause reached `199.7 ms` against the unchanged
+`25 ms` bound. It is not counted as a pass.
 
 ## External-required release gates
 
