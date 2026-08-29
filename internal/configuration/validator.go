@@ -386,6 +386,9 @@ func applyDefaults(root map[string]any) {
 	for _, plan := range objectArray(spec, "limitPlans") {
 		for _, limit := range objectArray(plan, "limits") {
 			setDefault(limit, "algorithm", inferredLimitAlgorithm(limit))
+			if stringValue(limit, "algorithm") == "calendar" {
+				setDefault(limit, "timezone", "UTC")
+			}
 			setDefault(limit, "hard", true)
 			if raw, ok := limit["refillPerSecond"].(json.Number); ok {
 				if rate, valid := parseJSONRefillRate(raw); valid {

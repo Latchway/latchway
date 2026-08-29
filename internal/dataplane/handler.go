@@ -43,12 +43,13 @@ import (
 )
 
 const (
-	defaultMaximumResponseBody = int64(32 << 20)
-	maximumRequestBodyLimit    = int64(100 << 20)
-	maximumResponseBodyLimit   = int64(100 << 20)
-	defaultClientWriteTimeout  = 30 * time.Second
-	defaultPersistenceTimeout  = 5 * time.Second
-	maximumDecisionLimitRules  = 128
+	defaultMaximumResponseBody            = int64(32 << 20)
+	maximumRequestBodyLimit               = int64(100 << 20)
+	maximumResponseBodyLimit              = int64(100 << 20)
+	defaultClientWriteTimeout             = 30 * time.Second
+	defaultPersistenceTimeout             = 5 * time.Second
+	maximumDecisionLimitRules             = 128
+	maximumDecisionCalendarTimezoneLength = 64
 	// These bounds mirror quota's exact fixed-point envelope so detached policy
 	// values fail closed before reaching durable reservation state.
 	maximumDecisionTokenBucketCapacity        = int64(9_223_372)
@@ -66,7 +67,8 @@ var (
 	errUpstreamDispatch     = errors.New("upstream dispatch failed")
 	errUpstreamProtocol     = errors.New("upstream protocol observation failed")
 	errUpstreamRelay        = errors.New("upstream response relay failed")
-	decisionWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|mo)$`)
+	decisionWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|w|mo)$`)
+	decisionTimezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$`)
 )
 
 var decisionScopeOrder = []string{
@@ -85,6 +87,7 @@ var decisionWindowMaximum = map[string]int64{
 	"m":  366 * 24 * 60,
 	"h":  366 * 24,
 	"d":  366,
+	"w":  52,
 	"mo": 12,
 }
 
@@ -1476,13 +1479,21 @@ func validateFeatureLimitPlan(
 	}
 	for _, limit := range limitPlan.Limits {
 		scope, ok := canonicalDecisionScope(limit.Scope)
+		timezone := ""
+		if limit.Algorithm == quota.CalendarAlgorithm {
+			var timezoneOK bool
+			timezone, timezoneOK = canonicalDecisionCalendarTimezone(limit.Timezone)
+			ok = ok && timezoneOK
+		} else if limit.Timezone != "" {
+			ok = false
+		}
 		if !limit.Hard || !ok || !supportedDecisionLimit(limit) ||
 			!protocolSupportsLimitMetric(feature.Protocol, limit.Metric) {
 			return validatedDecision{}, errUnsupportedLimitPlan
 		}
 		identity := decisionLimitIdentity{
 			metric: limit.Metric, algorithm: limit.Algorithm,
-			window: limit.Window, scope: strings.Join(scope, "\x00"),
+			window: limit.Window, timezone: timezone, scope: strings.Join(scope, "\x00"),
 		}
 		if _, duplicate := seenIdentities[identity]; duplicate {
 			return validatedDecision{}, errUnsupportedLimitPlan
@@ -1490,7 +1501,7 @@ func validateFeatureLimitPlan(
 		seenIdentities[identity] = struct{}{}
 		rules = append(rules, quota.Rule{
 			Metric: limit.Metric, Algorithm: limit.Algorithm, Scope: scope,
-			Window: limit.Window, Maximum: limit.Maximum,
+			Window: limit.Window, Timezone: timezone, Maximum: limit.Maximum,
 			PerRequestMaximum: limit.PerRequestMaximum, Capacity: limit.Capacity,
 			RefillNumerator:   limit.RefillPerSecond.Numerator,
 			RefillDenominator: limit.RefillPerSecond.Denominator, Hard: limit.Hard,
@@ -1598,30 +1609,31 @@ func protocolSupportsTrustedInputPreflight(protocolID string) bool {
 
 func supportedDecisionLimit(limit configuration.Limit) bool {
 	noRefill := limit.RefillPerSecond == (configuration.RefillRate{})
+	_, validTimezone := canonicalDecisionCalendarTimezone(limit.Timezone)
 	switch {
 	case limit.Metric == quota.LogicalRequestsMetric && limit.Algorithm == quota.CalendarAlgorithm:
-		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+		return validDecisionWindow(limit.Window) && validTimezone && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.LogicalRequestsMetric || limit.Metric == quota.InputTokensMetric ||
 		limit.Metric == quota.OutputTokensMetric || limit.Metric == quota.TotalTokensMetric) &&
 		limit.Algorithm == quota.TokenBucketAlgorithm:
-		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
+		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 && limit.PerRequestMaximum == 0 &&
 			limit.Capacity > 0 && limit.Capacity <= maximumDecisionTokenBucketCapacity &&
 			validDecisionTokenBucketRefill(limit.RefillPerSecond)
 	case (limit.Metric == quota.InputTokensMetric || limit.Metric == quota.OutputTokensMetric ||
 		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.CalendarAlgorithm:
-		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+		return validDecisionWindow(limit.Window) && validTimezone && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case limit.Metric == quota.CostNanoUSDMetric && limit.Algorithm == quota.CalendarAlgorithm:
-		return validDecisionWindow(limit.Window) && limit.Maximum > 0 &&
+		return validDecisionWindow(limit.Window) && validTimezone && limit.Maximum > 0 &&
 			limit.PerRequestMaximum == 0 && limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.InputTokensMetric || limit.Metric == quota.OutputTokensMetric ||
 		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.PerRequestAlgorithm:
-		return limit.Window == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&
+		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&
 			limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.ConcurrentRequestsMetric || limit.Metric == quota.ConcurrentStreamsMetric) &&
 		limit.Algorithm == quota.ConcurrencyAlgorithm:
-		return limit.Window == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 &&
+		return limit.Window == "" && limit.Timezone == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 &&
 			limit.Capacity == 0 && noRefill
 	default:
 		return false
@@ -1639,6 +1651,7 @@ type decisionLimitIdentity struct {
 	metric    string
 	algorithm string
 	window    string
+	timezone  string
 	scope     string
 }
 
@@ -1673,6 +1686,18 @@ func validDecisionWindow(raw string) bool {
 	amount, err := strconv.ParseInt(matches[1], 10, 64)
 	maximum, ok := decisionWindowMaximum[matches[2]]
 	return err == nil && ok && amount > 0 && amount <= maximum
+}
+
+func canonicalDecisionCalendarTimezone(raw string) (string, bool) {
+	if raw == "" || raw == "UTC" {
+		return "UTC", true
+	}
+	if raw == "Local" || len(raw) > maximumDecisionCalendarTimezoneLength ||
+		!decisionTimezonePattern.MatchString(raw) {
+		return "", false
+	}
+	location, err := time.LoadLocation(raw)
+	return raw, err == nil && location.String() == raw
 }
 
 func (handler *Handler) startStage(ctx context.Context, stage string, labels telemetry.Labels) (context.Context, func(string)) {

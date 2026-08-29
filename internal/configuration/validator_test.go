@@ -47,9 +47,41 @@ func TestValidatorCompilesStrictNormalizedConfiguration(t *testing.T) {
 		t.Fatalf("default private destination policy = %#v", destination)
 	}
 	limit := objectArray(objectArray(spec, "limitPlans")[0], "limits")[0]
-	if stringValue(limit, "algorithm") != "calendar" || limit["hard"] != true ||
+	if stringValue(limit, "algorithm") != "calendar" || stringValue(limit, "timezone") != "UTC" || limit["hard"] != true ||
 		!slices.Equal(stringArray(limit, "scope"), []string{"user", "feature"}) {
 		t.Fatalf("normalized executable limit = %#v", limit)
+	}
+}
+
+func TestValidatorCompilesWeekWindowWithConfiguredIANATimezone(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	limit := objectArray(objectArray(objectValue(document, "spec"), "limitPlans")[0], "limits")[0]
+	limit["window"] = "1w"
+	limit["timezone"] = "America/New_York"
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("week/IANA configuration is not schema-valid: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid {
+		t.Fatalf("week/IANA configuration rejected: %+v", report.Issues)
+	}
+	snapshot, err := newActiveSnapshot("revision", "environment", encoded, compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, ok := snapshot.LimitPlan("free")
+	if !ok || len(plan.Limits) != 1 || plan.Limits[0].Window != "1w" ||
+		plan.Limits[0].Timezone != "America/New_York" {
+		t.Fatalf("compiled plan = %+v ok=%t", plan, ok)
 	}
 }
 
@@ -952,6 +984,13 @@ func TestValidatorRejectsExecutableLimitFieldShapeMismatches(t *testing.T) {
 			},
 		},
 		{
+			name: "per request with calendar timezone",
+			limit: map[string]any{
+				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
+				"timezone": "UTC", "perRequestMaximum": json.Number("10"),
+			},
+		},
+		{
 			name: "per request with maximum",
 			limit: map[string]any{
 				"metric": "output_tokens", "algorithm": "per_request", "scope": []any{"user"},
@@ -1003,6 +1042,29 @@ func TestValidatorRejectsExecutableLimitFieldShapeMismatches(t *testing.T) {
 				t.Fatalf("field-shape mismatch activated: report=%+v compiled=%q", report, compiled)
 			}
 		})
+	}
+}
+
+func TestValidatorRejectsUnavailableCalendarTimezone(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	limit := objectArray(objectArray(objectValue(document, "spec"), "limitPlans")[0], "limits")[0]
+	limit["window"] = "1w"
+	limit["timezone"] = "Not/A_Real_Zone"
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) != 0 {
+		t.Fatalf("unavailable but well-formed IANA name should reach semantic validation: %+v", issues)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "limit_capability_unsupported") {
+		t.Fatalf("unavailable timezone activated: report=%+v compiled=%q", report, compiled)
 	}
 }
 

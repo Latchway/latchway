@@ -1144,7 +1144,8 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 		if !rule.stateful {
 			continue
 		}
-		if rule.Metric == ConcurrentStreamsMetric && !prepared.Streaming {
+		reservedUnits, applicable := ProjectedReservationUnits(rule.Rule, prepared.Streaming)
+		if !applicable {
 			continue
 		}
 		var period calendarPeriod
@@ -1154,14 +1155,10 @@ func plannedBucketsAt(prepared preparedRequest, at time.Time) ([]plannedBucket, 
 			period.key = tokenBucketWindowKey
 		} else {
 			var err error
-			period, err = calendarWindow(at, rule.Window)
+			period, err = calendarWindowIn(at, rule.Window, rule.Timezone)
 			if err != nil {
 				return nil, err
 			}
-		}
-		reservedUnits := rule.ReservedUnits
-		if rule.Metric == LogicalRequestsMetric || isConcurrencyMetric(rule.Metric) {
-			reservedUnits = 1
 		}
 		if !validReservationEntryUnits(rule.Metric, rule.Algorithm, reservedUnits) {
 			return nil, ErrInvalidInput

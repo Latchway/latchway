@@ -1338,7 +1338,15 @@ components:
               metric: { type: string }
               algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
               scope: { type: array, maxItems: 9, uniqueItems: true, items: { type: string } }
-              window: { type: string }
+              window:
+                type: string
+                pattern: '^[1-9][0-9]*(m|h|d|w|mo)$'
+                example: 1w
+              timezone:
+                type: string
+                maxLength: 64
+                description: Canonical server-configured IANA timezone for a calendar rule; UTC when omitted in source configuration.
+                example: America/New_York
               maximum: { type: integer, minimum: 0 }
               per_request_maximum: { type: integer, minimum: 0 }
               capacity: { type: integer, minimum: 0 }

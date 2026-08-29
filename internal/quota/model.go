@@ -4,9 +4,9 @@
 // durable token-bucket logical-request rules, hard calendar and durable
 // token-bucket output-token rules, hard concurrent-request and
 // concurrent-stream leases, hard per-request output-token enforcement
-// metadata, immutable configured-price attribution, and hard UTC-calendar
-// input-token and total-token rules backed by an immutable trusted preflight
-// binding.
+// metadata, immutable configured-price attribution, and hard server-configured
+// IANA-calendar input-token and total-token rules backed by an immutable
+// trusted preflight binding.
 // One request may resolve to multiple rules, which are reserved and finalized
 // atomically. The package does not accept client supplied counters, bucket
 // keys, rule hashes, usage totals, costs, or timestamps.
@@ -112,14 +112,16 @@ const (
 // store. A cost reservation may also be zero when trusted configured pricing
 // proves that the request is free. Capacity and the reduced
 // RefillNumerator/RefillDenominator are populated only for a token_bucket
-// rule. PerRequestMaximum is populated only for input/output/total-token
-// per_request metadata, which is fingerprinted but does not create a durable
-// bucket.
+// rule. Timezone is the canonical server-configured IANA timezone for a
+// calendar rule and is rejected on every other algorithm. PerRequestMaximum
+// is populated only for input/output/total-token per_request metadata, which
+// is fingerprinted but does not create a durable bucket.
 type Rule struct {
 	Metric            string
 	Algorithm         string
 	Scope             []string
 	Window            string
+	Timezone          string
 	Maximum           int64
 	PerRequestMaximum int64
 	ReservedUnits     int64
@@ -632,15 +634,26 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 		}
+		timezone := ""
 		if stateful && rule.Algorithm == CalendarAlgorithm {
 			if _, err := parseCalendarSpec(rule.Window); err != nil {
 				return nil, ErrInvalidInput
 			}
+			var err error
+			timezone, _, err = canonicalCalendarTimezone(rule.Timezone)
+			if err != nil {
+				return nil, ErrInvalidInput
+			}
 		}
-		if !stateful && rule.Window != "" {
+		if (!stateful && rule.Window != "") || rule.Algorithm != CalendarAlgorithm && rule.Timezone != "" {
 			return nil, ErrInvalidInput
 		}
 		ruleParts := []string{rule.Metric, rule.Algorithm, rule.Window}
+		// Preserve every historical UTC rule digest. Only a non-UTC calendar
+		// rule appends the timezone identity before its canonical dimensions.
+		if timezone != "" && timezone != "UTC" {
+			ruleParts = append(ruleParts, timezone)
+		}
 		ruleParts = append(ruleParts, dimensions...)
 		scopeParts := make([]string, 0, len(dimensions)*2)
 		for _, dimension := range dimensions {
@@ -653,7 +666,7 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		preparedRules = append(preparedRules, preparedRule{
 			Rule: Rule{
 				Metric: rule.Metric, Algorithm: rule.Algorithm,
-				Scope: append([]string(nil), dimensions...), Window: rule.Window,
+				Scope: append([]string(nil), dimensions...), Window: rule.Window, Timezone: timezone,
 				Maximum: rule.Maximum, PerRequestMaximum: rule.PerRequestMaximum,
 				ReservedUnits: rule.ReservedUnits, Capacity: rule.Capacity,
 				RefillNumerator:   rule.RefillNumerator,

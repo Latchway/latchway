@@ -19,6 +19,25 @@ credential revocation, re-enable, and concurrent final-owner protection, but is
 skipped when `LATCHWAY_TEST_DATABASE_URL` is absent. Contract bundle, SDK locks,
 live conformance, and release evidence remain deliberately unsealed.
 
+## Local working-tree update — calendar week and IANA timezone rules (2026-08-29)
+
+The quota engine and active configuration boundary now support bounded calendar
+week windows plus a server-configured IANA timezone on each calendar rule. An
+omitted timezone canonicalizes to UTC and preserves every historical UTC rule
+digest and bucket-key byte; a non-UTC timezone is identity-bearing. Local civil
+day, Monday-based week, and month boundaries are daylight-saving safe, while
+fixed elapsed minute/hour buckets cannot alias a repeated wall hour. Timezone
+fields on non-calendar algorithms and invalid, unavailable, or process-local
+zone names fail closed. No client timestamp or timezone header participates.
+
+Focused quota, configuration, and data-plane normal/race tests, the full normal
+Go suite, focused vet, and contract validation pass locally. The new PostgreSQL
+proof covers reservation/snapshot reset and counter equality, timezone
+isolation, idempotent expiry recovery, and settlement-versus-recovery
+serialization, but both cases skip because `LATCHWAY_TEST_DATABASE_URL` is
+absent. This working-tree result is not PostgreSQL execution evidence, an
+immutable compatibility checkpoint, or release-readiness evidence.
+
 ## Local working-tree update — operational resilience evidence (2026-08-29)
 
 The core repository now contains a fail-closed operational-resilience evidence

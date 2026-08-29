@@ -457,6 +457,7 @@ type Limit struct {
 	Algorithm         string
 	Scope             []string
 	Window            string
+	Timezone          string
 	Maximum           int64
 	PerRequestMaximum int64
 	Capacity          int64

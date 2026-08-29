@@ -1026,7 +1026,7 @@ func TestValidSemVer(t *testing.T) {
 func TestValidDecisionWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	t.Parallel()
 
-	valid := []string{"1m", "527040m", "1h", "8784h", "1d", "366d", "1mo", "12mo"}
+	valid := []string{"1m", "527040m", "1h", "8784h", "1d", "366d", "1w", "52w", "1mo", "12mo"}
 	for _, window := range valid {
 		window := window
 		t.Run("valid_"+window, func(t *testing.T) {
@@ -1038,8 +1038,8 @@ func TestValidDecisionWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 
 	invalid := []string{
-		"", "0d", "01d", "1w",
-		"527041m", "8785h", "367d", "13mo",
+		"", "0d", "01d", "1y",
+		"527041m", "8785h", "367d", "53w", "13mo",
 		"9223372036854775808d",
 	}
 	for _, window := range invalid {
@@ -1058,7 +1058,7 @@ func TestHandlerTranslatesMultipleCanonicalLimitRulesBeforeReservation(t *testin
 	fixture.decision.LimitPlan.Limits[0].Scope = []string{"user", "environment"}
 	fixture.decision.LimitPlan.Limits = append(fixture.decision.LimitPlan.Limits, configuration.Limit{
 		Metric: quota.LogicalRequestsMetric, Algorithm: quota.CalendarAlgorithm,
-		Scope: []string{"feature", "application"}, Window: "1mo", Maximum: 1, Hard: true,
+		Scope: []string{"feature", "application"}, Window: "1w", Timezone: "America/New_York", Maximum: 1, Hard: true,
 	})
 	handler := fixture.handler(t)
 
@@ -1072,7 +1072,8 @@ func TestHandlerTranslatesMultipleCanonicalLimitRulesBeforeReservation(t *testin
 	first, second := fixture.quotas.reserveInput.Rules[0], fixture.quotas.reserveInput.Rules[1]
 	if !slices.Equal(first.Scope, []string{"environment", "user"}) ||
 		!slices.Equal(second.Scope, []string{"application", "feature"}) ||
-		first.Window != "1d" || first.Maximum != 100 || second.Window != "1mo" || second.Maximum != 1 {
+		first.Window != "1d" || first.Timezone != "UTC" || first.Maximum != 100 ||
+		second.Window != "1w" || second.Timezone != "America/New_York" || second.Maximum != 1 {
 		t.Fatalf("translated canonical rules = %#v", fixture.quotas.reserveInput.Rules)
 	}
 }
@@ -1720,7 +1721,12 @@ func TestHandlerRejectsUnsupportedOrDuplicateLimitRulesBeforeReservation(t *test
 		{name: "empty scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = nil }},
 		{name: "duplicate scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = []string{"user", "user"} }},
 		{name: "unknown scope", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Scope = []string{"claim"} }},
-		{name: "unsupported window unit", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "1w" }},
+		{name: "unsupported window unit", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "1y" }},
+		{name: "invalid calendar timezone", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Timezone = "Not/A_Real_Zone" }},
+		{name: "calendar timezone on token bucket", mutate: func(plan *configuration.LimitPlan) {
+			plan.Limits[0] = tokenLimit(quota.LogicalRequestsMetric)
+			plan.Limits[0].Timezone = "UTC"
+		}},
 		{name: "window above executable bound", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "367d" }},
 		{name: "overflowing window", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Window = "9223372036854775808d" }},
 		{name: "zero maximum", mutate: func(plan *configuration.LimitPlan) { plan.Limits[0].Maximum = 0 }},

@@ -557,11 +557,11 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 			case "calendar":
 				valid = hasFields(limit, "window", "maximum") && !hasAnyField(limit, "capacity", "refillPerSecond", "perRequestMaximum")
 			case "token_bucket":
-				valid = hasFields(limit, "capacity", "refillPerSecond") && !hasAnyField(limit, "window", "maximum", "perRequestMaximum")
+				valid = hasFields(limit, "capacity", "refillPerSecond") && !hasAnyField(limit, "window", "timezone", "maximum", "perRequestMaximum")
 			case "concurrency":
-				valid = (metric == "concurrent_requests" || metric == "concurrent_streams") && hasFields(limit, "maximum") && !hasAnyField(limit, "window", "capacity", "refillPerSecond", "perRequestMaximum")
+				valid = (metric == "concurrent_requests" || metric == "concurrent_streams") && hasFields(limit, "maximum") && !hasAnyField(limit, "window", "timezone", "capacity", "refillPerSecond", "perRequestMaximum")
 			case "per_request":
-				valid = hasFields(limit, "perRequestMaximum") && !hasAnyField(limit, "window", "maximum", "capacity", "refillPerSecond")
+				valid = hasFields(limit, "perRequestMaximum") && !hasAnyField(limit, "window", "timezone", "maximum", "capacity", "refillPerSecond")
 			default:
 				valid = false
 			}
@@ -579,7 +579,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 			hard, _ := limit["hard"].(bool)
 			_, identity, executable := normalizeExecutableLimit(Limit{
 				Metric: metric, Algorithm: algorithm, Scope: stringArray(limit, "scope"),
-				Window: stringValue(limit, "window"), Maximum: maximum,
+				Window: stringValue(limit, "window"), Timezone: stringValue(limit, "timezone"), Maximum: maximum,
 				PerRequestMaximum: perRequestMaximum, Capacity: capacity,
 				RefillPerSecond: refill, Hard: hard,
 			})
@@ -587,7 +587,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits, hard input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/input_tokens/output_tokens/total_tokens token_bucket limits, hard input_tokens/output_tokens/total_tokens per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a supported window and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
+					"This release can activate only hard logical_requests calendar limits, hard input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/input_tokens/output_tokens/total_tokens token_bucket limits, hard input_tokens/output_tokens/total_tokens per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a bounded minute/hour/day/week/month window, a valid server-configured IANA timezone, and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
@@ -595,7 +595,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"duplicate_limit_rule",
 					path,
-					"A limit plan cannot repeat the same immutable metric, algorithm, window, and canonical scope identity.",
+					"A limit plan cannot repeat the same immutable metric, algorithm, window, timezone, and canonical scope identity.",
 				))
 				continue
 			}

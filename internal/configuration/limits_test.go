@@ -13,6 +13,7 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 		"1m", "15m", "527040m",
 		"1h", "8784h",
 		"1d", "366d",
+		"1w", "52w",
 		"1mo", "12mo",
 	}
 	for _, window := range valid {
@@ -26,8 +27,8 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 	}
 
 	invalid := []string{
-		"", "0d", "01d", "1w",
-		"527041m", "8785h", "367d", "13mo",
+		"", "0d", "01d", "1y",
+		"527041m", "8785h", "367d", "53w", "13mo",
 		"9223372036854775808d",
 	}
 	for _, window := range invalid {
@@ -38,6 +39,46 @@ func TestExecutableCalendarWindowUsesDeterministicOneYearBounds(t *testing.T) {
 				t.Fatalf("expected %q to be rejected", window)
 			}
 		})
+	}
+}
+
+func TestNormalizeExecutableCalendarTimezoneIsCanonicalAndIdentityBearing(t *testing.T) {
+	t.Parallel()
+	base := Limit{
+		Metric: "logical_requests", Algorithm: "calendar", Scope: []string{"user"},
+		Window: "1w", Maximum: 5, Hard: true,
+	}
+	omitted, omittedIdentity, ok := normalizeExecutableLimit(base)
+	if !ok || omitted.Timezone != "UTC" {
+		t.Fatalf("omitted timezone = %+v ok=%t, want canonical UTC", omitted, ok)
+	}
+	explicitRule := base
+	explicitRule.Timezone = "UTC"
+	explicit, explicitIdentity, ok := normalizeExecutableLimit(explicitRule)
+	if !ok || explicit.Timezone != "UTC" || explicitIdentity != omittedIdentity {
+		t.Fatalf("explicit UTC identity differs: omitted=%+v explicit=%+v ok=%t", omittedIdentity, explicitIdentity, ok)
+	}
+	ianaRule := base
+	ianaRule.Timezone = "America/New_York"
+	iana, ianaIdentity, ok := normalizeExecutableLimit(ianaRule)
+	if !ok || iana.Timezone != "America/New_York" || ianaIdentity == omittedIdentity {
+		t.Fatalf("IANA identity not isolated: UTC=%+v IANA=%+v ok=%t", omittedIdentity, ianaIdentity, ok)
+	}
+	for _, timezone := range []string{"Local", "Not/A_Real_Zone", "../UTC", "/UTC", "America//New_York"} {
+		invalid := base
+		invalid.Timezone = timezone
+		if normalized, identity, accepted := normalizeExecutableLimit(invalid); accepted {
+			t.Fatalf("invalid timezone %q accepted: limit=%+v identity=%+v", timezone, normalized, identity)
+		}
+	}
+	for _, invalid := range []Limit{
+		{Metric: "logical_requests", Algorithm: "token_bucket", Scope: []string{"user"}, Timezone: "UTC", Capacity: 10, RefillPerSecond: RefillRate{Numerator: 1, Denominator: 1}, Hard: true},
+		{Metric: "output_tokens", Algorithm: "per_request", Scope: []string{"user"}, Timezone: "UTC", PerRequestMaximum: 10, Hard: true},
+		{Metric: "concurrent_requests", Algorithm: "concurrency", Scope: []string{"user"}, Timezone: "UTC", Maximum: 10, Hard: true},
+	} {
+		if normalized, identity, accepted := normalizeExecutableLimit(invalid); accepted {
+			t.Fatalf("non-calendar timezone accepted: limit=%+v identity=%+v", normalized, identity)
+		}
 	}
 }
 

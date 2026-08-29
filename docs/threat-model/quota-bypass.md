@@ -13,7 +13,12 @@ After completion or failure, a separate transaction records actual/estimated usa
 ## Attacks and controls
 
 - **Parallel overspend:** row locking or atomic conditional updates and non-negative constraints.
-- **Boundary hopping:** server-calculated calendar windows in a defined timezone, not client timestamps.
+- **Boundary hopping:** server-calculated calendar windows use the active rule's
+  bounded IANA timezone (UTC by default), never a client timestamp or timezone
+  header. Weeks begin Monday; local civil day/week/month boundaries remain
+  deterministic across daylight-saving changes, while fixed elapsed
+  minute/hour buckets do not alias repeated wall-clock time. The exact
+  non-UTC timezone and UTC boundary instant are part of bucket identity.
 - **Integer abuse:** bounded integers, checked arithmetic, integer nano-USD, no floating-point currency.
 - **Negative/unknown usage:** reject negative values; preserve provenance; fail closed when hard pricing is unavailable.
 - **Double settlement/release:** unique operation identifiers and terminal reservation states.

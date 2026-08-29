@@ -220,6 +220,7 @@ type compiledLimitPlan struct {
 type compiledLimit struct {
 	Limit
 	hasWindow            bool
+	hasTimezone          bool
 	hasMaximum           bool
 	hasPerRequestMaximum bool
 	hasCapacity          bool
@@ -241,7 +242,7 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 	}
 	for field := range fields {
 		switch field {
-		case "metric", "algorithm", "scope", "window", "maximum", "perRequestMaximum", "capacity", "refillPerSecond", "hard":
+		case "metric", "algorithm", "scope", "window", "timezone", "maximum", "perRequestMaximum", "capacity", "refillPerSecond", "hard":
 		default:
 			return ErrInvalid
 		}
@@ -251,12 +252,14 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 		Algorithm string   `json:"algorithm"`
 		Scope     []string `json:"scope"`
 		Window    string   `json:"window"`
+		Timezone  string   `json:"timezone"`
 		Hard      bool     `json:"hard"`
 	}
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		return err
 	}
 	_, limit.hasWindow = fields["window"]
+	_, limit.hasTimezone = fields["timezone"]
 	_, limit.hasMaximum = fields["maximum"]
 	_, limit.hasPerRequestMaximum = fields["perRequestMaximum"]
 	_, limit.hasCapacity = fields["capacity"]
@@ -279,7 +282,7 @@ func (limit *compiledLimit) UnmarshalJSON(encoded []byte) error {
 	}
 	limit.Limit = Limit{
 		Metric: decoded.Metric, Algorithm: decoded.Algorithm,
-		Scope: append([]string(nil), decoded.Scope...), Window: decoded.Window,
+		Scope: append([]string(nil), decoded.Scope...), Window: decoded.Window, Timezone: decoded.Timezone,
 		Maximum: maximum, PerRequestMaximum: perRequestMaximum,
 		Capacity: capacity, RefillPerSecond: refillPerSecond,
 		Hard: decoded.Hard,
@@ -317,21 +320,21 @@ func (limit compiledLimit) normalizeExecutable() (Limit, immutableLimitIdentity,
 	switch limit.Algorithm {
 	case "calendar":
 		if !limit.hasWindow || !limit.hasMaximum || limit.hasPerRequestMaximum ||
-			limit.hasCapacity || limit.hasRefillPerSecond {
+			limit.hasCapacity || limit.hasRefillPerSecond || limit.hasTimezone && limit.Timezone == "" {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "token_bucket":
-		if !limit.hasCapacity || !limit.hasRefillPerSecond || limit.hasWindow ||
+		if !limit.hasCapacity || !limit.hasRefillPerSecond || limit.hasWindow || limit.hasTimezone ||
 			limit.hasMaximum || limit.hasPerRequestMaximum {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":
-		if !limit.hasPerRequestMaximum || limit.hasWindow || limit.hasMaximum ||
+		if !limit.hasPerRequestMaximum || limit.hasWindow || limit.hasTimezone || limit.hasMaximum ||
 			limit.hasCapacity || limit.hasRefillPerSecond {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "concurrency":
-		if !limit.hasMaximum || limit.hasWindow || limit.hasPerRequestMaximum ||
+		if !limit.hasMaximum || limit.hasWindow || limit.hasTimezone || limit.hasPerRequestMaximum ||
 			limit.hasCapacity || limit.hasRefillPerSecond {
 			return Limit{}, immutableLimitIdentity{}, false
 		}

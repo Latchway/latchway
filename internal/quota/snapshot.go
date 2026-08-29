@@ -291,7 +291,7 @@ func snapshotPlansAt(rules []preparedRule, at time.Time) ([]snapshotPlan, error)
 		case ordered[index].Algorithm == TokenBucketAlgorithm:
 			plans[index].period.key = tokenBucketWindowKey
 		default:
-			period, err := calendarWindow(at, ordered[index].Window)
+			period, err := calendarWindowIn(at, ordered[index].Window, ordered[index].Timezone)
 			if err != nil {
 				return nil, err
 			}

@@ -5,16 +5,20 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+	_ "time/tzdata"
 )
 
 const (
 	maximumExecutableLimitRules                       = 128
 	maximumExecutableTokenBucketCapacity        int64 = 9_223_372
 	maximumExecutableTokenBucketRefillPerSecond int64 = 1_000_000
+	maximumExecutableCalendarTimezoneLength           = 64
 )
 
 var (
-	executableCalendarWindowPattern = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|mo)$`)
+	executableCalendarWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|w|mo)$`)
+	executableCalendarTimezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$`)
 	// The initial executable slice deliberately caps one calendar rule at one
 	// leap year. This is a deterministic subset of quota.calendarWindow that
 	// cannot overflow duration arithmetic or produce impractically distant
@@ -23,6 +27,7 @@ var (
 		"m":  366 * 24 * 60,
 		"h":  366 * 24,
 		"d":  366,
+		"w":  52,
 		"mo": 12,
 	}
 	executableLimitScopeOrder = []string{
@@ -45,6 +50,7 @@ type immutableLimitIdentity struct {
 	metric    string
 	algorithm string
 	window    string
+	timezone  string
 	scope     string
 }
 
@@ -54,16 +60,18 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 	}
 	switch limit.Algorithm {
 	case "calendar":
+		timezone, ok := canonicalExecutableCalendarTimezone(limit.Timezone)
 		if (limit.Metric != "logical_requests" && limit.Metric != "output_tokens" &&
 			limit.Metric != "input_tokens" && limit.Metric != "total_tokens" &&
 			limit.Metric != "cost_nano_usd") ||
 			limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) ||
-			!executableCalendarWindow(limit.Window) {
+			!executableCalendarWindow(limit.Window) || !ok {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
+		limit.Timezone = timezone
 	case "token_bucket":
-		if (limit.Metric != "logical_requests" && limit.Metric != "input_tokens" &&
+		if limit.Timezone != "" || (limit.Metric != "logical_requests" && limit.Metric != "input_tokens" &&
 			limit.Metric != "output_tokens" && limit.Metric != "total_tokens") || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity <= 0 || limit.Capacity > maximumExecutableTokenBucketCapacity ||
@@ -71,14 +79,14 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "per_request":
-		if (limit.Metric != "input_tokens" && limit.Metric != "output_tokens" &&
+		if limit.Timezone != "" || (limit.Metric != "input_tokens" && limit.Metric != "output_tokens" &&
 			limit.Metric != "total_tokens") || limit.Window != "" ||
 			limit.Maximum != 0 || limit.PerRequestMaximum <= 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
 		}
 	case "concurrency":
-		if (limit.Metric != "concurrent_requests" && limit.Metric != "concurrent_streams") ||
+		if limit.Timezone != "" || (limit.Metric != "concurrent_requests" && limit.Metric != "concurrent_streams") ||
 			limit.Window != "" || limit.Maximum <= 0 || limit.PerRequestMaximum != 0 ||
 			limit.Capacity != 0 || limit.RefillPerSecond != (RefillRate{}) {
 			return Limit{}, immutableLimitIdentity{}, false
@@ -93,8 +101,20 @@ func normalizeExecutableLimit(limit Limit) (Limit, immutableLimitIdentity, bool)
 	limit.Scope = scope
 	return limit, immutableLimitIdentity{
 		metric: limit.Metric, algorithm: limit.Algorithm,
-		window: limit.Window, scope: strings.Join(scope, "\x00"),
+		window: limit.Window, timezone: limit.Timezone, scope: strings.Join(scope, "\x00"),
 	}, true
+}
+
+func canonicalExecutableCalendarTimezone(raw string) (string, bool) {
+	if raw == "" || raw == "UTC" {
+		return "UTC", true
+	}
+	if raw == "Local" || len(raw) > maximumExecutableCalendarTimezoneLength ||
+		!executableCalendarTimezonePattern.MatchString(raw) {
+		return "", false
+	}
+	location, err := time.LoadLocation(raw)
+	return raw, err == nil && location.String() == raw
 }
 
 func executableTokenBucketRefillRate(rate RefillRate) bool {
