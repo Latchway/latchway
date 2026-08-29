@@ -21,12 +21,13 @@ import (
 )
 
 type options struct {
-	output          string
-	server          string
-	stdin           io.Reader
-	stdout          io.Writer
-	stderr          io.Writer
-	adminHTTPClient *http.Client
+	output           string
+	server           string
+	stdin            io.Reader
+	stdout           io.Writer
+	stderr           io.Writer
+	adminHTTPClient  *http.Client
+	providerVerifier providerVerifierCLI
 }
 
 // Execute runs the CLI with explicit process dependencies.

@@ -32,16 +32,17 @@ const (
 	CostVerified   = "verified"
 	CostUnverified = "unverified"
 
-	openRouterBaseURL     = "https://openrouter.ai/api/v1"
-	maximumResponseBytes  = int64(4 << 20)
-	maximumMetadataBytes  = int64(64 << 10)
-	defaultTotalTimeout   = 45 * time.Second
-	defaultConnectTimeout = 5 * time.Second
-	defaultHeaderTimeout  = 10 * time.Second
-	maximumMaxCostNanoUSD = int64(1_000_000_000)
-	conservativeFraming   = int64(64)
-	minimumContextTokens  = int64(4096)
-	maximumModelBytes     = 256
+	openRouterBaseURL      = "https://openrouter.ai/api/v1"
+	maximumResponseBytes   = int64(4 << 20)
+	maximumMetadataBytes   = int64(64 << 10)
+	maximumCredentialBytes = 32 << 10
+	defaultTotalTimeout    = 45 * time.Second
+	defaultConnectTimeout  = 5 * time.Second
+	defaultHeaderTimeout   = 10 * time.Second
+	maximumMaxCostNanoUSD  = int64(1_000_000_000)
+	conservativeFraming    = int64(64)
+	minimumContextTokens   = int64(4096)
+	maximumModelBytes      = 256
 )
 
 var openRouterModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$`)
@@ -152,7 +153,7 @@ func (v *Verifier) Verify(ctx context.Context, request Request) (Report, error) 
 		if sourceReturned {
 			return nil
 		}
-		if called || len(credential) == 0 {
+		if called || !validBearerCredential(credential) {
 			operationErr = safeError("credential_unavailable")
 			return nil
 		}
@@ -299,6 +300,26 @@ func validateRequest(request Request) (string, string, error) {
 	default:
 		return "", "", errors.New("invalid")
 	}
+}
+
+func validBearerCredential(credential []byte) bool {
+	if len(credential) == 0 || len(credential) > maximumCredentialBytes || credential[0] == '=' {
+		return false
+	}
+	padding := false
+	for _, character := range credential {
+		if character == '=' {
+			padding = true
+			continue
+		}
+		if padding || !((character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			strings.ContainsRune("-._~+/", rune(character))) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateProductionHTTPS(raw string) error {

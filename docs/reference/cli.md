@@ -241,20 +241,50 @@ non-zero status, marks later dependent checks skipped, and always attempts
 cleanup. `DATABASE_URL` is used only as the default fallback when
 `LATCHWAY_DATABASE_URL` was not explicitly selected.
 
-Credential-aware server verification names only active server-owned
-configuration and a hard two-request cost ceiling:
+Ephemeral provider verification runs locally and never sends the provider key
+to Latchway's Admin API. Supply the key by environment-variable name or through
+bounded stdin; plaintext provider keys are never accepted as command arguments.
 
 ```bash
-latchway verify upstream --environment env_... --upstream primary --model canary
-latchway verify openrouter --environment env_... --upstream openrouter --model canary \
+OPENROUTER_API_KEY=... latchway verify openrouter \
+  --api-key-env OPENROUTER_API_KEY \
+  --model openai/gpt-4o-mini \
+  --max-cost-usd 0.01
+
+PROVIDER_API_KEY=... latchway verify upstream \
+  --base-url https://api.example.com/v1 \
+  --protocol openai_chat \
+  --api-key-env PROVIDER_API_KEY \
+  --model provider-model
+
+# stdin is exact: do not append a newline.
+printf %s "$OPENROUTER_API_KEY" | latchway verify openrouter \
+  --api-key-stdin --model openai/gpt-4o-mini --max-cost-usd 0.01
+```
+
+`--api-key-env` and `--api-key-stdin` are mutually exclusive. Empty, oversized,
+multiline, control-byte, or invalid bearer-token values are rejected. OpenRouter
+requires an exact positive `--max-cost-usd` decimal (up to US$1.00); Latchway
+converts it directly to integer nano-USD without floating point and proves the
+two-request worst case before dispatch. Generic `openai_chat` verification has
+no trusted price catalog and therefore reports monetary cost as `unverified`.
+
+To test an active server-owned target and its write-only stored credential, opt
+in explicitly with `--server-owned`. These flags cannot be combined with the
+ephemeral flags:
+
+```bash
+latchway verify upstream --server-owned \
+  --environment env_... --upstream primary --model canary
+latchway verify openrouter --server-owned \
+  --environment env_... --upstream openrouter --model canary \
   --max-cost-nano-usd 10000000
 ```
 
-The default credential-test ceiling is `10,000,000` nano-USD (US$0.01). The
-server requires configured pricing and trusted model-aware input accounting and
-refuses dispatch if it cannot prove the bound. The CLI never reads, obtains, or
-forwards a provider credential; every credential remains in the server's
-write-only secret store.
+The server-owned default ceiling is `10,000,000` nano-USD (US$0.01). The server
+requires configured pricing and trusted model-aware input accounting. In this
+mode the CLI never reads or forwards the provider credential; it remains in the
+server's write-only secret store.
 
 Use the same `run_self_tests`-scoped Admin API token to create a persistent
 schedule. Creation binds that authenticating token's stable ID; there is no

@@ -216,6 +216,43 @@ func TestCredentialSourceErrorsAndConcurrentCallbacksAreSafe(t *testing.T) {
 	})
 }
 
+func TestCredentialBoundaryRejectsOversizeAndInvalidBytesBeforeDispatch(t *testing.T) {
+	tests := []struct {
+		name       string
+		credential []byte
+		wantOK     bool
+	}{
+		{name: "exact maximum", credential: bytes.Repeat([]byte{'a'}, maximumCredentialBytes), wantOK: true},
+		{name: "one over", credential: bytes.Repeat([]byte{'a'}, maximumCredentialBytes+1)},
+		{name: "space", credential: []byte("secret value")},
+		{name: "newline", credential: []byte("secret\nvalue")},
+		{name: "control", credential: []byte{'a', 0, 'b'}},
+		{name: "padding only", credential: []byte("===")},
+		{name: "padding middle", credential: []byte("abc=def")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeTarget{t: t, secret: test.credential, steps: []fakeStep{
+				completionStep(t, false, 5, 1, 6, ""), completionStep(t, true, 5, 1, 6, ""), errorStep(400, `{}`),
+			}}
+			report, err := verifierWithTarget(fake).Verify(context.Background(), Request{
+				Mode: ModeOpenAIChat, BaseURL: "https://provider.example", Model: "model",
+				Credential: func(_ context.Context, consume func([]byte) error) error { return consume(test.credential) },
+			})
+			if test.wantOK {
+				if err != nil || !report.Passed || fake.index != 3 {
+					t.Fatalf("Verify() report=%+v error=%v dispatches=%d", report, err, fake.index)
+				}
+				return
+			}
+			assertErrorCode(t, err, "credential_unavailable")
+			if fake.index != 0 {
+				t.Fatalf("invalid credential dispatched %d requests", fake.index)
+			}
+		})
+	}
+}
+
 func TestTimeoutIsBoundedAndSafe(t *testing.T) {
 	fake := &fakeTarget{t: t, secret: []byte(testCredential), steps: []fakeStep{
 		func(request *http.Request, _ string, _ []byte) (*http.Response, error) {

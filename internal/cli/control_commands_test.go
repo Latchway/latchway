@@ -173,7 +173,7 @@ func TestVerifyOpenRouterSendsOnlyServerOwnedSelectionAndDefaultCostCeiling(t *t
 	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
 	if err := executeWithOptions(context.Background(), []string{
 		"--server", "http://127.0.0.1:8080", "--output", "json", "verify", "openrouter",
-		"--environment", controlTestEnvironment, "--upstream", "openrouter", "--model", "canary",
+		"--server-owned", "--environment", controlTestEnvironment, "--upstream", "openrouter", "--model", "canary",
 		"--api-token-env", "TEST_LATCHWAY_SELF_TEST_TOKEN",
 	}, opts); err != nil {
 		t.Fatalf("verify openrouter error = %v", err)

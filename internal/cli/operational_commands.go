@@ -640,44 +640,7 @@ func newVerifyCommand(opts *options) *cobra.Command {
 	command.AddCommand(newVerifyLocalCommand(opts))
 	command.AddCommand(newVerifyScheduleCommand(opts, values))
 	for _, kind := range []string{"upstream", "openrouter"} {
-		kind := kind
-		var environmentID, upstream, model string
-		var maxCost int64
-		subcommand := &cobra.Command{
-			Use: kind, Short: verifyShort(kind), Args: cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				credentialInputValid := secretNamePattern.MatchString(upstream) &&
-					secretNamePattern.MatchString(model) && maxCost >= 1 && maxCost <= 1_000_000_000
-				if id.Validate(environmentID, id.Environment) != nil || !credentialInputValid {
-					return errors.New("verification environment, configured selection, or cost bound is invalid")
-				}
-				request := map[string]any{"kind": kind, "environment_id": environmentID}
-				if upstream != "" {
-					request["upstream"] = upstream
-				}
-				if model != "" {
-					request["model"] = model
-				}
-				if maxCost != 0 {
-					request["max_cost_nano_usd"] = maxCost
-				}
-				client, err := newControlAPIClient(opts, values.tokenEnvironment)
-				if err != nil {
-					return err
-				}
-				var run selfTestRunCLI
-				if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/self-tests", nil, request, http.StatusAccepted, &run); err != nil {
-					return err
-				}
-				return printSelfTest(opts, run)
-			},
-		}
-		subcommand.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
-		subcommand.Flags().StringVar(&upstream, "upstream", "", "server-owned upstream identifier")
-		subcommand.Flags().StringVar(&model, "model", "", "active configured model identifier")
-		subcommand.Flags().Int64Var(&maxCost, "max-cost-nano-usd", 10_000_000, "hard two-request verification cost ceiling (10,000,000 is US$0.01)")
-		_ = subcommand.MarkFlagRequired("environment")
-		command.AddCommand(subcommand)
+		command.AddCommand(newProviderVerifyCommand(opts, values, kind))
 	}
 	return command
 }
