@@ -1084,6 +1084,11 @@ func cloneReserveInput(input ReserveInput) ReserveInput {
 		binding := *input.InputPreflight
 		result.InputPreflight = &binding
 	}
+	if input.RequestMeasurements != nil {
+		binding := *input.RequestMeasurements
+		result.RequestMeasurements = &binding
+	}
+	result.NormalizedClaimDigests = cloneStringMap(input.NormalizedClaimDigests)
 	result.Rules = append([]Rule(nil), input.Rules...)
 	for index := range result.Rules {
 		result.Rules[index].Scope = append([]string(nil), input.Rules[index].Scope...)

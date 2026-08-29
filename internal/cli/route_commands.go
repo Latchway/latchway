@@ -97,6 +97,7 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 	var feature, platform, trustLevel, claimsFile, appVersion string
 	var authenticated, streaming bool
 	var requestedInput, requestedOutput, rewrittenRequestBytes, framingUnitCount int64
+	var imageUnits, toolCalls int64
 	command := &cobra.Command{
 		Use: "simulate REVISION_ID", Short: "Run the exact production resolver against a valid or active revision", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -105,6 +106,7 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 			}
 			if requestedInput < 0 || requestedOutput < 0 || requestedInput > 100_000_000 || requestedOutput > 100_000_000 ||
 				rewrittenRequestBytes < 0 || rewrittenRequestBytes > 100<<20 || framingUnitCount < 0 || framingUnitCount > 4096 ||
+				imageUnits < 0 || imageUnits > 1_000_000 || toolCalls < 0 || toolCalls > 1_000_000 ||
 				len(appVersion) > 128 || strings.ContainsAny(appVersion, "\r\n\x00") {
 				return errors.New("simulated request bounds are invalid")
 			}
@@ -127,6 +129,12 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 			}
 			if framingUnitCount != 0 {
 				requestFacts["framing_unit_count"] = framingUnitCount
+			}
+			if imageUnits != 0 {
+				requestFacts["image_units"] = imageUnits
+			}
+			if toolCalls != 0 {
+				requestFacts["tool_calls"] = toolCalls
 			}
 			request := map[string]any{
 				"feature": feature, "platform": platform, "trust_level": trustLevel,
@@ -155,6 +163,8 @@ func newRoutesSimulateCommand(opts *options, root *controlCommandOptions) *cobra
 	command.Flags().Int64Var(&requestedOutput, "requested-output-max", 0, "requested output-token maximum used by the production clamp and reservation projection")
 	command.Flags().Int64Var(&rewrittenRequestBytes, "rewritten-request-bytes", 0, "hypothetical exact post-rewrite bytes required by trusted input projection")
 	command.Flags().Int64Var(&framingUnitCount, "framing-unit-count", 0, "hypothetical exact message/item/input count required by trusted input projection")
+	command.Flags().Int64Var(&imageUnits, "image-units", 0, "hypothetical exact structured image count used by per-request guards")
+	command.Flags().Int64Var(&toolCalls, "tool-calls", 0, "hypothetical exact structured tool-call count used by per-request guards")
 	_ = command.MarkFlagRequired("feature")
 	_ = command.MarkFlagRequired("platform")
 	return command

@@ -29,6 +29,7 @@ import (
 	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/dpop"
+	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/pricing"
 	"github.com/latchway/latchway/internal/problem"
@@ -44,7 +45,7 @@ import (
 
 const (
 	defaultMaximumResponseBody            = int64(32 << 20)
-	maximumRequestBodyLimit               = int64(100 << 20)
+	maximumRequestBodyLimit               = protocol.MaximumMeasuredRequestBytes
 	maximumResponseBodyLimit              = int64(100 << 20)
 	defaultClientWriteTimeout             = 30 * time.Second
 	defaultPersistenceTimeout             = 5 * time.Second
@@ -70,18 +71,6 @@ var (
 	decisionWindowPattern   = regexp.MustCompile(`^([1-9][0-9]*)(m|h|d|w|mo)$`)
 	decisionTimezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$`)
 )
-
-var decisionScopeOrder = []string{
-	"organization",
-	"application",
-	"environment",
-	"user",
-	"installation",
-	"feature",
-	"route",
-	"upstream",
-	"model",
-}
 
 var decisionWindowMaximum = map[string]int64{
 	"m":  366 * 24 * 60,
@@ -392,12 +381,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		EnvironmentID: authorization.EnvironmentID, ApplicationUserID: authorization.ApplicationUserID,
 		InstallationID: authorization.InstallationID, SessionGrantID: authorization.SessionGrantID,
 		ConfigRevisionID: snapshot.PolicyRevision(), FeatureKey: prepared.decision.Feature.ID,
-		Protocol: prepared.decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
+		Platform:               prepared.decision.Scopes.Platform,
+		NormalizedClaimDigests: cloneClaimDigests(prepared.decision.Scopes.NormalizedClaims),
+		Protocol:               prepared.decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
 		LimitPlanKey: prepared.decision.LimitPlan.ID, RouteKey: prepared.decision.Route.ID,
 		UpstreamKey: prepared.decision.Upstream.ID, ModelKey: prepared.decision.Model.ID,
 		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
-		InputPreflight: quotaInputPreflightBinding(prepared.inputPreflight),
-		Streaming:      metadata.Streaming, Rules: prepared.rules,
+		InputPreflight:      quotaInputPreflightBinding(prepared.inputPreflight),
+		RequestMeasurements: quotaRequestMeasurementBinding(prepared.requestMeasurements),
+		Streaming:           metadata.Streaming, Rules: prepared.rules,
 	})
 	finishQuota(handler.telemetryOutcome(err))
 	if err != nil {
@@ -415,7 +407,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 
 	result := handler.executeReserved(
 		prepared.request.Context(), writer, prepared.request, endpoint, authorization,
-		prepared.decision, reservation, prepared.inputPreflight,
+		prepared.decision, reservation, prepared.inputPreflight, prepared.requestMeasurements,
 	)
 	candidateIndex := 0
 	routeAttempts := int64(1)
@@ -578,7 +570,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			retryExecution = true
 			result = handler.executeRetry(
 				next.request.Context(), writer, next.request, endpoint, authorization,
-				next.decision, retryPrevious, retryInput, next.inputPreflight,
+				next.decision, retryPrevious, retryInput, next.inputPreflight, next.requestMeasurements,
 			)
 			continue
 		}
@@ -620,14 +612,16 @@ type preparedExecutionAttempt struct {
 	pricing              configuredPricing
 	appliedOutputMaximum int64
 	inputPreflight       *protocol.TrustedInputPreflight
+	requestMeasurements  *protocol.RequestMeasurements
 	hardCost             hardCostReservation
 }
 
 func retryAttemptInput(prepared preparedExecutionAttempt) (quota.RetryAttemptInput, error) {
-	units := make(map[string]int64, 4)
+	units := make(map[string]int64, 7)
 	for _, rule := range prepared.rules {
 		switch rule.Metric {
-		case quota.InputTokensMetric, quota.OutputTokensMetric, quota.TotalTokensMetric, quota.CostNanoUSDMetric:
+		case quota.InputTokensMetric, quota.OutputTokensMetric, quota.TotalTokensMetric, quota.CostNanoUSDMetric,
+			quota.RequestBytesMetric, quota.ImageUnitsMetric, quota.ToolCallsMetric:
 			if existing, duplicate := units[rule.Metric]; duplicate && existing != rule.ReservedUnits {
 				return quota.RetryAttemptInput{}, policy.ErrConfiguration
 			}
@@ -640,6 +634,9 @@ func retryAttemptInput(prepared preparedExecutionAttempt) (quota.RetryAttemptInp
 		quota.OutputTokensMetric,
 		quota.TotalTokensMetric,
 		quota.CostNanoUSDMetric,
+		quota.RequestBytesMetric,
+		quota.ImageUnitsMetric,
+		quota.ToolCallsMetric,
 	} {
 		if value, ok := units[metric]; ok {
 			allocations = append(allocations, quota.AttemptAllocation{Metric: metric, Units: value})
@@ -657,6 +654,7 @@ func retryAttemptInput(prepared preparedExecutionAttempt) (quota.RetryAttemptInp
 		Pricing:                prepared.pricing.quotaSelection,
 		InputNanoUSDPerMillion: inputNanoUSDPerMillion,
 		InputPreflight:         quotaInputPreflightBinding(prepared.inputPreflight),
+		RequestMeasurements:    quotaRequestMeasurementBinding(prepared.requestMeasurements),
 		Allocations:            allocations,
 	}, nil
 }
@@ -728,6 +726,24 @@ func (handler *Handler) prepareExecutionAttempt(
 	if !validAppliedOutputMaximum(adapter.Capabilities(), validated, appliedOutputMaximum) {
 		return preparedExecutionAttempt{}, errInvalidConfiguration
 	}
+	var requestMeasurements *protocol.RequestMeasurements
+	if requestMeasurementsRequired(validated.rules) {
+		measurer, supportsMeasurement := adapter.(protocol.RequestMeasurer)
+		if !supportsMeasurement {
+			return preparedExecutionAttempt{}, policy.ErrConfiguration
+		}
+		measurements, measurementErr := measurer.MeasureRequest(attemptRequest.Context(), attemptRequest)
+		if measurementErr != nil {
+			return preparedExecutionAttempt{}, measurementErr
+		}
+		if err := validateRequestMeasurements(decision, validated.rules, measurements); err != nil {
+			return preparedExecutionAttempt{}, err
+		}
+		if err := verifyAndRebindMeasuredBody(attemptRequest, measurements); err != nil {
+			return preparedExecutionAttempt{}, err
+		}
+		requestMeasurements = &measurements
+	}
 	var inputPreflight *protocol.TrustedInputPreflight
 	if trustedInputPreflightRequired(validated.rules, selectedPricing) {
 		profile, profileErr := resolveTrustedInputProfile(snapshot, decision)
@@ -747,6 +763,14 @@ func (handler *Handler) prepareExecutionAttempt(
 		}
 		inputPreflight = &preflight
 	}
+	if requestMeasurements != nil && inputPreflight != nil &&
+		(requestMeasurements.RewrittenBodySHA256 != inputPreflight.RewrittenBodySHA256 ||
+			requestMeasurements.RequestBytes != inputPreflight.RequestBytes) {
+		return preparedExecutionAttempt{}, policy.ErrConfiguration
+	}
+	if err := assignRequestMeasurementUnits(validated.rules, requestMeasurements); err != nil {
+		return preparedExecutionAttempt{}, err
+	}
 	hardCost, err := assignDecisionReservationUnits(
 		validated.rules, selectedPricing, appliedOutputMaximum, inputPreflight,
 	)
@@ -756,7 +780,8 @@ func (handler *Handler) prepareExecutionAttempt(
 	return preparedExecutionAttempt{
 		request: attemptRequest, decision: decision, rules: validated.rules, pricing: selectedPricing,
 		appliedOutputMaximum: appliedOutputMaximum, inputPreflight: inputPreflight,
-		hardCost: hardCost,
+		requestMeasurements: requestMeasurements,
+		hardCost:            hardCost,
 	}, nil
 }
 
@@ -800,10 +825,11 @@ func (handler *Handler) executeReserved(
 	decision policy.Decision,
 	reservation quota.Reservation,
 	inputPreflight *protocol.TrustedInputPreflight,
+	requestMeasurements *protocol.RequestMeasurements,
 ) executionResult {
 	ctx, finish := handler.startStage(ctx, "upstream attempt", attemptTelemetryLabels(decision))
 	result := handler.executeAttempt(
-		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
+		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight, requestMeasurements,
 		func(beginContext context.Context) (quota.Attempt, bool, error) {
 			return handler.quotas.BeginAttempt(beginContext, reservation)
 		},
@@ -822,10 +848,11 @@ func (handler *Handler) executeRetry(
 	previous quota.Attempt,
 	retry quota.RetryAttemptInput,
 	inputPreflight *protocol.TrustedInputPreflight,
+	requestMeasurements *protocol.RequestMeasurements,
 ) executionResult {
 	ctx, finish := handler.startStage(ctx, "upstream attempt", attemptTelemetryLabels(decision))
 	result := handler.executeAttempt(
-		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight,
+		ctx, writer, incoming, endpoint, authorization, decision, inputPreflight, requestMeasurements,
 		func(beginContext context.Context) (quota.Attempt, bool, error) {
 			return handler.quotas.BeginRetryAttempt(beginContext, previous, retry)
 		},
@@ -844,6 +871,7 @@ func (handler *Handler) executeAttempt(
 	authorization session.Authorization,
 	decision policy.Decision,
 	inputPreflight *protocol.TrustedInputPreflight,
+	requestMeasurements *protocol.RequestMeasurements,
 	begin beginExecutionAttempt,
 ) executionResult {
 	if !validTargetTimeouts(decision.Upstream.Timeouts) {
@@ -854,6 +882,11 @@ func (handler *Handler) executeAttempt(
 	}
 	if inputPreflight != nil {
 		if err := verifyAndRebindPreflightBody(incoming, *inputPreflight); err != nil {
+			return executionResult{err: err}
+		}
+	}
+	if requestMeasurements != nil {
+		if err := verifyAndRebindMeasuredBody(incoming, *requestMeasurements); err != nil {
 			return executionResult{err: err}
 		}
 	}
@@ -1213,6 +1246,81 @@ func validateTrustedInputPreflight(
 	return nil
 }
 
+func requestMeasurementsRequired(rules []quota.Rule) bool {
+	for _, rule := range rules {
+		if rule.Metric == quota.RequestBytesMetric || rule.Metric == quota.ImageUnitsMetric ||
+			rule.Metric == quota.ToolCallsMetric {
+			return true
+		}
+	}
+	return false
+}
+
+func validateRequestMeasurements(
+	decision policy.Decision,
+	rules []quota.Rule,
+	measurements protocol.RequestMeasurements,
+) error {
+	var zeroDigest [sha256.Size]byte
+	structured := slices.Contains([]string{
+		protocol.OpenAIResponsesID, protocol.OpenAIChatID,
+		protocol.OpenAIEmbeddingsID, protocol.AnthropicMessagesID,
+	}, measurements.Protocol)
+	if measurements.Protocol != decision.Feature.Protocol ||
+		measurements.RewrittenBodySHA256 == zeroDigest || measurements.RequestBytes < 0 ||
+		measurements.RequestBytes > maximumRequestBodyLimit || measurements.ImageUnits < 0 ||
+		measurements.ImageUnits > protocol.MaximumRequestStructuredUnits || measurements.ToolCalls < 0 ||
+		measurements.ToolCalls > protocol.MaximumRequestStructuredUnits ||
+		!measurements.ImageUnitsKnown && measurements.ImageUnits != 0 ||
+		!measurements.ToolCallsKnown && measurements.ToolCalls != 0 ||
+		(measurements.ImageUnitsKnown || measurements.ToolCallsKnown) && !structured {
+		return policy.ErrConfiguration
+	}
+	for _, rule := range rules {
+		switch rule.Metric {
+		case quota.ImageUnitsMetric:
+			if !measurements.ImageUnitsKnown {
+				return policy.ErrConfiguration
+			}
+		case quota.ToolCallsMetric:
+			if !measurements.ToolCallsKnown {
+				return policy.ErrConfiguration
+			}
+		}
+	}
+	return nil
+}
+
+func assignRequestMeasurementUnits(
+	rules []quota.Rule,
+	measurements *protocol.RequestMeasurements,
+) error {
+	for index := range rules {
+		var units int64
+		switch rules[index].Metric {
+		case quota.RequestBytesMetric:
+			if measurements == nil {
+				return policy.ErrConfiguration
+			}
+			units = measurements.RequestBytes
+		case quota.ImageUnitsMetric:
+			if measurements == nil || !measurements.ImageUnitsKnown {
+				return policy.ErrConfiguration
+			}
+			units = measurements.ImageUnits
+		case quota.ToolCallsMetric:
+			if measurements == nil || !measurements.ToolCallsKnown {
+				return policy.ErrConfiguration
+			}
+			units = measurements.ToolCalls
+		default:
+			continue
+		}
+		rules[index].ReservedUnits = units
+	}
+	return nil
+}
+
 func trustedInputBoundFromProfile(
 	profile protocol.TrustedInputProfile,
 	preflight protocol.TrustedInputPreflight,
@@ -1261,6 +1369,41 @@ func verifyAndRebindPreflightBody(
 	return nil
 }
 
+func verifyAndRebindMeasuredBody(
+	request *http.Request,
+	measurements protocol.RequestMeasurements,
+) error {
+	if request == nil || measurements.RequestBytes < 0 ||
+		measurements.RequestBytes > maximumRequestBodyLimit || request.ContentLength != measurements.RequestBytes {
+		return policy.ErrConfiguration
+	}
+	if measurements.RequestBytes == 0 && (request.Body == nil || request.Body == http.NoBody) {
+		if measurements.RewrittenBodySHA256 != sha256.Sum256(nil) {
+			return policy.ErrConfiguration
+		}
+		request.Body = http.NoBody
+		request.ContentLength = 0
+		request.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+		return nil
+	}
+	if request.Body == nil {
+		return policy.ErrConfiguration
+	}
+	body, err := io.ReadAll(io.LimitReader(request.Body, measurements.RequestBytes+1))
+	closeErr := request.Body.Close()
+	if err != nil || closeErr != nil || int64(len(body)) != measurements.RequestBytes ||
+		sha256.Sum256(body) != measurements.RewrittenBodySHA256 {
+		return policy.ErrConfiguration
+	}
+	owned := append([]byte(nil), body...)
+	request.Body = io.NopCloser(bytes.NewReader(owned))
+	request.ContentLength = int64(len(owned))
+	request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(owned)), nil
+	}
+	return nil
+}
+
 func quotaInputPreflightBinding(
 	preflight *protocol.TrustedInputPreflight,
 ) *quota.InputPreflightBinding {
@@ -1272,6 +1415,20 @@ func quotaInputPreflightBinding(
 		ProfileDigest: preflight.ProfileDigest, RewrittenBodySHA256: preflight.RewrittenBodySHA256,
 		PhysicalModel: preflight.PhysicalModel, InputTokenBound: preflight.InputTokenBound,
 		OutputTokenBound: preflight.OutputTokenBound, TotalTokenBound: preflight.TotalTokenBound,
+	}
+}
+
+func quotaRequestMeasurementBinding(
+	measurements *protocol.RequestMeasurements,
+) *quota.RequestMeasurementBinding {
+	if measurements == nil {
+		return nil
+	}
+	return &quota.RequestMeasurementBinding{
+		Protocol: measurements.Protocol, RewrittenBodySHA256: measurements.RewrittenBodySHA256,
+		RequestBytes: measurements.RequestBytes, ImageUnits: measurements.ImageUnits,
+		ToolCalls: measurements.ToolCalls, ImageUnitsKnown: measurements.ImageUnitsKnown,
+		ToolCallsKnown: measurements.ToolCallsKnown,
 	}
 }
 
@@ -1462,6 +1619,7 @@ func validateDecisionPlan(
 		decision := policy.Decision{
 			Feature: plan.Feature, LimitPlan: plan.LimitPlan,
 			Route: candidate.Route, Model: candidate.Model, Upstream: candidate.Upstream,
+			Scopes: plan.Scopes,
 		}
 		validated, err := validateDecision(featureID, decision, endpointProtocol)
 		if err != nil {
@@ -1624,6 +1782,13 @@ func protocolSupportsLimitMetric(protocolID, metric string) bool {
 		return protocolSupportsTrustedInputPreflight(protocolID)
 	case quota.OutputTokensMetric, quota.ConcurrentStreamsMetric:
 		return protocolUsesOutputTokens(protocolID)
+	case quota.RequestBytesMetric:
+		return protocol.ProtocolExecutable(protocolID)
+	case quota.ImageUnitsMetric, quota.ToolCallsMetric:
+		return slices.Contains([]string{
+			protocol.OpenAIResponsesID, protocol.OpenAIChatID,
+			protocol.OpenAIEmbeddingsID, protocol.AnthropicMessagesID,
+		}, protocolID)
 	default:
 		return true
 	}
@@ -1663,6 +1828,10 @@ func supportedDecisionLimit(limit configuration.Limit) bool {
 		limit.Metric == quota.TotalTokensMetric) && limit.Algorithm == quota.PerRequestAlgorithm:
 		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 && limit.PerRequestMaximum > 0 &&
 			limit.Capacity == 0 && noRefill
+	case (limit.Metric == quota.RequestBytesMetric || limit.Metric == quota.ImageUnitsMetric ||
+		limit.Metric == quota.ToolCallsMetric) && limit.Algorithm == quota.PerRequestAlgorithm:
+		return limit.Window == "" && limit.Timezone == "" && limit.Maximum == 0 &&
+			limit.PerRequestMaximum > 0 && limit.Capacity == 0 && noRefill
 	case (limit.Metric == quota.ConcurrentRequestsMetric || limit.Metric == quota.ConcurrentStreamsMetric) &&
 		limit.Algorithm == quota.ConcurrencyAlgorithm:
 		return limit.Window == "" && limit.Timezone == "" && limit.Maximum > 0 && limit.PerRequestMaximum == 0 &&
@@ -1688,26 +1857,18 @@ type decisionLimitIdentity struct {
 }
 
 func canonicalDecisionScope(input []string) ([]string, bool) {
-	if len(input) == 0 || len(input) > len(decisionScopeOrder) {
-		return nil, false
+	return limitscope.CanonicalDimensions(input)
+}
+
+func cloneClaimDigests(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
 	}
-	seen := make(map[string]struct{}, len(input))
-	for _, dimension := range input {
-		if !slices.Contains(decisionScopeOrder, dimension) {
-			return nil, false
-		}
-		if _, duplicate := seen[dimension]; duplicate {
-			return nil, false
-		}
-		seen[dimension] = struct{}{}
+	result := make(map[string]string, len(input))
+	for name, digest := range input {
+		result[name] = digest
 	}
-	result := make([]string, 0, len(input))
-	for _, dimension := range decisionScopeOrder {
-		if _, ok := seen[dimension]; ok {
-			result = append(result, dimension)
-		}
-	}
-	return result, true
+	return result
 }
 
 func validDecisionWindow(raw string) bool {

@@ -50,7 +50,7 @@ func TestMigratorPostgreSQLEmbeddingsZeroOutputPreflightFreshAndUpgrade(t *testi
 
 			migrator := NewMigrator(pool)
 			current, available, err := migrator.Status(ctx)
-			if err != nil || current != 16 || available != 16 {
+			if err != nil || current != latestTestSchemaVersion || available != latestTestSchemaVersion {
 				t.Fatalf("schema current=%d available=%d err=%v", current, available, err)
 			}
 			var chatOutput, embeddingsOutput, embeddingsTotal int64

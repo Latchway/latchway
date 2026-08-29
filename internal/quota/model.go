@@ -28,6 +28,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/limitscope"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/requestidentity"
 )
 
@@ -39,6 +41,9 @@ const (
 	ConcurrentRequestsMetric  = "concurrent_requests"
 	ConcurrentStreamsMetric   = "concurrent_streams"
 	CostNanoUSDMetric         = "cost_nano_usd"
+	RequestBytesMetric        = "request_bytes"
+	ImageUnitsMetric          = "image_units"
+	ToolCallsMetric           = "tool_calls"
 	CalendarAlgorithm         = "calendar"
 	TokenBucketAlgorithm      = "token_bucket"
 	PerRequestAlgorithm       = "per_request"
@@ -85,19 +90,10 @@ var (
 		"anthropic_messages",
 		"opaque_http",
 	}
+	allowedPlatformValues = []string{
+		"ios", "android", "web", "react_native_ios", "react_native_android", "node",
+	}
 )
-
-var scopeOrder = []string{
-	"organization",
-	"application",
-	"environment",
-	"user",
-	"installation",
-	"feature",
-	"route",
-	"upstream",
-	"model",
-}
 
 const (
 	ruleDigestDomain                = "latchway/quota-rule/v1\x00"
@@ -105,6 +101,7 @@ const (
 	requestDigestDomain             = "latchway/quota-request/v1\x00"
 	reservationPricingBindingDomain = "latchway/quota-reservation-pricing/v1\x00"
 	inputPreflightBindingDomain     = "latchway/quota-input-preflight-binding/v2\x00"
+	requestMeasurementBindingDomain = "latchway/quota-request-measurement-binding/v1\x00"
 	attemptDecisionBindingDomain    = "latchway/quota-attempt-decision/v1\x00"
 )
 
@@ -158,6 +155,20 @@ type InputPreflightBinding struct {
 	TotalTokenBound     int64
 }
 
+// RequestMeasurementBinding is the server-trusted post-rewrite request proof
+// used by hard request_bytes, image_units, and tool_calls guards. Optional
+// structured counts retain explicit known flags so unsupported protocols
+// cannot silently turn unknown into zero.
+type RequestMeasurementBinding struct {
+	Protocol            string
+	RewrittenBodySHA256 [sha256.Size]byte
+	RequestBytes        int64
+	ImageUnits          int64
+	ToolCalls           int64
+	ImageUnitsKnown     bool
+	ToolCallsKnown      bool
+}
+
 // ReserveInput contains only canonical durable identities and server-selected
 // policy values. ClientRequestID is correlation-only: it is persisted and
 // compared on replay, but never serves as a lookup, authorization, bucket,
@@ -172,18 +183,24 @@ type ReserveInput struct {
 	InstallationID    string
 	SessionGrantID    string
 	ConfigRevisionID  string
+	Platform          string
+	// NormalizedClaimDigests contains only policy-derived, domain-separated
+	// values keyed by canonical normalized claim name. Raw claims are never
+	// accepted by quota and therefore cannot enter fingerprints or storage.
+	NormalizedClaimDigests map[string]string
 
-	FeatureKey      string
-	Protocol        string
-	ClientRequestID string
-	LimitPlanKey    string
-	RouteKey        string
-	UpstreamKey     string
-	ModelKey        string
-	PhysicalModel   string
-	Pricing         PricingSelection
-	InputPreflight  *InputPreflightBinding
-	Streaming       bool
+	FeatureKey          string
+	Protocol            string
+	ClientRequestID     string
+	LimitPlanKey        string
+	RouteKey            string
+	UpstreamKey         string
+	ModelKey            string
+	PhysicalModel       string
+	Pricing             PricingSelection
+	InputPreflight      *InputPreflightBinding
+	RequestMeasurements *RequestMeasurementBinding
+	Streaming           bool
 
 	Rules []Rule
 }
@@ -225,22 +242,23 @@ type Outcome struct {
 // Reservation is an opaque, immutable handle returned only after the reserve
 // transaction commits.
 type Reservation struct {
-	organizationID   string
-	applicationID    string
-	environmentID    string
-	logicalRequestID string
-	reservationID    string
-	entries          []reservationEntry
-	routeKey         string
-	upstreamKey      string
-	modelKey         string
-	physicalModel    string
-	protocol         string
-	pricing          selectedPricing
-	inputPreflight   *InputPreflightBinding
-	retryPlan        *reservationRetryPlan
-	windowResetAt    time.Time
-	expiresAt        time.Time
+	organizationID      string
+	applicationID       string
+	environmentID       string
+	logicalRequestID    string
+	reservationID       string
+	entries             []reservationEntry
+	routeKey            string
+	upstreamKey         string
+	modelKey            string
+	physicalModel       string
+	protocol            string
+	pricing             selectedPricing
+	inputPreflight      *InputPreflightBinding
+	requestMeasurements *RequestMeasurementBinding
+	retryPlan           *reservationRetryPlan
+	windowResetAt       time.Time
+	expiresAt           time.Time
 }
 
 // reservationRetryPlan is a defensive copy of the immutable, server-resolved
@@ -256,6 +274,8 @@ type reservationRetryPlan struct {
 	configRevisionID  string
 	featureKey        string
 	limitPlanKey      string
+	platform          string
+	claimDigests      map[string]string
 	streaming         bool
 	rules             []Rule
 }
@@ -318,6 +338,7 @@ type RetryAttemptInput struct {
 	Pricing                PricingSelection
 	InputNanoUSDPerMillion int64
 	InputPreflight         *InputPreflightBinding
+	RequestMeasurements    *RequestMeasurementBinding
 	Allocations            []AttemptAllocation
 }
 
@@ -415,7 +436,7 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		return preparedRequest{}, ErrInvalidInput
 	}
 
-	values := map[string]string{
+	values, err := quotaScopeValues(map[string]string{
 		"organization": input.OrganizationID,
 		"application":  input.ApplicationID,
 		"environment":  input.EnvironmentID,
@@ -425,6 +446,9 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		"route":        input.RouteKey,
 		"upstream":     input.UpstreamKey,
 		"model":        input.ModelKey,
+	}, input.Platform, input.NormalizedClaimDigests)
+	if err != nil {
+		return preparedRequest{}, err
 	}
 	preparedRules, err := prepareRules(input.Rules, values, reserveRulePreparation)
 	if err != nil {
@@ -445,12 +469,88 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	if err != nil {
 		return preparedRequest{}, err
 	}
+	measurements, err := prepareRequestMeasurements(
+		input.RequestMeasurements, input.Protocol, preparedRules,
+	)
+	if err != nil || preflight != nil && measurements != nil &&
+		preflight.RewrittenBodySHA256 != measurements.RewrittenBodySHA256 {
+		return preparedRequest{}, ErrInvalidInput
+	}
 	// Do not retain the caller's pointer. Fingerprinting and persistence must
 	// observe the single validated value even if the caller reuses its input.
 	input.InputPreflight = preflight
+	input.RequestMeasurements = measurements
+	input.NormalizedClaimDigests = cloneStringMap(input.NormalizedClaimDigests)
 	prepared := preparedRequest{ReserveInput: input, rules: preparedRules}
 	prepared.Rules = clonePreparedRules(preparedRules)
 	return prepared, nil
+}
+
+func prepareRequestMeasurements(
+	input *RequestMeasurementBinding,
+	requestProtocol string,
+	rules []preparedRule,
+) (*RequestMeasurementBinding, error) {
+	requiresBytes, requiresImages, requiresTools := false, false, false
+	for _, rule := range rules {
+		switch rule.Metric {
+		case RequestBytesMetric:
+			requiresBytes = true
+		case ImageUnitsMetric:
+			requiresImages = true
+		case ToolCallsMetric:
+			requiresTools = true
+		}
+	}
+	if !requiresBytes && !requiresImages && !requiresTools {
+		if input != nil {
+			return nil, ErrInvalidInput
+		}
+		return nil, nil
+	}
+	if input == nil {
+		return nil, ErrInvalidInput
+	}
+	binding := *input
+	if !validRequestMeasurementBinding(&binding, requestProtocol) ||
+		requiresImages && !binding.ImageUnitsKnown || requiresTools && !binding.ToolCallsKnown {
+		return nil, ErrInvalidInput
+	}
+	for _, rule := range rules {
+		var expected int64
+		switch rule.Metric {
+		case RequestBytesMetric:
+			expected = binding.RequestBytes
+		case ImageUnitsMetric:
+			expected = binding.ImageUnits
+		case ToolCallsMetric:
+			expected = binding.ToolCalls
+		default:
+			continue
+		}
+		if rule.ReservedUnits != expected {
+			return nil, ErrInvalidInput
+		}
+	}
+	return &binding, nil
+}
+
+func validRequestMeasurementBinding(binding *RequestMeasurementBinding, requestProtocol string) bool {
+	if binding == nil {
+		return false
+	}
+	var zeroDigest [sha256.Size]byte
+	structuredProtocol := slices.Contains([]string{
+		"openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages",
+	}, binding.Protocol)
+	return binding.Protocol == requestProtocol && slices.Contains(allowedProtocolValues, binding.Protocol) &&
+		binding.RewrittenBodySHA256 != zeroDigest && binding.RequestBytes >= 0 &&
+		binding.RequestBytes <= protocol.MaximumMeasuredRequestBytes && binding.ImageUnits >= 0 &&
+		binding.ImageUnits <= protocol.MaximumRequestStructuredUnits && binding.ToolCalls >= 0 &&
+		binding.ToolCalls <= protocol.MaximumRequestStructuredUnits &&
+		(binding.ImageUnitsKnown || binding.ImageUnits == 0) &&
+		(binding.ToolCallsKnown || binding.ToolCalls == 0) &&
+		(!(binding.ImageUnitsKnown || binding.ToolCallsKnown) || structuredProtocol)
 }
 
 func prepareInputPreflight(
@@ -540,6 +640,7 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 	}
 	preparedRules := make([]preparedRule, 0, len(input))
 	tokenReservations := make(map[string]int64, 3)
+	requestReservations := make(map[string]int64, 3)
 	var costReservation int64
 	costReservationSet := false
 	for _, rule := range input {
@@ -595,6 +696,17 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				rule.Capacity != 0 || rule.RefillNumerator != 0 || rule.RefillDenominator != 0 {
 				return nil, ErrInvalidInput
 			}
+		case (rule.Metric == RequestBytesMetric || rule.Metric == ImageUnitsMetric ||
+			rule.Metric == ToolCallsMetric) && rule.Algorithm == PerRequestAlgorithm:
+			requestUnitsValid := rule.ReservedUnits >= 0
+			if mode == snapshotRulePreparation {
+				requestUnitsValid = rule.ReservedUnits == 0
+			}
+			if rule.Window != "" || rule.Maximum != 0 || rule.PerRequestMaximum <= 0 ||
+				!requestUnitsValid || rule.Capacity != 0 || rule.RefillNumerator != 0 ||
+				rule.RefillDenominator != 0 {
+				return nil, ErrInvalidInput
+			}
 		case (rule.Metric == InputTokensMetric || rule.Metric == TotalTokensMetric) &&
 			rule.Algorithm == CalendarAlgorithm:
 			if rule.Maximum <= 0 || rule.PerRequestMaximum != 0 || !tokenReserved ||
@@ -640,6 +752,14 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 				return nil, ErrInvalidInput
 			}
 		}
+		if mode == reserveRulePreparation && (rule.Metric == RequestBytesMetric ||
+			rule.Metric == ImageUnitsMetric || rule.Metric == ToolCallsMetric) {
+			reservation, found := requestReservations[rule.Metric]
+			if found && reservation != rule.ReservedUnits {
+				return nil, ErrInvalidInput
+			}
+			requestReservations[rule.Metric] = rule.ReservedUnits
+		}
 		timezone := ""
 		if stateful && rule.Algorithm == CalendarAlgorithm {
 			if _, err := parseCalendarSpec(rule.Window); err != nil {
@@ -665,10 +785,7 @@ func prepareRules(input []Rule, values map[string]string, mode rulePreparationMo
 		for _, dimension := range dimensions {
 			scopeParts = append(scopeParts, dimension, values[dimension])
 		}
-		scopeType := dimensions[0]
-		if len(dimensions) > 1 {
-			scopeType = "composite"
-		}
+		scopeType := limitscope.ScopeType(dimensions)
 		preparedRules = append(preparedRules, preparedRule{
 			Rule: Rule{
 				Metric: rule.Metric, Algorithm: rule.Algorithm,
@@ -781,26 +898,51 @@ func clonePreparedRules(preparedRules []preparedRule) []Rule {
 }
 
 func canonicalScopeDimensions(input []string) ([]string, error) {
-	if len(input) == 0 || len(input) > len(scopeOrder) {
+	result, ok := limitscope.CanonicalDimensions(input)
+	if !ok {
 		return nil, ErrInvalidInput
 	}
-	seen := make(map[string]struct{}, len(input))
-	for _, dimension := range input {
-		if !slices.Contains(scopeOrder, dimension) {
-			return nil, ErrInvalidInput
-		}
-		if _, duplicate := seen[dimension]; duplicate {
-			return nil, ErrInvalidInput
-		}
-		seen[dimension] = struct{}{}
+	return result, nil
+}
+
+func quotaScopeValues(
+	fixed map[string]string,
+	platform string,
+	claimDigests map[string]string,
+) (map[string]string, error) {
+	if len(claimDigests) > maximumRulesPerRequest {
+		return nil, ErrInvalidInput
 	}
-	result := make([]string, 0, len(input))
-	for _, dimension := range scopeOrder {
-		if _, ok := seen[dimension]; ok {
-			result = append(result, dimension)
+	result := make(map[string]string, len(fixed)+1+len(claimDigests))
+	for dimension, value := range fixed {
+		result[dimension] = value
+	}
+	if platform != "" {
+		if !slices.Contains(allowedPlatformValues, platform) {
+			return nil, ErrInvalidInput
 		}
+		result[limitscope.PlatformDimension] = platform
+	}
+	for name, digest := range claimDigests {
+		dimension := limitscope.NormalizedClaimPrefix + name
+		parsed, ok := limitscope.NormalizedClaimName(dimension)
+		if !ok || parsed != name || !limitscope.ValidClaimDigest(digest) {
+			return nil, ErrInvalidInput
+		}
+		result[dimension] = digest
 	}
 	return result, nil
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]string, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
 }
 
 // canonicalDigest is SHA-256(domain || uint32be(len(part)) || part ...),
@@ -862,7 +1004,9 @@ func requestFingerprint(prepared preparedRequest) string {
 		// Token and cost reservation shapes bind both their configured per-request
 		// maximum and the exact reservation applied to this provider request.
 		if rule.Metric == InputTokensMetric || rule.Metric == OutputTokensMetric ||
-			rule.Metric == TotalTokensMetric || rule.Metric == CostNanoUSDMetric {
+			rule.Metric == TotalTokensMetric || rule.Metric == CostNanoUSDMetric ||
+			rule.Metric == RequestBytesMetric || rule.Metric == ImageUnitsMetric ||
+			rule.Metric == ToolCallsMetric {
 			parts = append(parts,
 				strconv.FormatInt(rule.PerRequestMaximum, 10),
 				strconv.FormatInt(rule.ReservedUnits, 10),
@@ -896,6 +1040,18 @@ func requestFingerprint(prepared preparedRequest) string {
 			strconv.FormatInt(binding.InputTokenBound, 10),
 			strconv.FormatInt(binding.OutputTokenBound, 10),
 			strconv.FormatInt(binding.TotalTokenBound, 10),
+		)
+	}
+	if binding := prepared.RequestMeasurements; binding != nil {
+		parts = append(parts,
+			requestMeasurementBindingDomain,
+			binding.Protocol,
+			base64.RawURLEncoding.EncodeToString(binding.RewrittenBodySHA256[:]),
+			strconv.FormatInt(binding.RequestBytes, 10),
+			strconv.FormatInt(binding.ImageUnits, 10),
+			strconv.FormatBool(binding.ImageUnitsKnown),
+			strconv.FormatInt(binding.ToolCalls, 10),
+			strconv.FormatBool(binding.ToolCallsKnown),
 		)
 	}
 	return canonicalDigest(requestDigestDomain, parts)
@@ -1036,7 +1192,7 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 		(input.Pricing.CatalogID != "" &&
 			(!identifierPattern.MatchString(input.Pricing.CatalogID) || input.Pricing.Currency != USDCurrency)) ||
 		input.InputNanoUSDPerMillion < 0 ||
-		len(input.Allocations) > len(reservedTokenMetricOrder)+1 {
+		len(input.Allocations) > len(reservedTokenMetricOrder)+1+len(requestMeasurementMetricOrder) {
 		return RetryAttemptInput{}, ErrInvalidInput
 	}
 	result := input
@@ -1044,6 +1200,7 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 		binding := *input.InputPreflight
 		result.InputPreflight = &binding
 	}
+	result.RequestMeasurements = cloneRequestMeasurementBinding(input.RequestMeasurements)
 	result.Allocations = append([]AttemptAllocation(nil), input.Allocations...)
 	sort.Slice(result.Allocations, func(left, right int) bool {
 		return attemptAllocationOrder(result.Allocations[left].Metric) <
@@ -1053,7 +1210,8 @@ func prepareRetryAttemptInput(input RetryAttemptInput) (RetryAttemptInput, error
 	for index, allocation := range result.Allocations {
 		if attemptAllocationOrder(allocation.Metric) == math.MaxInt ||
 			(allocation.Metric == CostNanoUSDMetric && allocation.Units < 0) ||
-			(allocation.Metric != CostNanoUSDMetric && allocation.Units <= 0) ||
+			(isRequestMeasurementMetric(allocation.Metric) && allocation.Units < 0) ||
+			(allocation.Metric != CostNanoUSDMetric && !isRequestMeasurementMetric(allocation.Metric) && allocation.Units <= 0) ||
 			(index > 0 && result.Allocations[index-1].Metric == allocation.Metric) {
 			return RetryAttemptInput{}, ErrInvalidInput
 		}
@@ -1082,6 +1240,14 @@ func cloneInputPreflightBinding(input *InputPreflightBinding) *InputPreflightBin
 	return &result
 }
 
+func cloneRequestMeasurementBinding(input *RequestMeasurementBinding) *RequestMeasurementBinding {
+	if input == nil {
+		return nil
+	}
+	result := *input
+	return &result
+}
+
 func retryPlanForRequest(prepared preparedRequest) *reservationRetryPlan {
 	return &reservationRetryPlan{
 		applicationUserID: prepared.ApplicationUserID,
@@ -1090,6 +1256,8 @@ func retryPlanForRequest(prepared preparedRequest) *reservationRetryPlan {
 		configRevisionID:  prepared.ConfigRevisionID,
 		featureKey:        prepared.FeatureKey,
 		limitPlanKey:      prepared.LimitPlanKey,
+		platform:          prepared.Platform,
+		claimDigests:      cloneStringMap(prepared.NormalizedClaimDigests),
 		streaming:         prepared.Streaming,
 		rules:             cloneLimitRules(prepared.Rules),
 	}
@@ -1101,6 +1269,7 @@ func cloneReservationRetryPlan(input *reservationRetryPlan) *reservationRetryPla
 	}
 	result := *input
 	result.rules = cloneLimitRules(input.rules)
+	result.claimDigests = cloneStringMap(input.claimDigests)
 	return &result
 }
 
@@ -1122,7 +1291,22 @@ func attemptAllocationOrder(metric string) int {
 	if metric == CostNanoUSDMetric {
 		return len(reservedTokenMetricOrder)
 	}
+	for index, candidate := range requestMeasurementMetricOrder {
+		if metric == candidate {
+			return len(reservedTokenMetricOrder) + 1 + index
+		}
+	}
 	return math.MaxInt
+}
+
+var requestMeasurementMetricOrder = [...]string{
+	RequestBytesMetric,
+	ImageUnitsMetric,
+	ToolCallsMetric,
+}
+
+func isRequestMeasurementMetric(metric string) bool {
+	return slices.Contains(requestMeasurementMetricOrder[:], metric)
 }
 
 func pricingForRequest(prepared preparedRequest) selectedPricing {
@@ -1169,6 +1353,14 @@ func (reservation Reservation) validate() error {
 		if !validInputPreflightBinding(binding, reservation.protocol, reservation.physicalModel) {
 			return ErrInvalidInput
 		}
+	}
+	if reservation.requestMeasurements != nil &&
+		!validRequestMeasurementBinding(reservation.requestMeasurements, reservation.protocol) {
+		return ErrInvalidInput
+	}
+	if reservation.inputPreflight != nil && reservation.requestMeasurements != nil &&
+		reservation.inputPreflight.RewrittenBodySHA256 != reservation.requestMeasurements.RewrittenBodySHA256 {
+		return ErrInvalidInput
 	}
 	if len(reservation.entries) == 0 {
 		if !reservation.windowResetAt.IsZero() {

@@ -445,7 +445,7 @@ func TestStoredAttemptAcceptsValidatedZeroOutputProof(t *testing.T) {
 	attempt := newStoredAttemptDecision(
 		"atm_00000000000000000000000001", 1,
 		"primary", "provider", "fast", input.PhysicalModel,
-		selectedPricing{}, binding, nil,
+		selectedPricing{}, binding, nil, nil,
 	)
 	attempt.status = "started"
 	decisionDigest := sha256.Sum256([]byte("validated-attempt-decision"))

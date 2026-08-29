@@ -50,11 +50,11 @@ var definitions = []Definition{
 	{Name: CostNanoUSD, Algorithms: []string{CalendarAlgorithm}},
 	{Name: ConcurrentRequests, Algorithms: []string{ConcurrencyAlgorithm}},
 	{Name: ConcurrentStreams, Algorithms: []string{ConcurrencyAlgorithm}},
-	{Name: RequestBytes},
+	{Name: RequestBytes, Algorithms: []string{PerRequestAlgorithm}},
 	{Name: ResponseBytes},
-	{Name: ImageUnits},
+	{Name: ImageUnits, Algorithms: []string{PerRequestAlgorithm}},
 	{Name: AudioSeconds},
-	{Name: ToolCalls},
+	{Name: ToolCalls, Algorithms: []string{PerRequestAlgorithm}},
 }
 
 var definitionsByName = func() map[string]Definition {

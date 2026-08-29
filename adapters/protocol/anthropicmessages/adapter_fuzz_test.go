@@ -61,6 +61,17 @@ func FuzzInspectAndApplyFeature(f *testing.F) {
 			request.Header.Get("Anthropic-Version") != CanonicalAPIVersion {
 			t.Fatalf("successful rewrite violated invariants: effective=%d headers=%v", effective, request.Header)
 		}
+		measurement, measurementErr := adapter.MeasureRequest(context.Background(), request)
+		if measurementErr != nil || measurement.Protocol != ID || measurement.RequestBytes < 0 ||
+			measurement.ImageUnits < 0 || measurement.ToolCalls < 0 ||
+			!measurement.ImageUnitsKnown || !measurement.ToolCallsKnown {
+			t.Fatalf("valid rewritten request produced invalid exact measurement: %+v, %v", measurement, measurementErr)
+		}
+		rewritten := readBodyFactory(t, request)
+		if measurement.RequestBytes != int64(len(rewritten)) ||
+			measurement.RewrittenBodySHA256 != sha256.Sum256(rewritten) {
+			t.Fatalf("measurement does not bind rewritten body: %+v", measurement)
+		}
 	})
 }
 

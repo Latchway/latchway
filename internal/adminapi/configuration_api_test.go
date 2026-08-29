@@ -94,7 +94,10 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 		"/admin/v1/config-revisions/"+initial.ID+"/simulate", map[string]any{
 			"feature": "assistant", "platform": "ios", "trust_level": "app_verified",
 			"principal": map[string]any{"authenticated": authenticated, "claims": map[string]any{}},
-			"request":   map[string]any{"streaming": true},
+			"request": map[string]any{
+				"streaming": true, "rewritten_request_bytes": 1024,
+				"image_units": 1, "tool_calls": 2,
+			},
 		}, cookie, csrf, "")
 	if simulation.Code != http.StatusOK || !bytes.Contains(simulation.Body.Bytes(), []byte(`"allowed":true`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"route":"primary"`)) ||
@@ -104,6 +107,10 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"revision_id":"`+initial.ID+`"`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"applied_output_maximum":800`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"logical_requests","algorithm":"calendar","units":1,"applicable":true,"durable":true`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"request_bytes","algorithm":"per_request","units":1024,"applicable":true,"durable":false`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"image_units","algorithm":"per_request","units":1,"applicable":true,"durable":false`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"tool_calls","algorithm":"per_request","units":2,"applicable":true,"durable":false`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"image_units":1,"tool_calls":2`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"requested_input_tokens","role":"explanatory","affects_cel":false`)) ||
 		bytes.Contains(simulation.Body.Bytes(), []byte("api.example.test")) {
 		t.Fatalf("route simulation status=%d body=%s", simulation.Code, simulation.Body.String())
@@ -257,7 +264,12 @@ func configurationObjectForAPI(t *testing.T, description string) map[string]any 
 			"attestationPolicies":[{"id":"native","platforms":{"ios":{"provider":"app_attest","mode":"required","appAttest":{"appIdPrefix":"TEAM1234","bundleId":"com.example.habits","environment":"production","allowedValidationCategories":[1],"allowedBundleVersions":["1.0"]}}}}],
 			"upstreams":[{"id":"primary","type":"openai_compatible","baseUrl":"https://api.example.test/v1","authentication":{"type":"none"}}],
 			"models":[{"id":"fast","upstream":"primary","upstreamModel":"configured-fast-model"}],
-			"limitPlans":[{"id":"free","limits":[{"metric":"logical_requests","window":"1d","maximum":5,"scope":["user","feature"]}]}],
+			"limitPlans":[{"id":"free","limits":[
+				{"metric":"logical_requests","window":"1d","maximum":5,"scope":["user","feature"]},
+				{"metric":"request_bytes","algorithm":"per_request","perRequestMaximum":2048,"scope":["platform","normalized_claim:region"]},
+				{"metric":"image_units","algorithm":"per_request","perRequestMaximum":2,"scope":["platform"]},
+				{"metric":"tool_calls","algorithm":"per_request","perRequestMaximum":3,"scope":["platform"]}
+			]}],
 			"features":[{"id":"assistant","protocol":"openai_chat","attestationPolicy":"native","access":{"expression":"principal.authenticated"},"limitPlan":{"expression":"'free'"},"output":{"defaultMaximumTokens":800,"absoluteMaximumTokens":1500},"routes":[{"id":"primary","when":"true","model":"fast","priority":10}]}]
 		}
 	}`), &document); err != nil {

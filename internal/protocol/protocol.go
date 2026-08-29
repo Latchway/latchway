@@ -18,6 +18,12 @@ const (
 	// operator-declared maximum provider framing for the request and messages.
 	TrustedInputMethodUTF8ByteBPEDeclaredFramingV1 = "utf8_byte_bpe_declared_framing_v1"
 
+	// MaximumMeasuredRequestBytes and MaximumRequestStructuredUnits bound the
+	// exact request-measurement proof across adapters, quota, persistence, and
+	// administrative projection. They are server limits, never client claims.
+	MaximumMeasuredRequestBytes   int64 = 100 << 20
+	MaximumRequestStructuredUnits int64 = 1_000_000
+
 	trustedInputProfileDigestDomain = "latchway/trusted-input-profile/v1\x00"
 )
 
@@ -115,6 +121,20 @@ type TrustedInputPreflight struct {
 	TotalTokenBound  int64
 }
 
+// RequestMeasurements binds exact request-shape units to the rewritten body
+// that will be dispatched. RequestBytes is always exact. ImageUnitsKnown and
+// ToolCallsKnown are explicit because an opaque or extensible protocol must
+// not turn an unknown structured count into a trusted zero.
+type RequestMeasurements struct {
+	Protocol            string
+	RewrittenBodySHA256 [sha256.Size]byte
+	RequestBytes        int64
+	ImageUnits          int64
+	ToolCalls           int64
+	ImageUnitsKnown     bool
+	ToolCallsKnown      bool
+}
+
 // FeatureDecision contains the server-owned physical request choices.
 type FeatureDecision struct {
 	PhysicalModel       string
@@ -179,6 +199,13 @@ type Capabilities struct {
 // richer request shapes when trusted input accounting is not required.
 type InputPreflighter interface {
 	PreflightInput(context.Context, *http.Request, TrustedInputProfile) (TrustedInputPreflight, error)
+}
+
+// RequestMeasurer is an optional adapter proof over the exact post-rewrite
+// request representation. Data-plane activation requires it whenever a hard
+// request_bytes, image_units, or tool_calls rule is selected.
+type RequestMeasurer interface {
+	MeasureRequest(context.Context, *http.Request) (RequestMeasurements, error)
 }
 
 // Adapter understands one client/provider wire protocol.

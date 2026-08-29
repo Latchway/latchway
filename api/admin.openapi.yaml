@@ -1340,6 +1340,16 @@ components:
               minimum: 0
               maximum: 4096
               description: Hypothetical exact adapter framing-unit count used for conservative trusted-input projection.
+            image_units:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Hypothetical exact structured image count used by a hard per-request guard.
+            tool_calls:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Hypothetical exact structured tool-call count used by a hard per-request guard.
     RouteSimulationResult:
       type: object
       additionalProperties: false
@@ -1354,7 +1364,7 @@ components:
         facts:
           type: object
           additionalProperties: false
-          required: [application_id, environment_id, revision_id, environment_kind, feature, platform, trust_level, authenticated, normalized_claims, streaming, requested_input_tokens, requested_output_max, rewritten_request_bytes, framing_unit_count]
+          required: [application_id, environment_id, revision_id, environment_kind, feature, platform, trust_level, authenticated, normalized_claims, streaming, requested_input_tokens, requested_output_max, rewritten_request_bytes, framing_unit_count, image_units, tool_calls]
           properties:
             application_id: { $ref: '#/components/schemas/ApplicationID' }
             environment_id: { $ref: '#/components/schemas/EnvironmentID' }
@@ -1371,6 +1381,8 @@ components:
             requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
             rewritten_request_bytes: { type: integer, minimum: 0, maximum: 104857600 }
             framing_unit_count: { type: integer, minimum: 0, maximum: 4096 }
+            image_units: { type: integer, minimum: 0, maximum: 1000000 }
+            tool_calls: { type: integer, minimum: 0, maximum: 1000000 }
         fact_usage:
           type: array
           maxItems: 16
@@ -1398,7 +1410,7 @@ components:
             properties:
               metric: { type: string }
               algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
-              scope: { type: array, maxItems: 9, uniqueItems: true, items: { type: string } }
+              scope: { type: array, maxItems: 11, uniqueItems: true, items: { type: string } }
               window:
                 type: string
                 pattern: '^[1-9][0-9]*(m|h|d|w|mo)$'

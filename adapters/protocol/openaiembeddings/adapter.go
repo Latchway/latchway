@@ -155,6 +155,33 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	return 0, nil
 }
 
+// MeasureRequest binds the exact rewritten Embeddings body. Its closed v1
+// request grammar has neither images nor tool calls, so both counts are exact
+// zeroes rather than omitted measurements.
+func (a Adapter) MeasureRequest(
+	ctx context.Context,
+	request *http.Request,
+) (protocol.RequestMeasurements, error) {
+	if ctx == nil {
+		return protocol.RequestMeasurements{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	object, raw, err := a.readRequest(ctx, request)
+	if err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	if _, err := inspectRequestObject(object, raw); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	installRequestBody(request, raw)
+	return protocol.RequestMeasurements{
+		Protocol: ID, RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: int64(len(raw)),
+		ImageUnitsKnown: true, ToolCallsKnown: true,
+	}, nil
+}
+
 // PreflightInput proves a conservative bound for text-only Embeddings input.
 // Caller-supplied token IDs and nested token batches deliberately fail closed:
 // this proof method is tied to the exact physical model's byte-level BPE and

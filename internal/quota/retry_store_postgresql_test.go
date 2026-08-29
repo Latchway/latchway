@@ -761,7 +761,8 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 		if got := fixture.count(t, `
 			SELECT count(*) FROM upstream_attempts
 			WHERE upstream_attempt_id = $1
-			  AND attempt_decision_binding_version = 1
+			  AND attempt_decision_binding_version = 2
+			  AND request_measurement_binding_version = 1
 			  AND per_request_output_token_bound = 24
 		`, second.ID()); got != 1 {
 			t.Fatalf("per-request retry output binding rows = %d, want 1", got)
@@ -792,7 +793,8 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			    model_key = NULL,
 			    attempt_decision_sha256 = NULL,
 			    per_request_output_token_bound = NULL,
-			    input_accounting_binding_version = 0
+			    input_accounting_binding_version = 0,
+			    request_measurement_binding_version = 0
 			WHERE upstream_attempt_id = $1
 		`, first.ID()); err != nil {
 			t.Fatalf("simulate schema-11 per-request first attempt: %v", err)
@@ -925,7 +927,8 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 		if got := fixture.count(t, `
 			SELECT count(*) FROM upstream_attempts
 				WHERE upstream_attempt_id = $1
-				  AND attempt_decision_binding_version = 1
+				  AND attempt_decision_binding_version = 2
+				  AND request_measurement_binding_version = 1
 				  AND model_key = $2
 				  AND octet_length(attempt_decision_sha256) = 32
 				  AND input_accounting_binding_version = 1
@@ -1057,7 +1060,12 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			    rewritten_body_sha256 = NULL,
 			    input_token_bound = NULL,
 			    output_token_bound = NULL,
-			    total_token_bound = NULL
+			    total_token_bound = NULL,
+			    request_measurement_binding_version = 0,
+			    request_measurement_sha256 = NULL,
+			    measured_request_bytes = NULL,
+			    measured_image_units = NULL,
+			    measured_tool_calls = NULL
 			WHERE upstream_attempt_id = $1
 		`, first.ID()); err != nil {
 			t.Fatalf("simulate schema-11 first-attempt binding: %v", err)
@@ -1080,7 +1088,12 @@ func TestStorePostgreSQLMultiAttemptQuotaLifecycle(t *testing.T) {
 			    rewritten_body_sha256 = decode(repeat('ff', 32), 'hex'),
 			    input_token_bound = $7,
 			    output_token_bound = $8,
-			    total_token_bound = $9
+			    total_token_bound = $9,
+			    request_measurement_binding_version = 0,
+			    request_measurement_sha256 = NULL,
+			    measured_request_bytes = NULL,
+			    measured_image_units = NULL,
+			    measured_tool_calls = NULL
 			WHERE upstream_attempt_id = $1
 		`, first.ID(), input.ModelKey, firstDecisionDigest,
 			input.InputPreflight.Method, input.InputPreflight.ProfileID,

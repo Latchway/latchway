@@ -317,6 +317,7 @@ func snapshotInputFromReserve(input ReserveInput) SnapshotInput {
 		OrganizationID: input.OrganizationID, ApplicationID: input.ApplicationID,
 		EnvironmentID: input.EnvironmentID, ApplicationUserID: input.ApplicationUserID,
 		InstallationID: input.InstallationID, ConfigRevisionID: input.ConfigRevisionID,
+		Platform: input.Platform, NormalizedClaimDigests: cloneStringMap(input.NormalizedClaimDigests),
 		FeatureKey: input.FeatureKey, LimitPlanKey: input.LimitPlanKey,
 		RouteKey: input.RouteKey, UpstreamKey: input.UpstreamKey, ModelKey: input.ModelKey,
 		Rules: rules,

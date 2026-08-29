@@ -46,9 +46,19 @@ func FuzzInspectAndRewrite(f *testing.F) {
 		if effective <= 0 || effective > 128 {
 			t.Fatalf("invalid effective output maximum: %d", effective)
 		}
+		measurement, measurementErr := adapter.MeasureRequest(context.Background(), request)
+		if measurementErr != nil || measurement.Protocol != ID || measurement.RequestBytes < 0 ||
+			measurement.ImageUnits != 0 || measurement.ToolCalls < 0 ||
+			!measurement.ImageUnitsKnown || !measurement.ToolCallsKnown {
+			t.Fatalf("valid rewritten request produced invalid exact measurement: %+v, %v", measurement, measurementErr)
+		}
 		rewritten, err := io.ReadAll(request.Body)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if measurement.RequestBytes != int64(len(rewritten)) ||
+			measurement.RewrittenBodySHA256 != sha256.Sum256(rewritten) {
+			t.Fatalf("measurement does not bind rewritten body: %+v", measurement)
 		}
 		value, err := jsonsafe.Decode(rewritten)
 		if err != nil {

@@ -204,6 +204,42 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	return effective, nil
 }
 
+// MeasureRequest counts explicit local function/custom call input items in the
+// exact rewritten Responses body. The executable v1 grammar rejects all media
+// input, so image_units is an exact zero rather than an estimate.
+func (a Adapter) MeasureRequest(
+	ctx context.Context,
+	request *http.Request,
+) (protocol.RequestMeasurements, error) {
+	if ctx == nil {
+		return protocol.RequestMeasurements{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	object, raw, err := a.readRequest(ctx, request)
+	if err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	if _, err := inspectRequestObject(object, raw); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	var calls int64
+	if items, ok := object["input"].([]any); ok {
+		for _, value := range items {
+			item, _ := value.(map[string]any)
+			if item["type"] == "function_call" || item["type"] == "custom_tool_call" {
+				calls++
+			}
+		}
+	}
+	installRequestBody(request, raw)
+	return protocol.RequestMeasurements{
+		Protocol: ID, RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: int64(len(raw)),
+		ImageUnits: 0, ToolCalls: calls, ImageUnitsKnown: true, ToolCallsKnown: true,
+	}, nil
+}
+
 // PreflightInput proves a conservative bound over the exact rewritten
 // Responses body. The proof deliberately accepts only local text input and
 // text message items. Files, media, tools, provider-hosted state, schemas, and

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
 )
@@ -842,6 +843,55 @@ func TestResolverResolveQuotaReturnsStableDetachedProjectionWithoutRouting(t *te
 		snapshot.features["assistant"].OpaqueHTTP.AllowedMethods[0] != "POST" ||
 		snapshot.plans["premium"].Limits[0].Scope[0] != "user" {
 		t.Fatal("returned quota projection retained snapshot-owned mutable state")
+	}
+}
+
+func TestResolverQuotaScopesUseOnlySealedPlatformAndOpaqueClaimDigests(t *testing.T) {
+	t.Parallel()
+
+	resolver := quotaResolver(t, func() time.Time { return policyTestNow })
+	snapshot := policySnapshot()
+	plan := snapshot.plans["premium"]
+	plan.Limits[0].Scope = []string{"normalized_claim:region", "platform", "user"}
+	snapshot.plans["premium"] = plan
+	authorization := quotaAuthorization("premium")
+	authorization.InstallationPlatform = "ios"
+	authorization.NormalizedClaims["region"] = "eu"
+
+	projection, err := resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPresent, ok := limitscope.ClaimDigest("region", "eu", true)
+	if !ok || projection.Scopes.Platform != "ios" ||
+		projection.Scopes.NormalizedClaims["region"] != wantPresent ||
+		strings.Contains(projection.Scopes.NormalizedClaims["region"], "eu") {
+		t.Fatalf("sealed quota scopes = %+v", projection.Scopes)
+	}
+	authorization.InstallationPlatform = "android"
+	authorization.NormalizedClaims["region"] = "forged"
+	if projection.Scopes.Platform != "ios" ||
+		projection.Scopes.NormalizedClaims["region"] != wantPresent {
+		t.Fatalf("caller mutation reached detached scope facts: %+v", projection.Scopes)
+	}
+
+	missing := quotaAuthorization("premium")
+	missing.InstallationPlatform = "ios"
+	delete(missing.NormalizedClaims, "region")
+	missingProjection, err := resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", missing,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMissing, ok := limitscope.ClaimDigest("region", nil, false)
+	if !ok || missingProjection.Scopes.NormalizedClaims["region"] != wantMissing ||
+		wantMissing == wantPresent {
+		t.Fatalf("missing normalized-claim scope = %+v", missingProjection.Scopes)
 	}
 }
 

@@ -42,9 +42,19 @@ func FuzzInspectAndRewrite(f *testing.F) {
 		}); err != nil {
 			t.Fatalf("valid inspected request could not be rewritten: %v", err)
 		}
+		measurement, err := adapter.MeasureRequest(context.Background(), request)
+		if err != nil || measurement.Protocol != ID || measurement.RequestBytes < 0 ||
+			measurement.ImageUnits < 0 || measurement.ToolCalls < 0 ||
+			!measurement.ImageUnitsKnown || !measurement.ToolCallsKnown {
+			t.Fatalf("valid rewritten request produced invalid exact measurement: %+v, %v", measurement, err)
+		}
 		rewritten, err := io.ReadAll(request.Body)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if measurement.RequestBytes != int64(len(rewritten)) ||
+			measurement.RewrittenBodySHA256 != sha256.Sum256(rewritten) {
+			t.Fatalf("measurement does not bind rewritten body: %+v", measurement)
 		}
 		value, err := jsonsafe.Decode(rewritten)
 		if err != nil {

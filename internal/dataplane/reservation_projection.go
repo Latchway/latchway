@@ -24,6 +24,8 @@ type ReservationProjectionInput struct {
 	RequestedOutputMaximum int64
 	RewrittenRequestBytes  int64
 	FramingUnitCount       int64
+	ImageUnits             int64
+	ToolCalls              int64
 	Streaming              bool
 	EvaluatedAt            time.Time
 }
@@ -76,7 +78,8 @@ func ProjectReservation(
 	input ReservationProjectionInput,
 ) (ReservationProjection, error) {
 	if input.EvaluatedAt.IsZero() || input.RequestedOutputMaximum < 0 ||
-		input.RewrittenRequestBytes < 0 || input.FramingUnitCount < 0 {
+		input.RewrittenRequestBytes < 0 || input.FramingUnitCount < 0 ||
+		input.ImageUnits < 0 || input.ToolCalls < 0 {
 		return ReservationProjection{}, ErrInvalidReservationProjection
 	}
 	validated, err := validateDecision(decision.Feature.ID, decision, decision.Feature.Protocol)
@@ -140,6 +143,19 @@ func ProjectReservation(
 		}
 	} else {
 		projection.TotalTokenBound = appliedOutput
+	}
+	var measurements *protocol.RequestMeasurements
+	if requestMeasurementsRequired(validated.rules) {
+		structured := decision.Feature.Protocol != protocol.OpaqueHTTPID
+		candidate := protocol.RequestMeasurements{
+			Protocol: decision.Feature.Protocol, RequestBytes: input.RewrittenRequestBytes,
+			ImageUnits: input.ImageUnits, ToolCalls: input.ToolCalls,
+			ImageUnitsKnown: structured, ToolCallsKnown: structured,
+		}
+		measurements = &candidate
+	}
+	if err := assignRequestMeasurementUnits(validated.rules, measurements); err != nil {
+		return ReservationProjection{}, ErrInvalidReservationProjection
 	}
 
 	costBound, err := assignDecisionReservationUnits(

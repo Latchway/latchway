@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"encoding/json"
 	"math"
 	"slices"
 	"testing"
@@ -274,6 +275,59 @@ func TestNormalizeExecutableLimitAcceptsBoundedProductionRules(t *testing.T) {
 	}
 	if streamConcurrencyIdentity == requestConcurrencyIdentity {
 		t.Fatal("request and stream concurrency rules shared an immutable identity")
+	}
+}
+
+func TestNormalizeExecutableLimitCanonicalizesPlatformAndNormalizedClaimScopes(t *testing.T) {
+	t.Parallel()
+
+	for _, metric := range []string{"request_bytes", "image_units", "tool_calls"} {
+		normalized, _, ok := normalizeExecutableLimit(Limit{
+			Metric: metric, Algorithm: "per_request",
+			Scope:             []string{"normalized_claim:region", "platform", "user", "organization"},
+			PerRequestMaximum: 9, Hard: true,
+		})
+		if !ok || !slices.Equal(normalized.Scope, []string{
+			"organization", "user", "platform", "normalized_claim:region",
+		}) {
+			t.Fatalf("%s normalized scope = %#v ok=%t", metric, normalized.Scope, ok)
+		}
+	}
+
+	base := Limit{
+		Metric: "request_bytes", Algorithm: "per_request", Scope: []string{"user"},
+		PerRequestMaximum: 9, Hard: true,
+	}
+	for _, scope := range [][]string{
+		{"limit_plan"},
+		{"normalized_claim:Region"},
+		{"normalized_claim:region", "normalized_claim:tier"},
+		{"platform", "platform"},
+	} {
+		invalid := base
+		invalid.Scope = scope
+		if normalized, identity, ok := normalizeExecutableLimit(invalid); ok {
+			t.Fatalf("invalid scope %#v accepted: limit=%+v identity=%+v", scope, normalized, identity)
+		}
+	}
+}
+
+func TestConfigurationSchemaRejectsMultipleNormalizedClaimScopeSelectors(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	limit := objectArray(objectArray(objectValue(document, "spec"), "limitPlans")[0], "limits")[0]
+	limit["scope"] = []any{"user", "normalized_claim:region", "normalized_claim:tier"}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := validator.SchemaIssues(encoded); len(issues) == 0 {
+		t.Fatal("configuration schema accepted two normalized-claim selectors")
 	}
 }
 

@@ -228,8 +228,17 @@ def schema_errors(schema_path: Path, schema: Any, instance: Any, location: str =
         if isinstance(schema.get("items"), dict):
             for index, value in enumerate(instance):
                 errors.extend(schema_errors(schema_path, schema["items"], value, f"{location}[{index}]"))
-        if "contains" in schema and not any(not schema_errors(schema_path, schema["contains"], item, location) for item in instance):
-            errors.append(f"{location}: no item satisfies contains")
+        if "contains" in schema:
+            contains_matches = sum(
+                not schema_errors(schema_path, schema["contains"], item, location)
+                for item in instance
+            )
+            minimum_contains = schema.get("minContains", 1)
+            maximum_contains = schema.get("maxContains")
+            if contains_matches < minimum_contains:
+                errors.append(f"{location}: fewer than minContains")
+            if maximum_contains is not None and contains_matches > maximum_contains:
+                errors.append(f"{location}: more than maxContains")
 
     if isinstance(instance, str):
         if "minLength" in schema and len(instance) < schema["minLength"]:

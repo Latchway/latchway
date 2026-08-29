@@ -149,17 +149,19 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 	}
 
 	quotaSnapshot, err := provider.quotas.Snapshot(ctx, quota.SnapshotInput{
-		OrganizationID:    authorization.OrganizationID,
-		ApplicationID:     authorization.ApplicationID,
-		EnvironmentID:     authorization.EnvironmentID,
-		ApplicationUserID: authorization.ApplicationUserID,
-		InstallationID:    authorization.InstallationID,
-		ConfigRevisionID:  snapshot.PolicyRevision(),
-		UserOverrideID:    authorization.UserOverrideID,
-		LimitPlanOverride: authorization.LimitPlanOverride,
-		FeatureKey:        projection.Feature.ID,
-		LimitPlanKey:      projection.LimitPlan.ID,
-		Rules:             validated.rules,
+		OrganizationID:         authorization.OrganizationID,
+		ApplicationID:          authorization.ApplicationID,
+		EnvironmentID:          authorization.EnvironmentID,
+		ApplicationUserID:      authorization.ApplicationUserID,
+		InstallationID:         authorization.InstallationID,
+		ConfigRevisionID:       snapshot.PolicyRevision(),
+		Platform:               projection.Scopes.Platform,
+		NormalizedClaimDigests: cloneClaimDigests(projection.Scopes.NormalizedClaims),
+		UserOverrideID:         authorization.UserOverrideID,
+		LimitPlanOverride:      authorization.LimitPlanOverride,
+		FeatureKey:             projection.Feature.ID,
+		LimitPlanKey:           projection.LimitPlan.ID,
+		Rules:                  validated.rules,
 	})
 	if err != nil {
 		return clientapi.FeatureQuotaResult{}, featureQuotaFailure(err)

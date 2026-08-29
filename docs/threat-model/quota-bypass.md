@@ -31,7 +31,20 @@ After completion or failure, a separate transaction records actual/estimated usa
 - **Crash after reservation:** bounded expiry plus idempotent recovery workers.
 - **Fallback amplification:** separate attempt cost from one logical request and reserve a configured worst case where enforceable.
 - **Output overspend:** rewrite protocol output clamps before dispatch, stream accounting, and stop generation where the adapter safely supports it.
-- **Claim manipulation:** limit-plan inputs come only from verified normalized claims and active configuration.
+- **Claim manipulation:** limit-plan inputs come only from verified normalized
+  claims and active configuration. A quota claim selector is explicit and
+  top-level; policy converts its sealed scalar value, including a distinct
+  missing marker, into a domain-separated opaque digest. Raw values never
+  reach quota persistence or operational views. Platform scope likewise comes
+  only from the sealed installation authorization. `limit_plan` cannot be an
+  optional duplicate scope because selected-plan identity is already implicit
+  in every rule and request fingerprint.
+- **Request-shape under-reporting:** request bytes are the exact post-rewrite
+  body length and digest, not a client counter. Structured adapters count
+  images and historical tool calls from their closed request grammar; opaque
+  protocols fail closed for those two metrics. The data plane owns and
+  re-verifies the body immediately before target acquisition, and quota binds
+  the proof across initial reserve, retry, replay, and crash recovery.
 
 ## Residual risks
 

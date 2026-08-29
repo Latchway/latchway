@@ -18,14 +18,16 @@ import (
 // RouteKey, UpstreamKey, and ModelKey are required only when a rule scopes on
 // the corresponding dimension.
 type SnapshotInput struct {
-	OrganizationID    string
-	ApplicationID     string
-	EnvironmentID     string
-	ApplicationUserID string
-	InstallationID    string
-	ConfigRevisionID  string
-	UserOverrideID    string
-	LimitPlanOverride string
+	OrganizationID         string
+	ApplicationID          string
+	EnvironmentID          string
+	ApplicationUserID      string
+	InstallationID         string
+	ConfigRevisionID       string
+	Platform               string
+	NormalizedClaimDigests map[string]string
+	UserOverrideID         string
+	LimitPlanOverride      string
 
 	FeatureKey   string
 	LimitPlanKey string
@@ -141,7 +143,7 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 		return preparedSnapshot{}, ErrInvalidInput
 	}
 
-	values := map[string]string{
+	values, err := quotaScopeValues(map[string]string{
 		"organization": input.OrganizationID,
 		"application":  input.ApplicationID,
 		"environment":  input.EnvironmentID,
@@ -151,6 +153,9 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 		"route":        input.RouteKey,
 		"upstream":     input.UpstreamKey,
 		"model":        input.ModelKey,
+	}, input.Platform, input.NormalizedClaimDigests)
+	if err != nil {
+		return preparedSnapshot{}, err
 	}
 	rules, err := prepareRules(input.Rules, values, snapshotRulePreparation)
 	if err != nil {
@@ -167,6 +172,7 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 		}
 	}
 
+	input.NormalizedClaimDigests = cloneStringMap(input.NormalizedClaimDigests)
 	prepared := preparedSnapshot{SnapshotInput: input, rules: rules}
 	prepared.Rules = clonePreparedRules(rules)
 	return prepared, nil

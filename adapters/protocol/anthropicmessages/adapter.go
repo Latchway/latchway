@@ -210,6 +210,61 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	return effective, nil
 }
 
+// MeasureRequest counts every supported image block, including images nested
+// in tool_result content, and every explicit assistant tool_use block in the
+// exact rewritten Messages body. Tool definitions and results are not calls.
+func (a Adapter) MeasureRequest(
+	ctx context.Context,
+	request *http.Request,
+) (protocol.RequestMeasurements, error) {
+	if ctx == nil {
+		return protocol.RequestMeasurements{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	object, raw, err := a.readRequest(ctx, request)
+	if err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	if _, err := inspectRequestObject(object, raw); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	images, calls := countRequestUnits(object)
+	installRequestBody(request, raw)
+	return protocol.RequestMeasurements{
+		Protocol: ID, RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: int64(len(raw)),
+		ImageUnits: images, ToolCalls: calls, ImageUnitsKnown: true, ToolCallsKnown: true,
+	}, nil
+}
+
+func countRequestUnits(object map[string]any) (int64, int64) {
+	var images, calls int64
+	messages, _ := object["messages"].([]any)
+	for _, messageValue := range messages {
+		message, _ := messageValue.(map[string]any)
+		blocks, _ := message["content"].([]any)
+		for _, blockValue := range blocks {
+			block, _ := blockValue.(map[string]any)
+			switch block["type"] {
+			case "image":
+				images++
+			case "tool_use":
+				calls++
+			case "tool_result":
+				nested, _ := block["content"].([]any)
+				for _, nestedValue := range nested {
+					nestedBlock, _ := nestedValue.(map[string]any)
+					if nestedBlock["type"] == "image" {
+						images++
+					}
+				}
+			}
+		}
+	}
+	return images, calls
+}
+
 // PreflightInput proves a conservative bound over the exact rewritten
 // Anthropic Messages body. Only text messages and text system blocks are in
 // the proof surface; images, tools, binary sources, and provider extensions

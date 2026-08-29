@@ -12,6 +12,7 @@ import (
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/problem"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/session"
 )
 
@@ -20,7 +21,8 @@ const (
 	simulationInstallationID = "ins_00000000000000000000000000"
 	simulationRequestID      = "req_00000000000000000000000000"
 	maximumSimulatedTokens   = int64(100_000_000)
-	maximumSimulatedBytes    = int64(100 << 20)
+	maximumSimulatedBytes    = protocol.MaximumMeasuredRequestBytes
+	maximumSimulatedUnits    = protocol.MaximumRequestStructuredUnits
 )
 
 type routeSimulationPrincipal struct {
@@ -45,6 +47,8 @@ type routeSimulationRequestFacts struct {
 	RequestedOutputMax    int64  `json:"requested_output_max,omitempty"`
 	RewrittenRequestBytes int64  `json:"rewritten_request_bytes,omitempty"`
 	FramingUnitCount      int64  `json:"framing_unit_count,omitempty"`
+	ImageUnits            int64  `json:"image_units,omitempty"`
+	ToolCalls             int64  `json:"tool_calls,omitempty"`
 }
 
 type routeSimulationLimit struct {
@@ -84,6 +88,8 @@ type routeSimulationFacts struct {
 	RequestedOutputMax    int64          `json:"requested_output_max"`
 	RewrittenRequestBytes int64          `json:"rewritten_request_bytes"`
 	FramingUnitCount      int64          `json:"framing_unit_count"`
+	ImageUnits            int64          `json:"image_units"`
+	ToolCalls             int64          `json:"tool_calls"`
 }
 
 type routeSimulationFactUse struct {
@@ -233,6 +239,8 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		RequestedOutputMaximum: request.Request.RequestedOutputMax,
 		RewrittenRequestBytes:  request.Request.RewrittenRequestBytes,
 		FramingUnitCount:       request.Request.FramingUnitCount,
+		ImageUnits:             request.Request.ImageUnits,
+		ToolCalls:              request.Request.ToolCalls,
 		Streaming:              request.Request.Streaming, EvaluatedAt: now,
 	})
 	if err != nil {
@@ -295,7 +303,9 @@ func validSimulationRequestFacts(facts routeSimulationRequestFacts) bool {
 		facts.RequestedInputTokens >= 0 && facts.RequestedInputTokens <= maximumSimulatedTokens &&
 		facts.RequestedOutputMax >= 0 && facts.RequestedOutputMax <= maximumSimulatedTokens &&
 		facts.RewrittenRequestBytes >= 0 && facts.RewrittenRequestBytes <= maximumSimulatedBytes &&
-		facts.FramingUnitCount >= 0 && facts.FramingUnitCount <= 4096
+		facts.FramingUnitCount >= 0 && facts.FramingUnitCount <= 4096 &&
+		facts.ImageUnits >= 0 && facts.ImageUnits <= maximumSimulatedUnits &&
+		facts.ToolCalls >= 0 && facts.ToolCalls <= maximumSimulatedUnits
 }
 
 func simulationFacts(
@@ -312,6 +322,8 @@ func simulationFacts(
 		RequestedOutputMax:    request.Request.RequestedOutputMax,
 		RewrittenRequestBytes: request.Request.RewrittenRequestBytes,
 		FramingUnitCount:      request.Request.FramingUnitCount,
+		ImageUnits:            request.Request.ImageUnits,
+		ToolCalls:             request.Request.ToolCalls,
 	}
 }
 
@@ -336,6 +348,8 @@ func baseSimulationResult(
 			{Fact: "requested_output_max", Role: "reservation", Explanation: "Applies the production default and absolute output clamp; it does not alter CEL."},
 			{Fact: "rewritten_request_bytes", Role: "reservation", Explanation: "Models the adapter-proved rewritten body size used by trusted input accounting."},
 			{Fact: "framing_unit_count", Role: "reservation", Explanation: "Models the adapter-proved message, item, or input count used by trusted input accounting."},
+			{Fact: "image_units", Role: "reservation", Explanation: "Models the adapter-proved structured image count used by a hard per-request guard; it does not alter CEL."},
+			{Fact: "tool_calls", Role: "reservation", Explanation: "Models the adapter-proved structured tool-call count used by a hard per-request guard; it does not alter CEL."},
 			{Fact: "app_version", Role: "explanatory", Explanation: "Returned for context only; it is not currently exposed to production CEL."},
 			{Fact: "requested_input_tokens", Role: "explanatory", Explanation: "Untrusted estimate returned for comparison only; it never affects reservation or CEL."},
 		},

@@ -2,13 +2,13 @@ package configuration
 
 import (
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 	_ "time/tzdata"
 
 	"github.com/latchway/latchway/internal/limitmetric"
+	"github.com/latchway/latchway/internal/limitscope"
 )
 
 const (
@@ -121,26 +121,7 @@ func executableTokenBucketRefillRate(rate RefillRate) bool {
 }
 
 func canonicalLimitScope(input []string) ([]string, bool) {
-	if len(input) == 0 || len(input) > len(executableLimitScopeOrder) {
-		return nil, false
-	}
-	seen := make(map[string]struct{}, len(input))
-	for _, dimension := range input {
-		if !slices.Contains(executableLimitScopeOrder, dimension) {
-			return nil, false
-		}
-		if _, duplicate := seen[dimension]; duplicate {
-			return nil, false
-		}
-		seen[dimension] = struct{}{}
-	}
-	result := make([]string, 0, len(input))
-	for _, dimension := range executableLimitScopeOrder {
-		if _, ok := seen[dimension]; ok {
-			result = append(result, dimension)
-		}
-	}
-	return result, true
+	return limitscope.CanonicalDimensions(input)
 }
 
 func executableCalendarWindow(raw string) bool {

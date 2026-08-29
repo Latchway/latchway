@@ -182,7 +182,9 @@ latchway routes simulate rev_... \
   --requested-input-tokens 1200 \
   --requested-output-max 800 \
   --rewritten-request-bytes 4096 \
-  --framing-unit-count 3
+  --framing-unit-count 3 \
+  --image-units 1 \
+  --tool-calls 2
 ```
 
 The response binds the authoritative application, environment, and revision;
@@ -191,6 +193,10 @@ fallback order, and pricing; and projects the exact conservative units that
 the production quota path would reserve. The byte and framing-unit flags model
 the exact post-rewrite values a production adapter proves and are required when
 the selected plan needs trusted input or total-token accounting. Simulation
+uses the image/tool flags as hypothetical exact structured counts for
+`per_request` guards. Their allocations are displayed with `durable: false`
+because request-local guards create no quota bucket. Opaque HTTP can project
+request bytes but cannot safely project image or tool counts. Simulation
 performs no durable reservation and no upstream dispatch. App version and the
 requested-input-token estimate are explicitly explanatory: they are returned
 for comparison but cannot influence CEL or reservation.

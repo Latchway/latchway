@@ -6,6 +6,7 @@ package opaquehttp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"mime"
@@ -124,6 +125,28 @@ func (adapter Adapter) ApplyFeature(
 		appliedPolicy{streamingAllowed: policy.StreamingAllowed},
 	))
 	return 0, nil
+}
+
+// MeasureRequest binds the exact opaque body installed by ApplyFeature. The
+// adapter cannot interpret structured image or tool semantics, so their known
+// flags remain false and hard rules for those metrics fail closed upstream.
+func (adapter Adapter) MeasureRequest(
+	ctx context.Context,
+	request *http.Request,
+) (protocol.RequestMeasurements, error) {
+	if ctx == nil || request == nil {
+		return protocol.RequestMeasurements{}, requestMalformed("request context is required")
+	}
+	if _, ok := request.Context().Value(appliedPolicyContextKey{}).(appliedPolicy); !ok {
+		return protocol.RequestMeasurements{}, errors.New("request is missing its opaque HTTP policy marker")
+	}
+	body, err := adapter.readBody(ctx, request, maximumPolicyBytes)
+	if err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	return protocol.RequestMeasurements{
+		Protocol: ID, RewrittenBodySHA256: sha256.Sum256(body), RequestBytes: int64(len(body)),
+	}, nil
 }
 
 func (Adapter) ObserveResponse(ctx context.Context, response *http.Response) (protocol.ResponseObserver, error) {

@@ -21,6 +21,8 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
+const latestTestSchemaVersion int64 = 18
+
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()
 	for _, model := range []struct {
@@ -32,9 +34,20 @@ func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 			name: "upstream attempt", typeOf: reflect.TypeOf(dbsql.UpstreamAttempt{}),
 			fields: map[string]string{
 				"ModelKey": "model_key", "AttemptDecisionBindingVersion": "attempt_decision_binding_version",
-				"AttemptDecisionSha256":         "attempt_decision_sha256",
-				"PerRequestOutputTokenBound":    "per_request_output_token_bound",
-				"InputAccountingBindingVersion": "input_accounting_binding_version",
+				"AttemptDecisionSha256":            "attempt_decision_sha256",
+				"PerRequestOutputTokenBound":       "per_request_output_token_bound",
+				"InputAccountingBindingVersion":    "input_accounting_binding_version",
+				"RequestMeasurementBindingVersion": "request_measurement_binding_version",
+				"RequestMeasurementSha256":         "request_measurement_sha256",
+				"MeasuredRequestBytes":             "measured_request_bytes",
+				"MeasuredImageUnits":               "measured_image_units",
+				"MeasuredToolCalls":                "measured_tool_calls",
+			},
+		},
+		{
+			name: "logical request", typeOf: reflect.TypeOf(dbsql.LogicalRequest{}),
+			fields: map[string]string{
+				"SelectedLimitPlanKey": "selected_limit_plan_key",
 			},
 		},
 		{

@@ -861,10 +861,18 @@
         "scope": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 11,
           "uniqueItems": true,
           "items": {
-            "enum": ["organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model"]
-          }
+            "oneOf": [
+              { "enum": ["organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model", "platform"] },
+              { "type": "string", "pattern": "^normalized_claim:[a-z][a-z0-9_]{0,62}$" }
+            ]
+          },
+          "contains": { "type": "string", "pattern": "^normalized_claim:[a-z][a-z0-9_]{0,62}$" },
+          "minContains": 0,
+          "maxContains": 1,
+          "description": "Runtime validation canonicalizes the fixed dimensions and permits at most one normalized_claim:<name> selector."
         },
         "window": {
           "description": "Server-owned calendar window: minute, hour, day, week, or month. Week windows begin Monday in the configured timezone.",

@@ -490,9 +490,10 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		routeKey: prepared.RouteKey, upstreamKey: prepared.UpstreamKey,
 		modelKey: prepared.ModelKey, physicalModel: prepared.PhysicalModel,
 		protocol: prepared.Protocol, pricing: pricing,
-		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
-		retryPlan:      retryPlanForRequest(prepared),
-		windowResetAt:  maximumResetAt(entries), expiresAt: expiresAt,
+		inputPreflight:      cloneInputPreflightBinding(prepared.InputPreflight),
+		requestMeasurements: cloneRequestMeasurementBinding(prepared.RequestMeasurements),
+		retryPlan:           retryPlanForRequest(prepared),
+		windowResetAt:       maximumResetAt(entries), expiresAt: expiresAt,
 	}, nil
 }
 
@@ -846,7 +847,8 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		*attempts[0].physicalModel != prepared.PhysicalModel ||
 		!storedModelKeyMatches(attempts[0], prepared.ModelKey) ||
 		!attemptPricingMatchesReservation(attempts[0], Reservation{pricing: pricing}) ||
-		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight)) {
+		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight) ||
+		!storedInitialRequestMeasurementsMatch(attempts[0], prepared.RequestMeasurements)) {
 		return Reservation{}, ErrInvalidState
 	}
 	replayed := lockedReservation{
@@ -854,8 +856,9 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 			organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 			environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
 			reservationID: reservationID, entries: entries, protocol: prepared.Protocol,
-			inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
-			retryPlan:      retryPlanForRequest(prepared), expiresAt: expiresAt,
+			inputPreflight:      cloneInputPreflightBinding(prepared.InputPreflight),
+			requestMeasurements: cloneRequestMeasurementBinding(prepared.RequestMeasurements),
+			retryPlan:           retryPlanForRequest(prepared), expiresAt: expiresAt,
 		},
 		status: reservationStatus, expiresAt: expiresAt,
 		applicationUserID: prepared.ApplicationUserID,
@@ -922,10 +925,11 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		reservationID:    reservationID, entries: entries, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
 		physicalModel: prepared.PhysicalModel, protocol: prepared.Protocol, pricing: pricing,
-		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
-		retryPlan:      retryPlanForRequest(prepared),
-		windowResetAt:  maximumResetAt(entries),
-		expiresAt:      expiresAt,
+		inputPreflight:      cloneInputPreflightBinding(prepared.InputPreflight),
+		requestMeasurements: cloneRequestMeasurementBinding(prepared.RequestMeasurements),
+		retryPlan:           retryPlanForRequest(prepared),
+		windowResetAt:       maximumResetAt(entries),
+		expiresAt:           expiresAt,
 	}, nil
 }
 
@@ -989,7 +993,8 @@ func loadExistingEntrylessReservation(
 		*attempts[0].physicalModel != prepared.PhysicalModel ||
 		!storedModelKeyMatches(attempts[0], prepared.ModelKey) ||
 		!attemptPricingMatchesReservation(attempts[0], Reservation{pricing: pricingForRequest(prepared)}) ||
-		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight)) {
+		!storedInitialInputPreflightMatches(attempts[0], prepared.InputPreflight) ||
+		!storedInitialRequestMeasurementsMatch(attempts[0], prepared.RequestMeasurements)) {
 		return Reservation{}, ErrInvalidState
 	}
 	validLifecycle := false
@@ -1005,8 +1010,9 @@ func loadExistingEntrylessReservation(
 		organizationID: prepared.OrganizationID, applicationID: prepared.ApplicationID,
 		environmentID: prepared.EnvironmentID, logicalRequestID: prepared.LogicalRequestID.String(),
 		reservationID: existing.reservationID, protocol: prepared.Protocol,
-		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
-		retryPlan:      retryPlanForRequest(prepared),
+		inputPreflight:      cloneInputPreflightBinding(prepared.InputPreflight),
+		requestMeasurements: cloneRequestMeasurementBinding(prepared.RequestMeasurements),
+		retryPlan:           retryPlanForRequest(prepared),
 	}, status: existing.status, expiresAt: existing.expiresAt,
 		applicationUserID: prepared.ApplicationUserID,
 		installationID:    prepared.InstallationID,
@@ -1044,10 +1050,11 @@ func loadExistingEntrylessReservation(
 		reservationID: existing.reservationID, routeKey: prepared.RouteKey,
 		upstreamKey: prepared.UpstreamKey, modelKey: prepared.ModelKey,
 		physicalModel: prepared.PhysicalModel, protocol: prepared.Protocol,
-		pricing:        pricingForRequest(prepared),
-		inputPreflight: cloneInputPreflightBinding(prepared.InputPreflight),
-		retryPlan:      retryPlanForRequest(prepared),
-		expiresAt:      existing.expiresAt,
+		pricing:             pricingForRequest(prepared),
+		inputPreflight:      cloneInputPreflightBinding(prepared.InputPreflight),
+		requestMeasurements: cloneRequestMeasurementBinding(prepared.RequestMeasurements),
+		retryPlan:           retryPlanForRequest(prepared),
+		expiresAt:           existing.expiresAt,
 	}, nil
 }
 
@@ -1480,10 +1487,11 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		if existing.routeKey != reservation.routeKey || existing.upstreamKey != reservation.upstreamKey ||
 			existing.physicalModel == nil || *existing.physicalModel != reservation.physicalModel ||
 			!storedModelKeyMatches(existing, reservation.modelKey) ||
-			(existing.attemptDecisionBindingVersion == 1 &&
+			(existing.attemptDecisionBindingVersion >= 1 &&
 				!optionalInt64Matches(existing.perRequestOutputTokenBound, perRequestOutputBound)) ||
 			!attemptPricingMatchesReservation(existing, reservation) ||
-			!storedInitialInputPreflightMatches(existing, reservation.inputPreflight) {
+			!storedInitialInputPreflightMatches(existing, reservation.inputPreflight) ||
+			!storedInitialRequestMeasurementsMatch(existing, reservation.requestMeasurements) {
 			return Attempt{}, false, ErrInvalidState
 		}
 		switch lockedReservation.status {
@@ -1573,7 +1581,7 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 	decisionAttempt := newStoredAttemptDecision(
 		attemptID, 1, reservation.routeKey, reservation.upstreamKey,
 		reservation.modelKey, reservation.physicalModel, reservation.pricing,
-		reservation.inputPreflight, perRequestOutputBound,
+		reservation.inputPreflight, reservation.requestMeasurements, perRequestOutputBound,
 	)
 	decisionDigest, err := attemptDecisionDigest(
 		lockedReservation, decisionAttempt,
@@ -1593,10 +1601,13 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 			cost_confidence, input_accounting_method,
 			input_accounting_profile_id, input_accounting_profile_digest,
 			rewritten_body_sha256, input_token_bound, output_token_bound,
-			total_token_bound
+			total_token_bound, request_measurement_binding_version,
+			request_measurement_sha256, measured_request_bytes,
+			measured_image_units, measured_tool_calls
 		) VALUES (
-			$1, $2, $3, $4, $5, 1, $6, $7, $8, $9, 1, $10, $11, 1,
-			'started', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+			$1, $2, $3, $4, $5, 1, $6, $7, $8, $9, 2, $10, $11, 1,
+			'started', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+			1, $24, $25, $26, $27
 		)
 	`, attemptID, reservation.organizationID, reservation.applicationID,
 		reservation.environmentID, reservation.logicalRequestID,
@@ -1606,7 +1617,10 @@ func (store *Store) BeginAttempt(ctx context.Context, reservation Reservation) (
 		nullableString(reservation.pricing.revision), nullableString(reservation.pricing.source),
 		nullableString(initialCostConfidence(reservation.pricing)), accountingMethod,
 		accountingProfileID, accountingProfileDigest, rewrittenBodyDigest,
-		inputBound, outputBound, totalBound); err != nil {
+		inputBound, outputBound, totalBound,
+		decisionAttempt.requestMeasurementSHA256,
+		decisionAttempt.measuredRequestBytes, decisionAttempt.measuredImageUnits,
+		decisionAttempt.measuredToolCalls); err != nil {
 		return Attempt{}, false, mapWriteError("insert upstream attempt", err)
 	}
 	if err := insertAttemptQuotaEntries(
@@ -1650,7 +1664,8 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 	stored := attempts[attempt.number-1]
 	if attempt.number == 1 && (!attemptPricingMatchesReservation(stored, reservation.Reservation) ||
 		!storedModelKeyMatches(stored, reservation.modelKey) ||
-		!storedInitialInputPreflightMatches(stored, reservation.inputPreflight)) {
+		!storedInitialInputPreflightMatches(stored, reservation.inputPreflight) ||
+		!storedInitialRequestMeasurementsMatch(stored, reservation.requestMeasurements)) {
 		return ErrInvalidState
 	}
 	entries, err := lockLifecycleEntries(ctx, tx, reservation)
@@ -2220,6 +2235,7 @@ func lockReservation(ctx context.Context, tx pgx.Tx, expected Reservation) (lock
 	result.Reservation.protocol = expected.protocol
 	result.Reservation.pricing = expected.pricing
 	result.Reservation.inputPreflight = cloneInputPreflightBinding(expected.inputPreflight)
+	result.Reservation.requestMeasurements = cloneRequestMeasurementBinding(expected.requestMeasurements)
 	result.Reservation.retryPlan = cloneReservationRetryPlan(expected.retryPlan)
 	result.Reservation.windowResetAt = expected.windowResetAt
 	return result, nil
@@ -2276,33 +2292,38 @@ func lockLogicalRequest(ctx context.Context, tx pgx.Tx, expected Reservation) (l
 }
 
 type storedAttempt struct {
-	id                            string
-	number                        int32
-	routeKey                      string
-	upstreamKey                   string
-	physicalModel                 *string
-	modelKey                      *string
-	status                        string
-	firstByteAt                   *time.Time
-	completedAt                   *time.Time
-	httpStatus                    *int32
-	failureCode                   *string
-	billedCost                    *int64
-	currency                      *string
-	priceRevision                 *string
-	pricingSource                 *string
-	costConfidence                *string
-	attemptDecisionBindingVersion int16
-	attemptDecisionSHA256         []byte
-	perRequestOutputTokenBound    *int64
-	inputAccountingBindingVersion int16
-	inputAccountingMethod         *string
-	inputAccountingProfileID      *string
-	inputAccountingProfileDigest  []byte
-	rewrittenBodySHA256           []byte
-	inputTokenBound               *int64
-	outputTokenBound              *int64
-	totalTokenBound               *int64
+	id                               string
+	number                           int32
+	routeKey                         string
+	upstreamKey                      string
+	physicalModel                    *string
+	modelKey                         *string
+	status                           string
+	firstByteAt                      *time.Time
+	completedAt                      *time.Time
+	httpStatus                       *int32
+	failureCode                      *string
+	billedCost                       *int64
+	currency                         *string
+	priceRevision                    *string
+	pricingSource                    *string
+	costConfidence                   *string
+	attemptDecisionBindingVersion    int16
+	attemptDecisionSHA256            []byte
+	perRequestOutputTokenBound       *int64
+	inputAccountingBindingVersion    int16
+	inputAccountingMethod            *string
+	inputAccountingProfileID         *string
+	inputAccountingProfileDigest     []byte
+	rewrittenBodySHA256              []byte
+	inputTokenBound                  *int64
+	outputTokenBound                 *int64
+	totalTokenBound                  *int64
+	requestMeasurementBindingVersion int16
+	requestMeasurementSHA256         []byte
+	measuredRequestBytes             *int64
+	measuredImageUnits               *int64
+	measuredToolCalls                *int64
 }
 
 func initialCostConfidence(pricing selectedPricing) string {
@@ -2381,7 +2402,9 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 		       input_accounting_binding_version,
 		       input_accounting_method, input_accounting_profile_id,
 		       input_accounting_profile_digest, rewritten_body_sha256,
-		       input_token_bound, output_token_bound, total_token_bound
+		       input_token_bound, output_token_bound, total_token_bound,
+		       request_measurement_binding_version, request_measurement_sha256,
+		       measured_request_bytes, measured_image_units, measured_tool_calls
 		FROM upstream_attempts
 		WHERE logical_request_id = $1 AND attempt_number = $2
 		FOR UPDATE
@@ -2397,6 +2420,8 @@ func loadAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID strin
 		&result.inputAccountingMethod, &result.inputAccountingProfileID,
 		&result.inputAccountingProfileDigest, &result.rewrittenBodySHA256,
 		&result.inputTokenBound, &result.outputTokenBound, &result.totalTokenBound,
+		&result.requestMeasurementBindingVersion, &result.requestMeasurementSHA256,
+		&result.measuredRequestBytes, &result.measuredImageUnits, &result.measuredToolCalls,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return storedAttempt{}, false, nil
@@ -2421,7 +2446,9 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 		       input_accounting_binding_version,
 		       input_accounting_method, input_accounting_profile_id,
 		       input_accounting_profile_digest, rewritten_body_sha256,
-		       input_token_bound, output_token_bound, total_token_bound
+		       input_token_bound, output_token_bound, total_token_bound,
+		       request_measurement_binding_version, request_measurement_sha256,
+		       measured_request_bytes, measured_image_units, measured_tool_calls
 		FROM upstream_attempts
 		WHERE logical_request_id = $1
 		ORDER BY attempt_number
@@ -2450,6 +2477,8 @@ func loadOnlyAttemptForUpdate(ctx context.Context, tx pgx.Tx, logicalRequestID s
 		&result.inputAccountingMethod, &result.inputAccountingProfileID,
 		&result.inputAccountingProfileDigest, &result.rewrittenBodySHA256,
 		&result.inputTokenBound, &result.outputTokenBound, &result.totalTokenBound,
+		&result.requestMeasurementBindingVersion, &result.requestMeasurementSHA256,
+		&result.measuredRequestBytes, &result.measuredImageUnits, &result.measuredToolCalls,
 	); err != nil {
 		return storedAttempt{}, false, persistenceFailure("scan recovered upstream attempt", err)
 	}

@@ -373,6 +373,7 @@ type LogicalRequest struct {
 	FailureCode       *string            `db:"failure_code" json:"failure_code"`
 	// Unpadded base64url SHA-256 of the canonical server-trusted request and resolved quota/routing decision. NULL is reserved for rows created before schema version 9 and cannot authorize a replay.
 	TrustedDecisionFingerprint *string `db:"trusted_decision_fingerprint" json:"trusted_decision_fingerprint"`
+	SelectedLimitPlanKey       string  `db:"selected_limit_plan_key" json:"selected_limit_plan_key"`
 }
 
 type Organization struct {
@@ -410,7 +411,7 @@ type QuotaBucket struct {
 	LimitPlanKey string `db:"limit_plan_key" json:"limit_plan_key"`
 	// Unpadded base64url SHA-256 of the canonical rule identity; mutable maximum and capacity values are excluded so policy changes do not reset usage.
 	RuleKey string `db:"rule_key" json:"rule_key"`
-	// Unique configuration dimension names whose server-owned values form this bucket scope.
+	// Canonical configuration dimension names, including at most one normalized_claim:<name> selector; raw normalized claim values are never stored.
 	ScopeDimensions []string `db:"scope_dimensions" json:"scope_dimensions"`
 }
 
@@ -587,8 +588,17 @@ type UpstreamAttempt struct {
 	RewrittenBodySha256           []byte             `db:"rewritten_body_sha256" json:"rewritten_body_sha256"`
 	InputTokenBound               *int64             `db:"input_token_bound" json:"input_token_bound"`
 	// Exact server-applied generated-token maximum: zero only for a protocol without generated tokens, positive for generative protocols.
-	OutputTokenBound *int64 `db:"output_token_bound" json:"output_token_bound"`
-	TotalTokenBound  *int64 `db:"total_token_bound" json:"total_token_bound"`
+	OutputTokenBound                 *int64 `db:"output_token_bound" json:"output_token_bound"`
+	TotalTokenBound                  *int64 `db:"total_token_bound" json:"total_token_bound"`
+	RequestMeasurementBindingVersion int16  `db:"request_measurement_binding_version" json:"request_measurement_binding_version"`
+	// SHA-256 of the exact post-rewrite request body measured before dispatch; never a client-supplied digest.
+	RequestMeasurementSha256 []byte `db:"request_measurement_sha256" json:"request_measurement_sha256"`
+	// Exact byte length of request_measurement_sha256 body; zero is valid for a bodyless opaque request.
+	MeasuredRequestBytes *int64 `db:"measured_request_bytes" json:"measured_request_bytes"`
+	// Exact structured image-unit count, or NULL when the selected protocol cannot prove it.
+	MeasuredImageUnits *int64 `db:"measured_image_units" json:"measured_image_units"`
+	// Exact structured historical tool-call count, or NULL when the selected protocol cannot prove it.
+	MeasuredToolCalls *int64 `db:"measured_tool_calls" json:"measured_tool_calls"`
 }
 
 // Per-dispatch token and cost allocations and their conservative settlement under one logical quota reservation.

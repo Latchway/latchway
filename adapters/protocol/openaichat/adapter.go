@@ -176,6 +176,57 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 	return effective, nil
 }
 
+// MeasureRequest counts the closed Chat v1 image and historical tool-call
+// locations after ApplyFeature has installed the exact provider body. Tool
+// definitions and tool results are not calls; each assistant tool_calls entry
+// and legacy function_call is one tool_calls unit.
+func (a Adapter) MeasureRequest(
+	ctx context.Context,
+	request *http.Request,
+) (protocol.RequestMeasurements, error) {
+	if ctx == nil {
+		return protocol.RequestMeasurements{}, requestMalformed("request context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	object, raw, err := a.readRequest(request)
+	if err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	if _, err := inspectRequestObject(object, raw); err != nil {
+		return protocol.RequestMeasurements{}, err
+	}
+	images, calls := countRequestUnits(object)
+	installRequestBody(request, raw)
+	return protocol.RequestMeasurements{
+		Protocol: ID, RewrittenBodySHA256: sha256.Sum256(raw), RequestBytes: int64(len(raw)),
+		ImageUnits: images, ToolCalls: calls, ImageUnitsKnown: true, ToolCallsKnown: true,
+	}, nil
+}
+
+func countRequestUnits(object map[string]any) (int64, int64) {
+	var images, calls int64
+	messages, _ := object["messages"].([]any)
+	for _, value := range messages {
+		message, _ := value.(map[string]any)
+		if content, ok := message["content"].([]any); ok {
+			for _, partValue := range content {
+				part, _ := partValue.(map[string]any)
+				if part["type"] == "image_url" {
+					images++
+				}
+			}
+		}
+		if toolCalls, ok := message["tool_calls"].([]any); ok {
+			calls += int64(len(toolCalls))
+		} else if message["function_call"] != nil {
+			calls++
+		}
+	}
+	return images, calls
+}
+
 // PreflightInput proves a conservative input-token bound over the exact body
 // installed by ApplyFeature. It intentionally supports only a strict
 // text-only subset of Chat Completions. Rich requests remain available when

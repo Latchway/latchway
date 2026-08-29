@@ -3,6 +3,7 @@ package opaquehttp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"net/url"
@@ -50,6 +51,13 @@ func FuzzInspectAndApplyFeature(f *testing.F) {
 		}}
 		if _, err := adapter.ApplyFeature(context.Background(), request, decision); err != nil {
 			t.Fatalf("ApplyFeature rejected a successfully inspected request: %v", err)
+		}
+		measurement, measurementErr := adapter.MeasureRequest(context.Background(), request)
+		if measurementErr != nil || measurement.Protocol != ID ||
+			measurement.RequestBytes != int64(len(input)) ||
+			measurement.RewrittenBodySHA256 != sha256.Sum256(input) ||
+			measurement.ImageUnitsKnown || measurement.ToolCallsKnown {
+			t.Fatalf("opaque exact-byte measurement = %+v, %v", measurement, measurementErr)
 		}
 		body, err := io.ReadAll(request.Body)
 		if err != nil || !bytes.Equal(body, input) {

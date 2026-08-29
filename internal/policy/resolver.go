@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"cel.dev/cel-go/common/types"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
 	"github.com/latchway/latchway/internal/useroverride"
@@ -225,6 +227,16 @@ type Decision struct {
 	Route     configuration.Route
 	Model     configuration.Model
 	Upstream  configuration.Upstream
+	Scopes    QuotaScopeFacts
+}
+
+// QuotaScopeFacts are derived only inside the policy boundary after a sealed
+// session authorization has been validated. NormalizedClaims contains opaque
+// domain-separated digests keyed by configured normalized claim name; raw
+// normalized claim values never cross into quota, replay, or persistence.
+type QuotaScopeFacts struct {
+	Platform         string
+	NormalizedClaims map[string]string
 }
 
 // RouteDecision is one server-owned physical candidate in a deterministic
@@ -245,6 +257,7 @@ type DecisionPlan struct {
 	Feature    configuration.Feature
 	LimitPlan  configuration.LimitPlan
 	Candidates []RouteDecision
+	Scopes     QuotaScopeFacts
 }
 
 // QuotaProjection is the request-shape-independent feature and limit plan
@@ -253,6 +266,7 @@ type DecisionPlan struct {
 type QuotaProjection struct {
 	Feature   configuration.Feature
 	LimitPlan configuration.LimitPlan
+	Scopes    QuotaScopeFacts
 }
 
 // Snapshot is the minimum immutable configuration surface required by policy
@@ -354,6 +368,7 @@ func (resolver *Resolver) Resolve(ctx context.Context, snapshot Snapshot, featur
 	return Decision{
 		Feature: plan.Feature, LimitPlan: plan.LimitPlan,
 		Route: primary.Route, Model: primary.Model, Upstream: primary.Upstream,
+		Scopes: cloneQuotaScopeFacts(plan.Scopes),
 	}, nil
 }
 
@@ -419,6 +434,10 @@ func (resolver *Resolver) ResolvePlan(
 	if err != nil {
 		return DecisionPlan{}, err
 	}
+	scopes, err := quotaScopeFacts(input.authorization, plan)
+	if err != nil {
+		return DecisionPlan{}, err
+	}
 	matched := make([]configuration.Route, 0, len(compiled.routes))
 	for _, route := range compiled.routes {
 		matches, evalErr := evaluateBool(ctx, route.when, activation)
@@ -452,6 +471,7 @@ func (resolver *Resolver) ResolvePlan(
 	}
 	return DecisionPlan{
 		Feature: cloneFeature(feature), LimitPlan: cloneLimitPlan(plan), Candidates: candidates,
+		Scopes: scopes,
 	}, nil
 }
 
@@ -571,10 +591,58 @@ func (resolver *Resolver) ResolveQuota(
 	if !reflect.DeepEqual(nonStreamingPlan, streamingPlan) {
 		return QuotaProjection{}, ErrConfiguration
 	}
+	scopes, err := quotaScopeFacts(nonStreaming.authorization, nonStreamingPlan)
+	if err != nil {
+		return QuotaProjection{}, err
+	}
 	return QuotaProjection{
 		Feature:   cloneFeature(feature),
 		LimitPlan: cloneLimitPlan(nonStreamingPlan),
+		Scopes:    scopes,
 	}, nil
+}
+
+func quotaScopeFacts(
+	authorization authorizationFacts,
+	plan configuration.LimitPlan,
+) (QuotaScopeFacts, error) {
+	if !validPlatform(authorization.installationPlatform) || authorization.claims == nil {
+		return QuotaScopeFacts{}, ErrInvalidInput
+	}
+	selectors := make(map[string]struct{})
+	for _, limit := range plan.Limits {
+		for _, dimension := range limit.Scope {
+			name, claim := limitscope.NormalizedClaimName(dimension)
+			if claim {
+				selectors[name] = struct{}{}
+			} else if strings.HasPrefix(dimension, limitscope.NormalizedClaimPrefix) {
+				return QuotaScopeFacts{}, ErrConfiguration
+			}
+		}
+	}
+	digests := make(map[string]string, len(selectors))
+	for name := range selectors {
+		value, present := authorization.claims[name]
+		digest, ok := limitscope.ClaimDigest(name, value, present)
+		if !ok {
+			return QuotaScopeFacts{}, ErrInvalidInput
+		}
+		digests[name] = digest
+	}
+	return QuotaScopeFacts{
+		Platform: authorization.installationPlatform, NormalizedClaims: digests,
+	}, nil
+}
+
+func cloneQuotaScopeFacts(input QuotaScopeFacts) QuotaScopeFacts {
+	result := QuotaScopeFacts{Platform: input.Platform}
+	if input.NormalizedClaims != nil {
+		result.NormalizedClaims = make(map[string]string, len(input.NormalizedClaims))
+		for name, digest := range input.NormalizedClaims {
+			result.NormalizedClaims[name] = digest
+		}
+	}
+	return result
 }
 
 func validInput(input Input) bool {

@@ -47,11 +47,11 @@ func TestRegistryDeclaresExactEnforcementCapabilitiesAndDefensiveCopies(t *testi
 		CostNanoUSD:        {CalendarAlgorithm},
 		ConcurrentRequests: {ConcurrencyAlgorithm},
 		ConcurrentStreams:  {ConcurrencyAlgorithm},
-		RequestBytes:       nil,
+		RequestBytes:       {PerRequestAlgorithm},
 		ResponseBytes:      nil,
-		ImageUnits:         nil,
+		ImageUnits:         {PerRequestAlgorithm},
 		AudioSeconds:       nil,
-		ToolCalls:          nil,
+		ToolCalls:          {PerRequestAlgorithm},
 	}
 	for name, algorithms := range want {
 		definition, ok := Lookup(name)
