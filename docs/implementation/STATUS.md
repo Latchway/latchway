@@ -62,7 +62,7 @@ clean-tree cross-repository source gate passed for core
 `87a46eab3853633e23a65525e451f1bdaf3ee0c3`, iOS
 `4cafe61faabfb4b8273af8833592c69ff2db7cfa`, Android
 `46cb6597430bc0f3c401757770420102894a5378`, and React Native
-`74d5c25d122f629862a8d4bd21b8ea9f0bce433f`. It does not substitute for any
+`b05060dfaec8897ca0374449f26a03658ff249e8`. It does not substitute for any
 protected external domain.
 
 ## Direct component attestation boundary

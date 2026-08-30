@@ -86,7 +86,7 @@ are not package-publication or production-support claims.
 | JavaScript `@latchway/client` | `87a46eab3853633e23a65525e451f1bdaf3ee0c3` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, and composite-trust decoding implemented and locked |
 | Swift `Latchway` | `4cafe61faabfb4b8273af8833592c69ff2db7cfa` | iOS 15+, macOS 12+ supported surfaces | Extension/component transport and Action/SSO direct App Attest step-up implemented and locked; physical proof pending |
 | Android `dev.latchway:latchway-*` | `46cb6597430bc0f3c401757770420102894a5378` | Android API 23+, Java 17 | Component/OkHttp transport and composite-trust decoding implemented and locked; direct component step-up unsupported by design |
-| React Native `@latchway/react-native` | `74d5c25d122f629862a8d4bd21b8ea9f0bce433f` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport and iOS extension-process Action/SSO direct step-up implemented and source-pinned; physical proof pending |
+| React Native `@latchway/react-native` | `b05060dfaec8897ca0374449f26a03658ff249e8` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, iOS extension-process Action/SSO direct step-up, and fail-closed native physical-proof linkage implemented and source-pinned; physical execution pending |
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. Current locks all point to the draft version 1 checkpoint named above.
