@@ -492,7 +492,8 @@ func validEnvironmentName(value string) bool {
 		return false
 	}
 	for index, character := range value {
-		if !((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || character == '_' || (index > 0 && character >= '0' && character <= '9')) {
+		if (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') &&
+			character != '_' && (index == 0 || character < '0' || character > '9') {
 			return false
 		}
 	}

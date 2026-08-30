@@ -138,10 +138,13 @@ func (client *controlAPIClient) doWithHeaders(
 	if response.Body == nil {
 		return controlResponse{}, errors.New("admin API returned an empty response")
 	}
-	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxControlCLIResponse+1))
+	closeErr := response.Body.Close()
 	if err != nil {
 		return controlResponse{}, fmt.Errorf("read Admin API response: %s", client.safeText(err.Error()))
+	}
+	if closeErr != nil {
+		return controlResponse{}, errors.New("close admin API response")
 	}
 	defer clear(responseBody)
 	if len(responseBody) > maxControlCLIResponse {

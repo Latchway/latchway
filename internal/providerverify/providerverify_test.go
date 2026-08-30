@@ -61,8 +61,15 @@ func (f *fakeTarget) Do(ctx context.Context, request *http.Request, path string,
 	if response.Body == nil {
 		response.Body = io.NopCloser(strings.NewReader(""))
 	}
-	defer response.Body.Close()
-	return consume(response)
+	consumeErr := consume(response)
+	closeErr := response.Body.Close()
+	if consumeErr != nil {
+		return consumeErr
+	}
+	if closeErr != nil {
+		return errors.New("close provider verification response")
+	}
+	return nil
 }
 
 func (f *fakeTarget) Close() { f.closed = true }

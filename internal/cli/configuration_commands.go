@@ -103,7 +103,7 @@ func newConfigPullCommand(opts *options, root *controlCommandOptions) *cobra.Com
 			if opts.output == "json" {
 				var document any
 				if err := json.Unmarshal(revision.Document, &document); err != nil {
-					return errors.New("Admin API returned a malformed configuration document")
+					return errors.New("admin API returned a malformed configuration document")
 				}
 				return printControlJSON(opts, document)
 			}
@@ -197,7 +197,7 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 			}
 			etag := created.Header.Get("ETag")
 			if !validStrongETag(etag) {
-				return errors.New("Admin API omitted the strong ETag required for safe activation")
+				return errors.New("admin API omitted the strong ETag required for safe activation")
 			}
 			if baseRevisionID != "" {
 				headers := http.Header{"If-Match": []string{etag}}
@@ -212,7 +212,7 @@ func newConfigApplyCommand(opts *options, root *controlCommandOptions) *cobra.Co
 				draft = replaced
 				etag = replacement.Header.Get("ETag")
 				if !validStrongETag(etag) {
-					return errors.New("Admin API omitted the strong ETag required for safe activation")
+					return errors.New("admin API omitted the strong ETag required for safe activation")
 				}
 			}
 			var report validationCLI
@@ -278,7 +278,7 @@ func newConfigRollbackCommand(opts *options, root *controlCommandOptions) *cobra
 			}
 			etag := current.Header.Get("ETag")
 			if !validStrongETag(etag) {
-				return errors.New("Admin API omitted the strong ETag required for safe rollback")
+				return errors.New("admin API omitted the strong ETag required for safe rollback")
 			}
 			var rolledBack configurationRevisionCLI
 			headers := http.Header{"If-Match": []string{etag}}

@@ -83,8 +83,8 @@ func validCredentialHeaderName(name string) bool {
 	}
 	for index := 0; index < len(name); index++ {
 		character := name[index]
-		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character))) {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && !strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character)) {
 			return false
 		}
 	}

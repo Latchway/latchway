@@ -145,8 +145,8 @@ func validSemVerIdentifiers(value string, rejectNumericLeadingZero bool) bool {
 				continue
 			}
 			numeric = false
-			if !((character >= 'A' && character <= 'Z') ||
-				(character >= 'a' && character <= 'z') || character == '-') {
+			if (character < 'A' || character > 'Z') &&
+				(character < 'a' || character > 'z') && character != '-' {
 				return false
 			}
 		}
@@ -256,7 +256,7 @@ func canonicalPublicOrigin(value string) (url.URL, error) {
 	}
 	origin.Scheme = strings.ToLower(origin.Scheme)
 	origin.Host = strings.ToLower(origin.Host)
-	if origin.Scheme != "https" && !(origin.Scheme == "http" && isLoopback(origin.Hostname())) {
+	if origin.Scheme != "https" && (origin.Scheme != "http" || !isLoopback(origin.Hostname())) {
 		return url.URL{}, errInvalidConfiguration
 	}
 	return url.URL{Scheme: origin.Scheme, Host: origin.Host}, nil

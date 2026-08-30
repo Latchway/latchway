@@ -315,10 +315,13 @@ func callAdminUserOverride(cmd *cobra.Command, opts *options, method, userID, en
 	if err != nil {
 		return userOverrideCLIResponse{}, fmt.Errorf("call administrative user override API: %w", err)
 	}
-	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxAdminCLIResponse+1))
+	closeErr := response.Body.Close()
 	if err != nil {
 		return userOverrideCLIResponse{}, fmt.Errorf("read administrative user override response: %w", err)
+	}
+	if closeErr != nil {
+		return userOverrideCLIResponse{}, errors.New("close administrative user override response")
 	}
 	defer clear(responseBody)
 	if len(responseBody) > maxAdminCLIResponse {

@@ -194,9 +194,9 @@ func (source *GoogleServiceAccountTokenSource) AccessToken(
 	if response == nil || response.Body == nil {
 		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
 	}
-	defer response.Body.Close()
 	encoded, readErr := io.ReadAll(io.LimitReader(response.Body, maximumGoogleTokenResponseBytes+1))
-	if readErr != nil || len(encoded) > maximumGoogleTokenResponseBytes || response.StatusCode != http.StatusOK {
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil || len(encoded) > maximumGoogleTokenResponseBytes || response.StatusCode != http.StatusOK {
 		return PlayIntegrityAccessToken{}, ErrPlayIntegrityService
 	}
 	mediaType, _, contentTypeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))

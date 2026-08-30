@@ -550,7 +550,7 @@ func validRequestMeasurementBinding(binding *RequestMeasurementBinding, requestP
 		binding.ToolCalls <= protocol.MaximumRequestStructuredUnits &&
 		(binding.ImageUnitsKnown || binding.ImageUnits == 0) &&
 		(binding.ToolCallsKnown || binding.ToolCalls == 0) &&
-		(!(binding.ImageUnitsKnown || binding.ToolCallsKnown) || structuredProtocol)
+		((!binding.ImageUnitsKnown && !binding.ToolCallsKnown) || structuredProtocol)
 }
 
 func prepareInputPreflight(

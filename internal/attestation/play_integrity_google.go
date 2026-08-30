@@ -190,9 +190,9 @@ func (decoder *GooglePlayIntegrityDecoder) DecodeIntegrityToken(
 	if response == nil || response.Body == nil {
 		return nil, ErrPlayIntegrityService
 	}
-	defer response.Body.Close()
 	encoded, readErr := io.ReadAll(io.LimitReader(response.Body, maxPlayIntegrityDecodedBytes+1))
-	if readErr != nil || len(encoded) > maxPlayIntegrityDecodedBytes {
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil || len(encoded) > maxPlayIntegrityDecodedBytes {
 		return nil, ErrPlayIntegrityService
 	}
 	if response.StatusCode != http.StatusOK {

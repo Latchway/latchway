@@ -102,7 +102,7 @@ func (c Config) Validate() error {
 	origin, originErr := url.Parse(c.PublicOrigin)
 	if originErr != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
 		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must be an absolute origin without credentials, path, query, or fragment"))
-	} else if origin.Scheme != "https" && !(origin.Scheme == "http" && isLoopbackHost(origin.Hostname())) {
+	} else if origin.Scheme != "https" && (origin.Scheme != "http" || !isLoopbackHost(origin.Hostname())) {
 		errs = append(errs, errors.New("LATCHWAY_PUBLIC_ORIGIN must use HTTPS except on localhost or a loopback address"))
 	}
 	if c.AdminBootstrapToken != "" && (len(c.AdminBootstrapToken) < 32 || len(c.AdminBootstrapToken) > 4096) {

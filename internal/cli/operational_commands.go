@@ -464,7 +464,7 @@ func newRequestsListCommand(opts *options, root *controlCommandOptions) *cobra.C
 			}
 			for _, request := range page.Items {
 				if !validLogicalRequestCLI(request) {
-					return errors.New("Admin API returned a non-conforming request document")
+					return errors.New("admin API returned a non-conforming request document")
 				}
 			}
 			return printRequests(opts, page)
@@ -493,7 +493,7 @@ func newRequestsInspectCommand(opts *options, root *controlCommandOptions) *cobr
 				return err
 			}
 			if !validLogicalRequestCLI(request) {
-				return errors.New("Admin API returned a non-conforming request document")
+				return errors.New("admin API returned a non-conforming request document")
 			}
 			return printRequest(opts, request)
 		},

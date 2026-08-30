@@ -284,7 +284,11 @@ func TestHandlerDelayedFirstByte(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	t.Cleanup(func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("close delayed response body: %v", err)
+		}
+	})
 	elapsed := time.Since(started)
 	if elapsed < delay-(10*time.Millisecond) {
 		t.Fatalf("first response arrived after %s, configured delay = %s", elapsed, delay)

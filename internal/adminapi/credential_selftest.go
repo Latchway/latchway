@@ -373,18 +373,18 @@ func credentialSelfTestAccounting(
 		return protocol.TrustedInputProfile{}, pricing.Rates{}, pricing.Source{}, err
 	}
 	return protocol.TrustedInputProfile{
-			ID:                             profile.ID,
-			Protocol:                       profile.Protocol,
-			Method:                         profile.Method,
-			PhysicalModel:                  profile.PhysicalModel,
-			MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
-			MaximumFramingTokensPerMessage: profile.MaximumFramingTokensPerMessage,
-			MaximumContextTokens:           profile.MaximumContextTokens,
-		}, pricing.Rates{
-			InputNanoUSDPerMillion:  entry.InputNanoUSDPerMillion,
-			OutputNanoUSDPerMillion: entry.OutputNanoUSDPerMillion,
-			RequestNanoUSD:          entry.RequestNanoUSD,
-		}, source, nil
+		ID:                             profile.ID,
+		Protocol:                       profile.Protocol,
+		Method:                         profile.Method,
+		PhysicalModel:                  profile.PhysicalModel,
+		MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
+		MaximumFramingTokensPerMessage: profile.MaximumFramingTokensPerMessage,
+		MaximumContextTokens:           profile.MaximumContextTokens,
+	}, pricing.Rates{
+		InputNanoUSDPerMillion:  entry.InputNanoUSDPerMillion,
+		OutputNanoUSDPerMillion: entry.OutputNanoUSDPerMillion,
+		RequestNanoUSD:          entry.RequestNanoUSD,
+	}, source, nil
 }
 
 func validOpenRouterTarget(configured configuration.Upstream) bool {

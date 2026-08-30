@@ -355,8 +355,8 @@ func (verifier *TurnstileVerifier) dispatchSiteverify(
 	if response.Body == nil {
 		return turnstileVerdict{}, ErrTurnstileService
 	}
-	defer response.Body.Close()
 	encoded, readErr := io.ReadAll(io.LimitReader(response.Body, maxTurnstileResponseBytes+1))
+	closeErr := response.Body.Close()
 	if readErr != nil {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return turnstileVerdict{}, contextErr
@@ -364,6 +364,9 @@ func (verifier *TurnstileVerifier) dispatchSiteverify(
 		if requestContext.Err() != nil {
 			return turnstileVerdict{}, errTurnstileTransient
 		}
+		return turnstileVerdict{}, ErrTurnstileService
+	}
+	if closeErr != nil {
 		return turnstileVerdict{}, ErrTurnstileService
 	}
 	if len(encoded) > maxTurnstileResponseBytes {
