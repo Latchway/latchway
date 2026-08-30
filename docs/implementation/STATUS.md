@@ -16,7 +16,7 @@ promoted.
 | --- | --- |
 | Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
 | Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
-| Last passing commit in each repository | Core locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `afab50dcdb577be8a9ca6e94c054a7717a857f6d`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` |
+| Last passing commit in each repository | Core locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `81cac33cc6f11fff66fe1fde97ccfce439943df0` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `20` |
 | Last full test time | `2026-08-30T00:11:34Z`, successful full Go suite against PostgreSQL 18 plus vet, client-diagnostics lifecycle, schema-20 migration, contract, workflow, formatting, and synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
@@ -89,10 +89,10 @@ gates to be rerun.
 
 | Component | Version | Source commit | Local status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `1.0.0` | `afab50dcdb577be8a9ca6e94c054a7717a857f6d` | Source, tests, examples, exports, package closure, reproducibility, clean-consumer, workflow-owned tag, and private-core evidence gates pass |
+| JavaScript `@latchway/client` | `1.0.0` | `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8` | Source, tests, examples, exports, package closure, reproducibility, clean-consumer, workflow-owned tag, and private-core evidence gates pass |
 | Swift package / `Latchway` pod | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | 65 Swift tests, release build, package consumer, CocoaPods lint, fixture, contract, unsupported-device fail-closed, and private-core evidence gates pass |
 | Android `dev.latchway:latchway-*` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | 76 JVM tests, 670 Gradle task gate, stable API 37.0 installer, device-evidence fixtures, assemble/lint/local Maven/offline-consumer, and private-core evidence gates pass |
-| React Native `@latchway/react-native` | `1.0.0` | `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` | JavaScript, codegen, synchronized exact native pins, bridge, New Architecture examples, package closure, reproducibility, podspec, workflow-owned tag, and private-sibling checkout gates pass |
+| React Native `@latchway/react-native` | `1.0.0` | `81cac33cc6f11fff66fe1fde97ccfce439943df0` | JavaScript, codegen, synchronized exact native pins, bridge, New Architecture examples, package closure, reproducibility, podspec, workflow-owned tag, and private-sibling checkout gates pass |
 
 The React Native compatibility manifest pins the exact JavaScript, Swift, and
 Android source commits above. The native Android SDK supports API 23 or newer;
@@ -160,8 +160,8 @@ candidate but are not immutable protected-run release evidence.
 | Go vulnerability scan | Exact-source `CGO_ENABLED=0`, `-trimpath` binary scan with pinned `govulncheck v1.1.4` reported zero called-symbol findings; result SHA-256 `172a57db4d2b0d373e3d2dbdac765ec52d2e2c0e5301731ec10422bbdde1e6b6` |
 | Container/source vulnerability and license scans | Pinned Trivy `0.74.0` reported zero blocked `HIGH` or `CRITICAL` findings for both architectures and source policy/license gates |
 | Local SBOM/provenance | Each platform has a subject-bound embedded SPDX statement and SLSA predicate; standalone SPDX 2.3 files contain 52 packages with amd64 SHA-256 `61346f0a2aaca142e040d34613077418c352707615b6317f259cc94c8eee565a` and arm64 SHA-256 `113bde74dd53a7cb213748a7ba9c5b2414bd2786c2a8513b149992916a9bd7da` |
-| JavaScript package | Reproducible tarball at `afab50dcdb577be8a9ca6e94c054a7717a857f6d`, SHA-256 `dd1e797bcf14523d996ed4b510deab2ce27e2259de94cf435fe049d78faa422e` |
-| React Native package | Reproducible exact-native-pin tarball at `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c`, SHA-256 `32c22817a73b44b42f31ef14c6b7bebfce5bca98f89ca2794019c33a40439037` |
+| JavaScript package | Reproducible tarball at `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`, SHA-256 `dd1e797bcf14523d996ed4b510deab2ce27e2259de94cf435fe049d78faa422e` |
+| React Native package | Reproducible exact-native-pin tarball at `81cac33cc6f11fff66fe1fde97ccfce439943df0`, SHA-256 `719830d3289ece5b677cd88417e0516a0bbbfe75a5e93b6204d8888f0d50379d` |
 | Mobile source/package evidence | Swift, Android, React Native, New Architecture examples, clean consumers, fail-closed simulator/emulator paths, and exact source pins passed; local prepublication receipt SHA-256 `763c94234e7585bd18799276b681ec9484ae0f8cd434e0143582894fdf9c9c33` explicitly retains `release_eligible: false` until physical proofs exist |
 | Historical local v1 load suite | Complete at core `1f6f45b17961f8788cf8d9d71b846e88fd82c751`; idle memory, 100 RPS, 500 concurrent SSE streams, and zero-overspend contention pass, but the original initial overhead gate fails at P50/P95 with `13.077/16.728/23.605 ms` against `<5/<15/<30 ms`; that historical report correctly retains `load_targets_passed: false` |
 | Corrected-target non-root local v1 load suite | Passed at clean source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`: `complete_suite: true`, `load_targets_passed: true`, overhead `10.908333/15.156082/18.917875 ms` against strict `<15/<20/<30 ms`, 6,000/6,000 non-streaming requests with exact terminal quota, 500 SSE streams for 60 seconds with `70.875 MiB` growth and no premature completion, and exact 64 accepted/64 denied/0 unexpected contention |

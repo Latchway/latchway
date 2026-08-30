@@ -49,15 +49,15 @@ compatibility coordinate.
 | Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |
 | --- | --- | --- | --- | --- |
 | Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0-rc.1` (intended stable `1.0.0`) | Locally passing RC implementation checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135`; exact protected candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
-| JavaScript | `@latchway/client` | `1.0.0` | `afab50dcdb577be8a9ca6e94c054a7717a857f6d` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
+| JavaScript | `@latchway/client` | `1.0.0` | `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
 | Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
 | Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| React Native | `@latchway/react-native` | `1.0.0` | `81cac33cc6f11fff66fe1fde97ccfce439943df0` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:
 
-- JavaScript: `afab50dcdb577be8a9ca6e94c054a7717a857f6d`
+- JavaScript: `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`
 - Swift: `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`
 - Android: `a41c0a5fd648365258695b2fe0abda44b618b9d6`
 
