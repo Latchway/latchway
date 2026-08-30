@@ -11,22 +11,22 @@ publication, and post-publication domains remain open.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 9: final source reconvergence and authorized public-branch handoff in progress |
-| Current objective | Commit the final implementation ledger, pass the five-repository source-conformance gate plus the separate documentation-mirror gate, and push `codex/v1-implementation` without merging, tagging, publishing, or deploying |
+| Current phase | Phase 9: source-converged candidate and authorized public-branch delivery |
+| Current objective | Push the six clean `codex/v1-implementation` branches without merging, tagging, publishing, or deploying |
 | Last passing commit in each repository | Exact coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
 | Database schema version | `23` |
-| Last full test time | `2026-08-30T20:22:34Z` — the repository and platform test matrix completed through the final React Native tree; the clean current-coordinate source/docs aggregate rerun remains pending |
-| Passing test commands | Exact commands are listed below |
-| Open blockers | Before push: the final ledger commit, clean source/docs gates, and clean worktrees; before release: physical iOS/Android, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
+| Last full test time | `2026-08-30T20:25:23Z` — core `make check`, the five-repository source-conformance report, canonical docs, mirror synchronization, and mirror docs all passed at the recorded coordinates |
+| Passing test commands | Verified commands and required working directories are listed below |
+| Open blockers | Repository-level blockers: none for the authorized branch push; before release: physical iOS/Android, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
 | External credentials still required | Known missing: an authorized Apple code-signing certificate/private-key identity and protected collector/finalizer identity/lease. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
-| Next executable task | Commit this exact-coordinate ledger, run clean source/docs conformance, and push the six authorized branches |
+| Next executable task | Commit this passing checkpoint and push the six authorized branches |
 
 ### Last passing commit in each repository
 
 | Repository | Passing source coordinate |
 | --- | --- |
-| Core `latchway` | `cc5b4c520c40f4e97a7676a37b3eca054e7b7711` |
+| Core `latchway` | `a9d8bd4b758427c7f8e046efc76e10f7c899f405` |
 | JavaScript `latchway-js` | `87a46eab3853633e23a65525e451f1bdaf3ee0c3` |
 | Swift `latchway-ios-sdk` | `94deb8cf33371a6943809dc12e19c936aba516ce` |
 | Android `latchway-android` | `61d3292dd04c1d303bba6b3c4bf2f2de917efdbe` |
@@ -45,32 +45,39 @@ python3 scripts/sync-public-docs.py --target ../latchway-docs --check
 (cd ../latchway-docs && mise exec -- pnpm check)
 
 # JavaScript SDK
-mise exec -- pnpm check
+(cd ../latchway-js && mise exec -- pnpm check)
 
 # Swift SDK package/release/consumer/CocoaPods gate
-scripts/verify-package.sh
-tuist generate --path Examples/AppAttestConformance --no-open
-xcodebuild -project Examples/AppAttestConformance/AppAttestConformance.xcodeproj \
-  -scheme AppAttestConformance -configuration Release \
-  -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
-tuist generate --path Examples/AppExtensionComponents --no-open
-xcodebuild -project Examples/AppExtensionComponents/AppExtensionComponents.xcodeproj \
-  -scheme AppExtensionComponents -destination 'generic/platform=iOS' \
-  CODE_SIGNING_ALLOWED=NO build
+(
+  cd ../latchway-ios-sdk
+  scripts/verify-package.sh
+  tuist generate --path Examples/AppAttestConformance --no-open
+  xcodebuild -project Examples/AppAttestConformance/AppAttestConformance.xcodeproj \
+    -scheme AppAttestConformance -configuration Release \
+    -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+  tuist generate --path Examples/AppExtensionComponents --no-open
+  xcodebuild -project Examples/AppExtensionComponents/AppExtensionComponents.xcodeproj \
+    -scheme AppExtensionComponents -destination 'generic/platform=iOS' \
+    CODE_SIGNING_ALLOWED=NO build
+)
 
 # Android SDK
-ANDROID_HOME=<android-sdk> ./gradlew test assemble lint
+(cd ../latchway-android && \
+  ANDROID_HOME="${ANDROID_HOME:?set ANDROID_HOME}" ./gradlew test assemble lint)
 
 # React Native SDK, release evidence, and physical-workflow invariants
-mise exec -- pnpm check
-python3 scripts/test-physical-candidate-producer.py
-python3 scripts/test-physical-evidence-workflow.py
-python3 scripts/test-physical-example-host.py
+(cd ../latchway-react-native-sdk && mise exec -- pnpm check)
+(cd ../latchway-react-native-sdk && \
+  python3 scripts/test-physical-candidate-producer.py)
+(cd ../latchway-react-native-sdk && \
+  python3 scripts/test-physical-evidence-workflow.py)
+(cd ../latchway-react-native-sdk && \
+  python3 scripts/test-physical-example-host.py)
 
 # Clean local source convergence
 python3 scripts/cross-repo-conformance.py --scope source \
-  --workspace-root <workspace-root> --output <report.json> \
-  --junit-output <report.xml>
+  --workspace-root .. --output /private/tmp/latchway-source-final.json \
+  --junit-output /private/tmp/latchway-source-final.xml
 ```
 
 ## Candidate snapshot
@@ -127,13 +134,14 @@ checkpoint and reproducible draft bundle above.
   and Vale MDX prose validation.
 
 These are source-development results, not protected release receipts. The
-current clean-tree cross-repository source gate is being rerun for core
-`cc5b4c520c40f4e97a7676a37b3eca054e7b7711`, JavaScript
+clean-tree cross-repository source gate passed for core
+`a9d8bd4b758427c7f8e046efc76e10f7c899f405`, JavaScript
 `87a46eab3853633e23a65525e451f1bdaf3ee0c3`, iOS
 `94deb8cf33371a6943809dc12e19c936aba516ce`, Android
 `61d3292dd04c1d303bba6b3c4bf2f2de917efdbe`, and React Native
-`4b28c9e0e56462ae3e15dd897bdffd0f79025cbb`. Even a passing source gate does
-not substitute for any protected external domain.
+`4b28c9e0e56462ae3e15dd897bdffd0f79025cbb`. The synchronized documentation
+mirror passed its separate gate. These results do not substitute for any
+protected external domain.
 
 ## Direct component attestation boundary
 
