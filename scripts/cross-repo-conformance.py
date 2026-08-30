@@ -511,6 +511,22 @@ class Evaluator:
         if console_version != core_version:
             raise VerificationError("core_console_version_mismatch")
 
+        dockerfile = read_text(core / "Dockerfile")
+        docker_version_declarations = tuple(
+            match.group(1)
+            for match in re.finditer(
+                r"^[ \t]*(?i:ARG)[ \t]+VERSION(?:[ \t]*=[ \t]*([^\r\n]*?))?[ \t]*$",
+                dockerfile,
+                flags=re.MULTILINE,
+            )
+        )
+        if not docker_version_declarations or any(
+            value is None or not value for value in docker_version_declarations
+        ):
+            raise VerificationError("core_docker_version_default_missing")
+        if any(value != core_version for value in docker_version_declarations):
+            raise VerificationError("core_docker_version_mismatch")
+
         self.state["manifest"] = manifest
         self.state["contract_version"] = contract_version
         self.state["wire_protocol"] = wire
@@ -523,6 +539,7 @@ class Evaluator:
             "wire_protocol": wire,
             "contract_status": status_value,
             "core_version": core_version,
+            "docker_version_default_count": len(docker_version_declarations),
         }
 
     def _contract_bundle(self) -> Mapping[str, Any]:

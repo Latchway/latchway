@@ -109,8 +109,14 @@ class SyntheticWorkspace:
             "api/test-vectors/attestation-binding/v1.json": '{"schema_version":1,"vectors":[]}\n',
             "api/test-vectors/attestation-binding/vector.schema.json": '{"type":"object"}\n',
             "internal/buildinfo/buildinfo.go": (
-                'package buildinfo\n\nvar (\n\tVersion = "1.0.0"\n)\n\n'
+                f'package buildinfo\n\nvar (\n\tVersion = "{self.version}"\n)\n\n'
                 'const (\n\tContractVersion = "1.0.0"\n\tProtocolVersion = "1"\n)\n'
+            ),
+            "Dockerfile": (
+                "FROM scratch AS build\n"
+                f"ARG VERSION={self.version}\n"
+                "FROM scratch\n"
+                f"ARG VERSION={self.version}\n"
             ),
             "CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-08-29\n\n- Release.\n",
         }.items():
@@ -121,7 +127,11 @@ class SyntheticWorkspace:
         )
         self.write_json(
             root / "web/console/package.json",
-            {"name": "@latchway/admin-console", "version": "1.0.0", "private": True},
+            {
+                "name": "@latchway/admin-console",
+                "version": self.version,
+                "private": True,
+            },
         )
         (root / "scripts").mkdir(parents=True, exist_ok=True)
         shutil.copyfile(BUILDER, root / "scripts/build-contract-bundle.py")
@@ -562,7 +572,9 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             junit.read_text(encoding="utf-8"),
         )
 
-    def test_source_scope_accepts_matching_prerelease_core_and_console_versions(self) -> None:
+    def test_source_scope_accepts_matching_prerelease_core_console_and_docker_versions(
+        self,
+    ) -> None:
         core = self.workspace.repositories["core"]
         buildinfo = core / "internal/buildinfo/buildinfo.go"
         buildinfo.write_text(
@@ -575,9 +587,17 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         console = json.loads(console_package.read_text(encoding="utf-8"))
         console["version"] = "1.0.0-rc.1"
         SyntheticWorkspace.write_json(console_package, console)
+        dockerfile = core / "Dockerfile"
+        dockerfile.write_text(
+            dockerfile.read_text(encoding="utf-8").replace(
+                "ARG VERSION=1.0.0", "ARG VERSION=1.0.0-rc.1"
+            ),
+            encoding="utf-8",
+        )
         SyntheticWorkspace.git(
             core,
             "add",
+            "Dockerfile",
             "internal/buildinfo/buildinfo.go",
             "web/console/package.json",
         )
@@ -596,6 +616,58 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             if repository["id"] == "core"
         )
         self.assertEqual(core_repository["version"], "1.0.0-rc.1")
+
+    def test_source_scope_rejects_drifted_docker_version_default(self) -> None:
+        core = self.workspace.repositories["core"]
+        dockerfile = core / "Dockerfile"
+        dockerfile.write_text(
+            dockerfile.read_text(encoding="utf-8").replace(
+                "ARG VERSION=1.0.0", "ARG VERSION=1.0.1", 1
+            ),
+            encoding="utf-8",
+        )
+        SyntheticWorkspace.git(core, "add", "Dockerfile")
+        SyntheticWorkspace.git(core, "commit", "-m", "test: drift image version")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-docker-version-drift")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(core_contract["reason"], "core_docker_version_mismatch")
+
+    def test_source_scope_rejects_missing_docker_version_default(self) -> None:
+        core = self.workspace.repositories["core"]
+        dockerfile = core / "Dockerfile"
+        dockerfile.write_text(
+            dockerfile.read_text(encoding="utf-8").replace(
+                "ARG VERSION=1.0.0", "ARG VERSION", 1
+            ),
+            encoding="utf-8",
+        )
+        SyntheticWorkspace.git(core, "add", "Dockerfile")
+        SyntheticWorkspace.git(
+            core, "commit", "-m", "test: remove image version default"
+        )
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-docker-version-missing")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(
+            core_contract["reason"], "core_docker_version_default_missing"
+        )
 
     def test_source_scope_is_byte_deterministic_and_redaction_safe(self) -> None:
         first_result, _, first_json, first_junit = self.run_gate("first")
