@@ -562,6 +562,41 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             junit.read_text(encoding="utf-8"),
         )
 
+    def test_source_scope_accepts_matching_prerelease_core_and_console_versions(self) -> None:
+        core = self.workspace.repositories["core"]
+        buildinfo = core / "internal/buildinfo/buildinfo.go"
+        buildinfo.write_text(
+            buildinfo.read_text(encoding="utf-8").replace(
+                '\tVersion = "1.0.0"', '\tVersion = "1.0.0-rc.1"', 1
+            ),
+            encoding="utf-8",
+        )
+        console_package = core / "web/console/package.json"
+        console = json.loads(console_package.read_text(encoding="utf-8"))
+        console["version"] = "1.0.0-rc.1"
+        SyntheticWorkspace.write_json(console_package, console)
+        SyntheticWorkspace.git(
+            core,
+            "add",
+            "internal/buildinfo/buildinfo.go",
+            "web/console/package.json",
+        )
+        SyntheticWorkspace.git(core, "commit", "-m", "test: use prerelease version")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-prerelease-pass")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["verdict"], "passed")
+        self.assertEqual(report["contract"]["version"], self.workspace.contract_version)
+        core_repository = next(
+            repository
+            for repository in report["repositories"]
+            if repository["id"] == "core"
+        )
+        self.assertEqual(core_repository["version"], "1.0.0-rc.1")
+
     def test_source_scope_is_byte_deterministic_and_redaction_safe(self) -> None:
         first_result, _, first_json, first_junit = self.run_gate("first")
         second_result, _, second_json, second_junit = self.run_gate("second")

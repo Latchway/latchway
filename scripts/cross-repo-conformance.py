@@ -508,7 +508,7 @@ class Evaluator:
             console_version, str
         ):
             raise VerificationError("invalid_console_package")
-        if console_version != core_version.split("-", 1)[0]:
+        if console_version != core_version:
             raise VerificationError("core_console_version_mismatch")
 
         self.state["manifest"] = manifest
