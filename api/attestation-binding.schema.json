@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/protocol/0.5.1/attestation-binding-v1.schema.json",
+  "title": "Latchway AttestationBinding version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "challenge_id",
+    "challenge_nonce",
+    "application_id",
+    "environment",
+    "principal_id",
+    "dpop_jkt",
+    "platform",
+    "issued_at"
+  ],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "challenge_id": { "type": "string", "pattern": "^chl_[A-Za-z0-9_-]{16,128}$" },
+    "challenge_nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43,86}$" },
+    "application_id": { "type": "string", "pattern": "^app_[A-Za-z0-9_-]{1,128}$" },
+    "environment": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+    "principal_id": { "type": "string", "pattern": "^usr_[A-Za-z0-9_-]{16,128}$" },
+    "dpop_jkt": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+    "platform": {
+      "type": "string",
+      "enum": ["ios", "android", "web", "react_native_ios", "react_native_android", "node"]
+    },
+    "issued_at": { "type": "integer", "minimum": 0, "maximum": 253402300799 }
+  }
+}

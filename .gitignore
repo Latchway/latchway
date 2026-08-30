@@ -1,0 +1,29 @@
+# Local process configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Build and test output
+/bin/
+/dist/
+/coverage/
+*.out
+*.test
+
+# Console dependencies and generated assets
+/node_modules/
+/web/console/node_modules/
+/web/console/dist/
+/web/console/coverage/
+
+# Interpreter caches
+__pycache__/
+*.py[cod]
+
+# Editor and operating-system metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Local verification output
+/artifacts/

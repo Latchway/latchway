@@ -1,0 +1,30 @@
+# Cloud Run does not support Kubernetes securityContext. The immutable
+# Latchway image explicitly runs as UID/GID 65532.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: latchway-migrate
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cloudsql-instances: ${CLOUD_SQL_CONNECTION_NAME}
+        run.googleapis.com/vpc-access-connector: ${VPC_CONNECTOR}
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      template:
+        spec:
+          serviceAccountName: ${SERVICE_ACCOUNT}
+          maxRetries: 1
+          timeoutSeconds: "900"
+          containers:
+            - name: latchway-migrate
+              image: ${LATCHWAY_IMAGE}
+              command: ["/latchway"]
+              args: ["migrate", "up"]
+              env:
+                - name: LATCHWAY_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: latchway-database-url
+                      key: latest

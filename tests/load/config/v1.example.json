@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "label": "replace-with-run-id",
+    "cpu": "2 vCPU",
+    "memory": "2 GiB",
+    "postgresql": "replace-with-version-and-network-location",
+    "postgresql_cpu_millicores": 4000,
+    "postgresql_memory_bytes": 4294967296,
+    "postgresql_memory_swap_bytes": 4294967296,
+    "postgresql_max_connections": 100,
+    "postgresql_network": "replace-with-measured-low-latency-network-placement",
+    "gateway_db_pool_max_connections": 32,
+    "body_logging_disabled": true,
+    "warm_configuration_cache": true
+  },
+  "gateway": {
+    "base_url": "http://127.0.0.1:8080",
+    "ready_path": "/readyz",
+    "pid_file": "../../../tmp/latchway.pid",
+    "process_name_contains": "latchway"
+  },
+  "session": {
+    "access_token_env": "LATCHWAY_LOAD_ACCESS_TOKEN",
+    "private_jwk_file_env": "LATCHWAY_LOAD_DPOP_JWK_FILE"
+  },
+  "non_stream_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Latchway-Protocol-Version": "1",
+      "X-Latchway-SDK": "react-native",
+      "X-Latchway-SDK-Version": "1.0.0",
+      "X-Latchway-Feature": "load"
+    },
+    "body": {
+      "model": "load-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "bounded load fixture"
+        }
+      ],
+      "stream": false,
+      "max_completion_tokens": 8
+    },
+    "expected_status": 200
+  },
+  "stream_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Latchway-Protocol-Version": "1",
+      "X-Latchway-SDK": "react-native",
+      "X-Latchway-SDK-Version": "1.0.0",
+      "X-Latchway-Feature": "stream-load"
+    },
+    "body": {
+      "model": "load-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "bounded streaming fixture"
+        }
+      ],
+      "stream": true,
+      "max_completion_tokens": 8
+    },
+    "expected_status": 200
+  },
+  "direct_upstream_baseline": {
+    "url": "http://127.0.0.1:19090/v1/chat/completions",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "model": "fixture-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "bounded load fixture"
+        }
+      ],
+      "stream": false,
+      "max_completion_tokens": 8
+    },
+    "expected_status": 200
+  },
+  "quota": {
+    "non_stream_snapshot_path": "/client/v1/features/load/quota",
+    "stream_snapshot_path": "/client/v1/features/stream-load/quota",
+    "contention_snapshot_path": "/client/v1/features/contention/quota",
+    "non_stream_terminal_limits": [
+      {
+        "metric": "logical_requests",
+        "maximum": 10000,
+        "used": 7021,
+        "reserved": 0,
+        "remaining": 2979,
+        "hard": true
+      },
+      {
+        "metric": "input_tokens",
+        "maximum": 1000000,
+        "used": 77231,
+        "reserved": 0,
+        "remaining": 922769,
+        "hard": true
+      },
+      {
+        "metric": "output_tokens",
+        "maximum": 100000,
+        "used": 49147,
+        "reserved": 0,
+        "remaining": 50853,
+        "hard": true
+      },
+      {
+        "metric": "total_tokens",
+        "maximum": 1100000,
+        "used": 126378,
+        "reserved": 0,
+        "remaining": 973622,
+        "hard": true
+      }
+    ],
+    "stream_terminal_limits": [
+      {
+        "metric": "concurrent_streams",
+        "maximum": 600,
+        "used": 0,
+        "reserved": 0,
+        "remaining": 600,
+        "hard": true
+      }
+    ],
+    "contention_request": {
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Latchway-Protocol-Version": "1",
+        "X-Latchway-SDK": "react-native",
+        "X-Latchway-SDK-Version": "1.0.0",
+        "X-Latchway-Feature": "contention"
+      },
+      "body": {
+        "model": "load-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "quota contention fixture"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 8
+      },
+      "expected_status": 200
+    },
+    "contention_metric": "logical_requests",
+    "contention_attempts": 128,
+    "denial_status": 429,
+    "denial_problem_code": "quota_exceeded",
+    "fixture": {
+      "protected_preflight_requests": 1,
+      "overhead_warmup_requests": 20,
+      "overhead_sample_requests": 1000,
+      "non_stream_load_requests": 6000,
+      "settled_input_tokens_per_request": 11,
+      "settled_output_tokens_per_request": 7,
+      "settled_total_tokens_per_request": 18,
+      "input_reservation_per_request": 140,
+      "output_reservation_per_request": 8,
+      "total_reservation_per_request": 148
+    }
+  },
+  "targets": {
+    "overhead_samples": 1000,
+    "overhead_warmup": 20,
+    "p50_gateway_overhead_ms": 15,
+    "p95_gateway_overhead_ms": 20,
+    "p99_gateway_overhead_ms": 30,
+    "non_stream_rps": 100,
+    "non_stream_duration_seconds": 60,
+    "maximum_schedule_lag_ms": 25,
+    "sse_concurrency": 500,
+    "sse_hold_seconds": 60,
+    "maximum_stream_memory_growth_mib": 128,
+    "maximum_stream_memory_slope_mib_per_minute": 5,
+    "idle_warmup_seconds": 10,
+    "idle_memory_mib": 256,
+    "request_timeout_seconds": 120
+  },
+  "metadata": {
+    "release_oci_reference": "registry.example/latchway/latchway@sha256:<replace-with-64-lowercase-hex-characters>",
+    "release_oci_platform_reference": "registry.example/latchway/latchway@sha256:<replace-with-linux-amd64-child-digest>",
+    "deployment": "replace-with-platform-and-revision",
+    "operator": "replace-with-runner-identity"
+  }
+}

@@ -1,0 +1,417 @@
+name: Operational resilience evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Exact 40-character core candidate commit
+        required: true
+        type: string
+      candidate_run_id:
+        description: Release-candidate workflow run containing latchway-candidate-COMMIT
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact current release-candidate run attempt
+        required: true
+        type: string
+      source_conformance_run_id:
+        description: Cross-repository source-conformance workflow run
+        required: true
+        type: string
+      source_conformance_run_attempt:
+        description: Exact source-conformance run attempt
+        required: true
+        type: string
+      load_evidence_run_id:
+        description: Run containing exact-release-image full load evidence
+        required: true
+        type: string
+      load_evidence_run_attempt:
+        description: Exact load-evidence producer run attempt
+        required: true
+        type: string
+      failure_evidence_run_id:
+        description: Run containing release-scope failure report and live-failure directory
+        required: true
+        type: string
+      failure_evidence_run_attempt:
+        description: Exact failure-evidence producer run attempt
+        required: true
+        type: string
+      previous_candidate_commit:
+        description: Distinct ancestor commit for the prior release candidate
+        required: true
+        type: string
+      previous_candidate_run_id:
+        description: Successful release-candidate workflow run for the prior commit
+        required: true
+        type: string
+      previous_candidate_run_attempt:
+        description: Exact previous release-candidate run attempt
+        required: true
+        type: string
+      postgres_image:
+        description: Exact docker.io/library/postgres OCI digest used by the isolated drills
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: operational-resilience-${{ inputs.candidate_commit }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    environment: operational-resilience-evidence
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: read
+    steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a fixed GitHub CLI verifier
+        run: python3 scripts/require-gh-version.py
+      - name: Reject mutable or cross-candidate inputs
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          SOURCE_RUN_ID: ${{ inputs.source_conformance_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_conformance_run_attempt }}
+          LOAD_RUN_ID: ${{ inputs.load_evidence_run_id }}
+          LOAD_RUN_ATTEMPT: ${{ inputs.load_evidence_run_attempt }}
+          FAILURE_RUN_ID: ${{ inputs.failure_evidence_run_id }}
+          FAILURE_RUN_ATTEMPT: ${{ inputs.failure_evidence_run_attempt }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          PREVIOUS_CANDIDATE_RUN_ID: ${{ inputs.previous_candidate_run_id }}
+          PREVIOUS_CANDIDATE_RUN_ATTEMPT: ${{ inputs.previous_candidate_run_attempt }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+        run: |
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PREVIOUS_CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$PREVIOUS_CANDIDATE_COMMIT" != "$CANDIDATE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1)"
+          test "$(git rev-parse --verify "$PREVIOUS_CANDIDATE_COMMIT^{commit}")" = "$PREVIOUS_CANDIDATE_COMMIT"
+          git merge-base --is-ancestor "$PREVIOUS_CANDIDATE_COMMIT" "$CANDIDATE_COMMIT"
+          for run_id in "$CANDIDATE_RUN_ID" "$PREVIOUS_CANDIDATE_RUN_ID" "$SOURCE_RUN_ID" "$LOAD_RUN_ID" "$FAILURE_RUN_ID"; do
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+          done
+          for attempt in "$CANDIDATE_RUN_ATTEMPT" "$SOURCE_RUN_ATTEMPT" "$LOAD_RUN_ATTEMPT" "$FAILURE_RUN_ATTEMPT" "$PREVIOUS_CANDIDATE_RUN_ATTEMPT"; do
+            [[ "$attempt" =~ ^[1-9][0-9]*$ ]]
+          done
+          [[ "$POSTGRES_IMAGE" =~ ^docker\.io/library/postgres@sha256:[0-9a-f]{64}$ ]]
+      - name: Download the immutable candidate manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the authenticated prior candidate manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.previous_candidate_commit }}-${{ inputs.previous_candidate_run_id }}-${{ inputs.previous_candidate_run_attempt }}
+          path: ${{ runner.temp }}/previous-candidate
+          run-id: ${{ inputs.previous_candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Require the exact fixed release-candidate runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          PREVIOUS_CANDIDATE_RUN_ID: ${{ inputs.previous_candidate_run_id }}
+          PREVIOUS_CANDIDATE_RUN_ATTEMPT: ${{ inputs.previous_candidate_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          for specification in \
+            "$CANDIDATE_RUN_ID:$CANDIDATE_RUN_ATTEMPT:$CANDIDATE_COMMIT:current-candidate" \
+            "$PREVIOUS_CANDIDATE_RUN_ID:$PREVIOUS_CANDIDATE_RUN_ATTEMPT:$PREVIOUS_CANDIDATE_COMMIT:previous-candidate"; do
+            run_id=${specification%%:*}
+            remainder=${specification#*:}
+            attempt=${remainder%%:*}
+            remainder=${remainder#*:}
+            expected_commit=${remainder%%:*}
+            label=${remainder#*:}
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RUNNER_TEMP/$label-run.json"
+            workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/$label-run.json")
+            jq --exit-status --arg commit "$expected_commit" --argjson attempt "$attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/$label-run.json" >/dev/null
+            [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
+            jq --exit-status \
+              '.path == ".github/workflows/release.yml" and .state == "active"' \
+              "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+          done
+      - name: Require the exact fixed load and failure producer runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          LOAD_RUN_ID: ${{ inputs.load_evidence_run_id }}
+          LOAD_RUN_ATTEMPT: ${{ inputs.load_evidence_run_attempt }}
+          FAILURE_RUN_ID: ${{ inputs.failure_evidence_run_id }}
+          FAILURE_RUN_ATTEMPT: ${{ inputs.failure_evidence_run_attempt }}
+          SOURCE_RUN_ID: ${{ inputs.source_conformance_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_conformance_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          for specification in \
+            "$SOURCE_RUN_ID:$SOURCE_RUN_ATTEMPT:.github/workflows/cross-repository-conformance.yml" \
+            "$LOAD_RUN_ID:$LOAD_RUN_ATTEMPT:.github/workflows/release-load-evidence.yml" \
+            "$FAILURE_RUN_ID:$FAILURE_RUN_ATTEMPT:.github/workflows/release-failure-evidence.yml"; do
+            run_id=${specification%%:*}
+            remainder=${specification#*:}
+            attempt=${remainder%%:*}
+            expected_path=${remainder#*:}
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RUNNER_TEMP/producer-run-$run_id.json"
+            workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/producer-run-$run_id.json")
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/producer-run-$run_id.json" >/dev/null
+            [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/producer-workflow-$run_id.json"
+            jq --exit-status --arg path "$expected_path" \
+              '.path == $path and .state == "active"' "$RUNNER_TEMP/producer-workflow-$run_id.json" >/dev/null
+          done
+      - name: Download five-repository source conformance
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-source-${{ inputs.source_conformance_run_id }}-${{ inputs.source_conformance_run_attempt }}
+          path: ${{ runner.temp }}/source
+          run-id: ${{ inputs.source_conformance_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download exact-release-image load evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-release-load-${{ inputs.candidate_commit }}-${{ inputs.load_evidence_run_id }}-${{ inputs.load_evidence_run_attempt }}
+          path: ${{ runner.temp }}/load
+          run-id: ${{ inputs.load_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download release-scope destructive failure evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-release-failure-${{ inputs.candidate_commit }}-${{ inputs.failure_evidence_run_id }}-${{ inputs.failure_evidence_run_attempt }}
+          path: ${{ runner.temp }}/failure
+          run-id: ${{ inputs.failure_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify current, prior-candidate, source, load, and failure attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          CANDIDATE_MANIFEST: ${{ runner.temp }}/candidate/latchway-candidate.json
+          PREVIOUS_CANDIDATE_MANIFEST: ${{ runner.temp }}/previous-candidate/latchway-candidate.json
+          SOURCE_REPORT: ${{ runner.temp }}/source/latchway-cross-repository.json
+          LOAD_MANIFEST: ${{ runner.temp }}/load/load-producer.json
+          FAILURE_MANIFEST: ${{ runner.temp }}/failure/failure-producer.json
+          LOAD_RUN_ID: ${{ inputs.load_evidence_run_id }}
+          LOAD_RUN_ATTEMPT: ${{ inputs.load_evidence_run_attempt }}
+          FAILURE_RUN_ID: ${{ inputs.failure_evidence_run_id }}
+          FAILURE_RUN_ATTEMPT: ${{ inputs.failure_evidence_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          gh attestation verify "$CANDIDATE_MANIFEST" \
+            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$PREVIOUS_CANDIDATE_MANIFEST" \
+            --bundle "$RUNNER_TEMP/previous-candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --signer-digest "$PREVIOUS_CANDIDATE_COMMIT" \
+            --source-digest "$PREVIOUS_CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$SOURCE_REPORT" \
+            --bundle "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$LOAD_MANIFEST" \
+            --bundle "$RUNNER_TEMP/load/load-producer.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-load-evidence.yml" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$FAILURE_MANIFEST" \
+            --bundle "$RUNNER_TEMP/failure/failure-producer.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-failure-evidence.yml" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main
+          jq --exit-status --arg run "$LOAD_RUN_ID" --argjson attempt "$LOAD_RUN_ATTEMPT" \
+            '.producer.run_id == $run and .producer.run_attempt == $attempt' "$LOAD_MANIFEST" >/dev/null
+          jq --exit-status --arg run "$FAILURE_RUN_ID" --argjson attempt "$FAILURE_RUN_ATTEMPT" \
+            '.producer.run_id == $run and .producer.run_attempt == $attempt' "$FAILURE_MANIFEST" >/dev/null
+      - name: Validate and hash-bind the prior candidate run
+        shell: bash
+        env:
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          PREVIOUS_CANDIDATE_RUN_ID: ${{ inputs.previous_candidate_run_id }}
+          PREVIOUS_CANDIDATE_RUN_ATTEMPT: ${{ inputs.previous_candidate_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          manifest="$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
+          bundle="$RUNNER_TEMP/previous-candidate/latchway-candidate.attestation.sigstore.json"
+          intended_tag=$(jq --raw-output .intended_tag "$manifest")
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest "$manifest" \
+            --commit "$PREVIOUS_CANDIDATE_COMMIT" \
+            --tag "$intended_tag" \
+            --image ghcr.io/latchway/latchway >/dev/null
+          manifest_sha256=$(sha256sum "$manifest" | awk '{print $1}')
+          attestation_sha256=$(sha256sum "$bundle" | awk '{print $1}')
+          workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/previous-candidate-run.json")
+          jq -n \
+            --arg workflow_id "$workflow_id" \
+            --arg run_id "$PREVIOUS_CANDIDATE_RUN_ID" \
+            --arg artifact_name "latchway-candidate-$PREVIOUS_CANDIDATE_COMMIT" \
+            --arg manifest_sha256 "$manifest_sha256" \
+            --arg attestation_sha256 "$attestation_sha256" \
+            --slurpfile run "$RUNNER_TEMP/previous-candidate-run.json" \
+            --slurpfile workflow "$RUNNER_TEMP/previous-candidate-workflow.json" \
+            '{
+              schema_version: 1,
+              kind: "latchway_previous_candidate_run",
+              repository: "Latchway/latchway",
+              workflow_path: $workflow[0].path,
+              workflow_id: $workflow_id,
+              workflow_state: $workflow[0].state,
+              run_id: $run_id,
+              run_attempt: $run[0].run_attempt,
+              event: $run[0].event,
+              status: $run[0].status,
+              conclusion: $run[0].conclusion,
+              head_sha: $run[0].head_sha,
+              head_branch: $run[0].head_branch,
+              artifact_name: $artifact_name,
+              manifest_sha256: $manifest_sha256,
+              attestation_sha256: $attestation_sha256
+            }' > "$RUNNER_TEMP/previous-candidate-run-receipt.json"
+          test "$(jq --raw-output .run_attempt "$RUNNER_TEMP/previous-candidate-run-receipt.json")" = "$PREVIOUS_CANDIDATE_RUN_ATTEMPT"
+      - name: Authenticate for exact GHCR image pulls
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve and verify both candidate image identities
+        id: candidate
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -f "$RUNNER_TEMP/candidate/latchway-candidate.json"
+          image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/candidate/latchway-candidate.json")"
+          platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/candidate/latchway-candidate.json")"
+          previous_candidate_image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/previous-candidate/latchway-candidate.json")"
+          previous_candidate_platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/previous-candidate/latchway-candidate.json")"
+          [[ "$image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$platform_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$previous_candidate_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$previous_candidate_platform_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          test "$(printf '%s\n' "$image" "$platform_image" "$previous_candidate_image" "$previous_candidate_platform_image" | sort -u | wc -l | tr -d ' ')" = 4
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$(jq --raw-output .intended_tag "$RUNNER_TEMP/candidate/latchway-candidate.json")" \
+            --image ghcr.io/latchway/latchway
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "platform_image=$platform_image" >> "$GITHUB_OUTPUT"
+      - name: Run isolated backup, restore, upgrade, and application rollback drills
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+          CANDIDATE_PLATFORM_IMAGE: ${{ steps.candidate.outputs.platform_image }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+        run: >-
+          scripts/run-operational-resilience-drills.sh
+          --acknowledge-isolated-destructive-drill
+          --evidence-dir "$RUNNER_TEMP/operational-drills"
+          --core-commit "$CANDIDATE_COMMIT"
+          --previous-candidate-commit "$PREVIOUS_CANDIDATE_COMMIT"
+          --previous-candidate-manifest "$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
+          --candidate-image "$CANDIDATE_IMAGE"
+          --candidate-platform-image "$CANDIDATE_PLATFORM_IMAGE"
+          --postgres-image "$POSTGRES_IMAGE"
+      - name: Seal the operational-resilience domain
+        run: >-
+          python3 scripts/operational-resilience-evidence.py
+          --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json"
+          --previous-candidate-manifest "$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
+          --previous-candidate-attestation "$RUNNER_TEMP/previous-candidate/latchway-candidate.attestation.sigstore.json"
+          --previous-candidate-run "$RUNNER_TEMP/previous-candidate-run-receipt.json"
+          --previous-candidate-commit "${{ inputs.previous_candidate_commit }}"
+          --previous-candidate-run-id "${{ inputs.previous_candidate_run_id }}"
+          --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json"
+          --load-report "$RUNNER_TEMP/load/load-v1.json"
+          --load-producer-manifest "$RUNNER_TEMP/load/load-producer.json"
+          --load-producer-attestation "$RUNNER_TEMP/load/load-producer.attestation.sigstore.json"
+          --load-producer-run-id "${{ inputs.load_evidence_run_id }}"
+          --failure-report "$RUNNER_TEMP/failure/failure-release.json"
+          --failure-producer-manifest "$RUNNER_TEMP/failure/failure-producer.json"
+          --failure-producer-attestation "$RUNNER_TEMP/failure/failure-producer.attestation.sigstore.json"
+          --failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"
+          --failure-evidence-dir "$RUNNER_TEMP/failure/live-failures"
+          --backup-restore-report "$RUNNER_TEMP/operational-drills/backup-restore.json"
+          --upgrade-rollback-report "$RUNNER_TEMP/operational-drills/upgrade-rollback.json"
+          --output-directory "$RUNNER_TEMP/operational-resilience"
+      - name: Attest the hash-bound domain document
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/operational-resilience/operational_resilience.json
+      - name: Retain the operational-resilience attestation bundle at artifact root
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp -- "$BUNDLE_PATH" "$RUNNER_TEMP/operational-resilience/operational_resilience.attestation.sigstore.json"
+      - name: Retain the domain document and bounded reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-operational-resilience-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/operational-resilience/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

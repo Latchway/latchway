@@ -1,0 +1,15 @@
+misconfigurations:
+  - id: KSV-0118
+    paths:
+      - deploy/cloud-run/migration-job.yaml
+    statement: >-
+      Cloud Run v1 Jobs do not support Kubernetes securityContext. The
+      immutable Latchway image explicitly declares USER 65532:65532.
+licenses:
+  - id: LGPL-3.0-or-later
+    paths:
+      - deploy/cloudflare/pnpm-lock.yaml
+    statement: >-
+      The finding is the optional development-only sharp/libvips binary used
+      by Wrangler tooling. It is dynamically linked and is never copied into
+      or distributed with the Latchway runtime image.

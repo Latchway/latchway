@@ -1,0 +1,2091 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Latchway Admin API
+  version: 0.5.1
+  summary: Canonical control-plane API used by the dashboard and CLI.
+  description: |
+    Normative draft for administrative bootstrap, tenancy, immutable configuration,
+    secrets, users, installations, usage, audit and self-tests. Cookie-authenticated
+    mutations also require origin validation and `X-CSRF-Token`; scoped bearer API
+    tokens are not subject to browser CSRF but receive the same capability checks.
+    Browser sessions receive the CSRF value in both the login/bootstrap response
+    header and a Secure, SameSite=Strict, non-HttpOnly `__Host-latchway_csrf`
+    cookie so a same-origin console reload can recover without persisting it.
+    Every successful or rejected mutation produces a redaction-safe audit event.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://gateway.example.test
+security:
+  - AdminCookie: []
+  - AdminToken: []
+tags:
+  - name: Authentication
+  - name: Organizations
+  - name: Applications
+  - name: Environments
+  - name: Configuration
+  - name: Secrets
+  - name: API tokens
+  - name: Administrators
+  - name: Users
+  - name: Installations
+  - name: Requests
+  - name: Usage
+  - name: Audit
+  - name: Self-tests
+  - name: System
+paths:
+  /admin/v1/auth/bootstrap:
+    post:
+      tags: [Authentication]
+      operationId: bootstrapFirstOwner
+      summary: Consume the one-time bootstrap token and create the first owner.
+      description: Fails permanently with `bootstrap_disabled` after any owner exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BootstrapRequest' }
+      responses:
+        '201':
+          description: First owner and authenticated session created transactionally.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: adminLogin
+      summary: Create a secure administrator cookie session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated administrator session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            X-CSRF-Token: { $ref: '#/components/headers/CSRFToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: adminLogout
+      summary: Revoke the active cookie or token session.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Session revoked and cookie cleared. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/auth/session:
+    get:
+      tags: [Authentication]
+      operationId: getAdminSession
+      summary: Return the current administrator and capabilities.
+      responses:
+        '200':
+          description: Current session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSession' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: List organizations visible to the administrator.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Organization page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPage'
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Create an organization.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNamedResource' }
+      responses:
+        '201':
+          description: Organization created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications:
+    get:
+      tags: [Applications]
+      operationId: listApplications
+      summary: List tenant-scoped applications.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Application page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Applications]
+      operationId: createApplication
+      summary: Create an application within an organization.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApplicationRequest' }
+      responses:
+        '201':
+          description: Application created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/applications/{applicationId}/environments:
+    get:
+      tags: [Environments]
+      operationId: listEnvironments
+      summary: List environments for an application.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+      responses:
+        '200':
+          description: Environment list.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Environment' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Environments]
+      operationId: createEnvironment
+      summary: Create an application environment.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEnvironmentRequest' }
+      responses:
+        '201':
+          description: Environment created without an active configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Environment' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/config:
+    get:
+      tags: [Configuration]
+      operationId: getActiveConfiguration
+      summary: Return the active immutable configuration revision.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+      responses:
+        '200':
+          description: Active configuration and revision metadata.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/config-revisions:
+    get:
+      tags: [Configuration]
+      operationId: listConfigurationRevisions
+      summary: List immutable and draft configuration revisions.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Revision page without secret values.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevisionPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Configuration]
+      operationId: createConfigurationRevision
+      summary: Create a draft revision from an explicit document or active revision.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConfigurationRevisionRequest' }
+      responses:
+        '201':
+          description: Draft revision created.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}:
+    get:
+      tags: [Configuration]
+      operationId: getConfigurationRevision
+      summary: Return one tenant-scoped revision.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+      responses:
+        '200':
+          description: Revision document and metadata.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [Configuration]
+      operationId: replaceDraftConfiguration
+      summary: Replace the document of a mutable draft using optimistic concurrency.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './config.schema.json' }
+      responses:
+        '200':
+          description: Updated draft.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/validate:
+    post:
+      tags: [Configuration]
+      operationId: validateConfigurationRevision
+      summary: Validate schema, references, secrets, CEL, capabilities and pricing.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Deterministic validation report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/plan:
+    post:
+      tags: [Configuration]
+      operationId: planConfigurationRevision
+      summary: Diff a valid draft against the active revision and identify impact.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Redaction-safe configuration plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationPlan' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/simulate:
+    post:
+      tags: [Configuration]
+      operationId: simulateConfigurationRevision
+      summary: Explain feature policy, limit and route selection without dispatch.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteSimulationRequest' }
+      responses:
+        '200':
+          description: Deterministic policy and routing explanation without secrets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteSimulationResult' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/config-revisions/{revisionId}/activate:
+    post:
+      tags: [Configuration]
+      operationId: activateConfigurationRevision
+      summary: Atomically activate a fully valid immutable revision.
+      parameters:
+        - $ref: '#/components/parameters/RevisionID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Activated revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/environments/{environmentId}/rollback:
+    post:
+      tags: [Configuration]
+      operationId: rollbackEnvironmentConfiguration
+      summary: Activate a prior valid revision without mutating it.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision_id]
+              properties:
+                revision_id: { $ref: '#/components/schemas/RevisionID' }
+      responses:
+        '200':
+          description: Prior revision is now active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationRevision' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/secrets:
+    get:
+      tags: [Secrets]
+      operationId: listSecrets
+      summary: List secret metadata; values are never returned.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Secret metadata page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecretPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Secrets]
+      operationId: createSecret
+      summary: Encrypt and store a new write-only secret value.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WriteSecretRequest' }
+      responses:
+        '201':
+          description: Metadata only; plaintext is never returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecretMetadata' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/secrets/{secretId}/rotate:
+    post:
+      tags: [Secrets]
+      operationId: rotateSecret
+      summary: Store a new encrypted version using the current version ID.
+      description: A superseded version ID is stale and returns `409 conflict`.
+      parameters:
+        - $ref: '#/components/parameters/SecretID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [value]
+              properties:
+                value: { $ref: '#/components/schemas/SecretValue' }
+      responses:
+        '200':
+          description: Rotated secret metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecretMetadata' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/secrets/{secretId}:
+    delete:
+      tags: [Secrets]
+      operationId: deleteSecret
+      summary: Mark an unreferenced secret unavailable using its current version ID.
+      description: |
+        A superseded version ID is stale and returns `409 conflict`. Repeating
+        deletion with the exact ID that was current when tombstoned is idempotent.
+      parameters:
+        - $ref: '#/components/parameters/SecretID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Secret tombstoned, or the exact tombstoned current-version deletion was repeated. }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/api-tokens:
+    get:
+      tags: [API tokens]
+      operationId: listAdminApiTokens
+      summary: List token metadata without token hashes or plaintext.
+      responses:
+        '200':
+          description: API token metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiTokenMetadata' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [API tokens]
+      operationId: createAdminApiToken
+      summary: Create a scoped API token shown exactly once.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApiTokenRequest' }
+      responses:
+        '201':
+          description: Token plaintext and metadata. The token cannot be retrieved again.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedApiToken' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/api-tokens/{tokenId}:
+    delete:
+      tags: [API tokens]
+      operationId: revokeAdminApiToken
+      summary: Revoke an API token.
+      parameters:
+        - $ref: '#/components/parameters/TokenID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Token revoked. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators:
+    get:
+      tags: [Administrators]
+      operationId: listAdministrators
+      summary: List administrator memberships in the active organization.
+      description: Requires the `manage_owners` capability. Credential material is never returned.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Bounded administrator membership page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdministratorPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Administrators]
+      operationId: createAdministrator
+      summary: Create a local administrator and its first organization membership.
+      description: |
+        Requires `manage_owners`. An email already used by any administrator is
+        rejected rather than changing credentials belonging to another tenant.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAdministratorRequest' }
+      responses:
+        '201':
+          description: Administrator and active organization membership created transactionally.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/role:
+    put:
+      tags: [Administrators]
+      operationId: changeAdministratorRole
+      summary: Replace an administrator's role in the active organization.
+      description: The final active owner cannot be demoted.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeAdministratorRoleRequest' }
+      responses:
+        '200':
+          description: Updated administrator membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/disable:
+    post:
+      tags: [Administrators]
+      operationId: disableAdministrator
+      summary: Disable an administrator membership and revoke its scoped credentials.
+      description: The final active owner cannot be disabled. Existing sessions and API tokens in the organization are revoked transactionally.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Disabled administrator membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/enable:
+    post:
+      tags: [Administrators]
+      operationId: enableAdministrator
+      summary: Re-enable an administrator membership for future authentication.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Enabled administrator membership. Revoked credentials remain revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/administrators/{adminUserId}/reset-password:
+    post:
+      tags: [Administrators]
+      operationId: resetAdministratorPassword
+      summary: Replace a local password and revoke every active administrator credential.
+      description: |
+        Requires `manage_owners`. Because local passwords are global to an
+        administrator identity, owner-driven reset is rejected when the target
+        has any membership in another organization. The password is write-only;
+        session and API-token revocation is atomic with the credential change.
+      parameters:
+        - $ref: '#/components/parameters/AdminUserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetAdministratorPasswordRequest' }
+      responses:
+        '200':
+          description: Password replaced and credentials revoked without returning credential material.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Administrator' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users:
+    get:
+      tags: [Users]
+      operationId: listApplicationUsers
+      summary: List pseudonymous application users.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: User page without raw subjects or identity tokens.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}:
+    get:
+      tags: [Users]
+      operationId: getApplicationUser
+      summary: Inspect one pseudonymous user and safe normalized claims.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+      responses:
+        '200':
+          description: User details.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationUser' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/block:
+    post:
+      tags: [Users]
+      operationId: blockApplicationUser
+      summary: Block a user and revoke active sessions.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationUser' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/unblock:
+    post:
+      tags: [Users]
+      operationId: unblockApplicationUser
+      summary: Restore future session eligibility without restoring revoked sessions.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationUser' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/limit-override:
+    put:
+      tags: [Users]
+      operationId: putUserLimitOverride
+      summary: Replace the user's explicit limit-plan override.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [limit_plan, reason]
+              properties:
+                limit_plan: { $ref: '#/components/schemas/Identifier' }
+                expires_at: { type: string, format: date-time }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationUser' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Users]
+      operationId: clearUserLimitOverride
+      summary: Clear the user's explicit limit-plan override.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Limit-plan override cleared. }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installations:
+    get:
+      tags: [Installations]
+      operationId: listInstallations
+      summary: List tenant-scoped installations and normalized trust.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Installation page without raw evidence or proofs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installations/{installationId}:
+    get:
+      tags: [Installations]
+      operationId: getInstallation
+      summary: Inspect one installation.
+      parameters:
+        - $ref: '#/components/parameters/InstallationID'
+      responses:
+        '200':
+          description: Installation details and normalized trust events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Installation' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installations/{installationId}/revoke:
+    post:
+      tags: [Installations]
+      operationId: revokeInstallation
+      summary: Revoke an installation, refresh tokens and sessions.
+      parameters:
+        - $ref: '#/components/parameters/InstallationID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Revoked installation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Installation' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/requests:
+    get:
+      tags: [Requests]
+      operationId: listLogicalRequests
+      summary: List redaction-safe logical request metadata.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Logical request page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/requests/{requestId}:
+    get:
+      tags: [Requests]
+      operationId: getLogicalRequest
+      summary: Inspect one logical request and its upstream attempts.
+      parameters:
+        - $ref: '#/components/parameters/RequestResourceID'
+      responses:
+        '200':
+          description: Request metadata, attempts and usage provenance; no bodies by default.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogicalRequest' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/summary:
+    get:
+      tags: [Usage]
+      operationId: getUsageSummary
+      summary: Aggregate logical requests, tokens and integer nano-USD cost.
+      description: The half-open `[start, end)` range is limited to 366 days; dimensional results are deterministically bounded.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/StartTime'
+        - $ref: '#/components/parameters/EndTime'
+        - name: breakdown_limit
+          in: query
+          required: false
+          description: Maximum number of feature, model, and selected-plan rows (default 50).
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Usage summary with provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageSummary' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/usage/timeseries:
+    get:
+      tags: [Usage]
+      operationId: getUsageTimeseries
+      summary: Return bounded hourly or daily usage points.
+      description: The half-open `[start, end)` range may produce at most 10,000 UTC buckets.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/StartTime'
+        - $ref: '#/components/parameters/EndTime'
+        - name: interval
+          in: query
+          required: true
+          schema: { type: string, enum: [hour, day] }
+      responses:
+        '200':
+          description: Usage timeseries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageTimeseries' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: List append-only redacted administrative audit events.
+      parameters:
+        - $ref: '#/components/parameters/OrganizationFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Audit event page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-test-schedules:
+    get:
+      tags: [Self-tests]
+      operationId: listSelfTestSchedules
+      summary: List bounded self-test schedules for one environment.
+      description: Returns stable authorization credential IDs and pinned configuration IDs, never token plaintext, provider secret material, or provider bodies.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Redaction-safe schedule page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedulePage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Self-tests]
+      operationId: createSelfTestSchedule
+      summary: Create a bounded schedule using the authenticating durable API token.
+      description: |
+        This operation rejects browser sessions. The scoped Admin API bearer token
+        authenticating this request is bound by stable token ID and active administrator
+        membership; its plaintext is never accepted in the document or persisted. The
+        active configuration revision and exact current provider secret record versions
+        are pinned at creation. Any later token revocation, configuration replacement,
+        or secret rotation disables the schedule instead of silently rebinding it.
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSelfTestScheduleRequest' }
+      responses:
+        '201':
+          description: Persistently authorized schedule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-test-schedules/{scheduleId}:
+    get:
+      tags: [Self-tests]
+      operationId: getSelfTestSchedule
+      summary: Return one redaction-safe self-test schedule.
+      parameters:
+        - $ref: '#/components/parameters/SelfTestScheduleID'
+      responses:
+        '200':
+          description: Exact persisted schedule bindings and lifecycle state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Self-tests]
+      operationId: disableSelfTestSchedule
+      summary: Permanently disable a self-test schedule.
+      description: Soft-disables future runs while preserving run and audit evidence.
+      parameters:
+        - $ref: '#/components/parameters/SelfTestScheduleID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Disabled schedule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestSchedule' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-tests:
+    post:
+      tags: [Self-tests]
+      operationId: startSelfTest
+      summary: Start a bounded diagnostic or conformance test.
+      description: |
+        `local` runs durable PostgreSQL, schema and active-configuration checks.
+        `upstream` and `openrouter` resolve one upstream and model from the active
+        compiled revision, require an exact trusted-input profile plus active USD
+        pricing, prove the two-request worst-case cost is no greater than the
+        caller's ceiling, and only then use the server-held credential through the
+        protected dispatcher. OpenRouter additionally verifies key access/credit,
+        final streaming usage, output clamping, and body-free error normalization.
+        No provider credential, prompt, response, URL, or provider error body is
+        returned or written to the durable result.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartSelfTestRequest' }
+      responses:
+        '202':
+          description: Self-test accepted; secrets remain server-side.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestRun' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/self-tests/{selfTestId}:
+    get:
+      tags: [Self-tests]
+      operationId: getSelfTest
+      summary: Return a redacted self-test result.
+      parameters:
+        - $ref: '#/components/parameters/SelfTestID'
+      responses:
+        '200':
+          description: Current or terminal self-test state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfTestRun' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/system:
+    get:
+      tags: [System]
+      operationId: getSystemStatus
+      summary: Return redacted build, protocol, database and role status.
+      responses:
+        '200':
+          description: Safe operational status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    AdminCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-latchway_admin
+    AdminToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-admin-api-token
+  parameters:
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth.
+      schema: { type: string, minLength: 32, maxLength: 512 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: { type: string, minLength: 3, maxLength: 256 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 2048 }
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    OrganizationFilter:
+      name: organization_id
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/OrganizationID' }
+    EnvironmentFilter:
+      name: environment_id
+      in: query
+      required: true
+      schema: { $ref: '#/components/schemas/EnvironmentID' }
+    ApplicationID:
+      name: applicationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ApplicationID' }
+    EnvironmentID:
+      name: environmentId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/EnvironmentID' }
+    RevisionID:
+      name: revisionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/RevisionID' }
+    SecretID:
+      name: secretId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SecretID' }
+    TokenID:
+      name: tokenId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TokenID' }
+    AdminUserID:
+      name: adminUserId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AdminUserID' }
+    UserID:
+      name: userId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/UserID' }
+    InstallationID:
+      name: installationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/InstallationID' }
+    RequestResourceID:
+      name: requestId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/RequestID' }
+    SelfTestID:
+      name: selfTestId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SelfTestID' }
+    SelfTestScheduleID:
+      name: scheduleId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SelfTestScheduleID' }
+    StartTime:
+      name: start
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+    EndTime:
+      name: end
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+  headers:
+    ETag:
+      description: Strong entity tag for optimistic concurrency.
+      schema: { type: string }
+    CSRFToken:
+      description: Session-bound CSRF token returned in the response header and mirrored in the Secure, SameSite=Strict `__Host-latchway_csrf` cookie for same-origin console use.
+      schema: { type: string, minLength: 32, maxLength: 512 }
+    RequestID:
+      description: Server-selected request identifier.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  responses:
+    Problem:
+      description: RFC 9457 problem using a stable code from `error-codes.yaml`.
+      headers:
+        X-Latchway-Request-ID: { $ref: '#/components/headers/RequestID' }
+        Retry-After: { schema: { type: string } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Identifier:
+      type: string
+      pattern: '^[a-z][a-z0-9_-]{0,62}$'
+    OpaqueID:
+      type: string
+      pattern: '^[A-Za-z][A-Za-z0-9_-]{16,128}$'
+    OrganizationID:
+      type: string
+      pattern: '^org_[A-Za-z0-9_-]{16,128}$'
+    ApplicationID:
+      type: string
+      pattern: '^app_[A-Za-z0-9_-]{16,128}$'
+    EnvironmentID:
+      type: string
+      pattern: '^env_[A-Za-z0-9_-]{16,128}$'
+    RevisionID:
+      type: string
+      pattern: '^rev_[A-Za-z0-9_-]{16,128}$'
+    SecretID:
+      type: string
+      pattern: '^sec_[A-Za-z0-9_-]{16,128}$'
+    TokenID:
+      type: string
+      pattern: '^tok_[A-Za-z0-9_-]{16,128}$'
+    AdminUserID:
+      type: string
+      pattern: '^adm_[A-Za-z0-9_-]{16,128}$'
+    UserID:
+      type: string
+      pattern: '^usr_[A-Za-z0-9_-]{16,128}$'
+    UserOverrideID:
+      type: string
+      pattern: '^uov_[A-Za-z0-9_-]{16,128}$'
+    InstallationID:
+      type: string
+      pattern: '^ins_[A-Za-z0-9_-]{16,128}$'
+    RequestID:
+      type: string
+      pattern: '^req_[A-Za-z0-9_-]{16,128}$'
+    SelfTestID:
+      type: string
+      pattern: '^tst_[A-Za-z0-9_-]{16,128}$'
+    SelfTestScheduleID:
+      type: string
+      pattern: '^sts_[A-Za-z0-9_-]{16,128}$'
+    PageInfo:
+      type: object
+      additionalProperties: false
+      required: [has_more]
+      properties:
+        has_more: { type: boolean }
+        next_cursor: { type: string, minLength: 1, maxLength: 2048 }
+    BootstrapRequest:
+      type: object
+      additionalProperties: false
+      required: [bootstrap_token, organization_slug, organization_name, email, display_name, password]
+      properties:
+        bootstrap_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        organization_slug: { $ref: '#/components/schemas/Identifier' }
+        organization_name: { type: string, minLength: 1, maxLength: 200 }
+        email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+    AdminSession:
+      type: object
+      additionalProperties: false
+      required: [administrator, organization_id, memberships, capabilities, expires_at]
+      properties:
+        administrator:
+          type: object
+          additionalProperties: false
+          required: [id, email, enabled]
+          properties:
+            id: { type: string, pattern: '^adm_[A-Za-z0-9_-]{16,128}$' }
+            email: { type: string, format: email }
+            enabled: { type: boolean }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        memberships:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [organization_id, role]
+            properties:
+              organization_id: { $ref: '#/components/schemas/OrganizationID' }
+              role: { type: string, enum: [owner, admin, operator, viewer] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
+        expires_at: { type: [string, 'null'], format: date-time }
+    CreateNamedResource:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name]
+      properties:
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string, minLength: 1, maxLength: 256 }
+    CreateEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name, kind]
+      properties:
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string, minLength: 1, maxLength: 256 }
+        kind: { type: string, enum: [development, staging, production] }
+    Organization:
+      type: object
+      additionalProperties: false
+      required: [id, slug, display_name, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/OrganizationID' }
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string }
+        created_at: { type: string, format: date-time }
+    OrganizationPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Organization' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    CreateApplicationRequest:
+      type: object
+      additionalProperties: false
+      required: [organization_id, slug, display_name]
+      properties:
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string, minLength: 1, maxLength: 128 }
+    Application:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, slug, display_name, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/ApplicationID' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string }
+        created_at: { type: string, format: date-time }
+    ApplicationPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Application' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    Environment:
+      type: object
+      additionalProperties: false
+      required: [id, application_id, slug, display_name, kind, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/EnvironmentID' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        slug: { $ref: '#/components/schemas/Identifier' }
+        display_name: { type: string }
+        kind: { type: string, enum: [development, staging, production] }
+        active_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        created_at: { type: string, format: date-time }
+    CreateConfigurationRevisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        base_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        document: { $ref: './config.schema.json' }
+        description: { type: string, maxLength: 512 }
+      oneOf:
+        - required: [base_revision_id]
+        - required: [document]
+    ConfigurationRevision:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, state, version, document, created_at, created_by]
+      properties:
+        id: { $ref: '#/components/schemas/RevisionID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        state: { type: string, enum: [draft, valid, active, superseded, invalid] }
+        version: { type: integer, minimum: 1 }
+        document: { $ref: './config.schema.json' }
+        validation: { $ref: '#/components/schemas/ValidationReport' }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        activated_at: { type: string, format: date-time }
+    ConfigurationRevisionPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ConfigurationRevision' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    ValidationIssue:
+      type: object
+      additionalProperties: false
+      required: [severity, code, path, message]
+      properties:
+        severity: { type: string, enum: [error, warning] }
+        code: { type: string, pattern: '^[a-z][a-z0-9_]{0,127}$' }
+        path: { type: string, maxLength: 1024 }
+        message: { type: string, maxLength: 2048 }
+    ValidationReport:
+      type: object
+      additionalProperties: false
+      required: [valid, checked_at, issues]
+      properties:
+        valid: { type: boolean }
+        checked_at: { type: string, format: date-time }
+        issues: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/ValidationIssue' } }
+    ConfigurationPlan:
+      type: object
+      additionalProperties: false
+      required: [from_revision_id, to_revision_id, changes, warnings]
+      properties:
+        from_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        to_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        changes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [operation, path]
+            properties:
+              operation: { type: string, enum: [add, remove, replace] }
+              path: { type: string }
+              summary: { type: string, maxLength: 1024 }
+        warnings: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } }
+    RouteSimulationRequest:
+      type: object
+      additionalProperties: false
+      required: [feature, platform, principal]
+      properties:
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        principal:
+          type: object
+          additionalProperties: false
+          required: [authenticated, claims]
+          properties:
+            authenticated: { type: boolean }
+            claims: { type: object, additionalProperties: true, maxProperties: 64 }
+        trust_level:
+          type: string
+          enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+        request:
+          type: object
+          additionalProperties: false
+          properties:
+            streaming: { type: boolean, default: false }
+            app_version: { type: string, maxLength: 128 }
+            requested_input_tokens:
+              type: integer
+              minimum: 0
+              maximum: 100000000
+              description: Explanatory untrusted estimate; never used by CEL or reservation.
+            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+            rewritten_request_bytes:
+              type: integer
+              minimum: 0
+              maximum: 104857600
+              description: Hypothetical exact post-rewrite body size used for conservative trusted-input projection.
+            framing_unit_count:
+              type: integer
+              minimum: 0
+              maximum: 4096
+              description: Hypothetical exact adapter framing-unit count used for conservative trusted-input projection.
+            image_units:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Hypothetical exact structured image count used by a hard per-request guard.
+            tool_calls:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Hypothetical exact structured tool-call count used by a hard per-request guard.
+    RouteSimulationResult:
+      type: object
+      additionalProperties: false
+      required: [allowed, feature, application_id, environment_id, revision_id, environment_kind, facts, fact_usage, explanation]
+      properties:
+        allowed: { type: boolean }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        environment_kind: { type: string, enum: [development, staging, production] }
+        facts:
+          type: object
+          additionalProperties: false
+          required: [application_id, environment_id, revision_id, environment_kind, feature, platform, trust_level, authenticated, normalized_claims, streaming, requested_input_tokens, requested_output_max, rewritten_request_bytes, framing_unit_count, image_units, tool_calls]
+          properties:
+            application_id: { $ref: '#/components/schemas/ApplicationID' }
+            environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+            revision_id: { $ref: '#/components/schemas/RevisionID' }
+            environment_kind: { type: string, enum: [development, staging, production] }
+            feature: { $ref: '#/components/schemas/Identifier' }
+            platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+            trust_level: { type: string, enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug] }
+            authenticated: { type: boolean }
+            normalized_claims: { type: object, maxProperties: 64, additionalProperties: true }
+            streaming: { type: boolean }
+            app_version: { type: string, maxLength: 128 }
+            requested_input_tokens: { type: integer, minimum: 0, maximum: 100000000 }
+            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+            rewritten_request_bytes: { type: integer, minimum: 0, maximum: 104857600 }
+            framing_unit_count: { type: integer, minimum: 0, maximum: 4096 }
+            image_units: { type: integer, minimum: 0, maximum: 1000000 }
+            tool_calls: { type: integer, minimum: 0, maximum: 1000000 }
+        fact_usage:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            additionalProperties: false
+            required: [fact, role, affects_cel, explanation]
+            properties:
+              fact: { type: string, maxLength: 128 }
+              role: { type: string, enum: [authentication, scope, policy, reservation, explanatory] }
+              affects_cel: { type: boolean }
+              explanation: { type: string, maxLength: 1024 }
+        protocol:
+          type: string
+          enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
+        matched_access_expression: { type: string, maxLength: 4096 }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        limits:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [metric, algorithm, scope, hard]
+            properties:
+              metric: { type: string }
+              algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
+              scope: { type: array, maxItems: 11, uniqueItems: true, items: { type: string } }
+              window:
+                type: string
+                pattern: '^[1-9][0-9]*(m|h|d|w|mo)$'
+                example: 1w
+              timezone:
+                type: string
+                maxLength: 64
+                description: Canonical server-configured IANA timezone for a calendar rule; UTC when omitted in source configuration.
+                example: America/New_York
+              maximum: { type: integer, minimum: 0 }
+              per_request_maximum: { type: integer, minimum: 0 }
+              capacity: { type: integer, minimum: 0 }
+              refill_per_second: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+              hard: { type: boolean }
+        route: { $ref: '#/components/schemas/Identifier' }
+        model: { $ref: '#/components/schemas/Identifier' }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        physical_model: { type: string, maxLength: 512 }
+        fallback_sequence:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [route, upstream, model, physical_model, fallback_on]
+            properties:
+              route: { $ref: '#/components/schemas/Identifier' }
+              upstream: { $ref: '#/components/schemas/Identifier' }
+              model: { $ref: '#/components/schemas/Identifier' }
+              physical_model: { type: string, maxLength: 512 }
+              fallback_on: { type: array, maxItems: 16, uniqueItems: true, items: { type: string } }
+        pricing_confidence: { type: string, enum: [configured, unknown] }
+        reservation:
+          type: object
+          additionalProperties: false
+          required: [applied_output_maximum, total_token_bound, cost_nano_usd_bound, cost_bound_known, input_accounting, allocations]
+          properties:
+            applied_output_maximum: { type: integer, minimum: 0 }
+            total_token_bound: { type: integer, minimum: 0 }
+            cost_nano_usd_bound: { type: integer, minimum: 0 }
+            cost_bound_known: { type: boolean }
+            pricing_catalog: { $ref: '#/components/schemas/Identifier' }
+            input_accounting:
+              type: object
+              additionalProperties: false
+              required: [required, rewritten_request_bytes, framing_unit_count, maximum_framing_tokens_per_request, maximum_framing_tokens_per_unit, input_token_bound, maximum_context_tokens]
+              properties:
+                required: { type: boolean }
+                profile_id: { $ref: '#/components/schemas/Identifier' }
+                method: { type: string, enum: [utf8_byte_bpe_declared_framing_v1] }
+                rewritten_request_bytes: { type: integer, minimum: 0 }
+                framing_unit_count: { type: integer, minimum: 0 }
+                maximum_framing_tokens_per_request: { type: integer, minimum: 0 }
+                maximum_framing_tokens_per_unit: { type: integer, minimum: 0 }
+                input_token_bound: { type: integer, minimum: 0 }
+                maximum_context_tokens: { type: integer, minimum: 0 }
+            allocations:
+              type: array
+              maxItems: 128
+              items:
+                type: object
+                additionalProperties: false
+                required: [metric, algorithm, units, applicable, durable]
+                properties:
+                  metric: { type: string }
+                  algorithm: { type: string, enum: [calendar, token_bucket, concurrency, per_request] }
+                  units: { type: integer, minimum: 0 }
+                  applicable: { type: boolean }
+                  durable: { type: boolean }
+        warnings: { type: array, maxItems: 16, items: { type: string, maxLength: 1024 } }
+        explanation: { type: array, items: { type: string, maxLength: 1024 } }
+    WriteSecretRequest:
+      type: object
+      additionalProperties: false
+      required: [environment_id, name, value]
+      properties:
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        name: { $ref: '#/components/schemas/Identifier' }
+        value: { $ref: '#/components/schemas/SecretValue' }
+    SecretValue:
+      type: string
+      minLength: 1
+      maxLength: 1048576
+      writeOnly: true
+      description: |
+        Write-only UTF-8 plaintext. In addition to the JSON Schema code-point
+        bound, its encoded UTF-8 representation must be at most 1,048,576 bytes.
+      x-latchway-max-utf8-bytes: 1048576
+    SecretMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, name, version, algorithm, master_key_id, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/SecretID'
+          description: Version-specific record ID; only the current ID may initiate rotation or deletion.
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        name: { $ref: '#/components/schemas/Identifier' }
+        version: { type: integer, minimum: 1 }
+        algorithm: { type: string }
+        master_key_id: { type: string }
+        created_at: { type: string, format: date-time }
+        rotated_at: { type: string, format: date-time }
+    SecretPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SecretMetadata' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    CreateApiTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 256 }
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
+        expires_at: { type: string, format: date-time }
+    ApiTokenMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, name, scopes, created_at, revoked]
+      properties:
+        id: { $ref: '#/components/schemas/TokenID' }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked: { type: boolean }
+    CreatedApiToken:
+      type: object
+      additionalProperties: false
+      required: [token, metadata]
+      properties:
+        token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+        metadata: { $ref: '#/components/schemas/ApiTokenMetadata' }
+    AdministratorRole:
+      type: string
+      enum: [owner, admin, operator, viewer]
+    Administrator:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - membership_id
+        - organization_id
+        - email
+        - display_name
+        - role
+        - status
+        - password_reset_required
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/AdminUserID' }
+        membership_id: { type: string, pattern: '^amb_[A-Za-z0-9_-]{16,128}$' }
+        organization_id: { $ref: '#/components/schemas/OrganizationID' }
+        email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+        status: { type: string, enum: [active, disabled] }
+        password_reset_required: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time }
+    AdministratorPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Administrator' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    CreateAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required: [email, display_name, password, role]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+    ChangeAdministratorRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/AdministratorRole' }
+    ResetAdministratorPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    ApplicationUser:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, status, identity_providers, normalized_claims, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/UserID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        status: { type: string, enum: [active, blocked] }
+        identity_providers:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        normalized_claims: { type: object, maxProperties: 64, additionalProperties: true }
+        limit_plan_override: { $ref: '#/components/schemas/UserLimitOverride' }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+    UserLimitOverride:
+      type: object
+      additionalProperties: false
+      required: [id, limit_plan, reason, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/UserOverrideID' }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    UserPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ApplicationUser' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    Installation:
+      type: object
+      additionalProperties: false
+      required: [id, user_id, environment_id, platform, dpop_jkt, status, trust_level, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/InstallationID' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        dpop_jkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        status: { type: string, enum: [active, revoked] }
+        trust_level:
+          type: string
+          enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+        attestation_provider:
+          type: string
+          enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
+        trust_expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    InstallationPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Installation' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    UsageValues:
+      type: object
+      additionalProperties: false
+      required: [logical_requests, input_tokens, output_tokens, total_tokens, cost_nano_usd]
+      properties:
+        logical_requests: { type: integer, minimum: 0 }
+        input_tokens: { type: integer, minimum: 0 }
+        output_tokens: { type: integer, minimum: 0 }
+        total_tokens: { type: integer, minimum: 0 }
+        cost_nano_usd: { type: integer, minimum: 0 }
+    UpstreamAttempt:
+      type: object
+      additionalProperties: false
+      description: >-
+        One redaction-safe physical attempt. Attempts are returned in contiguous
+        attempt_number order. Terminal attempts have completed_at; succeeded attempts
+        have a 2xx http_status and no failure_code; failed or canceled attempts have a
+        sanitized failure_code. Unknown durable failure values map to unknown and raw
+        provider or internal error text is never returned.
+      required: [id, attempt_number, route, upstream, model, started_at, status, usage_provenance, cost_provenance]
+      properties:
+        id: { type: string, pattern: '^atm_[A-Za-z0-9_-]{16,128}$' }
+        attempt_number: { type: integer, minimum: 1, maximum: 32 }
+        route: { $ref: '#/components/schemas/Identifier' }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        model: { type: string, maxLength: 512 }
+        started_at: { type: string, format: date-time }
+        first_byte_at:
+          type: string
+          format: date-time
+          description: First response byte observed by the gateway, when one was observed; never precedes started_at or follows completed_at.
+        completed_at: { type: string, format: date-time }
+        status: { type: string, enum: [succeeded, failed, canceled, unknown] }
+        http_status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: Upstream HTTP status when a valid status line was received.
+        failure_code:
+          type: string
+          enum: [canceled, gateway_error, protocol_error, timeout, unavailable, upstream_rejected, unknown]
+          description: Closed, sanitized public failure category. Omitted for successful and in-progress attempts.
+        usage: { $ref: '#/components/schemas/UsageValues' }
+        usage_provenance: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] }
+        cost_provenance:
+          type: string
+          enum: [upstream_reported, calculated, estimated, unknown]
+          description: Provenance of this attempt's cost, independent of token-usage provenance.
+        cost_source:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Fixed provider report source or configured pricing catalog identity when cost is known.
+    LogicalRequest:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, user_id, installation_id, feature, protocol, started_at, status, attempts]
+      properties:
+        id: { $ref: '#/components/schemas/RequestID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        installation_id: { $ref: '#/components/schemas/InstallationID' }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        protocol:
+          type: string
+          enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        status: { type: string, enum: [succeeded, failed, canceled, unknown] }
+        usage: { $ref: '#/components/schemas/UsageValues' }
+        attempts:
+          type: array
+          maxItems: 32
+          description: Ordered by contiguous attempt_number beginning at one.
+          items: { $ref: '#/components/schemas/UpstreamAttempt' }
+    RequestPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LogicalRequest' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    UsageFraction:
+      type: object
+      additionalProperties: false
+      required: [numerator, denominator]
+      properties:
+        numerator: { type: integer, minimum: 0 }
+        denominator: { type: integer, minimum: 0 }
+    UsageRate:
+      type: object
+      additionalProperties: false
+      required: [numerator, denominator, parts_per_million]
+      properties:
+        numerator: { type: integer, minimum: 0 }
+        denominator: { type: integer, minimum: 0 }
+        parts_per_million: { type: integer, minimum: 0, maximum: 1000000 }
+    UsageDistribution:
+      type: object
+      additionalProperties: false
+      required: [samples, p50_ms, p95_ms, p99_ms]
+      properties:
+        samples: { type: integer, minimum: 0 }
+        p50_ms: { type: integer, minimum: 0 }
+        p95_ms: { type: integer, minimum: 0 }
+        p99_ms: { type: integer, minimum: 0 }
+    UsageBreakdown:
+      type: object
+      additionalProperties: false
+      required: [items, truncated, limit]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, active_users, request_count, values]
+            properties:
+              key: { type: string, minLength: 1, maxLength: 512 }
+              active_users: { type: integer, minimum: 0 }
+              request_count: { type: integer, minimum: 0 }
+              values: { $ref: '#/components/schemas/UsageValues' }
+        truncated: { type: boolean }
+        limit: { type: integer, minimum: 1, maximum: 200 }
+    UsageAnalytics:
+      type: object
+      additionalProperties: false
+      required: [active_users, request_count, requests_per_active_user, cost_per_active_user_nano_usd, by_feature, by_model, by_selected_plan, request_latency, time_to_first_token, failure_rate, quota_denial_rate, attestation_failure_rate, fallback_rate, usage_by_provenance]
+      properties:
+        active_users: { type: integer, minimum: 0 }
+        request_count: { type: integer, minimum: 0 }
+        requests_per_active_user: { $ref: '#/components/schemas/UsageFraction' }
+        cost_per_active_user_nano_usd: { $ref: '#/components/schemas/UsageFraction' }
+        by_feature: { $ref: '#/components/schemas/UsageBreakdown' }
+        by_model: { $ref: '#/components/schemas/UsageBreakdown' }
+        by_selected_plan: { $ref: '#/components/schemas/UsageBreakdown' }
+        request_latency: { $ref: '#/components/schemas/UsageDistribution' }
+        time_to_first_token: { $ref: '#/components/schemas/UsageDistribution' }
+        failure_rate: { $ref: '#/components/schemas/UsageRate' }
+        quota_denial_rate: { $ref: '#/components/schemas/UsageRate' }
+        attestation_failure_rate: { $ref: '#/components/schemas/UsageRate' }
+        fallback_rate: { $ref: '#/components/schemas/UsageRate' }
+        usage_by_provenance:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [provenance, values]
+            properties:
+              provenance: { type: string, enum: [upstream_reported, calculated, estimated, unknown] }
+              cost_source:
+                type: string
+                minLength: 1
+                maxLength: 64
+                description: Present as openrouter_usage_cost when this window contains provider-reported cost.
+              values: { $ref: '#/components/schemas/UsageValues' }
+    UsageSummary:
+      type: object
+      additionalProperties: false
+      required: [start, end, values, provenance, analytics]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        values: { $ref: '#/components/schemas/UsageValues' }
+        provenance: { type: array, maxItems: 5, uniqueItems: true, items: { type: string, enum: [upstream_reported, calculated, configured, estimated, unknown] } }
+        analytics: { $ref: '#/components/schemas/UsageAnalytics' }
+    UsageTimeseries:
+      type: object
+      additionalProperties: false
+      required: [interval, points]
+      properties:
+        interval: { type: string, enum: [hour, day] }
+        points:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [timestamp, values]
+            properties:
+              timestamp: { type: string, format: date-time }
+              values: { $ref: '#/components/schemas/UsageValues' }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, timestamp, actor, action, target, result, request_id, summary]
+      properties:
+        id: { type: string, pattern: '^aud_[A-Za-z0-9_-]{16,128}$' }
+        timestamp: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
+        target: { type: string }
+        result: { type: string, enum: [succeeded, denied, failed, indeterminate] }
+        request_id: { type: string }
+        summary: { type: object, additionalProperties: true, description: Redaction-safe structured change summary. }
+    AuditPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/AuditEvent' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    StartSelfTestRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, environment_id]
+      properties:
+        kind: { type: string, enum: [local, upstream, openrouter] }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        upstream: { $ref: '#/components/schemas/Identifier', description: Active server-owned upstream identifier. }
+        model: { $ref: '#/components/schemas/Identifier', description: Active configured model identifier, not a client-selected physical model string. }
+        max_cost_nano_usd: { type: integer, minimum: 0, maximum: 1000000000 }
+      oneOf:
+        - properties:
+            kind: { const: local }
+          not:
+            anyOf:
+              - required: [upstream]
+              - required: [model]
+              - required: [max_cost_nano_usd]
+        - required: [upstream, model, max_cost_nano_usd]
+          properties:
+            kind: { enum: [upstream, openrouter] }
+            max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+    CreateSelfTestScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, environment_id, upstream, model, max_cost_nano_usd, daily_cost_limit_nano_usd, interval_seconds]
+      properties:
+        kind: { type: string, enum: [upstream, openrouter] }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        upstream: { $ref: '#/components/schemas/Identifier', description: Active server-owned upstream identifier. }
+        model: { $ref: '#/components/schemas/Identifier', description: Active configured logical model identifier. }
+        max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+        daily_cost_limit_nano_usd: { type: integer, minimum: 1, maximum: 10000000000 }
+        interval_seconds: { type: integer, minimum: 3600, maximum: 2592000 }
+    SelfTestSchedule:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, application_id, config_revision_id, authorization_credential_id, kind, upstream, model, max_cost_nano_usd, daily_cost_limit_nano_usd, interval_seconds, status, created_at, updated_at]
+      properties:
+        id: { $ref: '#/components/schemas/SelfTestScheduleID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        application_id: { $ref: '#/components/schemas/ApplicationID' }
+        config_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        authorization_credential_id: { $ref: '#/components/schemas/TokenID', description: Stable durable credential ID; never token plaintext. }
+        kind: { type: string, enum: [upstream, openrouter] }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        model: { $ref: '#/components/schemas/Identifier' }
+        max_cost_nano_usd: { type: integer, minimum: 1, maximum: 1000000000 }
+        daily_cost_limit_nano_usd: { type: integer, minimum: 1, maximum: 10000000000 }
+        interval_seconds: { type: integer, minimum: 3600, maximum: 2592000 }
+        status: { type: string, enum: [active, disabled] }
+        next_run_at: { type: string, format: date-time }
+        last_enqueued_at: { type: string, format: date-time }
+        last_self_test_id: { $ref: '#/components/schemas/SelfTestID' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time }
+        disabled_reason_code: { $ref: '#/components/schemas/Identifier' }
+      oneOf:
+        - properties: { status: { const: active } }
+          required: [next_run_at]
+          not:
+            anyOf:
+              - required: [disabled_at]
+              - required: [disabled_reason_code]
+        - properties: { status: { const: disabled } }
+          required: [disabled_at, disabled_reason_code]
+          not: { required: [next_run_at] }
+    SelfTestSchedulePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/SelfTestSchedule' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    SelfTestRun:
+      type: object
+      additionalProperties: false
+      required: [id, kind, state, created_at, checks]
+      properties:
+        id: { $ref: '#/components/schemas/SelfTestID' }
+        schedule_id: { $ref: '#/components/schemas/SelfTestScheduleID' }
+        kind: { type: string, enum: [local, upstream, openrouter] }
+        state: { type: string, enum: [queued, running, passed, failed, canceled] }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        checks:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, state]
+            properties:
+              name: { type: string }
+              state: { type: string, enum: [pending, passed, failed, skipped] }
+              safe_detail: { type: string, maxLength: 2048 }
+    SystemStatus:
+      type: object
+      additionalProperties: false
+      required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
+      properties:
+        server_version: { type: string }
+        contract_version: { type: string, const: 0.5.1 }
+        protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
+        role: { type: string, enum: [all, api, worker] }
+        database_schema_version: { type: string }
+        ready: { type: boolean }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, code, request_id, retryable]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string, minLength: 1, maxLength: 256 }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string, minLength: 1, maxLength: 2048 }
+        instance: { type: string, format: uri-reference }
+        code:
+          $ref: './client.openapi.yaml#/components/schemas/Problem/properties/code'
+        request_id: { type: string, minLength: 8, maxLength: 128 }
+        retryable: { type: boolean }
+        retry_after: { type: string, format: date-time }
+        operation_id: { type: string, pattern: '^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        errors: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ValidationIssue' } }
+      allOf:
+        - if:
+            properties:
+              code: { const: operation_indeterminate }
+            required: [code]
+          then:
+            required: [operation_id]
+          else:
+            not:
+              required: [operation_id]

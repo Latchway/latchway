@@ -1,0 +1,10 @@
+node_modules/
+coverage/
+.vite/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# The reproducible distribution is tracked so package console can embed it in clean builds.
+!dist/
+!dist/**

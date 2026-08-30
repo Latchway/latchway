@@ -1,0 +1,12 @@
+region          = "ap-southeast-1"
+name            = "latchway"
+image           = "ACCOUNT.dkr.ecr.REGION.amazonaws.com/latchway@sha256:replace-with-verified-digest"
+public_origin   = "https://ai.example.com"
+certificate_arn = "arn:aws:acm:REGION:ACCOUNT:certificate/REPLACE"
+
+desired_tasks                  = 2
+minimum_tasks                  = 2
+maximum_tasks                  = 10
+db_connections_per_task        = 20
+inject_admin_bootstrap_token    = true
+migrate_on_start                = true

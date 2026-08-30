@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "latchway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-29",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // These are passed into the container by LatchwayContainer. Secret values
+  // must be installed with `wrangler secret put`; never add them to vars.
+  "vars": {
+    "LATCHWAY_CONTAINER_INSTANCES": "4",
+    "LATCHWAY_ROLE": "all",
+    "LATCHWAY_LOG_LEVEL": "info",
+    "LATCHWAY_MIGRATE_ON_START": "true",
+    "LATCHWAY_DB_MAX_CONNECTIONS": "5",
+    "LATCHWAY_SHUTDOWN_TIMEOUT": "30s"
+  },
+  "secrets": {
+    "required": [
+      "LATCHWAY_DATABASE_URL",
+      "LATCHWAY_MASTER_KEY",
+      "LATCHWAY_PUBLIC_ORIGIN",
+      "LATCHWAY_ADMIN_BOOTSTRAP_TOKEN"
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LATCHWAY_CONTAINER",
+        "class_name": "LatchwayContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LatchwayContainer"]
+    }
+  ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "containers": [
+    {
+      "name": "latchway",
+      "class_name": "LatchwayContainer",
+      "image": "../../Dockerfile",
+      "image_build_context": "../..",
+      "max_instances": 4,
+      "instance_type": "standard-1",
+      "rollout_step_percentage": [10, 50, 100],
+      "rollout_active_grace_period": 35
+    }
+  ],
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  }
+}

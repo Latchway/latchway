@@ -1,0 +1,1053 @@
+name: Promote proven release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Exact candidate commit produced by the candidate workflow
+        required: true
+        type: string
+      intended_tag:
+        description: Exact public core tag bound into promotion evidence
+        required: true
+        type: string
+      candidate_run_id:
+        description: Candidate workflow run containing the attested candidate manifest
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact candidate workflow run attempt
+        required: true
+        type: string
+      security_evidence_run_id:
+        description: Exact successful security-evidence workflow run ID
+        required: true
+        type: string
+      security_evidence_run_attempt:
+        description: Exact successful security-evidence run attempt
+        required: true
+        type: string
+      promotion_evidence_run_id:
+        description: Cross-repository workflow run containing attested promotion evidence
+        required: true
+        type: string
+      promotion_evidence_run_attempt:
+        description: Exact cross-repository promotion-evidence run attempt
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: read
+  contents: write
+  packages: write
+
+concurrency:
+  # Every stable release shares moving OCI aliases, so promotions must serialize
+  # across versions rather than merely across retries of one tag.
+  group: promote-stable-oci-aliases
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    steps:
+      - name: Check out the exact candidate source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          path: latchway
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a fixed GitHub CLI verifier
+        run: python3 latchway/scripts/require-gh-version.py
+      - name: Preflight protected immutable-release settings for every release repository
+        shell: bash
+        env:
+          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+          for repository in \
+            Latchway/latchway \
+            Latchway/latchway-js \
+            Latchway/latchway-ios-sdk \
+            Latchway/latchway-android \
+            Latchway/latchway-react-native-sdk; do
+            slug=${repository##*/}
+            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$repository/immutable-releases" \
+              > "$RUNNER_TEMP/$slug-immutable-releases.json"
+            jq --exit-status '
+              type == "object" and
+              (keys | sort) == ["enabled", "enforced_by_owner"] and
+              .enabled == true and
+              (.enforced_by_owner | type) == "boolean"
+            ' "$RUNNER_TEMP/$slug-immutable-releases.json" >/dev/null
+          done
+      - name: Validate immutable workflow inputs and cross-repository authority
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          SECURITY_RUN_ID: ${{ inputs.security_evidence_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_evidence_run_attempt }}
+          PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
+          PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
+          DISPATCH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
+        run: |
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SECURITY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SECURITY_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROMOTION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROMOTION_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -n "$DISPATCH_TOKEN"
+          for repository in \
+            Latchway/latchway-js \
+            Latchway/latchway-ios-sdk \
+            Latchway/latchway-android \
+            Latchway/latchway-react-native-sdk; do
+            GH_TOKEN="$DISPATCH_TOKEN" gh api "repos/$repository" --jq .full_name >/dev/null
+          done
+      - name: Require the fixed successful producer workflow runs and attempts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          SECURITY_RUN_ID: ${{ inputs.security_evidence_run_id }}
+          SECURITY_RUN_ATTEMPT: ${{ inputs.security_evidence_run_attempt }}
+          PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
+          PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          verify_run() {
+            local label="$1" run_id="$2" run_attempt="$3" expected_path="$4"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$RUNNER_TEMP/$label-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$run_attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/$label-run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
+            jq --exit-status --arg path "$expected_path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+          }
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+          verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml
+          verify_run promotion "$PROMOTION_RUN_ID" "$PROMOTION_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+      - name: Download the immutable candidate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+          path: ${{ runner.temp }}/latchway-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download exact current-candidate security evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-security-${{ inputs.candidate_commit }}-${{ inputs.security_evidence_run_id }}-${{ inputs.security_evidence_run_attempt }}
+          path: ${{ runner.temp }}/latchway-security
+          run-id: ${{ inputs.security_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the aggregate promotion evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-promotion-${{ inputs.promotion_evidence_run_id }}-${{ inputs.promotion_evidence_run_attempt }}
+          path: ${{ runner.temp }}/latchway-promotion
+          run-id: ${{ inputs.promotion_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify candidate and promotion attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_MANIFEST: ${{ runner.temp }}/latchway-candidate/latchway-candidate.json
+          SECURITY_REPORT: ${{ runner.temp }}/latchway-security/security-summary.json
+          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+        run: |
+          gh attestation verify "$CANDIDATE_MANIFEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$SECURITY_REPORT" \
+            --bundle "$RUNNER_TEMP/latchway-security/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
+            --signer-digest "${{ inputs.candidate_commit }}" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          gh attestation verify "$PROMOTION_REPORT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+      - name: Verify the candidate artifact and exact aggregate bindings
+        id: verified
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_MANIFEST: ${{ runner.temp }}/latchway-candidate/latchway-candidate.json
+          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+        run: |
+          python3 latchway/scripts/release-candidate.py \
+            --verify \
+            --manifest "$CANDIDATE_MANIFEST" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --image ghcr.io/latchway/latchway
+          python3 latchway/scripts/verify-promotion.py \
+            --report "$PROMOTION_REPORT" \
+            --candidate "$CANDIDATE_MANIFEST" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Recompute exact current-candidate security evidence
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          python3 latchway/scripts/security-evidence.py \
+            --verify \
+            --report "$RUNNER_TEMP/latchway-security/security-summary.json" \
+            --candidate-manifest "$RUNNER_TEMP/latchway-candidate/latchway-candidate.json" \
+            --raw-directory "$RUNNER_TEMP/latchway-security/raw" \
+            --repository "$GITHUB_WORKSPACE/latchway" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify the exact candidate image signature and provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OCI_IMAGE_DIGEST: ${{ steps.verified.outputs.oci_image_digest }}
+        run: |
+          cosign verify \
+            --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$OCI_IMAGE_DIGEST"
+          gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "${{ inputs.candidate_commit }}" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+      - name: Preflight immutable releases and every fixed core release asset
+        id: immutable-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          IMAGE: ${{ steps.verified.outputs.image }}
+          INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
+          VERSION: ${{ steps.verified.outputs.core_version }}
+          CANDIDATE_DIR: ${{ runner.temp }}/latchway-candidate
+          SECURITY_DIR: ${{ runner.temp }}/latchway-security
+          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+        run: |
+          set -Eeuo pipefail
+          moving='[]'
+          if [[ "$VERSION" != *-* ]]; then
+            IFS=. read -r major minor patch <<< "$VERSION"
+            moving=$(jq --null-input --compact-output \
+              --arg mm "$major.$minor" --arg m "$major" '[ $mm, $m, "latest" ]')
+          fi
+          jq --null-input \
+            --arg repository "$IMAGE" \
+            --arg version "$VERSION" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg digest "$INDEX_DIGEST" \
+            --argjson moving "$moving" \
+            '{schema_version: 1, kind: "latchway_oci_alias_promotion",
+              repository: $repository, version: $version, source_commit: $commit,
+              index_digest: $digest, immutable_version: $version,
+              moving_aliases: $moving}' > "$RUNNER_TEMP/oci-alias-promotion.json"
+          install -m 0600 -- \
+            "$PROMOTION_REPORT" \
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
+          install -m 0600 -- \
+            "$RUNNER_TEMP/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+          assets=(
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
+            "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-candidate.json"
+            "$CANDIDATE_DIR/latchway-candidate.attestation.sigstore.json"
+            "$CANDIDATE_DIR/latchway-contract.tar.gz"
+            "$CANDIDATE_DIR/latchway-linux-amd64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64.spdx.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-vulnerability.json"
+            "$CANDIDATE_DIR/latchway-linux-amd64-license.json"
+            "$CANDIDATE_DIR/latchway-linux-arm64-license.json"
+            "$SECURITY_DIR/security-summary.json"
+            "$SECURITY_DIR/security-summary.attestation.sigstore.json"
+            "$RUNNER_TEMP/oci-alias-promotion.json"
+          )
+          : > "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          declare -A names=()
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test -s "$asset"
+            name=${asset##*/}
+            test -z "${names[$name]:-}"
+            names[$name]=1
+            printf '%s\n' "$asset" >> "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          done
+          test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d ' ')" = 14
+
+          set +e
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/preflight-release.json" \
+            2> "$RUNNER_TEMP/preflight-release-error.txt"
+          release_status=$?
+          set -e
+          if [[ "$release_status" -ne 0 ]]; then
+            test "$release_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" \
+              "$RUNNER_TEMP/preflight-release-error.txt"
+            echo "mode=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+          expected_body="Immutable Latchway product release $INTENDED_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg title "Latchway $INTENDED_TAG" \
+            --arg body "$expected_body" \
+            --argjson prerelease "$expected_prerelease" \
+            '.tag_name == $tag and .name == $title and .body == $body and
+             .prerelease == $prerelease and
+             ((.draft == true and .immutable == false) or
+              (.draft == false and .immutable == true))' \
+            "$RUNNER_TEMP/preflight-release.json" >/dev/null
+          mode=draft
+          if [[ "$(jq --raw-output .immutable "$RUNNER_TEMP/preflight-release.json")" == true ]]; then
+            mode=immutable
+          fi
+          while IFS= read -r existing_name; do
+            test -n "${names[$existing_name]:-}"
+          done < <(jq --raw-output '.assets[].name' "$RUNNER_TEMP/preflight-release.json")
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 0 then "absent"
+              elif length == 1 then (.[0].digest // "digest-unavailable")
+              else error("duplicate fixed core release asset") end
+            ' "$RUNNER_TEMP/preflight-release.json")
+            if [[ "$mode" == immutable ]]; then test "$existing" = "$expected"; fi
+            if [[ "$existing" != absent ]]; then
+              test "$existing" = "$expected"
+              download_dir=$(mktemp -d "$RUNNER_TEMP/product-asset-preflight.XXXXXX")
+              gh release download "$INTENDED_TAG" --pattern "$name" --dir "$download_dir"
+              cmp --silent "$asset" "$download_dir/$name"
+            fi
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - name: Verify any existing core release tag
+        id: release-state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/existing-tag-ref.json" 2> "$RUNNER_TEMP/existing-tag-error.txt"
+          lookup_status=$?
+          set -e
+          if [[ "$lookup_status" -ne 0 ]]; then
+            test "$lookup_status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/existing-tag-error.txt"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/existing-tag-ref.json")
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/existing-tag-ref.json")" = tag
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/existing-tag-object.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$message" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/existing-tag-object.json" >/dev/null
+          echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+      - name: Create the evidence-gated annotated core tag
+        if: steps.release-state.outputs.tag_exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+        run: |
+          jq --null-input \
+            --arg tag "$INTENDED_TAG" \
+            --arg message "Latchway $INTENDED_TAG\n\nPromotion evidence SHA-256: $REPORT_SHA256" \
+            --arg object "$CANDIDATE_COMMIT" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{tag: $tag, message: $message, object: $object, type: "commit", tagger: {name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com", date: $date}}' \
+            > "$RUNNER_TEMP/tag-object.json"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/git/tags" \
+            --input "$RUNNER_TEMP/tag-object.json" \
+            > "$RUNNER_TEMP/tag-result.json"
+          tag_object=$(jq --raw-output .sha "$RUNNER_TEMP/tag-result.json")
+          [[ "$tag_object" =~ ^[0-9a-f]{40}$ ]]
+          jq --null-input \
+            --arg ref "refs/tags/$INTENDED_TAG" \
+            --arg sha "$tag_object" \
+            '{ref: $ref, sha: $sha}' \
+            > "$RUNNER_TEMP/tag-ref.json"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/git/refs" \
+            --input "$RUNNER_TEMP/tag-ref.json" >/dev/null
+      - name: Re-fetch and verify the immutable annotated core tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          expected_message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" > "$RUNNER_TEMP/final-tag-ref.json"
+          jq --exit-status \
+            --arg ref "refs/tags/$INTENDED_TAG" \
+            '.ref == $ref and .object.type == "tag" and (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$RUNNER_TEMP/final-tag-ref.json" >/dev/null
+          tag_object=$(jq --raw-output .object.sha "$RUNNER_TEMP/final-tag-ref.json")
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/final-tag-object.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$expected_message" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/final-tag-object.json" >/dev/null
+      - name: Prepare the recoverable product release draft and exact assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          RELEASE_MODE: ${{ steps.immutable-release.outputs.mode }}
+        run: |
+          set -Eeuo pipefail
+          case "$RELEASE_MODE" in
+            absent|draft|immutable) ;;
+            *) echo "invalid immutable-release preflight mode" >&2; exit 1 ;;
+          esac
+          expected_body="Immutable Latchway product release $INTENDED_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          if [[ "$RELEASE_MODE" == absent ]]; then
+            create=(gh release create "$INTENDED_TAG" --draft --verify-tag --title "Latchway $INTENDED_TAG" --notes "$expected_body")
+            if [[ "$INTENDED_TAG" == *-* ]]; then create+=(--prerelease); fi
+            "${create[@]}"
+          fi
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/product-release-draft.json"
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+          if [[ "$RELEASE_MODE" == immutable ]]; then
+            expected_draft=false
+            expected_immutable=true
+          else
+            expected_draft=true
+            expected_immutable=false
+          fi
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg title "Latchway $INTENDED_TAG" \
+            --arg body "$expected_body" \
+            --argjson prerelease "$expected_prerelease" \
+            --argjson draft "$expected_draft" \
+            --argjson immutable "$expected_immutable" \
+            '.tag_name == $tag and .name == $title and .body == $body and
+             .prerelease == $prerelease and .draft == $draft and
+             .immutable == $immutable and (.id | type == "number" and . > 0)' \
+            "$RUNNER_TEMP/product-release-draft.json" >/dev/null
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            while IFS= read -r asset; do
+              name=${asset##*/}
+              expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+              existing=$(jq --raw-output --arg name "$name" '
+                [.assets[] | select(.name == $name)] |
+                if length == 0 then "absent"
+                elif length == 1 then (.[0].digest // "digest-unavailable")
+                else error("duplicate fixed core release asset") end
+              ' "$RUNNER_TEMP/product-release-draft.json")
+              if [[ "$existing" == absent ]]; then
+                gh release upload "$INTENDED_TAG" "$asset"
+              else
+                test "$existing" = "$expected"
+              fi
+            done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+            gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+              > "$RUNNER_TEMP/product-release-draft.json"
+          fi
+          while IFS= read -r asset; do basename "$asset"; done \
+            < "$RUNNER_TEMP/fixed-core-release-assets.txt" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/product-expected-assets.txt"
+          jq --raw-output '.assets[].name' "$RUNNER_TEMP/product-release-draft.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/product-actual-assets.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/product-expected-assets.txt" \
+            "$RUNNER_TEMP/product-actual-assets.txt"
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            actual=$(jq --raw-output --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 1 then (.[0].digest // "digest-unavailable")
+              else error("fixed core release asset missing or duplicated") end
+            ' "$RUNNER_TEMP/product-release-draft.json")
+            test "$actual" = "$expected"
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+      - name: Promote only the verified index digest to stable OCI tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.verified.outputs.image }}
+          INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
+          VERSION: ${{ steps.verified.outputs.core_version }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          inspect_reference() {
+            local reference="$1" output="$2" error="$3"
+            set +e
+            docker buildx imagetools inspect --raw "$reference" > "$output" 2> "$error"
+            local status=$?
+            set -e
+            if [[ "$status" -ne 0 ]]; then
+              grep --extended-regexp --ignore-case --quiet \
+                'manifest unknown|name unknown|not found' \
+                "$error"
+              return 1
+            fi
+          }
+          digest_of() {
+            printf 'sha256:%s\n' "$(sha256sum "$1" | cut -d ' ' -f 1)"
+          }
+
+          # The exact version coordinate is immutable: create once or require
+          # byte identity forever. It is never overwritten by a retry.
+          version_target="$IMAGE:$VERSION"
+          if inspect_reference "$version_target" \
+            "$RUNNER_TEMP/oci-version-existing.json" \
+            "$RUNNER_TEMP/oci-version-existing.error"; then
+            test "$(digest_of "$RUNNER_TEMP/oci-version-existing.json")" = "$INDEX_DIGEST"
+          else
+            docker buildx imagetools create --tag "$version_target" "$IMAGE@$INDEX_DIGEST"
+          fi
+          docker buildx imagetools inspect --raw "$version_target" \
+            > "$RUNNER_TEMP/oci-version-final.json"
+          test "$(digest_of "$RUNNER_TEMP/oci-version-final.json")" = "$INDEX_DIGEST"
+
+          if [[ "$VERSION" != *-* ]]; then
+            IFS=. read -r major minor patch <<< "$VERSION"
+            [[ "$major" =~ ^(0|[1-9][0-9]*)$ ]]
+            [[ "$minor" =~ ^(0|[1-9][0-9]*)$ ]]
+            [[ "$patch" =~ ^(0|[1-9][0-9]*)$ ]]
+            aliases=("$major.$minor" "$major" latest)
+            declare -A alias_state=()
+            declare -A alias_digest=()
+            declare -A finalized_versions=()
+            jq --null-input \
+              --arg mm "$major.$minor" --arg m "$major" \
+              '{
+                aliases: {($mm): null, ($m): null, latest: null},
+                stable_predecessors: {}
+              }' \
+              > "$RUNNER_TEMP/oci-alias-transition-plan.json"
+
+            require_finalized_version() {
+              local prior_version="$1" prior_commit="$2"
+              local prefix="$RUNNER_TEMP/prior-final-$prior_version"
+              local evidence_tag="evidence/v$prior_version"
+              local expected_title="Latchway v$prior_version final evidence"
+              local expected_body="Authoritative final evidence for immutable product release v$prior_version at $prior_commit."
+              local expected_message
+              printf -v expected_message \
+                'Latchway v%s final evidence\n\nProduct release: v%s\nCandidate commit: %s' \
+                "$prior_version" "$prior_version" "$prior_commit"
+              if [[ -n "${finalized_versions[$prior_version]:-}" ]]; then
+                test "${finalized_versions[$prior_version]}" = "$prior_commit"
+                return
+              fi
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$evidence_tag" \
+                > "$prefix-tag-ref.json"
+              jq --exit-status --arg ref "refs/tags/$evidence_tag" \
+                '.ref == $ref and .object.type == "tag" and
+                 (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+                "$prefix-tag-ref.json" >/dev/null
+              local evidence_tag_object
+              evidence_tag_object=$(jq --raw-output .object.sha "$prefix-tag-ref.json")
+              gh api "repos/$GITHUB_REPOSITORY/git/tags/$evidence_tag_object" \
+                > "$prefix-tag-object.json"
+              jq --exit-status \
+                --arg tag "$evidence_tag" \
+                --arg commit "$prior_commit" \
+                --arg message "$expected_message" \
+                '.tag == $tag and .object.type == "commit" and
+                 .object.sha == $commit and .message == $message' \
+                "$prefix-tag-object.json" >/dev/null
+              gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
+                > "$prefix-release.json"
+              jq --exit-status \
+                --arg tag "$evidence_tag" \
+                --arg title "$expected_title" \
+                --arg body "$expected_body" \
+                --argjson assets '[
+                  "COMPLETION_REPORT.attestation.sigstore.json",
+                  "COMPLETION_REPORT.md",
+                  "SHA256SUMS",
+                  "latchway-cross-repository-release.attestation.sigstore.json",
+                  "latchway-cross-repository-release.json",
+                  "latchway-product-release-attestation.json",
+                  "latchway-public-registry-byte-proof.json",
+                  "latchway-publication-state.json",
+                  "latchway-release-evidence-v1.tar.gz"
+                ]' \
+                '.tag_name == $tag and .name == $title and .body == $body and
+                 .draft == false and .prerelease == false and .immutable == true and
+                 ([.assets[].name] | sort) == $assets and
+                 all(.assets[]; (.id | type == "number" and . > 0) and
+                   (.size | type == "number" and . > 0) and
+                   (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")))' \
+                "$prefix-release.json" >/dev/null
+              gh release verify "$evidence_tag" --format json \
+                > "$prefix-release-attestation.json"
+              python3 latchway/scripts/verify-github-release-attestation.py \
+                --attestation "$prefix-release-attestation.json" \
+                --release "$prefix-release.json" \
+                --repository "$GITHUB_REPOSITORY" \
+                --tag "$evidence_tag" \
+                --ref-sha "$evidence_tag_object" \
+                --output "$prefix-release-attestation-verification.json"
+              mkdir "$prefix-assets"
+              gh release download "$evidence_tag" --dir "$prefix-assets"
+              gh attestation verify "$prefix-assets/COMPLETION_REPORT.md" \
+                --bundle "$prefix-assets/COMPLETION_REPORT.attestation.sigstore.json" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/finalize-release-record.yml" \
+                --source-digest "$prior_commit" \
+                --signer-digest "$prior_commit" \
+                --source-ref refs/heads/main \
+                --deny-self-hosted-runners >/dev/null
+              python3 latchway/scripts/verify-final-evidence-release.py \
+                --directory "$prefix-assets" \
+                --release "$prefix-release.json" \
+                --candidate-commit "$prior_commit" \
+                --release-tag "v$prior_version"
+              finalized_versions[$prior_version]="$prior_commit"
+            }
+
+            # A failed promotion can leave its immutable product tag and exact
+            # OCI version before it reaches the moving-alias phase. Enumerate
+            # every stable product tag so a later release cannot skip that
+            # unfinished version merely because no moving alias reached it.
+            gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" \
+              --jq '.[] | [.ref, .object.type, .object.sha] | @tsv' \
+              > "$RUNNER_TEMP/stable-product-tag-refs.tsv"
+            candidate_tag_seen=false
+            while IFS=$'\t' read -r stable_ref object_type object_sha; do
+              if [[ ! "$stable_ref" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                continue
+              fi
+              prior_version="${stable_ref#refs/tags/v}"
+              if [[ "$prior_version" == "$VERSION" ]]; then
+                candidate_tag_seen=true
+                continue
+              fi
+              test "$object_type" = tag
+              [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]]
+              # This also rejects an older candidate when any newer stable tag
+              # already exists; stable promotions never skip or roll back.
+              python3 latchway/scripts/verify-oci-alias-transition.py \
+                --alias latest \
+                --current-version "$prior_version" \
+                --candidate-version "$VERSION" >/dev/null
+              gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
+                > "$RUNNER_TEMP/prior-product-$prior_version-tag.json"
+              prior_commit=$(jq --exit-status --raw-output \
+                '.object.sha | select(
+                  type == "string" and test("^[0-9a-f]{40}$")
+                )' "$RUNNER_TEMP/prior-product-$prior_version-tag.json")
+              jq --exit-status \
+                --arg tag "v$prior_version" \
+                --arg commit "$prior_commit" \
+                '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
+                "$RUNNER_TEMP/prior-product-$prior_version-tag.json" >/dev/null
+              require_finalized_version "$prior_version" "$prior_commit"
+              jq \
+                --arg version "$prior_version" \
+                --arg commit "$prior_commit" \
+                '.stable_predecessors[$version] = {
+                  commit: $commit,
+                  finalized: true
+                }' "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+                > "$RUNNER_TEMP/oci-alias-transition-plan.next.json"
+              mv -- "$RUNNER_TEMP/oci-alias-transition-plan.next.json" \
+                "$RUNNER_TEMP/oci-alias-transition-plan.json"
+            done < "$RUNNER_TEMP/stable-product-tag-refs.tsv"
+            test "$candidate_tag_seen" = true
+
+            # Preflight every moving alias and its predecessor's immutable final
+            # evidence before changing any alias. This prevents a newer release
+            # from making an unfinished older release impossible to finalize.
+            for alias in "${aliases[@]}"; do
+              target="$IMAGE:$alias"
+              if inspect_reference "$target" \
+                "$RUNNER_TEMP/oci-alias-$alias-existing.json" \
+                "$RUNNER_TEMP/oci-alias-$alias-existing.error"; then
+                current_digest="$(digest_of "$RUNNER_TEMP/oci-alias-$alias-existing.json")"
+                alias_state[$alias]=present
+                alias_digest[$alias]="$current_digest"
+                predecessor_finalized=false
+                if [[ "$current_digest" != "$INDEX_DIGEST" ]]; then
+                  # Authenticate the prior alias state before authorizing a
+                  # monotonic move. The version label alone is never trusted.
+                  docker pull --platform linux/amd64 "$target" >/dev/null
+                  current_version=$(docker image inspect --format \
+                    '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$target")
+                  current_commit=$(docker image inspect --format \
+                    '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$target")
+                  current_source=$(docker image inspect --format \
+                    '{{ index .Config.Labels "org.opencontainers.image.source" }}' "$target")
+                  test "$current_source" = "https://github.com/Latchway/latchway"
+                  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]]
+                  python3 latchway/scripts/verify-oci-alias-transition.py \
+                    --alias "$alias" \
+                    --current-version "$current_version" \
+                    --candidate-version "$VERSION" >/dev/null
+                  docker buildx imagetools inspect --raw "$IMAGE:$current_version" \
+                    > "$RUNNER_TEMP/oci-alias-$alias-current-version.json"
+                  test "$(digest_of "$RUNNER_TEMP/oci-alias-$alias-current-version.json")" = "$current_digest"
+                  gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+                    "repos/$GITHUB_REPOSITORY/releases/tags/v$current_version" \
+                    > "$RUNNER_TEMP/oci-alias-$alias-current-release.json"
+                  jq --exit-status --arg tag "v$current_version" \
+                    '.tag_name == $tag and .draft == false and .prerelease == false and .immutable == true' \
+                    "$RUNNER_TEMP/oci-alias-$alias-current-release.json" >/dev/null
+                  gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$current_version" \
+                    > "$RUNNER_TEMP/oci-alias-$alias-current-tag-ref.json"
+                  tag_object=$(jq --raw-output \
+                    '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+                    "$RUNNER_TEMP/oci-alias-$alias-current-tag-ref.json")
+                  test "$(jq --raw-output .object.type "$RUNNER_TEMP/oci-alias-$alias-current-tag-ref.json")" = tag
+                  gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+                    > "$RUNNER_TEMP/oci-alias-$alias-current-tag.json"
+                  jq --exit-status --arg tag "v$current_version" --arg commit "$current_commit" \
+                    '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
+                    "$RUNNER_TEMP/oci-alias-$alias-current-tag.json" >/dev/null
+                  cosign verify \
+                    --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
+                    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                    --certificate-github-workflow-sha "$current_commit" \
+                    "$IMAGE@$current_digest" >/dev/null
+                  gh attestation verify "oci://$IMAGE@$current_digest" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                    --source-digest "$current_commit" \
+                    --signer-digest "$current_commit" \
+                    --source-ref refs/heads/main \
+                    --deny-self-hosted-runners >/dev/null
+                  require_finalized_version "$current_version" "$current_commit"
+                  predecessor_finalized=true
+                else
+                  current_version="$VERSION"
+                fi
+                jq \
+                  --arg alias "$alias" \
+                  --arg current "$current_version" \
+                  --argjson finalized "$predecessor_finalized" \
+                  '.aliases[$alias] = {
+                    current_version: $current,
+                    predecessor_finalized: $finalized
+                  }' "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+                  > "$RUNNER_TEMP/oci-alias-transition-plan.next.json"
+                mv -- "$RUNNER_TEMP/oci-alias-transition-plan.next.json" \
+                  "$RUNNER_TEMP/oci-alias-transition-plan.json"
+              else
+                alias_state[$alias]=absent
+              fi
+            done
+            python3 latchway/scripts/verify-oci-alias-transition.py \
+              --candidate-version "$VERSION" \
+              --plan "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+              > "$RUNNER_TEMP/oci-alias-transition-authorization.json"
+
+            # Re-close each preflight state immediately before its controlled
+            # create/advance. The shared concurrency group excludes another
+            # Latchway promotion or finalizer throughout this phase.
+            for alias in "${aliases[@]}"; do
+              target="$IMAGE:$alias"
+              if [[ "${alias_state[$alias]}" == present ]]; then
+                docker buildx imagetools inspect --raw "$target" \
+                  > "$RUNNER_TEMP/oci-alias-$alias-pre-update.json"
+                test "$(digest_of "$RUNNER_TEMP/oci-alias-$alias-pre-update.json")" = "${alias_digest[$alias]}"
+                if [[ "${alias_digest[$alias]}" != "$INDEX_DIGEST" ]]; then
+                  docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
+                fi
+              else
+                if inspect_reference "$target" \
+                  "$RUNNER_TEMP/oci-alias-$alias-pre-create.json" \
+                  "$RUNNER_TEMP/oci-alias-$alias-pre-create.error"; then
+                  echo "OCI alias appeared after absent preflight: $alias" >&2
+                  exit 1
+                fi
+                docker buildx imagetools create --tag "$target" "$IMAGE@$INDEX_DIGEST"
+              fi
+              docker buildx imagetools inspect --raw "$target" \
+                > "$RUNNER_TEMP/oci-alias-$alias-final.json"
+              actual="$(digest_of "$RUNNER_TEMP/oci-alias-$alias-final.json")"
+              test "$actual" = "$INDEX_DIGEST"
+            done
+          fi
+
+          jq --exit-status \
+            --arg repository "$IMAGE" --arg version "$VERSION" \
+            --arg commit "$CANDIDATE_COMMIT" --arg digest "$INDEX_DIGEST" \
+            '.schema_version == 1 and .kind == "latchway_oci_alias_promotion" and
+             .repository == $repository and .version == $version and
+             .source_commit == $commit and .index_digest == $digest and
+             .immutable_version == $version' \
+            "$RUNNER_TEMP/oci-alias-promotion.json" >/dev/null
+      - name: Publish the immutable release record
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          RELEASE_MODE: ${{ steps.immutable-release.outputs.mode }}
+        run: |
+          set -Eeuo pipefail
+          case "$RELEASE_MODE" in
+            absent|draft|immutable) ;;
+            *) echo "invalid immutable-release preflight mode" >&2; exit 1 ;;
+          esac
+          expected_message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          expected_body="Immutable Latchway product release $INTENDED_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+
+          # Close both mutable objects again immediately before publication.
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/pre-publish-product-tag-ref.json"
+          jq --exit-status --arg ref "refs/tags/$INTENDED_TAG" \
+            '.ref == $ref and .object.type == "tag" and
+             (.object.sha | type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$RUNNER_TEMP/pre-publish-product-tag-ref.json" >/dev/null
+          tag_object=$(jq --raw-output .object.sha \
+            "$RUNNER_TEMP/pre-publish-product-tag-ref.json")
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+            > "$RUNNER_TEMP/pre-publish-product-tag-object.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg message "$expected_message" \
+            '.tag == $tag and .object.type == "commit" and
+             .object.sha == $commit and .message == $message' \
+            "$RUNNER_TEMP/pre-publish-product-tag-object.json" >/dev/null
+          gh api --include -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/pre-publish-release-snapshot.http"
+          python3 latchway/scripts/verify-github-api-snapshot.py \
+            --response "$RUNNER_TEMP/pre-publish-release-snapshot.http" \
+            --expected-status 200 \
+            --body-output "$RUNNER_TEMP/release.json" \
+            --etag-output "$RUNNER_TEMP/pre-publish-release.etag"
+          release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+            "$RUNNER_TEMP/release.json")
+          if [[ "$RELEASE_MODE" == immutable ]]; then
+            expected_draft=false
+            expected_immutable=true
+          else
+            expected_draft=true
+            expected_immutable=false
+          fi
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg title "Latchway $INTENDED_TAG" \
+            --arg body "$expected_body" \
+            --argjson prerelease "$expected_prerelease" \
+            --argjson draft "$expected_draft" \
+            --argjson immutable "$expected_immutable" \
+            --argjson id "$release_id" \
+            '.id == $id and .tag_name == $tag and .name == $title and .body == $body and
+             .prerelease == $prerelease and .draft == $draft and
+             .immutable == $immutable' "$RUNNER_TEMP/release.json" >/dev/null
+          jq --raw-output '.assets[].name' "$RUNNER_TEMP/release.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/product-pre-publish-assets.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/product-expected-assets.txt" \
+            "$RUNNER_TEMP/product-pre-publish-assets.txt"
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            actual=$(jq --raw-output --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 1 then (.[0].digest // "digest-unavailable")
+              else error("pre-publication core asset missing or duplicated") end
+            ' "$RUNNER_TEMP/release.json")
+            test "$actual" = "$expected"
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          if [[ "$RELEASE_MODE" != immutable ]]; then
+            release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/release.json")
+            jq --null-input '{draft: false}' > "$RUNNER_TEMP/publish-release.json"
+            # GitHub does not document If-Match for this unsafe PATCH. Use the
+            # strongest supported guard: prove the exact validated ETag is still
+            # current with a conditional GET immediately before the one PATCH.
+            gh api --include \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -H "If-None-Match: $(cat "$RUNNER_TEMP/pre-publish-release.etag")" \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+              > "$RUNNER_TEMP/pre-publish-release-unchanged.http"
+            python3 latchway/scripts/verify-github-api-snapshot.py \
+              --response "$RUNNER_TEMP/pre-publish-release-unchanged.http" \
+              --expected-status 304
+            gh api --method PATCH \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --input "$RUNNER_TEMP/publish-release.json" \
+              > "$RUNNER_TEMP/published-release.json"
+          fi
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/release.json"
+          jq --exit-status \
+            --arg tag "$INTENDED_TAG" \
+            --arg title "Latchway $INTENDED_TAG" \
+            --arg body "$expected_body" \
+            --argjson prerelease "$expected_prerelease" \
+            --argjson id "$release_id" \
+            '.id == $id and .tag_name == $tag and .name == $title and .body == $body and
+             .draft == false and .prerelease == $prerelease and
+             .immutable == true' "$RUNNER_TEMP/release.json" >/dev/null
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/release-by-id.json"
+          cmp --silent \
+            <(jq --sort-keys . "$RUNNER_TEMP/release.json") \
+            <(jq --sort-keys . "$RUNNER_TEMP/release-by-id.json")
+          jq --raw-output '.assets[].name' "$RUNNER_TEMP/release.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/product-final-assets.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/product-expected-assets.txt" \
+            "$RUNNER_TEMP/product-final-assets.txt"
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output --arg name "$name" \
+              '[.assets[] | select(.name == $name)] |
+               if length == 1 then (.[0].digest // "digest-unavailable")
+               else error("immutable core release asset missing or duplicated") end' \
+              "$RUNNER_TEMP/release.json")
+            test "$existing" = "$expected"
+            gh release verify-asset "$INTENDED_TAG" "$asset" --format json \
+              > "$RUNNER_TEMP/product-release-asset-${name}.json"
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          gh release verify "$INTENDED_TAG" --format json \
+            > "$RUNNER_TEMP/product-release-attestation.json"
+          python3 latchway/scripts/verify-github-release-attestation.py \
+            --attestation "$RUNNER_TEMP/product-release-attestation.json" \
+            --release "$RUNNER_TEMP/release.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$INTENDED_TAG" \
+            --ref-sha "$(jq --raw-output .object.sha "$RUNNER_TEMP/pre-publish-product-tag-ref.json")" \
+            --output "$RUNNER_TEMP/product-release-attestation-verification.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/post-publish-product-tag-ref.json"
+          cmp --silent \
+            <(jq --sort-keys . "$RUNNER_TEMP/pre-publish-product-tag-ref.json") \
+            <(jq --sort-keys . "$RUNNER_TEMP/post-publish-product-tag-ref.json")
+      - name: Dispatch exact evidence-bound SDK publications
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          OCI_IMAGE_DIGEST: ${{ steps.verified.outputs.oci_image_digest }}
+        run: |
+          for mapping in \
+            'javascript:latchway-js' \
+            'ios:latchway-ios-sdk' \
+            'android:latchway-android' \
+            'react_native:latchway-react-native-sdk'; do
+            repository_id=${mapping%%:*}
+            repository_name=${mapping#*:}
+            coordinate=$(jq --compact-output --arg id "$repository_id" '.repositories[] | select(.id == $id)' "$PROMOTION_REPORT")
+            test -n "$coordinate"
+            jq --null-input \
+              --arg core_tag "$INTENDED_TAG" \
+              --arg evidence_url "https://github.com/$GITHUB_REPOSITORY/releases/download/$INTENDED_TAG/latchway-cross-repository-promotion.json" \
+              --arg evidence_sha256 "$REPORT_SHA256" \
+              --arg oci_image_digest "$OCI_IMAGE_DIGEST" \
+              --argjson coordinate "$coordinate" \
+              '{event_type: "latchway_release_promoted", client_payload: {core_tag: $core_tag, promotion_evidence_url: $evidence_url, promotion_evidence_sha256: $evidence_sha256, oci_image_digest: $oci_image_digest, repository: $coordinate}}' \
+              > "$RUNNER_TEMP/sdk-dispatch.json"
+            gh api \
+              --method POST \
+              "repos/Latchway/$repository_name/dispatches" \
+              --input "$RUNNER_TEMP/sdk-dispatch.json"
+          done

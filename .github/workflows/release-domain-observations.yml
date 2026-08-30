@@ -1,0 +1,408 @@
+name: Protected release-domain observations
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Fixed external observation set to execute
+        required: true
+        type: choice
+        options:
+          - live_sdk_conformance
+          - physical_devices
+          - live_provider
+          - supply_chain
+          - public_tags
+          - public_registries
+      candidate_commit:
+        description: Exact core candidate commit
+        required: true
+        type: string
+      javascript_commit:
+        description: Exact JavaScript SDK commit from source conformance
+        required: true
+        type: string
+      ios_commit:
+        description: Exact iOS SDK commit from source conformance
+        required: true
+        type: string
+      android_commit:
+        description: Exact Android SDK commit from source conformance
+        required: true
+        type: string
+      react_native_commit:
+        description: Exact React Native SDK commit from source conformance
+        required: true
+        type: string
+      source_evidence_run_id:
+        description: Successful attested source-conformance run ID
+        required: true
+        type: string
+      source_evidence_run_attempt:
+        description: Exact source-conformance run attempt
+        required: true
+        type: string
+      candidate_run_id:
+        description: Successful attested immutable-candidate run ID
+        required: true
+        type: string
+      candidate_run_attempt:
+        description: Exact immutable-candidate run attempt
+        required: true
+        type: string
+      ios_physical_run_id:
+        description: Exact successful Physical App Attest evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      ios_physical_run_attempt:
+        description: Exact Physical App Attest run attempt (SDK/device domains only)
+        required: false
+        type: string
+      android_physical_run_id:
+        description: Exact successful Physical Play Integrity evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      android_physical_run_attempt:
+        description: Exact Physical Play Integrity run attempt (SDK/device domains only)
+        required: false
+        type: string
+      react_native_physical_run_id:
+        description: Exact successful Physical React Native evidence run ID (SDK/device domains only)
+        required: false
+        type: string
+      react_native_physical_run_attempt:
+        description: Exact Physical React Native run attempt (SDK/device domains only)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+  packages: read
+
+concurrency:
+  group: release-domain-observations-${{ inputs.domain }}-${{ inputs.candidate_commit }}
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence
+    runs-on: ${{ inputs.domain == 'public_registries' && 'macos-15' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact core candidate and producer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          path: latchway
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a fixed GitHub CLI verifier
+        run: python3 latchway/scripts/require-gh-version.py
+      - name: Check out the exact JavaScript SDK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-js
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
+          ref: ${{ inputs.javascript_commit }}
+          path: latchway-js
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the exact iOS SDK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-ios-sdk
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
+          ref: ${{ inputs.ios_commit }}
+          path: latchway-ios-sdk
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the exact Android SDK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-android
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
+          ref: ${{ inputs.android_commit }}
+          path: latchway-android
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the exact React Native SDK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: Latchway/latchway-react-native-sdk
+          token: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}
+          ref: ${{ inputs.react_native_commit }}
+          path: latchway-react-native-sdk
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate immutable run and commit inputs
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          JAVASCRIPT_COMMIT: ${{ inputs.javascript_commit }}
+          IOS_COMMIT: ${{ inputs.ios_commit }}
+          ANDROID_COMMIT: ${{ inputs.android_commit }}
+          REACT_NATIVE_COMMIT: ${{ inputs.react_native_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
+          IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
+          ANDROID_PHYSICAL_RUN_ID: ${{ inputs.android_physical_run_id }}
+          ANDROID_PHYSICAL_RUN_ATTEMPT: ${{ inputs.android_physical_run_attempt }}
+          REACT_NATIVE_PHYSICAL_RUN_ID: ${{ inputs.react_native_physical_run_id }}
+          REACT_NATIVE_PHYSICAL_RUN_ATTEMPT: ${{ inputs.react_native_physical_run_attempt }}
+        run: |
+          for value in "$CANDIDATE_COMMIT" "$JAVASCRIPT_COMMIT" "$IOS_COMMIT" "$ANDROID_COMMIT" "$REACT_NATIVE_COMMIT"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]]
+          done
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          if [[ "$EVIDENCE_DOMAIN" == live_sdk_conformance || "$EVIDENCE_DOMAIN" == physical_devices ]]; then
+            for value in "$IOS_PHYSICAL_RUN_ID" "$ANDROID_PHYSICAL_RUN_ID" "$REACT_NATIVE_PHYSICAL_RUN_ID"; do
+              [[ "$value" =~ ^[1-9][0-9]{0,19}$ ]]
+            done
+            for value in "$IOS_PHYSICAL_RUN_ATTEMPT" "$ANDROID_PHYSICAL_RUN_ATTEMPT" "$REACT_NATIVE_PHYSICAL_RUN_ATTEMPT"; do
+              [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]]
+            done
+          fi
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test "$(git -C latchway-js rev-parse --verify HEAD)" = "$JAVASCRIPT_COMMIT"
+          test "$(git -C latchway-ios-sdk rev-parse --verify HEAD)" = "$IOS_COMMIT"
+          test "$(git -C latchway-android rev-parse --verify HEAD)" = "$ANDROID_COMMIT"
+          test "$(git -C latchway-react-native-sdk rev-parse --verify HEAD)" = "$REACT_NATIVE_COMMIT"
+      - name: Authenticate exact source and candidate runs and attempts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          verify_run() {
+            local label="$1" run_id="$2" attempt="$3" path="$4"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RUNNER_TEMP/$label-run.json"
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+              "$RUNNER_TEMP/$label-run.json" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
+            jq --exit-status --arg path "$path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+          }
+          verify_run source "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+          verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+      - name: Download the exact source-conformance artifact and bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cross-repository-source-${{ inputs.source_evidence_run_id }}-${{ inputs.source_evidence_run_attempt }}
+          path: ${{ runner.temp }}/source
+          run-id: ${{ inputs.source_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the exact candidate artifact and bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify source and candidate bundle provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          gh attestation verify "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --bundle "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/source-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
+      - name: Download exact iOS physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-attest-physical-${{ inputs.ios_physical_run_id }}-${{ inputs.ios_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/ios
+          repository: Latchway/latchway-ios-sdk
+          run-id: ${{ inputs.ios_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact Android physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: play-integrity-physical-${{ inputs.android_physical_run_id }}-${{ inputs.android_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/android
+          repository: Latchway/latchway-android
+          run-id: ${{ inputs.android_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact React Native iOS physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: react-native-ios-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/react-native-ios
+          repository: Latchway/latchway-react-native-sdk
+          run-id: ${{ inputs.react_native_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - name: Download exact React Native Android physical evidence receipt
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: react-native-android-physical-${{ inputs.react_native_physical_run_id }}-${{ inputs.react_native_physical_run_attempt }}
+          path: ${{ runner.temp }}/physical/react-native-android
+          repository: Latchway/latchway-react-native-sdk
+          run-id: ${{ inputs.react_native_physical_run_id }}
+          github-token: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        if: inputs.domain == 'live_sdk_conformance'
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        if: inputs.domain == 'live_sdk_conformance'
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: latchway-js/pnpm-lock.yaml
+      - name: Build the exact JavaScript SDK live harness
+        if: inputs.domain == 'live_sdk_conformance'
+        working-directory: latchway-js
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        if: inputs.domain == 'supply_chain'
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: inputs.domain == 'supply_chain' || inputs.domain == 'public_registries'
+      - name: Build the exact CLI for the bounded live-provider self-test
+        if: inputs.domain == 'live_provider'
+        working-directory: latchway
+        run: go build -trimpath -o "$RUNNER_TEMP/latchway" ./cmd/latchway
+      - name: Execute the fixed SDK or physical-device observation plan
+        if: inputs.domain == 'live_sdk_conformance' || inputs.domain == 'physical_devices'
+        shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          GH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}
+          LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+          LATCHWAY_MAVEN_SIGNING_FINGERPRINT: ${{ vars.LATCHWAY_MAVEN_SIGNING_FINGERPRINT }}
+          LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
+          LATCHWAY_LIVE_SDK_APPLICATION_ID: ${{ vars.LATCHWAY_LIVE_SDK_APPLICATION_ID }}
+          LATCHWAY_LIVE_SDK_FEATURE: ${{ vars.LATCHWAY_LIVE_SDK_FEATURE }}
+          LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE: ${{ vars.LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE }}
+          LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER: ${{ vars.LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER }}
+          LATCHWAY_LIVE_SDK_ENVIRONMENT: ${{ vars.LATCHWAY_LIVE_SDK_ENVIRONMENT }}
+          LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER: ${{ vars.LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER }}
+          LATCHWAY_LIVE_SDK_MODEL: ${{ vars.LATCHWAY_LIVE_SDK_MODEL }}
+          LATCHWAY_LIVE_SDK_IDENTITY_TOKEN: ${{ inputs.domain == 'live_sdk_conformance' && secrets.LATCHWAY_LIVE_SDK_IDENTITY_TOKEN || '' }}
+          LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN: ${{ inputs.domain == 'live_sdk_conformance' && secrets.LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN || '' }}
+          IOS_PHYSICAL_RUN_ID: ${{ inputs.ios_physical_run_id }}
+          IOS_PHYSICAL_RUN_ATTEMPT: ${{ inputs.ios_physical_run_attempt }}
+          ANDROID_PHYSICAL_RUN_ID: ${{ inputs.android_physical_run_id }}
+          ANDROID_PHYSICAL_RUN_ATTEMPT: ${{ inputs.android_physical_run_attempt }}
+          REACT_NATIVE_PHYSICAL_RUN_ID: ${{ inputs.react_native_physical_run_id }}
+          REACT_NATIVE_PHYSICAL_RUN_ATTEMPT: ${{ inputs.react_native_physical_run_attempt }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/observation-artifact"
+          test -n "$GH_TOKEN"
+          python3 latchway/scripts/release-domain-observer.py \
+            --domain "$EVIDENCE_DOMAIN" \
+            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --output-directory "$RUNNER_TEMP/observation-artifact/raw" \
+            --core-repo "$GITHUB_WORKSPACE/latchway" \
+            --javascript-repo "$GITHUB_WORKSPACE/latchway-js" \
+            --ios-repo "$GITHUB_WORKSPACE/latchway-ios-sdk" \
+            --android-repo "$GITHUB_WORKSPACE/latchway-android" \
+            --react-native-repo "$GITHUB_WORKSPACE/latchway-react-native-sdk" \
+            --ios-receipt-directory "$RUNNER_TEMP/physical/ios" \
+            --android-receipt-directory "$RUNNER_TEMP/physical/android" \
+            --react-native-ios-receipt-directory "$RUNNER_TEMP/physical/react-native-ios" \
+            --react-native-android-receipt-directory "$RUNNER_TEMP/physical/react-native-android" \
+            --ios-run-id "$IOS_PHYSICAL_RUN_ID" \
+            --ios-run-attempt "$IOS_PHYSICAL_RUN_ATTEMPT" \
+            --android-run-id "$ANDROID_PHYSICAL_RUN_ID" \
+            --android-run-attempt "$ANDROID_PHYSICAL_RUN_ATTEMPT" \
+            --react-native-run-id "$REACT_NATIVE_PHYSICAL_RUN_ID" \
+            --react-native-run-attempt "$REACT_NATIVE_PHYSICAL_RUN_ATTEMPT"
+      - name: Execute the fixed non-SDK domain observation plan
+        if: inputs.domain != 'live_sdk_conformance' && inputs.domain != 'physical_devices'
+        shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          GH_TOKEN: ${{ github.token }}
+          LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+          LATCHWAY_MAVEN_SIGNING_FINGERPRINT: ${{ vars.LATCHWAY_MAVEN_SIGNING_FINGERPRINT }}
+          LATCHWAY_BASE_URL: ${{ vars.LATCHWAY_LIVE_GATEWAY_BASE_URL }}
+          LATCHWAY_ADMIN_API_TOKEN: ${{ inputs.domain == 'live_provider' && secrets.LATCHWAY_LIVE_PROVIDER_ADMIN_API_TOKEN || '' }}
+          LATCHWAY_PROVIDER_ENVIRONMENT_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_ENVIRONMENT_ID }}
+          LATCHWAY_PROVIDER_UPSTREAM_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_UPSTREAM_ID }}
+          LATCHWAY_PROVIDER_MODEL_ID: ${{ vars.LATCHWAY_LIVE_PROVIDER_MODEL_ID }}
+          LATCHWAY_PROVIDER_MAX_COST_NANO_USD: ${{ vars.LATCHWAY_LIVE_PROVIDER_MAX_COST_NANO_USD }}
+          LATCHWAY_CLI_PATH: ${{ runner.temp }}/latchway
+        run: |
+          mkdir -p "$RUNNER_TEMP/observation-artifact"
+          python3 latchway/scripts/release-domain-observer.py \
+            --domain "$EVIDENCE_DOMAIN" \
+            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --output-directory "$RUNNER_TEMP/observation-artifact/raw" \
+            --core-repo "$GITHUB_WORKSPACE/latchway" \
+            --javascript-repo "$GITHUB_WORKSPACE/latchway-js" \
+            --ios-repo "$GITHUB_WORKSPACE/latchway-ios-sdk" \
+            --android-repo "$GITHUB_WORKSPACE/latchway-android" \
+            --react-native-repo "$GITHUB_WORKSPACE/latchway-react-native-sdk"
+      - name: Produce the exact machine-results manifest
+        shell: bash
+        env:
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          LATCHWAY_RELEASE_EVIDENCE_ENVIRONMENT: release-evidence
+        run: |
+          python3 latchway/scripts/release-domain-evidence.py \
+            --produce \
+            --domain "$EVIDENCE_DOMAIN" \
+            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --raw-directory "$RUNNER_TEMP/observation-artifact/raw" \
+            --receipt "$RUNNER_TEMP/observation-artifact/machine-results-manifest.json"
+      - name: Attest the exact machine-results manifest
+        id: machine-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/observation-artifact/machine-results-manifest.json
+      - name: Retain the machine-results attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.machine-attestation.outputs.bundle-path }}
+        run: cp -- "$BUNDLE_PATH" "$RUNNER_TEMP/observation-artifact/machine-results.attestation.sigstore.json"
+      - name: Retain only the attested machine-result set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-machine-results-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/observation-artifact
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

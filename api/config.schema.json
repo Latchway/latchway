@@ -1,0 +1,1236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/config/0.5.1/environment-config.schema.json",
+  "title": "Latchway EnvironmentConfig",
+  "description": "Immutable, revisioned configuration for one Latchway application environment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "latchway.dev/v1alpha1" },
+    "kind": { "const": "EnvironmentConfig" },
+    "metadata": { "$ref": "#/$defs/Metadata" },
+    "spec": { "$ref": "#/$defs/Spec" }
+  },
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+    },
+    "SecretRef": {
+      "type": "string",
+      "pattern": "^secret/[a-z][a-z0-9_-]{0,62}$"
+    },
+    "CELExpression": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(ms|s|m|h|d)$"
+    },
+    "Metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organization", "application", "environment"],
+      "properties": {
+        "organization": { "$ref": "#/$defs/Identifier" },
+        "application": { "$ref": "#/$defs/Identifier" },
+        "environment": { "$ref": "#/$defs/Identifier" },
+        "description": { "type": "string", "maxLength": 512 },
+        "labels": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,62}$" },
+          "additionalProperties": { "type": "string", "maxLength": 128 }
+        }
+      }
+    },
+    "Spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identityProviders",
+        "attestationPolicies",
+        "upstreams",
+        "models",
+        "limitPlans",
+        "features"
+      ],
+      "properties": {
+        "identityProviders": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/IdentityProvider" }
+        },
+        "attestationPolicies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/AttestationPolicy" }
+        },
+        "upstreams": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/Upstream" }
+        },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/Model" }
+        },
+        "inputAccountingProfiles": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/InputAccountingProfile" },
+          "default": []
+        },
+        "pricingCatalogs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/PricingCatalog" },
+          "default": []
+        },
+        "limitPlans": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/LimitPlan" }
+        },
+        "features": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/Feature" }
+        },
+        "session": { "$ref": "#/$defs/SessionPolicy" },
+        "privacy": { "$ref": "#/$defs/PrivacyPolicy" }
+      }
+    },
+    "ClaimMapping": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,62}$" },
+      "additionalProperties": { "$ref": "#/$defs/CELExpression" }
+    },
+    "IdentityProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": {
+          "enum": ["generic_oidc", "firebase", "supabase", "clerk", "custom_jwt"]
+        },
+        "projectId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$" },
+        "projectUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "issuer": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "audiences": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "authorizedParties": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "allowedAlgorithms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["RS256", "RS384", "RS512", "ES256", "ES384", "HS256"] }
+        },
+        "jwksUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "staticPublicKeySecretRef": { "$ref": "#/$defs/SecretRef" },
+        "symmetricSecretRef": { "$ref": "#/$defs/SecretRef" },
+        "acknowledgeSymmetricRisk": { "type": "boolean", "default": false },
+        "subjectClaim": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}(\\.[A-Za-z][A-Za-z0-9_-]{0,127})*$",
+          "default": "sub"
+        },
+        "clockSkewSeconds": { "type": "integer", "minimum": 0, "maximum": 300, "default": 60 },
+        "requiredClaims": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}(\\.[A-Za-z][A-Za-z0-9_-]{0,127})*$"
+          }
+        },
+        "claimMappings": { "$ref": "#/$defs/ClaimMapping" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "firebase" } }, "required": ["type"] },
+          "then": {
+            "required": ["projectId"],
+            "properties": { "allowedAlgorithms": { "const": ["RS256"] } },
+            "not": {
+              "anyOf": [
+                { "required": ["jwksUrl"] },
+                { "required": ["staticPublicKeySecretRef"] },
+                { "required": ["symmetricSecretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "supabase" } }, "required": ["type"] },
+          "then": {
+            "required": ["projectUrl"],
+            "properties": {
+              "allowedAlgorithms": {
+                "items": { "enum": ["RS256", "ES256"] }
+              }
+            },
+            "not": {
+              "anyOf": [
+                { "required": ["jwksUrl"] },
+                { "required": ["staticPublicKeySecretRef"] },
+                { "required": ["symmetricSecretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "clerk" } }, "required": ["type"] },
+          "then": {
+            "required": ["issuer", "audiences"],
+            "properties": { "allowedAlgorithms": { "const": ["RS256"] } },
+            "not": {
+              "anyOf": [
+                { "required": ["symmetricSecretRef"] },
+                { "required": ["jwksUrl", "staticPublicKeySecretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "generic_oidc" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["issuer", "audiences", "allowedAlgorithms"],
+            "oneOf": [
+              { "required": ["jwksUrl"] },
+              { "required": ["staticPublicKeySecretRef"] }
+            ],
+            "properties": {
+              "allowedAlgorithms": {
+                "items": { "enum": ["RS256", "RS384", "RS512", "ES256", "ES384"] }
+              }
+            },
+            "not": { "required": ["symmetricSecretRef"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "custom_jwt" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["issuer", "audiences", "allowedAlgorithms"],
+            "oneOf": [
+              { "required": ["jwksUrl"] },
+              { "required": ["staticPublicKeySecretRef"] },
+              { "required": ["symmetricSecretRef"] }
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": ["symmetricSecretRef"]
+          },
+          "then": {
+            "required": ["type", "allowedAlgorithms", "acknowledgeSymmetricRisk"],
+            "properties": {
+              "type": { "const": "custom_jwt" },
+              "allowedAlgorithms": { "const": ["HS256"] },
+              "acknowledgeSymmetricRisk": { "const": true }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "allowedAlgorithms": { "contains": { "const": "HS256" } }
+            },
+            "required": ["allowedAlgorithms"]
+          },
+          "then": {
+            "required": ["symmetricSecretRef", "acknowledgeSymmetricRisk"],
+            "properties": {
+              "type": { "const": "custom_jwt" },
+              "allowedAlgorithms": { "const": ["HS256"] },
+              "acknowledgeSymmetricRisk": { "const": true }
+            }
+          }
+        }
+      ]
+    },
+    "AttestationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "platforms"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "maxAge": { "$ref": "#/$defs/Duration" },
+        "platforms": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "ios": { "$ref": "#/$defs/PlatformAttestation" },
+            "android": { "$ref": "#/$defs/PlatformAttestation" },
+            "web": { "$ref": "#/$defs/PlatformAttestation" },
+            "react_native_ios": { "$ref": "#/$defs/PlatformAttestation" },
+            "react_native_android": { "$ref": "#/$defs/PlatformAttestation" },
+            "node": { "$ref": "#/$defs/PlatformAttestation" }
+          }
+        }
+      }
+    },
+    "PlatformAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "mode"],
+      "properties": {
+        "provider": {
+          "enum": ["app_attest", "play_integrity", "firebase_app_check", "turnstile", "debug"]
+        },
+        "mode": { "enum": ["required", "preferred", "disabled"] },
+        "minimumTrustLevel": {
+          "enum": [
+            "none",
+            "identity_only",
+            "web_risk_verified",
+            "app_verified",
+            "device_verified",
+            "strong_device_verified",
+            "debug"
+          ]
+        },
+        "applicationIdentifiers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "allowedOrigins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 2048,
+            "format": "uri",
+            "pattern": "^https://"
+          }
+        },
+        "secretRef": { "$ref": "#/$defs/SecretRef" },
+        "dangerousAllowInProduction": { "type": "boolean", "default": false },
+        "appAttest": { "$ref": "#/$defs/AppAttestConfiguration" },
+        "playIntegrity": { "$ref": "#/$defs/PlayIntegrityConfiguration" },
+        "firebaseAppCheck": { "$ref": "#/$defs/FirebaseAppCheckConfiguration" },
+        "turnstile": { "$ref": "#/$defs/TurnstileConfiguration" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "provider": { "const": "app_attest" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] },
+                { "required": ["secretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "play_integrity" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "firebase_app_check" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["turnstile"] },
+                { "required": ["secretRef"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "turnstile" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "debug" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["appAttest"] },
+                { "required": ["playIntegrity"] },
+                { "required": ["firebaseAppCheck"] },
+                { "required": ["turnstile"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "app_attest" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["appAttest"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "play_integrity" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["playIntegrity"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "firebase_app_check" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["firebaseAppCheck"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "turnstile" },
+              "mode": { "enum": ["required", "preferred"] }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "required": ["turnstile", "secretRef"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": { "const": "turnstile" },
+              "mode": { "const": "disabled" }
+            },
+            "required": ["provider", "mode"]
+          },
+          "then": { "not": { "required": ["secretRef"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "playIntegrity": {
+                "properties": { "credentialSource": { "const": "metadata" } },
+                "required": ["credentialSource"]
+              }
+            },
+            "required": ["playIntegrity"]
+          },
+          "then": { "not": { "required": ["secretRef"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "playIntegrity": {
+                "properties": { "credentialSource": { "const": "service_account" } },
+                "required": ["credentialSource"]
+              }
+            },
+            "required": ["playIntegrity"]
+          },
+          "then": { "required": ["secretRef"] }
+        }
+      ]
+    },
+    "AppAttestConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appIdPrefix",
+        "bundleId",
+        "environment",
+        "allowedValidationCategories",
+        "allowedBundleVersions"
+      ],
+      "properties": {
+        "appIdPrefix": { "type": "string", "pattern": "^[A-Z0-9]{1,64}$" },
+        "bundleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"
+        },
+        "environment": { "enum": ["development", "production"] },
+        "allowedValidationCategories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": { "enum": [1, 2, 3, 4, 5, 6, 10] }
+        },
+        "allowedBundleVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,126}[A-Za-z0-9])?$"
+          }
+        }
+      }
+    },
+    "PlayIntegrityConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageName",
+        "cloudProjectNumber",
+        "certificateSha256Digests",
+        "minimumDeviceIntegrity",
+        "requireLicensed",
+        "allowTestingResponses",
+        "minimumVersionCode",
+        "maximumVersionCode",
+        "credentialSource"
+      ],
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+        },
+        "cloudProjectNumber": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "certificateSha256Digests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}=?$" }
+        },
+        "minimumDeviceIntegrity": { "enum": ["device", "strong"] },
+        "requireLicensed": { "type": "boolean" },
+        "allowTestingResponses": { "type": "boolean" },
+        "minimumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "maximumVersionCode": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "credentialSource": { "enum": ["metadata", "service_account"] }
+      }
+    },
+    "FirebaseAppCheckConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectNumber", "allowedAppIds"],
+      "properties": {
+        "projectNumber": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "allowedAppIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 256,
+            "pattern": "^[!-~]+$"
+          }
+        }
+      }
+    },
+    "TurnstileConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedHostnames", "expectedAction"],
+      "properties": {
+        "allowedHostnames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$"
+          }
+        },
+        "expectedAction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      }
+    },
+    "Upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "baseUrl", "authentication"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "enum": ["openai_compatible", "anthropic", "generic"] },
+        "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "dangerousAllowInsecureHttp": { "type": "boolean", "default": false },
+        "authentication": { "$ref": "#/$defs/UpstreamAuthentication" },
+        "timeouts": { "$ref": "#/$defs/Timeouts" },
+        "destinationPolicy": { "$ref": "#/$defs/DestinationPolicy" },
+        "providerReportedCost": { "$ref": "#/$defs/ProviderReportedCost" },
+        "staticHeaders": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" },
+          "additionalProperties": { "type": "string", "maxLength": 2048 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "baseUrl": { "pattern": "^http://" } }, "required": ["baseUrl"] },
+          "then": {
+            "required": ["dangerousAllowInsecureHttp"],
+            "properties": { "dangerousAllowInsecureHttp": { "const": true } }
+          }
+        },
+        {
+          "if": { "required": ["providerReportedCost"] },
+          "then": { "properties": { "type": { "const": "openai_compatible" } } }
+        }
+      ]
+    },
+    "ProviderReportedCost": {
+      "type": "object",
+      "description": "Explicit opt-in to exact final provider usage.cost settlement. Configured pricing remains authoritative for pre-dispatch reservations.",
+      "additionalProperties": false,
+      "required": ["source", "currency"],
+      "properties": {
+        "source": { "const": "openrouter_usage_cost" },
+        "currency": { "const": "USD" }
+      }
+    },
+    "UpstreamAuthentication": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "secretRef"],
+          "properties": {
+            "type": { "const": "bearer" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "headerName", "secretRef"],
+          "properties": {
+            "type": { "const": "header" },
+            "headerName": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "username", "secretRef"],
+          "properties": {
+            "type": { "const": "basic" },
+            "username": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!-9;-~]+$" },
+            "secretRef": { "$ref": "#/$defs/SecretRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "headers"],
+          "properties": {
+            "type": { "const": "headers" },
+            "headers": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": { "$ref": "#/$defs/UpstreamAuthenticationHeader" }
+            }
+          }
+        }
+      ]
+    },
+    "UpstreamAuthenticationHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headerName", "secretRef"],
+      "properties": {
+        "headerName": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" },
+        "secretRef": { "$ref": "#/$defs/SecretRef" }
+      }
+    },
+    "Timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connect": { "$ref": "#/$defs/Duration" },
+        "responseHeader": { "$ref": "#/$defs/Duration" },
+        "firstByte": { "$ref": "#/$defs/Duration" },
+        "idle": { "$ref": "#/$defs/Duration" },
+        "total": { "$ref": "#/$defs/Duration" }
+      }
+    },
+    "DestinationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedPorts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "default": [443]
+        },
+        "allowRedirects": { "type": "boolean", "default": false },
+        "allowPrivateNetworks": { "type": "boolean", "default": false },
+        "allowedCidrs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 8, "maxLength": 43 },
+          "default": []
+        },
+        "dnsPinning": { "type": "boolean", "default": true }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["allowPrivateNetworks"],
+            "properties": { "allowPrivateNetworks": { "const": true } }
+          },
+          "then": {
+            "required": ["allowedCidrs"],
+            "properties": { "allowedCidrs": { "minItems": 1 } }
+          },
+          "else": {
+            "properties": { "allowedCidrs": { "maxItems": 0 } }
+          }
+        }
+      ]
+    },
+    "Model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "upstream", "upstreamModel"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "upstream": { "$ref": "#/$defs/Identifier" },
+        "upstreamModel": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "pricingRef": { "$ref": "#/$defs/Identifier" },
+        "inputAccountingRef": { "$ref": "#/$defs/Identifier" },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"]
+          }
+        }
+      }
+    },
+    "InputAccountingProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "method",
+        "physicalModel",
+        "maximumFramingTokensPerRequest",
+        "maximumFramingTokensPerMessage",
+        "maximumContextTokens"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "protocol": {
+          "enum": ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages"]
+        },
+        "method": { "const": "utf8_byte_bpe_declared_framing_v1" },
+        "physicalModel": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "maximumFramingTokensPerRequest": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maximumFramingTokensPerMessage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maximumContextTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      }
+    },
+    "PricingCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "currency", "entries"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "currency": { "const": "USD" },
+        "effectiveAt": { "type": "string", "format": "date-time" },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/PricingEntry" }
+        }
+      }
+    },
+    "PricingEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "inputNanoUsdPerMillion", "outputNanoUsdPerMillion"],
+      "properties": {
+        "model": { "$ref": "#/$defs/Identifier" },
+        "inputNanoUsdPerMillion": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "outputNanoUsdPerMillion": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+        "requestNanoUsd": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807, "default": 0 }
+      }
+    },
+    "LimitPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "limits"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "limits": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/Limit" }
+        }
+      }
+    },
+    "Limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric"],
+      "properties": {
+        "metric": {
+          "enum": [
+            "logical_requests",
+            "upstream_attempts",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "reasoning_tokens",
+            "cached_input_tokens",
+            "cache_write_tokens",
+            "cost_nano_usd",
+            "concurrent_requests",
+            "concurrent_streams",
+            "request_bytes",
+            "response_bytes",
+            "image_units",
+            "audio_seconds",
+            "tool_calls"
+          ]
+        },
+        "algorithm": { "enum": ["calendar", "token_bucket", "concurrency", "per_request"] },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": {
+            "oneOf": [
+              { "enum": ["organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model", "platform"] },
+              { "type": "string", "pattern": "^normalized_claim:[a-z][a-z0-9_]{0,62}$" }
+            ]
+          },
+          "contains": { "type": "string", "pattern": "^normalized_claim:[a-z][a-z0-9_]{0,62}$" },
+          "minContains": 0,
+          "maxContains": 1,
+          "description": "Runtime validation canonicalizes the fixed dimensions and permits at most one normalized_claim:<name> selector."
+        },
+        "window": {
+          "description": "Server-owned calendar window: minute, hour, day, week, or month. Week windows begin Monday in the configured timezone.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(m|h|d|w|mo)$"
+        },
+        "timezone": {
+          "description": "IANA timezone used only by calendar rules. The server defaults omitted values to UTC and never derives this from a client header.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$",
+          "not": { "const": "Local" },
+          "default": "UTC"
+        },
+        "maximum": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "perRequestMaximum": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "capacity": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "refillPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+        "hard": { "type": "boolean", "default": true }
+      },
+      "anyOf": [
+        { "required": ["maximum"] },
+        { "required": ["perRequestMaximum"] },
+        { "required": ["capacity", "refillPerSecond"] }
+      ]
+    },
+    "Feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "protocol", "attestationPolicy", "access", "limitPlan", "routes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "protocol": {
+          "enum": ["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"]
+        },
+        "attestationPolicy": { "$ref": "#/$defs/Identifier" },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expression"],
+          "properties": { "expression": { "$ref": "#/$defs/CELExpression" } }
+        },
+        "limitPlan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expression"],
+          "properties": { "expression": { "$ref": "#/$defs/CELExpression" } }
+        },
+        "output": { "$ref": "#/$defs/OutputPolicy" },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/Route" }
+        },
+        "opaqueHttp": { "$ref": "#/$defs/OpaqueHttpPolicy" }
+      }
+    },
+    "OutputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultMaximumTokens", "absoluteMaximumTokens"],
+      "properties": {
+        "defaultMaximumTokens": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+        "absoluteMaximumTokens": { "type": "integer", "minimum": 1, "maximum": 10000000 }
+      }
+    },
+    "Route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "when", "model", "priority"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "when": { "$ref": "#/$defs/CELExpression" },
+        "model": { "$ref": "#/$defs/Identifier" },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "weight": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 1 },
+        "stickyBy": { "enum": ["none", "user", "installation"], "default": "none" },
+        "fallbackOn": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/RetryCondition" }
+        },
+        "retryPolicy": { "$ref": "#/$defs/RetryPolicy" },
+        "maxRequestBodyBytes": {
+          "description": "Optional post-rewrite request-body bound for this route. It cannot exceed the server-wide request bound.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 104857600
+        },
+        "maxRequestHeaderBytes": {
+          "description": "Optional bound over the canonical parsed request headers, including Host and Latchway authentication/control fields.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "maxResponseBytes": {
+          "description": "Required for opaque_http features. The lower of this per-route bound and the server-wide response bound applies.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 104857600
+        },
+        "timeouts": { "$ref": "#/$defs/RouteTimeouts" },
+        "streamingAllowed": {
+          "description": "For opaque_http routes, permits text/event-stream responses.",
+          "type": "boolean",
+          "default": false
+        },
+        "retryUnsafeMethods": {
+          "description": "Explicit declaration that unsafe opaque methods are idempotent and may use this route's configured retries or fallback.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "RetryCondition": {
+      "enum": ["connect_error", "timeout_before_headers", "first_byte_timeout", "status_408", "status_429", "status_500", "status_502", "status_503", "status_504"]
+    },
+    "RouteTimeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "connect": { "$ref": "#/$defs/Duration" },
+        "responseHeader": { "$ref": "#/$defs/Duration" },
+        "firstByte": { "$ref": "#/$defs/Duration" },
+        "idle": { "$ref": "#/$defs/Duration" },
+        "total": { "$ref": "#/$defs/Duration" }
+      }
+    },
+    "RetryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "retryOn"],
+      "properties": {
+        "maxAttempts": {
+          "description": "Maximum attempts on this route, including the initial attempt.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8
+        },
+        "initialBackoffMilliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 0
+        },
+        "maximumBackoffMilliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 0
+        },
+        "jitterRatio": {
+          "description": "Deterministic downward jitter as a fraction of the exponential backoff.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "retryOn": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/RetryCondition" }
+        }
+      }
+    },
+    "OpaqueHttpPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedMethods", "pathPrefixes", "maxBodyBytes"],
+      "properties": {
+        "allowedMethods": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] }
+        },
+        "pathPrefixes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^/", "maxLength": 512 }
+        },
+        "maxBodyBytes": { "type": "integer", "minimum": 0, "maximum": 104857600 },
+        "allowedRequestHeaders": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$" }
+        }
+      }
+    },
+    "SessionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accessTokenTtl": { "$ref": "#/$defs/Duration" },
+        "challengeTtl": { "$ref": "#/$defs/Duration" },
+        "refreshTokenTtl": { "$ref": "#/$defs/Duration" },
+        "maximumClockSkewSeconds": { "type": "integer", "minimum": 0, "maximum": 300 }
+      }
+    },
+    "PrivacyPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storePromptBodies": { "type": "boolean", "default": false },
+        "storeResponseBodies": { "type": "boolean", "default": false },
+        "bodyRetention": { "$ref": "#/$defs/Duration" }
+      }
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "latchway.dev/v1alpha1",
+      "kind": "EnvironmentConfig",
+      "metadata": {
+        "organization": "example",
+        "application": "habits",
+        "environment": "production"
+      },
+      "spec": {
+        "identityProviders": [
+          {
+            "id": "firebase",
+            "type": "firebase",
+            "projectId": "habits-production",
+            "claimMappings": { "plan": "claims.subscription_tier" }
+          }
+        ],
+        "attestationPolicies": [
+          {
+            "id": "native",
+            "platforms": {
+              "ios": {
+                "provider": "app_attest",
+                "mode": "required",
+                "minimumTrustLevel": "app_verified",
+                "appAttest": {
+                  "appIdPrefix": "TEAM1234",
+                  "bundleId": "com.example.habits",
+                  "environment": "production",
+                  "allowedValidationCategories": [1],
+                  "allowedBundleVersions": ["1.0"]
+                }
+              },
+              "android": {
+                "provider": "play_integrity",
+                "mode": "required",
+                "minimumTrustLevel": "device_verified",
+                "playIntegrity": {
+                  "packageName": "com.example.habits",
+                  "cloudProjectNumber": 123456789,
+                  "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
+                  "minimumDeviceIntegrity": "device",
+                  "requireLicensed": true,
+                  "allowTestingResponses": false,
+                  "minimumVersionCode": 1,
+                  "maximumVersionCode": 0,
+                  "credentialSource": "metadata"
+                }
+              }
+            }
+          }
+        ],
+        "upstreams": [
+          {
+            "id": "openrouter",
+            "type": "openai_compatible",
+            "baseUrl": "https://openrouter.ai/api/v1",
+            "authentication": { "type": "bearer", "secretRef": "secret/openrouter" }
+          }
+        ],
+        "models": [
+          { "id": "fast", "upstream": "openrouter", "upstreamModel": "configured-fast-model", "capabilities": ["openai_responses"] }
+        ],
+        "limitPlans": [
+          {
+            "id": "free",
+            "limits": [
+              { "metric": "logical_requests", "algorithm": "calendar", "scope": ["user", "feature"], "window": "1w", "timezone": "America/New_York", "maximum": 5 }
+            ]
+          }
+        ],
+        "features": [
+          {
+            "id": "habit-assistant",
+            "protocol": "openai_responses",
+            "attestationPolicy": "native",
+            "access": { "expression": "principal.authenticated" },
+            "limitPlan": { "expression": "'free'" },
+            "output": { "defaultMaximumTokens": 800, "absoluteMaximumTokens": 1500 },
+            "routes": [
+              {
+                "id": "primary",
+                "when": "true",
+                "model": "fast",
+                "priority": 10,
+                "retryPolicy": {
+                  "maxAttempts": 3,
+                  "initialBackoffMilliseconds": 100,
+                  "maximumBackoffMilliseconds": 1000,
+                  "jitterRatio": 0.2,
+                  "retryOn": ["connect_error", "timeout_before_headers", "status_429", "status_503"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/release-evidence.schema.json",
+  "title": "Latchway cross-repository release evidence",
+  "description": "Deterministic source, prepublication promotion, or postpublication release evidence for one exact Latchway candidate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "scope",
+    "verdict",
+    "source_conformance_passed",
+    "promotion_ready",
+    "release_ready",
+    "contract",
+    "repositories",
+    "evidence_window",
+    "evidence_domains",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "latchway_cross_repository_conformance_evidence" },
+    "scope": { "enum": ["source", "promotion", "release"] },
+    "verdict": { "enum": ["passed", "failed"] },
+    "source_conformance_passed": { "type": "boolean" },
+    "promotion_ready": { "type": "boolean" },
+    "release_ready": { "type": "boolean" },
+    "contract": { "$ref": "#/$defs/contract" },
+    "repositories": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/repository" }
+    },
+    "evidence_window": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/evidenceWindow" }
+      ]
+    },
+    "evidence_domains": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 11,
+      "items": { "$ref": "#/$defs/evidenceDomain" }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/check" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "scope": { "const": "source" } },
+        "required": ["scope"]
+      },
+      "then": {
+        "properties": {
+          "promotion_ready": { "const": false },
+          "release_ready": { "const": false },
+          "evidence_window": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "promotion_ready": { "const": true } },
+        "required": ["promotion_ready"]
+      },
+      "then": {
+        "properties": {
+          "scope": { "enum": ["promotion", "release"] },
+          "contract": { "$ref": "#/$defs/releasedContract" },
+          "evidence_window": { "$ref": "#/$defs/evidenceWindow" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "release_ready": { "const": true } },
+        "required": ["release_ready"]
+      },
+      "then": {
+        "properties": {
+          "scope": { "const": "release" },
+          "verdict": { "const": "passed" },
+          "promotion_ready": { "const": true },
+          "contract": { "$ref": "#/$defs/releasedContract" },
+          "evidence_window": { "$ref": "#/$defs/evidenceWindow" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "releaseTag": {
+      "type": "string",
+      "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "ociImageDigest": {
+      "type": "string",
+      "pattern": "^ghcr\\.io/latchway/latchway@sha256:[0-9a-f]{64}$"
+    },
+    "nullableDateTime": {
+      "oneOf": [
+        { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" },
+        { "type": "null" }
+      ]
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "status",
+        "released_at",
+        "wire_protocol",
+        "bundle_file_name",
+        "bundle_sha256",
+        "core_release",
+        "oci_image_digest"
+      ],
+      "properties": {
+        "version": { "oneOf": [{ "$ref": "#/$defs/semver" }, { "type": "null" }] },
+        "status": { "enum": ["draft", "released", null] },
+        "released_at": { "$ref": "#/$defs/nullableDateTime" },
+        "wire_protocol": { "type": ["integer", "null"], "minimum": 1 },
+        "bundle_file_name": {
+          "type": ["string", "null"],
+          "pattern": "^latchway-contract-(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?\\.tar\\.gz$"
+        },
+        "bundle_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "core_release": {
+          "oneOf": [
+            { "$ref": "#/$defs/releaseTag" },
+            { "const": "unreleased" },
+            { "type": "null" }
+          ]
+        },
+        "oci_image_digest": {
+          "oneOf": [{ "$ref": "#/$defs/ociImageDigest" }, { "type": "null" }]
+        }
+      }
+    },
+    "releasedContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "status",
+        "released_at",
+        "wire_protocol",
+        "bundle_file_name",
+        "bundle_sha256",
+        "core_release",
+        "oci_image_digest"
+      ],
+      "properties": {
+        "version": { "$ref": "#/$defs/semver" },
+        "status": { "const": "released" },
+        "released_at": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" },
+        "wire_protocol": { "type": "integer", "minimum": 1 },
+        "bundle_file_name": {
+          "type": "string",
+          "pattern": "^latchway-contract-(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?\\.tar\\.gz$"
+        },
+        "bundle_sha256": { "$ref": "#/$defs/sha256" },
+        "core_release": { "$ref": "#/$defs/releaseTag" },
+        "oci_image_digest": { "$ref": "#/$defs/ociImageDigest" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "commit", "version", "intended_tag"],
+      "properties": {
+        "id": { "enum": ["core", "javascript", "ios", "android", "react_native"] },
+        "commit": { "oneOf": [{ "$ref": "#/$defs/commit" }, { "type": "null" }] },
+        "version": { "oneOf": [{ "$ref": "#/$defs/semver" }, { "type": "null" }] },
+        "intended_tag": { "oneOf": [{ "$ref": "#/$defs/releaseTag" }, { "type": "null" }] }
+      }
+    },
+    "evidenceWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "finished_at", "maximum_age_seconds"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" },
+        "finished_at": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" },
+        "maximum_age_seconds": { "const": 604800 }
+      }
+    },
+    "evidenceDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "required",
+        "status",
+        "started_at",
+        "finished_at",
+        "document_sha256",
+        "oci_image_digest",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "local_source",
+            "local_promotion",
+            "local_release",
+            "live_sdk_conformance",
+            "public_tags",
+            "public_registries",
+            "physical_devices",
+            "live_provider",
+            "cloud_deployments",
+            "operational_resilience",
+            "supply_chain"
+          ]
+        },
+        "required": { "type": "boolean" },
+        "status": { "enum": ["passed", "failed", "unverified"] },
+        "started_at": { "$ref": "#/$defs/nullableDateTime" },
+        "finished_at": { "$ref": "#/$defs/nullableDateTime" },
+        "document_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "oci_image_digest": {
+          "oneOf": [{ "$ref": "#/$defs/ociImageDigest" }, { "type": "null" }]
+        },
+        "artifact_sha256": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "diagnosticScalar": {
+      "type": ["string", "integer", "boolean", "null"]
+    },
+    "diagnosticValue": {
+      "anyOf": [
+        { "$ref": "#/$defs/diagnosticScalar" },
+        {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/diagnosticScalar" }
+        },
+        {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": { "pattern": "^[A-Za-z0-9_.-]{1,128}$" },
+          "additionalProperties": { "$ref": "#/$defs/diagnosticScalar" }
+        }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "domain", "required", "status", "summary"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.]{0,127}$" },
+        "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "required": { "type": "boolean" },
+        "status": { "enum": ["passed", "failed", "unverified"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "details": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+          "additionalProperties": { "$ref": "#/$defs/diagnosticValue" }
+        }
+      }
+    }
+  }
+}

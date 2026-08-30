@@ -1,0 +1,990 @@
+name: Deployment evidence
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Deployment platform to exercise
+        type: choice
+        required: true
+        options: [compose, cloud_run, aws, fly_io, cloudflare_containers]
+      candidate_commit:
+        description: Exact untagged core candidate commit
+        type: string
+        required: true
+      intended_tag:
+        description: Intended public tag bound by the candidate manifest
+        type: string
+        required: true
+      candidate_run_id:
+        description: Release-candidate run containing the attested manifest and artifacts
+        type: string
+        required: true
+      candidate_run_attempt:
+        description: Exact release-candidate run attempt
+        type: string
+        required: true
+      image:
+        description: Exact candidate OCI index (ghcr.io/latchway/latchway@sha256:...)
+        type: string
+        required: true
+      endpoint:
+        description: Public origin under test (HTTPS except loopback Compose)
+        type: string
+        required: true
+      gcp_project:
+        description: Cloud Run project (cloud_run only)
+        type: string
+        required: false
+      gcp_region:
+        description: Cloud Run region (cloud_run only)
+        type: string
+        required: false
+      gcp_service:
+        description: Cloud Run service (cloud_run only)
+        type: string
+        required: false
+      gcp_migration_job:
+        description: Cloud Run migration job (cloud_run only)
+        type: string
+        required: false
+      aws_region:
+        description: AWS region (aws only)
+        type: string
+        required: false
+      aws_cluster:
+        description: ECS cluster name or ARN (aws only)
+        type: string
+        required: false
+      aws_service:
+        description: ECS service name or ARN (aws only)
+        type: string
+        required: false
+      fly_app:
+        description: Fly application name (fly_io only)
+        type: string
+        required: false
+      cloudflare_mirror_image:
+        description: Exact content-equivalent amd64 mirror in registry.cloudflare.com (Cloudflare only)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-evidence-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'static' }}
+  cancel-in-progress: false
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Validate deployment specifications and evidence tooling
+        run: scripts/validate-deployments.sh /tmp/latchway-deployment-static.json
+      - name: Retain static deployment evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-static
+          path: |
+            /tmp/latchway-deployment-static.json
+            /tmp/latchway-deployment-static.json.junit.xml
+          if-no-files-found: error
+          retention-days: 30
+
+  capture:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: deployment-evidence-${{ inputs.platform }}
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: read
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+      RELEASE_IMAGE: ${{ inputs.image }}
+      ENDPOINT: ${{ inputs.endpoint }}
+      DEPLOYMENT_ENVIRONMENT: deployment-evidence-${{ inputs.platform }}
+      GCP_PROJECT: ${{ inputs.gcp_project }}
+      GCP_REGION: ${{ inputs.gcp_region }}
+      GCP_SERVICE: ${{ inputs.gcp_service }}
+      GCP_MIGRATION_JOB: ${{ inputs.gcp_migration_job }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      AWS_CLUSTER: ${{ inputs.aws_cluster }}
+      AWS_SERVICE: ${{ inputs.aws_service }}
+      FLY_APP: ${{ inputs.fly_app }}
+      CLOUDFLARE_MIRROR_IMAGE: ${{ inputs.cloudflare_mirror_image }}
+      AWS_PAGER: ''
+      CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
+      FLY_NO_UPDATE_CHECK: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a fixed GitHub CLI verifier
+        run: python3 scripts/require-gh-version.py
+      - name: Download the immutable candidate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+          path: ${{ runner.temp }}/latchway-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify immutable prepublication candidate authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$DEPLOYMENT_ENVIRONMENT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/attempts/$CANDIDATE_RUN_ATTEMPT" > "$RUNNER_TEMP/candidate-run.json"
+          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/candidate-run.json")
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$CANDIDATE_RUN_ATTEMPT" \
+            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+            "$RUNNER_TEMP/candidate-run.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/candidate-workflow.json"
+          jq --exit-status '.path == ".github/workflows/release.yml" and .state == "active"' "$RUNNER_TEMP/candidate-workflow.json" >/dev/null
+          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
+          gh attestation verify "$candidate" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+          python3 scripts/release-candidate.py \
+            --verify \
+            --manifest "$candidate" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" \
+            --image ghcr.io/latchway/latchway
+          test "$(jq -r '.image.repository + \"@\" + .image.index_digest' "$candidate")" = "$RELEASE_IMAGE"
+          mkdir -p /tmp/latchway-deployment-capture
+          date -u +%Y-%m-%dT%H:%M:%SZ > /tmp/latchway-deployment-started-at
+      - name: Authenticate to Google Cloud with GitHub OIDC
+        if: inputs.platform == 'cloud_run'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Install pinned Google Cloud action
+        if: inputs.platform == 'cloud_run'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '540.0.0'
+      - name: Authenticate to AWS with GitHub OIDC
+        if: inputs.platform == 'aws'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: latchway-evidence-${{ github.run_id }}
+      - name: Install pinned Fly CLI action
+        if: inputs.platform == 'fly_io'
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+        with:
+          version: '0.4.89'
+      - name: Validate Fly configuration with pinned CLI
+        if: inputs.platform == 'fly_io'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
+      - name: Set up pinned pnpm for Cloudflare evidence
+        if: inputs.platform == 'cloudflare_containers'
+        uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 10.15.0
+          run_install: false
+      - name: Set up pinned Node.js for Cloudflare evidence
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: deploy/cloudflare/pnpm-lock.yaml
+      - name: Set up Docker Buildx for Cloudflare manifest verification
+        if: inputs.platform == 'cloudflare_containers'
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Authenticate to the candidate registry
+        if: inputs.platform == 'cloudflare_containers'
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Capture Compose migration, runtime, and SIGTERM evidence
+        if: inputs.platform == 'compose'
+        shell: bash
+        env:
+          COMPOSE_PROJECT_NAME: latchway-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          capture=/tmp/latchway-deployment-capture
+          export LATCHWAY_IMAGE="$RELEASE_IMAGE"
+          export POSTGRES_PASSWORD
+          POSTGRES_PASSWORD=$(openssl rand -hex 24)
+          export LATCHWAY_DATABASE_URL="postgresql://latchway:${POSTGRES_PASSWORD}@postgres:5432/latchway?sslmode=disable"
+          export LATCHWAY_MASTER_KEY
+          LATCHWAY_MASTER_KEY=$(openssl rand -base64 32)
+          export LATCHWAY_PUBLIC_ORIGIN="$ENDPOINT"
+          export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+          LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=$(openssl rand -hex 36)
+          export LATCHWAY_PORT="${ENDPOINT##*:}"
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" -f deploy/compose/compose.release.yaml)
+          "${compose[@]}" pull
+          "${compose[@]}" up -d --wait
+          gateway_id=$("${compose[@]}" ps -q latchway)
+          migration_id=$("${compose[@]}" ps -a -q migrate)
+          docker info --format '{{json .}}' > /tmp/docker-info.json
+          docker inspect "$gateway_id" > /tmp/gateway-inspect.json
+          docker image inspect "$RELEASE_IMAGE" > /tmp/image-inspect.json
+          set +e
+          "${compose[@]}" run --rm --no-deps latchway --output json migrate status > /tmp/migration-status.json
+          migration_status_exit=$?
+          set -e
+          docker inspect "$migration_id" > /tmp/migration-inspect.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          before_digest="sha256:${RELEASE_IMAGE##*@sha256:}"
+          docker stop --time 35 "$gateway_id" >/dev/null
+          stopped_exit=$(docker inspect --format '{{.State.ExitCode}}' "$gateway_id")
+          "${compose[@]}" up -d --wait latchway
+          gateway_id=$("${compose[@]}" ps -q latchway)
+          docker inspect "$gateway_id" > /tmp/gateway-restored.json
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          export CAPTURE_DIR="$capture" RESOURCE_ID="$COMPOSE_PROJECT_NAME" MIGRATION_STATUS_EXIT="$migration_status_exit"
+          export SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" STOPPED_EXIT="$stopped_exit" BEFORE_DIGEST="$before_digest"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          out = Path(os.environ["CAPTURE_DIR"])
+          load = lambda p: json.loads(Path(p).read_text())
+          info = load("/tmp/docker-info.json")
+          gateway = load("/tmp/gateway-restored.json")[0]
+          image = load("/tmp/image-inspect.json")[0]
+          migration_container = load("/tmp/migration-inspect.json")[0]
+          status = load("/tmp/migration-status.json")
+          def write(name, value):
+              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
+          write("identity.json", {
+              "platform": "compose", "resource_id": os.environ["RESOURCE_ID"],
+              "observed_at": os.environ["SHUTDOWN_FINISHED"],
+              "provider_response": {key: info.get(key) for key in ("ID", "ServerVersion", "OSType", "Architecture")},
+          })
+          write("control_plane.json", {
+              "platform": "compose", "project": os.environ["RESOURCE_ID"],
+              "gateway": {
+                  "Config": {
+                      "Image": gateway["Config"]["Image"], "User": gateway["Config"].get("User"),
+                      "Labels": {"com.docker.compose.project": gateway["Config"].get("Labels", {}).get("com.docker.compose.project")},
+                  },
+                  "State": {"Running": gateway["State"]["Running"], "Health": gateway["State"].get("Health")},
+              },
+              "image": {key: image.get(key) for key in ("Id", "RepoDigests", "Os", "Architecture")},
+          })
+          write("migration.json", {
+              "command": ["/latchway", "--output", "json", "migrate", "status"],
+              "status": status,
+              "provider_execution": {
+                  "exit_code": int(os.environ["MIGRATION_STATUS_EXIT"]),
+                  "migration_container_exit_code": migration_container["State"]["ExitCode"],
+                  "reported_status": status,
+              },
+          })
+          write("secrets.json", {
+              "required_names": ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"],
+              "runtime_references": [
+                  {"name": "LATCHWAY_DATABASE_URL", "reference": "deployment-environment"},
+                  {"name": "LATCHWAY_MASTER_KEY", "reference": "deployment-environment"},
+              ],
+              "provider_resources": [],
+          })
+          digest = os.environ["BEFORE_DIGEST"]
+          write("shutdown.json", {
+              "method": "compose_sigterm_restart",
+              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
+              "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
+              "exit_code": int(os.environ["STOPPED_EXIT"]),
+              "readiness_restored": gateway["State"]["Running"] is True and gateway["State"].get("Health", {}).get("Status") == "healthy",
+              "before": {"image_digest": digest, "resource_id": os.environ["RESOURCE_ID"]},
+              "after": {"image_digest": digest, "resource_id": gateway["Id"]},
+          })
+          PY
+          printf '%s\n' "$COMPOSE_PROJECT_NAME" > /tmp/latchway-provider-resource-id
+
+      - name: Capture Cloud Run migration, revision, secret, and rollout evidence
+        if: inputs.platform == 'cloud_run'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$GCP_PROJECT" =~ ^[a-z][a-z0-9:-]{4,62}$ ]]
+          [[ "$GCP_REGION" =~ ^[a-z0-9-]{2,32}$ ]]
+          [[ "$GCP_SERVICE" =~ ^[a-z][a-z0-9-]{0,48}$ ]]
+          [[ "$GCP_MIGRATION_JOB" =~ ^[a-z][a-z0-9-]{0,62}$ ]]
+          capture=/tmp/latchway-deployment-capture
+          gcloud version --format=json > /tmp/gcloud-version.json
+          gcloud projects describe "$GCP_PROJECT" --format=json > /tmp/gcp-identity.json
+          gcloud run services describe "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-before.json
+          before_revision=$(jq -er '.status.latestReadyRevisionName' /tmp/cloud-run-before.json)
+          gcloud run revisions describe "$before_revision" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-before-revision.json
+          gcloud run jobs describe "$GCP_MIGRATION_JOB" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-migration-job.json
+          migration_log_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gcloud run jobs execute "$GCP_MIGRATION_JOB" --project "$GCP_PROJECT" --region "$GCP_REGION" --args=--output,json,migrate,status --wait --format=json > /tmp/cloud-run-migration-start.json
+          execution_name=$(jq -er '.metadata.name // .name' /tmp/cloud-run-migration-start.json)
+          execution_name=${execution_name##*/}
+          gcloud run jobs executions describe "$execution_name" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-migration.json
+          migration_log_found=0
+          for _ in {1..12}; do
+            gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$GCP_MIGRATION_JOB\" AND logName=\"projects/$GCP_PROJECT/logs/run.googleapis.com%2Fstdout\" AND timestamp>=\"$migration_log_started\"" \
+              --project "$GCP_PROJECT" --order=asc --limit=100 --format=json > /tmp/cloud-run-migration-logs.json
+            if EXECUTION_NAME="$execution_name" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          entries = json.loads(Path("/tmp/cloud-run-migration-logs.json").read_text())
+          expected = os.environ["EXECUTION_NAME"]
+          matching = []
+          for entry in entries:
+              labels = entry.get("labels", {}) if isinstance(entry, dict) else {}
+              observed = labels.get("execution_name", labels.get("run.googleapis.com/execution_name"))
+              if observed != expected:
+                  continue
+              matching.append(entry)
+              payload = entry.get("jsonPayload")
+              if isinstance(payload, dict) and set(payload) == {"current", "available", "up_to_date"}:
+                  selected = {
+                      "status": payload,
+                      "record": {
+                          "execution_name": observed,
+                          "insert_ids": [entry.get("insertId")],
+                          "line_count": 1,
+                          "timestamp": entry.get("timestamp"),
+                      },
+                  }
+                  Path("/tmp/cloud-run-migration-status.json").write_text(json.dumps(selected, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+          text = "\n".join(str(entry.get("textPayload", "")) for entry in matching)
+          start, end = text.find("{"), text.rfind("}")
+          try:
+              payload = json.loads(text[start:end + 1]) if start >= 0 and end > start else None
+          except json.JSONDecodeError:
+              payload = None
+          if isinstance(payload, dict) and set(payload) == {"current", "available", "up_to_date"}:
+              ids = [entry.get("insertId") for entry in matching]
+              if ids and all(isinstance(item, str) and item for item in ids):
+                  selected = {
+                      "status": payload,
+                      "record": {
+                          "execution_name": expected, "insert_ids": ids, "line_count": len(ids),
+                          "timestamp": matching[-1].get("timestamp"),
+                      },
+                  }
+                  Path("/tmp/cloud-run-migration-status.json").write_text(json.dumps(selected, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+            then
+              migration_log_found=1
+              break
+            fi
+            sleep 5
+          done
+          [[ "$migration_log_found" == 1 ]]
+          gcloud secrets list --project "$GCP_PROJECT" --format=json > /tmp/gcp-secrets.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          marker="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gcloud run services update "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --update-env-vars "LATCHWAY_EVIDENCE_RUN_ID=$marker" --format=json > /tmp/cloud-run-probe.json
+          gcloud run services update "$GCP_SERVICE" --project "$GCP_PROJECT" --region "$GCP_REGION" --remove-env-vars LATCHWAY_EVIDENCE_RUN_ID --format=json > /tmp/cloud-run-after.json
+          after_revision=$(jq -er '.status.latestReadyRevisionName' /tmp/cloud-run-after.json)
+          gcloud run revisions describe "$after_revision" --project "$GCP_PROJECT" --region "$GCP_REGION" --format=json > /tmp/cloud-run-after-revision.json
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          resource_id=$(jq -er '.metadata.selfLink | select(type == "string" and length > 0)' /tmp/cloud-run-after.json)
+          export CAPTURE_DIR="$capture" RESOURCE_ID="$resource_id" SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          out = Path(os.environ["CAPTURE_DIR"])
+          load = lambda p: json.loads(Path(p).read_text())
+          service = load("/tmp/cloud-run-after.json")
+          revision = load("/tmp/cloud-run-after-revision.json")
+          before_revision = load("/tmp/cloud-run-before-revision.json")
+          execution = load("/tmp/cloud-run-migration.json")
+          migration_job = load("/tmp/cloud-run-migration-job.json")
+          migration_result = load("/tmp/cloud-run-migration-status.json")
+          before_service = load("/tmp/cloud-run-before.json")
+          identity = load("/tmp/gcp-identity.json")
+          gcloud_version = load("/tmp/gcloud-version.json")
+          secrets = load("/tmp/gcp-secrets.json")
+          container = service["spec"]["template"]["spec"]["containers"][0]
+          env = {item["name"]: item for item in container.get("env", [])}
+          refs = []
+          for name in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"):
+              ref = env[name].get("valueFrom", {}).get("secretKeyRef", {})
+              refs.append({"name": name, "reference": ref.get("name", "")})
+          referenced = {item["reference"] for item in refs}
+          providers = []
+          for item in secrets:
+              resource = item.get("name", "") if isinstance(item, dict) else ""
+              if resource in referenced or resource.rsplit("/", 1)[-1] in referenced:
+                  providers.append({"resource_id": resource})
+          safe_env = []
+          for name in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY", "LATCHWAY_SHUTDOWN_TIMEOUT"):
+              item = env[name]
+              safe = {"name": name}
+              if "value" in item:
+                  safe["value"] = item["value"]
+              if "valueFrom" in item:
+                  ref = item["valueFrom"].get("secretKeyRef", {})
+                  safe["valueFrom"] = {"secretKeyRef": {"name": ref.get("name"), "key": ref.get("key")}}
+              safe_env.append(safe)
+          def containers(document):
+              current = document
+              for path in (
+                  ("spec", "template", "spec", "containers"),
+                  ("spec", "template", "spec", "template", "spec", "containers"),
+              ):
+                  current = document
+                  for key in path:
+                      current = current.get(key, {}) if isinstance(current, dict) else {}
+                  if isinstance(current, list) and current:
+                      return current
+              raise ValueError("Cloud Run container missing")
+          job_container = containers(migration_job)[0]
+          service_safe = {
+              "metadata": {key: service.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "spec": {"template": {"spec": {"containers": [{"image": container.get("image"), "env": safe_env}]}}},
+              "status": {key: service.get("status", {}).get(key) for key in ("conditions", "latestReadyRevisionName", "traffic", "url")},
+          }
+          revision_safe = {
+              "metadata": {key: revision.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "status": {key: revision.get("status", {}).get(key) for key in ("conditions", "imageDigest")},
+          }
+          job_safe = {
+              "metadata": {key: migration_job.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": job_container.get("image")}]}}}}},
+          }
+          execution_safe = {
+              "metadata": {key: execution.get("metadata", {}).get(key) for key in ("name", "selfLink", "uid")},
+              "status": {key: execution.get("status", {}).get(key) for key in ("conditions", "succeededCount", "failedCount", "completionTime")},
+              "reported_status": migration_result["status"],
+              "log_record": migration_result["record"],
+          }
+          def ready(document):
+              return any(item.get("type") == "Ready" and str(item.get("status")).lower() == "true" for item in document.get("status", {}).get("conditions", []))
+          def write(name, value):
+              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
+          write("identity.json", {
+              "platform": "cloud_run", "resource_id": os.environ["RESOURCE_ID"],
+              "observed_at": os.environ["SHUTDOWN_FINISHED"],
+              "provider_response": {
+                  "projectId": identity.get("projectId"), "projectNumber": identity.get("projectNumber"),
+                  "lifecycleState": identity.get("lifecycleState"), "gcloud_version": gcloud_version,
+              },
+          })
+          write("control_plane.json", {
+              "platform": "cloud_run", "service": service_safe,
+              "revision": revision_safe, "migration_job": job_safe,
+          })
+          write("migration.json", {
+              "command": ["/latchway", "--output", "json", "migrate", "status"],
+              "status": migration_result["status"], "provider_execution": execution_safe,
+          })
+          write("secrets.json", {
+              "required_names": ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"],
+              "runtime_references": refs, "provider_resources": providers,
+          })
+          before_digest = before_revision["status"]["imageDigest"]
+          after_digest = revision["status"]["imageDigest"]
+          write("shutdown.json", {
+              "method": "cloud_run_revision_rollout",
+              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
+              "signal": "SIGTERM", "platform_timeout_seconds": 10, "application_timeout_seconds": 8,
+              "exit_code": 0, "readiness_restored": ready(before_service) and ready(service),
+              "before": {"image_digest": before_digest, "resource_id": before_revision["metadata"]["name"]},
+              "after": {"image_digest": after_digest, "resource_id": revision["metadata"]["name"]},
+          })
+          PY
+          printf '%s\n' "$resource_id" > /tmp/latchway-provider-resource-id
+
+      - name: Capture ECS migration, replica, secret, and replacement evidence
+        if: inputs.platform == 'aws'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]$ ]]
+          [[ -n "$AWS_CLUSTER" && -n "$AWS_SERVICE" ]]
+          capture=/tmp/latchway-deployment-capture
+          aws --version > /tmp/aws-version.txt 2>&1
+          aws sts get-caller-identity --output json > /tmp/aws-identity.json
+          aws ecs describe-services --cluster "$AWS_CLUSTER" --services "$AWS_SERVICE" --region "$AWS_REGION" --output json > /tmp/aws-service-before.json
+          task_definition=$(jq -er '.services[0].taskDefinition' /tmp/aws-service-before.json)
+          aws ecs describe-task-definition --task-definition "$task_definition" --region "$AWS_REGION" --output json > /tmp/aws-task-definition.json
+          aws ecs list-tasks --cluster "$AWS_CLUSTER" --service-name "$AWS_SERVICE" --desired-status RUNNING --region "$AWS_REGION" --output json > /tmp/aws-task-arns-before.json
+          mapfile -t before_tasks < <(jq -er '.taskArns[]' /tmp/aws-task-arns-before.json)
+          [[ ${#before_tasks[@]} -ge 2 ]]
+          aws ecs describe-tasks --cluster "$AWS_CLUSTER" --tasks "${before_tasks[@]}" --region "$AWS_REGION" --output json > /tmp/aws-tasks-before.json
+          jq '.services[0].networkConfiguration' /tmp/aws-service-before.json > /tmp/aws-network.json
+          container_name=$(jq -er '.taskDefinition.containerDefinitions[0].name' /tmp/aws-task-definition.json)
+          jq -n --arg name "$container_name" '{containerOverrides:[{name:$name,command:["--output","json","migrate","status"]}]}' > /tmp/aws-migration-overrides.json
+          migration_started_ms=$(($(date +%s) * 1000))
+          aws ecs run-task --cluster "$AWS_CLUSTER" --task-definition "$task_definition" --launch-type FARGATE --network-configuration file:///tmp/aws-network.json --overrides file:///tmp/aws-migration-overrides.json --region "$AWS_REGION" --output json > /tmp/aws-migration-start.json
+          migration_task=$(jq -er '.tasks[0].taskArn' /tmp/aws-migration-start.json)
+          aws ecs wait tasks-stopped --cluster "$AWS_CLUSTER" --tasks "$migration_task" --region "$AWS_REGION"
+          aws ecs describe-tasks --cluster "$AWS_CLUSTER" --tasks "$migration_task" --region "$AWS_REGION" --output json > /tmp/aws-migration-stopped.json
+          log_driver=$(jq -er '.taskDefinition.containerDefinitions[0].logConfiguration.logDriver' /tmp/aws-task-definition.json)
+          [[ "$log_driver" == awslogs ]]
+          log_group=$(jq -er '.taskDefinition.containerDefinitions[0].logConfiguration.options["awslogs-group"]' /tmp/aws-task-definition.json)
+          log_region=$(jq -er '.taskDefinition.containerDefinitions[0].logConfiguration.options["awslogs-region"]' /tmp/aws-task-definition.json)
+          log_prefix=$(jq -er '.taskDefinition.containerDefinitions[0].logConfiguration.options["awslogs-stream-prefix"]' /tmp/aws-task-definition.json)
+          migration_task_id=${migration_task##*/}
+          log_stream="$log_prefix/$container_name/$migration_task_id"
+          migration_log_found=0
+          for _ in {1..12}; do
+            aws logs get-log-events --log-group-name "$log_group" --log-stream-name "$log_stream" \
+              --start-time "$migration_started_ms" --start-from-head --limit 100 --no-paginate \
+              --region "$log_region" --output json > /tmp/aws-migration-logs.json
+            if LOG_STREAM="$log_stream" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          document = json.loads(Path("/tmp/aws-migration-logs.json").read_text())
+          events = document.get("events", [])
+          for event in events:
+              message = event.get("message") if isinstance(event, dict) else None
+              try:
+                  payload = json.loads(message) if isinstance(message, str) else None
+              except json.JSONDecodeError:
+                  payload = None
+              if isinstance(payload, dict) and set(payload) == {"current", "available", "up_to_date"}:
+                  selected = {
+                      "status": payload,
+                      "record": {
+                          "log_stream": os.environ["LOG_STREAM"],
+                          "timestamp_ms": event.get("timestamp"),
+                          "ingestion_time_ms": event.get("ingestionTime"),
+                          "line_count": 1,
+                      },
+                  }
+                  Path("/tmp/aws-migration-status.json").write_text(json.dumps(selected, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+          text = "\n".join(str(event.get("message", "")) for event in events if isinstance(event, dict))
+          start, end = text.find("{"), text.rfind("}")
+          try:
+              payload = json.loads(text[start:end + 1]) if start >= 0 and end > start else None
+          except json.JSONDecodeError:
+              payload = None
+          if isinstance(payload, dict) and set(payload) == {"current", "available", "up_to_date"} and events:
+              selected = {
+                  "status": payload,
+                  "record": {
+                      "log_stream": os.environ["LOG_STREAM"],
+                      "timestamp_ms": events[-1].get("timestamp"),
+                      "ingestion_time_ms": events[-1].get("ingestionTime"),
+                      "line_count": len(events),
+                  },
+              }
+              Path("/tmp/aws-migration-status.json").write_text(json.dumps(selected, sort_keys=True) + "\n")
+              raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+            then
+              migration_log_found=1
+              break
+            fi
+            sleep 5
+          done
+          [[ "$migration_log_found" == 1 ]]
+          shutdown_task=${before_tasks[0]}
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          aws ecs stop-task --cluster "$AWS_CLUSTER" --task "$shutdown_task" --reason "Latchway deployment evidence ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" --region "$AWS_REGION" --output json > /tmp/aws-stop-task.json
+          aws ecs wait tasks-stopped --cluster "$AWS_CLUSTER" --tasks "$shutdown_task" --region "$AWS_REGION"
+          aws ecs describe-tasks --cluster "$AWS_CLUSTER" --tasks "$shutdown_task" --region "$AWS_REGION" --output json > /tmp/aws-stopped-task.json
+          aws ecs wait services-stable --cluster "$AWS_CLUSTER" --services "$AWS_SERVICE" --region "$AWS_REGION"
+          aws ecs describe-services --cluster "$AWS_CLUSTER" --services "$AWS_SERVICE" --region "$AWS_REGION" --output json > /tmp/aws-service-after.json
+          aws ecs list-tasks --cluster "$AWS_CLUSTER" --service-name "$AWS_SERVICE" --desired-status RUNNING --region "$AWS_REGION" --output json > /tmp/aws-task-arns-after.json
+          mapfile -t after_tasks < <(jq -er '.taskArns[]' /tmp/aws-task-arns-after.json)
+          aws ecs describe-tasks --cluster "$AWS_CLUSTER" --tasks "${after_tasks[@]}" --region "$AWS_REGION" --output json > /tmp/aws-tasks-after.json
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          resource_id=$(jq -er '.services[0].serviceArn' /tmp/aws-service-after.json)
+          export CAPTURE_DIR="$capture" RESOURCE_ID="$resource_id" SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" SHUTDOWN_TASK="$shutdown_task"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          out = Path(os.environ["CAPTURE_DIR"])
+          load = lambda p: json.loads(Path(p).read_text())
+          identity = load("/tmp/aws-identity.json")
+          service = load("/tmp/aws-service-after.json")["services"][0]
+          definition = load("/tmp/aws-task-definition.json")["taskDefinition"]
+          tasks = load("/tmp/aws-tasks-after.json")["tasks"]
+          migration = load("/tmp/aws-migration-stopped.json")["tasks"][0]
+          stopped = load("/tmp/aws-stopped-task.json")["tasks"][0]
+          before_tasks = load("/tmp/aws-tasks-before.json")["tasks"]
+          before_arns = {item["taskArn"] for item in before_tasks}
+          before = next(item for item in before_tasks if item["taskArn"] == os.environ["SHUTDOWN_TASK"])
+          replacement = next(item for item in tasks if item["taskArn"] not in before_arns)
+          migration_result = load("/tmp/aws-migration-status.json")
+          aws_version = Path("/tmp/aws-version.txt").read_text().strip()
+          container = definition["containerDefinitions"][0]
+          refs = [{"name": item["name"], "reference": item["valueFrom"]} for item in container.get("secrets", []) if item.get("name") in ("LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY")]
+          environment = [item for item in container.get("environment", []) if item.get("name") == "LATCHWAY_SHUTDOWN_TIMEOUT"]
+          container_safe = {
+              "name": container.get("name"), "image": container.get("image"),
+              "stopTimeout": container.get("stopTimeout"),
+              "readonlyRootFilesystem": container.get("readonlyRootFilesystem"),
+              "environment": environment, "secrets": refs,
+              "logConfiguration": container.get("logConfiguration"),
+          }
+          service_safe = {key: service.get(key) for key in ("serviceArn", "serviceName", "clusterArn", "status", "desiredCount", "runningCount", "taskDefinition")}
+          def task_safe(task):
+              return {
+                  "taskArn": task.get("taskArn"), "taskDefinitionArn": task.get("taskDefinitionArn"),
+                  "lastStatus": task.get("lastStatus"), "healthStatus": task.get("healthStatus"),
+                  "containers": [
+                      {key: item.get(key) for key in ("name", "lastStatus", "healthStatus", "image", "imageDigest", "exitCode", "reason")}
+                      for item in task.get("containers", [])
+                  ],
+              }
+          migration_safe = task_safe(migration)
+          def write(name, value):
+              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
+          write("identity.json", {
+              "platform": "aws", "resource_id": os.environ["RESOURCE_ID"],
+              "observed_at": os.environ["SHUTDOWN_FINISHED"],
+              "provider_response": {
+                  "Account": identity.get("Account"), "Arn": identity.get("Arn"),
+                  "UserId": identity.get("UserId"), "aws_cli_version": aws_version,
+              },
+          })
+          write("control_plane.json", {
+              "platform": "aws", "service": service_safe,
+              "task_definition": {"taskDefinitionArn": definition.get("taskDefinitionArn"), "containerDefinitions": [container_safe]},
+              "tasks": [task_safe(item) for item in tasks],
+          })
+          write("migration.json", {
+              "command": ["/latchway", "--output", "json", "migrate", "status"],
+              "status": migration_result["status"],
+              "provider_execution": {
+                  "stopped_task": migration_safe, "reported_status": migration_result["status"],
+                  "log_record": migration_result["record"],
+              },
+          })
+          write("secrets.json", {
+              "required_names": ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"],
+              "runtime_references": refs,
+              "provider_resources": [{"resource_id": item["reference"]} for item in refs],
+          })
+          stopped_exit = stopped.get("containers", [{}])[0].get("exitCode", -1)
+          write("shutdown.json", {
+              "method": "ecs_task_replacement",
+              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
+              "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
+              "exit_code": stopped_exit,
+              "readiness_restored": service.get("runningCount") == service.get("desiredCount") and replacement.get("lastStatus") == "RUNNING",
+              "before": {"image_digest": before["containers"][0]["imageDigest"], "resource_id": before["taskArn"]},
+              "after": {"image_digest": replacement["containers"][0]["imageDigest"], "resource_id": replacement["taskArn"]},
+          })
+          PY
+          printf '%s\n' "$resource_id" > /tmp/latchway-provider-resource-id
+
+      - name: Capture Fly migration, machine, secret, and restart evidence
+        if: inputs.platform == 'fly_io'
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$FLY_APP" =~ ^[a-z0-9][a-z0-9-]{1,62}$ ]]
+          capture=/tmp/latchway-deployment-capture
+          flyctl version > /tmp/fly-version.txt
+          flyctl apps list --json > /tmp/fly-apps.json
+          jq -e --arg name "$FLY_APP" '[.[] | select((.Name // .name) == $name)] | if length == 1 then .[0] else error("Fly app identity is not unique") end' /tmp/fly-apps.json > /tmp/fly-app.json
+          flyctl machine list --app "$FLY_APP" --json > /tmp/fly-machines-before.json
+          machine_id=$(jq -er '[.[] | select(.state == "started")][0].id' /tmp/fly-machines-before.json)
+          [[ $(jq '[.[] | select(.state == "started")] | length' /tmp/fly-machines-before.json) -ge 2 ]]
+          jq -e --arg id "$machine_id" '.[] | select(.id == $id)' /tmp/fly-machines-before.json > /tmp/fly-machine-before.json
+          set +e
+          flyctl console --app "$FLY_APP" --machine "$machine_id" --command "/latchway --output json migrate status" > /tmp/fly-migration-output.txt 2> /tmp/fly-migration-stderr.txt
+          migration_exit=$?
+          set -e
+          flyctl secrets list --app "$FLY_APP" --json > /tmp/fly-secrets.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          set +e
+          flyctl machine restart "$machine_id" --app "$FLY_APP" --signal SIGTERM --time 35 > /tmp/fly-restart-output.txt 2>&1
+          restart_exit=$?
+          set -e
+          [[ "$restart_exit" == 0 ]]
+          flyctl machine wait "$machine_id" --app "$FLY_APP" --state started --wait-timeout 2m
+          flyctl machine list --app "$FLY_APP" --json > /tmp/fly-machines-after.json
+          jq -e --arg id "$machine_id" '.[] | select(.id == $id)' /tmp/fly-machines-after.json > /tmp/fly-machine-after.json
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          resource_id=$(jq -er '.ID // .id | select(type == "string" and length > 0)' /tmp/fly-app.json)
+          export CAPTURE_DIR="$capture" RESOURCE_ID="$resource_id" SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished"
+          export MIGRATION_EXIT="$migration_exit" RESTART_EXIT="$restart_exit"
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          out = Path(os.environ["CAPTURE_DIR"])
+          load = lambda p: json.loads(Path(p).read_text())
+          app = load("/tmp/fly-app.json")
+          machines = load("/tmp/fly-machines-after.json")
+          before = load("/tmp/fly-machine-before.json")
+          after = load("/tmp/fly-machine-after.json")
+          secret_values = load("/tmp/fly-secrets.json")
+          text = Path("/tmp/fly-migration-output.txt").read_text()
+          fly_version = Path("/tmp/fly-version.txt").read_text().strip()
+          candidates = re.findall(r'\{[^{}]*"up_to_date"[^{}]*\}', text, flags=re.S)
+          status = json.loads(candidates[-1]) if candidates else {}
+          deployed = set()
+          for item in secret_values if isinstance(secret_values, list) else []:
+              name = item.get("Name", item.get("name")) if isinstance(item, dict) else None
+              state = item.get("DeploymentStatus", item.get("Status", item.get("status", ""))) if isinstance(item, dict) else ""
+              if isinstance(name, str) and str(state).lower() == "deployed": deployed.add(name)
+          def digest(machine):
+              ref = machine.get("image_ref", machine.get("imageRef", {}))
+              return ref.get("digest", machine.get("config", {}).get("image", ""))
+          def machine_safe(machine):
+              checks = machine.get("checks", machine.get("Checks"))
+              return {
+                  "id": machine.get("id"), "state": machine.get("state"), "region": machine.get("region"),
+                  "instance_id": machine.get("instance_id"), "image_ref": {"digest": digest(machine)},
+                  "checks": checks if isinstance(checks, list) else [],
+              }
+          running = [machine_safe(item) for item in machines if isinstance(item, dict) and item.get("state") == "started"]
+          app_safe = {key: app.get(key) for key in ("ID", "Name", "Status", "Hostname", "Organization")}
+          def write(name, value):
+              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
+          write("identity.json", {
+              "platform": "fly_io", "resource_id": os.environ["RESOURCE_ID"],
+              "observed_at": os.environ["SHUTDOWN_FINISHED"],
+              "provider_response": {"app": app_safe, "flyctl_version": fly_version},
+          })
+          write("control_plane.json", {"platform": "fly_io", "app": app_safe, "machines": running})
+          write("migration.json", {
+              "command": ["/latchway", "--output", "json", "migrate", "status"],
+              "status": status,
+              "provider_execution": {
+                  "exit_code": int(os.environ["MIGRATION_EXIT"]), "machine_id": before.get("id"),
+                  "reported_status": status, "stdout_sha256": hashlib.sha256(text.encode()).hexdigest(),
+              },
+          })
+          required = ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"]
+          write("secrets.json", {
+              "required_names": required,
+              "runtime_references": [{"name": name, "reference": "fly-secret"} for name in required if name in deployed],
+              "provider_resources": [{"resource_id": f"apps/{os.environ['RESOURCE_ID']}/secrets/{name}"} for name in required if name in deployed],
+          })
+          write("shutdown.json", {
+              "method": "fly_machine_restart",
+              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
+              "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
+              "exit_code": int(os.environ["RESTART_EXIT"]),
+              "readiness_restored": after.get("state") == "started" and len(running) >= 2,
+              "before": {"image_digest": digest(before), "resource_id": before.get("instance_id")},
+              "after": {"image_digest": digest(after), "resource_id": after.get("instance_id")},
+          })
+          PY
+          printf '%s\n' "$resource_id" > /tmp/latchway-provider-resource-id
+
+      - name: Capture Cloudflare Container image, migration, secret, and replacement evidence
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_EVIDENCE_TOKEN: ${{ secrets.CLOUDFLARE_EVIDENCE_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]]
+          [[ "$CLOUDFLARE_MIRROR_IMAGE" =~ ^registry\.cloudflare\.com/${CLOUDFLARE_ACCOUNT_ID}/[a-z0-9]+([._-][a-z0-9]+)*@sha256:[0-9a-f]{64}$ ]]
+          test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -ge 32
+          test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -le 256
+          capture=/tmp/latchway-deployment-capture
+          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
+          amd64_digest=$(jq -er '.image.platforms["linux/amd64"] | select(test("^sha256:[0-9a-f]{64}$"))' "$candidate")
+          mirror_digest="${CLOUDFLARE_MIRROR_IMAGE##*@}"
+          pnpm --dir deploy/cloudflare install --frozen-lockfile
+          wrangler=(pnpm --dir deploy/cloudflare exec wrangler --config "$GITHUB_WORKSPACE/deploy/cloudflare/wrangler.release.jsonc")
+          pnpm --dir deploy/cloudflare exec wrangler containers registries credentials registry.cloudflare.com \
+            --pull --expiration-minutes 15 --json > /tmp/cloudflare-registry-credentials.json
+          registry_username=$(jq -er '.username | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json)
+          jq -er '.password | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json \
+            | docker login registry.cloudflare.com --username "$registry_username" --password-stdin
+          docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway@$amd64_digest" > /tmp/cloudflare-canonical-manifest.json
+          docker buildx imagetools inspect --raw "$CLOUDFLARE_MIRROR_IMAGE" > /tmp/cloudflare-mirror-manifest.json
+          rm /tmp/cloudflare-registry-credentials.json
+          docker logout registry.cloudflare.com >/dev/null
+          pnpm --dir deploy/cloudflare release:config -- --image "$CLOUDFLARE_MIRROR_IMAGE"
+          pnpm --dir deploy/cloudflare release:deploy
+          evidence_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          request_body=$(jq --null-input --compact-output --arg evidence_id "$evidence_id" '{evidence_id: $evidence_id}')
+          migration_ready=0
+          for _ in {1..24}; do
+            "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications-before.json
+            app_id=$(jq -er --arg image "$CLOUDFLARE_MIRROR_IMAGE" \
+              '[.[] | select(.name == "latchway" and .image == $image and (.state == "active" or .state == "ready"))] | if length == 1 then .[0].id else empty end' \
+              /tmp/cloudflare-applications-before.json || true)
+            if [[ "$app_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && \
+              curl --silent --show-error --fail-with-body --max-time 20 \
+                --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+                --header 'Content-Type: application/json' \
+                --data "$request_body" \
+                --output /tmp/cloudflare-migration-before.json \
+                "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
+              "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-before.json
+              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications-before.json)
+              if jq -e --argjson version "$app_version" \
+                'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
+                /tmp/cloudflare-instances-before.json >/dev/null; then
+                migration_ready=1
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test "$migration_ready" = 1
+          "${wrangler[@]}" whoami --json > /tmp/cloudflare-whoami.json
+          "${wrangler[@]}" secret list --name latchway --format json > /tmp/cloudflare-secrets.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          curl --silent --show-error --fail-with-body --max-time 60 \
+            --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$request_body" \
+            --output /tmp/cloudflare-shutdown.json \
+            "$ENDPOINT/__latchway/cloudflare/evidence/shutdown"
+          jq -e --arg evidence_id "$evidence_id" \
+            '.evidence_id == $evidence_id and .stop.signal == "SIGTERM" and .stop.reason == "runtime_signal" and .stop.exit_code == 0' \
+            /tmp/cloudflare-shutdown.json >/dev/null
+          replacement_ready=0
+          for _ in {1..24}; do
+            if curl --silent --show-error --fail-with-body --max-time 20 \
+              --header "Authorization: Bearer $CLOUDFLARE_EVIDENCE_TOKEN" \
+              --header 'Content-Type: application/json' \
+              --data "$request_body" \
+              --output /tmp/cloudflare-migration.json \
+              "$ENDPOINT/__latchway/cloudflare/evidence/migration"; then
+              "${wrangler[@]}" containers list --json > /tmp/cloudflare-applications.json
+              "${wrangler[@]}" containers instances "$app_id" --search instance-0 --json > /tmp/cloudflare-instances-after.json
+              app_version=$(jq -er --arg id "$app_id" '.[] | select(.id == $id) | .version' /tmp/cloudflare-applications.json)
+              before_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-before.json)
+              after_created=$(jq -er '.[0].created' /tmp/cloudflare-instances-after.json)
+              if [[ "$before_created" != "$after_created" ]] && jq -e --argjson version "$app_version" \
+                'length == 1 and .[0].name == "instance-0" and .[0].state == "running" and .[0].version == $version' \
+                /tmp/cloudflare-instances-after.json >/dev/null; then
+                replacement_ready=1
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test "$replacement_ready" = 1
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          "${wrangler[@]}" deployments list --name latchway --json > /tmp/cloudflare-deployments.json
+          "${wrangler[@]}" versions list --name latchway --json > /tmp/cloudflare-versions.json
+          wrangler_version=$(pnpm --dir deploy/cloudflare exec wrangler --version)
+          python3 scripts/cloudflare-deployment-capture.py \
+            --candidate-manifest "$candidate" \
+            --canonical-manifest /tmp/cloudflare-canonical-manifest.json \
+            --mirror-manifest /tmp/cloudflare-mirror-manifest.json \
+            --mirror-image "$CLOUDFLARE_MIRROR_IMAGE" \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --whoami /tmp/cloudflare-whoami.json \
+            --applications /tmp/cloudflare-applications.json \
+            --instances-before /tmp/cloudflare-instances-before.json \
+            --instances-after /tmp/cloudflare-instances-after.json \
+            --deployments /tmp/cloudflare-deployments.json \
+            --versions /tmp/cloudflare-versions.json \
+            --secrets /tmp/cloudflare-secrets.json \
+            --migration /tmp/cloudflare-migration.json \
+            --shutdown /tmp/cloudflare-shutdown.json \
+            --observed-at "$shutdown_finished" \
+            --shutdown-started "$shutdown_started" \
+            --shutdown-finished "$shutdown_finished" \
+            --wrangler-version "$wrangler_version" \
+            --output-dir "$capture" \
+            --resource-id-output /tmp/latchway-provider-resource-id
+
+      - name: Capture bounded HTTPS health and readiness responses
+        run: >-
+          python3 scripts/deployment-evidence.py observe-http
+          --endpoint "$ENDPOINT"
+          --output-dir /tmp/latchway-deployment-capture
+          --timeout 15
+      - name: Bind observations to this protected workflow run
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          provider_resource_id=$(cat /tmp/latchway-provider-resource-id)
+          python3 scripts/deployment-evidence.py make-manifest \
+            --platform "$PLATFORM" \
+            --capture-dir /tmp/latchway-deployment-capture \
+            --started-at "$(cat /tmp/latchway-deployment-started-at)" \
+            --finished-at "$finished_at" \
+            --core-commit "$CANDIDATE_COMMIT" \
+            --core-release "$INTENDED_TAG" \
+            --image "$RELEASE_IMAGE" \
+            --endpoint "$ENDPOINT" \
+            --provider-resource-id "$provider_resource_id" \
+            --environment "$DEPLOYMENT_ENVIRONMENT"
+          python3 scripts/deployment-evidence.py validate-capture \
+            --capture-dir /tmp/latchway-deployment-capture \
+            --output /tmp/latchway-deployment-validation.json
+          python3 scripts/deployment-evidence.py seal \
+            --capture-dir /tmp/latchway-deployment-capture \
+            --output "/tmp/${PLATFORM}.tar.gz"
+      - name: Attest the bounded provider capture
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: /tmp/${{ inputs.platform }}.tar.gz
+      - name: Name the attestation bundle deterministically
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" "/tmp/${PLATFORM}.attestation.json"
+      - name: Upload signed provider evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/${{ inputs.platform }}.tar.gz
+            /tmp/${{ inputs.platform }}.attestation.json
+            /tmp/latchway-deployment-validation.json
+            /tmp/latchway-deployment-validation.json.junit.xml
+          if-no-files-found: error
+          retention-days: 90
+      - name: Tear down the ephemeral Compose deployment
+        if: always() && inputs.platform == 'compose'
+        shell: bash
+        env:
+          COMPOSE_PROJECT_NAME: latchway-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          export LATCHWAY_IMAGE="$RELEASE_IMAGE"
+          export POSTGRES_PASSWORD=cleanup
+          export LATCHWAY_DATABASE_URL='postgresql://cleanup:cleanup@postgres:5432/cleanup?sslmode=disable'
+          export LATCHWAY_MASTER_KEY='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+          export LATCHWAY_PUBLIC_ORIGIN="$ENDPOINT"
+          export LATCHWAY_PORT="${ENDPOINT##*:}"
+          docker compose -p "$COMPOSE_PROJECT_NAME" -f deploy/compose/compose.release.yaml down --volumes

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/cloud-deployment-capture-v1.json",
+  "title": "Latchway cloud deployment capture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "platform",
+    "started_at",
+    "finished_at",
+    "core_commit",
+    "core_release",
+    "contract_version",
+    "bundle_sha256",
+    "oci_image_digest",
+    "endpoint",
+    "provider_resource_id",
+    "collector",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "latchway_cloud_deployment_capture"},
+    "platform": {
+      "enum": ["compose", "cloud_run", "aws", "fly_io", "cloudflare_containers"]
+    },
+    "started_at": {"type": "string", "format": "date-time", "maxLength": 32},
+    "finished_at": {"type": "string", "format": "date-time", "maxLength": 32},
+    "core_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "core_release": {
+      "type": "string",
+      "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "contract_version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "oci_image_digest": {
+      "type": "string",
+      "pattern": "^ghcr\\.io/latchway/latchway@sha256:[0-9a-f]{64}$"
+    },
+    "endpoint": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "provider_resource_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow_ref",
+        "ref",
+        "sha",
+        "run_id",
+        "run_attempt",
+        "runner_environment",
+        "environment"
+      ],
+      "properties": {
+        "repository": {"const": "Latchway/latchway"},
+        "workflow_ref": {
+          "type": "string",
+          "const": "Latchway/latchway/.github/workflows/deployment-evidence.yml@refs/heads/main"
+        },
+        "ref": {"const": "refs/heads/main"},
+        "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "run_id": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+        "run_attempt": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "runner_environment": {"const": "github-hosted"},
+        "environment": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "control_plane",
+        "migration",
+        "health",
+        "readiness",
+        "secrets",
+        "shutdown"
+      ],
+      "properties": {
+        "identity": {"$ref": "#/$defs/artifact"},
+        "control_plane": {"$ref": "#/$defs/artifact"},
+        "migration": {"$ref": "#/$defs/artifact"},
+        "health": {"$ref": "#/$defs/artifact"},
+        "readiness": {"$ref": "#/$defs/artifact"},
+        "secrets": {"$ref": "#/$defs/artifact"},
+        "shutdown": {"$ref": "#/$defs/artifact"}
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*\\.json$",
+          "maxLength": 64
+        },
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}
