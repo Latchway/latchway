@@ -8,8 +8,10 @@ misconfigurations:
 licenses:
   - id: LGPL-3.0-or-later
     paths:
+      - .github/toolchains/wrangler/package-lock.json
       - deploy/cloudflare/pnpm-lock.yaml
     statement: >-
-      The finding is the optional development-only sharp/libvips binary used
-      by Wrangler tooling. It is dynamically linked and is never copied into
-      or distributed with the Latchway runtime image.
+      The findings are optional tooling-only sharp/libvips binaries pulled by
+      Wrangler in the deployment package and the source-free CI evidence
+      toolchain. They are dynamically linked and are never copied into or
+      distributed with the Latchway runtime image.

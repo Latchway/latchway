@@ -28,6 +28,24 @@ def steps(workflow: dict, job: str) -> list[dict]:
 
 
 class SecurityWorkflowTests(unittest.TestCase):
+    def test_license_exception_is_limited_to_wrangler_tooling(self) -> None:
+        policy = yaml.safe_load(
+            (ROOT / ".trivyignore.yaml").read_text(encoding="utf-8")
+        )
+        licenses = policy.get("licenses", [])
+        self.assertEqual(len(licenses), 1)
+        exception = licenses[0]
+        self.assertEqual(exception["id"], "LGPL-3.0-or-later")
+        self.assertEqual(
+            set(exception["paths"]),
+            {
+                ".github/toolchains/wrangler/package-lock.json",
+                "deploy/cloudflare/pnpm-lock.yaml",
+            },
+        )
+        self.assertIn("tooling-only", exception["statement"])
+        self.assertIn("never copied into or distributed", exception["statement"])
+
     def test_candidate_gate_is_protected_fixed_and_candidate_bound(self) -> None:
         workflow = load_workflow("security.yml")
         dispatch = workflow["on"]["workflow_dispatch"]
