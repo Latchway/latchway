@@ -14,16 +14,16 @@ promoted.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
-| Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
-| Last passing commit in each repository | Core locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `3e80e47302773d209b98f51b4bedd412213e1605` |
+| Current phase | Phase 19 current RC source checkpoint is hosted-green on its review branch; protected-main candidate retention and the stable descendant remain pending |
+| Current objective | Enable the required private-repository protection, land the current documentation-only descendant of the coherent `1.0.0-rc.1` source checkpoint on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
+| Last passing commit in each repository | Core hosted-green RC source/release-tooling checkpoint `3c2da120a729f05ac5d8ddf799acb21eb013e833` (CI run `33287170804`; exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `3e80e47302773d209b98f51b4bedd412213e1605` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
 | Database schema version | `20` |
-| Last full test time | `2026-08-30T00:11:34Z`, successful full Go suite against PostgreSQL 18 plus vet, client-diagnostics lifecycle, schema-20 migration, contract, workflow, formatting, and synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Last full test time | `2026-08-30T02:33:44Z`, successful hosted core CI run `33287170804` at `3c2da120a729f05ac5d8ddf799acb21eb013e833`, including PostgreSQL 15/18, race, fuzz, vet/lint, contracts, console/browser, reliability, deployment validation, non-root startup, and multi-architecture image construction; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
-| Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: protected `main` has not retained the required canonical RC candidate run or its stable descendant run, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
-| External credentials still required | Protected GitHub repository settings, runners, and registry publication/signing identities; Apple Distribution signing and production App Attest configuration (a physical iPhone has been connected but must be unlocked, trusted, and visible to CoreDevice during the protected run); a physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
-| Next executable task | Advance protected `main` only to the signed `1.0.0-rc.1` checkpoint and wait for its `release.yml` run to pass; only then advance to the signed stable descendant and begin exact-candidate source and release evidence |
+| Open blockers | Local implementation/load/deployment/recovery blockers: none identified. Release blockers: GitHub rejects branch protection/rulesets for the current private repositories on the organization plan, so protected `main` has not retained the required canonical RC candidate run or its stable descendant run; exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence also remains unavailable |
+| External credentials still required | Purpose-scoped GitHub source-read, Actions-read, release-dispatch, administration-read, package-publication, and signing identities; Apple Distribution signing plus the permanent team/bundle/App Attest configuration (a physical iPhone is connected with Developer Mode enabled, but no matching Latchway distribution identity or profile exists); a visible physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
+| Next executable task | Upgrade or otherwise enable protection for the private repositories, configure the purpose-scoped release identities, then land the current `1.0.0-rc.1` descendant on protected `main` and wait for its `release.yml` run to pass; only then advance to the stable descendant and begin exact-candidate release evidence |
 
 Passing repository commands at the recorded heads include:
 
@@ -66,7 +66,7 @@ mise exec -- pnpm pack:check
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Passing RC implementation and release-tooling checkpoint | `ca26b74b6588b9c81935c5e50843a0be98fbd135` (`1.0.0-rc.1`); exact protected candidate pending |
+| Passing RC implementation and release-tooling checkpoint | `3c2da120a729f05ac5d8ddf799acb21eb013e833` (`1.0.0-rc.1`), including successful hosted CI run `33287170804`; exact protected candidate pending |
 | Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
@@ -77,13 +77,13 @@ The archive was reproduced byte-for-byte in two independent local output
 directories. All four SDK locks point to the normative checkpoint above.
 Release-hardening and documentation commits may descend from that checkpoint,
 but must not alter `api/`; any later API drift invalidates the locks.
-The current implementation candidate adopts ADR 0022's plan-authorized strict
+The hosted-green implementation checkpoint adopts ADR 0022's plan-authorized strict
 `<15/<20/<30 ms` P50/P95/P99 correction without weakening P99, correctness,
 throughput, streaming, memory, contention, or failure gates. The unchanged
 complete local load suite passes at the source/load checkpoint above. A later
-documentation-only repository head is not implicitly a different
-implementation candidate, and any later code change requires the affected
-gates to be rerun.
+documentation-only repository head does not change the implementation claim;
+the exact candidate is established only by the protected-main dispatch, and
+any later code change requires the affected gates to be rerun.
 
 ## Mobile-first SDK coordinates
 

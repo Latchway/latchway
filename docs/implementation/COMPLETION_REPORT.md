@@ -11,7 +11,7 @@ after every release domain has authenticated evidence for one exact candidate.
 
 | Artifact | Candidate coordinate | Current evidence |
 | --- | --- | --- |
-| Core | Intended `v1.0.0`; locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135`; exact protected RC candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged; coherent `1.0.0-rc.1` source including protected client diagnostics is prepared; non-root corrected-target load, local multi-architecture supply-chain, Compose, failure-matrix, and recovery drills passed at their named checkpoints; protected RC/stable candidate runs, exact-image evidence, public annotated product tag, and GitHub release are not claimed |
+| Core | Intended `v1.0.0`; hosted-green RC implementation/release-tooling checkpoint `3c2da120a729f05ac5d8ddf799acb21eb013e833` (CI run `33287170804`); exact protected RC candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged; coherent `1.0.0-rc.1` source including protected client diagnostics is prepared and passed the full hosted review suite; non-root corrected-target load, local multi-architecture supply-chain, Compose, failure-matrix, and recovery drills passed at their named checkpoints; protected RC/stable candidate runs, exact-image evidence, public annotated product tag, and GitHub release are not claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8` | Local reproducible package/consumer and release-workflow gates pass; npm publication not claimed |
 | Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | Local Swift Package, consumer, CocoaPods, fixture, unsupported-device fail-closed, and release-workflow gates pass; public tag/package and physical proof not claimed |
 | Android | `dev.latchway:latchway-*` `1.0.0`; source `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Local Gradle, stable API 37.0 installer, Maven-layout, consumer, explicit emulator-rejection, and release-workflow gates pass; Maven Central and Play-distributed proof not claimed |
@@ -24,12 +24,13 @@ Contract `0.5.1` is marked `released` at `2026-08-29T07:14:27Z`
 with wire protocol `1`. That state freezes normative source; it does not assert
 that the product or packages have been publicly released.
 
-The checkpoint and candidate are separate by design: SDK locks consume the
-byte-frozen contract at the checkpoint, while the implementation candidate is
-the server/CLI/dashboard and corrected performance-contract snapshot. The
-source/load checkpoint is the clean documentation descendant that passed the
-unchanged complete local suite. Documentation-only descendants do not rewrite
-those historical coordinates. Any later code change requires a new candidate
+The checkpoints and candidate are separate by design: SDK locks consume the
+byte-frozen contract checkpoint; the hosted-green RC checkpoint identifies the
+current server/CLI/dashboard and release-hardening source; and the source/load
+checkpoint identifies the corrected performance-contract snapshot that passed
+the unchanged complete local suite. Documentation-only descendants do not
+rewrite those historical coordinates. The exact candidate is established only
+by the protected-main dispatch. Any later code change requires a new candidate
 and new affected evidence.
 
 ## Test evidence
