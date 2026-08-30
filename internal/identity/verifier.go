@@ -221,7 +221,7 @@ func (verifier *JWTVerifier) Verify(ctx context.Context, credential RawIdentityC
 		return VerifiedPrincipal{}, invalidCredential("issued-at claim is required")
 	}
 	expiresAt, err := claims.GetExpirationTime()
-	if err != nil || expiresAt == nil || expiresAt.IsZero() || expiresAt.Time.Sub(issuedAt.Time) > verifier.maxTokenLifetime || !expiresAt.Time.After(issuedAt.Time) {
+	if err != nil || expiresAt == nil || expiresAt.IsZero() || expiresAt.Sub(issuedAt.Time) > verifier.maxTokenLifetime || !expiresAt.After(issuedAt.Time) {
 		return VerifiedPrincipal{}, invalidCredential("token lifetime is invalid")
 	}
 	for _, claim := range verifier.requiredClaims {
@@ -247,7 +247,7 @@ func (verifier *JWTVerifier) Verify(ctx context.Context, credential RawIdentityC
 	authenticatedAt := issuedAt.Time
 	if value, present := claims["auth_time"]; present {
 		parsed, parseErr := numericDate(value)
-		if parseErr != nil || parsed.After(now.Add(verifier.clockSkew)) || !expiresAt.Time.After(parsed) {
+		if parseErr != nil || parsed.After(now.Add(verifier.clockSkew)) || !expiresAt.After(parsed) {
 			return VerifiedPrincipal{}, invalidCredential("authentication time is invalid")
 		}
 		authenticatedAt = parsed
@@ -267,7 +267,7 @@ func (verifier *JWTVerifier) Verify(ctx context.Context, credential RawIdentityC
 	principal := VerifiedPrincipal{
 		ProviderID: verifier.id, Issuer: verifier.issuer, Subject: subject,
 		Audience: append([]string(nil), audience...), AuthenticatedAt: authenticatedAt.UTC(),
-		ExpiresAt: expiresAt.Time.UTC(), Claims: mapped,
+		ExpiresAt: expiresAt.UTC(), Claims: mapped,
 	}
 	if err := principal.validate(); err != nil {
 		return VerifiedPrincipal{}, err

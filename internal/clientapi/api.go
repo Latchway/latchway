@@ -1,13 +1,12 @@
 package clientapi
 
 import (
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -93,7 +92,7 @@ func canonicalPublicOrigin(value string) (url.URL, error) {
 	}
 	origin.Scheme = strings.ToLower(origin.Scheme)
 	origin.Host = strings.ToLower(origin.Host)
-	if origin.Scheme != "https" && !(origin.Scheme == "http" && isLoopback(origin.Hostname())) {
+	if origin.Scheme != "https" && (origin.Scheme != "http" || !isLoopback(origin.Hostname())) {
 		return url.URL{}, errors.New("client API public origin must use HTTPS except on loopback")
 	}
 	return url.URL{Scheme: origin.Scheme, Host: origin.Host}, nil
@@ -470,12 +469,12 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 	}
 	expectedMethod := ""
 	path := r.URL.Path
-	switch {
-	case path == challengePath, path == exchangePath, path == refreshPath:
+	switch path {
+	case challengePath, exchangePath, refreshPath:
 		expectedMethod = http.MethodPost
-	case path == revokePath:
+	case revokePath:
 		expectedMethod = http.MethodDelete
-	case path == diagnosticsPath, path == jwksPath, path == discoveryPath:
+	case diagnosticsPath, jwksPath, discoveryPath:
 		expectedMethod = http.MethodGet
 	default:
 		if _, ok := featureFromQuotaPath(path); ok {
@@ -864,10 +863,7 @@ func challengeDocumentFor(result ChallengeResult) (challengeDocument, error) {
 	return challengeDocument{
 		ChallengeID: result.ChallengeID, ChallengeNonce: result.ChallengeNonce,
 		BindingVersion: result.BindingVersion, IssuedAt: result.IssuedAt, ExpiresAt: result.ExpiresAt.UTC(),
-		Attestation: challengeAttestationDocument{
-			Provider: attestation.Provider, Mode: attestation.Mode,
-			ClientDataHash: attestation.ClientDataHash, ProviderOptions: attestation.ProviderOptions,
-		},
+		Attestation: challengeAttestationDocument(attestation),
 	}, nil
 }
 
@@ -965,7 +961,11 @@ func validateJWKS(keys JWKS) error {
 		}
 		xBytes, _ := base64.RawURLEncoding.Strict().DecodeString(key.X)
 		yBytes, _ := base64.RawURLEncoding.Strict().DecodeString(key.Y)
-		if !elliptic.P256().IsOnCurve(new(big.Int).SetBytes(xBytes), new(big.Int).SetBytes(yBytes)) {
+		encodedPoint := make([]byte, 1+len(xBytes)+len(yBytes))
+		encodedPoint[0] = 4
+		copy(encodedPoint[1:], xBytes)
+		copy(encodedPoint[1+len(xBytes):], yBytes)
+		if _, err := ecdh.P256().NewPublicKey(encodedPoint); err != nil {
 			return errors.New("public JWK point is not on P-256")
 		}
 		if _, exists := seen[key.Kid]; exists {

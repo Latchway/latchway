@@ -811,9 +811,7 @@ func runtimeUpstream(raw compiledUpstream) (Upstream, error) {
 		HeaderName: raw.Authentication.HeaderName, Username: raw.Authentication.Username,
 	}
 	for _, header := range raw.Authentication.Headers {
-		authentication.Headers = append(authentication.Headers, UpstreamAuthenticationHeader{
-			HeaderName: header.HeaderName, SecretRef: header.SecretRef,
-		})
+		authentication.Headers = append(authentication.Headers, UpstreamAuthenticationHeader(header))
 	}
 	switch authentication.Type {
 	case "none":

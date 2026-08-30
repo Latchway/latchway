@@ -933,14 +933,6 @@ func evaluateString(ctx context.Context, program cel.Program, activation map[str
 	return result, nil
 }
 
-func selectRoute(featureID string, matched []configuration.Route, input Input) (configuration.Route, error) {
-	ordered, err := orderRoutes(featureID, matched, input)
-	if err != nil {
-		return configuration.Route{}, err
-	}
-	return ordered[0], nil
-}
-
 func orderRoutes(featureID string, matched []configuration.Route, input Input) ([]configuration.Route, error) {
 	if !policyIdentifierPattern.MatchString(featureID) || len(matched) == 0 || len(matched) > 32 {
 		return nil, ErrRouteNotFound

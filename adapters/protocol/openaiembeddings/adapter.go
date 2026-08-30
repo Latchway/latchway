@@ -125,7 +125,7 @@ func (a Adapter) ApplyFeature(ctx context.Context, request *http.Request, decisi
 		return 0, errors.New("valid physical model is required")
 	}
 	if decision.DefaultOutputTokens != 0 || decision.MaximumOutputTokens != 0 {
-		return 0, errors.New("Embeddings output-token bounds must be zero")
+		return 0, errors.New("embeddings output-token bounds must be zero")
 	}
 
 	object, raw, err := a.readRequest(ctx, request)

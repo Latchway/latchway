@@ -339,8 +339,9 @@ func validProviderCredential(value []byte) bool {
 			padding = true
 			continue
 		}
-		if padding || !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') || strings.ContainsRune("-._~+/", rune(character))) {
+		allowed := (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune("-._~+/", rune(character))
+		if padding || !allowed {
 			return false
 		}
 	}
@@ -418,13 +419,14 @@ func expectedProviderVerifyChecks(mode string) map[string]string {
 	for name, detail := range providerVerifyCommonCheckDetails {
 		expected[name] = detail
 	}
-	if mode == providerverify.ModeOpenRouter {
+	switch mode {
+	case providerverify.ModeOpenRouter:
 		expected["target"] = "The canonical OpenRouter HTTPS target passed protected destination validation."
 		expected["model_pricing"] = "Exact selected-model pricing and context metadata were validated."
 		expected["key_information"] = "The key is inference-capable, current, and has sufficient declared credit or free access."
 		expected["cost_preflight"] = "The complete live-probe worst-case cost was proved below the operator ceiling before dispatch."
 		expected["cost_reconciliation"] = "Provider-reported cost was exact and did not exceed the trusted calculated bound."
-	} else if mode == providerverify.ModeOpenAIChat {
+	case providerverify.ModeOpenAIChat:
 		expected["target"] = "The generic HTTPS target passed protected destination validation."
 		expected["cost_preflight"] = "No trusted generic price source was supplied; monetary cost remains explicitly unverified."
 	}

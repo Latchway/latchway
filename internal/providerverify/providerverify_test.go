@@ -672,14 +672,6 @@ func errorStep(status int, body string) fakeStep {
 	}
 }
 
-func errorUnknownLengthStep(status int, body string) fakeStep {
-	return func(*http.Request, string, []byte) (*http.Response, error) {
-		result := response(status, "application/json", body)
-		result.ContentLength = -1
-		return result, nil
-	}
-}
-
 func response(status int, contentType, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status, Header: http.Header{"Content-Type": []string{contentType}},

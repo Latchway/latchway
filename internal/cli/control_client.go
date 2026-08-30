@@ -100,7 +100,7 @@ func (client *controlAPIClient) doWithHeaders(
 		}
 		defer clear(body)
 		if len(body) > maxControlCLIRequest {
-			return controlResponse{}, errors.New("Admin API request exceeds the safety limit")
+			return controlResponse{}, errors.New("admin API request exceeds the safety limit")
 		}
 	}
 	endpoint, err := adminEndpoint(client.server, path)
@@ -136,7 +136,7 @@ func (client *controlAPIClient) doWithHeaders(
 		return controlResponse{}, fmt.Errorf("call Admin API: %s", client.safeText(err.Error()))
 	}
 	if response.Body == nil {
-		return controlResponse{}, errors.New("Admin API returned an empty response")
+		return controlResponse{}, errors.New("admin API returned an empty response")
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxControlCLIResponse+1))
@@ -145,32 +145,32 @@ func (client *controlAPIClient) doWithHeaders(
 	}
 	defer clear(responseBody)
 	if len(responseBody) > maxControlCLIResponse {
-		return controlResponse{}, errors.New("Admin API response exceeds the safety limit")
+		return controlResponse{}, errors.New("admin API response exceeds the safety limit")
 	}
 	if client.containsToken(responseBody) {
-		return controlResponse{}, errors.New("Admin API returned unsafe credential material")
+		return controlResponse{}, errors.New("admin API returned unsafe credential material")
 	}
 	if response.StatusCode != expectedStatus {
 		return controlResponse{}, client.problem(response.StatusCode, response.Header, responseBody)
 	}
 	if expectedStatus == http.StatusNoContent {
 		if len(responseBody) != 0 {
-			return controlResponse{}, errors.New("Admin API returned an invalid no-content response")
+			return controlResponse{}, errors.New("admin API returned an invalid no-content response")
 		}
 		return controlResponse{Header: response.Header.Clone()}, nil
 	}
 	if responseDocument == nil || len(responseBody) == 0 || !secretJSONContentType(response.Header.Get("Content-Type")) {
-		return controlResponse{}, errors.New("Admin API returned an invalid success document")
+		return controlResponse{}, errors.New("admin API returned an invalid success document")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	decoder.DisallowUnknownFields()
 	decoder.UseNumber()
 	if err := decoder.Decode(responseDocument); err != nil {
-		return controlResponse{}, errors.New("Admin API returned malformed or non-conforming JSON")
+		return controlResponse{}, errors.New("admin API returned malformed or non-conforming JSON")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return controlResponse{}, errors.New("Admin API returned multiple JSON values")
+		return controlResponse{}, errors.New("admin API returned multiple JSON values")
 	}
 	return controlResponse{Header: response.Header.Clone()}, nil
 }
@@ -178,7 +178,7 @@ func (client *controlAPIClient) doWithHeaders(
 func (client *controlAPIClient) problem(status int, header http.Header, body []byte) error {
 	document, _, valid := decodeSecretProblem(status, header, body)
 	if !valid {
-		return fmt.Errorf("Admin API failed with HTTP status %d", status)
+		return fmt.Errorf("admin API failed with HTTP status %d", status)
 	}
 	detail := client.safeText(document.Detail)
 	if detail == "" {

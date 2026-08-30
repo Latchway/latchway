@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"math/big"
 	"mime"
 	"net/http"
@@ -280,7 +279,7 @@ func parseUSDPerTokenNanoPerMillion(value string) (int64, error) {
 		return 0, errors.New("pricing")
 	}
 	result := parsed.Num().Int64()
-	if result < 0 || result > math.MaxInt64 {
+	if result < 0 {
 		return 0, errors.New("pricing")
 	}
 	return result, nil

@@ -373,7 +373,7 @@ func adminEndpoint(rawServer, path string) (string, error) {
 	if err != nil || server.Scheme == "" || server.Host == "" || server.User != nil || server.RawQuery != "" || server.Fragment != "" || (server.Path != "" && server.Path != "/") {
 		return "", errors.New("--server must be an absolute origin without credentials, path, query, or fragment")
 	}
-	if server.Scheme != "https" && !(server.Scheme == "http" && cliLoopbackHost(server.Hostname())) {
+	if server.Scheme != "https" && (server.Scheme != "http" || !cliLoopbackHost(server.Hostname())) {
 		return "", errors.New("--server must use HTTPS except on localhost or a loopback address")
 	}
 	server.Path = path

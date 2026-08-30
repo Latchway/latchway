@@ -1297,7 +1297,7 @@ func TestHandlerTranslatesConcurrencyRulesAndPropagatesStreaming(t *testing.T) {
 			Scope: []string{"user", "environment"}, Maximum: 1, Hard: true,
 		},
 	}
-	fixture.target.response.Response.Header.Set("Content-Type", "text/event-stream")
+	fixture.target.response.Header.Set("Content-Type", "text/event-stream")
 	handler := fixture.handler(t)
 	request := fixture.request(t)
 	body := `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"stream":true}`
@@ -4283,7 +4283,7 @@ func (fake *fakeDispatchTarget) scoped(
 
 func (fake *fakeDispatchTarget) bindResponseRequest() {
 	if fake.response != nil && fake.response.Response != nil {
-		fake.response.Response.Request = fake.preparedRequest
+		fake.response.Request = fake.preparedRequest
 	}
 }
 

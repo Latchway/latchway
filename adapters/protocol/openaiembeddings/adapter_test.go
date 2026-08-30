@@ -395,7 +395,7 @@ func TestRequestTransportAndBodyFailuresAreSafe(t *testing.T) {
 }
 
 func TestContextCancellationAndApplyFailures(t *testing.T) {
-	if _, err := (Adapter{}).InspectRequest(nil, newRequest(t, `{"model":"client","input":"hello"}`)); !protocol.IsCode(err, "request_invalid") {
+	if _, err := (Adapter{}).InspectRequest(intentionallyNilContext(), newRequest(t, `{"model":"client","input":"hello"}`)); !protocol.IsCode(err, "request_invalid") {
 		t.Fatalf("nil InspectRequest context error = %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -406,10 +406,9 @@ func TestContextCancellationAndApplyFailures(t *testing.T) {
 	if _, err := (Adapter{}).ApplyFeature(ctx, newRequest(t, `{"model":"client","input":"hello"}`), protocol.FeatureDecision{PhysicalModel: "server"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled ApplyFeature error = %v", err)
 	}
-	if _, err := (Adapter{}).ApplyFeature(nil, newRequest(t, `{"model":"client","input":"hello"}`), protocol.FeatureDecision{PhysicalModel: "server"}); !protocol.IsCode(err, "request_invalid") {
+	if _, err := (Adapter{}).ApplyFeature(intentionallyNilContext(), newRequest(t, `{"model":"client","input":"hello"}`), protocol.FeatureDecision{PhysicalModel: "server"}); !protocol.IsCode(err, "request_invalid") {
 		t.Fatalf("nil ApplyFeature context error = %v", err)
 	}
-
 	for _, model := range []string{"", " server", "server\nmodel", strings.Repeat("m", 257)} {
 		if _, err := (Adapter{}).ApplyFeature(context.Background(), newRequest(t, `{"model":"client","input":"hello"}`), protocol.FeatureDecision{PhysicalModel: model}); err == nil {
 			t.Fatalf("unsafe physical model %q was accepted", model)
@@ -445,7 +444,7 @@ func TestObserveResponseRequiresAppliedJSONRequest(t *testing.T) {
 		t.Fatalf("ObserveResponse() error = %v", err)
 	}
 
-	if _, err := adapter.ObserveResponse(nil, valid); err == nil {
+	if _, err := adapter.ObserveResponse(intentionallyNilContext(), valid); err == nil {
 		t.Fatal("nil response context was accepted")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -477,6 +476,10 @@ func TestObserveResponseRequiresAppliedJSONRequest(t *testing.T) {
 		}
 	}
 }
+
+// intentionallyNilContext preserves adversarial nil-context coverage without
+// encouraging nil contexts in production call sites.
+func intentionallyNilContext() context.Context { return nil }
 
 func TestProviderErrorResponsesAreOpaqueAndSafe(t *testing.T) {
 	adapter := Adapter{}

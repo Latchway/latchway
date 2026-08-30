@@ -155,12 +155,7 @@ func runtimePricingCatalog(raw compiledPricingCatalog, models map[string]Model) 
 			return PricingCatalog{}, ErrInvalid
 		}
 		seenModels[rawEntry.ModelID] = struct{}{}
-		catalog.Entries = append(catalog.Entries, PricingEntry{
-			ModelID:                 rawEntry.ModelID,
-			InputNanoUSDPerMillion:  rawEntry.InputNanoUSDPerMillion,
-			OutputNanoUSDPerMillion: rawEntry.OutputNanoUSDPerMillion,
-			RequestNanoUSD:          rawEntry.RequestNanoUSD,
-		})
+		catalog.Entries = append(catalog.Entries, PricingEntry(rawEntry))
 	}
 	return catalog, nil
 }

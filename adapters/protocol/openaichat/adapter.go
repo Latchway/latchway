@@ -636,7 +636,7 @@ func validateMessages(value any) error {
 		}
 		content, hasContent := message["content"]
 		if (role == "function" && !hasContent) ||
-			((!hasContent || content == nil) && role != "function" && !(role == "assistant" && (toolCalls || functionCall))) {
+			((!hasContent || content == nil) && role != "function" && (role != "assistant" || (!toolCalls && !functionCall))) {
 			return requestMalformed("each message must contain content or a tool call")
 		}
 		if hasContent && !validMessageContent(content, role) {

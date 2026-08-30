@@ -881,9 +881,10 @@ func activateChallengeTestRevisionWithPolicy(t *testing.T, ctx context.Context, 
 	selection := map[string]any{
 		"provider": provider, "mode": mode, "minimumTrustLevel": minimumTrust,
 	}
-	if provider == "debug" {
+	switch provider {
+	case "debug":
 		selection["secretRef"] = "secret/debug-attestation-public-keys"
-	} else if provider == "app_attest" {
+	case "app_attest":
 		selection["appAttest"] = map[string]any{
 			"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
 			"environment": "development", "allowedValidationCategories": []any{1},

@@ -24,7 +24,7 @@ func TestTokenIssuerCreatesCanonicalRedactedTokens(t *testing.T) {
 	if !strings.HasPrefix(plaintext, "lwa_") {
 		t.Fatalf("token prefix = %q", plaintext)
 	}
-	if got := fmt.Sprintf("%s", issued.Secret); got != "[REDACTED]" {
+	if got := issued.Secret.String(); got != "[REDACTED]" {
 		t.Fatalf("formatted token = %q", got)
 	}
 	if got := fmt.Sprintf("%#v", issued.Secret); strings.Contains(got, plaintext) {

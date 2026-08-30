@@ -90,10 +90,6 @@ func calendarWindowIn(now time.Time, raw, timezone string) (calendarPeriod, erro
 	return calendarPeriod{key: key, start: startUTC, end: end.UTC()}, nil
 }
 
-func calendarMonthWindow(now time.Time, amount int64) (time.Time, time.Time, error) {
-	return calendarMonthWindowIn(now.UTC(), amount, time.UTC)
-}
-
 func canonicalCalendarTimezone(raw string) (string, *time.Location, error) {
 	if raw == "" || raw == "UTC" {
 		return "UTC", time.UTC, nil
