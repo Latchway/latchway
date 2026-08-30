@@ -34,7 +34,7 @@ const clientAccessTokenAudience = "latchway-data-plane"
 // replicas construct the gateway signing-key envelope required for rotation,
 // but never construct HTTP, administrative, identity, policy, or upstream
 // dependencies.
-func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr error) {
 	selection, err := selectRole(cfg.Role)
 	if err != nil {
 		return err
@@ -102,7 +102,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		}
 		// The HTTP runtime drains in-flight requests before runRole returns. Only
 		// then may pooled upstream transports be retired.
-		defer targetCache.Close()
+		defer func() {
+			runErr = errors.Join(runErr, targetCache.Close())
+		}()
 	}
 
 	var jobs workerRuntime

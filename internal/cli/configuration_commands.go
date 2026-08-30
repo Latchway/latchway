@@ -316,12 +316,16 @@ func readConfigurationInput(command *cobra.Command, input *configurationInputOpt
 		if err != nil {
 			return nil, fmt.Errorf("open configuration file: %w", err)
 		}
-		defer closeFile.Close()
 		reader = closeFile
 	} else {
 		reader = command.InOrStdin()
 	}
 	value, err := jsonsafe.DecodeReader(reader, maxConfigurationCLIBytes)
+	if closeFile != nil {
+		if closeErr := closeFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close configuration file: %w", closeErr)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read configuration JSON: %w", err)
 	}

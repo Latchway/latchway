@@ -159,7 +159,7 @@ func (source *RemoteKeySource) Key(ctx context.Context, kid, algorithm string) (
 	}
 
 	now := source.now().UTC()
-	record, found, fresh, staleAllowed := source.snapshot(kid, algorithm, now)
+	record, found, fresh, _ := source.snapshot(kid, algorithm, now)
 	if found && fresh {
 		return record.key, nil
 	}
@@ -175,7 +175,7 @@ func (source *RemoteKeySource) Key(ctx context.Context, kid, algorithm string) (
 	if errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
 		return nil, refreshErr
 	}
-	record, found, _, staleAllowed = source.snapshot(kid, algorithm, source.now().UTC())
+	record, found, _, staleAllowed := source.snapshot(kid, algorithm, source.now().UTC())
 	if found && staleAllowed && isTransientKeyFetch(refreshErr) {
 		return record.key, nil
 	}
@@ -209,52 +209,50 @@ func (source *RemoteKeySource) Refresh(ctx context.Context) error {
 }
 
 func (source *RemoteKeySource) refresh(ctx context.Context, forced, requireShared bool) error {
-	for {
-		now := source.now().UTC()
-		source.mu.Lock()
-		if source.refreshing {
-			done := source.refreshDone
-			source.mu.Unlock()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-done:
-				source.mu.Lock()
-				outcome := source.refreshError(requireShared)
-				source.mu.Unlock()
-				return outcome
-			}
-		}
-		if !forced && len(source.keys) > 0 && now.Before(source.freshUntil) {
-			source.mu.Unlock()
-			return nil
-		}
-		if forced && !source.lastForced.IsZero() && now.Sub(source.lastForced) < source.forcedRefreshMinimum {
-			source.mu.Unlock()
-			return transientKeyFetch(errors.New("forced key refresh is throttled"))
-		}
-		if forced {
-			source.lastForced = now
-		}
-		source.refreshing = true
-		source.refreshDone = make(chan struct{})
-		local := source.cachedRecordLocked()
+	now := source.now().UTC()
+	source.mu.Lock()
+	if source.refreshing {
+		done := source.refreshDone
 		source.mu.Unlock()
-
-		result := source.refreshRemote(ctx, local, forced, now)
-
-		source.mu.Lock()
-		if len(result.keys) != 0 && len(result.record.document) != 0 {
-			source.applyRecordLocked(result.record, result.keys)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			source.mu.Lock()
+			outcome := source.refreshError(requireShared)
+			source.mu.Unlock()
+			return outcome
 		}
-		source.refreshOutcome = result.err
-		source.sharedOutcome = result.sharedErr
-		source.refreshing = false
-		close(source.refreshDone)
-		outcome := source.refreshError(requireShared)
-		source.mu.Unlock()
-		return outcome
 	}
+	if !forced && len(source.keys) > 0 && now.Before(source.freshUntil) {
+		source.mu.Unlock()
+		return nil
+	}
+	if forced && !source.lastForced.IsZero() && now.Sub(source.lastForced) < source.forcedRefreshMinimum {
+		source.mu.Unlock()
+		return transientKeyFetch(errors.New("forced key refresh is throttled"))
+	}
+	if forced {
+		source.lastForced = now
+	}
+	source.refreshing = true
+	source.refreshDone = make(chan struct{})
+	local := source.cachedRecordLocked()
+	source.mu.Unlock()
+
+	result := source.refreshRemote(ctx, local, forced, now)
+
+	source.mu.Lock()
+	if len(result.keys) != 0 && len(result.record.document) != 0 {
+		source.applyRecordLocked(result.record, result.keys)
+	}
+	source.refreshOutcome = result.err
+	source.sharedOutcome = result.sharedErr
+	source.refreshing = false
+	close(source.refreshDone)
+	outcome := source.refreshError(requireShared)
+	source.mu.Unlock()
+	return outcome
 }
 
 func (source *RemoteKeySource) refreshError(requireShared bool) error {
@@ -458,7 +456,12 @@ func (result remoteKeyFetchResult) staleGrace(configured time.Duration) time.Dur
 	return configured
 }
 
-func (source *RemoteKeySource) fetch(ctx context.Context, etag string, lastModified *time.Time, now time.Time) (remoteKeyFetchResult, error) {
+func (source *RemoteKeySource) fetch(
+	ctx context.Context,
+	etag string,
+	lastModified *time.Time,
+	now time.Time,
+) (result remoteKeyFetchResult, resultErr error) {
 	requestContext := ctx
 	var cancel context.CancelFunc
 	if source.target != nil {
@@ -506,9 +509,19 @@ func (source *RemoteKeySource) fetch(ctx context.Context, etag string, lastModif
 		return remoteKeyFetchResult{}, transientKeyFetch(errors.New("remote key response is unavailable"))
 	}
 	if dispatched != nil {
-		defer dispatched.Close()
+		defer func() {
+			if closeErr := dispatched.Close(); resultErr == nil && closeErr != nil {
+				result = remoteKeyFetchResult{}
+				resultErr = transientKeyFetch(errors.New("close protected remote key response"))
+			}
+		}()
 	} else {
-		defer response.Body.Close()
+		defer func() {
+			if closeErr := response.Body.Close(); resultErr == nil && closeErr != nil {
+				result = remoteKeyFetchResult{}
+				resultErr = transientKeyFetch(errors.New("close remote key response"))
+			}
+		}()
 	}
 
 	ttl := cacheLifetime(response.Header, now, source.defaultTTL, source.maximumTTL)
@@ -642,23 +655,27 @@ func publicRemoteKeyDocument(format RemoteKeyFormat, value any, keys map[string]
 				entry["n"] = base64.RawURLEncoding.EncodeToString(key.N.Bytes())
 				entry["e"] = base64.RawURLEncoding.EncodeToString(exponent)
 			case *ecdsa.PublicKey:
-				if key == nil || key.Curve == nil || key.X == nil || key.Y == nil {
+				if key == nil || key.Curve == nil {
 					return nil, errors.New("JWKS EC public key is invalid")
 				}
 				var curve string
+				var coordinateBytes int
 				switch key.Curve {
 				case elliptic.P256():
-					curve = "P-256"
+					curve, coordinateBytes = "P-256", 32
 				case elliptic.P384():
-					curve = "P-384"
+					curve, coordinateBytes = "P-384", 48
 				default:
 					return nil, errors.New("JWKS EC public key is unsupported")
 				}
-				coordinateBytes := (key.Curve.Params().BitSize + 7) / 8
+				encoded, err := key.Bytes()
+				if err != nil || len(encoded) != 1+2*coordinateBytes || encoded[0] != 4 {
+					return nil, errors.New("JWKS EC public key is invalid")
+				}
 				entry["kty"] = "EC"
 				entry["crv"] = curve
-				entry["x"] = base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, coordinateBytes)))
-				entry["y"] = base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, coordinateBytes)))
+				entry["x"] = base64.RawURLEncoding.EncodeToString(encoded[1 : 1+coordinateBytes])
+				entry["y"] = base64.RawURLEncoding.EncodeToString(encoded[1+coordinateBytes:])
 			default:
 				return nil, errors.New("JWKS public key type is unsupported")
 			}
@@ -725,7 +742,14 @@ func parseJWKPublicKey(jwk map[string]any) (any, error) {
 		if errX != nil || errY != nil || len(x) != coordinateBytes || len(y) != coordinateBytes {
 			return nil, errors.New("JWKS EC coordinates are invalid")
 		}
-		key := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+		encoded := make([]byte, 1+2*coordinateBytes)
+		encoded[0] = 4
+		copy(encoded[1:1+coordinateBytes], x)
+		copy(encoded[1+coordinateBytes:], y)
+		key, err := ecdsa.ParseUncompressedPublicKey(curve, encoded)
+		if err != nil {
+			return nil, errors.New("JWKS EC public key is unsafe")
+		}
 		if err := validateAsymmetricKey(key); err != nil {
 			return nil, errors.New("JWKS EC public key is unsafe")
 		}

@@ -54,10 +54,12 @@ func runPreflight(ctx context.Context, cfg config, client *protectedClient) gate
 		var response *http.Response
 		response, err = client.http.Do(request)
 		if err == nil {
-			defer response.Body.Close()
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+			closeErr := response.Body.Close()
 			if response.StatusCode != http.StatusOK {
 				err = fmt.Errorf("readiness status %d, want 200", response.StatusCode)
+			} else if closeErr != nil {
+				err = errors.New("close readiness response")
 			}
 		}
 	}
@@ -493,10 +495,10 @@ func openStream(ctx context.Context, client *protectedClient, specification requ
 		completed <- result
 		return
 	}
-	defer response.Body.Close()
 	mediaType, _, mediaErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if mediaErr != nil || mediaType != "text/event-stream" {
 		result := requestResult{Status: response.StatusCode, Latency: time.Since(started), Err: errors.New("stream response is not text/event-stream")}
+		result = closeStreamResponse(response, result)
 		established <- result
 		completed <- result
 		return
@@ -509,7 +511,15 @@ func openStream(ctx context.Context, client *protectedClient, specification requ
 	if readErr == nil {
 		_, readErr = io.Copy(io.Discard, reader)
 	}
-	completed <- requestResult{Status: response.StatusCode, Latency: time.Since(started), FirstByteAt: firstByteAt, Err: readErr}
+	completedResult := requestResult{Status: response.StatusCode, Latency: time.Since(started), FirstByteAt: firstByteAt, Err: readErr}
+	completed <- closeStreamResponse(response, completedResult)
+}
+
+func closeStreamResponse(response *http.Response, result requestResult) requestResult {
+	if closeErr := response.Body.Close(); result.Err == nil && closeErr != nil {
+		result.Err = errors.New("close stream response")
+	}
+	return result
 }
 
 func readFirstSSEEvent(reader *bufio.Reader) error {

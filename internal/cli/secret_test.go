@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -747,49 +748,70 @@ func TestSecretValueCanBeReadFromBoundedFileAndDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pipeReader, pipeWriter, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	descriptorValue := "descriptor-backed-secret"
-	if _, err := io.WriteString(pipeWriter, descriptorValue); err != nil {
-		t.Fatal(err)
-	}
-	if err := pipeWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	defer pipeReader.Close()
+	t.Run("regular file", func(t *testing.T) {
+		values := secretValueCLIOptions{valueFD: -1}
+		var got []byte
+		command := &cobra.Command{
+			Use: "source-test",
+			RunE: func(command *cobra.Command, _ []string) error {
+				var err error
+				got, err = readSecretValue(command, values)
+				return err
+			},
+		}
+		addSecretValueFlags(command, &values)
+		command.SetArgs([]string{"--value-file", filePath})
+		if err := command.Execute(); err != nil {
+			t.Fatalf("read source: %v", err)
+		}
+		defer clear(got)
+		if string(got) != fileValue {
+			t.Fatalf("value length = %d", len(got))
+		}
+	})
 
-	for _, test := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "regular file", args: []string{"--value-file", filePath}, want: fileValue},
-		{name: "file descriptor", args: []string{"--value-fd", strconv.Itoa(int(pipeReader.Fd()))}, want: descriptorValue},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			values := secretValueCLIOptions{valueFD: -1}
-			var got []byte
-			command := &cobra.Command{
-				Use: "source-test",
-				RunE: func(command *cobra.Command, _ []string) error {
-					var err error
-					got, err = readSecretValue(command, values)
-					return err
-				},
-			}
-			addSecretValueFlags(command, &values)
-			command.SetArgs(test.args)
-			if err := command.Execute(); err != nil {
-				t.Fatalf("read source: %v", err)
-			}
-			defer clear(got)
-			if string(got) != test.want {
-				t.Fatalf("value length = %d", len(got))
-			}
-		})
-	}
+	t.Run("file descriptor ownership", func(t *testing.T) {
+		pipeReader, pipeWriter, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		descriptorValue := "descriptor-backed-secret"
+		if _, err := io.WriteString(pipeWriter, descriptorValue); err != nil {
+			t.Fatal(err)
+		}
+		if err := pipeWriter.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		transferred := pipeReader
+		values := secretValueCLIOptions{valueFD: -1}
+		var got []byte
+		command := &cobra.Command{
+			Use: "source-test",
+			RunE: func(command *cobra.Command, _ []string) error {
+				var err error
+				got, err = readSecretValueWithDescriptor(command, values, func(fileDescriptor int) *os.File {
+					if fileDescriptor != int(transferred.Fd()) {
+						return nil
+					}
+					return transferred
+				})
+				return err
+			},
+		}
+		addSecretValueFlags(command, &values)
+		command.SetArgs([]string{"--value-fd", strconv.Itoa(int(transferred.Fd()))})
+		if err := command.Execute(); err != nil {
+			t.Fatalf("read source: %v", err)
+		}
+		defer clear(got)
+		if string(got) != descriptorValue {
+			t.Fatalf("value length = %d", len(got))
+		}
+		if _, err := transferred.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("transferred descriptor remains usable after read: %v", err)
+		}
+	})
 }
 
 func TestSecretClientRejectsRedirectsAndInsecureRemoteOrigins(t *testing.T) {

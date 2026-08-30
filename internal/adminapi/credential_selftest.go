@@ -373,18 +373,18 @@ func credentialSelfTestAccounting(
 		return protocol.TrustedInputProfile{}, pricing.Rates{}, pricing.Source{}, err
 	}
 	return protocol.TrustedInputProfile{
-		ID:                             profile.ID,
-		Protocol:                       profile.Protocol,
-		Method:                         profile.Method,
-		PhysicalModel:                  profile.PhysicalModel,
-		MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
-		MaximumFramingTokensPerMessage: profile.MaximumFramingTokensPerMessage,
-		MaximumContextTokens:           profile.MaximumContextTokens,
-	}, pricing.Rates{
-		InputNanoUSDPerMillion:  entry.InputNanoUSDPerMillion,
-		OutputNanoUSDPerMillion: entry.OutputNanoUSDPerMillion,
-		RequestNanoUSD:          entry.RequestNanoUSD,
-	}, source, nil
+			ID:                             profile.ID,
+			Protocol:                       profile.Protocol,
+			Method:                         profile.Method,
+			PhysicalModel:                  profile.PhysicalModel,
+			MaximumFramingTokensPerRequest: profile.MaximumFramingTokensPerRequest,
+			MaximumFramingTokensPerMessage: profile.MaximumFramingTokensPerMessage,
+			MaximumContextTokens:           profile.MaximumContextTokens,
+		}, pricing.Rates{
+			InputNanoUSDPerMillion:  entry.InputNanoUSDPerMillion,
+			OutputNanoUSDPerMillion: entry.OutputNanoUSDPerMillion,
+			RequestNanoUSD:          entry.RequestNanoUSD,
+		}, source, nil
 }
 
 func validOpenRouterTarget(configured configuration.Upstream) bool {
@@ -425,11 +425,16 @@ func observeCredentialResponse(
 	ctx context.Context,
 	adapter protocol.Adapter,
 	response *upstream.DispatchedResponse,
-) (protocol.Usage, error) {
+) (usage protocol.Usage, resultErr error) {
 	if response == nil || response.Response == nil || response.Body == nil {
 		return protocol.Usage{}, errors.New("provider response is unavailable")
 	}
-	defer response.Close()
+	defer func() {
+		if closeErr := response.Close(); resultErr == nil && closeErr != nil {
+			usage = protocol.Usage{}
+			resultErr = errors.New("close provider response")
+		}
+	}()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices ||
 		response.ContentLength > maximumSelfTestBodyBytes {
 		return protocol.Usage{}, errors.New("provider rejected the request")
@@ -489,11 +494,15 @@ func (runner *productionCredentialSelfTests) verifyOpenRouterKey(
 		return err
 	}
 	return runner.dispatch(ctx, scope, configured, request, "/key", nil,
-		func(response *upstream.DispatchedResponse) error {
+		func(response *upstream.DispatchedResponse) (resultErr error) {
 			if response == nil || response.Response == nil || response.Body == nil {
 				return errors.New("OpenRouter key response is unavailable")
 			}
-			defer response.Close()
+			defer func() {
+				if closeErr := response.Close(); resultErr == nil && closeErr != nil {
+					resultErr = errors.New("close OpenRouter key response")
+				}
+			}()
 			if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices ||
 				response.ContentLength > 64<<10 {
 				return errors.New("OpenRouter rejected the credential")
@@ -566,11 +575,15 @@ func (runner *productionCredentialSelfTests) verifyProviderErrorNormalization(
 	}
 	request.Header.Set("Content-Type", "application/json")
 	return runner.dispatch(ctx, scope, configured, request, providerPath,
-		[]string{"Content-Type"}, func(response *upstream.DispatchedResponse) error {
+		[]string{"Content-Type"}, func(response *upstream.DispatchedResponse) (resultErr error) {
 			if response == nil || response.Response == nil || response.Body == nil {
 				return errors.New("provider error response is unavailable")
 			}
-			defer response.Close()
+			defer func() {
+				if closeErr := response.Close(); resultErr == nil && closeErr != nil {
+					resultErr = errors.New("close provider error response")
+				}
+			}()
 			if response.StatusCode < http.StatusBadRequest || response.StatusCode >= http.StatusInternalServerError ||
 				response.ContentLength > 64<<10 {
 				return errors.New("provider error did not normalize to a safe rejection")

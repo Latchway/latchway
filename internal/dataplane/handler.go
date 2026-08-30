@@ -1250,7 +1250,9 @@ func (handler *Handler) consumeResponse(
 	if response == nil || response.Response == nil {
 		return upstream.RelayOutcome{}, time.Time{}, errDispatchNotConsumed
 	}
-	defer response.Close()
+	// Relay reports response-body close failures. This cleanup also covers the
+	// early protocol-validation exits before Relay takes ownership.
+	defer func() { _ = response.Close() }()
 	if nilDependency(adapter) {
 		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, errInvalidConfiguration
 	}

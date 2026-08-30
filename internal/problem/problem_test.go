@@ -18,7 +18,11 @@ func TestRegistryMatchesCanonicalYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close canonical error registry: %v", err)
+		}
+	})
 	codeLine := regexp.MustCompile(`^  ([a-z][a-z0-9_]*):$`)
 	fieldLine := regexp.MustCompile(`^    (status|title|retryable): (.+)$`)
 	parsed := map[string]Definition{}

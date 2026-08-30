@@ -222,7 +222,9 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer discoveryResponse.Body.Close()
+	if err := discoveryResponse.Body.Close(); err != nil {
+		return errors.New("close mock OIDC discovery response")
+	}
 	if discoveryResponse.StatusCode != http.StatusOK {
 		return errors.New("mock OIDC discovery failed")
 	}

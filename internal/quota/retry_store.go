@@ -1682,8 +1682,7 @@ func (store *Store) settleRetryLifecycle(
 		if err != nil {
 			return err
 		}
-		quotaEntries, err = loadAttemptQuotaEntriesForUpdate(ctx, tx, reservation, stored)
-		if err != nil {
+		if _, err := loadAttemptQuotaEntriesForUpdate(ctx, tx, reservation, stored); err != nil {
 			return err
 		}
 	} else {
@@ -2944,9 +2943,10 @@ func finalizeRetryReservationLocked(
 		return mapWriteError("insert retry logical usage", err)
 	}
 	logicalStatus := "failed"
-	if outcome.Status == AttemptSucceeded {
+	switch outcome.Status {
+	case AttemptSucceeded:
 		logicalStatus = "succeeded"
-	} else if outcome.Status == AttemptCancelled {
+	case AttemptCancelled:
 		logicalStatus = "cancelled"
 	}
 	command, err := tx.Exec(ctx, `

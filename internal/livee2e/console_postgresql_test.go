@@ -136,7 +136,7 @@ func waitForReady(ctx context.Context, origin string, exit <-chan error) error {
 	client := &http.Client{Timeout: time.Second}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	lastReadiness := "no response"
+	var lastReadiness string
 	for {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/readyz", nil)
 		if err != nil {

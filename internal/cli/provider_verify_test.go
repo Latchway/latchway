@@ -156,8 +156,16 @@ func TestProviderCredentialStdinHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	t.Cleanup(func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close credential reader: %v", err)
+		}
+	})
+	t.Cleanup(func() {
+		if err := writer.Close(); err != nil {
+			t.Errorf("close credential writer: %v", err)
+		}
+	})
 	if _, err := writer.WriteString("partial-secret"); err != nil {
 		t.Fatal(err)
 	}

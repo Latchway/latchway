@@ -72,23 +72,12 @@ func processRSSMiB(pid int) (float64, error) {
 		return 0, errors.New("invalid gateway pid")
 	}
 	if runtime.GOOS == "linux" {
-		file, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))
-		if err == nil {
-			defer file.Close()
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				fields := strings.Fields(scanner.Text())
-				if len(fields) == 3 && fields[0] == "VmRSS:" && fields[2] == "kB" {
-					value, parseErr := strconv.ParseFloat(fields[1], 64)
-					if parseErr != nil {
-						return 0, parseErr
-					}
-					return value / 1024, nil
-				}
-			}
-			if err := scanner.Err(); err != nil {
-				return 0, err
-			}
+		value, found, err := processRSSMiBFromProc(pid)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			return value, nil
 		}
 	}
 	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
@@ -100,6 +89,35 @@ func processRSSMiB(pid int) (float64, error) {
 		return 0, errors.New("read gateway RSS: invalid ps output")
 	}
 	return kib / 1024, nil
+}
+
+func processRSSMiBFromProc(pid int) (value float64, found bool, resultErr error) {
+	file, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0, false, nil
+	}
+	defer func() {
+		if closeErr := file.Close(); resultErr == nil && closeErr != nil {
+			value = 0
+			found = false
+			resultErr = errors.New("close gateway proc status")
+		}
+	}()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 3 && fields[0] == "VmRSS:" && fields[2] == "kB" {
+			value, parseErr := strconv.ParseFloat(fields[1], 64)
+			if parseErr != nil {
+				return 0, false, parseErr
+			}
+			return value / 1024, true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, false, err
+	}
+	return 0, false, nil
 }
 
 func resolvePID(cfg gatewayConfig) (int, error) {
@@ -126,8 +144,15 @@ func processExecutable(pid int) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read gateway executable identity: %w", err)
 		}
-		defer file.Close()
-		return processExecutableFromProcCmdline(file)
+		name, readErr := processExecutableFromProcCmdline(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return "", readErr
+		}
+		if closeErr != nil {
+			return "", errors.New("close gateway executable identity")
+		}
+		return name, nil
 	}
 	output, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {

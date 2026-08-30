@@ -468,7 +468,6 @@ func (source *secretServiceAccountTokenSource) Preflight(ctx context.Context) er
 		if transient == nil && operationErr == nil {
 			operationErr = attestation.ErrConfiguration
 		}
-		transient = nil
 		return nil
 	})
 	if err != nil || operationErr != nil {

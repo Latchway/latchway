@@ -324,6 +324,16 @@ func runSecretDelete(cmd *cobra.Command, opts *options, rootValues secretRootCLI
 }
 
 func readSecretValue(command *cobra.Command, values secretValueCLIOptions) ([]byte, error) {
+	return readSecretValueWithDescriptor(command, values, func(fileDescriptor int) *os.File {
+		return os.NewFile(uintptr(fileDescriptor), fmt.Sprintf("secret-value-fd-%d", fileDescriptor))
+	})
+}
+
+func readSecretValueWithDescriptor(
+	command *cobra.Command,
+	values secretValueCLIOptions,
+	openDescriptor func(int) *os.File,
+) (value []byte, resultErr error) {
 	selected := 0
 	for _, flag := range []string{"from-stdin", "value-env", "value-file", "value-fd"} {
 		if command.Flags().Changed(flag) {
@@ -336,6 +346,17 @@ func readSecretValue(command *cobra.Command, values secretValueCLIOptions) ([]by
 
 	var reader io.Reader
 	source := "selected source"
+	var ownedFile *os.File
+	defer func() {
+		if ownedFile == nil {
+			return
+		}
+		if closeErr := ownedFile.Close(); resultErr == nil && closeErr != nil {
+			clear(value)
+			value = nil
+			resultErr = fmt.Errorf("close secret value %s", source)
+		}
+	}()
 	switch {
 	case command.Flags().Changed("from-stdin"):
 		if !values.fromStdin {
@@ -360,7 +381,7 @@ func readSecretValue(command *cobra.Command, values secretValueCLIOptions) ([]by
 		if err != nil {
 			return nil, errors.New("open secret value file")
 		}
-		defer file.Close()
+		ownedFile = file
 		info, err := file.Stat()
 		if err != nil || !info.Mode().IsRegular() {
 			return nil, errors.New("--value-file must name a regular file")
@@ -371,13 +392,14 @@ func readSecretValue(command *cobra.Command, values secretValueCLIOptions) ([]by
 		reader = file
 		source = "file"
 	case command.Flags().Changed("value-fd"):
-		if values.valueFD < 0 || values.valueFD > 1<<20 {
+		if values.valueFD < 0 || values.valueFD > 1<<20 || openDescriptor == nil {
 			return nil, errors.New("--value-fd is invalid")
 		}
-		file := os.NewFile(uintptr(values.valueFD), fmt.Sprintf("secret-value-fd-%d", values.valueFD))
+		file := openDescriptor(values.valueFD)
 		if file == nil {
 			return nil, errors.New("--value-fd is invalid")
 		}
+		ownedFile = file
 		reader = file
 		source = "file descriptor"
 	}
@@ -484,7 +506,7 @@ func validSecretAPIToken(token string) bool {
 	return true
 }
 
-func (client *secretAPIClient) do(ctx context.Context, method, path string, query url.Values, requestBody []byte, expectedStatus int, output any) error {
+func (client *secretAPIClient) do(ctx context.Context, method, path string, query url.Values, requestBody []byte, expectedStatus int, output any) (resultErr error) {
 	if len(requestBody) > maxSecretCLIRequest {
 		return errors.New("encoded secret request exceeds the safety limit")
 	}
@@ -515,7 +537,11 @@ func (client *secretAPIClient) do(ctx context.Context, method, path string, quer
 	if response.Body == nil {
 		return errors.New("secret API returned an invalid empty response")
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); resultErr == nil && closeErr != nil {
+			resultErr = errors.New("close secret API response")
+		}
+	}()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxSecretCLIResponse+1))
 	if err != nil {
 		clear(responseBody)

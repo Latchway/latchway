@@ -543,7 +543,9 @@ func TestObserveResponseHonorsContextAndRequiresAppliedMode(t *testing.T) {
 	if _, err := (Adapter{}).ObserveResponse(cancelled, response); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ObserveResponse() error = %v, want context.Canceled", err)
 	}
-	if _, err := (Adapter{}).ObserveResponse(nil, response); err == nil {
+	// Passing nil is intentional here: the adapter contract rejects a missing
+	// request context before any response processing begins.
+	if _, err := (Adapter{}).ObserveResponse(nil, response); err == nil { //nolint:staticcheck
 		t.Fatal("nil response context accepted")
 	}
 	if _, err := (Adapter{}).ObserveResponse(context.Background(), nil); err == nil {
@@ -795,8 +797,15 @@ func readBodyFactory(t *testing.T, request *http.Request) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer body.Close()
-	return readBody(t, body)
+	result, readErr := io.ReadAll(body)
+	closeErr := body.Close()
+	if readErr != nil {
+		t.Fatalf("read request body factory: %v", readErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close request body factory: %v", closeErr)
+	}
+	return result
 }
 
 func mustJSONInt64(t *testing.T, value any) int64 {

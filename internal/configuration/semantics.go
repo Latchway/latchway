@@ -588,7 +588,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 			path := fmt.Sprintf("%s/%d", base, index)
 			algorithm := stringValue(limit, "algorithm")
 			metric := stringValue(limit, "metric")
-			valid := true
+			var valid bool
 			switch algorithm {
 			case "calendar":
 				valid = hasFields(limit, "window", "maximum") && !hasAnyField(limit, "capacity", "refillPerSecond", "perRequestMaximum")

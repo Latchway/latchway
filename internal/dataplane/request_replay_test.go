@@ -43,8 +43,14 @@ func TestReplayableRequestProducesDetachedExactAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fromGetBody.Close()
-	got, _ := io.ReadAll(fromGetBody)
+	got, readErr := io.ReadAll(fromGetBody)
+	closeErr := fromGetBody.Close()
+	if readErr != nil {
+		t.Fatalf("read replay body factory: %v", readErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close replay body factory: %v", closeErr)
+	}
 	if string(got) != "exact-body" {
 		t.Fatalf("GetBody() = %q", got)
 	}
