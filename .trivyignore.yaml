@@ -15,3 +15,21 @@ licenses:
       Wrangler in the deployment package and the source-free CI evidence
       toolchain. They are dynamically linked and are never copied into or
       distributed with the Latchway runtime image.
+  - id: Apache-2.0 AND LGPL-3.0-or-later
+    paths:
+      - .github/toolchains/wrangler/package-lock.json
+      - deploy/cloudflare/pnpm-lock.yaml
+    statement: >-
+      The findings are optional tooling-only sharp/libvips binaries pulled by
+      Wrangler in the deployment package and the source-free CI evidence
+      toolchain. They are never copied into or distributed with the Latchway
+      runtime image.
+  - id: Apache-2.0 AND LGPL-3.0-or-later AND MIT
+    paths:
+      - .github/toolchains/wrangler/package-lock.json
+      - deploy/cloudflare/pnpm-lock.yaml
+    statement: >-
+      The finding is an optional tooling-only sharp/libvips WASM binary pulled
+      by Wrangler in the deployment package and the source-free CI evidence
+      toolchain. It is never copied into or distributed with the Latchway
+      runtime image.
