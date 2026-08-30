@@ -13,9 +13,22 @@ postgres="latchway-smoke-postgres-${suffix}"
 gateway="latchway-smoke-gateway-${suffix}"
 
 cleanup() {
+  status=$?
+  trap - EXIT
+  if (( status != 0 )); then
+    if docker inspect "$gateway" >/dev/null 2>&1; then
+      echo "--- Latchway gateway logs ---" >&2
+      docker logs "$gateway" >&2 || true
+    fi
+    if docker inspect "$postgres" >/dev/null 2>&1; then
+      echo "--- PostgreSQL logs ---" >&2
+      docker logs "$postgres" >&2 || true
+    fi
+  fi
   docker rm --force "$gateway" >/dev/null 2>&1 || true
   docker rm --force "$postgres" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -33,15 +46,37 @@ docker run --detach \
   docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 >/dev/null
 
 postgres_ready=false
+postgres_tcp_ready_streak=0
+postgres_required_ready_streak=5
 for _ in $(seq 1 60); do
-  if docker exec "$postgres" pg_isready --username latchway --dbname latchway >/dev/null 2>&1; then
-    postgres_ready=true
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$postgres" 2>/dev/null || true)" != true ]]; then
     break
+  fi
+
+  # The official PostgreSQL entrypoint runs a temporary postmaster over a Unix
+  # socket while initializing the database, with TCP listening disabled. Probe
+  # an authenticated TCP query repeatedly so that server can never satisfy this
+  # gate and a short-lived final postmaster is treated as a failed startup.
+  if docker exec \
+    --env "PGPASSWORD=${POSTGRES_PASSWORD}" \
+    "$postgres" \
+    psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --command 'SELECT 1' >/dev/null 2>&1; then
+    postgres_tcp_ready_streak=$((postgres_tcp_ready_streak + 1))
+    if (( postgres_tcp_ready_streak >= postgres_required_ready_streak )); then
+      postgres_ready=true
+      break
+    fi
+  else
+    postgres_tcp_ready_streak=0
   fi
   sleep 1
 done
 if [[ "$postgres_ready" != true ]]; then
-  docker logs "$postgres" >&2
   echo "PostgreSQL did not become ready" >&2
   exit 1
 fi
@@ -71,7 +106,6 @@ docker run --detach \
   "$image" >/dev/null
 
 if [[ "$(docker inspect --format '{{.State.Running}}' "$gateway")" != true ]]; then
-  docker logs "$gateway" >&2
   echo "Latchway exited before its port was published" >&2
   exit 1
 fi
@@ -92,7 +126,6 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 if [[ "$gateway_ready" != true ]]; then
-  docker logs "$gateway" >&2
   echo "Latchway did not become ready" >&2
   exit 1
 fi

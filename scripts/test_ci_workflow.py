@@ -87,6 +87,31 @@ class CIWorkflowTests(unittest.TestCase):
                     )
         self.assertGreater(cached_setup_nodes, 0)
 
+    def test_container_smoke_rejects_the_postgres_initialization_server(self) -> None:
+        script = (ROOT / "scripts/container-smoke.sh").read_text(encoding="utf-8")
+        self.assertIn("postgres_required_ready_streak=5", script)
+        self.assertIn(
+            "docker inspect --format '{{.State.Running}}' \"$postgres\"",
+            script,
+        )
+        self.assertIn("--env \"PGPASSWORD=${POSTGRES_PASSWORD}\"", script)
+        self.assertIn("--host 127.0.0.1", script)
+        self.assertIn("--command 'SELECT 1'", script)
+        self.assertIn(
+            "postgres_tcp_ready_streak=$((postgres_tcp_ready_streak + 1))",
+            script,
+        )
+        self.assertGreaterEqual(script.count("postgres_tcp_ready_streak=0"), 2)
+        self.assertNotIn(
+            'docker exec "$postgres" pg_isready --username latchway',
+            script,
+        )
+
+    def test_container_smoke_failure_dumps_gateway_and_postgres_logs(self) -> None:
+        script = (ROOT / "scripts/container-smoke.sh").read_text(encoding="utf-8")
+        self.assertIn('docker logs "$gateway" >&2 || true', script)
+        self.assertIn('docker logs "$postgres" >&2 || true', script)
+
     def test_workflows_have_one_pinned_pnpm_bootstrap(self) -> None:
         for path in sorted(WORKFLOWS.glob("*.yml")):
             self.assertNotIn(
