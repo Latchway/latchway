@@ -472,6 +472,18 @@ type RuntimeInstance struct {
 	Metadata    []byte             `db:"metadata" json:"metadata"`
 }
 
+type ScheduledSelfTestRun struct {
+	JobID               string             `db:"job_id" json:"job_id"`
+	SelfTestScheduleID  string             `db:"self_test_schedule_id" json:"self_test_schedule_id"`
+	SelfTestID          string             `db:"self_test_id" json:"self_test_id"`
+	Status              string             `db:"status" json:"status"`
+	BudgetDate          pgtype.Date        `db:"budget_date" json:"budget_date"`
+	ReservedCostNanoUsd int64              `db:"reserved_cost_nano_usd" json:"reserved_cost_nano_usd"`
+	StartedAt           pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	CompletedAt         pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	Result              []byte             `db:"result" json:"result"`
+}
+
 type SecretRecord struct {
 	SecretRecordID          string             `db:"secret_record_id" json:"secret_record_id"`
 	OrganizationID          string             `db:"organization_id" json:"organization_id"`
@@ -488,6 +500,41 @@ type SecretRecord struct {
 	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	RotatedAt               pgtype.Timestamptz `db:"rotated_at" json:"rotated_at"`
 	DestroyedAt             pgtype.Timestamptz `db:"destroyed_at" json:"destroyed_at"`
+}
+
+type SelfTestSchedule struct {
+	SelfTestScheduleID        string             `db:"self_test_schedule_id" json:"self_test_schedule_id"`
+	OrganizationID            string             `db:"organization_id" json:"organization_id"`
+	ApplicationID             string             `db:"application_id" json:"application_id"`
+	EnvironmentID             string             `db:"environment_id" json:"environment_id"`
+	ConfigRevisionID          string             `db:"config_revision_id" json:"config_revision_id"`
+	Kind                      string             `db:"kind" json:"kind"`
+	UpstreamKey               string             `db:"upstream_key" json:"upstream_key"`
+	ModelKey                  string             `db:"model_key" json:"model_key"`
+	MaxCostNanoUsd            int64              `db:"max_cost_nano_usd" json:"max_cost_nano_usd"`
+	DailyCostLimitNanoUsd     int64              `db:"daily_cost_limit_nano_usd" json:"daily_cost_limit_nano_usd"`
+	IntervalSeconds           int32              `db:"interval_seconds" json:"interval_seconds"`
+	AuthorizedAdminUserID     string             `db:"authorized_admin_user_id" json:"authorized_admin_user_id"`
+	AuthorizationMethod       string             `db:"authorization_method" json:"authorization_method"`
+	AuthorizationCredentialID string             `db:"authorization_credential_id" json:"authorization_credential_id"`
+	Status                    string             `db:"status" json:"status"`
+	NextRunAt                 pgtype.Timestamptz `db:"next_run_at" json:"next_run_at"`
+	LastEnqueuedAt            pgtype.Timestamptz `db:"last_enqueued_at" json:"last_enqueued_at"`
+	DisabledAt                pgtype.Timestamptz `db:"disabled_at" json:"disabled_at"`
+	DisabledReasonCode        *string            `db:"disabled_reason_code" json:"disabled_reason_code"`
+	CreatedAt                 pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type SelfTestScheduleSecretBinding struct {
+	SelfTestScheduleID string `db:"self_test_schedule_id" json:"self_test_schedule_id"`
+	Ordinal            int16  `db:"ordinal" json:"ordinal"`
+	OrganizationID     string `db:"organization_id" json:"organization_id"`
+	ApplicationID      string `db:"application_id" json:"application_id"`
+	EnvironmentID      string `db:"environment_id" json:"environment_id"`
+	SecretReference    string `db:"secret_reference" json:"secret_reference"`
+	SecretRecordID     string `db:"secret_record_id" json:"secret_record_id"`
+	SecretVersion      int64  `db:"secret_version" json:"secret_version"`
 }
 
 type SessionChallenge struct {
