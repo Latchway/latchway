@@ -284,6 +284,44 @@ func (store *Store) AuthorizeAccess(ctx context.Context, input AccessRequestInpu
 	return state.Authorization, nil
 }
 
+func (store *Store) authorizeClientDiagnostics(ctx context.Context, input AccessRequestInput) (Authorization, bool, error) {
+	refreshAvailable := false
+	state, err := store.authorizeAccess(ctx, input, false, false, func(
+		ctx context.Context,
+		tx pgx.Tx,
+		state authorizationState,
+		now time.Time,
+	) error {
+		err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM refresh_tokens
+				WHERE organization_id = $1
+				  AND application_id = $2
+				  AND environment_id = $3
+				  AND application_user_id = $4
+				  AND installation_id = $5
+				  AND session_grant_id = $6
+				  AND status = 'active'
+				  AND expires_at > $7
+				  AND used_at IS NULL
+				  AND revoked_at IS NULL
+				  AND rotated_to_refresh_token_id IS NULL
+			)
+		`, state.OrganizationID, state.ApplicationID, state.EnvironmentID,
+			state.ApplicationUserID, state.InstallationID, state.SessionGrantID, now,
+		).Scan(&refreshAvailable)
+		if err != nil {
+			return fmt.Errorf("inspect client diagnostics refresh availability: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return Authorization{}, false, err
+	}
+	return state.Authorization, refreshAvailable, nil
+}
+
 // RevokeCurrentInstallation authenticates the request and atomically records
 // its replay key before revoking the bound installation and every live session
 // credential beneath it. A still-valid access token with a fresh proof may

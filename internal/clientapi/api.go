@@ -28,6 +28,7 @@ const (
 	exchangePath              = "/client/v1/sessions"
 	refreshPath               = "/client/v1/sessions/refresh"
 	revokePath                = "/client/v1/installations/current"
+	diagnosticsPath           = "/client/v1/diagnostics"
 	featureQuotaPrefix        = "/client/v1/features/"
 	featureQuotaSuffix        = "/quota"
 	jwksPath                  = "/.well-known/jwks.json"
@@ -59,8 +60,8 @@ func New(config Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets := make(map[string]url.URL, 4)
-	for _, path := range []string{challengePath, exchangePath, refreshPath, revokePath} {
+	targets := make(map[string]url.URL, 5)
+	for _, path := range []string{challengePath, exchangePath, refreshPath, revokePath, diagnosticsPath} {
 		targets[path] = url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: path}
 	}
 	return &API{
@@ -174,6 +175,12 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		api.revokeCurrentInstallation(w, r, correlationID, logicalID.String())
+	case diagnosticsPath:
+		if r.Method != http.MethodGet {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.getDiagnostics(w, r, correlationID, logicalID.String())
 	case jwksPath:
 		if r.Method != http.MethodGet {
 			api.methodNotAllowed(w, correlationID)
@@ -324,6 +331,42 @@ func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (api *API) getDiagnostics(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	result, err := api.coordinator.Diagnostics(r.Context(), DiagnosticsInput{
+		Metadata:    api.metadata(r, logicalRequestID, declaration, http.MethodGet, diagnosticsPath, proof),
+		AccessToken: accessToken,
+	})
+	if err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	document, err := diagnosticsDocumentFor(result, declaration.sdk, requestID)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
+}
+
 func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestID string, logicalRequestID requestidentity.LogicalID, feature string) {
 	declaration, violation := parseClientDeclaration(r)
 	if violation != nil {
@@ -432,7 +475,7 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 		expectedMethod = http.MethodPost
 	case path == revokePath:
 		expectedMethod = http.MethodDelete
-	case path == jwksPath, path == discoveryPath:
+	case path == diagnosticsPath, path == jwksPath, path == discoveryPath:
 		expectedMethod = http.MethodGet
 	default:
 		if _, ok := featureFromQuotaPath(path); ok {
@@ -770,6 +813,21 @@ type discoveryDocument struct {
 	MaximumClockSkewSeconds   int      `json:"maximum_clock_skew_seconds"`
 }
 
+type diagnosticsDocument struct {
+	RequestID       string                     `json:"request_id"`
+	ServerVersion   string                     `json:"server_version"`
+	ContractVersion string                     `json:"contract_version"`
+	ProtocolVersion int                        `json:"protocol_version"`
+	Installation    InstallationSummary        `json:"installation"`
+	Session         diagnosticsSessionDocument `json:"session"`
+	Trust           TrustSummary               `json:"trust"`
+}
+
+type diagnosticsSessionDocument struct {
+	ExpiresAt        time.Time `json:"expires_at"`
+	RefreshAvailable bool      `json:"refresh_available"`
+}
+
 type challengeAttestationDocument struct {
 	Provider        string         `json:"provider"`
 	Mode            string         `json:"mode"`
@@ -810,6 +868,31 @@ func challengeDocumentFor(result ChallengeResult) (challengeDocument, error) {
 			Provider: attestation.Provider, Mode: attestation.Mode,
 			ClientDataHash: attestation.ClientDataHash, ProviderOptions: attestation.ProviderOptions,
 		},
+	}, nil
+}
+
+func diagnosticsDocumentFor(result DiagnosticsResult, sdk, requestID string) (diagnosticsDocument, error) {
+	installation := result.Installation
+	trust := result.Trust
+	if !validRequestID(requestID) || len(buildinfo.Version) < 1 || len(buildinfo.Version) > 128 ||
+		strings.ContainsAny(buildinfo.Version, "\r\n\x00") ||
+		!installationPattern.MatchString(installation.ID) || !validPlatform(installation.Platform) ||
+		!platformCompatible(sdk, installation.Platform) || !validCanonicalBase64URL(installation.DPoPJKT, 32) ||
+		installation.Status != "active" || result.SessionExpiresAt.IsZero() ||
+		result.SessionExpiresAt.Location() != time.UTC || !validAttestationProvider(trust.Provider) ||
+		!validTrustLevel(trust.Level) || trust.VerifiedAt.IsZero() || trust.VerifiedAt.Location() != time.UTC ||
+		trust.ExpiresAt.IsZero() || trust.ExpiresAt.Location() != time.UTC ||
+		!trust.ExpiresAt.After(trust.VerifiedAt) {
+		return diagnosticsDocument{}, errors.New("invalid client diagnostics result")
+	}
+	return diagnosticsDocument{
+		RequestID: requestID, ServerVersion: buildinfo.Version,
+		ContractVersion: buildinfo.ContractVersion, ProtocolVersion: 1,
+		Installation: installation,
+		Session: diagnosticsSessionDocument{
+			ExpiresAt: result.SessionExpiresAt, RefreshAvailable: result.RefreshAvailable,
+		},
+		Trust: trust,
 	}, nil
 }
 

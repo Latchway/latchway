@@ -43,6 +43,10 @@ func (fake *blackBoxCoordinator) RefreshSession(_ context.Context, input clienta
 	return blackBoxGrant(), nil
 }
 
+func (fake *blackBoxCoordinator) Diagnostics(_ context.Context, input clientapi.DiagnosticsInput) (clientapi.DiagnosticsResult, error) {
+	return clientapi.DiagnosticsResult{}, nil
+}
+
 func (fake *blackBoxCoordinator) RevokeCurrentInstallation(_ context.Context, input clientapi.RevokeInstallationInput) error {
 	fake.revoke = input
 	return nil

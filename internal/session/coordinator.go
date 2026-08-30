@@ -307,6 +307,59 @@ func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input 
 	return clientGrant(issued)
 }
 
+func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input clientapi.DiagnosticsInput) (clientapi.DiagnosticsResult, error) {
+	accessToken, err := NewAccessToken(input.AccessToken.Reveal())
+	if err != nil {
+		return clientapi.DiagnosticsResult{}, clientFailure("session_expired")
+	}
+	principal, err := coordinator.accessTokens.Verify(ctx, accessToken)
+	if err != nil {
+		return clientapi.DiagnosticsResult{}, clientFailure(mapAccessRequestError(err))
+	}
+	proof, err := NewDPoPProof(input.Metadata.DPoPProof.Reveal())
+	if err != nil {
+		return clientapi.DiagnosticsResult{}, clientFailure("dpop_invalid")
+	}
+	authorization, refreshAvailable, err := coordinator.sessions.authorizeClientDiagnostics(ctx, AccessRequestInput{
+		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
+		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
+	})
+	if err != nil {
+		return clientapi.DiagnosticsResult{}, clientFailure(mapAccessRequestError(err))
+	}
+	if !clientSDKMatchesInstallation(input.Metadata.SDK, authorization.InstallationPlatform) {
+		return clientapi.DiagnosticsResult{}, clientFailure("request_invalid")
+	}
+	return clientapi.DiagnosticsResult{
+		Installation: clientapi.InstallationSummary{
+			ID: authorization.InstallationID, Platform: authorization.InstallationPlatform,
+			DPoPJKT: authorization.DPoPJKT, Status: "active",
+		},
+		SessionExpiresAt: authorization.AccessExpiresAt,
+		RefreshAvailable: refreshAvailable,
+		Trust: clientapi.TrustSummary{
+			Provider: authorization.AttestationProvider, Level: authorization.TrustLevel,
+			VerifiedAt: authorization.AttestedAt, ExpiresAt: authorization.AttestationExpiresAt,
+		},
+	}, nil
+}
+
+func clientSDKMatchesInstallation(sdk, platform string) bool {
+	switch sdk {
+	case "ios":
+		return platform == "ios"
+	case "android":
+		return platform == "android"
+	case "javascript":
+		return platform == "web" || platform == "node"
+	case "react-native":
+		return platform == "react_native_ios" || platform == "react_native_android"
+	default:
+		return false
+	}
+}
+
 func (coordinator *clientCoordinator) RevokeCurrentInstallation(ctx context.Context, input clientapi.RevokeInstallationInput) error {
 	accessToken, err := NewAccessToken(input.AccessToken.Reveal())
 	if err != nil {

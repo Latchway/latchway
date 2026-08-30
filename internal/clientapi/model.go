@@ -194,6 +194,25 @@ type FeatureQuotaResult struct {
 	Limits     []FeatureQuotaLimit
 }
 
+// DiagnosticsInput contains the DPoP-bound access credential and canonical
+// server-owned request metadata required by the protected diagnostics read.
+// The transport correlation ID is intentionally not part of this boundary.
+type DiagnosticsInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
+}
+
+// DiagnosticsResult is the complete allowlist of authenticated session state
+// that may cross the public diagnostics boundary. Tenant identifiers, user
+// subjects, normalized claims, tokens, raw attestation evidence and provider
+// credentials cannot be represented by this type.
+type DiagnosticsResult struct {
+	Installation     InstallationSummary
+	SessionExpiresAt time.Time
+	RefreshAvailable bool
+	Trust            TrustSummary
+}
+
 // FeatureQuotaProvider authenticates the DPoP-bound session and returns only
 // the effective quota projection safe for the current principal. It is kept
 // separate from Coordinator because quota reads are data-plane operations,
@@ -248,6 +267,7 @@ type Coordinator interface {
 	CreateChallenge(context.Context, ChallengeInput) (ChallengeResult, error)
 	ExchangeSession(context.Context, ExchangeInput) (GrantResult, error)
 	RefreshSession(context.Context, RefreshInput) (GrantResult, error)
+	Diagnostics(context.Context, DiagnosticsInput) (DiagnosticsResult, error)
 	RevokeCurrentInstallation(context.Context, RevokeInstallationInput) error
 }
 

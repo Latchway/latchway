@@ -29,17 +29,20 @@ const (
 var testInstant = time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
 
 type fakeCoordinator struct {
-	challengeResult ChallengeResult
-	challengeErr    error
-	exchangeResult  GrantResult
-	exchangeErr     error
-	refreshResult   GrantResult
-	refreshErr      error
-	revokeErr       error
-	challengeInputs []ChallengeInput
-	exchangeInputs  []ExchangeInput
-	refreshInputs   []RefreshInput
-	revokeInputs    []RevokeInstallationInput
+	challengeResult   ChallengeResult
+	challengeErr      error
+	exchangeResult    GrantResult
+	exchangeErr       error
+	refreshResult     GrantResult
+	refreshErr        error
+	diagnosticsResult DiagnosticsResult
+	diagnosticsErr    error
+	revokeErr         error
+	challengeInputs   []ChallengeInput
+	exchangeInputs    []ExchangeInput
+	refreshInputs     []RefreshInput
+	diagnosticsInputs []DiagnosticsInput
+	revokeInputs      []RevokeInstallationInput
 }
 
 func (fake *fakeCoordinator) CreateChallenge(_ context.Context, input ChallengeInput) (ChallengeResult, error) {
@@ -55,6 +58,11 @@ func (fake *fakeCoordinator) ExchangeSession(_ context.Context, input ExchangeIn
 func (fake *fakeCoordinator) RefreshSession(_ context.Context, input RefreshInput) (GrantResult, error) {
 	fake.refreshInputs = append(fake.refreshInputs, input)
 	return fake.refreshResult, fake.refreshErr
+}
+
+func (fake *fakeCoordinator) Diagnostics(_ context.Context, input DiagnosticsInput) (DiagnosticsResult, error) {
+	fake.diagnosticsInputs = append(fake.diagnosticsInputs, input)
+	return fake.diagnosticsResult, fake.diagnosticsErr
 }
 
 func (fake *fakeCoordinator) RevokeCurrentInstallation(_ context.Context, input RevokeInstallationInput) error {

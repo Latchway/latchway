@@ -23,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/attestation"
+	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/clientapi"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
@@ -306,6 +307,54 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	assertClientHTTPAccessToken(t, ctx, keyManager, refreshed.AccessToken, fixture, revisionID, dpopJKT, now)
 
+	diagnosticsTarget := clientHTTPURL(t, "/client/v1/diagnostics")
+	mismatchedSDKProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodGet, diagnosticsTarget,
+		now, refreshed.AccessToken, "client-http-diagnostics-mismatched-sdk")
+	mismatchedSDKResponse := clientHTTPGetDiagnostics(t, handler, refreshed.AccessToken, mismatchedSDKProof, "android")
+	assertClientHTTPProblem(t, mismatchedSDKResponse, http.StatusBadRequest, "request_invalid")
+
+	oldDiagnosticsProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodGet, diagnosticsTarget,
+		now, exchanged.AccessToken, "client-http-diagnostics-rotated-refresh")
+	oldDiagnosticsResponse := clientHTTPGetDiagnostics(t, handler, exchanged.AccessToken, oldDiagnosticsProof, "ios")
+	if oldDiagnosticsResponse.Code != http.StatusOK {
+		t.Fatalf("old client diagnostics status=%d body=%s", oldDiagnosticsResponse.Code, oldDiagnosticsResponse.Body.String())
+	}
+	var oldDiagnostics clientHTTPDiagnosticsDocument
+	if err := json.NewDecoder(oldDiagnosticsResponse.Body).Decode(&oldDiagnostics); err != nil {
+		t.Fatalf("decode old client diagnostics: %v", err)
+	}
+	if oldDiagnostics.Session.RefreshAvailable {
+		t.Fatal("diagnostics reported a rotated refresh token as available")
+	}
+
+	diagnosticsProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodGet, diagnosticsTarget,
+		now, refreshed.AccessToken, "client-http-diagnostics")
+	diagnosticsResponse := clientHTTPGetDiagnostics(t, handler, refreshed.AccessToken, diagnosticsProof, "ios")
+	if diagnosticsResponse.Code != http.StatusOK || diagnosticsResponse.Header().Get("Cache-Control") != "no-store" ||
+		diagnosticsResponse.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("client diagnostics status=%d headers=%#v body=%s",
+			diagnosticsResponse.Code, diagnosticsResponse.Header(), diagnosticsResponse.Body.String())
+	}
+	var diagnostics clientHTTPDiagnosticsDocument
+	if err := json.NewDecoder(diagnosticsResponse.Body).Decode(&diagnostics); err != nil {
+		t.Fatalf("decode client diagnostics: %v", err)
+	}
+	if diagnostics.RequestID == "" || diagnostics.RequestID != diagnosticsResponse.Header().Get("X-Latchway-Request-ID") ||
+		diagnostics.ServerVersion != buildinfo.Version || diagnostics.ContractVersion != buildinfo.ContractVersion ||
+		diagnostics.ProtocolVersion != 1 || diagnostics.Installation != refreshed.Installation ||
+		!diagnostics.Session.ExpiresAt.Equal(now.Add(10*time.Minute)) || !diagnostics.Session.RefreshAvailable ||
+		diagnostics.Trust != refreshed.Trust {
+		t.Fatalf("client diagnostics violated the redacted session contract: %#v", diagnostics)
+	}
+	if strings.Contains(diagnosticsResponse.Body.String(), refreshed.AccessToken) ||
+		strings.Contains(diagnosticsResponse.Body.String(), refreshed.RefreshToken) ||
+		strings.Contains(diagnosticsResponse.Body.String(), fixture.organizationID) ||
+		strings.Contains(diagnosticsResponse.Body.String(), "external-user-001") {
+		t.Fatalf("client diagnostics exposed private session material: %s", diagnosticsResponse.Body.String())
+	}
+	diagnosticsReplay := clientHTTPGetDiagnostics(t, handler, refreshed.AccessToken, diagnosticsProof, "ios")
+	assertClientHTTPProblem(t, diagnosticsReplay, http.StatusUnauthorized, "dpop_replayed")
+
 	revokeTarget := clientHTTPURL(t, "/client/v1/installations/current")
 	unknownKeyToken := clientHTTPAccessTokenWithKeyID(t, refreshed.AccessToken, dpopPrivateKey,
 		"gsk_unknown-attacker-selected-key")
@@ -573,6 +622,19 @@ type clientHTTPGrantDocument struct {
 	} `json:"trust"`
 }
 
+type clientHTTPDiagnosticsDocument struct {
+	RequestID       string                        `json:"request_id"`
+	ServerVersion   string                        `json:"server_version"`
+	ContractVersion string                        `json:"contract_version"`
+	ProtocolVersion int                           `json:"protocol_version"`
+	Installation    clientapi.InstallationSummary `json:"installation"`
+	Session         struct {
+		ExpiresAt        time.Time `json:"expires_at"`
+		RefreshAvailable bool      `json:"refresh_available"`
+	} `json:"session"`
+	Trust clientapi.TrustSummary `json:"trust"`
+}
+
 func insertClientHTTPAdministrator(t *testing.T, ctx context.Context, pool *pgxpool.Pool, organizationID string, now time.Time) string {
 	t.Helper()
 	adminUserID := mustSessionID(t, id.AdminUser)
@@ -770,6 +832,17 @@ func clientHTTPDeleteInstallation(t *testing.T, handler http.Handler, accessToke
 	request := httptest.NewRequest(http.MethodDelete, "/client/v1/installations/current", nil)
 	request.Header.Set("Authorization", "DPoP "+accessToken)
 	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func clientHTTPGetDiagnostics(t *testing.T, handler http.Handler, accessToken string, proof DPoPProof, sdk string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/client/v1/diagnostics", nil)
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	setClientHTTPProtectedHeaders(request, proof)
+	request.Header.Set("X-Latchway-SDK", sdk)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
