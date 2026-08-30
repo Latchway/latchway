@@ -84,9 +84,9 @@ are not package-publication or production-support claims.
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
 | JavaScript `@latchway/client` | `87a46eab3853633e23a65525e451f1bdaf3ee0c3` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, and composite-trust decoding implemented and locked |
-| Swift `Latchway` | `4cafe61faabfb4b8273af8833592c69ff2db7cfa` | iOS 15+, macOS 12+ supported surfaces | Extension/component transport and Action/SSO direct App Attest step-up implemented and locked; physical proof pending |
-| Android `dev.latchway:latchway-*` | `46cb6597430bc0f3c401757770420102894a5378` | Android API 23+, Java 17 | Component/OkHttp transport and composite-trust decoding implemented and locked; direct component step-up unsupported by design |
-| React Native `@latchway/react-native` | `b05060dfaec8897ca0374449f26a03658ff249e8` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, iOS extension-process Action/SSO direct step-up, and fail-closed native physical-proof linkage implemented and source-pinned; physical execution pending |
+| Swift `Latchway` | `94deb8cf33371a6943809dc12e19c936aba516ce` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, private root-Keychain isolation, explicit legacy shared-group migration detection, and delegated-only iOS extension/component transport implemented and locked; physical proof pending |
+| Android `dev.latchway:latchway-*` | `61d3292dd04c1d303bba6b3c4bf2f2de917efdbe` | Android API 23+, Java 17 | Component/OkHttp transport and composite-trust decoding implemented and locked; direct component step-up unsupported by design |
+| React Native `@latchway/react-native` | `4b28c9e0e56462ae3e15dd897bdffd0f79025cbb` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage implemented and source-pinned; physical execution pending |
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. Current locks all point to the draft version 1 checkpoint named above.
@@ -118,14 +118,17 @@ delegation identifiers. Access tokens bind the attestation provider for
 component-aware sessions, while retained legacy tokens intentionally have no
 provider claim.
 
-The server source permits App Attest step-up only for configured delegated
-Action, SSO, and watch component kinds on Apple platforms with an exact bundle
-identifier and a component-only `preferred` policy. The current Swift and
-React Native iOS client surfaces implement Action/SSO extension-process proof;
-they do not claim watch client support. The containing React Native process
-cannot attest an extension bundle on the extension's behalf. JavaScript and
-Android decode the composite trust source for contract compatibility, but
-Android direct component step-up remains unsupported in version 1.
+The server source restricts the generic App Attest step-up route to configured
+delegated Action, SSO, and watch component kinds on Apple platforms with an
+exact bundle identifier and a component-only `preferred` policy. That wire
+capability does not imply a usable iOS producer: Apple rejects App Attest key
+generation in iOS app extensions. Swift and React Native iOS therefore keep
+Action and SSO delegated-only, and a containing process cannot attest an
+extension bundle on its behalf. Apple documents an extension exception for
+eligible watchOS apps, but the current Swift package does not claim a watch
+client surface. JavaScript and Android decode the composite trust source for
+contract compatibility; neither provides direct component step-up in version
+1.
 
 These statements describe source and wire compatibility only. Physical App
 Attest/Play Integrity, entitlement isolation, lifecycle, live-provider,

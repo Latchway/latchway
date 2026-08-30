@@ -1,6 +1,6 @@
 # Latchway version 1 master plan
 
-This is the canonical merged implementation plan as of 2026-08-30. It combines
+This is the canonical merged implementation plan as of 2026-08-31. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
 and Mintlify addendum. The version 1 source candidate is implemented and
 locally source-converged; release promotion remains blocked on protected
@@ -74,8 +74,10 @@ checkpoint. It is not rewritten by this plan.
 - [x] Implement Swift component-specific Keychain access groups and containing-
   app preparation APIs with unsigned host/extension consumer evidence.
 
-Physical Apple entitlement, sibling-denial, background execution, and App
-Attest evidence remain external gates, not missing source.
+Physical Apple entitlement, sibling-denial, background execution, and root-app
+App Attest evidence remain external gates, not missing source. iOS extensions
+are delegated-only because Apple's App Attest runtime rejects key generation
+from iOS app extensions.
 
 ### Phase 2: Contract and schema — source complete and frozen
 
@@ -132,20 +134,32 @@ parent mismatch.
 - [x] Implement `LatchwayAppExtensions`, component preparation, component-local
   Keychain storage, session restore/sign-out, diagnostics, and host/widget/share
   consumer projects.
-- [x] Implement Action/SSO extension-process App Attest step-up in Swift and
-  React Native iOS without passing a root credential or native proof through
-  the React Native JavaScript bridge.
+- [x] Implement delegated-only Widget/Share/Action/SSO extension sessions in
+  Swift and React Native iOS without passing a root credential or native proof
+  through the React Native JavaScript bridge.
+- [x] Require a fully resolved private root Keychain access group in the Swift
+  and React Native iOS root clients, prove that it is the signed default with a
+  disposable sentinel, and scan every explicit extension-shared group only at
+  known legacy root-record coordinates. Stale shared-first root state fails
+  closed and requires an explicit migration.
+- [x] Include the React Native App Intents extension as a fail-closed signing,
+  provisioning, and Keychain-isolation fixture; it is not delegated-request
+  execution evidence.
 - [x] Pass Swift package, CocoaPods, Tuist, unsigned extension-host, adapter,
   conformance, and reproducibility gates locally.
-- [ ] Capture protected physical containing-app/widget/share isolation,
-  Action/SSO component identity and sibling denial, no-host/background/
-  termination/no-user-presence behavior, signing, and App Attest evidence for
-  the exact candidate.
+- [ ] Capture protected physical root-app App Attest and
+  containing-app/widget/share/action isolation, App Intents signed-binary and
+  entitlement isolation, component identity and sibling denial,
+  no-host/background/termination/no-user-presence behavior, and signing
+  evidence for the exact candidate. The App Intents fixture must continue to
+  fail closed and cannot count as delegated-request execution evidence.
 
-The server contract can represent an eligible watch component, but the current
-Swift package does not claim a watch direct-step-up client API. Android direct
-component step-up is intentionally unsupported in version 1; Play Integrity
-continues to apply to supported Android application trust surfaces.
+The server contract retains generic direct-component routes and can represent
+an eligible watchOS component, but the current Swift package does not claim a
+watch direct-step-up client API. Apple rejects App Attest key generation in
+iOS app extensions, so no Action/SSO direct-step-up claim exists in version 1.
+Android direct component step-up is also unsupported; Play Integrity continues
+to apply to supported Android application trust surfaces.
 
 ### Phase 6: Framework adapters — source complete at experimental scope
 
@@ -205,8 +219,8 @@ Source implementation is complete when the clean cross-repository source gate
 passes on synchronized commits. Version 1 is released only when the same
 candidate also has protected evidence for:
 
-1. physical App Attest, Play Integrity, App Check/Turnstile where configured,
-   app-extension/component isolation, and Action/SSO direct step-up lifecycle;
+1. physical root-app App Attest, Play Integrity, browser App Check/Turnstile
+   where configured, and delegated app-extension/component isolation;
 2. live providers and every advertised protocol/framework/version bound;
 3. every claimed cloud, multi-replica, load, failure, backup/restore, upgrade,
    rollback, key-rotation, and worker-recovery path;
