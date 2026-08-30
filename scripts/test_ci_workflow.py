@@ -12,7 +12,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
-PNPM_SETUP = "pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d"
+PNPM_SETUP = "pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9"
 
 
 def load_workflow(path: Path) -> dict:
