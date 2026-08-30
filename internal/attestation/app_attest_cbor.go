@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/binary"
-	"math/big"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -182,11 +181,15 @@ func parseAppAttestAttestationAuthenticator(encoded []byte) (parsedAppAttestAuth
 	if err != nil {
 		return parsedAppAttestAuthenticator{}, err
 	}
+	publicKeyX963, err := publicKey.Bytes()
+	if err != nil || len(publicKeyX963) != 65 || publicKeyX963[0] != 4 {
+		return parsedAppAttestAuthenticator{}, invalid("app attest credential public key")
+	}
 	extensions, err := decodeAppAttestExtensions(rest)
 	if err != nil {
 		return parsedAppAttestAuthenticator{}, err
 	}
-	result.publicKeyX963 = elliptic.Marshal(elliptic.P256(), publicKey.X, publicKey.Y)
+	result.publicKeyX963 = publicKeyX963
 	result.extensions = extensions
 	return result, nil
 }
@@ -228,12 +231,15 @@ func decodeAppAttestCOSEKey(wire appAttestCOSEKeyWire) (*ecdsa.PublicKey, error)
 	if wire.KeyType != 2 || wire.Algorithm != -7 || wire.Curve != 1 || len(wire.X) != 32 || len(wire.Y) != 32 {
 		return nil, invalid("app attest credential public key")
 	}
-	x := new(big.Int).SetBytes(wire.X)
-	y := new(big.Int).SetBytes(wire.Y)
-	if !elliptic.P256().IsOnCurve(x, y) {
+	encoded := make([]byte, 1+len(wire.X)+len(wire.Y))
+	encoded[0] = 4
+	copy(encoded[1:], wire.X)
+	copy(encoded[1+len(wire.X):], wire.Y)
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
 		return nil, invalid("app attest credential public key")
 	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+	return publicKey, nil
 }
 
 func decodeAppAttestExtensions(encoded []byte) (appAttestExtensions, error) {

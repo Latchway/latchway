@@ -381,7 +381,8 @@ func TestAppAttestVerifierRejectsWrongBindingScopeBeforeStorage(t *testing.T) {
 	}
 	store := newMemoryAppAttestKeyStore()
 	verifier := mustTestAppAttestVerifier(t, store, fixture.root, AppAttestProduction)
-	if _, err := verifier.Verify(nil, evidence, binding); !errors.Is(err, ErrInvalid) {
+	var nilContext context.Context
+	if _, err := verifier.Verify(nilContext, evidence, binding); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("nil context error = %v, want ErrInvalid", err)
 	}
 	debugEvidence, err := NewEvidence("debug", map[string]any{"opaque": true})
@@ -705,7 +706,10 @@ func TestAppAttestParserMatchesOfficialAppleAttestationObject(t *testing.T) {
 	if !ok {
 		t.Fatalf("official credential certificate key type = %T", leaf.PublicKey)
 	}
-	leafPublicKeyX963 := elliptic.Marshal(elliptic.P256(), leafPublicKey.X, leafPublicKey.Y)
+	leafPublicKeyX963, err := leafPublicKey.Bytes()
+	if err != nil || len(leafPublicKeyX963) != 65 || leafPublicKeyX963[0] != 4 {
+		t.Fatalf("encode official credential certificate key: bytes=%d err=%v", len(leafPublicKeyX963), err)
+	}
 	if !bytes.Equal(leafPublicKeyX963, parsed.authenticator.publicKeyX963) ||
 		sha256.Sum256(leafPublicKeyX963) != expectedKeyID {
 		t.Fatal("official leaf and COSE public keys did not hash to the key ID")
@@ -1394,7 +1398,10 @@ func newAppAttestFixture(binding Binding, options appAttestFixtureOptions) (appA
 	}
 
 	privateKey := appAttestTestPrivateKey(31)
-	publicKeyX963 := elliptic.Marshal(elliptic.P256(), privateKey.X, privateKey.Y)
+	publicKeyX963, err := privateKey.PublicKey.Bytes()
+	if err != nil || len(publicKeyX963) != 65 || publicKeyX963[0] != 4 {
+		return appAttestFixture{}, errors.New("fixture public key is invalid")
+	}
 	keyID := sha256.Sum256(publicKeyX963)
 	rpIDHash := sha256.Sum256([]byte(appAttestTestAppIDPrefix + "." + appAttestTestBundleID))
 	if options.rpIDHash != nil {
@@ -1521,11 +1528,15 @@ func appAttestTestAttestationAuthenticator(
 	bundleVersion string,
 	omitExtensions bool,
 ) ([]byte, error) {
-	if publicKey == nil || publicKey.X == nil || publicKey.Y == nil {
+	if publicKey == nil {
 		return nil, errors.New("fixture public key is invalid")
 	}
-	x := publicKey.X.FillBytes(make([]byte, 32))
-	y := publicKey.Y.FillBytes(make([]byte, 32))
+	encodedPublicKey, err := publicKey.Bytes()
+	if err != nil || len(encodedPublicKey) != 65 || encodedPublicKey[0] != 4 {
+		return nil, errors.New("fixture public key is invalid")
+	}
+	x := encodedPublicKey[1:33]
+	y := encodedPublicKey[33:]
 	cose, err := testAppAttestEncMode.Marshal(map[int64]any{
 		1: int64(2), 3: int64(-7), -1: int64(1), -2: x, -3: y,
 	})
@@ -1629,9 +1640,12 @@ func appAttestTestNonceExtension(nonce [sha256.Size]byte) []byte {
 }
 
 func appAttestTestPrivateKey(scalar int64) *ecdsa.PrivateKey {
-	d := big.NewInt(scalar)
-	x, y := elliptic.P256().ScalarBaseMult(d.Bytes())
-	return &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, D: d}
+	encodedScalar := big.NewInt(scalar).FillBytes(make([]byte, 32))
+	privateKey, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), encodedScalar)
+	if err != nil {
+		panic("invalid deterministic App Attest fixture scalar")
+	}
+	return privateKey
 }
 
 func appAttestTestAAGUID(environment AppAttestEnvironment) [16]byte {

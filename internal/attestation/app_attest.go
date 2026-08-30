@@ -304,11 +304,13 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 		return AppAttestStoredKey{}, err
 	}
 	publicKey, ok := leaf.PublicKey.(*ecdsa.PublicKey)
-	if !ok || publicKey.Curve != elliptic.P256() || publicKey.X == nil || publicKey.Y == nil ||
-		!elliptic.P256().IsOnCurve(publicKey.X, publicKey.Y) {
+	if !ok || publicKey.Curve != elliptic.P256() {
 		return AppAttestStoredKey{}, invalid("app attest credential certificate key")
 	}
-	publicKeyX963 := elliptic.Marshal(elliptic.P256(), publicKey.X, publicKey.Y)
+	publicKeyX963, err := publicKey.Bytes()
+	if err != nil || len(publicKeyX963) != 65 || publicKeyX963[0] != 4 {
+		return AppAttestStoredKey{}, invalid("app attest credential certificate key")
+	}
 	publicKeyHash := sha256.Sum256(publicKeyX963)
 	if subtle.ConstantTimeCompare(publicKeyHash[:], keyID[:]) != 1 ||
 		subtle.ConstantTimeCompare(parsed.authenticator.credentialID[:], keyID[:]) != 1 ||
@@ -651,7 +653,10 @@ func validateAppAttestStoredKey(keyID [sha256.Size]byte, key AppAttestStoredKey)
 	if err != nil {
 		return ErrInvalid
 	}
-	canonical := elliptic.Marshal(elliptic.P256(), publicKey.X, publicKey.Y)
+	canonical, err := publicKey.Bytes()
+	if err != nil || len(canonical) != 65 || canonical[0] != 4 {
+		return ErrInvalid
+	}
 	publicKeyHash := sha256.Sum256(canonical)
 	if subtle.ConstantTimeCompare(publicKeyHash[:], keyID[:]) != 1 {
 		return ErrInvalid
@@ -674,11 +679,11 @@ func parseAppAttestPublicKey(encoded []byte) (*ecdsa.PublicKey, error) {
 	if len(encoded) != 65 || encoded[0] != 4 {
 		return nil, ErrInvalid
 	}
-	x, y := elliptic.Unmarshal(elliptic.P256(), encoded)
-	if x == nil || y == nil || !elliptic.P256().IsOnCurve(x, y) {
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
 		return nil, ErrInvalid
 	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+	return publicKey, nil
 }
 
 func cloneAppAttestStoredKey(key AppAttestStoredKey) AppAttestStoredKey {

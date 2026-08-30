@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"math/big"
 	"net/url"
 	"testing"
 	"time"
@@ -183,16 +182,22 @@ func signProof(t testing.TB, key *ecdsa.PrivateKey, claims map[string]any) strin
 
 func signProofWithJWK(t testing.TB, key *ecdsa.PrivateKey, claims map[string]any, includePrivate bool) string {
 	t.Helper()
-	x := key.PublicKey.X.FillBytes(make([]byte, 32))
-	y := key.PublicKey.Y.FillBytes(make([]byte, 32))
+	publicKey, err := key.PublicKey.Bytes()
+	if err != nil || len(publicKey) != 65 || publicKey[0] != 4 {
+		t.Fatalf("encode DPoP public key: bytes=%d err=%v", len(publicKey), err)
+	}
 	jwk := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(x),
-		"y":   base64.RawURLEncoding.EncodeToString(y),
+		"x":   base64.RawURLEncoding.EncodeToString(publicKey[1:33]),
+		"y":   base64.RawURLEncoding.EncodeToString(publicKey[33:]),
 	}
 	if includePrivate {
-		jwk["d"] = base64.RawURLEncoding.EncodeToString(key.D.FillBytes(make([]byte, 32)))
+		privateScalar, err := key.Bytes()
+		if err != nil || len(privateScalar) != 32 {
+			t.Fatalf("encode DPoP private key: bytes=%d err=%v", len(privateScalar), err)
+		}
+		jwk["d"] = base64.RawURLEncoding.EncodeToString(privateScalar)
 	}
 	header := map[string]any{"typ": "dpop+jwt", "alg": "ES256", "jwk": jwk}
 	headerBytes, _ := json.Marshal(header)
@@ -214,10 +219,9 @@ func fixedDPoPFuzzKey(t testing.TB) *ecdsa.PrivateKey {
 	// the fuzz seed's public JWK stable without introducing credential material.
 	scalar := make([]byte, 32)
 	scalar[len(scalar)-1] = 1
-	curve := elliptic.P256()
-	x, y := curve.ScalarBaseMult(scalar)
-	return &ecdsa.PrivateKey{
-		PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y},
-		D:         new(big.Int).SetBytes(scalar),
+	key, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), scalar)
+	if err != nil {
+		t.Fatalf("parse fixed DPoP fuzz key: %v", err)
 	}
+	return key
 }

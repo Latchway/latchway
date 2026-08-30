@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/otlptranslator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	otlptracehttp "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -20,6 +21,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	otelnoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 const instrumentationName = "github.com/latchway/latchway"
@@ -155,7 +157,7 @@ func newRegistry(tracerProvider trace.TracerProvider, shutdownTrace func(context
 		otelprom.WithRegisterer(prometheusRegistry),
 		otelprom.WithoutTargetInfo(),
 		otelprom.WithoutScopeInfo(),
-		otelprom.WithoutUnits(),
+		otelprom.WithTranslationStrategy(otlptranslator.UnderscoreEscapingWithoutSuffixes),
 	)
 	if err != nil {
 		return nil, errors.New("construct OpenTelemetry Prometheus exporter")
@@ -163,7 +165,7 @@ func newRegistry(tracerProvider trace.TracerProvider, shutdownTrace func(context
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
 	meter := provider.Meter(instrumentationName)
 	if tracerProvider == nil {
-		tracerProvider = trace.NewNoopTracerProvider()
+		tracerProvider = otelnoop.NewTracerProvider()
 	}
 	registry := &Registry{
 		provider: provider,

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -114,25 +113,31 @@ func loadPrivateJWK(path string) (*ecdsa.PrivateKey, dpop.PublicJWK, error) {
 	if err != nil || len(dBytes) != 32 || base64.RawURLEncoding.EncodeToString(dBytes) != value.D {
 		return nil, dpop.PublicJWK{}, errors.New("private JWK scalar is invalid")
 	}
-	d := new(big.Int).SetBytes(dBytes)
-	curve := elliptic.P256()
-	if d.Sign() <= 0 || d.Cmp(curve.Params().N) >= 0 || !curve.IsOnCurve(x, y) {
+	publicKeyBytes := make([]byte, 1+len(x)+len(y))
+	publicKeyBytes[0] = 4
+	copy(publicKeyBytes[1:], x)
+	copy(publicKeyBytes[1+len(x):], y)
+	if _, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), publicKeyBytes); err != nil {
 		return nil, dpop.PublicJWK{}, errors.New("private JWK point is invalid")
 	}
-	wantX, wantY := curve.ScalarBaseMult(dBytes)
-	if wantX.Cmp(x) != 0 || wantY.Cmp(y) != 0 {
+	privateKey, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), dBytes)
+	if err != nil {
+		return nil, dpop.PublicJWK{}, errors.New("private JWK scalar is invalid")
+	}
+	derivedPublicKey, err := privateKey.PublicKey.Bytes()
+	if err != nil || !bytes.Equal(derivedPublicKey, publicKeyBytes) {
 		return nil, dpop.PublicJWK{}, errors.New("private JWK public point does not match its scalar")
 	}
-	return &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y}, D: d},
+	return privateKey,
 		dpop.PublicJWK{Kty: value.Kty, Crv: value.Crv, X: value.X, Y: value.Y}, nil
 }
 
-func decodeCoordinate(value string) (*big.Int, error) {
+func decodeCoordinate(value string) ([]byte, error) {
 	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
 	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != value {
 		return nil, errors.New("invalid coordinate")
 	}
-	return new(big.Int).SetBytes(decoded), nil
+	return decoded, nil
 }
 
 func (client *protectedClient) target(path string) *url.URL {
@@ -213,8 +218,8 @@ func (client *protectedClient) execute(ctx context.Context, specification reques
 	if err != nil {
 		return requestResult{Latency: time.Since(started), Err: err}
 	}
-	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maximumResponseBytes+1))
+	err = errors.Join(err, response.Body.Close())
 	latency := time.Since(started)
 	if err != nil {
 		return requestResult{Status: response.StatusCode, Latency: latency, Err: err}
@@ -241,8 +246,8 @@ func executeBaseline(ctx context.Context, httpClient *http.Client, cfg config) r
 	if err != nil {
 		return requestResult{Latency: time.Since(started), Err: err}
 	}
-	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maximumResponseBytes+1))
+	err = errors.Join(err, response.Body.Close())
 	if err == nil && len(body) > maximumResponseBytes {
 		err = errors.New("direct upstream response exceeds 4 MiB evidence bound")
 	}
