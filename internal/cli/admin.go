@@ -155,7 +155,7 @@ func newAdminBootstrapCommand(opts *options) *cobra.Command {
 	return command
 }
 
-func runAdminBootstrap(cmd *cobra.Command, opts *options, values bootstrapCLIOptions) error {
+func runAdminBootstrap(cmd *cobra.Command, opts *options, values bootstrapCLIOptions) (resultErr error) {
 	if !environmentNamePattern.MatchString(values.tokenEnvironment) || !environmentNamePattern.MatchString(values.passwordEnv) {
 		return errors.New("secret environment variable names are invalid")
 	}
@@ -195,7 +195,11 @@ func runAdminBootstrap(cmd *cobra.Command, opts *options, values bootstrapCLIOpt
 	if err != nil {
 		return fmt.Errorf("call administrative bootstrap API: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); resultErr == nil && closeErr != nil {
+			resultErr = errors.New("close administrative bootstrap response")
+		}
+	}()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxAdminCLIResponse+1))
 	if err != nil {
 		return fmt.Errorf("read administrative bootstrap response: %w", err)

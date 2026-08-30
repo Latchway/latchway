@@ -185,8 +185,10 @@ func readSimulationClaims(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open claims file: %w", err)
 	}
-	defer file.Close()
 	value, err := jsonsafe.DecodeReader(file, maxSimulationClaimsBytes)
+	if closeErr := file.Close(); err == nil && closeErr != nil {
+		err = fmt.Errorf("close claims file: %w", closeErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read normalized claims JSON: %w", err)
 	}

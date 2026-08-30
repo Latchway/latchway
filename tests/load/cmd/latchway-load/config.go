@@ -459,7 +459,6 @@ func (request requestConfig) validate(name string) error {
 	if request.Method == "" {
 		return fmt.Errorf("%s.method is required", name)
 	}
-	request.Method = strings.ToUpper(request.Method)
 	if err := validatePath(request.Path, name+".path"); err != nil {
 		return err
 	}

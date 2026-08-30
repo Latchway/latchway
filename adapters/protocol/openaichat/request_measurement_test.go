@@ -55,10 +55,13 @@ func bodyFromFactory(t *testing.T, request *http.Request) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer body.Close()
-	value, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatal(err)
+	value, readErr := io.ReadAll(body)
+	closeErr := body.Close()
+	if readErr != nil {
+		t.Fatalf("read request body factory: %v", readErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close request body factory: %v", closeErr)
 	}
 	return value
 }
