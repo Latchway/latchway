@@ -250,7 +250,7 @@ func createAPITokenFile(command *cobra.Command, client *controlAPIClient, path s
 		if id.Validate(issued.Metadata.ID, id.AdminAPIToken) == nil {
 			_, _ = client.do(command.Context(), http.MethodDelete, "/admin/v1/api-tokens/"+issued.Metadata.ID, nil, nil, http.StatusNoContent, nil)
 		}
-		return apiTokenMetadataCLI{}, errors.New("Admin API returned an invalid token creation document")
+		return apiTokenMetadataCLI{}, errors.New("admin API returned an invalid token creation document")
 	}
 	plaintext := []byte(issued.Token)
 	issued.Token = ""
@@ -291,24 +291,24 @@ func revokeCreatedAPIToken(command *cobra.Command, client *controlAPIClient, tok
 func validateAPITokenMetadata(metadata apiTokenMetadataCLI) error {
 	if id.Validate(metadata.ID, id.AdminAPIToken) != nil || len(strings.TrimSpace(metadata.Name)) == 0 ||
 		len(metadata.Name) > 256 || len(metadata.Scopes) == 0 || len(metadata.Scopes) > len(administratorCapabilities) {
-		return errors.New("Admin API returned invalid API token metadata")
+		return errors.New("admin API returned invalid API token metadata")
 	}
 	seen := make(map[string]struct{}, len(metadata.Scopes))
 	for _, scope := range metadata.Scopes {
 		if !slices.Contains(administratorCapabilities, scope) {
-			return errors.New("Admin API returned an unknown API token scope")
+			return errors.New("admin API returned an unknown API token scope")
 		}
 		if _, duplicate := seen[scope]; duplicate {
-			return errors.New("Admin API returned duplicate API token scopes")
+			return errors.New("admin API returned duplicate API token scopes")
 		}
 		seen[scope] = struct{}{}
 	}
 	if _, err := time.Parse(time.RFC3339Nano, metadata.CreatedAt); err != nil {
-		return errors.New("Admin API returned an invalid API token creation time")
+		return errors.New("admin API returned an invalid API token creation time")
 	}
 	if metadata.ExpiresAt != nil {
 		if _, err := time.Parse(time.RFC3339Nano, *metadata.ExpiresAt); err != nil {
-			return errors.New("Admin API returned an invalid API token expiration time")
+			return errors.New("admin API returned an invalid API token expiration time")
 		}
 	}
 	return nil
@@ -319,26 +319,26 @@ func validateTokenModeSession(session tokenModeSessionCLI) error {
 		id.Validate(session.OrganizationID, id.Organization) != nil ||
 		!session.Administrator.Enabled || len(session.Administrator.Email) < 3 || len(session.Administrator.Email) > 320 ||
 		strings.ContainsAny(session.Administrator.Email, "\r\n\x00") {
-		return errors.New("Admin API returned an invalid token-mode session")
+		return errors.New("admin API returned an invalid token-mode session")
 	}
 	for _, membership := range session.Memberships {
 		if id.Validate(membership.OrganizationID, id.Organization) != nil || !validAdministratorRole(membership.Role) {
-			return errors.New("Admin API returned an invalid token-mode membership")
+			return errors.New("admin API returned an invalid token-mode membership")
 		}
 	}
 	seen := make(map[string]struct{}, len(session.Capabilities))
 	for _, capability := range session.Capabilities {
 		if !slices.Contains(administratorCapabilities, capability) {
-			return errors.New("Admin API returned an invalid token-mode capability")
+			return errors.New("admin API returned an invalid token-mode capability")
 		}
 		if _, duplicate := seen[capability]; duplicate {
-			return errors.New("Admin API returned duplicate token-mode capabilities")
+			return errors.New("admin API returned duplicate token-mode capabilities")
 		}
 		seen[capability] = struct{}{}
 	}
 	if session.ExpiresAt != nil {
 		if _, err := time.Parse(time.RFC3339Nano, *session.ExpiresAt); err != nil {
-			return errors.New("Admin API returned an invalid token-mode expiration")
+			return errors.New("admin API returned an invalid token-mode expiration")
 		}
 	}
 	return nil

@@ -67,7 +67,7 @@ func TestNewContextFailsClosedForGeneratorFailuresAndInvalidOutput(t *testing.T)
 	}); err == nil || ctx != nil {
 		t.Fatalf("invalid generator output = (%v, %v), want failure", ctx, err)
 	}
-	if ctx, err := newContext(nil, func() (string, error) {
+	if ctx, err := newContext(intentionallyNilContext(), func() (string, error) {
 		return "", nil
 	}); err == nil || ctx != nil {
 		t.Fatalf("nil parent = (%v, %v), want failure", ctx, err)
@@ -80,7 +80,11 @@ func TestFromContextRejectsMissingIdentity(t *testing.T) {
 	if identity, ok := FromContext(context.Background()); ok || identity.String() != "" {
 		t.Fatalf("missing identity = %q, %t", identity.String(), ok)
 	}
-	if identity, ok := FromContext(nil); ok || identity.String() != "" {
+	if identity, ok := FromContext(intentionallyNilContext()); ok || identity.String() != "" {
 		t.Fatalf("nil context identity = %q, %t", identity.String(), ok)
 	}
 }
+
+// intentionallyNilContext preserves adversarial nil-context coverage without
+// encouraging nil contexts in production call sites.
+func intentionallyNilContext() context.Context { return nil }
