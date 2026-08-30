@@ -52,7 +52,7 @@ compatibility coordinate.
 | JavaScript | `@latchway/client` | `1.0.0` | `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
 | Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
 | Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `81cac33cc6f11fff66fe1fde97ccfce439943df0` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+| React Native | `@latchway/react-native` | `1.0.0` | `04769b9b3b61e9341e3bf83145cf626e827078c8` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
 
 The React Native release manifest deliberately pins these native dependency
 commits rather than accepting whatever happens to be latest:
