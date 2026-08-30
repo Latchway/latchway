@@ -15,34 +15,6 @@
       {
         "id": "native",
         "platforms": {
-          "ios": {
-            "provider": "app_attest",
-            "mode": "required",
-            "minimumTrustLevel": "app_verified",
-            "appAttest": {
-              "appIdPrefix": "TEAM1234",
-              "bundleId": "com.example.mobile",
-              "environment": "production",
-              "allowedValidationCategories": [1],
-              "allowedBundleVersions": ["2.3.4"]
-            }
-          },
-          "android": {
-            "provider": "play_integrity",
-            "mode": "required",
-            "minimumTrustLevel": "device_verified",
-            "playIntegrity": {
-              "packageName": "com.example.mobile",
-              "cloudProjectNumber": 123456789,
-              "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
-              "minimumDeviceIntegrity": "device",
-              "requireLicensed": true,
-              "allowTestingResponses": false,
-              "minimumVersionCode": 1,
-              "maximumVersionCode": 0,
-              "credentialSource": "metadata"
-            }
-          },
           "react_native_ios": {
             "provider": "app_attest",
             "mode": "required",
@@ -60,7 +32,7 @@
             "mode": "required",
             "minimumTrustLevel": "device_verified",
             "playIntegrity": {
-              "packageName": "com.example.mobile",
+              "packageName": "com.example.mobile.android",
               "cloudProjectNumber": 123456789,
               "certificateSha256Digests": ["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"],
               "minimumDeviceIntegrity": "device",
@@ -72,6 +44,26 @@
             }
           }
         }
+      }
+    ],
+    "componentDefinitions": [
+      {
+        "id": "react-native-ios-main",
+        "platform": "react_native_ios",
+        "kind": "main_app",
+        "identifiers": { "bundleIdentifiers": ["com.example.mobile"] },
+        "familyRole": "root",
+        "attestation": { "strategy": "direct", "provider": "app_attest" },
+        "allowedFeatures": ["assistant"]
+      },
+      {
+        "id": "react-native-android-main",
+        "platform": "react_native_android",
+        "kind": "android_app",
+        "identifiers": { "packageNames": ["com.example.mobile.android"] },
+        "familyRole": "root",
+        "attestation": { "strategy": "direct", "provider": "play_integrity" },
+        "allowedFeatures": ["assistant"]
       }
     ],
     "upstreams": [

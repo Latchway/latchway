@@ -1,0 +1,32 @@
+---
+title: "Why Latchway"
+description: "Decide whether a self-hosted, policy-enforcing gateway is the right boundary between your application and AI providers."
+---
+
+Latchway is for teams that need an untrusted application to call AI or HTTP
+upstreams without receiving the upstream credential or choosing the physical
+provider route.
+
+The application selects a stable feature such as `habit-assistant`. Latchway
+verifies the application user and client trust, enforces configured policy and
+quotas, selects the route, injects the server-held credential, and records
+redacted usage.
+
+## When it fits
+
+- You ship iOS, Android, React Native, or web clients.
+- You already have an identity provider.
+- You need server-controlled routing, quotas, and provider credentials.
+- You can operate the Latchway gateway and PostgreSQL.
+
+## When it does not fit
+
+Latchway is not a chat framework, agent runtime, prompt store, tool executor,
+or hosted AI provider. It does not make web risk signals equivalent to native
+hardware-backed evidence, and it cannot make an untrusted client trustworthy.
+
+<Warning>
+  Latchway version 1 remains a source candidate. Check [Release
+  status](/release-status) before relying on a package, image, integration, or
+  production security claim.
+</Warning>

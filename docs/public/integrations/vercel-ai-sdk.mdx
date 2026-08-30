@@ -1,0 +1,112 @@
+---
+title: "Vercel AI SDK integration"
+description: "Evaluate the experimental feature-bound provider seam for Vercel AI SDK without treating local evidence as released support."
+---
+
+<Warning>
+  `@latchway/vercel-ai` is pre-release and unpublished. Vercel AI SDK `7.0.85`
+  has an experimental local-evidence row, not a supported release.
+</Warning>
+
+## 1. What this integration does
+
+The target Class A or B adapter supplies a Latchway provider, or an
+OpenAI-compatible provider with guarded custom fetch, while keeping Vercel AI
+SDK messages, tools, output types, middleware, and telemetry semantics intact.
+
+## 2. Supported framework versions
+
+Vercel AI SDK `7.0.85` is the exact locally tested experimental version. The
+generated compatibility registry is canonical; no supported range is
+published.
+
+## 3. Supported Latchway versions
+
+None published for this adapter. Draft contract `1.0.0` uses current wire
+protocol `2`, but a contract coordinate does not imply framework support.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Required; not yet evidenced |
+| Private key remains native | Required on native-backed runtimes; not yet evidenced |
+| Streaming | Required for `streamText`; not yet evidenced |
+| Cancellation | Required; not yet evidenced |
+| App extensions | Requires future Installation Family support |
+| Structured output | Required when translation is exact; not yet evidenced |
+| Tool calls | Required; not yet evidenced |
+| Protocol | Planned through a supported Latchway AI protocol |
+
+## 5. Install packages
+
+Do not install an unverified `@latchway/vercel-ai` package. Published package
+integrity and a compatibility row are release prerequisites.
+
+## 6. Create the Latchway client
+
+Use the platform client that keeps identity input, session state, and DPoP key
+material out of framework code.
+
+## 7. Bind a feature
+
+The provider's model identifier represents a Latchway feature. It must not
+expose a provider or physical model selector.
+
+## 8. Create the framework client
+
+The final adapter will choose the custom-provider or custom-fetch seam after
+conformance proves middleware, telemetry, retry, and metadata behavior.
+
+## 9. Send a non-streaming request
+
+`generateText` is a required conformance case. No runnable helper is published
+until its exact types and versions are locked.
+
+## 10. Send a streaming request
+
+`streamText` must preserve incremental delivery, backpressure, final usage,
+provider errors, and abort behavior.
+
+## 11. Use tools
+
+Tools remain Vercel AI SDK abstractions. Latchway does not own or execute them.
+
+## 12. Use structured output
+
+The adapter must declare only capabilities it translates without weakening
+validation or feature routing.
+
+## 13. Handle cancellation
+
+The framework abort signal must cancel the active transport and must not create
+an automatic replay.
+
+## 14. Handle quota failures
+
+Preserve the canonical Latchway problem and request ID through the provider
+error surface.
+
+## 15. Handle session renewal
+
+Single-flight refresh may retry only a replayable request rejected before
+upstream dispatch, with a new DPoP proof.
+
+## 16. Known limitations
+
+Framework runtime and platform support differ, especially in React Native. A
+browser-only capability must not be advertised on native runtimes.
+
+## 17. Verify the integration
+
+Required cases include `generateText`, `streamText`, structured output, tools,
+abort, middleware, retries, telemetry interaction, and provider metadata.
+
+## 18. Troubleshooting
+
+Confirm the runtime supports the selected extension seam and that secondary
+requests never receive Latchway credentials.
+
+## 19. Compatibility matrix
+
+No supported row is published. See [Compatibility](/reference/compatibility).

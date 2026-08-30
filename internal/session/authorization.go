@@ -21,39 +21,57 @@ import (
 const clientInstallationRevocationReason = "client_installation_revoked"
 
 type Authorization struct {
-	OrganizationID       string
-	ApplicationID        string
-	EnvironmentID        string
-	EnvironmentKind      string
-	ApplicationUserID    string
-	InstallationID       string
-	InstallationPlatform string
-	SessionGrantID       string
-	PolicyRevisionID     string
-	UserOverrideID       string
-	LimitPlanOverride    string
-	IdentityProvider     string
-	DPoPJKT              string
-	TrustLevel           string
-	AttestationProvider  string
-	NormalizedClaims     map[string]any
-	IdentityExpiresAt    time.Time
-	AttestedAt           time.Time
-	AttestationExpiresAt time.Time
-	AccessExpiresAt      time.Time
+	OrganizationID            string
+	ApplicationID             string
+	EnvironmentID             string
+	EnvironmentKind           string
+	ApplicationUserID         string
+	InstallationID            string
+	InstallationPlatform      string
+	InstallationFamilyID      string
+	InstallationFamilyStatus  string
+	ComponentID               string
+	ComponentDefinitionID     string
+	ComponentKind             string
+	ComponentIsRoot           bool
+	ComponentSessionFamilyID  string
+	ComponentKeyID            string
+	TrustSource               string
+	ParentComponentID         string
+	ParentAttestationProvider string
+	DelegationID              string
+	GrantedFeatures           []string
+	SessionGrantID            string
+	PolicyRevisionID          string
+	UserOverrideID            string
+	LimitPlanOverride         string
+	IdentityProvider          string
+	DPoPJKT                   string
+	TrustLevel                string
+	AttestationProvider       string
+	NormalizedClaims          map[string]any
+	IdentityVerifiedAt        time.Time
+	IdentityExpiresAt         time.Time
+	AttestedAt                time.Time
+	AttestationExpiresAt      time.Time
+	AccessExpiresAt           time.Time
 
 	seal [sha256.Size]byte
 }
 
 type authorizationState struct {
 	Authorization
-	grantRevoked       bool
-	installationStatus string
-	installationTrust  string
-	userStatus         string
-	applicationStatus  string
-	environmentStatus  string
-	organizationStatus string
+	grantRevoked           bool
+	installationStatus     string
+	installationTrust      string
+	userStatus             string
+	applicationStatus      string
+	environmentStatus      string
+	organizationStatus     string
+	familyStatus           string
+	componentStatus        string
+	componentKeyStatus     string
+	componentSessionStatus string
 }
 
 func (store *Store) Authorize(ctx context.Context, principal AccessPrincipal) (Authorization, error) {
@@ -93,16 +111,28 @@ type authorizationQuerier interface {
 
 func loadAuthorizationState(ctx context.Context, query authorizationQuerier, principal AccessPrincipal, lockClause string) (authorizationState, error) {
 	var result authorizationState
-	var storedJTIHash, normalizedClaimsJSON []byte
-	var grantExpiresAt, identityExpiresAt, attestedAt, attestationExpiresAt *time.Time
+	var storedJTIHash, normalizedClaimsJSON, grantedFeaturesJSON []byte
+	var grantExpiresAt, identityVerifiedAt, identityExpiresAt, attestedAt, attestationExpiresAt *time.Time
+	var familyID, componentID, componentDefinitionID, componentKind, componentTrustSource *string
+	var componentSessionFamilyID, componentKeyID, currentComponentKeyID *string
+	var parentComponentID, parentAttestationProvider, delegationID *string
+	var componentIsRoot *bool
+	var familyStatus, componentStatus, componentKeyStatus, componentSessionStatus *string
 	statement := `
 		SELECT g.organization_id, g.application_id, g.environment_id, g.application_user_id,
 		       g.installation_id, g.session_grant_id, g.policy_revision_id, g.dpop_jkt,
 		       g.trust_level, g.identity_provider_key, g.access_token_jti_hash,
-		       g.expires_at, g.identity_expires_at,
+		       g.expires_at, g.identity_verified_at, g.identity_expires_at,
 		       g.attested_at, g.attestation_provider, g.attestation_expires_at,
 		       g.revoked_at IS NOT NULL, i.status, i.trust_level, i.platform,
-		       u.status, u.normalized_claims, a.status, e.status, e.kind, o.status
+		       u.status, u.normalized_claims, a.status, e.status, e.kind, o.status,
+		       g.installation_family_id, g.client_component_id,
+		       g.component_definition_id, g.component_kind, g.component_is_root,
+		       g.trust_source, g.component_session_family_id,
+		       f.status, c.status, c.current_component_key_id,
+		       sf.component_key_id, k.status, sf.status,
+		       c.trust_parent_component_id, p.trust_attestation_provider,
+		       c.trust_delegation_id, c.granted_features
 		FROM session_grants g
 		JOIN installations i
 		  ON i.organization_id = g.organization_id AND i.application_id = g.application_id
@@ -115,16 +145,34 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		  ON e.organization_id = g.organization_id AND e.application_id = g.application_id
 		 AND e.environment_id = g.environment_id
 		JOIN organizations o ON o.organization_id = g.organization_id
+		LEFT JOIN installation_families f
+		  ON f.installation_family_id = g.installation_family_id
+		LEFT JOIN client_components c
+		  ON c.client_component_id = g.client_component_id
+		 AND c.installation_family_id = g.installation_family_id
+		LEFT JOIN component_session_families sf
+		  ON sf.component_session_family_id = g.component_session_family_id
+		 AND sf.client_component_id = g.client_component_id
+		LEFT JOIN component_keys k
+		  ON k.component_key_id = sf.component_key_id
+		 AND k.client_component_id = g.client_component_id
+		LEFT JOIN client_components p
+		  ON p.client_component_id = c.trust_parent_component_id
 		WHERE g.session_grant_id = $1
 	` + lockClause
 	err := query.QueryRow(ctx, statement, principal.SessionGrantID).Scan(
 		&result.OrganizationID, &result.ApplicationID, &result.EnvironmentID, &result.ApplicationUserID,
 		&result.InstallationID, &result.SessionGrantID, &result.PolicyRevisionID, &result.DPoPJKT,
-		&result.TrustLevel, &result.IdentityProvider, &storedJTIHash, &grantExpiresAt, &identityExpiresAt,
+		&result.TrustLevel, &result.IdentityProvider, &storedJTIHash, &grantExpiresAt, &identityVerifiedAt, &identityExpiresAt,
 		&attestedAt, &result.AttestationProvider, &attestationExpiresAt,
 		&result.grantRevoked, &result.installationStatus, &result.installationTrust, &result.InstallationPlatform,
 		&result.userStatus, &normalizedClaimsJSON, &result.applicationStatus, &result.environmentStatus, &result.EnvironmentKind,
 		&result.organizationStatus,
+		&familyID, &componentID, &componentDefinitionID, &componentKind, &componentIsRoot,
+		&componentTrustSource, &componentSessionFamilyID,
+		&familyStatus, &componentStatus, &currentComponentKeyID,
+		&componentKeyID, &componentKeyStatus, &componentSessionStatus,
+		&parentComponentID, &parentAttestationProvider, &delegationID, &grantedFeaturesJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return authorizationState{}, ErrSessionInvalid
@@ -132,9 +180,10 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 	if err != nil {
 		return authorizationState{}, fmt.Errorf("authorize client session: %w", err)
 	}
-	if grantExpiresAt == nil || identityExpiresAt == nil || attestedAt == nil || attestationExpiresAt == nil || len(storedJTIHash) != sha256.Size {
+	if grantExpiresAt == nil || identityVerifiedAt == nil || identityExpiresAt == nil || attestedAt == nil || attestationExpiresAt == nil || len(storedJTIHash) != sha256.Size {
 		return authorizationState{}, ErrSessionInvalid
 	}
+	result.IdentityVerifiedAt = identityVerifiedAt.UTC()
 	result.IdentityExpiresAt = identityExpiresAt.UTC()
 	result.AttestedAt = attestedAt.UTC()
 	result.AttestationExpiresAt = attestationExpiresAt.UTC()
@@ -144,6 +193,43 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		return authorizationState{}, ErrSessionInvalid
 	}
 	result.NormalizedClaims = claims
+	componentAware := componentID != nil || familyID != nil || componentDefinitionID != nil ||
+		componentKind != nil || componentIsRoot != nil || componentTrustSource != nil ||
+		componentSessionFamilyID != nil
+	if componentAware {
+		if familyID == nil || componentID == nil || componentDefinitionID == nil || componentKind == nil ||
+			componentIsRoot == nil || componentTrustSource == nil || componentSessionFamilyID == nil ||
+			familyStatus == nil || componentStatus == nil || currentComponentKeyID == nil ||
+			componentKeyID == nil || componentKeyStatus == nil || componentSessionStatus == nil ||
+			*currentComponentKeyID != *componentKeyID || len(grantedFeaturesJSON) == 0 {
+			return authorizationState{}, ErrSessionInvalid
+		}
+		result.InstallationFamilyID = *familyID
+		result.InstallationFamilyStatus = *familyStatus
+		result.ComponentID = *componentID
+		result.ComponentDefinitionID = *componentDefinitionID
+		result.ComponentKind = *componentKind
+		result.ComponentIsRoot = *componentIsRoot
+		result.TrustSource = *componentTrustSource
+		result.ComponentSessionFamilyID = *componentSessionFamilyID
+		result.ComponentKeyID = *componentKeyID
+		result.familyStatus = *familyStatus
+		result.componentStatus = *componentStatus
+		result.componentKeyStatus = *componentKeyStatus
+		result.componentSessionStatus = *componentSessionStatus
+		if parentComponentID != nil {
+			result.ParentComponentID = *parentComponentID
+		}
+		if parentAttestationProvider != nil {
+			result.ParentAttestationProvider = *parentAttestationProvider
+		}
+		if delegationID != nil {
+			result.DelegationID = *delegationID
+		}
+		if err := json.Unmarshal(grantedFeaturesJSON, &result.GrantedFeatures); err != nil {
+			return authorizationState{}, ErrSessionInvalid
+		}
+	}
 	override, err := loadActiveUserOverride(ctx, query, result.Authorization)
 	if err != nil {
 		return authorizationState{}, err
@@ -158,7 +244,8 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 		result.EnvironmentID != principal.EnvironmentID || result.ApplicationUserID != principal.ApplicationUserID ||
 		result.InstallationID != principal.InstallationID || result.PolicyRevisionID != principal.PolicyRevisionID ||
 		result.DPoPJKT != principal.DPoPJKT || result.TrustLevel != principal.TrustLevel ||
-		result.IdentityProvider != principal.IdentityProvider || !result.AccessExpiresAt.Equal(principal.ExpiresAt) {
+		result.IdentityProvider != principal.IdentityProvider || !result.AccessExpiresAt.Equal(principal.ExpiresAt) ||
+		!authorizationMatchesPrincipal(result.Authorization, principal) {
 		return authorizationState{}, ErrSessionInvalid
 	}
 	sealed, err := sealAuthorization(result.Authorization)
@@ -167,6 +254,27 @@ func loadAuthorizationState(ctx context.Context, query authorizationQuerier, pri
 	}
 	result.Authorization = sealed
 	return result, nil
+}
+
+func authorizationMatchesPrincipal(authorization Authorization, principal AccessPrincipal) bool {
+	if authorization.InstallationFamilyID != principal.InstallationFamilyID ||
+		authorization.ComponentID != principal.ComponentID ||
+		authorization.ComponentDefinitionID != principal.ComponentDefinitionID ||
+		authorization.ComponentKind != principal.ComponentKind ||
+		authorization.ComponentIsRoot != principal.ComponentIsRoot ||
+		authorization.TrustSource != principal.TrustSource ||
+		authorization.ParentComponentID != principal.ParentComponentID ||
+		authorization.ParentAttestationProvider != principal.ParentAttestationProvider ||
+		authorization.DelegationID != principal.DelegationID ||
+		len(authorization.GrantedFeatures) != len(principal.Features) {
+		return false
+	}
+	for index := range authorization.GrantedFeatures {
+		if authorization.GrantedFeatures[index] != principal.Features[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // loadActiveUserOverride reads mutable server-owned policy only after the
@@ -213,6 +321,23 @@ func loadActiveUserOverride(
 }
 
 func authorizationStateError(state authorizationState, now time.Time, allowRevokedInstallation bool) error {
+	if state.ComponentID != "" {
+		if state.familyStatus != "active" {
+			if allowRevokedInstallation && state.familyStatus == "revoked" && state.installationStatus == "revoked" {
+				return nil
+			}
+			if state.familyStatus == "revoked" {
+				return ErrInstallationFamilyRevoked
+			}
+			return ErrSessionInvalid
+		}
+		if state.componentStatus != "active" || state.componentKeyStatus != "active" {
+			return ErrComponentRevoked
+		}
+		if state.componentSessionStatus != "active" {
+			return ErrSessionRevoked
+		}
+	}
 	if state.installationStatus == "revoked" && allowRevokedInstallation {
 		return nil
 	}
@@ -242,6 +367,13 @@ func validateAccessPrincipal(principal AccessPrincipal, now time.Time) error {
 		OrganizationID: principal.OrganizationID, ApplicationID: principal.ApplicationID,
 		EnvironmentID: principal.EnvironmentID, ApplicationUserID: principal.ApplicationUserID,
 		InstallationID: principal.InstallationID, SessionGrantID: principal.SessionGrantID,
+		InstallationFamilyID: principal.InstallationFamilyID,
+		ComponentID:          principal.ComponentID, ComponentDefinitionID: principal.ComponentDefinitionID,
+		ComponentKind: principal.ComponentKind, ComponentIsRoot: principal.ComponentIsRoot,
+		TrustSource: principal.TrustSource, AttestationProvider: principal.AttestationProvider,
+		ParentComponentID:         principal.ParentComponentID,
+		ParentAttestationProvider: principal.ParentAttestationProvider,
+		DelegationID:              principal.DelegationID, Features: append([]string(nil), principal.Features...),
 		IdentityProvider: principal.IdentityProvider, TrustLevel: principal.TrustLevel,
 		PolicyRevisionID: principal.PolicyRevisionID, DPoPJKT: principal.DPoPJKT,
 	}
@@ -292,7 +424,7 @@ func (store *Store) authorizeClientDiagnostics(ctx context.Context, input Access
 		state authorizationState,
 		now time.Time,
 	) error {
-		err := tx.QueryRow(ctx, `
+		statement := `
 			SELECT EXISTS (
 				SELECT 1
 				FROM refresh_tokens
@@ -308,9 +440,30 @@ func (store *Store) authorizeClientDiagnostics(ctx context.Context, input Access
 				  AND revoked_at IS NULL
 				  AND rotated_to_refresh_token_id IS NULL
 			)
-		`, state.OrganizationID, state.ApplicationID, state.EnvironmentID,
-			state.ApplicationUserID, state.InstallationID, state.SessionGrantID, now,
-		).Scan(&refreshAvailable)
+		`
+		arguments := []any{state.OrganizationID, state.ApplicationID, state.EnvironmentID,
+			state.ApplicationUserID, state.InstallationID, state.SessionGrantID, now}
+		if state.ComponentID != "" {
+			statement = `
+				SELECT EXISTS (
+					SELECT 1
+					FROM component_refresh_tokens
+					WHERE component_session_family_id = $1
+					  AND client_component_id = $2
+					  AND component_key_id = $3
+					  AND session_grant_id = $4
+					  AND grant_kind = 'session'
+					  AND status = 'active'
+					  AND expires_at > $5
+					  AND used_at IS NULL
+					  AND revoked_at IS NULL
+					  AND rotated_to_component_refresh_token_id IS NULL
+				)
+			`
+			arguments = []any{state.ComponentSessionFamilyID, state.ComponentID,
+				state.ComponentKeyID, state.SessionGrantID, now}
+		}
+		err := tx.QueryRow(ctx, statement, arguments...).Scan(&refreshAvailable)
 		if err != nil {
 			return fmt.Errorf("inspect client diagnostics refresh availability: %w", err)
 		}
@@ -460,7 +613,50 @@ func lockAccessInstallation(ctx context.Context, tx pgx.Tx, principal AccessPrin
 	if err != nil {
 		return fmt.Errorf("lock access installation: %w", err)
 	}
-	if subtle.ConstantTimeCompare([]byte(storedJKT), []byte(principal.DPoPJKT)) != 1 || (status != "active" && status != "revoked") {
+	if status != "active" && status != "revoked" {
+		return ErrSessionInvalid
+	}
+	if principal.ComponentID == "" {
+		if subtle.ConstantTimeCompare([]byte(storedJKT), []byte(principal.DPoPJKT)) != 1 {
+			return ErrSessionInvalid
+		}
+		return nil
+	}
+	var familyStatus, componentStatus, keyStatus, sessionStatus, componentJKT string
+	err = tx.QueryRow(ctx, `
+		SELECT f.status, c.status, k.status, sf.status, k.dpop_jkt
+		FROM installation_families f
+		JOIN client_components c
+		  ON c.installation_family_id = f.installation_family_id
+		JOIN component_session_families sf
+		  ON sf.installation_family_id = f.installation_family_id
+		 AND sf.client_component_id = c.client_component_id
+		JOIN component_keys k
+		  ON k.client_component_id = c.client_component_id
+		 AND k.component_key_id = sf.component_key_id
+		WHERE f.organization_id = $1 AND f.application_id = $2 AND f.environment_id = $3
+		  AND f.application_user_id = $4 AND f.root_installation_id = $5
+		  AND f.installation_family_id = $6 AND c.client_component_id = $7
+		  AND sf.component_session_family_id = (
+		      SELECT component_session_family_id FROM session_grants
+		      WHERE session_grant_id = $8
+		  )
+	`+lockClause+` OF f, c, sf, k`, principal.OrganizationID, principal.ApplicationID,
+		principal.EnvironmentID, principal.ApplicationUserID, principal.InstallationID,
+		principal.InstallationFamilyID, principal.ComponentID, principal.SessionGrantID).Scan(
+		&familyStatus, &componentStatus, &keyStatus, &sessionStatus, &componentJKT,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSessionInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("lock access component boundary: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(componentJKT), []byte(principal.DPoPJKT)) != 1 ||
+		(familyStatus != "active" && familyStatus != "revoked") ||
+		(componentStatus != "active" && componentStatus != "revoked" && componentStatus != "replaced") ||
+		(keyStatus != "active" && keyStatus != "revoked" && keyStatus != "replaced") ||
+		(sessionStatus != "active" && sessionStatus != "revoked" && sessionStatus != "replaced" && sessionStatus != "expired") {
 		return ErrSessionInvalid
 	}
 	return nil
@@ -517,6 +713,36 @@ func revokeCurrentInstallation(ctx context.Context, tx pgx.Tx, state authorizati
 func validateAuthorizationIDs(result Authorization) error {
 	if id.Validate(result.OrganizationID, id.Organization) != nil || id.Validate(result.ApplicationID, id.Application) != nil || id.Validate(result.EnvironmentID, id.Environment) != nil || id.Validate(result.ApplicationUserID, id.ApplicationUser) != nil || id.Validate(result.InstallationID, id.Installation) != nil || id.Validate(result.SessionGrantID, id.SessionGrant) != nil || id.Validate(result.PolicyRevisionID, id.ConfigRevision) != nil {
 		return ErrSessionInvalid
+	}
+	componentAware := result.InstallationFamilyID != "" || result.InstallationFamilyStatus != "" || result.ComponentID != "" ||
+		result.ComponentDefinitionID != "" || result.ComponentKind != "" ||
+		result.ComponentSessionFamilyID != "" || result.ComponentKeyID != "" ||
+		result.TrustSource != "" || len(result.GrantedFeatures) != 0
+	if componentAware && (id.Validate(result.InstallationFamilyID, id.InstallationFamily) != nil ||
+		id.Validate(result.ComponentID, id.ClientComponent) != nil ||
+		id.Validate(result.ComponentSessionFamilyID, id.ComponentSession) != nil ||
+		id.Validate(result.ComponentKeyID, id.ComponentKey) != nil ||
+		!sessionIdentifierPattern.MatchString(result.ComponentDefinitionID) ||
+		!componentKindPattern.MatchString(result.ComponentKind) ||
+		(result.InstallationFamilyStatus != "active" && result.InstallationFamilyStatus != "revoked") ||
+		!trustSourcePattern.MatchString(result.TrustSource) ||
+		!sessionIdentifierList(result.GrantedFeatures)) {
+		return ErrSessionInvalid
+	}
+	if result.ComponentID == "" && (result.ComponentIsRoot || result.ParentComponentID != "" ||
+		result.ParentAttestationProvider != "" || result.DelegationID != "") {
+		return ErrSessionInvalid
+	}
+	if result.ComponentID != "" {
+		if result.ComponentIsRoot {
+			if result.ParentComponentID != "" || result.ParentAttestationProvider != "" || result.DelegationID != "" {
+				return ErrSessionInvalid
+			}
+		} else if id.Validate(result.ParentComponentID, id.ClientComponent) != nil ||
+			id.Validate(result.DelegationID, id.ComponentDelegation) != nil ||
+			!sessionIdentifierPattern.MatchString(result.ParentAttestationProvider) {
+			return ErrSessionInvalid
+		}
 	}
 	return nil
 }
@@ -577,9 +803,11 @@ func normalizedAuthorization(authorization Authorization) (Authorization, error)
 	}
 	authorization.NormalizedClaims = claims
 	authorization.IdentityExpiresAt = authorization.IdentityExpiresAt.UTC()
+	authorization.IdentityVerifiedAt = authorization.IdentityVerifiedAt.UTC()
 	authorization.AttestedAt = authorization.AttestedAt.UTC()
 	authorization.AttestationExpiresAt = authorization.AttestationExpiresAt.UTC()
 	authorization.AccessExpiresAt = authorization.AccessExpiresAt.UTC()
+	authorization.GrantedFeatures = append([]string(nil), authorization.GrantedFeatures...)
 	authorization.seal = [sha256.Size]byte{}
 	return authorization, nil
 }
@@ -596,7 +824,9 @@ func validateAuthorizationValues(authorization Authorization) error {
 			ID: authorization.UserOverrideID, LimitPlan: authorization.LimitPlanOverride,
 		}).Validate() != nil ||
 		authorization.IdentityExpiresAt.IsZero() || authorization.AttestedAt.IsZero() ||
+		authorization.IdentityVerifiedAt.IsZero() ||
 		authorization.AttestationExpiresAt.IsZero() || authorization.AccessExpiresAt.IsZero() ||
+		!authorization.IdentityExpiresAt.After(authorization.IdentityVerifiedAt) ||
 		!authorization.AttestationExpiresAt.After(authorization.AttestedAt) ||
 		!authorization.AccessExpiresAt.After(authorization.AttestedAt) ||
 		authorization.NormalizedClaims == nil {
@@ -610,26 +840,40 @@ func validEnvironmentKind(kind string) bool {
 }
 
 type authorizationSealPayload struct {
-	OrganizationID       string         `json:"organization_id"`
-	ApplicationID        string         `json:"application_id"`
-	EnvironmentID        string         `json:"environment_id"`
-	EnvironmentKind      string         `json:"environment_kind"`
-	ApplicationUserID    string         `json:"application_user_id"`
-	InstallationID       string         `json:"installation_id"`
-	InstallationPlatform string         `json:"installation_platform"`
-	SessionGrantID       string         `json:"session_grant_id"`
-	PolicyRevisionID     string         `json:"policy_revision_id"`
-	UserOverrideID       string         `json:"user_override_id,omitempty"`
-	LimitPlanOverride    string         `json:"limit_plan_override,omitempty"`
-	IdentityProvider     string         `json:"identity_provider"`
-	DPoPJKT              string         `json:"dpop_jkt"`
-	TrustLevel           string         `json:"trust_level"`
-	AttestationProvider  string         `json:"attestation_provider"`
-	NormalizedClaims     map[string]any `json:"normalized_claims"`
-	IdentityExpiresAt    time.Time      `json:"identity_expires_at"`
-	AttestedAt           time.Time      `json:"attested_at"`
-	AttestationExpiresAt time.Time      `json:"attestation_expires_at"`
-	AccessExpiresAt      time.Time      `json:"access_expires_at"`
+	OrganizationID            string         `json:"organization_id"`
+	ApplicationID             string         `json:"application_id"`
+	EnvironmentID             string         `json:"environment_id"`
+	EnvironmentKind           string         `json:"environment_kind"`
+	ApplicationUserID         string         `json:"application_user_id"`
+	InstallationID            string         `json:"installation_id"`
+	InstallationPlatform      string         `json:"installation_platform"`
+	InstallationFamilyID      string         `json:"installation_family_id,omitempty"`
+	InstallationFamilyStatus  string         `json:"installation_family_status,omitempty"`
+	ComponentID               string         `json:"component_id,omitempty"`
+	ComponentDefinitionID     string         `json:"component_definition_id,omitempty"`
+	ComponentKind             string         `json:"component_kind,omitempty"`
+	ComponentIsRoot           bool           `json:"component_is_root,omitempty"`
+	ComponentSessionFamilyID  string         `json:"component_session_family_id,omitempty"`
+	ComponentKeyID            string         `json:"component_key_id,omitempty"`
+	TrustSource               string         `json:"trust_source,omitempty"`
+	ParentComponentID         string         `json:"parent_component_id,omitempty"`
+	ParentAttestationProvider string         `json:"parent_attestation_provider,omitempty"`
+	DelegationID              string         `json:"delegation_id,omitempty"`
+	GrantedFeatures           []string       `json:"granted_features,omitempty"`
+	SessionGrantID            string         `json:"session_grant_id"`
+	PolicyRevisionID          string         `json:"policy_revision_id"`
+	UserOverrideID            string         `json:"user_override_id,omitempty"`
+	LimitPlanOverride         string         `json:"limit_plan_override,omitempty"`
+	IdentityProvider          string         `json:"identity_provider"`
+	DPoPJKT                   string         `json:"dpop_jkt"`
+	TrustLevel                string         `json:"trust_level"`
+	AttestationProvider       string         `json:"attestation_provider"`
+	NormalizedClaims          map[string]any `json:"normalized_claims"`
+	IdentityVerifiedAt        time.Time      `json:"identity_verified_at"`
+	IdentityExpiresAt         time.Time      `json:"identity_expires_at"`
+	AttestedAt                time.Time      `json:"attested_at"`
+	AttestationExpiresAt      time.Time      `json:"attestation_expires_at"`
+	AccessExpiresAt           time.Time      `json:"access_expires_at"`
 }
 
 func authorizationSealDigest(authorization Authorization) ([sha256.Size]byte, error) {
@@ -638,11 +882,23 @@ func authorizationSealDigest(authorization Authorization) ([sha256.Size]byte, er
 		EnvironmentID: authorization.EnvironmentID, EnvironmentKind: authorization.EnvironmentKind,
 		ApplicationUserID: authorization.ApplicationUserID, InstallationID: authorization.InstallationID,
 		InstallationPlatform: authorization.InstallationPlatform, SessionGrantID: authorization.SessionGrantID,
-		PolicyRevisionID: authorization.PolicyRevisionID, UserOverrideID: authorization.UserOverrideID,
+		InstallationFamilyID:     authorization.InstallationFamilyID,
+		InstallationFamilyStatus: authorization.InstallationFamilyStatus,
+		ComponentID:              authorization.ComponentID,
+		ComponentDefinitionID:    authorization.ComponentDefinitionID, ComponentKind: authorization.ComponentKind,
+		ComponentIsRoot:          authorization.ComponentIsRoot,
+		ComponentSessionFamilyID: authorization.ComponentSessionFamilyID,
+		ComponentKeyID:           authorization.ComponentKeyID, TrustSource: authorization.TrustSource,
+		ParentComponentID:         authorization.ParentComponentID,
+		ParentAttestationProvider: authorization.ParentAttestationProvider,
+		DelegationID:              authorization.DelegationID,
+		GrantedFeatures:           append([]string(nil), authorization.GrantedFeatures...),
+		PolicyRevisionID:          authorization.PolicyRevisionID, UserOverrideID: authorization.UserOverrideID,
 		LimitPlanOverride: authorization.LimitPlanOverride, IdentityProvider: authorization.IdentityProvider,
 		DPoPJKT: authorization.DPoPJKT, TrustLevel: authorization.TrustLevel,
 		AttestationProvider: authorization.AttestationProvider, NormalizedClaims: authorization.NormalizedClaims,
-		IdentityExpiresAt: authorization.IdentityExpiresAt, AttestedAt: authorization.AttestedAt,
+		IdentityVerifiedAt: authorization.IdentityVerifiedAt,
+		IdentityExpiresAt:  authorization.IdentityExpiresAt, AttestedAt: authorization.AttestedAt,
 		AttestationExpiresAt: authorization.AttestationExpiresAt, AccessExpiresAt: authorization.AccessExpiresAt,
 	}
 	encoded, err := json.Marshal(payload)

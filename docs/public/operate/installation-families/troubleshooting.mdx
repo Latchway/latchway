@@ -1,0 +1,22 @@
+---
+title: "Troubleshoot component setup"
+description: "Map extension provisioning failures to entitlements, definitions, trust expiry, scope, identity, and revocation without exposing secrets."
+---
+
+<Warning>
+  Stable pre-release Installation Family error codes will come from generated
+  OpenAPI. Names here are diagnostic categories, not released protocol codes.
+</Warning>
+
+| Symptom | Check |
+| --- | --- |
+| Extension says setup is required | Open the containing app and confirm the root established current direct trust. |
+| Provisioning is rejected | Compare application, environment, bundle identifier, component type, and public-key binding with the Component Definition. |
+| Key cannot be loaded | Check the target's Keychain entitlement and component-local access group. |
+| Handoff is missing | Check the App Group entitlement and that only non-secret bounded provisioning data is shared. |
+| Session stops refreshing | Check delegation expiry, root trust, user relationship, component revocation, and family revocation. |
+| Feature is denied | Check component scope, trust requirement, and family/user/application policy. |
+
+Collect a request ID and safe diagnostics. Do not include access or refresh
+tokens, private keys, DPoP proofs, identity tokens, upstream credentials, or raw
+attestation objects in an issue.

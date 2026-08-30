@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/protocol"
 )
 
@@ -58,6 +59,12 @@ func prepareRetryRuleSet(
 		len(plan.rules) < 1 || len(plan.rules) > maximumRulesPerRequest {
 		return preparedRequest{}, nil, ErrInvalidInput
 	}
+	if !validComponentAttribution(
+		plan.installationFamilyID, plan.clientComponentID,
+		plan.componentDefinitionID, plan.componentKind, plan.trustSource,
+	) {
+		return preparedRequest{}, nil, ErrInvalidInput
+	}
 	allocations := make(map[string]int64, len(input.Allocations))
 	for _, allocation := range input.Allocations {
 		allocations[allocation.Metric] = allocation.Units
@@ -79,15 +86,20 @@ func prepareRetryRuleSet(
 		return preparedRequest{}, nil, ErrInvalidInput
 	}
 	values, err := quotaScopeValues(map[string]string{
-		"organization": reservation.organizationID,
-		"application":  reservation.applicationID,
-		"environment":  reservation.environmentID,
-		"user":         plan.applicationUserID,
-		"installation": plan.installationID,
-		"feature":      plan.featureKey,
-		"route":        input.RouteKey,
-		"upstream":     input.UpstreamKey,
-		"model":        input.ModelKey,
+		"organization":                          reservation.organizationID,
+		"application":                           reservation.applicationID,
+		"environment":                           reservation.environmentID,
+		"user":                                  plan.applicationUserID,
+		"installation":                          plan.installationID,
+		limitscope.InstallationFamilyDimension:  plan.installationFamilyID,
+		limitscope.ClientComponentDimension:     plan.clientComponentID,
+		limitscope.ComponentDefinitionDimension: plan.componentDefinitionID,
+		limitscope.ComponentKindDimension:       plan.componentKind,
+		limitscope.TrustSourceDimension:         plan.trustSource,
+		"feature":                               plan.featureKey,
+		"route":                                 input.RouteKey,
+		"upstream":                              input.UpstreamKey,
+		"model":                                 input.ModelKey,
 	}, plan.platform, plan.claimDigests)
 	if err != nil {
 		return preparedRequest{}, nil, err
@@ -115,6 +127,11 @@ func prepareRetryRuleSet(
 		EnvironmentID:          reservation.environmentID,
 		ApplicationUserID:      plan.applicationUserID,
 		InstallationID:         plan.installationID,
+		InstallationFamilyID:   plan.installationFamilyID,
+		ClientComponentID:      plan.clientComponentID,
+		ComponentDefinitionID:  plan.componentDefinitionID,
+		ComponentKind:          plan.componentKind,
+		TrustSource:            plan.trustSource,
 		SessionGrantID:         plan.sessionGrantID,
 		ConfigRevisionID:       plan.configRevisionID,
 		Platform:               plan.platform,

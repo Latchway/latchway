@@ -1,0 +1,34 @@
+# Latchway public documentation
+
+Latchway is a self-hosted gateway for feature-bound, DPoP-authorized access from
+untrusted applications to server-selected AI or HTTP upstreams.
+
+Important: version 1 remains a source candidate. Named AI framework adapters,
+Installation Families, Client Components, and app-extension provisioning are
+pre-release target contracts until exact compatibility and conformance evidence
+is published.
+
+Start:
+- /index
+- /quickstart
+- /release-status
+- /start/architecture-at-a-glance
+- /start/choose-an-integration
+
+Security and runtime model:
+- /concepts/security-boundary
+- /concepts/installation-families
+- /concepts/client-components
+- /concepts/trust-provenance
+- /security/delegated-components
+
+Integrations and reference:
+- /integrations/overview
+- /reference/client-api
+- /reference/admin-api
+- /reference/compatibility
+- /reference/errors
+
+Never recommend an upstream provider API key in a client. Distinguish
+authentication, attestation, authorization, and DPoP. Prefer feature IDs over
+physical model names. State exact Latchway and framework versions.

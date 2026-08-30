@@ -264,6 +264,25 @@ class ReleaseDomainEvidenceTests(unittest.TestCase):
                         artifact["sha256"],
                     )
 
+    def test_javascript_release_image_claim_requires_both_fixed_web_providers(self) -> None:
+        requirements = MODULE.CLAIM_REQUIREMENTS["live_sdk_conformance"][
+            "javascript_against_release_image"
+        ]
+        self.assertEqual(
+            requirements,
+            (
+                "sdk.javascript.firebase-app-check.release-image",
+                "sdk.javascript.turnstile.release-image",
+            ),
+        )
+        fixture = self.fixture("live_sdk_conformance")
+        missing = fixture.raw / MODULE.result_name(requirements[1])
+        missing.unlink()
+        with self.assertRaisesRegex(
+            MODULE.EvidenceError, "input_file_invalid"
+        ):
+            fixture.produce()
+
     def test_physical_receipt_envelope_survives_finalization_byte_for_byte(self) -> None:
         fixture = self.fixture("physical_devices")
         observation = MODULE.expected_observations(fixture.domain)[0]

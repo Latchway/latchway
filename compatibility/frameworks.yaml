@@ -1,0 +1,226 @@
+schema_version: 1
+frameworks:
+  - id: android-okhttp
+    name: Android OkHttp ecosystem
+    tier: tier_1
+    ecosystem: android
+    package: com.squareup.okhttp3:okhttp
+    integration: interceptor_authenticator
+    latchway_package: dev.latchway:latchway-okhttp
+    support: experimental
+    tested:
+      minimum: 5.3.0
+      latest: 5.3.0
+    capabilities:
+      responses: true
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: conditional
+      structured_output: conditional
+      embeddings: true
+      audio: conditional
+      images: conditional
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: full
+      native_key_isolation: partial
+    limitations:
+      - Local source, route, replay, streaming, cancellation, and OkHttp 5.3.0 tests pass; hosted gateway conformance and physical Play-distributed key proof remain release gates.
+  - id: foundation-models
+    name: Apple Foundation Models
+    tier: tier_1
+    ecosystem: apple
+    package: FoundationModels
+    integration: language_model_executor
+    latchway_package: LatchwayFoundationModels
+    support: planned
+    tested:
+      minimum: null
+      latest: null
+    capabilities:
+      responses: false
+      chat_completions: false
+      text: planned
+      streaming: planned
+      tools: conditional
+      structured_output: planned
+      embeddings: false
+      audio: false
+      images: false
+      cancellation: planned
+      app_extensions: conditional
+    security:
+      dpop: not_tested
+      native_key_isolation: not_tested
+    limitations:
+      - The OS 27 custom executor compiles, but its runtime tests were skipped on an older host OS; gateway and physical-device execution remain pending.
+  - id: langchain-js
+    name: LangChain JavaScript
+    tier: tier_1
+    ecosystem: javascript
+    package: "@langchain/openai"
+    integration: underlying_client
+    latchway_package: "@latchway/langchain"
+    support: experimental
+    tested:
+      minimum: 1.5.10
+      latest: 1.5.10
+    capabilities:
+      responses: false
+      chat_completions: true
+      text: true
+      streaming: conditional
+      tools: conditional
+      structured_output: conditional
+      embeddings: true
+      audio: false
+      images: false
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: full
+      native_key_isolation: not_applicable
+    limitations:
+      - Chat and embeddings pass local adapter tests at @langchain/openai 1.5.10; streaming/tool paths and hosted common conformance are not yet release evidence.
+  - id: macpaw-openai
+    name: MacPaw OpenAI
+    tier: tier_1
+    ecosystem: apple
+    package: MacPaw/OpenAI
+    integration: async_request_interceptor
+    latchway_package: LatchwayOpenAI
+    support: unsupported
+    tested:
+      minimum: 0.5.1
+      latest: 0.5.1
+    capabilities:
+      responses: false
+      chat_completions: false
+      text: false
+      streaming: false
+      tools: false
+      structured_output: false
+      embeddings: false
+      audio: false
+      images: false
+      cancellation: false
+      app_extensions: false
+    security:
+      dpop: not_applicable
+      native_key_isolation: not_applicable
+    limitations:
+      - MacPaw/OpenAI 0.5.1 exposes only synchronous request middleware and no public streaming transport injection, so a safe transparent Latchway adapter cannot be shipped.
+  - id: openai-js
+    name: OpenAI JavaScript SDK
+    tier: tier_1
+    ecosystem: javascript
+    package: openai
+    integration: custom_fetch
+    latchway_package: "@latchway/openai"
+    support: experimental
+    tested:
+      minimum: 7.8.0
+      latest: 7.8.0
+    capabilities:
+      responses: true
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: conditional
+      structured_output: conditional
+      embeddings: conditional
+      audio: conditional
+      images: conditional
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: full
+      native_key_isolation: not_applicable
+    limitations:
+      - Responses plus chat streaming/cancellation pass local OpenAI 7.8.0 adapter tests; tools, media, embeddings, and hosted common conformance remain conditional.
+  - id: react-native-fetch
+    name: React Native framework fetch
+    tier: tier_1
+    ecosystem: react_native
+    package: react-native
+    integration: native_backed_fetch
+    latchway_package: "@latchway/react-native"
+    support: experimental
+    tested:
+      minimum: 0.82.0
+      latest: 0.82.0
+    capabilities:
+      responses: true
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: conditional
+      structured_output: conditional
+      embeddings: true
+      audio: false
+      images: false
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: partial
+      native_key_isolation: partial
+    limitations:
+      - React Native 0.82.0 New Architecture hosts, native-only credentials, pull streaming and cancellation pass local gates; live gateway and physical iOS/Android proof remain pending.
+  - id: swift-openai
+    name: SwiftOpenAI
+    tier: tier_1
+    ecosystem: apple
+    package: SwiftOpenAI/SwiftOpenAI
+    integration: async_http_client
+    latchway_package: LatchwaySwiftOpenAI
+    support: experimental
+    tested:
+      minimum: 4.6.0
+      latest: 4.6.0
+    capabilities:
+      responses: true
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: conditional
+      structured_output: conditional
+      embeddings: conditional
+      audio: conditional
+      images: conditional
+      cancellation: conditional
+      app_extensions: conditional
+    security:
+      dpop: full
+      native_key_isolation: partial
+    limitations:
+      - Buffered and line-stream HTTP pass exact SwiftOpenAI 4.6.0 tests; WebSocket Realtime bypasses the injectable HTTP client and is unsupported, while physical cancellation proof is pending.
+  - id: vercel-ai-sdk
+    name: Vercel AI SDK
+    tier: tier_1
+    ecosystem: javascript
+    package: ai
+    integration: custom_provider
+    latchway_package: "@latchway/vercel-ai"
+    support: experimental
+    tested:
+      minimum: 7.0.85
+      latest: 7.0.85
+    capabilities:
+      responses: true
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: conditional
+      structured_output: conditional
+      embeddings: true
+      audio: false
+      images: conditional
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: full
+      native_key_isolation: not_applicable
+    limitations:
+      - Responses, chat, embeddings, streaming and cancellation pass local AI SDK 7.0.85 adapter tests; tools, images and hosted common conformance remain conditional.

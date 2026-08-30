@@ -1,0 +1,24 @@
+---
+title: "Add a framework integration"
+description: "Propose a transport or provider adapter with complete security, capability, version, conformance, and documentation evidence."
+---
+
+Start by classifying the framework as transport-injectable, provider-extensible,
+or static-configuration-only. Reject an approach that cannot generate a fresh
+DPoP proof after the final method, URL, token, and redirect destination are
+known.
+
+## Required change set
+
+- Add or update the machine-readable compatibility registry.
+- Pin the minimum and latest tested framework versions.
+- Implement the smallest transport or provider adapter; do not recreate the framework.
+- Preserve origin restriction, credential replacement, streaming, cancellation, and bounded retries.
+- Add non-streaming, streaming, tools, structured output, cancellation, quota, refresh, and redirect conformance cases.
+- Publish a versioned SDK documentation bundle with source provenance.
+- Generate the public compatibility table and page snippets.
+- Complete all 19 sections in the framework page template.
+
+A static base URL, API key, or header-only integration is not full Latchway
+support. Do not weaken DPoP or expose a reusable Latchway token to satisfy a
+framework limitation.

@@ -141,6 +141,7 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
 
 export function AuthenticationProvidersPage() { return <ConfigurationAreaEditor definition={configurationAreas.identity} />; }
 export function AttestationConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.attestation} />; }
+export function ComponentDefinitionsConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.components} />; }
 export function FeaturesConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.features} />; }
 export function RoutesConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.routes} />; }
 export function UpstreamsConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.upstreams} />; }

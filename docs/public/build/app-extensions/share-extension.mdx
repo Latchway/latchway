@@ -1,0 +1,35 @@
+---
+title: "Share extension setup"
+description: "Define the security and lifecycle checks for a Share extension with an independently scoped delegated component."
+---
+
+<Warning>
+  Share extension support is a pre-release target and has no released SDK
+  package or verified setup example yet.
+</Warning>
+
+## Xcode target and identifiers
+
+Use a separate Share extension target and bundle identifier. Bind it to a
+server-side Component Definition that restricts component type, feature scope,
+delegation lifetime, application, and environment.
+
+## Component-owned request path
+
+The extension generates its own P-256 key, creates its own session family, and
+sends through its own authenticated transport. Its tight execution and memory
+limits do not justify moving reusable Latchway credentials into a shared store.
+
+## Containing-app preparation and first launch
+
+The containing app must establish the Installation Family and authorize the
+extension key before the extension can obtain delegated trust. If that has not
+happened, return an actionable setup error and ask the user to open the
+containing app. Do not attest the containing app on the extension's behalf.
+
+## Sign-out, dashboard, and diagnostics
+
+Sign-out invalidates the prior user's family credentials. The dashboard should
+show the Share extension as a distinct delegated component. Diagnostics must
+distinguish entitlement, Keychain group, App Group, Component Definition,
+delegation expiry, feature scope, and revocation failures.

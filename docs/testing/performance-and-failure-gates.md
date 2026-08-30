@@ -48,7 +48,7 @@ The failure report has two independent verdicts:
 The original version 1 plan labeled the `<5/<15/<30 ms` P50/P95/P99 gateway
 overhead values as initial targets and, in Phase 18, explicitly permits a
 corrected target when it is justified with evidence.
-[ADR 0022](../adr/0022-correct-v1-gateway-overhead-targets.md) records that
+[ADR 0034](../adr/0034-correct-v1-gateway-overhead-targets.md) records that
 correction. The version 1 acceptance target is now strictly:
 
 ```text

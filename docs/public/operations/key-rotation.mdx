@@ -1,0 +1,66 @@
+---
+title: "Key and secret rotation"
+description: "Rotate gateway, provider, identity, and administrator credentials without losing recoverability."
+---
+
+Latchway key classes have different lifecycles. Treating them as interchangeable
+can make encrypted records unrecoverable or invalidate every mobile session.
+
+## Environment master key
+
+`LATCHWAY_MASTER_KEY` is a base64-encoded 32-byte root used to protect managed
+secrets and gateway signing material. Version 1 has no in-place rewrap workflow.
+Replacing the value is not rotation: readiness fails when durable records name
+another master-key identifier.
+
+Escrow the exact key separately from PostgreSQL. A master-key change requires a
+future audited rewrap or a planned restore/migration, not an environment-variable
+edit during rollout.
+
+## Gateway signing keys
+
+The worker owns durable signing-key rotation. New keys become active while old
+public keys remain in JWKS long enough for issued access tokens and verifier
+caches to expire. Monitor rotation jobs, JWKS publication, readiness, and clock
+skew across replicas.
+
+Emergency shortening of overlap invalidates live sessions and requires an
+incident decision. Record key IDs and lifecycle timestamps, never private bytes.
+
+## Identity-provider keys
+
+Remote JWKS is cached in PostgreSQL so replicas share refresh and failure
+behavior. Respect provider cache metadata and the configured stale-key safety
+window. Test a real provider rollover with multiple API replicas before relying
+on it in production.
+
+Static public keys and HS256 verification secrets change through a reviewed
+immutable configuration and managed-secret procedure. HS256 remains an
+explicit-risk configuration because verification and signing share material.
+
+## Upstream credentials
+
+1. Create a new managed-secret version through the console or CLI.
+2. Create and activate a configuration revision that references it.
+3. Run a bounded server-owned self-test and verify production traffic.
+4. Delete the old version only after reference checks permit it.
+5. Recreate any scheduled self-test intentionally; schedules fail closed when
+   their pinned secret version changes.
+
+```bash
+printf '%s' "$NEW_PROVIDER_KEY" | \
+  latchway secret rotate sec_... --from-stdin
+```
+
+The Admin API never returns plaintext. Reconcile an indeterminate rotation by
+operation ID before retrying.
+
+## Administrator credentials
+
+Remove `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` after the first owner is created. Reset
+a compromised password through the Admin API, revoke API tokens and affected
+sessions, verify current owners, and review redacted audit events. Disabling an
+administrator membership revokes its organization-scoped sessions and tokens.
+
+Include master-key escrow, signing overlap, provider rotation, identity-key
+rollover, and administrator recovery in the production drill schedule.

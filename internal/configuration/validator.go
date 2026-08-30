@@ -15,7 +15,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const canonicalSchemaURL = "https://latchway.dev/schemas/config/0.5.1/environment-config.schema.json"
+const canonicalSchemaURL = "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json"
 
 const (
 	// Configuration numbers ultimately fit int64 or the six-decimal refill
@@ -53,6 +53,7 @@ func NewValidator() (*Validator, error) {
 	}
 	policyEnvironment, err := cel.NewEnv(
 		cel.Variable("principal", cel.DynType),
+		cel.Variable("client", cel.DynType),
 		cel.Variable("installation", cel.DynType),
 		cel.Variable("request", cel.DynType),
 		cel.Variable("environment", cel.DynType),
@@ -329,6 +330,7 @@ func applyDefaults(root map[string]any) {
 	spec := objectValue(root, "spec")
 	setDefault(spec, "inputAccountingProfiles", []any{})
 	setDefault(spec, "pricingCatalogs", []any{})
+	setDefault(spec, "componentDefinitions", []any{})
 
 	for _, provider := range objectArray(spec, "identityProviders") {
 		setDefault(provider, "acknowledgeSymmetricRisk", false)
@@ -353,6 +355,13 @@ func applyDefaults(root map[string]any) {
 				}
 			}
 			setDefault(selection, "minimumTrustLevel", minimumTrust)
+		}
+	}
+	for _, definition := range objectArray(spec, "componentDefinitions") {
+		attestation := ensureObject(definition, "attestation")
+		setDefault(attestation, "directStepUp", false)
+		if delegation, ok := definition["delegation"].(map[string]any); ok {
+			setDefault(delegation, "allowChildDelegation", false)
 		}
 	}
 	for _, upstream := range objectArray(spec, "upstreams") {

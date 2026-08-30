@@ -1,0 +1,22 @@
+---
+title: "Glossary"
+description: "Use Latchway security, runtime, routing, and release terms consistently across integrations and operations."
+---
+
+| Term | Definition |
+| --- | --- |
+| Application user | A user authenticated by the application's existing identity provider. |
+| Authentication | Verification of who the application user is. |
+| Attestation | Evidence about the client application or environment. |
+| Authorization | The decision about what an authenticated principal may do. |
+| DPoP | RFC 9449 proof that a caller possesses the private key bound to a Latchway token. |
+| Installation Family | Pre-release parent resource grouping related Client Components in one logical installation. |
+| Client Component | Pre-release resource for one independently executing application surface with its own key and session family. |
+| Direct trust | Trust derived from platform evidence verified for that component. |
+| Delegated trust | Trust derived from an attested root authorizing a bounded component key; not independent component attestation. |
+| Feature | Application-facing capability the client selects. |
+| Route | Server-side rule that selects an upstream and physical model. |
+| Upstream | Server-configured destination that receives the proxied request. |
+| Access token | Short-lived Latchway credential bound to a DPoP key. It is not an upstream API key. |
+| Upstream credential | Server-held provider secret that is never supplied by an application client. |
+| Source candidate | Repository state under test; not a published or supported release. |

@@ -66,6 +66,77 @@ func TestPrepareRequestCanonicalizesTrustedBucketIdentity(t *testing.T) {
 	}
 }
 
+func TestPrepareRequestBindsComponentScopesAndFrameworkAttribution(t *testing.T) {
+	t.Parallel()
+	input := validReserveInput(t)
+	input.InstallationFamilyID = id.Must(id.InstallationFamily)
+	input.ClientComponentID = id.Must(id.ClientComponent)
+	input.ComponentDefinitionID = "ios-widget"
+	input.ComponentKind = "widget"
+	input.TrustSource = "delegated_from_attested_root"
+	input.Framework = "swift-openai"
+	input.FrameworkVersion = "4.6.0"
+	input.Rules[0].Scope = []string{
+		"feature", "trust_source", "component_kind", "component_definition",
+		"client_component", "installation_family",
+	}
+
+	prepared, err := prepareRequest(input)
+	if err != nil {
+		t.Fatalf("prepare component request: %v", err)
+	}
+	wantScope := []string{
+		"installation_family", "client_component", "component_definition",
+		"component_kind", "trust_source", "feature",
+	}
+	if !slices.Equal(prepared.rules[0].scopeDimensions, wantScope) {
+		t.Fatalf("component scope = %#v, want %#v", prepared.rules[0].scopeDimensions, wantScope)
+	}
+
+	changed := cloneReserveInput(input)
+	changed.ClientComponentID = id.Must(id.ClientComponent)
+	changedPrepared, err := prepareRequest(changed)
+	if err != nil {
+		t.Fatalf("prepare changed component request: %v", err)
+	}
+	if changedPrepared.rules[0].scopeKey == prepared.rules[0].scopeKey ||
+		requestFingerprint(changedPrepared) == requestFingerprint(prepared) {
+		t.Fatal("component identity did not isolate quota scope and replay fingerprint")
+	}
+	retryPrepared, _, err := prepareRetryRuleSet(Reservation{
+		organizationID: input.OrganizationID, applicationID: input.ApplicationID,
+		environmentID: input.EnvironmentID, protocol: input.Protocol,
+		retryPlan: retryPlanForRequest(prepared),
+	}, RetryAttemptInput{
+		RouteKey: "secondary", UpstreamKey: "backup", ModelKey: "backup-model",
+		PhysicalModel: "provider/backup-model",
+	})
+	if err != nil {
+		t.Fatalf("prepare component retry: %v", err)
+	}
+	if retryPrepared.InstallationFamilyID != input.InstallationFamilyID ||
+		retryPrepared.ClientComponentID != input.ClientComponentID ||
+		retryPrepared.ComponentDefinitionID != input.ComponentDefinitionID ||
+		retryPrepared.ComponentKind != input.ComponentKind || retryPrepared.TrustSource != input.TrustSource ||
+		retryPrepared.rules[0].scopeKey != prepared.rules[0].scopeKey {
+		t.Fatalf("component retry attribution = %+v scope=%s", retryPrepared.ReserveInput,
+			retryPrepared.rules[0].scopeKey)
+	}
+
+	for name, mutate := range map[string]func(*ReserveInput){
+		"partial component":    func(value *ReserveInput) { value.ClientComponentID = "" },
+		"partial framework":    func(value *ReserveInput) { value.FrameworkVersion = "" },
+		"unknown framework":    func(value *ReserveInput) { value.Framework = "unknown-framework" },
+		"noncanonical version": func(value *ReserveInput) { value.FrameworkVersion = "04.6.0" },
+	} {
+		invalid := cloneReserveInput(input)
+		mutate(&invalid)
+		if _, err := prepareRequest(invalid); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s accepted: %v", name, err)
+		}
+	}
+}
+
 func TestRequestFingerprintBindsOpaqueLogicalIdentityAndTrustedDecision(t *testing.T) {
 	t.Parallel()
 	input := validReserveInput(t)

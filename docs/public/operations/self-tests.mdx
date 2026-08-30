@@ -1,0 +1,105 @@
+---
+title: "Self-tests"
+description: "Run bounded local, live, and scheduled verification without exposing provider credentials."
+---
+
+Latchway has three distinct verification boundaries. They produce different
+claims and are not interchangeable.
+
+## Isolated local vertical
+
+`latchway verify local` is a destructive test only inside a generated,
+short-lived PostgreSQL schema:
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://...'
+latchway verify local --timeout 2m --junit ./local-verify.xml
+```
+
+It applies migrations, creates an ephemeral tenant and deterministic identity
+and upstream fixtures, exercises production session/proxy/accounting/quota/
+routing/recovery paths, then drops the schema and proves it no longer exists.
+It is strong local source evidence, not a live provider or hardware proof.
+
+## Ephemeral live provider verification
+
+The provider key stays in the CLI process and never enters the Admin API:
+
+```bash
+PROVIDER_API_KEY=... latchway verify upstream \
+  --base-url https://api.example.com/v1 \
+  --protocol openai_chat \
+  --api-key-env PROVIDER_API_KEY \
+  --model provider-model
+
+OPENROUTER_API_KEY=... latchway verify openrouter \
+  --api-key-env OPENROUTER_API_KEY \
+  --model openai/gpt-4o-mini \
+  --max-cost-usd 0.01
+```
+
+The generic ephemeral command supports OpenAI Chat in version 1. Destinations
+are public by default; private RFC 1918 or IPv6 ULA subnets require exact
+repeatable allow-list flags. Loopback, link-local, metadata, and other special
+ranges cannot be allow-listed.
+
+## Server-owned target verification
+
+This mode exercises the active immutable target and its write-only secret. The
+CLI never receives the provider credential:
+
+```bash
+latchway verify upstream --server-owned \
+  --environment env_... --upstream primary --model canary
+latchway verify openrouter --server-owned \
+  --environment env_... --upstream openrouter --model canary \
+  --max-cost-nano-usd 10000000
+```
+
+The generic upstream diagnostic selects OpenAI Responses capability first and
+then Chat. The OpenRouter diagnostic requires Chat. Both require model-bound
+trusted input accounting, active USD pricing, and a positive maximum cost that
+proves the complete worst case before target acquisition.
+
+Results are durable and redaction-safe. They include fixed check names and safe
+details, not prompt/response bodies, provider error text, URLs, tokens,
+credentials, or raw dependency errors.
+
+## Scheduled canaries
+
+Create a scoped `run_self_tests` Admin API token, then bind a schedule to that
+exact durable credential and active configuration:
+
+```bash
+latchway verify schedule create \
+  --environment env_... --kind upstream \
+  --upstream primary --model canary \
+  --interval-seconds 3600 \
+  --max-cost-nano-usd 10000000 \
+  --daily-cost-limit-nano-usd 240000000
+```
+
+Constraints are:
+
+- cadence from one hour through 30 days;
+- per-run cost from 1 through 1,000,000,000 nano-USD;
+- UTC-day ceiling no higher than 10,000,000,000 nano-USD and large enough for
+  every theoretical run;
+- at most 32 active schedules per organization;
+- one active schedule for an exact environment/kind/upstream/model tuple;
+- overdue intervals coalesce rather than creating a catch-up burst.
+
+The schedule pins its revision, current provider-secret record versions,
+administrator, and API-token ID. Token revocation, membership loss, configuration
+replacement, or secret rotation fails closed and disables future runs instead
+of silently rebinding.
+
+```bash
+latchway verify schedule list --environment env_...
+latchway verify schedule get sts_...
+latchway verify schedule disable sts_...
+```
+
+Self-tests are bounded canaries, not load generators. Protected release evidence
+must still run against the exact candidate image and retain authenticated
+receipts.

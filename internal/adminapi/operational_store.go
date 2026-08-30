@@ -111,17 +111,24 @@ type upstreamAttemptDocument struct {
 }
 
 type logicalRequestDocument struct {
-	ID             string                    `json:"id"`
-	EnvironmentID  string                    `json:"environment_id"`
-	UserID         string                    `json:"user_id"`
-	InstallationID string                    `json:"installation_id"`
-	Feature        string                    `json:"feature"`
-	Protocol       string                    `json:"protocol"`
-	StartedAt      time.Time                 `json:"started_at"`
-	CompletedAt    *time.Time                `json:"completed_at,omitempty"`
-	Status         string                    `json:"status"`
-	Usage          *usageValues              `json:"usage,omitempty"`
-	Attempts       []upstreamAttemptDocument `json:"attempts"`
+	ID                    string                    `json:"id"`
+	EnvironmentID         string                    `json:"environment_id"`
+	UserID                string                    `json:"user_id"`
+	InstallationID        string                    `json:"installation_id"`
+	InstallationFamilyID  *string                   `json:"installation_family_id,omitempty"`
+	ClientComponentID     *string                   `json:"client_component_id,omitempty"`
+	ComponentDefinitionID *string                   `json:"component_definition_id,omitempty"`
+	ComponentKind         *string                   `json:"component_kind,omitempty"`
+	TrustSource           *string                   `json:"trust_source,omitempty"`
+	Framework             *string                   `json:"framework,omitempty"`
+	FrameworkVersion      *string                   `json:"framework_version,omitempty"`
+	Feature               string                    `json:"feature"`
+	Protocol              string                    `json:"protocol"`
+	StartedAt             time.Time                 `json:"started_at"`
+	CompletedAt           *time.Time                `json:"completed_at,omitempty"`
+	Status                string                    `json:"status"`
+	Usage                 *usageValues              `json:"usage,omitempty"`
+	Attempts              []upstreamAttemptDocument `json:"attempts"`
 }
 
 type usageSummaryDocument struct {
@@ -465,6 +472,37 @@ func (store *operationalStore) setUserBlocked(
 		`, principal.OrganizationID, applicationID, userID, now); err != nil {
 			return useroverride.ApplicationUser{}, fmt.Errorf("revoke blocked-user refresh tokens: %w", err)
 		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE component_refresh_tokens
+			SET status = 'revoked', revoked_at = COALESCE(revoked_at, GREATEST(issued_at, $4))
+			WHERE client_component_id IN (
+			    SELECT client_component_id FROM client_components
+			    WHERE organization_id = $1 AND application_id = $2
+			      AND application_user_id = $3
+			) AND status IN ('staged', 'active')
+		`, principal.OrganizationID, applicationID, userID, now); err != nil {
+			return useroverride.ApplicationUser{}, fmt.Errorf("revoke blocked-user component refresh tokens: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM refresh_rotation_results
+			WHERE client_component_id IN (
+			    SELECT client_component_id FROM client_components
+			    WHERE organization_id = $1 AND application_id = $2
+			      AND application_user_id = $3
+			)
+		`, principal.OrganizationID, applicationID, userID); err != nil {
+			return useroverride.ApplicationUser{}, fmt.Errorf("remove blocked-user component refresh results: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE component_session_families
+			SET status = 'revoked', updated_at = GREATEST(updated_at, created_at, $4),
+			    revoked_at = COALESCE(revoked_at, GREATEST(created_at, $4)),
+			    revocation_reason = COALESCE(revocation_reason, 'admin_user_blocked')
+			WHERE organization_id = $1 AND application_id = $2
+			  AND application_user_id = $3 AND status = 'active'
+		`, principal.OrganizationID, applicationID, userID, now); err != nil {
+			return useroverride.ApplicationUser{}, fmt.Errorf("revoke blocked-user component session families: %w", err)
+		}
 	}
 	changes, err := operationalUserChanges(blocked)
 	if err != nil {
@@ -693,6 +731,33 @@ func (store *operationalStore) revokeInstallation(
 	if err := tx.QueryRow(ctx, "SELECT transaction_timestamp()").Scan(&now); err != nil {
 		return installationDocument{}, fmt.Errorf("read installation revocation time: %w", err)
 	}
+	var installationFamilyID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT installation_family_id
+		FROM installation_families
+		WHERE organization_id = $1 AND root_installation_id = $2
+		FOR UPDATE
+	`, principal.OrganizationID, installationID).Scan(&installationFamilyID); errors.Is(err, pgx.ErrNoRows) {
+		installationFamilyID = nil
+	} else if err != nil {
+		return installationDocument{}, fmt.Errorf("lock installation family for legacy revocation: %w", err)
+	}
+	if installationFamilyID != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE installation_families
+			SET status = 'revoked', revoked_at = COALESCE(revoked_at, GREATEST(created_at, $3)),
+			    revocation_reason = COALESCE(revocation_reason, $4),
+			    updated_at = GREATEST(updated_at, created_at, $3)
+			WHERE organization_id = $1 AND installation_family_id = $2
+		`, principal.OrganizationID, *installationFamilyID, now, reason); err != nil {
+			return installationDocument{}, fmt.Errorf("revoke installation family through legacy endpoint: %w", err)
+		}
+		if err := revokeComponentCredentials(
+			ctx, tx, principal.OrganizationID, *installationFamilyID, nil, now, reason,
+		); err != nil {
+			return installationDocument{}, err
+		}
+	}
 	if status == "active" {
 		if _, err := tx.Exec(ctx, `
 			UPDATE installations
@@ -770,6 +835,8 @@ func (store *operationalStore) listRequests(
 	}
 	rows, err := store.pool.Query(ctx, `
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
+		       installation_family_id, client_component_id, component_definition_id,
+		       component_kind, trust_source, framework, framework_version,
 		       feature_key, protocol, requested_at, completed_at, status
 		FROM logical_requests
 		WHERE organization_id = $1 AND environment_id = $2
@@ -783,15 +850,10 @@ func (store *operationalStore) listRequests(
 	defer rows.Close()
 	items := make([]logicalRequestDocument, 0, page.size+1)
 	for rows.Next() {
-		var item logicalRequestDocument
-		var status string
-		if err := rows.Scan(
-			&item.ID, &item.EnvironmentID, &item.UserID, &item.InstallationID,
-			&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
-		); err != nil {
-			return nil, fmt.Errorf("scan logical request: %w", err)
+		item, scanErr := scanLogicalRequestSummary(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		item.Status = publicLogicalRequestStatus(status)
 		item.Attempts = make([]upstreamAttemptDocument, 0)
 		items = append(items, item)
 	}
@@ -815,30 +877,85 @@ func (store *operationalStore) getRequest(
 	if !validOperationalRead(principal) {
 		return logicalRequestDocument{}, errOperationalForbidden
 	}
-	var item logicalRequestDocument
-	var status string
-	err := store.pool.QueryRow(ctx, `
+	row := store.pool.QueryRow(ctx, `
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
+		       installation_family_id, client_component_id, component_definition_id,
+		       component_kind, trust_source, framework, framework_version,
 		       feature_key, protocol, requested_at, completed_at, status
 		FROM logical_requests
 		WHERE organization_id = $1 AND logical_request_id = $2
-	`, principal.OrganizationID, requestID).Scan(
-		&item.ID, &item.EnvironmentID, &item.UserID, &item.InstallationID,
-		&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
-	)
+	`, principal.OrganizationID, requestID)
+	item, err := scanLogicalRequestSummary(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return logicalRequestDocument{}, errOperationalNotFound
 	}
 	if err != nil {
 		return logicalRequestDocument{}, fmt.Errorf("read logical request: %w", err)
 	}
-	item.Status = publicLogicalRequestStatus(status)
 	item.Attempts = make([]upstreamAttemptDocument, 0)
 	items := []logicalRequestDocument{item}
 	if err := store.populateRequestDetails(ctx, principal.OrganizationID, items); err != nil {
 		return logicalRequestDocument{}, err
 	}
 	return items[0], nil
+}
+
+func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
+	var item logicalRequestDocument
+	var status string
+	if err := row.Scan(
+		&item.ID, &item.EnvironmentID, &item.UserID, &item.InstallationID,
+		&item.InstallationFamilyID, &item.ClientComponentID,
+		&item.ComponentDefinitionID, &item.ComponentKind, &item.TrustSource,
+		&item.Framework, &item.FrameworkVersion,
+		&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
+	); err != nil {
+		return logicalRequestDocument{}, err
+	}
+	if !validRequestAttribution(item) {
+		return logicalRequestDocument{}, errOperationalCorrupt
+	}
+	item.Status = publicLogicalRequestStatus(status)
+	return item, nil
+}
+
+func validRequestAttribution(item logicalRequestDocument) bool {
+	componentValues := []bool{
+		item.InstallationFamilyID != nil,
+		item.ClientComponentID != nil,
+		item.ComponentDefinitionID != nil,
+		item.ComponentKind != nil,
+		item.TrustSource != nil,
+	}
+	for _, present := range componentValues[1:] {
+		if present != componentValues[0] {
+			return false
+		}
+	}
+	if item.InstallationFamilyID != nil {
+		if id.Validate(*item.InstallationFamilyID, id.InstallationFamily) != nil ||
+			id.Validate(*item.ClientComponentID, id.ClientComponent) != nil ||
+			!operationalIdentifierPattern.MatchString(*item.ComponentDefinitionID) ||
+			!operationalIdentifierPattern.MatchString(*item.ComponentKind) ||
+			!operationalIdentifierPattern.MatchString(*item.TrustSource) {
+			return false
+		}
+	}
+	if (item.Framework == nil) != (item.FrameworkVersion == nil) {
+		return false
+	}
+	if item.Framework != nil {
+		if !operationalIdentifierPattern.MatchString(*item.Framework) ||
+			!validOperationalVersion(*item.FrameworkVersion) {
+			return false
+		}
+	}
+	return true
+}
+
+func validOperationalVersion(value string) bool {
+	return value != "" && len(value) <= 128 && utf8.ValidString(value) &&
+		!strings.ContainsAny(value, "\r\n\x00")
 }
 
 func publicLogicalRequestStatus(status string) string {

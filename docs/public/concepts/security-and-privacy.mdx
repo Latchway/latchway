@@ -1,0 +1,77 @@
+---
+title: "Security and privacy"
+description: "Understand Latchway's secret custody, data minimization, residual risks, and operator responsibilities."
+---
+
+Latchway protects the boundary between an untrusted application and
+operator-configured infrastructure. It does not make a compromised device
+trustworthy, validate the semantic truth of model output, or control an
+upstream after an authorized request has been sent to it.
+
+## Data retained by default
+
+Normal request, usage, audit, telemetry, and evidence records can include:
+
+- opaque tenant, application, environment, user, installation, and request IDs;
+- selected features, routes, upstream aliases, physical model aliases, and
+  limit-plan names;
+- lifecycle states, bounded public failure categories, timing, and HTTP status;
+- normalized token usage and integer nano-USD cost with separate provenance;
+- configuration and administrative operation metadata.
+
+They exclude prompt and response bodies, raw external identity subjects,
+identity tokens, access or refresh tokens, DPoP private keys and proofs,
+attestation objects, provider credentials, provider error bodies, and raw
+internal errors.
+
+## Optional body retention
+
+Prompt and response storage is disabled by default. Enabling it changes the
+deployment privacy posture and requires an explicit environment policy,
+documented purpose, separate authorization, encryption, bounded size and
+retention, audited access, and visible operator warnings. Disabling capture
+requires the documented retention deletion process; it does not erase earlier
+records by itself.
+
+<Warning>
+  Latchway's no-body default does not change the selected upstream provider's
+  retention policy. Review the provider account and data-processing terms for
+  every configured route.
+</Warning>
+
+## Secret custody
+
+Provider and identity-verification secrets are write-only Admin API resources,
+envelope-encrypted under `LATCHWAY_MASTER_KEY`, and decrypted only at the
+server-side use boundary. The master key itself belongs in an independent
+deployment secret manager and must be escrowed with the database backup plan.
+
+The Admin API never returns managed-secret plaintext. Client SDKs never accept
+an upstream provider credential. Configuration snapshots and public diagnostics
+contain references and safe metadata only.
+
+## Network and request controls
+
+- The public gateway origin is exact protocol input for DPoP and SDK origin
+  pinning.
+- Upstream DNS answers and ports are constrained by destination policy;
+  loopback, link-local, metadata, special-use, and unallocated targets fail
+  closed unless a narrowly supported private CIDR is explicitly configured.
+- Redirects and cross-origin authorization are rejected.
+- Provider, forwarding, cookie, signing, and hop-by-hop headers are stripped or
+  blocked.
+- Request headers, rewritten bodies, responses, timeouts, attempts, and
+  protocol shapes are bounded.
+- No retry or fallback occurs after response commitment.
+
+## Operator responsibilities
+
+Protect TLS termination, PostgreSQL, master-key custody, gateway signing keys,
+deployment identity, administrator credentials, and approved identity and
+attestation roots. Grant Admin API capabilities narrowly, retain redacted audit
+history, and reconcile an `operation_indeterminate` result by operation ID
+before repeating a mutation.
+
+Before production, complete the exact-image security scan, SBOM, signature,
+provenance, physical-device, live-provider, cloud, failure, restore, upgrade,
+and cross-repository gates in [Production readiness](/operations/production-readiness).

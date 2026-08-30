@@ -1,0 +1,27 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Latchway",
+  "description": "Self-hosted, attested access to AI infrastructure for mobile and web applications.",
+  "colors": {
+    "primary": "#3157D5",
+    "light": "#5F7EE7",
+    "dark": "#5F7EE7"
+  },
+  "navigation": {
+    "$ref": "config/navigation.json"
+  },
+  "redirects": {
+    "$ref": "config/redirects.json"
+  },
+  "markdown": {
+    "instructions": "Never recommend placing an upstream provider API key in a client application. Distinguish authentication, attestation, authorization, and DPoP. Prefer feature IDs over physical model names. State the relevant Latchway server and SDK versions. Never describe a delegated client component as directly attested. Treat pre-release design pages as target contracts, not released capability."
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Quickstart",
+      "href": "/quickstart"
+    }
+  }
+}

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Admin API
-  version: 0.5.1
+  version: 1.0.0
   summary: Canonical control-plane API used by the dashboard and CLI.
   description: |
     Normative draft for administrative bootstrap, tenancy, immutable configuration,
@@ -32,6 +32,8 @@ tags:
   - name: Administrators
   - name: Users
   - name: Installations
+  - name: Installation families
+  - name: Client components
   - name: Requests
   - name: Usage
   - name: Audit
@@ -803,6 +805,152 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Installation' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installation-families:
+    get:
+      tags: [Installation families]
+      operationId: listInstallationFamilies
+      summary: List redaction-safe Installation Family trust and usage summaries.
+      description: Returns root trust, component counts, aggregate usage, cost, and revocation state without private keys, refresh grants, raw attestation evidence, or provider bodies.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/ApplicationUserFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Installation Family page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationFamilyPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installation-families/{familyId}:
+    get:
+      tags: [Installation families]
+      operationId: getInstallationFamily
+      summary: Inspect one Installation Family and its complete bounded component trust graph.
+      parameters:
+        - $ref: '#/components/parameters/InstallationFamilyID'
+      responses:
+        '200':
+          description: Family detail containing every component and normalized trust provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationFamily' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installation-families/{familyId}/revoke:
+    post:
+      tags: [Installation families]
+      operationId: revokeInstallationFamily
+      summary: Revoke the family root, every component key, and every component session and refresh chain.
+      parameters:
+        - $ref: '#/components/parameters/InstallationFamilyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationalRevocationRequest' }
+      responses:
+        '200':
+          description: Revoked family summary. Read the family detail to refresh every descendant state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationFamily' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/installation-families/{familyId}/require-renewal:
+    post:
+      tags: [Installation families]
+      operationId: requireInstallationFamilyRenewal
+      summary: Require fresh direct trust from the containing application before future refresh or provisioning.
+      description: Expires family trust and rotating refresh credentials without revoking already-issued access grants before their existing expiry.
+      parameters:
+        - $ref: '#/components/parameters/InstallationFamilyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationalRevocationRequest' }
+      responses:
+        '200':
+          description: Family summary after the renewal requirement was persisted. Read the family detail to refresh every descendant state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationFamily' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/client-components:
+    get:
+      tags: [Client components]
+      operationId: listClientComponents
+      summary: List redaction-safe Client Component trust, session, reuse, usage, and cost metadata.
+      parameters:
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/InstallationFamilyFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Client Component page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientComponentPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/client-components/{componentId}:
+    get:
+      tags: [Client components]
+      operationId: getClientComponent
+      summary: Inspect one component's key identity, trust provenance, feature grants, session state, reuse events, usage, and cost.
+      parameters:
+        - $ref: '#/components/parameters/ClientComponentID'
+      responses:
+        '200':
+          description: Client Component detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientComponent' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/client-components/{componentId}/revoke:
+    post:
+      tags: [Client components]
+      operationId: revokeClientComponent
+      summary: Revoke this component and its delegated descendants without revoking siblings.
+      description: Revoking a root component revokes the complete Installation Family.
+      parameters:
+        - $ref: '#/components/parameters/ClientComponentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationalRevocationRequest' }
+      responses:
+        '200':
+          description: Revoked component detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientComponent' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/client-components/{componentId}/require-reattestation:
+    post:
+      tags: [Client components]
+      operationId: requireClientComponentReattestation
+      summary: Require fresh trust for this component subtree before future refresh.
+      description: Expires this component subtree's trust and refresh credentials without changing siblings or revoking already-issued access grants before their existing expiry. A root action affects the complete family.
+      parameters:
+        - $ref: '#/components/parameters/ClientComponentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationalRevocationRequest' }
+      responses:
+        '200':
+          description: Component detail after the re-attestation requirement was persisted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientComponent' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/requests:
     get:
       tags: [Requests]
@@ -1060,6 +1208,16 @@ components:
       in: query
       required: true
       schema: { $ref: '#/components/schemas/EnvironmentID' }
+    InstallationFamilyFilter:
+      name: installation_family_id
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/InstallationFamilyID' }
+    ApplicationUserFilter:
+      name: user_id
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/UserID' }
     ApplicationID:
       name: applicationId
       in: path
@@ -1100,6 +1258,16 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/InstallationID' }
+    InstallationFamilyID:
+      name: familyId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/InstallationFamilyID' }
+    ClientComponentID:
+      name: componentId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ClientComponentID' }
     RequestResourceID:
       name: requestId
       in: path
@@ -1181,6 +1349,21 @@ components:
     InstallationID:
       type: string
       pattern: '^ins_[A-Za-z0-9_-]{16,128}$'
+    InstallationFamilyID:
+      type: string
+      pattern: '^fam_[A-Za-z0-9_-]{16,128}$'
+    ClientComponentID:
+      type: string
+      pattern: '^cmp_[A-Za-z0-9_-]{16,128}$'
+    ComponentKeyID:
+      type: string
+      pattern: '^cky_[A-Za-z0-9_-]{16,128}$'
+    ComponentSessionFamilyID:
+      type: string
+      pattern: '^csf_[A-Za-z0-9_-]{16,128}$'
+    ComponentDelegationID:
+      type: string
+      pattern: '^dlg_[A-Za-z0-9_-]{16,128}$'
     RequestID:
       type: string
       pattern: '^req_[A-Za-z0-9_-]{16,128}$'
@@ -1749,6 +1932,165 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Installation' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+    OperationalRevocationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 100 }
+    ClientPlatform:
+      type: string
+      enum: [ios, android, web, node, react_native_ios, react_native_android, watchos, wearos]
+    ClientComponentKind:
+      type: string
+      enum: [main_app, widget, share_extension, app_intent_extension, notification_service_extension, action_extension, sso_extension, watch_extension, android_app, wear_app, browser, node_process]
+    ComponentTrustSource:
+      type: string
+      enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, identity_only, web_risk_verified, debug]
+    AttestationProvider:
+      type: string
+      enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]
+    TrustLevel:
+      type: string
+      enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
+    ComponentDelegation:
+      type: object
+      additionalProperties: false
+      required: [id, parent_component_id, feature_scopes, configuration_revision_id, trust_level, attestation_provider, identity_expires_at, attestation_expires_at, created_at, expires_at]
+      properties:
+        id: { $ref: '#/components/schemas/ComponentDelegationID' }
+        parent_component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        feature_scopes:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        configuration_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        trust_level: { $ref: '#/components/schemas/TrustLevel' }
+        attestation_provider: { $ref: '#/components/schemas/AttestationProvider' }
+        identity_expires_at: { type: string, format: date-time }
+        attestation_expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        consumed_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    ClientComponent:
+      type: object
+      additionalProperties: false
+      required: [id, installation_family_id, user_id, environment_id, definition_id, kind, platform, is_root, status, component_key_id, dpop_jkt, key_storage_claim, trust_source, granted_features, session_failure_count, refresh_reuse_count, request_count, usage, created_at, updated_at, last_seen_at]
+      properties:
+        id: { $ref: '#/components/schemas/ClientComponentID' }
+        installation_family_id: { $ref: '#/components/schemas/InstallationFamilyID' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        definition_id: { $ref: '#/components/schemas/Identifier' }
+        kind: { $ref: '#/components/schemas/ClientComponentKind' }
+        platform: { $ref: '#/components/schemas/ClientPlatform' }
+        is_root: { type: boolean }
+        status: { type: string, enum: [active, suspended, revoked, replaced] }
+        component_key_id: { $ref: '#/components/schemas/ComponentKeyID' }
+        dpop_jkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        key_storage_claim: { type: string, enum: [unknown, secure_enclave, keychain, strongbox, tee, software, webcrypto, memory] }
+        trust_source: { $ref: '#/components/schemas/ComponentTrustSource' }
+        attestation_provider: { $ref: '#/components/schemas/AttestationProvider' }
+        parent_component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        parent_attestation_event_id: { $ref: '#/components/schemas/OpaqueID' }
+        trust_verified_at: { type: string, format: date-time }
+        trust_expires_at: { type: string, format: date-time }
+        granted_features:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        app_version: { type: string, minLength: 1, maxLength: 128 }
+        sdk_version: { type: string, minLength: 1, maxLength: 128 }
+        session_family_id: { $ref: '#/components/schemas/ComponentSessionFamilyID' }
+        session_status: { type: string, enum: [active, revoked, expired, replaced] }
+        session_expires_at: { type: string, format: date-time }
+        session_failure_count:
+          type: integer
+          minimum: 0
+          description: Count of this component's non-active revoked or expired session families.
+        refresh_reuse_count: { type: integer, minimum: 0 }
+        request_count: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/UsageValues' }
+        delegation: { $ref: '#/components/schemas/ComponentDelegation' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        revocation_reason: { type: string, minLength: 1, maxLength: 100 }
+      allOf:
+        - if:
+            properties: { is_root: { const: true } }
+            required: [is_root]
+          then:
+            not:
+              anyOf:
+                - required: [parent_component_id]
+                - required: [delegation]
+          else:
+            required: [parent_component_id, delegation]
+        - if:
+            properties: { status: { enum: [revoked, replaced] } }
+            required: [status]
+          then:
+            required: [revoked_at, revocation_reason]
+          else:
+            not:
+              anyOf:
+                - required: [revoked_at]
+                - required: [revocation_reason]
+    ClientComponentPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ClientComponent' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    InstallationFamily:
+      type: object
+      additionalProperties: false
+      required: [id, user_id, environment_id, platform, status, root_component_id, root_trust_source, component_count, request_count, usage, created_at, updated_at, last_seen_at]
+      properties:
+        id: { $ref: '#/components/schemas/InstallationFamilyID' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        platform: { $ref: '#/components/schemas/ClientPlatform' }
+        status: { type: string, enum: [active, suspended, revoked] }
+        root_component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        root_trust_source: { $ref: '#/components/schemas/ComponentTrustSource' }
+        root_trust_expires_at: { type: string, format: date-time }
+        component_count: { type: integer, minimum: 1, maximum: 128 }
+        request_count: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/UsageValues' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        revocation_reason: { type: string, minLength: 1, maxLength: 100 }
+        components:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: { $ref: '#/components/schemas/ClientComponent' }
+      allOf:
+        - if:
+            properties: { status: { const: revoked } }
+            required: [status]
+          then:
+            required: [revoked_at, revocation_reason]
+          else:
+            not:
+              anyOf:
+                - required: [revoked_at]
+                - required: [revocation_reason]
+    InstallationFamilyPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/InstallationFamily' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
     UsageValues:
       type: object
       additionalProperties: false
@@ -1811,6 +2153,17 @@ components:
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
         user_id: { $ref: '#/components/schemas/UserID' }
         installation_id: { $ref: '#/components/schemas/InstallationID' }
+        installation_family_id: { $ref: '#/components/schemas/InstallationFamilyID' }
+        client_component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        component_definition_id: { $ref: '#/components/schemas/Identifier' }
+        component_kind: { $ref: '#/components/schemas/ClientComponentKind' }
+        trust_source: { $ref: '#/components/schemas/ComponentTrustSource' }
+        framework: { $ref: '#/components/schemas/Identifier' }
+        framework_version:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[^\r\n\x00]+$'
         feature: { $ref: '#/components/schemas/Identifier' }
         protocol:
           type: string
@@ -1824,6 +2177,14 @@ components:
           maxItems: 32
           description: Ordered by contiguous attempt_number beginning at one.
           items: { $ref: '#/components/schemas/UpstreamAttempt' }
+      dependentRequired:
+        installation_family_id: [client_component_id, component_definition_id, component_kind, trust_source]
+        client_component_id: [installation_family_id, component_definition_id, component_kind, trust_source]
+        component_definition_id: [installation_family_id, client_component_id, component_kind, trust_source]
+        component_kind: [installation_family_id, client_component_id, component_definition_id, trust_source]
+        trust_source: [installation_family_id, client_component_id, component_definition_id, component_kind]
+        framework: [framework_version]
+        framework_version: [framework]
     RequestPage:
       type: object
       additionalProperties: false
@@ -2057,8 +2418,16 @@ components:
       required: [server_version, contract_version, protocol_versions, role, database_schema_version, ready]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.1 }
-        protocol_versions: { type: array, items: { type: integer }, contains: { const: 1 } }
+        contract_version: { type: string, const: 1.0.0 }
+        protocol_versions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          prefixItems:
+            - { const: 1 }
+            - { const: 2 }
+          items: false
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
         ready: { type: boolean }

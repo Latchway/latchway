@@ -1,0 +1,39 @@
+---
+title: "WidgetKit setup"
+description: "Prepare the target contract for a WidgetKit extension that uses a delegated component key without inheriting root credentials."
+---
+
+<Warning>
+  This is a pre-release implementation checklist, not a working SDK tutorial.
+  WidgetKit support remains unavailable until the server and Swift SDK ship the
+  Installation Family contract and physical-device conformance passes.
+</Warning>
+
+## Xcode target and identifiers
+
+Create a separate WidgetKit target with its own bundle identifier. The server
+must have an exact Component Definition for that application, environment,
+bundle identifier, and component type. A wildcard definition is not sufficient.
+
+## Key and shared storage
+
+Generate the widget's P-256 key in the widget's permitted Keychain context.
+Share only a bounded, non-secret provisioning envelope through an App Group
+when the final SDK contract requires it. Never place root or widget access
+tokens, refresh tokens, private keys, raw App Attest evidence, or upstream
+credentials in the App Group.
+
+## First launch and containing-app preparation
+
+The widget cannot create delegated trust before the containing app has enrolled
+the family and authorized the widget key. The widget must show an actionable
+"open the app to finish setup" state rather than silently falling back to a
+shared credential or debug trust.
+
+## Sign-out, dashboard, and diagnostics
+
+Sign-out must invalidate prior family credentials. The dashboard should show a
+root component and a distinct delegated `widget` component with separate key,
+session, scope, quota, trust provenance, and revocation state. Diagnostics must
+identify missing entitlements, missing preparation, definition mismatch,
+expired delegation, and revocation without exposing credential material.

@@ -74,6 +74,7 @@ func newRootCommand(opts *options) *cobra.Command {
 		newTokenModeLoginCommand(opts), newTokenModeLogoutCommand(opts),
 		newAdminCommand(opts), newSecretCommand(opts), newStatusCommand(opts), newConfigCommand(opts),
 		newUsersCommand(opts), newInstallationsCommand(opts), newRequestsCommand(opts),
+		newInstallationFamiliesCommand(opts), newClientComponentsCommand(opts),
 		newRoutesCommand(opts), newUsageCommand(opts), newAuditCommand(opts), newVerifyCommand(opts),
 	)
 	root.InitDefaultCompletionCmd()

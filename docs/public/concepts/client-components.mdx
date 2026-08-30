@@ -1,0 +1,40 @@
+---
+title: "Client Components"
+description: "Model each independently executing application surface with its own possession key, session family, scope, and revocation state."
+---
+
+<Warning>
+  Client Components are implemented in pre-release draft contract `1.0.0` on wire
+  protocol `2`. Publication and physical-device conformance remain gated.
+</Warning>
+
+A **Client Component** is one independently executing application surface. An
+iOS containing app, Widget extension, Share extension, Android app process, Wear
+OS companion, or browser installation can each be a component when a configured
+Component Definition permits it.
+
+Each component owns:
+
+- one P-256 key and DPoP thumbprint;
+- its own access sessions and rotating refresh-token chain;
+- an explicit feature scope and component type;
+- independent quota attribution and revocation state;
+- trust provenance that says whether trust is direct or delegated.
+
+The App Group or other shared store may carry non-secret provisioning material.
+It must not contain a DPoP private key, access token, rotating refresh token, raw
+attestation object, identity token, or upstream credential.
+
+## Isolation invariants
+
+A component credential cannot cross an Installation Family, application,
+environment, component type, or application user. A component session is bound
+to the component key that created it. Sign-out invalidates the family
+credentials associated with the prior user.
+
+## Root and delegated components
+
+The root component establishes the family's primary trust. A delegated
+component presents a short-lived, single-use authorization issued by the root
+for that component's public key and definition. Read [Trust
+provenance](/concepts/trust-provenance) before designing an extension flow.

@@ -53,10 +53,17 @@ func TestContractExposedPrefixes(t *testing.T) {
 	t.Parallel()
 
 	for prefix, want := range map[Prefix]string{
-		AdminUser:        "adm",
-		AdminAPIToken:    "tok",
-		ConfigRevision:   "rev",
-		SessionChallenge: "chl",
+		AdminUser:           "adm",
+		AdminAPIToken:       "tok",
+		ConfigRevision:      "rev",
+		SessionChallenge:    "chl",
+		InstallationFamily:  "fam",
+		ClientComponent:     "cmp",
+		ComponentKey:        "cky",
+		ComponentDelegation: "dlg",
+		ComponentSession:    "csf",
+		ComponentRefresh:    "crf",
+		RefreshRotation:     "rrs",
 	} {
 		if string(prefix) != want {
 			t.Errorf("prefix = %q, want %q", prefix, want)

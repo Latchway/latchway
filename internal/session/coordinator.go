@@ -307,6 +307,76 @@ func (coordinator *clientCoordinator) RefreshSession(ctx context.Context, input 
 	return clientGrant(issued)
 }
 
+func (coordinator *clientCoordinator) ProvisionComponent(ctx context.Context, input clientapi.ProvisionComponentInput) (clientapi.ProvisionComponentResult, error) {
+	access, principal, proof, err := coordinator.verifiedAccessRequest(ctx, input.AccessToken, input.Metadata)
+	if err != nil {
+		return clientapi.ProvisionComponentResult{}, err
+	}
+	provisioned, err := coordinator.sessions.ProvisionComponent(ctx, ComponentProvisionInput{
+		Access: AccessRequestInput{
+			AccessToken: access, Principal: principal, DPoPProof: proof,
+			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+			Origin: input.Metadata.Origin,
+		},
+		DefinitionID: input.DefinitionID,
+		PublicJWK: dpop.PublicJWK{
+			Kty: input.PublicJWK.Kty, Crv: input.PublicJWK.Crv,
+			X: input.PublicJWK.X, Y: input.PublicJWK.Y,
+		},
+		RequestedFeatures: append([]string(nil), input.RequestedFeatures...),
+		AppVersion:        input.ClientMetadata.AppVersion,
+		SDKVersion:        input.ClientMetadata.SDKVersion,
+	})
+	if err != nil {
+		return clientapi.ProvisionComponentResult{}, clientFailure(mapSessionError(err))
+	}
+	return clientapi.ProvisionComponentResult{
+		ComponentID:           provisioned.Component.ID,
+		InstallationFamilyID:  provisioned.Family.ID,
+		TrustSource:           provisioned.Component.TrustSource,
+		TrustExpiresAt:        provisioned.TrustExpiresAt,
+		GrantedFeatures:       append([]string(nil), provisioned.Component.GrantedFeatures...),
+		RefreshGrant:          clientapi.NewSensitiveString(provisioned.RefreshGrant.Reveal()),
+		RefreshGrantExpiresAt: provisioned.RefreshExpiresAt,
+	}, nil
+}
+
+func (coordinator *clientCoordinator) CreateComponentSession(ctx context.Context, input clientapi.CreateComponentSessionInput) (clientapi.GrantResult, error) {
+	refresh, err := NewRefreshToken(input.RefreshGrant.Reveal())
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure("component_not_provisioned")
+	}
+	proof, err := NewDPoPProof(input.Metadata.DPoPProof.Reveal())
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure("dpop_invalid")
+	}
+	issued, err := coordinator.sessions.CreateComponentSession(ctx, ComponentSessionInput{
+		ComponentID: input.ComponentID, RefreshGrant: refresh, DPoPProof: proof,
+		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
+	})
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure(mapSessionError(err))
+	}
+	return clientGrant(issued)
+}
+
+func (coordinator *clientCoordinator) verifiedAccessRequest(ctx context.Context, raw clientapi.SensitiveString, metadata clientapi.RequestMetadata) (AccessToken, AccessPrincipal, DPoPProof, error) {
+	access, err := NewAccessToken(raw.Reveal())
+	if err != nil {
+		return AccessToken{}, AccessPrincipal{}, DPoPProof{}, clientFailure("session_expired")
+	}
+	principal, err := coordinator.accessTokens.Verify(ctx, access)
+	if err != nil {
+		return AccessToken{}, AccessPrincipal{}, DPoPProof{}, clientFailure(mapAccessRequestError(err))
+	}
+	proof, err := NewDPoPProof(metadata.DPoPProof.Reveal())
+	if err != nil {
+		return AccessToken{}, AccessPrincipal{}, DPoPProof{}, clientFailure("dpop_invalid")
+	}
+	return access, principal, proof, nil
+}
+
 func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input clientapi.DiagnosticsInput) (clientapi.DiagnosticsResult, error) {
 	accessToken, err := NewAccessToken(input.AccessToken.Reveal())
 	if err != nil {
@@ -340,7 +410,11 @@ func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input cli
 		RefreshAvailable: refreshAvailable,
 		Trust: clientapi.TrustSummary{
 			Provider: authorization.AttestationProvider, Level: authorization.TrustLevel,
-			VerifiedAt: authorization.AttestedAt, ExpiresAt: authorization.AttestationExpiresAt,
+			Source:                    authorization.TrustSource,
+			ParentComponentID:         authorization.ParentComponentID,
+			ParentAttestationProvider: authorization.ParentAttestationProvider,
+			DelegationID:              authorization.DelegationID,
+			VerifiedAt:                authorization.AttestedAt, ExpiresAt: authorization.AttestationExpiresAt,
 		},
 	}, nil
 }
@@ -375,6 +449,38 @@ func (coordinator *clientCoordinator) RevokeCurrentInstallation(ctx context.Cont
 	}
 	err = coordinator.sessions.RevokeCurrentInstallation(ctx, AccessRequestInput{
 		AccessToken: accessToken, Principal: principal, DPoPProof: proof,
+		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
+	})
+	if err != nil {
+		return clientFailure(mapAccessRequestError(err))
+	}
+	return nil
+}
+
+func (coordinator *clientCoordinator) RevokeComponent(ctx context.Context, input clientapi.RevokeComponentInput) error {
+	access, principal, proof, err := coordinator.verifiedAccessRequest(ctx, input.AccessToken, input.Metadata)
+	if err != nil {
+		return err
+	}
+	err = coordinator.sessions.RevokeComponent(ctx, AccessRequestInput{
+		AccessToken: access, Principal: principal, DPoPProof: proof,
+		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+		Origin: input.Metadata.Origin,
+	}, input.ComponentID)
+	if err != nil {
+		return clientFailure(mapAccessRequestError(err))
+	}
+	return nil
+}
+
+func (coordinator *clientCoordinator) RevokeCurrentFamily(ctx context.Context, input clientapi.RevokeFamilyInput) error {
+	access, principal, proof, err := coordinator.verifiedAccessRequest(ctx, input.AccessToken, input.Metadata)
+	if err != nil {
+		return err
+	}
+	err = coordinator.sessions.RevokeCurrentFamily(ctx, AccessRequestInput{
+		AccessToken: access, Principal: principal, DPoPProof: proof,
 		HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
 		Origin: input.Metadata.Origin,
 	})
@@ -771,20 +877,38 @@ func clientGrant(issued IssuedSession) (clientapi.GrantResult, error) {
 	if !ok {
 		return clientapi.GrantResult{}, clientFailure("internal_error")
 	}
-	return clientapi.GrantResult{
+	result := clientapi.GrantResult{
 		AccessToken:      clientapi.NewSensitiveString(issued.Access.Token.Reveal()),
 		ExpiresIn:        accessSeconds,
 		RefreshToken:     clientapi.NewSensitiveString(issued.Refresh.Reveal()),
 		RefreshExpiresIn: refreshSeconds,
+		RefreshExpiresAt: issued.RefreshExpiresAt,
 		Installation: clientapi.InstallationSummary{
 			ID: issued.Installation.ID, Platform: issued.Installation.Platform,
 			DPoPJKT: issued.Installation.DPoPJKT, Status: issued.Installation.Status,
 		},
 		Trust: clientapi.TrustSummary{
 			Provider: issued.Trust.Provider, Level: issued.Trust.Level,
-			VerifiedAt: issued.Trust.VerifiedAt, ExpiresAt: issued.Trust.ExpiresAt,
+			Source:                    issued.Component.TrustSource,
+			ParentComponentID:         issued.Component.ParentComponentID,
+			ParentAttestationProvider: issued.Component.ParentAttestationProvider,
+			DelegationID:              issued.Component.DelegationID,
+			VerifiedAt:                issued.Trust.VerifiedAt, ExpiresAt: issued.Trust.ExpiresAt,
 		},
-	}, nil
+	}
+	if issued.Family.ID != "" && issued.Component.ID != "" {
+		result.InstallationFamily = &clientapi.InstallationFamilySummary{
+			ID: issued.Family.ID, Status: issued.Family.Status,
+		}
+		result.Component = &clientapi.ClientComponentSummary{
+			ID: issued.Component.ID, DefinitionID: issued.Component.DefinitionID,
+			Kind: issued.Component.Kind, Platform: issued.Component.Platform,
+			IsRoot: issued.Component.IsRoot, Status: issued.Component.Status,
+			DPoPJKT:         issued.Component.DPoPJKT,
+			GrantedFeatures: append([]string(nil), issued.Component.GrantedFeatures...),
+		}
+	}
+	return result, nil
 }
 
 func exactPositiveSeconds(duration time.Duration) (int, bool) {
@@ -910,6 +1034,30 @@ func mapSessionError(err error) string {
 		return "attestation_stale"
 	case errors.Is(err, ErrInstallationRevoked):
 		return "installation_revoked"
+	case errors.Is(err, ErrInstallationFamilyRevoked):
+		return "installation_family_revoked"
+	case errors.Is(err, ErrInstallationFamilyNotFound):
+		return "installation_family_not_found"
+	case errors.Is(err, ErrComponentDefinitionNotFound):
+		return "component_definition_not_found"
+	case errors.Is(err, ErrComponentRevoked):
+		return "component_revoked"
+	case errors.Is(err, ErrComponentNotConfigured):
+		return "component_not_configured"
+	case errors.Is(err, ErrComponentNotProvisioned):
+		return "component_not_provisioned"
+	case errors.Is(err, ErrComponentKeyInvalid):
+		return "component_key_invalid"
+	case errors.Is(err, ErrComponentKeyReplaced):
+		return "component_key_replaced"
+	case errors.Is(err, ErrComponentDelegationExpired):
+		return "component_delegation_expired"
+	case errors.Is(err, ErrComponentFeatureNotGranted):
+		return "component_feature_not_granted"
+	case errors.Is(err, ErrComponentParentTrustExpired):
+		return "component_parent_trust_expired"
+	case errors.Is(err, ErrComponentDirectAttestationRequired):
+		return "component_direct_attestation_required"
 	case errors.Is(err, ErrRefreshReused):
 		return "refresh_token_reused"
 	case errors.Is(err, ErrIdentityRefreshRequired):
@@ -949,6 +1097,30 @@ func mapAccessRequestError(err error) string {
 		return "session_expired"
 	case errors.Is(err, ErrInstallationRevoked):
 		return "installation_revoked"
+	case errors.Is(err, ErrInstallationFamilyRevoked):
+		return "installation_family_revoked"
+	case errors.Is(err, ErrInstallationFamilyNotFound):
+		return "installation_family_not_found"
+	case errors.Is(err, ErrComponentDefinitionNotFound):
+		return "component_definition_not_found"
+	case errors.Is(err, ErrComponentRevoked):
+		return "component_revoked"
+	case errors.Is(err, ErrComponentNotConfigured):
+		return "component_not_configured"
+	case errors.Is(err, ErrComponentNotProvisioned):
+		return "component_not_provisioned"
+	case errors.Is(err, ErrComponentKeyInvalid):
+		return "component_key_invalid"
+	case errors.Is(err, ErrComponentKeyReplaced):
+		return "component_key_replaced"
+	case errors.Is(err, ErrComponentDelegationExpired):
+		return "component_delegation_expired"
+	case errors.Is(err, ErrComponentFeatureNotGranted):
+		return "component_feature_not_granted"
+	case errors.Is(err, ErrComponentParentTrustExpired):
+		return "component_parent_trust_expired"
+	case errors.Is(err, ErrComponentDirectAttestationRequired):
+		return "component_direct_attestation_required"
 	case errors.Is(err, ErrAttestationRefreshNeeded):
 		return "attestation_stale"
 	case errors.Is(err, ErrSessionRevoked), errors.Is(err, ErrSessionScope), errors.Is(err, ErrSessionInvalid):

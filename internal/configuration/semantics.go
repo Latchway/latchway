@@ -46,6 +46,8 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 	issues = append(issues, identityIssues...)
 	attestations, attestationIssues := indexObjects(objectArray(spec, "attestationPolicies"), "/spec/attestationPolicies")
 	issues = append(issues, attestationIssues...)
+	components, componentIssues := indexObjects(objectArray(spec, "componentDefinitions"), "/spec/componentDefinitions")
+	issues = append(issues, componentIssues...)
 	upstreams, upstreamIssues := indexObjects(objectArray(spec, "upstreams"), "/spec/upstreams")
 	issues = append(issues, upstreamIssues...)
 	models, modelIssues := indexObjects(objectArray(spec, "models"), "/spec/models")
@@ -64,6 +66,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 
 	issues = append(issues, validator.identityIssues(identities)...)
 	issues = append(issues, attestationSemanticIssues(attestations, environment.EnvironmentKind)...)
+	issues = append(issues, componentDefinitionSemanticIssues(components, features)...)
 	issues = append(issues, upstreamSemanticIssues(upstreams, environment.EnvironmentKind)...)
 	issues = append(issues, inputAccountingProfileSemanticIssues(inputAccounting)...)
 	issues = append(issues, modelSemanticIssues(models, upstreams, pricing, inputAccounting)...)
@@ -76,6 +79,171 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 	issues = append(issues, privacySemanticIssues(objectValue(spec, "privacy"))...)
 	issues = append(issues, secretReferenceIssues(root, environment.SecretNames)...)
 	return deduplicateIssues(issues)
+}
+
+func componentDefinitionSemanticIssues(
+	definitions map[string]map[string]any,
+	features map[string]map[string]any,
+) []Issue {
+	issues := make([]Issue, 0)
+	identifierOwners := make(map[string]string)
+	parents := make(map[string][]string, len(definitions))
+
+	for _, definitionID := range sortedMapKeys(definitions) {
+		definition := definitions[definitionID]
+		base := "/spec/componentDefinitions/" + pointerToken(definitionID)
+		platform := stringValue(definition, "platform")
+		kind := stringValue(definition, "kind")
+		role := stringValue(definition, "familyRole")
+		identifiers := objectValue(definition, "identifiers")
+		for field, values := range map[string][]string{
+			"bundleIdentifiers": stringArray(identifiers, "bundleIdentifiers"),
+			"packageNames":      stringArray(identifiers, "packageNames"),
+			"origins":           stringArray(identifiers, "origins"),
+		} {
+			for index, value := range values {
+				if owner, exists := identifierOwners[value]; exists && owner != definitionID {
+					issues = append(issues, errorIssue(
+						"component_identifier_duplicate",
+						fmt.Sprintf("%s/identifiers/%s/%d", base, field, index),
+						"A platform identifier may belong to only one Component Definition.",
+					))
+				} else {
+					identifierOwners[value] = definitionID
+				}
+			}
+		}
+		if !componentIdentifierShapeValid(platform, identifiers) {
+			issues = append(issues, errorIssue(
+				"component_identifier_platform_mismatch", base+"/identifiers",
+				"Component identifiers must use the identifier kind owned by the configured platform.",
+			))
+		}
+
+		for index, featureID := range stringArray(definition, "allowedFeatures") {
+			if _, exists := features[featureID]; !exists {
+				issues = append(issues, errorIssue(
+					"component_feature_not_found",
+					fmt.Sprintf("%s/allowedFeatures/%d", base, index),
+					"A Component Definition may grant only a configured application feature.",
+				))
+			}
+		}
+
+		attestation := objectValue(definition, "attestation")
+		strategy := stringValue(attestation, "strategy")
+		provider := stringValue(attestation, "provider")
+		directStepUp, _ := attestation["directStepUp"].(bool)
+		if !runtimeComponentAttestation(platform, kind, role, ComponentAttestationPolicy{
+			Strategy: strategy, Provider: provider, DirectStepUp: directStepUp,
+		}) {
+			issues = append(issues, errorIssue(
+				"component_attestation_unsupported", base+"/attestation",
+				"The component platform and kind do not support the configured trust-establishment strategy.",
+			))
+		}
+
+		delegation := objectValue(definition, "delegation")
+		allowedParents := stringArray(delegation, "allowedParents")
+		parents[definitionID] = allowedParents
+		if role == "root" && len(delegation) != 0 {
+			issues = append(issues, errorIssue(
+				"root_component_delegation_forbidden", base+"/delegation",
+				"A root Component Definition cannot be delegated.",
+			))
+		}
+		if role == "delegated" {
+			lifetime, err := parseConfigDuration(stringValue(delegation, "maximumLifetime"))
+			if err != nil || lifetime < time.Minute || lifetime > 30*24*time.Hour {
+				issues = append(issues, errorIssue(
+					"component_delegation_lifetime_unbounded", base+"/delegation/maximumLifetime",
+					"Delegation lifetime must be between one minute and 30 days.",
+				))
+			}
+			for index, parentID := range allowedParents {
+				parent, exists := definitions[parentID]
+				path := fmt.Sprintf("%s/delegation/allowedParents/%d", base, index)
+				if !exists {
+					issues = append(issues, errorIssue(
+						"component_parent_not_found", path,
+						"A delegated component parent must name a configured Component Definition.",
+					))
+					continue
+				}
+				if parentID == definitionID {
+					issues = append(issues, errorIssue(
+						"component_self_delegation", path,
+						"A Component Definition cannot delegate to itself.",
+					))
+					continue
+				}
+				parentRole := stringValue(parent, "familyRole")
+				parentDelegation := objectValue(parent, "delegation")
+				allowChild, _ := parentDelegation["allowChildDelegation"].(bool)
+				if parentRole != "root" && !allowChild {
+					issues = append(issues, errorIssue(
+						"component_parent_delegation_forbidden", path,
+						"A delegated parent must explicitly allow child delegation.",
+					))
+				}
+			}
+		}
+	}
+
+	state := make(map[string]uint8, len(definitions))
+	var visit func(string) bool
+	visit = func(definitionID string) bool {
+		switch state[definitionID] {
+		case 1:
+			return false
+		case 2:
+			return true
+		}
+		state[definitionID] = 1
+		for _, parentID := range parents[definitionID] {
+			if _, exists := definitions[parentID]; exists && !visit(parentID) {
+				return false
+			}
+		}
+		state[definitionID] = 2
+		return true
+	}
+	for _, definitionID := range sortedMapKeys(definitions) {
+		if !visit(definitionID) {
+			issues = append(issues, errorIssue(
+				"component_delegation_cycle", "/spec/componentDefinitions/"+pointerToken(definitionID)+"/delegation",
+				"Component Definition delegation must be acyclic.",
+			))
+			break
+		}
+	}
+	return issues
+}
+
+func componentIdentifierShapeValid(platform string, identifiers map[string]any) bool {
+	bundles := stringArray(identifiers, "bundleIdentifiers")
+	packages := stringArray(identifiers, "packageNames")
+	origins := stringArray(identifiers, "origins")
+	switch platform {
+	case "ios", "react_native_ios", "watchos":
+		return len(bundles) > 0 && len(packages) == 0 && len(origins) == 0
+	case "android", "react_native_android", "wearos":
+		return len(packages) > 0 && len(bundles) == 0 && len(origins) == 0
+	case "web":
+		if len(origins) == 0 || len(bundles) != 0 || len(packages) != 0 {
+			return false
+		}
+		for _, origin := range origins {
+			if !canonicalBrowserHTTPSOrigin(origin) {
+				return false
+			}
+		}
+		return true
+	case "node":
+		return len(bundles) == 0 && len(packages) == 0 && len(origins) == 0
+	default:
+		return false
+	}
 }
 
 func indexObjects(objects []map[string]any, basePath string) (map[string]map[string]any, []Issue) {

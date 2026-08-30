@@ -1,0 +1,110 @@
+---
+title: "LangChain JavaScript integration"
+description: "Define a low-maintenance ChatOpenAI transport adapter while keeping chains, agents, tools, and memory outside Latchway."
+---
+
+<Warning>
+  `@latchway/langchain` is pre-release and unpublished. `@langchain/openai`
+  `1.5.10` has an experimental local-evidence row, not a supported release.
+</Warning>
+
+## 1. What this integration does
+
+The target Class A helper passes a guarded custom fetch and Latchway base URL
+through `ChatOpenAI` client configuration. It does not implement chains, agents,
+graphs, memory, retrievers, or tool execution.
+
+## 2. Supported framework versions
+
+`@langchain/openai` `1.5.10` is the exact locally tested experimental version.
+The generated compatibility registry is canonical; no supported range is
+published.
+
+## 3. Supported Latchway versions
+
+None published for this adapter. Draft contract `1.0.0` uses current wire
+protocol `2`, but a contract coordinate does not establish framework support.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Required; not yet evidenced |
+| Private key remains native | Required on native-backed runtimes; not yet evidenced |
+| Streaming | Required; not yet evidenced |
+| Cancellation | Required; not yet evidenced |
+| App extensions | Requires future Installation Family support |
+| Structured output | Required; not yet evidenced |
+| Tool calls | Protocol content supported only after conformance |
+| Protocol | Planned through a supported OpenAI-compatible Latchway route |
+
+## 5. Install packages
+
+Do not install an unverified `@latchway/langchain` package. Peer dependency and
+version ranges are not released.
+
+## 6. Create the Latchway client
+
+Use a platform Latchway client that owns refresh, key storage, DPoP signing, and
+origin checks.
+
+## 7. Bind a feature
+
+Bind one feature ID when creating the model helper. Do not use LangChain's model
+field to select a physical model.
+
+## 8. Create the framework client
+
+The final helper will configure `ChatOpenAI` through supported client options.
+Its signature remains intentionally undocumented until package release.
+
+## 9. Send a non-streaming request
+
+`invoke` and `batch` are required conformance cases. LangChain message types
+remain unchanged.
+
+## 10. Send a streaming request
+
+`stream` must remain incremental and cancellable without buffering or replay.
+
+## 11. Use tools
+
+LangChain retains tool schemas and execution. Latchway only transports valid
+protocol payloads under feature policy.
+
+## 12. Use structured output
+
+Structured output must preserve LangChain's validation and error behavior.
+
+## 13. Handle cancellation
+
+Cancellation must reach the underlying request and suppress automatic replay.
+
+## 14. Handle quota failures
+
+Surface the Latchway problem and request ID without disguising it as an OpenAI
+credential error.
+
+## 15. Handle session renewal
+
+Framework retries and Latchway refresh must not combine into unbounded attempts.
+Every permitted attempt requires a new DPoP proof.
+
+## 16. Known limitations
+
+LangChain and its transitive OpenAI client can change their networking seams
+independently. Both ranges require testing.
+
+## 17. Verify the integration
+
+Required cases include `invoke`, `stream`, `batch`, tools, structured output,
+cancellation, retry behavior, and metadata propagation.
+
+## 18. Troubleshooting
+
+Confirm the guarded custom fetch reached the underlying OpenAI client and that
+no framework retry reused a proof.
+
+## 19. Compatibility matrix
+
+No supported row is published. See [Compatibility](/reference/compatibility).

@@ -24,6 +24,23 @@ func TestCanonicalDimensionsOrdersPlatformAndOneExplicitClaim(t *testing.T) {
 	}
 }
 
+func TestCanonicalDimensionsOrdersComponentProvenance(t *testing.T) {
+	t.Parallel()
+	input := []string{
+		"trust_source", "feature", "component_kind", "client_component",
+		"installation_family", "component_definition", "user",
+	}
+	want := []string{
+		"user", "installation_family", "client_component", "component_definition",
+		"component_kind", "trust_source", "feature",
+	}
+	if got, ok := CanonicalDimensions(input); !ok || !slices.Equal(got, want) ||
+		ScopeType([]string{ClientComponentDimension}) != ClientComponentDimension ||
+		ScopeType(got) != "composite" {
+		t.Fatalf("component scope = %#v, %t, want %#v", got, ok, want)
+	}
+}
+
 func TestClaimDigestRejectsValuesOutsideSealedNormalizedClaimGrammar(t *testing.T) {
 	t.Parallel()
 

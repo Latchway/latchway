@@ -316,6 +316,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		))
 		return
 	}
+	if authorization.ComponentID != "" && !slices.Contains(authorization.GrantedFeatures, declaration.feature) {
+		handler.writeMappedError(writer, requestID, declaration.feature, session.ErrComponentFeatureNotGranted)
+		return
+	}
 
 	snapshot, err := handler.configuration.ActiveSnapshot(request.Context(), configuration.TenantScope{
 		OrganizationID: authorization.OrganizationID,
@@ -390,10 +394,16 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		OrganizationID:   authorization.OrganizationID, ApplicationID: authorization.ApplicationID,
 		EnvironmentID: authorization.EnvironmentID, ApplicationUserID: authorization.ApplicationUserID,
 		InstallationID: authorization.InstallationID, SessionGrantID: authorization.SessionGrantID,
-		ConfigRevisionID: snapshot.PolicyRevision(), FeatureKey: prepared.decision.Feature.ID,
+		InstallationFamilyID:  prepared.decision.Scopes.InstallationFamilyID,
+		ClientComponentID:     prepared.decision.Scopes.ClientComponentID,
+		ComponentDefinitionID: prepared.decision.Scopes.ComponentDefinitionID,
+		ComponentKind:         prepared.decision.Scopes.ComponentKind,
+		TrustSource:           prepared.decision.Scopes.TrustSource,
+		ConfigRevisionID:      snapshot.PolicyRevision(), FeatureKey: prepared.decision.Feature.ID,
 		Platform:               prepared.decision.Scopes.Platform,
 		NormalizedClaimDigests: cloneClaimDigests(prepared.decision.Scopes.NormalizedClaims),
 		Protocol:               prepared.decision.Feature.Protocol, ClientRequestID: declaration.clientRequestID,
+		Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
 		LimitPlanKey: prepared.decision.LimitPlan.ID, RouteKey: prepared.decision.Route.ID,
 		UpstreamKey: prepared.decision.Upstream.ID, ModelKey: prepared.decision.Model.ID,
 		PhysicalModel: prepared.decision.Model.UpstreamModel, Pricing: prepared.pricing.quotaSelection,
@@ -2363,6 +2373,12 @@ func errorCode(err error, now time.Time) (string, int) {
 		return "session_expired", 0
 	case errors.Is(err, session.ErrInstallationRevoked):
 		return "installation_revoked", 0
+	case errors.Is(err, session.ErrInstallationFamilyRevoked):
+		return "installation_family_revoked", 0
+	case errors.Is(err, session.ErrComponentRevoked):
+		return "component_revoked", 0
+	case errors.Is(err, session.ErrComponentFeatureNotGranted):
+		return "component_feature_not_granted", 0
 	case errors.Is(err, session.ErrAttestationRefreshNeeded):
 		return "attestation_stale", 0
 	case errors.Is(err, session.ErrAttestationStepUpRequired):
@@ -2473,6 +2489,12 @@ func safeProblemDetail(code string) string {
 		return "The Latchway session is no longer active."
 	case "installation_revoked":
 		return "The installation is no longer active."
+	case "installation_family_revoked":
+		return "The installation family is no longer active."
+	case "component_revoked":
+		return "The client component is no longer active."
+	case "component_feature_not_granted":
+		return "The client component is not allowed to use this feature."
 	case "attestation_stale":
 		return "Fresh application attestation is required."
 	case "attestation_step_up_required":

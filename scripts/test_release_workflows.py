@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import unittest
@@ -44,8 +45,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
             if not offsets:
                 continue
             guarded.append(path.name)
-            self.assertIn("require-gh-version.py", text, path.name)
-            self.assertLess(text.index("require-gh-version.py"), min(offsets), path.name)
+            guard_offsets = [
+                text.index(marker)
+                for marker in (
+                    "require-gh-version.py",
+                    "major > 2 || (major == 2 && minor >= 97)",
+                )
+                if marker in text
+            ]
+            self.assertTrue(guard_offsets, path.name)
+            self.assertLess(min(guard_offsets), min(offsets), path.name)
         self.assertEqual(
             guarded,
             [
@@ -66,11 +75,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         observer = (ROOT / "scripts/release-domain-observer.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("require_github_cli()", observer)
-        self.assertLess(
-            observer.index("require_github_cli()\n        observer = Observer"),
-            observer.index("observer.observe()"),
-        )
+        self.assertNotIn("require_github_cli()\n        observer = Observer", observer)
+        self.assertIn('value.add_argument("--github-authority-directory"', observer)
+        self.assertIn('value.add_argument("--live-provider-capture-directory"', observer)
         for script_name, guarded_branch in (
             ("deployment-evidence.py", 'if args.command == "finalize":'),
             ("release-domain-evidence.py", "if arguments.output_directory is None:"),
@@ -95,45 +102,256 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("refs/tags/", serialized)
         self.assertNotIn("type=semver", serialized)
         self.assertNotIn("value=latest", serialized)
-        self.assertIn(":candidate-${{ inputs.candidate_commit }}", serialized)
+        self.assertIn('$IMAGE:candidate-$CANDIDATE_COMMIT', serialized)
         self.assertIn("scripts/release-preflight.py", serialized)
         self.assertIn("--candidate", serialized)
         self.assertIn("scripts/run-local-load-gates.sh", serialized)
         self.assertIn("-scope automated", serialized)
-        self.assertIn("subject-path: latchway-candidate.json", serialized)
+        self.assertIn(
+            "subject-path: ${{ runner.temp }}/candidate/latchway-candidate.json",
+            serialized,
+        )
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         for job in workflow["jobs"].values():
             self.assertEqual(job.get("if"), "github.ref == 'refs/heads/main'")
 
+    def test_candidate_image_signing_is_fresh_and_executes_no_candidate_tooling(self) -> None:
+        workflow = load_workflow("release.yml")
+        self.assertEqual(
+            set(workflow["jobs"]), {"verify", "image", "publish-image", "sign"}
+        )
+        image = workflow["jobs"]["image"]
+        publisher = workflow["jobs"]["publish-image"]
+        signer = workflow["jobs"]["sign"]
+        self.assertEqual(publisher["needs"], "image")
+        self.assertEqual(publisher["environment"], "release-image-publishing")
+        self.assertEqual(signer["needs"], "publish-image")
+        self.assertEqual(signer["environment"], "release-evidence-signing")
+        self.assertNotIn("id-token", image["permissions"])
+        self.assertNotIn("attestations", image["permissions"])
+        self.assertNotIn("artifact-metadata", image["permissions"])
+        self.assertNotIn("packages", image["permissions"])
+        self.assertEqual(publisher["permissions"]["packages"], "write")
+        self.assertNotIn("id-token", publisher["permissions"])
+        self.assertNotIn("attestations", publisher["permissions"])
+        self.assertEqual(signer["permissions"]["id-token"], "write")
+        self.assertEqual(signer["permissions"]["attestations"], "write")
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in publisher["steps"]
+            )
+        )
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in signer["steps"]
+            )
+        )
+        serialized = json.dumps(signer, sort_keys=True)
+        self.assertNotIn("scripts/", serialized)
+        self.assertNotIn("python", serialized)
+        self.assertNotIn("pnpm", serialized)
+        self.assertNotIn("npm ", serialized)
+        publisher_serialized = json.dumps(publisher, sort_keys=True)
+        self.assertNotIn("scripts/", publisher_serialized)
+        self.assertNotIn("python", publisher_serialized)
+        self.assertNotIn("pnpm", publisher_serialized)
+        self.assertNotIn("npm ", publisher_serialized)
+        self.assertIn("docker logout ghcr.io", publisher_serialized)
+        self.assertIn("docker logout ghcr.io", serialized)
+        image_serialized = json.dumps(image, sort_keys=True)
+        self.assertNotIn("docker/login-action", image_serialized)
+        self.assertNotIn("secrets.GITHUB_TOKEN", image_serialized)
+        image_runs = "\n".join(
+            step.get("run", "") for step in image["steps"] if isinstance(step, dict)
+        )
+        self.assertIn('test -z "${GH_TOKEN:-}"', image_runs)
+        publisher_names = [step.get("name", "") for step in publisher["steps"]]
+        handoff_validation = publisher_names.index(
+            "Validate the exact closed handoff before registry authentication"
+        )
+        registry_authentication = publisher_names.index(
+            "Authenticate only the fresh no-checkout publisher"
+        )
+        publication = publisher_names.index(
+            "Publish exact platform images and assemble the immutable index"
+        )
+        manifest = publisher_names.index(
+            "Construct the exact unsigned candidate manifest without candidate code"
+        )
+        self.assertLess(handoff_validation, registry_authentication)
+        self.assertLess(registry_authentication, publication)
+        self.assertLess(publication, manifest)
+        names = [step.get("name", "") for step in signer["steps"]]
+        validation = names.index(
+            "Validate candidate identity, exact artifacts, scan results, and SBOMs without candidate code"
+        )
+        registry = names.index(
+            "Verify the registry index and exact platform children without candidate code"
+        )
+        signature = names.index(
+            "Sign and verify the validated candidate index with GitHub OIDC"
+        )
+        candidate_attestation = names.index(
+            "Attest the exact validated candidate manifest"
+        )
+        retained = names.index("Retain immutable signed candidate evidence")
+        signer_logout = names.index("Remove the source-free signer registry credential")
+        self.assertLess(validation, registry)
+        self.assertLess(registry, signature)
+        self.assertLess(signature, candidate_attestation)
+        self.assertLess(candidate_attestation, retained)
+        self.assertLess(retained, signer_logout)
+        image_names = [step.get("name", "") for step in image["steps"]]
+        self.assertIn(
+            "Retain the exact credential-free image handoff",
+            image_names,
+        )
+
     def test_promotion_verification_precedes_every_public_mutation(self) -> None:
         workflow = load_workflow("promote-release.yml")
-        job = workflow["jobs"]["promote"]
-        self.assertEqual(job["environment"], "release")
-        self.assertEqual(job.get("if"), "github.ref == 'refs/heads/main'")
-        steps = job["steps"]
-        names = [step.get("name", "") for step in steps]
+        self.assertEqual(
+            set(workflow["jobs"]),
+            {
+                "authenticate-inputs",
+                "candidate-gates",
+                "immutable-release-settings",
+                "plan-promotion",
+                "stage-github-release",
+                "promote-oci",
+                "publish-github-release",
+                "dispatch-sdk-publications",
+            },
+        )
+        authority = workflow["jobs"]["authenticate-inputs"]
+        candidate_gates = workflow["jobs"]["candidate-gates"]
+        immutable_settings = workflow["jobs"]["immutable-release-settings"]
+        planner = workflow["jobs"]["plan-promotion"]
+        stage = workflow["jobs"]["stage-github-release"]
+        oci = workflow["jobs"]["promote-oci"]
+        publisher = workflow["jobs"]["publish-github-release"]
+        dispatch = workflow["jobs"]["dispatch-sdk-publications"]
+        self.assertEqual(authority["environment"], "security-evidence")
+        self.assertEqual(
+            set(planner["needs"]),
+            {"authenticate-inputs", "candidate-gates", "immutable-release-settings"},
+        )
+        self.assertNotIn("environment", planner)
+        self.assertEqual(
+            set(stage["needs"]), {"plan-promotion", "immutable-release-settings"}
+        )
+        self.assertEqual(set(oci["needs"]), {"plan-promotion", "stage-github-release"})
+        self.assertEqual(
+            set(publisher["needs"]),
+            {"plan-promotion", "stage-github-release", "promote-oci"},
+        )
+        self.assertEqual(
+            set(dispatch["needs"]),
+            {"authenticate-inputs", "promote-oci", "publish-github-release"},
+        )
+        for job in (stage, oci, publisher):
+            self.assertEqual(job["environment"], "release")
+            self.assertEqual(job.get("if"), "github.ref == 'refs/heads/main'")
 
-        candidate_attestation = names.index("Verify candidate and promotion attestations")
-        bindings = names.index("Verify the candidate artifact and exact aggregate bindings")
-        image_provenance = names.index("Verify the exact candidate image signature and provenance")
-        immutable_preflight = names.index(
+        planner_names = [step.get("name", "") for step in planner["steps"]]
+        candidate_attestation = planner_names.index(
+            "Reverify candidate and promotion attestations on the credential-free planner"
+        )
+        bindings = planner_names.index(
+            "Verify exact candidate security and aggregate bindings without source"
+        )
+        image_provenance = planner_names.index(
+            "Verify the exact candidate image signature and provenance"
+        )
+        immutable_preflight = planner_names.index(
             "Preflight immutable releases and every fixed core release asset"
         )
-        existing_tag = names.index("Verify any existing core release tag")
-        tag_creation = names.index("Create the evidence-gated annotated core tag")
-        draft = names.index("Prepare the recoverable product release draft and exact assets")
-        oci_promotion = names.index("Promote only the verified index digest to stable OCI tags")
-        release_creation = names.index("Publish the immutable release record")
-        sdk_dispatch = names.index("Dispatch exact evidence-bound SDK publications")
+        handoff = planner_names.index("Build the exact source-free mutation handoff")
+        retained = planner_names.index("Retain only the closed source-free mutation handoff")
         self.assertLess(candidate_attestation, bindings)
         self.assertLess(bindings, image_provenance)
         self.assertLess(image_provenance, immutable_preflight)
-        self.assertLess(immutable_preflight, existing_tag)
-        self.assertLess(existing_tag, tag_creation)
+        self.assertLess(immutable_preflight, handoff)
+        self.assertLess(handoff, retained)
+
+        stage_names = [step.get("name", "") for step in stage["steps"]]
+        stage_validation = stage_names.index(
+            "Validate exact closure hashes and attestations before any GitHub mutation"
+        )
+        tag_creation = stage_names.index("Create the evidence-gated annotated core tag")
+        draft = stage_names.index(
+            "Prepare the recoverable product release draft and exact assets"
+        )
+        self.assertLess(stage_validation, tag_creation)
         self.assertLess(tag_creation, draft)
-        self.assertLess(draft, oci_promotion)
-        self.assertLess(oci_promotion, release_creation)
-        self.assertLess(release_creation, sdk_dispatch)
+
+        oci_names = [step.get("name", "") for step in oci["steps"]]
+        oci_validation = oci_names.index(
+            "Validate exact closure hashes attestations tag and draft before registry authentication"
+        )
+        oci_promotion = oci_names.index(
+            "Promote only the verified index digest to stable OCI tags"
+        )
+        self.assertLess(oci_validation, oci_promotion)
+
+        publisher_names = [step.get("name", "") for step in publisher["steps"]]
+        publication_validation = publisher_names.index(
+            "Validate exact closure hashes and attestations before release publication"
+        )
+        oci_verification = publisher_names.index(
+            "Verify both immutable and moving OCI coordinates before publication"
+        )
+        release_creation = publisher_names.index("Publish the immutable release record")
+        self.assertLess(publication_validation, oci_verification)
+        self.assertLess(oci_verification, release_creation)
+        self.assertIn(
+            "Dispatch exact evidence-bound SDK publications without a checkout",
+            [step.get("name", "") for step in dispatch["steps"]],
+        )
+
+        self.assertEqual(candidate_gates["needs"], "authenticate-inputs")
+        self.assertEqual(candidate_gates["permissions"], {})
+        self.assertNotIn("secrets.", str(candidate_gates))
+        self.assertNotIn("id-token", candidate_gates["permissions"])
+        self.assertNotEqual(candidate_gates["permissions"].get("contents"), "write")
+        for source_job in (candidate_gates, planner):
+            self.assertNotEqual(source_job["permissions"].get("contents"), "write")
+            self.assertNotEqual(source_job["permissions"].get("packages"), "write")
+            self.assertNotEqual(source_job["permissions"].get("id-token"), "write")
+            self.assertNotIn("secrets.", str(source_job))
+        for privileged in (
+            authority,
+            immutable_settings,
+            stage,
+            oci,
+            publisher,
+            dispatch,
+        ):
+            privileged_text = json.dumps(privileged, sort_keys=True)
+            self.assertFalse(
+                any(
+                    step.get("uses", "").startswith("actions/checkout@")
+                    for step in privileged["steps"]
+                ),
+                privileged,
+            )
+            self.assertNotIn("python3 latchway/scripts/", privileged_text)
+        authority_names = [step.get("name", "") for step in authority["steps"]]
+        self.assertLess(
+            authority_names.index(
+                "Verify nested independent-review attestation on the credential-isolated runner"
+            ),
+            authority_names.index("Package exact candidate source objects without a checkout"),
+        )
+        self.assertIn("INDEPENDENT_SECURITY_REVIEW_TOKEN", str(authority))
+        self.assertIn("diff --unified=0", str(authority))
+        self.assertIn(".review_authority.reviewer", str(authority))
+        self.assertIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", str(dispatch))
+        self.assertIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", str(immutable_settings))
+        for job in (stage, oci, publisher):
+            self.assertNotIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", str(job))
+            self.assertNotIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", str(job))
 
         serialized = (WORKFLOWS / "promote-release.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/release-candidate.py", serialized)
@@ -143,6 +361,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(serialized.count("--source-digest"), 3)
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("--deny-self-hosted-runners", serialized)
+        self.assertIn(
+            '--promotion-directory "$root/latchway-security/promotion-conformance"',
+            serialized,
+        )
+        self.assertIn('.promotion_conformance.report_sha256', serialized)
+        self.assertIn('.review_authority.producer.repository', serialized)
+        self.assertIn(
+            'actions/runs/$run_id/attempts/$run_attempt', serialized
+        )
         self.assertIn("LATCHWAY_RELEASE_DISPATCH_TOKEN", serialized)
         self.assertIn("repos/$repository/immutable-releases", serialized)
         self.assertIn("LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN", serialized)
@@ -150,12 +377,100 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('gh release create "$INTENDED_TAG" --draft', serialized)
         self.assertIn('.immutable == true', serialized)
         self.assertIn('gh release verify "$INTENDED_TAG"', serialized)
-        self.assertIn("verify-github-release-attestation.py", serialized)
         self.assertIn("If-None-Match:", serialized)
-        self.assertIn("--expected-status 304", serialized)
+        self.assertIn("'^HTTP/[0-9.]+ 304( |$)'", serialized)
         self.assertNotIn("If-Match:", serialized)
         self.assertNotIn("--generate-notes", serialized)
         self.assertNotIn("continue-on-error", serialized)
+
+    def test_promotion_mutators_are_source_free_and_validate_closed_handoffs(self) -> None:
+        workflow = load_workflow("promote-release.yml")
+        jobs = workflow["jobs"]
+        planner = jobs["plan-promotion"]
+        stage = jobs["stage-github-release"]
+        oci = jobs["promote-oci"]
+        publisher = jobs["publish-github-release"]
+        dispatch = jobs["dispatch-sdk-publications"]
+
+        self.assertEqual(stage["permissions"]["contents"], "write")
+        self.assertNotIn("packages", stage["permissions"])
+        self.assertEqual(oci["permissions"]["packages"], "write")
+        self.assertNotEqual(oci["permissions"].get("contents"), "write")
+        self.assertEqual(publisher["permissions"]["contents"], "write")
+        self.assertNotIn("packages", publisher["permissions"])
+        for job_name in (
+            "stage-github-release",
+            "promote-oci",
+            "publish-github-release",
+            "dispatch-sdk-publications",
+        ):
+            serialized = json.dumps(jobs[job_name], sort_keys=True)
+            self.assertNotIn("actions/checkout@", serialized, job_name)
+            self.assertNotIn("latchway/scripts/", serialized, job_name)
+            self.assertNotIn("python3", serialized, job_name)
+            self.assertNotIn("latchway.source.tar", serialized, job_name)
+            self.assertNotIn("source.sha256", serialized, job_name)
+
+        for mutator in (stage, oci, publisher):
+            serialized = json.dumps(mutator, sort_keys=True)
+            self.assertIn("handoff.sha256", serialized)
+            self.assertIn("actual-handoff-files.txt", serialized)
+            self.assertIn("actual-handoff-hashes.txt", serialized)
+            self.assertIn("sha256sum --strict --check handoff.sha256", serialized)
+            self.assertGreaterEqual(serialized.count("gh attestation verify"), 3)
+            self.assertIn("--deny-self-hosted-runners", serialized)
+
+        planner_text = json.dumps(planner, sort_keys=True)
+        self.assertIn(
+            "latchway-promote-evidence-${{ github.run_id }}-${{ github.run_attempt }}",
+            planner_text,
+        )
+        self.assertNotIn("latchway-promote-inputs-", planner_text)
+        self.assertNotIn("actions/checkout@", planner_text)
+        self.assertNotIn("latchway/scripts/", planner_text)
+        self.assertNotIn("python3", planner_text)
+        self.assertNotIn("latchway.source.tar", planner_text)
+        self.assertNotIn("source.sha256", planner_text)
+        self.assertIn("latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}", planner_text)
+        handoff_run = next(
+            step["run"]
+            for step in planner["steps"]
+            if step.get("name") == "Build the exact source-free mutation handoff"
+        )
+        self.assertIn("test \"$(find \"$root\" -type f | wc -l | tr -d ' ')\" = 16", handoff_run)
+        self.assertNotIn("docker/login-action", planner_text)
+
+        stage_text = json.dumps(stage, sort_keys=True)
+        oci_text = json.dumps(oci, sort_keys=True)
+        publisher_text = json.dumps(publisher, sort_keys=True)
+        self.assertNotIn("docker buildx imagetools create", stage_text)
+        self.assertNotIn("docker login", stage_text)
+        self.assertIn("docker buildx imagetools create", oci_text)
+        self.assertIn("${{ secrets.GITHUB_TOKEN }}", oci_text)
+        self.assertNotIn("gh release create", oci_text)
+        self.assertNotIn("gh release upload", oci_text)
+        self.assertNotIn("--method PATCH", oci_text)
+        self.assertIn("docker_config=$(mktemp -d", oci_text)
+        self.assertIn("trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT", oci_text)
+        mutation_run = next(
+            step["run"]
+            for step in oci["steps"]
+            if step.get("name")
+            == "Promote only the verified index digest to stable OCI tags"
+        )
+        self.assertIn(
+            'test -z "$(find "$DOCKER_CONFIG" -mindepth 1 -print -quit)"',
+            mutation_run,
+        )
+        self.assertLess(mutation_run.index("trap 'docker logout"), mutation_run.index("docker login"))
+        self.assertLess(mutation_run.index("docker login"), mutation_run.index("imagetools create"))
+        self.assertNotIn("docker login", publisher_text)
+        self.assertNotIn("imagetools create", publisher_text)
+        self.assertIn("--method PATCH", publisher_text)
+        self.assertNotIn("${{ secrets.GITHUB_TOKEN }}", stage_text)
+        self.assertNotIn("${{ secrets.GITHUB_TOKEN }}", publisher_text)
+        self.assertIn("latchway-promotion-handoff", json.dumps(dispatch, sort_keys=True))
+        self.assertNotIn("latchway-promote-inputs", json.dumps(dispatch, sort_keys=True))
 
     def test_cross_repository_promotion_is_mandatory_and_attested(self) -> None:
         workflow = load_workflow("cross-repository-conformance.yml")
@@ -175,8 +490,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn(
             ".github/workflows/release-domain-evidence.yml", serialized
         )
-        self.assertIn("--signer-digest \"$candidate_commit\"", serialized)
-        self.assertIn("--source-digest \"$candidate_commit\"", serialized)
+        self.assertIn("--signer-digest \"$CANDIDATE_COMMIT\"", serialized)
+        self.assertIn("--source-digest \"$CANDIDATE_COMMIT\"", serialized)
         self.assertIn("--deny-self-hosted-runners", serialized)
         self.assertNotIn("if: inputs.scope != 'source'\n        uses: actions/attest@", serialized)
         self.assertIn('test "$GITHUB_SHA" = "$core_commit"', serialized)
@@ -188,12 +503,28 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(download.get("if"), "inputs.scope != 'source'")
 
-    def test_private_sibling_checkouts_use_a_least_privilege_read_token(self) -> None:
-        expected = "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}"
+    def test_oidc_attestors_never_execute_candidate_owned_tooling(self) -> None:
         for workflow_name in (
             "cross-repository-conformance.yml",
-            "release-domain-observations.yml",
+            "finalize-release-record.yml",
         ):
+            workflow = load_workflow(workflow_name)
+            for job_name, job in workflow["jobs"].items():
+                permissions = job.get("permissions", {})
+                if (
+                    permissions.get("id-token") != "write"
+                    and permissions.get("attestations") != "write"
+                ):
+                    continue
+                serialized = str(job)
+                self.assertNotIn("actions/checkout@", serialized, job_name)
+                self.assertNotIn("python3 scripts/", serialized, job_name)
+                self.assertNotIn("python3 latchway/scripts/", serialized, job_name)
+                self.assertNotIn("cross-repo-conformance.py", serialized, job_name)
+
+    def test_private_sibling_sources_use_a_least_privilege_read_token(self) -> None:
+        expected = "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}"
+        for workflow_name in ("release-domain-observations.yml",):
             sibling_checkouts = [
                 step
                 for step in all_steps(load_workflow(workflow_name))
@@ -205,6 +536,31 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertEqual(len(sibling_checkouts), 4, workflow_name)
             for step in sibling_checkouts:
                 self.assertEqual(step["with"].get("token"), expected, step)
+        cross = load_workflow("cross-repository-conformance.yml")
+        authority = cross["jobs"]["authenticate-inputs"]
+        evidence = cross["jobs"]["evidence"]
+        attestor = cross["jobs"]["attest"]
+        self.assertEqual(authority["environment"], "private-sibling-read")
+        self.assertEqual(attestor["environment"], "release-evidence-signing")
+        self.assertIn("SIBLING_TOKEN", str(authority))
+        self.assertIn(
+            "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN }}",
+            str(authority),
+        )
+        self.assertNotIn("|| github.token", str(authority))
+        self.assertNotIn("secrets.", str(evidence))
+        self.assertNotIn("id-token", evidence["permissions"])
+        self.assertEqual(attestor["permissions"]["id-token"], "write")
+        self.assertNotIn("scripts/", str(attestor))
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in authority["steps"] + evidence["steps"] + attestor["steps"]
+            )
+        )
+        self.assertIn("Retain only authenticated inputs for candidate-code execution", [
+            step.get("name", "") for step in authority["steps"]
+        ])
 
     def test_external_domain_evidence_is_protected_attested_and_candidate_bound(self) -> None:
         workflow = load_workflow("release-domain-evidence.yml")
@@ -221,30 +577,79 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "public_registries",
             ],
         )
-        job = workflow["jobs"]["evidence"]
-        self.assertEqual(job["environment"], "release-evidence")
-        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
-        names = [step.get("name", "") for step in job["steps"]]
-        producer_run = names.index("Verify every input run and attempt belongs to its fixed producer")
-        bundles = names.index("Verify all three exact attestation bundles before finalization")
-        finalized = names.index("Finalize the external release-domain document")
-        document_attested = names.index("Attest the exact external evidence document")
-        bundle_retained = names.index("Retain the external evidence attestation bundle")
-        artifact_retained = names.index(
+        domain_jobs = workflow["jobs"]
+        self.assertEqual(set(domain_jobs), {"authenticate", "finalize", "attest"})
+        authentication = domain_jobs["authenticate"]
+        finalizer = domain_jobs["finalize"]
+        attestor = domain_jobs["attest"]
+        self.assertEqual(authentication["environment"], "release-evidence")
+        self.assertEqual(attestor["environment"], "release-evidence-signing")
+        self.assertEqual(authentication["if"], "github.ref == 'refs/heads/main'")
+        self.assertEqual(finalizer["needs"], "authenticate")
+        self.assertEqual(attestor["needs"], "finalize")
+        self.assertNotIn("id-token", authentication["permissions"])
+        self.assertNotIn("id-token", finalizer["permissions"])
+        self.assertEqual(attestor["permissions"]["id-token"], "write")
+        authentication_names = [
+            step.get("name", "") for step in authentication["steps"]
+        ]
+        producer_run = authentication_names.index(
+            "Verify every input run and attempt belongs to its fixed producer"
+        )
+        bundles = authentication_names.index(
+            "Verify all three exact attestation bundles before finalization"
+        )
+        retained_inputs = authentication_names.index(
+            "Retain only authenticated inputs for credential-free finalization"
+        )
+        finalizer_names = [step.get("name", "") for step in finalizer["steps"]]
+        finalized = finalizer_names.index("Finalize the external release-domain document")
+        unsigned = finalizer_names.index(
+            "Retain the unsigned domain for a fresh attestation runner"
+        )
+        attestor_names = [step.get("name", "") for step in attestor["steps"]]
+        fixed_validation = attestor_names.index(
+            "Validate the exact domain document and retained file set without candidate code"
+        )
+        document_attested = attestor_names.index(
+            "Attest the exact external evidence document"
+        )
+        bundle_retained = attestor_names.index(
+            "Retain the external evidence attestation bundle"
+        )
+        artifact_retained = attestor_names.index(
             "Retain the domain document and all hash-bound raw results"
         )
         self.assertLess(producer_run, bundles)
-        self.assertLess(bundles, finalized)
-        self.assertLess(finalized, document_attested)
+        self.assertLess(bundles, retained_inputs)
+        self.assertLess(finalized, unsigned)
+        self.assertLess(fixed_validation, document_attested)
         self.assertLess(document_attested, bundle_retained)
         self.assertLess(bundle_retained, artifact_retained)
+        self.assertFalse(
+            any(
+                step.get("uses", "").startswith("actions/checkout@")
+                for step in authentication["steps"] + attestor["steps"]
+            )
+        )
+        self.assertNotIn("scripts/", str(attestor))
+        self.assertNotIn("python3", str(attestor))
+        self.assertIn('.image.repository == "ghcr.io/latchway/latchway"', str(attestor))
+        self.assertIn('test("^sha256:[0-9a-f]{64}$")', str(attestor))
+        self.assertIn(
+            '.image.repository + "@" + .image.index_digest',
+            str(attestor),
+        )
+        checkout = finalizer["steps"][0]
+        self.assertTrue(checkout["uses"].startswith("actions/checkout@"))
+        self.assertFalse(checkout["with"]["persist-credentials"])
         serialized = (WORKFLOWS / "release-domain-evidence.yml").read_text(encoding="utf-8")
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', serialized)
         self.assertIn("--receipt-attestation", serialized)
         self.assertIn("verify_run machine \"$MACHINE_RESULTS_RUN_ID\" \"$MACHINE_RESULTS_RUN_ATTEMPT\" .github/workflows/release-domain-observations.yml", serialized)
-        self.assertEqual(serialized.count("--signer-digest"), 3)
-        self.assertEqual(serialized.count("--source-digest"), 3)
-        self.assertEqual(serialized.count("--deny-self-hosted-runners"), 3)
+        self.assertEqual(serialized.count("--signer-digest"), 6)
+        self.assertEqual(serialized.count("--source-digest"), 6)
+        self.assertEqual(serialized.count("--deny-self-hosted-runners"), 6)
         self.assertNotIn("machine_results_artifact", serialized)
         self.assertNotIn("continue-on-error", serialized)
         self.assertNotIn("secrets.", serialized)
@@ -255,23 +660,87 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "options"
         ]
         self.assertIn("physical_devices", producer_domains)
-        producer_job = producer["jobs"]["observe"]
-        self.assertEqual(producer_job["environment"], "release-evidence")
-        self.assertEqual(producer_job["if"], "github.ref == 'refs/heads/main'")
-        producer_names = [step.get("name", "") for step in producer_job["steps"]]
-        sdk_executed = producer_names.index(
-            "Execute the fixed SDK or physical-device observation plan"
+        jobs = producer["jobs"]
+        self.assertEqual(
+            set(jobs),
+            {
+                "authenticate",
+                "live_provider_capture",
+                "github_authority",
+                "sources",
+                "physical_authority",
+                "javascript_harness",
+                "javascript_collect",
+                "observe_non_sdk",
+                "aggregate",
+                "sign",
+            },
         )
-        other_executed = producer_names.index(
-            "Execute the fixed non-SDK domain observation plan"
+        self.assertEqual(jobs["authenticate"]["environment"], "release-evidence")
+        self.assertEqual(
+            jobs["live_provider_capture"]["environment"],
+            "release-evidence-live-provider",
         )
-        manifested = producer_names.index("Produce the exact machine-results manifest")
-        attested = producer_names.index("Attest the exact machine-results manifest")
-        retained = producer_names.index("Retain only the attested machine-result set")
-        self.assertLess(sdk_executed, manifested)
-        self.assertLess(other_executed, manifested)
-        self.assertLess(manifested, attested)
-        self.assertLess(attested, retained)
+        self.assertEqual(
+            jobs["github_authority"]["environment"],
+            "release-evidence-github-read",
+        )
+        self.assertEqual(
+            jobs["physical_authority"]["environment"], "release-evidence-physical"
+        )
+        collector = jobs["javascript_collect"]
+        self.assertEqual(collector["environment"], "${{ matrix.environment }}")
+        self.assertEqual(
+            {row["environment"] for row in collector["strategy"]["matrix"]["include"]},
+            {"release-evidence-firebase-app-check", "release-evidence-turnstile"},
+        )
+        self.assertEqual(collector["permissions"], {})
+        self.assertIn("latchway-ephemeral-jit", collector["runs-on"])
+        self.assertEqual(jobs["aggregate"]["environment"], "release-evidence")
+        self.assertEqual(jobs["sign"]["environment"], "release-evidence-signing")
+        for job_name in (
+            "authenticate",
+            "live_provider_capture",
+            "github_authority",
+            "physical_authority",
+            "sign",
+        ):
+            self.assertFalse(
+                any(
+                    str(step.get("uses", "")).startswith("actions/checkout@")
+                    for step in jobs[job_name]["steps"]
+                ),
+                job_name,
+            )
+        for job_name in ("live_provider_capture", "github_authority"):
+            serialized_job = json.dumps(jobs[job_name], sort_keys=True)
+            self.assertNotIn("scripts/release-domain-observer.py", serialized_job)
+            self.assertNotIn("scripts/live-conformance.mjs", serialized_job)
+            self.assertEqual(
+                jobs[job_name]["permissions"],
+                {"actions": "read", "contents": "none"},
+            )
+        for job_name in ("observe_non_sdk", "aggregate"):
+            serialized_job = json.dumps(jobs[job_name], sort_keys=True)
+            self.assertNotIn("secrets.", serialized_job, job_name)
+            self.assertNotIn("latchway verify", serialized_job, job_name)
+            self.assertNotIn("--server-owned", serialized_job, job_name)
+            self.assertIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", serialized_job)
+            self.assertIn("ACTIONS_ID_TOKEN_REQUEST_URL", serialized_job)
+            self.assertEqual(
+                jobs[job_name]["permissions"],
+                {"actions": "read", "contents": "none"},
+            )
+        aggregate_names = [step.get("name", "") for step in jobs["aggregate"]["steps"]]
+        self.assertLess(
+            aggregate_names.index("Validate SDK and device observations without credentials"),
+            aggregate_names.index("Produce the exact machine-results manifest"),
+        )
+        sign_names = [step.get("name", "") for step in jobs["sign"]["steps"]]
+        self.assertLess(
+            sign_names.index("Download validated machine results on a fresh no-checkout runner"),
+            sign_names.index("Attest the exact machine-results manifest"),
+        )
         producer_text = (WORKFLOWS / "release-domain-observations.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/release-domain-observer.py", producer_text)
         self.assertNotIn("Refuse hosted substitution", producer_text)
@@ -291,6 +760,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "repository: Latchway/latchway-android",
             "repository: Latchway/latchway-react-native-sdk",
             "pnpm build",
+            "--physical-authority-directory",
+            "--javascript-firebase-app-check-capture",
+            "--javascript-turnstile-capture",
+            "--live-provider-capture-directory",
+            "--github-authority-directory",
+            "LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN",
+            "Refuse provider, GitHub, and OIDC credentials before candidate execution",
+            "Retain validated unsigned machine results for a fresh signer",
         ):
             self.assertIn(value, producer_text)
         observer_text = (ROOT / "scripts" / "release-domain-observer.py").read_text(
@@ -308,24 +785,153 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/live-conformance.mjs", observer_text)
         self.assertIn("latchway_retained_physical_device_receipt", observer_text)
         self.assertIn('"retained_inputs": item["receipt"]["payloads"]', observer_text)
-        self.assertIn('"X-GitHub-Api-Version: 2026-03-10"', observer_text)
-        self.assertIn('"release", "verify"', observer_text)
+        self.assertIn("_github_authority_file", observer_text)
+        for removed_online_path in (
+            "def _github_token(",
+            "def _gh_json(",
+            "def _verify_release_attestation(",
+            "def _download_release_asset(",
+            "def _verify_immutable_release_asset(",
+        ):
+            self.assertNotIn(removed_online_path, observer_text)
+        self.assertIn("X-GitHub-Api-Version: 2026-03-10", producer_text)
+        self.assertIn("gh release verify", producer_text)
         self.assertNotIn("machine_results_run_id", producer_text)
         self.assertNotIn("continue-on-error", producer_text)
-        sdk_step = producer_job["steps"][sdk_executed]
-        other_step = producer_job["steps"][other_executed]
+        collector_step = next(
+            step
+            for step in jobs["javascript_collect"]["steps"]
+            if step.get("name")
+            == "Execute the candidate only through the gateway-isolated one-use supervisor"
+        )
+        physical_step = next(
+            step
+            for step in jobs["physical_authority"]["steps"]
+            if step.get("name") == "Authenticate physical runs, artifacts, and subject attestations"
+        )
+        other_step = next(
+            step
+            for step in jobs["observe_non_sdk"]["steps"]
+            if step.get("name") == "Validate the isolated non-SDK observations offline"
+        )
+        github_step = next(
+            step
+            for step in jobs["github_authority"]["steps"]
+            if step.get("name")
+            == "Capture the fixed GitHub authority set without candidate code"
+        )
+        provider_step = next(
+            step
+            for step in jobs["live_provider_capture"]["steps"]
+            if step.get("name")
+            == "Capture fixed responses with a run-bound one-use Admin grant"
+        )
         self.assertEqual(
-            sdk_step["env"]["GH_TOKEN"],
+            physical_step["env"]["GH_TOKEN"],
             "${{ secrets.LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN }}",
         )
-        self.assertNotIn("LATCHWAY_ADMIN_API_TOKEN", sdk_step["env"])
-        self.assertEqual(other_step["env"]["GH_TOKEN"], "${{ github.token }}")
+        self.assertEqual(
+            collector_step["env"]["ONE_TIME_GRANT"],
+            "${{ secrets.LATCHWAY_ONE_TIME_LIVE_SDK_GRANT }}",
+        )
+        for forbidden in (
+            "LATCHWAY_LIVE_SDK_IDENTITY_TOKEN",
+            "LATCHWAY_LIVE_SDK_FIREBASE_APP_CHECK_TOKEN",
+            "LATCHWAY_LIVE_SDK_TURNSTILE_TOKEN",
+        ):
+            self.assertNotIn(forbidden, producer_text)
+        self.assertIn("gateway_egress_only:true", producer_text)
+        self.assertIn("consumption_count == 1", producer_text)
+        self.assertIn("Unconditionally zero the grant", producer_text)
+        self.assertIn("latchway.live-sdk-collector-teardown.v1", producer_text)
+        self.assertNotIn("LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER", producer_text)
+        self.assertNotIn("LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN", producer_text)
+        self.assertNotIn("GH_TOKEN", other_step["env"])
+        self.assertNotIn("LATCHWAY_ADMIN_API_TOKEN", other_step["env"])
+        self.assertEqual(
+            github_step["env"]["GH_TOKEN"],
+            "${{ secrets.LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN }}",
+        )
+        self.assertEqual(
+            provider_step["env"]["ONE_TIME_GRANT"],
+            "${{ secrets.LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT }}",
+        )
+        self.assertEqual(
+            producer_text.count(
+                "${{ secrets.LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN }}"
+            ),
+            1,
+        )
+        self.assertEqual(
+            producer_text.count(
+                "${{ secrets.LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT }}"
+            ),
+            1,
+        )
+        self.assertNotIn("LATCHWAY_LIVE_PROVIDER_ADMIN_API_TOKEN", producer_text)
+        self.assertEqual(
+            jobs["live_provider_capture"]["runs-on"],
+            ["self-hosted", "linux", "x64", "latchway-live-provider", "latchway-ephemeral-jit"],
+        )
+        for marker in (
+            "latchway.live-provider-collector-lease.v1",
+            "latchway.live-provider-one-use-grant.v1",
+            "(.grant.expires_at_unix - .grant.issued_at_unix) <= 300",
+            "(( capture_finish <= grant_expires ))",
+            "latchway.live-provider-grant-consumption.v1",
+            "consumption_count == 1",
+            "latchway.live-provider-collector-teardown.v1",
+            "grant_issuer_independent:true",
+            "one_use_verification:true",
+            "gateway_egress_only:true",
+            "collector-isolation",
+            "latchway_retained_live_provider_collector_isolation",
+            "Reverify the retained live-provider collector closure without candidate code",
+            "LATCHWAY_LIVE_PROVIDER_COLLECTOR_TRUST_ROOT_SHA256",
+            "grant-consumption-receipt.sig",
+            "openssl dgst -sha256 -verify",
+        ):
+            self.assertIn(marker, producer_text)
         self.assertNotIn("LATCHWAY_LIVE_SDK_IDENTITY_TOKEN", other_step["env"])
 
         release_text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
         source_text = (WORKFLOWS / "cross-repository-conformance.yml").read_text(encoding="utf-8")
         self.assertIn("latchway-candidate.attestation.sigstore.json", release_text)
         self.assertIn("latchway-cross-repository.attestation.sigstore.json", source_text)
+
+    def test_release_domain_candidate_jobs_are_never_oidc_or_attestation_privileged(self) -> None:
+        jobs = load_workflow("release-domain-observations.yml")["jobs"]
+        privileged = {
+            name
+            for name, job in jobs.items()
+            if job.get("permissions", {}).get("id-token") == "write"
+            or "attestations" in job.get("permissions", {})
+        }
+        self.assertEqual(privileged, {"sign"})
+        for name in privileged:
+            serialized = json.dumps(jobs[name], sort_keys=True)
+            self.assertNotIn("actions/checkout@", serialized, name)
+            self.assertNotIn("scripts/release-domain-observer.py", serialized, name)
+            self.assertNotIn("scripts/live-conformance.mjs", serialized, name)
+            self.assertNotIn("secrets.", serialized, name)
+        for name in (
+            "sources",
+            "live_provider_capture",
+            "github_authority",
+            "javascript_harness",
+            "javascript_collect",
+            "observe_non_sdk",
+            "aggregate",
+        ):
+            permissions = jobs[name].get("permissions", {})
+            self.assertNotEqual(permissions.get("id-token"), "write", name)
+            self.assertNotIn("attestations", permissions, name)
+            self.assertNotIn("artifact-metadata", permissions, name)
+        collector = json.dumps(jobs["javascript_collect"], sort_keys=True)
+        self.assertNotIn("LATCHWAY_LIVE_SDK_IDENTITY_TOKEN", collector)
+        self.assertNotIn("LATCHWAY_LIVE_SDK_FIREBASE_APP_CHECK_TOKEN", collector)
+        self.assertNotIn("LATCHWAY_LIVE_SDK_TURNSTILE_TOKEN", collector)
+        self.assertIn("LATCHWAY_ONE_TIME_LIVE_SDK_GRANT", collector)
 
     def test_every_third_party_action_is_commit_pinned(self) -> None:
         for name in (

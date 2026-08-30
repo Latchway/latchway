@@ -1,0 +1,55 @@
+---
+title: "Architecture at a glance"
+description: "Trace one feature-bound request from an untrusted application through Latchway to a server-selected upstream."
+---
+
+The client chooses a feature. It does not choose an upstream credential,
+provider, physical model, price, or route.
+
+```mermaid
+flowchart LR
+    subgraph client ["Untrusted client"]
+        application["Application"]
+        framework["Existing AI framework"]
+    end
+    subgraph gateway ["Latchway boundary"]
+        transport["Authenticated transport"]
+        latchway["Latchway gateway"]
+    end
+    subgraph service ["Server-controlled execution"]
+        policy["Policy, quota, and routing"]
+    end
+    subgraph datastore ["Durable state"]
+        postgres["PostgreSQL"]
+    end
+    subgraph external ["Configured upstream"]
+        upstream["AI or HTTP upstream"]
+    end
+
+    application -->|"Calls"| framework
+    framework -->|"Feature-bound request"| transport
+    transport -->|"DPoP-authorized HTTPS"| latchway
+    latchway -->|"Evaluates"| policy
+    policy -->|"Reads and writes"| postgres
+    policy -.->|"Selected route"| upstream
+```
+
+## Request boundary
+
+The SDK transport obtains identity input, uses platform trust evidence, owns the
+component key, and creates a fresh DPoP proof. Latchway authenticates the
+session, reserves quota, rewrites trusted fields, and dispatches to the route
+selected by current server configuration.
+
+## Control boundary
+
+Operators configure applications, identity and attestation providers,
+features, routes, limits, pricing, and secrets. Client code cannot write those
+resources through the data plane.
+
+## Current release boundary
+
+The diagram describes the implemented gateway shape and the target transport
+boundary. Installation Families and named framework adapters are pre-release
+contracts until their server, SDK, compatibility, and conformance evidence is
+published.

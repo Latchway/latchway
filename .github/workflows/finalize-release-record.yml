@@ -36,12 +36,7 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  attestations: write
-  contents: write
-  id-token: write
-  packages: read
+permissions: {}
 
 concurrency:
   # Finalization must close one release's moving aliases before a later
@@ -50,21 +45,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  finalize:
+  authenticate-inputs:
     if: github.ref == 'refs/heads/main'
-    environment: release
+    environment: security-evidence
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    outputs:
+      public_inputs_manifest_sha256: ${{ steps.public-inputs.outputs.manifest_sha256 }}
     steps:
-      - name: Check out the exact released source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 scripts/require-gh-version.py
-      - name: Require exact immutable finalizer inputs
+      - name: Validate exact finalizer inputs and fixed GitHub CLI without a checkout
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -79,42 +72,17 @@ jobs:
           set -Eeuo pipefail
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          for value in \
-            "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
+          for value in "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
             "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" \
             "$CONFORMANCE_RUN_ID" "$CONFORMANCE_RUN_ATTEMPT"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
-          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
-      - name: Preflight protected immutable-release settings for every release repository
-        shell: bash
-        env:
-          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
-          for repository in \
-            Latchway/latchway \
-            Latchway/latchway-js \
-            Latchway/latchway-ios-sdk \
-            Latchway/latchway-android \
-            Latchway/latchway-react-native-sdk; do
-            slug=${repository##*/}
-            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$repository/immutable-releases" \
-              > "$RUNNER_TEMP/$slug-immutable-releases.json"
-            jq --exit-status '
-              type == "object" and
-              (keys | sort) == ["enabled", "enforced_by_owner"] and
-              .enabled == true and
-              (.enforced_by_owner | type) == "boolean"
-            ' "$RUNNER_TEMP/$slug-immutable-releases.json" >/dev/null
-          done
-      - name: Authenticate every fixed evidence run and attempt
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+      - name: Authenticate every fixed evidence run and attempt without candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,22 +95,17 @@ jobs:
           CONFORMANCE_RUN_ATTEMPT: ${{ inputs.release_conformance_run_attempt }}
         run: |
           set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/authenticated-inputs/run-verification"
           verify_run() {
             local label="$1" run_id="$2" run_attempt="$3" expected_workflow="$4"
-            local run="$RUNNER_TEMP/$label-run.json"
-            local workflow="$RUNNER_TEMP/$label-workflow.json"
+            local run="$RUNNER_TEMP/authenticated-inputs/run-verification/$label-run.json"
+            local workflow="$RUNNER_TEMP/authenticated-inputs/run-verification/$label-workflow.json"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$run"
-            jq --exit-status \
-              --arg commit "$CANDIDATE_COMMIT" \
-              --argjson attempt "$run_attempt" \
-              '.event == "workflow_dispatch" and
-               .status == "completed" and .conclusion == "success" and
-               .head_sha == $commit and .head_branch == "main" and
-               .run_attempt == $attempt' "$run" >/dev/null
+            jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$run_attempt" \
+              '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' "$run" >/dev/null
             workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$run")
             gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
-            jq --exit-status --arg path "$expected_workflow" \
-              '.path == $path and .state == "active"' "$workflow" >/dev/null
+            jq --exit-status --arg path "$expected_workflow" '.path == $path and .state == "active"' "$workflow" >/dev/null
           }
           verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
           verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml
@@ -151,96 +114,325 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
-          path: ${{ runner.temp }}/candidate
+          path: ${{ runner.temp }}/authenticated-inputs/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
       - name: Download the exact candidate-security evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-security-${{ inputs.candidate_commit }}-${{ inputs.security_run_id }}-${{ inputs.security_run_attempt }}
-          path: ${{ runner.temp }}/security
+          path: ${{ runner.temp }}/authenticated-inputs/security
           run-id: ${{ inputs.security_run_id }}
           github-token: ${{ github.token }}
       - name: Download the exact release-scope conformance evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-cross-repository-release-${{ inputs.release_conformance_run_id }}-${{ inputs.release_conformance_run_attempt }}
-          path: ${{ runner.temp }}/conformance
+          path: ${{ runner.temp }}/authenticated-inputs/conformance
           run-id: ${{ inputs.release_conformance_run_id }}
           github-token: ${{ github.token }}
-      - name: Verify all evidence signer identities and immutable source bindings
+      - name: Verify all Latchway evidence and nested promotion attestations without candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
           set -Eeuo pipefail
-          gh attestation verify "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-digest "$CANDIDATE_COMMIT" \
-            --signer-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main \
-            --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
-          gh attestation verify "$RUNNER_TEMP/security/security-summary.json" \
-            --bundle "$RUNNER_TEMP/security/security-summary.attestation.sigstore.json" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
-            --source-digest "$CANDIDATE_COMMIT" \
-            --signer-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main \
-            --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/security-attestation-verification.json"
-          gh attestation verify "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
-            --bundle "$RUNNER_TEMP/conformance/latchway-cross-repository.attestation.sigstore.json" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
-            --source-digest "$CANDIDATE_COMMIT" \
-            --signer-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main \
-            --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/conformance-attestation-verification.json"
-          gh attestation verify "$RUNNER_TEMP/conformance/latchway-external-evidence/aggregate-manifest.json" \
-            --bundle "$RUNNER_TEMP/conformance/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/aggregate-release-evidence.yml" \
-            --source-digest "$CANDIDATE_COMMIT" \
-            --signer-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main \
-            --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/aggregate-attestation-verification.json"
-      - name: Recompute the candidate and security gates
+          root="$RUNNER_TEMP/authenticated-inputs"
+          verify_latchway() {
+            local subject="$1" bundle="$2" workflow="$3"
+            gh attestation verify "$subject" --bundle "$bundle" \
+              --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/$workflow" \
+              --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          }
+          verify_latchway "$root/candidate/latchway-candidate.json" "$root/candidate/latchway-candidate.attestation.sigstore.json" .github/workflows/release.yml
+          verify_latchway "$root/security/security-summary.json" "$root/security/security-summary.attestation.sigstore.json" .github/workflows/security.yml
+          verify_latchway "$root/conformance/latchway-cross-repository.json" "$root/conformance/latchway-cross-repository.attestation.sigstore.json" .github/workflows/cross-repository-conformance.yml
+          verify_latchway "$root/conformance/latchway-external-evidence/aggregate-manifest.json" "$root/conformance/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json" .github/workflows/aggregate-release-evidence.yml
+          promotion="$root/security/promotion-conformance/latchway-cross-repository.json"
+          promotion_bundle="$root/security/promotion-conformance/latchway-cross-repository.attestation.sigstore.json"
+          summary="$root/security/security-summary.json"
+          promotion_run_id=$(jq --raw-output '.promotion_conformance.run_id' "$summary")
+          promotion_run_attempt=$(jq --raw-output '.promotion_conformance.run_attempt' "$summary")
+          [[ "$promotion_run_id" =~ ^[1-9][0-9]*$ && "$promotion_run_attempt" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$promotion_run_id/attempts/$promotion_run_attempt" \
+            > "$RUNNER_TEMP/promotion-run.json"
+          promotion_workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' \
+            "$RUNNER_TEMP/promotion-run.json")
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$promotion_run_attempt" '
+            .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and
+            .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt
+          ' "$RUNNER_TEMP/promotion-run.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$promotion_workflow_id" \
+            > "$RUNNER_TEMP/promotion-workflow.json"
+          jq --exit-status '.path == ".github/workflows/cross-repository-conformance.yml" and .state == "active"' \
+            "$RUNNER_TEMP/promotion-workflow.json" >/dev/null
+          verify_latchway "$promotion" "$promotion_bundle" .github/workflows/cross-repository-conformance.yml
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$(jq --raw-output '.promotion_conformance.report_sha256' "$summary")"
+          jq --exit-status --argjson run_id "$promotion_run_id" --argjson attempt "$promotion_run_attempt" \
+            '.promotion_conformance.scope == "promotion" and
+             .promotion_conformance.run_id == $run_id and
+             .promotion_conformance.run_attempt == $attempt' "$summary" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.repositories' "$root/conformance/latchway-cross-repository.json") \
+            <(jq --sort-keys '.promotion_conformance.repositories' "$summary")
+      - name: Verify nested independent-review attestation on the credential-isolated runner
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.INDEPENDENT_SECURITY_REVIEW_TOKEN }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          root="$RUNNER_TEMP/authenticated-inputs/security"
+          summary="$root/security-summary.json"
+          report="$root/independent-review/independent-security-review.json"
+          bundle="$root/independent-review/independent-security-review.attestation.sigstore.json"
+          repository=$(jq --raw-output '.review_authority.producer.repository' "$summary")
+          workflow=$(jq --raw-output '.review_authority.producer.workflow_path' "$summary")
+          source_commit=$(jq --raw-output '.review_authority.producer.source_commit' "$summary")
+          run_id=$(jq --raw-output '.review_authority.producer.run_id' "$summary")
+          run_attempt=$(jq --raw-output '.review_authority.producer.run_attempt' "$summary")
+          reviewer_login=$(jq --raw-output '.review_authority.reviewer.github_login' "$summary")
+          reviewer_organization=$(jq --raw-output '.review_authority.reviewer.organization' "$summary")
+          [[ "$repository" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]]
+          [[ "$workflow" =~ ^\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\.ya?ml$ ]]
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+          [[ "$reviewer_login" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]]
+          owner=${repository%%/*}
+          test "${owner,,}" != latchway
+          test "${reviewer_organization,,}" != latchway
+          test "$(sha256sum "$report" | cut -d ' ' -f 1)" = "$(jq --raw-output '.review_authority.report_sha256' "$summary")"
+          diff --unified=0 \
+            <(jq --sort-keys '.producer' "$report") \
+            <(jq --sort-keys '.review_authority.producer' "$summary")
+          diff --unified=0 \
+            <(jq --sort-keys '.reviewer' "$report") \
+            <(jq --sort-keys '.review_authority.reviewer' "$summary")
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" \
+            '.candidate.commit == $commit and .status == "passed"' "$report" >/dev/null
+          gh api "repos/$repository/actions/runs/$run_id/attempts/$run_attempt" \
+            > "$RUNNER_TEMP/independent-review-run.json"
+          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' \
+            "$RUNNER_TEMP/independent-review-run.json")
+          jq --exit-status --arg commit "$source_commit" --arg login "$reviewer_login" --argjson attempt "$run_attempt" '
+            .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and
+            .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt and
+            .actor.login == $login and .triggering_actor.login == $login
+          ' "$RUNNER_TEMP/independent-review-run.json" >/dev/null
+          gh api "repos/$repository/actions/workflows/$workflow_id" \
+            > "$RUNNER_TEMP/independent-review-workflow.json"
+          jq --exit-status --arg path "$workflow" '.path == $path and .state == "active"' \
+            "$RUNNER_TEMP/independent-review-workflow.json" >/dev/null
+          gh attestation verify "$report" --bundle "$bundle" --repo "$repository" \
+            --signer-workflow "$repository/$workflow" --source-digest "$source_commit" \
+            --signer-digest "$source_commit" --source-ref refs/heads/main \
+            --deny-self-hosted-runners >/dev/null
+      - name: Package exact released source objects without a checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          bare="$RUNNER_TEMP/latchway.git"
+          git init --bare "$bare" >/dev/null
+          gh auth setup-git
+          git -C "$bare" fetch --no-tags --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$CANDIDATE_COMMIT"
+          git -C "$bare" update-ref refs/heads/authenticated "$CANDIDATE_COMMIT"
+          git -C "$bare" symbolic-ref HEAD refs/heads/authenticated
+          GIT_INDEX_FILE="$bare/index" git --git-dir="$bare" read-tree "$CANDIDATE_COMMIT"
+          mkdir -p "$RUNNER_TEMP/authenticated-inputs/source"
+          git --git-dir="$bare" archive --format=tar "$CANDIDATE_COMMIT" | gzip -n > "$RUNNER_TEMP/authenticated-inputs/source/latchway.source.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C "$bare" -czf "$RUNNER_TEMP/authenticated-inputs/source/latchway.git.tar.gz" .
+          (cd "$RUNNER_TEMP/authenticated-inputs" && sha256sum source/*.tar.gz | LC_ALL=C sort > source.sha256)
+      - name: Seal a bounded evidence-only handoff for the public-state authority
+        id: public-inputs
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -Eeuo pipefail
-          python3 scripts/release-candidate.py \
-            --verify \
-            --manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$RELEASE_TAG" \
-            --image ghcr.io/latchway/latchway
-          python3 scripts/security-evidence.py \
-            --verify \
-            --report "$RUNNER_TEMP/security/security-summary.json" \
-            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --raw-directory "$RUNNER_TEMP/security/raw" \
-            --repository "$GITHUB_WORKSPACE" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$RELEASE_TAG"
+          source_root="$RUNNER_TEMP/authenticated-inputs"
+          handoff="$RUNNER_TEMP/public-state-inputs"
+          payload="$handoff/payload"
+          mkdir -p "$payload"
+          cp -R -- "$source_root/candidate" "$payload/candidate"
+          cp -R -- "$source_root/security" "$payload/security"
+          cp -R -- "$source_root/conformance" "$payload/conformance"
+          test -z "$(find "$payload" -type l -print -quit)"
+          test -z "$(find "$payload" ! -type d ! -type f -print -quit)"
+          file_count=$(find "$payload" -type f | wc -l | tr -d ' ')
+          total_size=$(find "$payload" -type f -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')
+          test "$file_count" -ge 12 && test "$file_count" -le 4096
+          test "$total_size" -ge 1 && test "$total_size" -le 2147483648
+          : > "$handoff/files.tsv"
+          while IFS= read -r -d '' file; do
+            relative=${file#"$payload/"}
+            [[ "$relative" =~ ^[A-Za-z0-9._/-]+$ ]]
+            size=$(stat --format=%s "$file")
+            test "$size" -ge 0 && test "$size" -le 536870912
+            printf '%s\t%s\t%s\n' \
+              "$relative" "$size" "$(sha256sum "$file" | cut -d ' ' -f 1)" \
+              >> "$handoff/files.tsv"
+          done < <(find "$payload" -type f -print0 | LC_ALL=C sort -z)
+          test "$(wc -l < "$handoff/files.tsv" | tr -d ' ')" = "$file_count"
+          jq --raw-input --slurp \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$RELEASE_TAG" \
+            --argjson file_count "$file_count" \
+            --argjson total_size "$total_size" '
+              split("\n") | map(select(length > 0) | split("\t")) as $rows |
+              {schema_version: 1,
+               kind: "latchway_finalizer_public_state_inputs",
+               source_free: true,
+               candidate_commit: $commit,
+               release_tag: $tag,
+               file_count: $file_count,
+               total_size: $total_size,
+               files: ($rows | map({path: .[0], size: (.[1] | tonumber), sha256: .[2]}))}
+            ' "$handoff/files.tsv" > "$handoff/manifest.json"
+          rm "$handoff/files.tsv"
+          jq --exit-status '
+            .source_free == true and
+            (.files | length) == .file_count and
+            ([.files[].path] | unique | length) == .file_count and
+            ([.files[].size] | add) == .total_size and
+            all(.files[];
+              (.path | test("^[A-Za-z0-9._/-]+$")) and
+              (.size | type == "number" and . >= 0 and . <= 536870912) and
+              (.sha256 | test("^[0-9a-f]{64}$")))
+          ' "$handoff/manifest.json" >/dev/null
+          echo "manifest_sha256=$(sha256sum "$handoff/manifest.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Retain authenticated finalizer inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-finalizer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated-inputs
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+      - name: Retain the evidence-only public-state inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-finalizer-public-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-state-inputs
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+
+  immutable-release-settings:
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Preflight protected immutable-release settings without a checkout
+        shell: bash
+        env:
+          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+          for repository in Latchway/latchway Latchway/latchway-js Latchway/latchway-ios-sdk Latchway/latchway-android Latchway/latchway-react-native-sdk; do
+            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
+              -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$repository/immutable-releases" > "$RUNNER_TEMP/immutable-releases.json"
+            jq --exit-status 'type == "object" and (keys | sort) == ["enabled", "enforced_by_owner"] and .enabled == true and (.enforced_by_owner | type) == "boolean"' "$RUNNER_TEMP/immutable-releases.json" >/dev/null
+          done
+
+  capture-public-state:
+    needs: authenticate-inputs
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      packages: read
+    outputs:
+      manifest_sha256: ${{ steps.seal-public-state.outputs.manifest_sha256 }}
+    steps:
+      - name: Download the evidence-only authority inputs without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-finalizer-public-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-state-inputs
+      - name: Validate the bounded source-free authority input closure
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.authenticate-inputs.outputs.public_inputs_manifest_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          handoff="$RUNNER_TEMP/public-state-inputs"
+          payload="$handoff/payload"
+          test -d "$payload" && test ! -L "$payload"
+          test -f "$handoff/manifest.json" && test ! -L "$handoff/manifest.json"
+          [[ "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum "$handoff/manifest.json" | cut -d ' ' -f 1)" = "$EXPECTED_MANIFEST_SHA256"
+          actual_top=$(find "$handoff" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          expected_top=$(printf '%s\n' manifest.json payload | LC_ALL=C sort)
+          test "$actual_top" = "$expected_top"
+          test -z "$(find "$handoff" -type l -print -quit)"
+          test -z "$(find "$handoff" ! -type d ! -type f -print -quit)"
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$RELEASE_TAG" '
+              .schema_version == 1 and
+              .kind == "latchway_finalizer_public_state_inputs" and
+              .source_free == true and
+              .candidate_commit == $commit and .release_tag == $tag and
+              (.file_count | type == "number" and . >= 12 and . <= 4096) and
+              (.total_size | type == "number" and . >= 1 and . <= 2147483648) and
+              (.files | length) == .file_count and
+              ([.files[].path] | unique | length) == .file_count and
+              ([.files[].size] | add) == .total_size and
+              all(.files[];
+                (.path | test("^(candidate|security|conformance)/[A-Za-z0-9._/-]+$")) and
+                (.size | type == "number" and . >= 0 and . <= 536870912) and
+                (.sha256 | test("^[0-9a-f]{64}$")))
+            ' "$handoff/manifest.json" >/dev/null
+          jq --raw-output '.files[].path' "$handoff/manifest.json" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-authority-input-files.txt"
+          find "$payload" -type f -printf '%P\n' \
+            | LC_ALL=C sort > "$RUNNER_TEMP/actual-authority-input-files.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/expected-authority-input-files.txt" \
+            "$RUNNER_TEMP/actual-authority-input-files.txt"
+          actual_total=0
+          while IFS=$'\t' read -r path size sha256; do
+            file="$payload/$path"
+            test -f "$file" && test ! -L "$file"
+            test "$(stat --format=%s "$file")" = "$size"
+            test "$(sha256sum "$file" | cut -d ' ' -f 1)" = "$sha256"
+            actual_total=$((actual_total + size))
+          done < <(jq --raw-output '.files[] | [.path, (.size | tostring), .sha256] | @tsv' "$handoff/manifest.json")
+          test "$actual_total" = "$(jq --raw-output .total_size "$handoff/manifest.json")"
+          test ! -e "$payload/source"
+          cp -R -- "$payload/candidate" "$RUNNER_TEMP/candidate"
+          cp -R -- "$payload/security" "$RUNNER_TEMP/security"
+          cp -R -- "$payload/conformance" "$RUNNER_TEMP/conformance"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
-      - name: Verify exact public tag release OCI and npm state
+      - name: Capture and authenticate exact public tag release OCI and npm state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ github.actor }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -331,13 +523,6 @@ jobs:
             gh release verify-asset "$RELEASE_TAG" "$asset" --format json \
               > "$RUNNER_TEMP/product-release-asset-${name}.json"
           done < "$RUNNER_TEMP/fixed-product-release-assets.txt"
-          python3 scripts/verify-github-release-attestation.py \
-            --attestation "$RUNNER_TEMP/product-release-attestation.json" \
-            --release "$RUNNER_TEMP/release.json" \
-            --repository "$GITHUB_REPOSITORY" \
-            --tag "$RELEASE_TAG" \
-            --ref-sha "$tag_object" \
-            --output "$RUNNER_TEMP/product-release-attestation-verification.json"
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
             > "$RUNNER_TEMP/final-product-tag-ref.json"
           cmp --silent \
@@ -360,6 +545,19 @@ jobs:
             "$RUNNER_TEMP/tag-object.json" >/dev/null
           image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
           [[ "$image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          export DOCKER_CONFIG="$RUNNER_TEMP/public-state-docker-config"
+          mkdir -m 0700 "$DOCKER_CONFIG"
+          logged_in=false
+          cleanup_registry() {
+            if [[ "$logged_in" == true ]]; then
+              docker logout ghcr.io >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup_registry EXIT
+          test -n "$REGISTRY_USER" && test "${#REGISTRY_USER}" -le 128
+          [[ "$REGISTRY_USER" != *$'\n'* && "$REGISTRY_USER" != *$'\r'* ]]
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin >/dev/null
+          logged_in=true
           docker buildx imagetools inspect --raw "$image" > "$RUNNER_TEMP/oci-index.json"
           actual="sha256:$(sha256sum "$RUNNER_TEMP/oci-index.json" | cut -d ' ' -f 1)"
           test "$actual" = "${image##*@}"
@@ -428,6 +626,321 @@ jobs:
              (.dist.signatures | type == "array" and length > 0) and
              (.dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1")' \
             "$RUNNER_TEMP/npm-react-native.json" >/dev/null
+          docker logout ghcr.io >/dev/null
+          logged_in=false
+          test -f "$RUNNER_TEMP/product-release-attestation.json"
+          test ! -L "$RUNNER_TEMP/product-release-attestation.json"
+          attestation_size=$(stat --format=%s "$RUNNER_TEMP/product-release-attestation.json")
+          test "$attestation_size" -ge 1 && test "$attestation_size" -le 16777216
+          jq --null-input --sort-keys \
+            --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" \
+            --arg tag_object "$tag_object" --arg promotion_sha256 "$promotion_sha256" \
+            --arg image "$image" \
+            --argjson release_id "$(jq .id "$RUNNER_TEMP/release.json")" \
+            --arg product_release_attestation_sha256 "$(sha256sum "$RUNNER_TEMP/product-release-attestation.json" | cut -d ' ' -f 1)" \
+            --arg promotion_asset_sha256 "$(sha256sum "$promotion" | cut -d ' ' -f 1)" \
+            --arg oci_alias_state_sha256 "$(sha256sum "$RUNNER_TEMP/oci-alias-state.json" | cut -d ' ' -f 1)" \
+            --arg npm_javascript_sha256 "$(sha256sum "$RUNNER_TEMP/npm-javascript.json" | cut -d ' ' -f 1)" \
+            --arg npm_react_native_sha256 "$(sha256sum "$RUNNER_TEMP/npm-react-native.json" | cut -d ' ' -f 1)" \
+            '{schema_version: 1, kind: "latchway_finalizer_public_state_authority",
+              source_free: true, candidate_commit: $commit, release_tag: $tag,
+              tag_object_sha: $tag_object, release_id: $release_id,
+              promotion_evidence_sha256: $promotion_sha256,
+              oci_image_digest: $image,
+              captured_sha256: {
+                product_release_attestation: $product_release_attestation_sha256,
+                promotion_asset: $promotion_asset_sha256,
+                oci_alias_state: $oci_alias_state_sha256,
+                npm_javascript: $npm_javascript_sha256,
+                npm_react_native: $npm_react_native_sha256}}' \
+            > "$RUNNER_TEMP/public-state-authority.json"
+      - name: Seal the strict hash-bound public-state handoff
+        id: seal-public-state
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          handoff="$RUNNER_TEMP/public-state-authority-handoff"
+          payload="$handoff/payload"
+          mkdir -p "$payload"
+          install -m 0600 -- "$RUNNER_TEMP/public-state-authority.json" "$payload/authority.json"
+          install -m 0600 -- "$RUNNER_TEMP/tag-ref.json" "$payload/tag-ref.json"
+          install -m 0600 -- "$RUNNER_TEMP/tag-object.json" "$payload/tag-object.json"
+          install -m 0600 -- "$RUNNER_TEMP/release.json" "$payload/release.json"
+          install -m 0600 -- "$RUNNER_TEMP/product-release-attestation.json" "$payload/product-release-attestation.json"
+          install -m 0600 -- "$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.json" "$payload/promotion.json"
+          install -m 0600 -- "$RUNNER_TEMP/oci-alias-state.json" "$payload/oci-alias-state.json"
+          install -m 0600 -- "$RUNNER_TEMP/npm-javascript.json" "$payload/npm-javascript.json"
+          install -m 0600 -- "$RUNNER_TEMP/npm-react-native.json" "$payload/npm-react-native.json"
+          test -z "$(find "$payload" -type l -print -quit)"
+          test -z "$(find "$payload" ! -type d ! -type f -print -quit)"
+          file_count=$(find "$payload" -type f | wc -l | tr -d ' ')
+          total_size=$(find "$payload" -type f -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')
+          test "$file_count" = 9
+          test "$total_size" -ge 1 && test "$total_size" -le 134217728
+          : > "$handoff/files.tsv"
+          while IFS= read -r -d '' file; do
+            relative=${file#"$payload/"}
+            [[ "$relative" =~ ^[A-Za-z0-9._-]+$ ]]
+            size=$(stat --format=%s "$file")
+            test "$size" -ge 1 && test "$size" -le 33554432
+            printf '%s\t%s\t%s\n' "$relative" "$size" "$(sha256sum "$file" | cut -d ' ' -f 1)" >> "$handoff/files.tsv"
+          done < <(find "$payload" -type f -print0 | LC_ALL=C sort -z)
+          jq --raw-input --slurp --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" --argjson total_size "$total_size" '
+            split("\n") | map(select(length > 0) | split("\t")) as $rows |
+            {schema_version: 1, kind: "latchway_finalizer_public_state_handoff",
+             source_free: true, candidate_commit: $commit, release_tag: $tag,
+             file_count: 9, total_size: $total_size,
+             files: ($rows | map({path: .[0], size: (.[1] | tonumber), sha256: .[2]}))}
+          ' "$handoff/files.tsv" > "$handoff/manifest.json"
+          rm "$handoff/files.tsv"
+          jq --exit-status '
+            .source_free == true and .file_count == 9 and
+            (.files | length) == 9 and ([.files[].path] | unique | length) == 9 and
+            ([.files[].size] | add) == .total_size and
+            ([.files[].path] | sort) == [
+              "authority.json", "npm-javascript.json", "npm-react-native.json",
+              "oci-alias-state.json", "product-release-attestation.json",
+              "promotion.json", "release.json", "tag-object.json", "tag-ref.json"] and
+            all(.files[];
+              (.path | test("^[A-Za-z0-9._-]+$")) and
+              (.size | type == "number" and . >= 1 and . <= 33554432) and
+              (.sha256 | test("^[0-9a-f]{64}$")))
+          ' "$handoff/manifest.json" >/dev/null
+          echo "manifest_sha256=$(sha256sum "$handoff/manifest.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Retain the source-free public-state authority handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-finalizer-public-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-state-authority-handoff
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 1
+
+  prepare:
+    needs: [authenticate-inputs, capture-public-state, immutable-release-settings]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions: {}
+    steps:
+      - name: Download authenticated finalizer inputs on a fresh runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-finalizer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated-inputs
+      - name: Download the source-free public-state authority handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-finalizer-public-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-state
+      - name: Validate the exact public-state handoff before candidate execution
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.capture-public-state.outputs.manifest_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          for variable in GH_TOKEN GITHUB_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN INDEPENDENT_SECURITY_REVIEW_TOKEN; do
+            test -z "${!variable:-}"
+          done
+          handoff="$RUNNER_TEMP/public-state"
+          payload="$handoff/payload"
+          test -d "$payload" && test ! -L "$payload"
+          test -f "$handoff/manifest.json" && test ! -L "$handoff/manifest.json"
+          [[ "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum "$handoff/manifest.json" | cut -d ' ' -f 1)" = "$EXPECTED_MANIFEST_SHA256"
+          actual_top=$(find "$handoff" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          expected_top=$(printf '%s\n' manifest.json payload | LC_ALL=C sort)
+          test "$actual_top" = "$expected_top"
+          test -z "$(find "$handoff" -type l -print -quit)"
+          test -z "$(find "$handoff" ! -type d ! -type f -print -quit)"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and .kind == "latchway_finalizer_public_state_handoff" and
+            .source_free == true and .candidate_commit == $commit and .release_tag == $tag and
+            .file_count == 9 and
+            (.total_size | type == "number" and . >= 1 and . <= 134217728) and
+            (.files | length) == 9 and ([.files[].path] | unique | length) == 9 and
+            ([.files[].size] | add) == .total_size and
+            ([.files[].path] | sort) == [
+              "authority.json", "npm-javascript.json", "npm-react-native.json",
+              "oci-alias-state.json", "product-release-attestation.json",
+              "promotion.json", "release.json", "tag-object.json", "tag-ref.json"] and
+            all(.files[];
+              (.path | test("^[A-Za-z0-9._-]+$")) and
+              (.size | type == "number" and . >= 1 and . <= 33554432) and
+              (.sha256 | test("^[0-9a-f]{64}$")))
+          ' "$handoff/manifest.json" >/dev/null
+          jq --raw-output '.files[].path' "$handoff/manifest.json" | LC_ALL=C sort > "$RUNNER_TEMP/expected-public-state-files.txt"
+          find "$payload" -type f -printf '%P\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-public-state-files.txt"
+          diff --unified=0 "$RUNNER_TEMP/expected-public-state-files.txt" "$RUNNER_TEMP/actual-public-state-files.txt"
+          actual_total=0
+          while IFS=$'\t' read -r path size sha256; do
+            file="$payload/$path"
+            test -f "$file" && test ! -L "$file"
+            test "$(stat --format=%s "$file")" = "$size"
+            test "$(sha256sum "$file" | cut -d ' ' -f 1)" = "$sha256"
+            actual_total=$((actual_total + size))
+          done < <(jq --raw-output '.files[] | [.path, (.size | tostring), .sha256] | @tsv' "$handoff/manifest.json")
+          test "$actual_total" = "$(jq --raw-output .total_size "$handoff/manifest.json")"
+          authority="$payload/authority.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and .kind == "latchway_finalizer_public_state_authority" and
+            .source_free == true and .candidate_commit == $commit and .release_tag == $tag and
+            (.tag_object_sha | test("^[0-9a-f]{40}$")) and
+            (.release_id | type == "number" and . > 0) and
+            (.promotion_evidence_sha256 | test("^[0-9a-f]{64}$")) and
+            (.oci_image_digest | test("^ghcr.io/latchway/latchway@sha256:[0-9a-f]{64}$")) and
+            (.captured_sha256 | keys | sort) == [
+              "npm_javascript", "npm_react_native", "oci_alias_state",
+              "product_release_attestation", "promotion_asset"] and
+            all(.captured_sha256[]; test("^[0-9a-f]{64}$"))
+          ' "$authority" >/dev/null
+          for pair in \
+            product_release_attestation:product-release-attestation.json \
+            promotion_asset:promotion.json \
+            oci_alias_state:oci-alias-state.json \
+            npm_javascript:npm-javascript.json \
+            npm_react_native:npm-react-native.json; do
+            key=${pair%%:*}
+            file=${pair#*:}
+            test "$(sha256sum "$payload/$file" | cut -d ' ' -f 1)" = "$(jq --raw-output ".captured_sha256.$key" "$authority")"
+          done
+      - name: Materialize authenticated candidate verification tooling without credentials
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          for variable in GH_TOKEN GITHUB_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN INDEPENDENT_SECURITY_REVIEW_TOKEN; do
+            test -z "${!variable:-}"
+          done
+          (cd "$RUNNER_TEMP/authenticated-inputs" && sha256sum --check source.sha256)
+          mkdir -p "$GITHUB_WORKSPACE/.git"
+          tar -xzf "$RUNNER_TEMP/authenticated-inputs/source/latchway.source.tar.gz" -C "$GITHUB_WORKSPACE"
+          tar -xzf "$RUNNER_TEMP/authenticated-inputs/source/latchway.git.tar.gz" -C "$GITHUB_WORKSPACE/.git"
+          git -C "$GITHUB_WORKSPACE" config core.bare false
+          git -C "$GITHUB_WORKSPACE" config core.worktree "$GITHUB_WORKSPACE"
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain=v1 --untracked-files=all)"
+          cp -R -- "$RUNNER_TEMP/authenticated-inputs/candidate" "$RUNNER_TEMP/candidate"
+          cp -R -- "$RUNNER_TEMP/authenticated-inputs/security" "$RUNNER_TEMP/security"
+          cp -R -- "$RUNNER_TEMP/authenticated-inputs/conformance" "$RUNNER_TEMP/conformance"
+      - name: Recompute the candidate and security gates offline
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/release-candidate.py \
+            --verify --manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --commit "$CANDIDATE_COMMIT" --tag "$RELEASE_TAG" \
+            --image ghcr.io/latchway/latchway
+          python3 scripts/security-evidence.py \
+            --verify --report "$RUNNER_TEMP/security/security-summary.json" \
+            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --raw-directory "$RUNNER_TEMP/security/raw" \
+            --review-directory "$RUNNER_TEMP/security/independent-review" \
+            --promotion-directory "$RUNNER_TEMP/security/promotion-conformance" \
+            --repository "$GITHUB_WORKSPACE" --commit "$CANDIDATE_COMMIT" --tag "$RELEASE_TAG"
+
+      - name: Validate the captured public state with candidate tooling offline
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          for variable in GH_TOKEN GITHUB_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN INDEPENDENT_SECURITY_REVIEW_TOKEN; do
+            test -z "${!variable:-}"
+          done
+          public="$RUNNER_TEMP/public-state/payload"
+          authority="$public/authority.json"
+          report="$RUNNER_TEMP/conformance/latchway-cross-repository.json"
+          candidate="$RUNNER_TEMP/candidate/latchway-candidate.json"
+          promotion="$public/promotion.json"
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = \
+            "$(jq --raw-output .promotion_evidence_sha256 "$authority")"
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = \
+            "$(jq --raw-output .promotion_conformance.report_sha256 "$RUNNER_TEMP/security/security-summary.json")"
+          cmp --silent \
+            "$promotion" \
+            "$RUNNER_TEMP/security/promotion-conformance/latchway-cross-repository.json"
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+            "$public/tag-ref.json")
+          test "$tag_object" = "$(jq --raw-output .tag_object_sha "$authority")"
+          test "$(jq --raw-output .object.type "$public/tag-ref.json")" = tag
+          jq --exit-status --arg tag "$RELEASE_TAG" --arg commit "$CANDIDATE_COMMIT" \
+            '.tag == $tag and .object.type == "commit" and .object.sha == $commit' \
+            "$public/tag-object.json" >/dev/null
+          promotion_sha256=$(sha256sum "$promotion" | cut -d ' ' -f 1)
+          expected_body="Immutable Latchway product release $RELEASE_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $promotion_sha256"
+          jq --exit-status \
+            --arg tag "$RELEASE_TAG" --arg body "$expected_body" \
+            --argjson release_id "$(jq .release_id "$authority")" \
+            '.id == $release_id and .tag_name == $tag and
+             .name == ("Latchway " + $tag) and .body == $body and
+             .draft == false and .prerelease == false and .immutable == true and
+             (.published_at | type == "string" and
+              test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' \
+            "$public/release.json" >/dev/null
+          python3 scripts/verify-github-release-attestation.py \
+            --attestation "$public/product-release-attestation.json" \
+            --release "$public/release.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --ref-sha "$tag_object" \
+            --output "$RUNNER_TEMP/product-release-attestation-verification.json"
+          image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
+          test "$image" = "$(jq --raw-output .oci_image_digest "$authority")"
+          test "$image" = "$(jq --raw-output .contract.oci_image_digest "$report")"
+          version=${RELEASE_TAG#v}
+          IFS=. read -r major minor patch <<< "$version"
+          jq --exit-status \
+            --arg version "$version" --arg mm "$major.$minor" --arg m "$major" \
+            --arg digest "${image##*@}" '
+              .immutable_version == $version and
+              (.references | keys | sort) == ([$version, $mm, $m, "latest"] | sort) and
+              .references[$version] == {
+                reference: ("ghcr.io/latchway/latchway:" + $version), digest: $digest} and
+              .references[$mm] == {
+                reference: ("ghcr.io/latchway/latchway:" + $mm), digest: $digest} and
+              .references[$m] == {
+                reference: ("ghcr.io/latchway/latchway:" + $m), digest: $digest} and
+              .references.latest == {
+                reference: "ghcr.io/latchway/latchway:latest", digest: $digest}
+            ' "$public/oci-alias-state.json" >/dev/null
+          javascript_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
+          react_native_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
+          jq --exit-status --arg version "$javascript_version" \
+            '.name == "@latchway/client" and .version == $version and
+             (.dist.integrity | startswith("sha512-")) and
+             ._npmUser.trustedPublisher.id == "github" and
+             (.dist.signatures | type == "array" and length > 0) and
+             .dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' \
+            "$public/npm-javascript.json" >/dev/null
+          jq --exit-status --arg version "$react_native_version" \
+            '.name == "@latchway/react-native" and .version == $version and
+             (.dist.integrity | startswith("sha512-")) and
+             ._npmUser.trustedPublisher.id == "github" and
+             (.dist.signatures | type == "array" and length > 0) and
+             .dist.attestations.provenance.predicateType == "https://slsa.dev/provenance/v1"' \
+            "$public/npm-react-native.json" >/dev/null
+          mkdir -p "$RUNNER_TEMP/promotion-release-assets"
+          install -m 0600 -- "$promotion" \
+            "$RUNNER_TEMP/promotion-release-assets/latchway-cross-repository-promotion.json"
+          install -m 0600 -- "$public/tag-ref.json" "$RUNNER_TEMP/tag-ref.json"
+          install -m 0600 -- "$public/release.json" "$RUNNER_TEMP/release.json"
+          install -m 0600 -- "$public/oci-alias-state.json" "$RUNNER_TEMP/oci-alias-state.json"
       - name: Seal verified public coordinates for the offline renderer
         shell: bash
         env:
@@ -536,41 +1049,650 @@ jobs:
             "$RUNNER_TEMP/security/security-summary.attestation.sigstore.json" \
             "$durable_root/security/security-summary.attestation.sigstore.json"
           cp -R -- "$RUNNER_TEMP/security/raw" "$durable_root/security/raw"
+          cp -R -- "$RUNNER_TEMP/security/independent-review" \
+            "$durable_root/security/independent-review"
+          cp -R -- "$RUNNER_TEMP/security/promotion-conformance" \
+            "$durable_root/security/promotion-conformance"
           cp -R -- "$RUNNER_TEMP/conformance/latchway-external-evidence" \
             "$durable_root/external/latchway-external-evidence"
           install -m 0600 -- \
             "$GITHUB_WORKSPACE/docs/release/final-report-metadata.json" \
             "$durable_root/source/final-report-metadata.json"
-          chmod -R u=rwX,go= "$durable_root"
+          test -z "$(find "$durable_root" -type l -print -quit)"
+          test -z "$(find "$durable_root" ! -type d ! -type f -print -quit)"
+          find "$durable_root" -type d -exec chmod 0700 {} +
+          find "$durable_root" -type f -exec chmod 0600 {} +
           tar --sort=name --format=ustar --mtime='UTC 1970-01-01' \
             --owner=0 --group=0 --numeric-owner -cf - \
             -C "$durable_parent" latchway-release-evidence-v1 \
             | gzip -n > "$destination/latchway-release-evidence-v1.tar.gz"
           test -s "$destination/latchway-release-evidence-v1.tar.gz"
-      - name: Render the deterministic final completion report
+      - name: Retain data-only final-record inputs for independent finalization
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-finalizer-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/final-release-record/
+            ${{ runner.temp }}/publication-state.json
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 1
+
+  finalize:
+    needs: [authenticate-inputs, prepare]
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Download validated final-record inputs on a fresh no-checkout runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-finalizer-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}
+      - name: Download the authenticated evidence-only authority inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-finalizer-public-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finalizer-authority-inputs
+      - name: Validate prepared bytes and exact release coordinates without candidate tooling
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -d "$RUNNER_TEMP/final-release-record"
+          test ! -L "$RUNNER_TEMP/final-release-record"
+          test ! -e "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
+          test -f "$RUNNER_TEMP/publication-state.json"
+          test ! -L "$RUNNER_TEMP/publication-state.json"
+          test -s "$RUNNER_TEMP/publication-state.json"
+          test -z "$(find "$RUNNER_TEMP/final-release-record" -type l -print -quit)"
+          test "$(find "$RUNNER_TEMP/final-release-record" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 6
+          test "$(find "$RUNNER_TEMP/final-release-record" -mindepth 1 -type d | wc -l | tr -d ' ')" = 0
+          actual_files=$(find "$RUNNER_TEMP/final-release-record" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          expected_files=$(printf '%s\n' \
+            latchway-cross-repository-release.attestation.sigstore.json \
+            latchway-cross-repository-release.json \
+            latchway-product-release-attestation.json \
+            latchway-public-registry-byte-proof.json \
+            latchway-publication-state.json \
+            latchway-release-evidence-v1.tar.gz | LC_ALL=C sort)
+          test "$actual_files" = "$expected_files"
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          report="$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json"
+          report_bundle="$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json"
+          gh attestation verify "$report" --bundle "$report_bundle" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/finalizer-conformance-attestation-verification.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and
+            .kind == "latchway_cross_repository_conformance_evidence" and
+            .scope == "release" and .verdict == "passed" and
+            .source_conformance_passed == true and .promotion_ready == true and
+            .release_ready == true and
+            .contract.core_release == $tag and
+            ([.repositories[] |
+              select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length == 1) and
+            ([.evidence_domains[] |
+              select((.id == "public_tags" or .id == "public_registries") and
+                     .required == true and .status == "passed")] | length == 2)
+          ' "$report" >/dev/null
+          publication="$RUNNER_TEMP/publication-state.json"
+          test "$(sha256sum "$RUNNER_TEMP/final-release-record/latchway-product-release-attestation.json" | cut -d ' ' -f 1)" = \
+            "$(jq --raw-output '.github_release.release_attestation_sha256' "$publication")"
+          jq --exit-status --arg repository "$GITHUB_REPOSITORY" --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and .kind == "latchway_public_release_state" and
+            .repository == $repository and .core_commit == $commit and .core_tag == $tag and
+            (.tag_object_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+            (.promotion_evidence_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+            .github_release.tag_name == $tag and .github_release.draft == false and
+            .github_release.prerelease == false and .github_release.immutable == true and
+            (.github_release.id | type == "number" and . > 0) and
+            (.github_release.assets | type == "array" and length > 0) and
+            (.oci_image_digest | type == "string" and
+             test("^ghcr.io/latchway/latchway@sha256:[0-9a-f]{64}$"))
+          ' "$publication" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and
+            .kind == "latchway_public_registry_byte_proof_verification" and
+            .candidate_commit == $commit and .release_tag == $tag and .status == "passed" and
+            (.proofs | keys | sort) == ["android", "ios", "javascript", "oci", "react_native"] and
+            all(.proofs[];
+              type == "object" and (keys | sort) == ["path", "sha256"] and
+              (.path | type == "string" and length > 0) and
+              (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
+          ' "$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" >/dev/null
+          jq --exit-status --arg repository "$GITHUB_REPOSITORY" --arg tag "$RELEASE_TAG" '
+            .schema_version == 1 and
+            .kind == "latchway_github_release_attestation_verification" and
+            .repository == $repository and .tag == $tag and
+            (.ref_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+            (.release_id | type == "number" and . > 0) and
+            (.attestation_bundle | type == "object") and
+            (.assets | type == "array" and length > 0) and
+            ([.assets[].name] | unique | length) == (.assets | length) and
+            all(.assets[];
+              type == "object" and (keys | sort) == ["name", "sha256"] and
+              (.name | type == "string" and length > 0) and
+              (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
+          ' "$RUNNER_TEMP/final-release-record/latchway-product-release-attestation.json" >/dev/null
+      - name: Independently recompute registry proof and verify the durable archive
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_AUTHORITY_MANIFEST_SHA256: ${{ needs.authenticate-inputs.outputs.public_inputs_manifest_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          python3 - \
+            "$RUNNER_TEMP/finalizer-authority-inputs" \
+            "$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz" \
+            "$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
+            "$RUNNER_TEMP/independently-recomputed-public-registry-proof.json" \
+            "$CANDIDATE_COMMIT" "$RELEASE_TAG" \
+            "$EXPECTED_AUTHORITY_MANIFEST_SHA256" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import re
+          import stat
+          import sys
+          import tarfile
+
+          authority = Path(sys.argv[1])
+          archive = Path(sys.argv[2])
+          prepared_proof = Path(sys.argv[3])
+          recomputed_proof = Path(sys.argv[4])
+          candidate_commit = sys.argv[5]
+          release_tag = sys.argv[6]
+          authority_manifest_sha256 = sys.argv[7]
+          sha256_re = re.compile(r"[0-9a-f]{64}")
+          commit_re = re.compile(r"[0-9a-f]{40}")
+          tag_re = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+          path_re = re.compile(r"[A-Za-z0-9._/-]+")
+          max_file = 512 * 1024 * 1024
+          max_json = 32 * 1024 * 1024
+          max_total = 2 * 1024 * 1024 * 1024
+          max_files = 8192
+          metadata_sha256 = "83e27abd447146714e62cf4e194430cb9c9a327f2632c7ea2ff5d0023ffdf7d0"
+
+          class Rejected(Exception):
+              pass
+
+          def reject(message):
+              raise Rejected(message)
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      reject("duplicate JSON key")
+                  value[key] = item
+              return value
+
+          def sha256_bytes(value):
+              return hashlib.sha256(value).hexdigest()
+
+          def sha256_file(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          def regular_metadata(path, *, allow_empty=False, maximum=max_file):
+              try:
+                  metadata = path.lstat()
+              except OSError as error:
+                  raise Rejected(f"missing file: {path}") from error
+              if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                  reject(f"non-regular file: {path}")
+              if metadata.st_size > maximum or (metadata.st_size == 0 and not allow_empty):
+                  reject(f"invalid file size: {path}")
+              return metadata
+
+          def read_regular(path, *, allow_empty=False, maximum=max_file):
+              regular_metadata(path, allow_empty=allow_empty, maximum=maximum)
+              return path.read_bytes()
+
+          def read_json(path):
+              try:
+                  value = json.loads(
+                      read_regular(path, maximum=max_json).decode("utf-8"),
+                      object_pairs_hook=strict_object,
+                      parse_constant=lambda value: reject("non-finite JSON number"),
+                  )
+              except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                  raise Rejected(f"invalid JSON: {path}") from error
+              if not isinstance(value, dict):
+                  reject(f"JSON root is not an object: {path}")
+              return value
+
+          def safe_relative(raw):
+              if not isinstance(raw, str) or not raw or not path_re.fullmatch(raw):
+                  reject("invalid relative path")
+              relative = PurePosixPath(raw)
+              if (
+                  relative.is_absolute()
+                  or relative.as_posix() != raw
+                  or any(part in {"", ".", ".."} for part in relative.parts)
+              ):
+                  reject("unsafe relative path")
+              return relative
+
+          def regular_tree(root):
+              result = {}
+              for current, directories, files in os.walk(root, followlinks=False):
+                  current_path = Path(current)
+                  for name in list(directories):
+                      path = current_path / name
+                      metadata = path.lstat()
+                      if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                          reject(f"unsafe directory: {path}")
+                  for name in files:
+                      path = current_path / name
+                      regular_metadata(path, allow_empty=True)
+                      relative = path.relative_to(root).as_posix()
+                      safe_relative(relative)
+                      if relative in result:
+                          reject("duplicate tree path")
+                      result[relative] = path
+              return result
+
+          if not commit_re.fullmatch(candidate_commit) or not tag_re.fullmatch(release_tag):
+              reject("invalid release identity")
+          if not sha256_re.fullmatch(authority_manifest_sha256):
+              reject("invalid authority manifest hash")
+          if not authority.is_dir() or authority.is_symlink():
+              reject("authority handoff is not a regular directory")
+          if {path.name for path in authority.iterdir()} != {"manifest.json", "payload"}:
+              reject("authority handoff top-level closure mismatch")
+          payload = authority / "payload"
+          if not payload.is_dir() or payload.is_symlink():
+              reject("authority payload is not a regular directory")
+          manifest_bytes = read_regular(authority / "manifest.json", maximum=max_json)
+          if sha256_bytes(manifest_bytes) != authority_manifest_sha256:
+              reject("authority manifest hash mismatch")
+          manifest = read_json(authority / "manifest.json")
+          manifest_files = manifest.get("files")
+          if (
+              set(manifest) != {
+                  "schema_version", "kind", "source_free", "candidate_commit",
+                  "release_tag", "file_count", "total_size", "files",
+              }
+              or manifest.get("schema_version") != 1
+              or manifest.get("kind") != "latchway_finalizer_public_state_inputs"
+              or manifest.get("source_free") is not True
+              or manifest.get("candidate_commit") != candidate_commit
+              or manifest.get("release_tag") != release_tag
+              or not isinstance(manifest_files, list)
+              or not 12 <= manifest.get("file_count", -1) <= 4096
+              or len(manifest_files) != manifest["file_count"]
+              or not 1 <= manifest.get("total_size", -1) <= max_total
+          ):
+              reject("authority manifest schema mismatch")
+          payload_tree = regular_tree(payload)
+          declared = {}
+          declared_total = 0
+          for item in manifest_files:
+              if not isinstance(item, dict) or set(item) != {"path", "size", "sha256"}:
+                  reject("invalid authority file entry")
+              relative = safe_relative(item.get("path"))
+              path = relative.as_posix()
+              if relative.parts[0] not in {"candidate", "security", "conformance"}:
+                  reject("candidate source crossed the authority boundary")
+              size = item.get("size")
+              expected = item.get("sha256")
+              if (
+                  path in declared
+                  or not isinstance(size, int)
+                  or isinstance(size, bool)
+                  or not 0 <= size <= max_file
+                  or not isinstance(expected, str)
+                  or not sha256_re.fullmatch(expected)
+                  or path not in payload_tree
+                  or payload_tree[path].stat().st_size != size
+                  or sha256_file(payload_tree[path]) != expected
+              ):
+                  reject("authority file closure or hash mismatch")
+              declared[path] = expected
+              declared_total += size
+          if set(declared) != set(payload_tree) or declared_total != manifest["total_size"]:
+              reject("authority payload closure mismatch")
+          forbidden_source_names = {
+              "latchway.source.tar.gz", "latchway.git.tar.gz", "source.tar.gz",
+          }
+          if any(PurePosixPath(path).name in forbidden_source_names for path in payload_tree):
+              reject("candidate source archive crossed the authority boundary")
+
+          external = payload / "conformance/latchway-external-evidence"
+          aggregate = read_json(external / "aggregate-manifest.json")
+          aggregate_files = aggregate.get("files")
+          if (
+              set(aggregate) != {
+                  "schema_version", "kind", "scope", "candidate_commit",
+                  "domains", "identity", "files",
+              }
+              or aggregate.get("schema_version") != 1
+              or aggregate.get("kind") != "latchway_external_evidence_aggregate"
+              or aggregate.get("scope") != "release"
+              or aggregate.get("candidate_commit") != candidate_commit
+              or "public_registries" not in aggregate.get("domains", [])
+              or not isinstance(aggregate_files, list)
+              or not aggregate_files
+          ):
+              reject("aggregate manifest identity mismatch")
+          aggregate_tree = regular_tree(external)
+          aggregate_hashes = {}
+          for item in aggregate_files:
+              if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+                  reject("invalid aggregate file entry")
+              relative = safe_relative(item.get("path")).as_posix()
+              expected = item.get("sha256")
+              if (
+                  relative in aggregate_hashes
+                  or not isinstance(expected, str)
+                  or not sha256_re.fullmatch(expected)
+                  or relative not in aggregate_tree
+                  or sha256_file(aggregate_tree[relative]) != expected
+              ):
+                  reject("aggregate file closure or hash mismatch")
+              aggregate_hashes[relative] = expected
+          if set(aggregate_tree) != set(aggregate_hashes) | {
+              "aggregate-manifest.json",
+              "aggregate-manifest.attestation.sigstore.json",
+          }:
+              reject("aggregate tree is not exact")
+          registry = read_json(external / "public_registries.json")
+          if (
+              registry.get("schema_version") != 1
+              or registry.get("kind") != "latchway_cross_repository_external_evidence"
+              or registry.get("domain") != "public_registries"
+              or registry.get("status") != "passed"
+              or registry.get("core_commit") != candidate_commit
+              or registry.get("core_release") != release_tag
+              or not isinstance(registry.get("repositories"), dict)
+              or not isinstance(registry.get("claims"), dict)
+              or not registry["claims"]
+              or any(value is not True for value in registry["claims"].values())
+              or not isinstance(registry.get("artifacts"), list)
+          ):
+              reject("registry domain identity mismatch")
+          suffixes = {
+              "oci": "artifacts--registry-oci--tool-output.json",
+              "javascript": "artifacts--registry-npm-javascript--tool-output.json",
+              "react_native": "artifacts--registry-npm-react-native--tool-output.json",
+              "ios": "artifacts--registry-cocoapods--tool-output.json",
+              "android": "artifacts--registry-maven-central--tool-output.json",
+          }
+          proofs = {}
+          for name, suffix in suffixes.items():
+              matches = [
+                  item for item in registry["artifacts"]
+                  if isinstance(item, dict) and str(item.get("path", "")).endswith(suffix)
+              ]
+              if len(matches) != 1 or set(matches[0]) != {"path", "sha256"}:
+                  reject(f"missing exact {name} registry artifact")
+              relative = safe_relative(matches[0]["path"]).as_posix()
+              expected = matches[0]["sha256"]
+              if (
+                  not isinstance(expected, str)
+                  or not sha256_re.fullmatch(expected)
+                  or aggregate_hashes.get(relative) != expected
+                  or relative not in aggregate_tree
+                  or sha256_file(aggregate_tree[relative]) != expected
+              ):
+                  reject(f"{name} registry artifact hash mismatch")
+              proofs[name] = {"path": relative, "sha256": expected}
+          result = {
+              "schema_version": 1,
+              "kind": "latchway_public_registry_byte_proof_verification",
+              "candidate_commit": candidate_commit,
+              "release_tag": release_tag,
+              "status": "passed",
+              "proofs": proofs,
+          }
+          canonical_proof = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+          if read_regular(prepared_proof, maximum=max_json) != canonical_proof:
+              reject("candidate-produced registry proof differs from independent recomputation")
+          if recomputed_proof.exists() or recomputed_proof.is_symlink():
+              reject("recomputed proof output already exists")
+          recomputed_proof.write_bytes(canonical_proof)
+
+          expected_archive = {
+              "candidate/latchway-candidate.json": declared["candidate/latchway-candidate.json"],
+              "candidate/latchway-candidate.attestation.sigstore.json": declared["candidate/latchway-candidate.attestation.sigstore.json"],
+              "security/latchway-candidate.json": declared["candidate/latchway-candidate.json"],
+              "security/security-summary.json": declared["security/security-summary.json"],
+              "security/security-summary.attestation.sigstore.json": declared["security/security-summary.attestation.sigstore.json"],
+          }
+          subtree_mappings = (
+              ("security/raw/", "security/raw/"),
+              ("security/independent-review/", "security/independent-review/"),
+              ("security/promotion-conformance/", "security/promotion-conformance/"),
+              ("conformance/latchway-external-evidence/", "external/latchway-external-evidence/"),
+          )
+          for source_prefix, archive_prefix in subtree_mappings:
+              matches = 0
+              for path in payload_tree:
+                  if path.startswith(source_prefix):
+                      expected_archive[archive_prefix + path.removeprefix(source_prefix)] = declared[path]
+                      matches += 1
+              if matches == 0:
+                  reject(f"required durable subtree is empty: {source_prefix}")
+          if len(expected_archive) > max_files:
+              reject("durable archive file count is unbounded")
+          regular_metadata(archive, maximum=max_total)
+          prefix = "latchway-release-evidence-v1"
+          seen_files = set()
+          seen_directories = set()
+          expected_directories = {prefix}
+          for path in expected_archive:
+              relative = PurePosixPath(path)
+              for parent in relative.parents:
+                  if parent.as_posix() != ".":
+                      expected_directories.add(f"{prefix}/{parent.as_posix()}")
+          expected_directories.add(f"{prefix}/source")
+          expected_file_names = {f"{prefix}/{path}" for path in expected_archive} | {
+              f"{prefix}/source/final-report-metadata.json"
+          }
+          total_uncompressed = 0
+          try:
+              with tarfile.open(archive, mode="r:gz") as bundle:
+                  members = bundle.getmembers()
+                  if len(members) > max_files * 2:
+                      reject("durable archive member count is unbounded")
+                  for member in members:
+                      name = member.name.rstrip("/")
+                      if not name or member.name.startswith("/") or "\\" in member.name:
+                          reject("unsafe durable archive member")
+                      safe_relative(name)
+                      if member.isdir():
+                          if (
+                              name in seen_directories
+                              or name not in expected_directories
+                              or member.uid != 0
+                              or member.gid != 0
+                              or member.mtime != 0
+                              or stat.S_IMODE(member.mode) != 0o700
+                          ):
+                              reject("durable archive directory mismatch")
+                          seen_directories.add(name)
+                          continue
+                      if (
+                          not member.isfile()
+                          or name in seen_files
+                          or name not in expected_file_names
+                          or member.uid != 0
+                          or member.gid != 0
+                          or member.mtime != 0
+                          or stat.S_IMODE(member.mode) != 0o600
+                          or not 0 <= member.size <= max_file
+                      ):
+                          reject("durable archive file metadata mismatch")
+                      source = bundle.extractfile(member)
+                      if source is None:
+                          reject("durable archive file is unreadable")
+                      digest = hashlib.sha256()
+                      size = 0
+                      for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                          size += len(chunk)
+                          if size > max_file:
+                              reject("durable archive file exceeds its bound")
+                          digest.update(chunk)
+                      if size != member.size:
+                          reject("durable archive file size mismatch")
+                      total_uncompressed += size
+                      if total_uncompressed > max_total:
+                          reject("durable archive expands beyond its bound")
+                      relative = name.removeprefix(f"{prefix}/")
+                      if relative == "source/final-report-metadata.json":
+                          if digest.hexdigest() != metadata_sha256:
+                              reject("durable report metadata hash mismatch")
+                      elif digest.hexdigest() != expected_archive.get(relative):
+                          reject("durable archive bytes differ from authenticated evidence")
+                      seen_files.add(name)
+          except (OSError, tarfile.TarError) as error:
+              raise Rejected("durable archive is invalid") from error
+          if seen_files != expected_file_names or seen_directories != expected_directories:
+              reject("durable archive entry closure mismatch")
+          PY
+          cmp --silent \
+            "$RUNNER_TEMP/independently-recomputed-public-registry-proof.json" \
+            "$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json"
+      - name: Generate the canonical completion report without candidate tooling
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -Eeuo pipefail
-          python3 scripts/render-completion-report.py \
-            --candidate "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --security "$RUNNER_TEMP/security/security-summary.json" \
-            --release-conformance "$RUNNER_TEMP/conformance/latchway-cross-repository.json" \
-            --publication-state "$RUNNER_TEMP/publication-state.json" \
-            --repository "$GITHUB_WORKSPACE" \
-            --durable-evidence-root "$RUNNER_TEMP/durable-release-evidence/latchway-release-evidence-v1" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$RELEASE_TAG" \
-            --evidence-tag "evidence/$RELEASE_TAG" \
-            --durable-asset "latchway-cross-repository-release.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.json" \
-            --durable-asset "latchway-cross-repository-release.attestation.sigstore.json=$RUNNER_TEMP/final-release-record/latchway-cross-repository-release.attestation.sigstore.json" \
-            --durable-asset "latchway-publication-state.json=$RUNNER_TEMP/final-release-record/latchway-publication-state.json" \
-            --durable-asset "latchway-public-registry-byte-proof.json=$RUNNER_TEMP/final-release-record/latchway-public-registry-byte-proof.json" \
-            --durable-asset "latchway-product-release-attestation.json=$RUNNER_TEMP/final-release-record/latchway-product-release-attestation.json" \
-            --durable-asset "latchway-release-evidence-v1.tar.gz=$RUNNER_TEMP/final-release-record/latchway-release-evidence-v1.tar.gz" \
-            --output "$RUNNER_TEMP/final-release-record/COMPLETION_REPORT.md"
+          destination="$RUNNER_TEMP/final-release-record"
+          completion="$destination/COMPLETION_REPORT.md"
+          report="$destination/latchway-cross-repository-release.json"
+          publication="$destination/latchway-publication-state.json"
+          proof="$destination/latchway-public-registry-byte-proof.json"
+          test ! -e "$completion" && test ! -L "$completion"
+          jq --exit-status '
+            [.repositories[].id] | sort == ["android", "core", "ios", "javascript", "react_native"]
+          ' "$report" >/dev/null
+          jq --exit-status '
+            (.repositories | length) == 5 and
+            all(.repositories[];
+              (.id | test("^(core|javascript|ios|android|react_native)$")) and
+              (.commit | test("^[0-9a-f]{40}$")) and
+              (.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")) and
+              .intended_tag == ("v" + .version)) and
+            ([.evidence_domains[] | select(.required == true and .status == "passed") | .id] | sort) ==
+              ["cloud_deployments", "live_provider", "live_sdk_conformance",
+               "local_promotion", "local_release", "local_source", "operational_resilience",
+               "physical_devices", "public_registries", "public_tags", "supply_chain"]
+          ' "$report" >/dev/null
+          core_version=${RELEASE_TAG#v}
+          js_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
+          ios_version=$(jq --raw-output '.repositories[] | select(.id == "ios") | .version' "$report")
+          ios_tag=$(jq --raw-output '.repositories[] | select(.id == "ios") | .intended_tag' "$report")
+          android_version=$(jq --raw-output '.repositories[] | select(.id == "android") | .version' "$report")
+          rn_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
+          image=$(jq --raw-output '.contract.oci_image_digest' "$report")
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" \
+            --arg core_version "$core_version" --arg js_version "$js_version" \
+            --arg ios_version "$ios_version" --arg ios_tag "$ios_tag" \
+            --arg android_version "$android_version" --arg rn_version "$rn_version" \
+            --arg image "$image" '
+              .core_commit == $commit and .core_tag == $tag and
+              .github_release.url == ("https://github.com/Latchway/latchway/releases/tag/" + $tag) and
+              (.github_release.published_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+              (.registries | keys | sort) ==
+                ["cocoapods", "maven_central", "npm_javascript", "npm_react_native", "oci", "swift_package"] and
+              .registries.oci == $image and
+              .registries.npm_javascript == ("@latchway/client@" + $js_version) and
+              .registries.npm_react_native == ("@latchway/react-native@" + $rn_version) and
+              .registries.swift_package == ("https://github.com/Latchway/latchway-ios-sdk.git@" + $ios_tag) and
+              .registries.cocoapods == ("Latchway/" + $ios_version) and
+              .registries.maven_central == [
+                "dev.latchway:latchway-core:" + $android_version,
+                "dev.latchway:latchway-okhttp:" + $android_version,
+                "dev.latchway:latchway-play-integrity:" + $android_version,
+                "dev.latchway:latchway-firebase-auth:" + $android_version,
+                "dev.latchway:latchway-bom:" + $android_version]
+          ' "$publication" >/dev/null
+          published_at=$(jq --raw-output '.github_release.published_at' "$publication")
+          tag_object=$(jq --raw-output '.tag_object_sha' "$publication")
+          contract_version=$(jq --raw-output '.contract.version' "$report")
+          contract_hash=$(jq --raw-output '.contract.bundle_sha256' "$report")
+          publication_hash=$(sha256sum "$publication" | cut -d ' ' -f 1)
+          conformance_hash=$(sha256sum "$report" | cut -d ' ' -f 1)
+          registry_hash=$(sha256sum "$proof" | cut -d ' ' -f 1)
+          archive_hash=$(sha256sum "$destination/latchway-release-evidence-v1.tar.gz" | cut -d ' ' -f 1)
+          temporary=$(mktemp "$RUNNER_TEMP/completion-report.XXXXXX")
+          {
+            printf '# Latchway %s final release record\n\n' "$RELEASE_TAG"
+            printf '<!-- latchway_completion_report_v1 -->\n\n'
+            printf '> Product status: **released and fully evidence-gated**. This canonical record was generated by fixed, no-checkout finalizer logic only after independently validating the authenticated aggregate, public-registry proof, and exact durable archive closure.\n\n'
+            printf '> Evidence publication target: [`evidence/%s`](https://github.com/Latchway/latchway/releases/tag/evidence/%s).\n\n' "$RELEASE_TAG" "$RELEASE_TAG"
+            printf '## Release identity\n\n'
+            printf '| Field | Exact value |\n| --- | --- |\n'
+            printf '| Core commit and tag | `%s` / `%s` |\n' "$CANDIDATE_COMMIT" "$RELEASE_TAG"
+            printf '| Git tag object | `%s` |\n' "$tag_object"
+            printf '| Published at | `%s` |\n' "$published_at"
+            printf '| OCI image | `%s` |\n' "$image"
+            printf '| Contract | `%s` / `%s` |\n\n' "$contract_version" "$contract_hash"
+            printf '## Exact repository coordinates\n\n'
+            printf '| Repository | Version | Annotated tag | Commit |\n| --- | --- | --- | --- |\n'
+            jq --raw-output '
+              ["core", "javascript", "ios", "android", "react_native"][] as $id |
+              .repositories[] | select(.id == $id) |
+              "| `\(.id)` | `\(.version)` | `\(.intended_tag)` | `\(.commit)` |"
+            ' "$report"
+            printf '\n## Published package coordinates\n\n'
+            printf -- '- OCI: `%s`\n' "$image"
+            printf -- '- JavaScript: `@latchway/client@%s`\n' "$js_version"
+            printf -- '- React Native: `@latchway/react-native@%s`\n' "$rn_version"
+            printf -- '- Swift Package: `https://github.com/Latchway/latchway-ios-sdk.git@%s`\n' "$ios_tag"
+            printf -- '- CocoaPods: `Latchway/%s`\n' "$ios_version"
+            printf -- '- Maven Central: `dev.latchway:{latchway-core,latchway-okhttp,latchway-play-integrity,latchway-firebase-auth,latchway-bom}:%s`\n\n' "$android_version"
+            printf '## Required evidence domains\n\n'
+            printf '| Domain | Result |\n| --- | --- |\n'
+            jq --raw-output '
+              .evidence_domains | sort_by(.id)[] |
+              select(.required == true) | "| `\(.id)` | `\(.status)` |"
+            ' "$report"
+            printf '\n## Independently bound evidence bytes\n\n'
+            printf '| Asset | SHA-256 |\n| --- | --- |\n'
+            while IFS= read -r asset; do
+              printf '| `%s` | `%s` |\n' "${asset##*/}" "$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            done < <(find "$destination" -mindepth 1 -maxdepth 1 -type f ! -name COMPLETION_REPORT.md -print | LC_ALL=C sort)
+            printf '\n| Authenticated release conformance | `%s` |\n' "$conformance_hash"
+            printf '| Verified public release state | `%s` |\n' "$publication_hash"
+            printf '| Independently recomputed public-registry proof | `%s` |\n' "$registry_hash"
+            printf '| Exact durable evidence archive | `%s` |\n\n' "$archive_hash"
+            printf 'The archive entry set, file metadata, and every retained byte were compared against the authenticated candidate, security, promotion, and external-evidence inputs before this report was created. No checked-out candidate source or candidate-owned helper executed in this credentialed finalizer.\n'
+          } > "$temporary"
+          test -s "$temporary"
+          install -m 0600 -- "$temporary" "$completion"
+          grep --fixed-strings --quiet "$CANDIDATE_COMMIT" "$completion"
+          grep --fixed-strings --quiet "evidence/$RELEASE_TAG" "$completion"
       - name: Reconcile any existing evidence-release completion attestation
         id: final-assets
         shell: bash
@@ -830,6 +1952,33 @@ jobs:
           TAG_EXISTS: ${{ steps.evidence-release.outputs.tag_exists }}
         run: |
           set -Eeuo pipefail
+          parse_snapshot() {
+            local response="$1" expected_status="$2" body_output="${3:-}" etag_output="${4:-}"
+            test -f "$response" && test ! -L "$response"
+            size=$(stat --format=%s "$response")
+            test "$size" -ge 1 && test "$size" -le 33554432
+            header_end=$(awk '/^\r?$/{print NR; exit}' "$response")
+            [[ "$header_end" =~ ^[1-9][0-9]*$ ]]
+            status=$(sed -n '1{s/\r$//;s#^HTTP/\(1\.[01]\|2\(\.0\)\?\) \([1-5][0-9][0-9]\)\( .*$\|$\)#\3#p;}' "$response")
+            test "$status" = "$expected_status"
+            headers="$RUNNER_TEMP/snapshot-headers-$expected_status"
+            body="$RUNNER_TEMP/snapshot-body-$expected_status"
+            head -n "$((header_end - 1))" "$response" | tr -d '\r' > "$headers"
+            tail -n "+$((header_end + 1))" "$response" > "$body"
+            if [[ "$expected_status" == 200 ]]; then
+              test -n "$body_output" && test -n "$etag_output"
+              test ! -e "$body_output" && test ! -e "$etag_output"
+              test "$(awk 'tolower($0) ~ /^etag:/{count++} END{print count+0}' "$headers")" = 1
+              etag=$(awk 'tolower($0) ~ /^etag:/{sub(/^[^:]+:[[:space:]]*/, ""); print}' "$headers")
+              [[ "$etag" =~ ^(W/)?\"[!#-~]{1,512}\"$ ]]
+              jq --exit-status 'type == "object"' "$body" >/dev/null
+              install -m 0600 -- "$body" "$body_output"
+              printf '%s\n' "$etag" > "$etag_output"
+            else
+              test "$expected_status" = 304
+              test -z "$(tr -d '[:space:]' < "$body")"
+            fi
+          }
           evidence_tag="evidence/$RELEASE_TAG"
           title="Latchway $RELEASE_TAG final evidence"
           notes="Authoritative final evidence for immutable product release $RELEASE_TAG at $CANDIDATE_COMMIT."
@@ -897,11 +2046,10 @@ jobs:
             gh api --include -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
               > "$RUNNER_TEMP/pre-publish-evidence-snapshot.http"
-            python3 scripts/verify-github-api-snapshot.py \
-              --response "$RUNNER_TEMP/pre-publish-evidence-snapshot.http" \
-              --expected-status 200 \
-              --body-output "$RUNNER_TEMP/pre-publish-evidence-draft.json" \
-              --etag-output "$RUNNER_TEMP/pre-publish-evidence.etag"
+            parse_snapshot \
+              "$RUNNER_TEMP/pre-publish-evidence-snapshot.http" 200 \
+              "$RUNNER_TEMP/pre-publish-evidence-draft.json" \
+              "$RUNNER_TEMP/pre-publish-evidence.etag"
             release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
               "$RUNNER_TEMP/pre-publish-evidence-draft.json")
             jq --exit-status \
@@ -951,9 +2099,7 @@ jobs:
               -H "If-None-Match: $(cat "$RUNNER_TEMP/pre-publish-evidence.etag")" \
               "repos/$GITHUB_REPOSITORY/releases/tags/$evidence_tag" \
               > "$RUNNER_TEMP/pre-publish-evidence-unchanged.http"
-            python3 scripts/verify-github-api-snapshot.py \
-              --response "$RUNNER_TEMP/pre-publish-evidence-unchanged.http" \
-              --expected-status 304
+            parse_snapshot "$RUNNER_TEMP/pre-publish-evidence-unchanged.http" 304
             gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --input "$RUNNER_TEMP/publish-evidence-release.json" \
@@ -984,6 +2130,10 @@ jobs:
             "$RUNNER_TEMP/final-evidence-assets.txt"
           gh release verify "$evidence_tag" --format json \
             > "$RUNNER_TEMP/evidence-release-attestation.json"
+          test -f "$RUNNER_TEMP/evidence-release-attestation.json"
+          test ! -L "$RUNNER_TEMP/evidence-release-attestation.json"
+          attestation_size=$(stat --format=%s "$RUNNER_TEMP/evidence-release-attestation.json")
+          test "$attestation_size" -ge 1 && test "$attestation_size" -le 16777216
           while IFS=$'\t' read -r _ asset; do
             name=${asset##*/}
             expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
@@ -1010,13 +2160,77 @@ jobs:
             '.tag == $tag and .object.type == "commit" and
              .object.sha == $commit and .message == $message' \
             "$RUNNER_TEMP/final-evidence-tag-object.json" >/dev/null
-          python3 scripts/verify-github-release-attestation.py \
-            --attestation "$RUNNER_TEMP/evidence-release-attestation.json" \
-            --release "$RUNNER_TEMP/final-release.json" \
-            --repository "$GITHUB_REPOSITORY" \
-            --tag "$evidence_tag" \
-            --ref-sha "$final_tag_object" \
-            --output "$RUNNER_TEMP/evidence-release-attestation-verification.json"
+          jq --exit-status \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$evidence_tag" '
+              (keys | sort) == ["attestation", "verificationResult"] and
+              .attestation.initiator == "github" and
+              (.verificationResult | type == "object" and length > 0) and
+              .attestation.bundle.dsseEnvelope.payloadType == "application/vnd.in-toto+json" and
+              (.attestation.bundle.dsseEnvelope.signatures | type == "array" and length == 1)
+            ' "$RUNNER_TEMP/evidence-release-attestation.json" >/dev/null
+          encoded=$(jq --raw-output '.attestation.bundle.dsseEnvelope.payload' \
+            "$RUNNER_TEMP/evidence-release-attestation.json")
+          test -n "$encoded" && test "$encoded" != null
+          printf '%s' "$encoded" | base64 --decode \
+            > "$RUNNER_TEMP/evidence-release-statement.json"
+          jq --exit-status \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$evidence_tag" \
+            --arg ref_sha "$final_tag_object" \
+            --slurpfile release "$RUNNER_TEMP/final-release.json" '
+              ($release[0]) as $r |
+              ("pkg:github/" + $repository + "@" + $tag) as $purl |
+              ._type == "https://in-toto.io/Statement/v1" and
+              .predicateType == "https://in-toto.io/attestation/release/v0.2" and
+              ($r.id | type == "number" and . > 0) and
+              $r.tag_name == $tag and $r.draft == false and $r.immutable == true and
+              ($r.assets | type == "array") and
+              ([ $r.assets[] |
+                 select(if type != "object" then true else
+                          (.name | type != "string" or length == 0) or
+                          (if (.digest | type) != "string" then true else
+                             (.digest | test("^sha256:[0-9a-f]{64}$") | not)
+                           end)
+                        end) ] | length == 0) and
+              ([ $r.assets[].name ] | unique | length) == ($r.assets | length) and
+              (.predicate.databaseId | tostring) == ($r.id | tostring) and
+              .predicate.purl == $purl and .predicate.repository == $repository and
+              .predicate.tag == $tag and
+              (.subject | type == "array" and length == (($r.assets | length) + 1)) and
+              ([.subject[] | select(.uri == $purl and .digest == {sha1: $ref_sha})] | length == 1) and
+              ([.subject[] | select(.uri != $purl) |
+                select(if type != "object" then true else
+                         (keys | sort) != ["digest", "name"] or
+                         (.name | type != "string") or
+                         (if (.digest | type) != "object" then true else
+                            (.digest | keys) != ["sha256"] or
+                            (if (.digest.sha256 | type) != "string" then true else
+                               (.digest.sha256 | test("^[0-9a-f]{64}$") | not)
+                             end)
+                          end)
+                       end)] | length == 0) and
+              ([.subject[] | select(.uri != $purl) | .name] | unique | length) == ($r.assets | length) and
+              ([.subject[] | select(.uri != $purl) |
+                select((keys | sort) == ["digest", "name"]) |
+                {name: .name, sha256: .digest.sha256}] | sort_by(.name)) ==
+              ($r.assets | map({name: .name, sha256: (.digest | ltrimstr("sha256:"))}) | sort_by(.name))
+            ' "$RUNNER_TEMP/evidence-release-statement.json" >/dev/null
+          jq --null-input --sort-keys \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$evidence_tag" \
+            --arg ref_sha "$final_tag_object" \
+            --slurpfile attestation "$RUNNER_TEMP/evidence-release-attestation.json" \
+            --slurpfile release "$RUNNER_TEMP/final-release.json" '
+              {schema_version: 1,
+               kind: "latchway_github_release_attestation_verification",
+               repository: $repository, tag: $tag, ref_sha: $ref_sha,
+               release_id: $release[0].id,
+               attestation_bundle: $attestation[0].attestation.bundle,
+               assets: ($release[0].assets |
+                 map({name: .name, sha256: (.digest | ltrimstr("sha256:"))}) |
+                 sort_by(.name))}
+            ' > "$RUNNER_TEMP/evidence-release-attestation-verification.json"
       - name: Retain the final report bundle and verified public state
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

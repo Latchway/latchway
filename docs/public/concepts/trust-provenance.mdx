@@ -1,0 +1,39 @@
+---
+title: "Trust provenance"
+description: "Distinguish direct platform attestation from root-authorized delegated trust and understand how both relationships expire."
+---
+
+<Warning>
+  This page defines the pre-release draft `1.0.0` Installation Family trust model exposed
+  on wire protocol `2`; it is not evidence of a published SDK release.
+</Warning>
+
+| Trust source | Evidence | What Latchway may conclude |
+| --- | --- | --- |
+| Direct | Platform attestation verified for the component key | The verifier accepted evidence about that application instance under current policy. |
+| Delegated | An attested root component authorized a bounded component key | The trusted root authorized that component key for the declared definition and lifetime. |
+| Debug | Repository-signed development evidence | The request is suitable only for an explicitly enabled debug environment. |
+| Web | Configured web risk signal | The signal met web policy; it is not hardware-backed native attestation. |
+
+> Delegated trust proves that an attested root component authorized a component
+> key. It does not prove that the delegated component independently completed
+> App Attest.
+
+## What this establishes
+
+Trust provenance lets policy distinguish a directly attested main app from a
+widget whose key the main app authorized. The server records the root,
+delegation, component definition, timestamps, and current revocation state.
+
+## What this does not establish
+
+Neither direct nor delegated evidence says that the operating system, user, or
+application is free from compromise. DPoP proves key possession; it does not
+authenticate the human or establish platform trust by itself.
+
+## What causes the relationship to expire
+
+Trust expires when its bounded lifetime ends or when the root, delegation,
+component, family, application, environment, or user relationship becomes
+invalid. Direct attestation step-up replaces the provenance only after the
+delegated component independently completes a supported verification flow.

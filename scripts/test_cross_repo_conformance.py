@@ -23,7 +23,7 @@ BUILDER = CORE_ROOT / "scripts/build-contract-bundle.py"
 class SyntheticWorkspace:
     version = "1.0.0"
     contract_version = "1.0.0"
-    wire_protocol = 1
+    wire_protocol = 2
     core_release = "v1.0.0"
     oci_image_digest = (
         "ghcr.io/latchway/latchway@sha256:"
@@ -64,7 +64,7 @@ class SyntheticWorkspace:
             "manifest_version": 1,
             "contract_version": self.contract_version,
             "contract_status": "released",
-            "wire_protocol": {"current": 1, "supported": [1], "minimum": 1},
+            "wire_protocol": {"current": 2, "supported": [1, 2], "minimum": 1},
             "bundle": {
                 "file_name": "latchway-contract-1.0.0.tar.gz",
                 "required_entries": [
@@ -75,6 +75,7 @@ class SyntheticWorkspace:
                     "release-evidence.schema.json",
                     "error-codes.yaml",
                     "protocol-version.json",
+                    "compatibility",
                     "test-vectors",
                     "SHA256SUMS",
                 ],
@@ -108,9 +109,13 @@ class SyntheticWorkspace:
             "api/test-vectors/dpop/vector.schema.json": '{"type":"object"}\n',
             "api/test-vectors/attestation-binding/v1.json": '{"schema_version":1,"vectors":[]}\n',
             "api/test-vectors/attestation-binding/vector.schema.json": '{"type":"object"}\n',
+            "api/test-vectors/installation-family/v2.json": '{"schema_version":1,"vectors":[]}\n',
+            "api/test-vectors/installation-family/vector.schema.json": '{"type":"object"}\n',
+            "compatibility/frameworks.schema.json": '{"type":"object"}\n',
+            "compatibility/frameworks.yaml": "schema_version: 1\nframeworks: []\n",
             "internal/buildinfo/buildinfo.go": (
                 f'package buildinfo\n\nvar (\n\tVersion = "{self.version}"\n)\n\n'
-                'const (\n\tContractVersion = "1.0.0"\n\tProtocolVersion = "1"\n)\n'
+                'const (\n\tContractVersion = "1.0.0"\n\tProtocolVersion = "2"\n)\n'
             ),
             "Dockerfile": (
                 "FROM scratch AS build\n"
@@ -156,6 +161,9 @@ class SyntheticWorkspace:
                 root / "api/test-vectors/attestation-binding/v1.json"
             ),
             "dpop-v1.json": self.sha256(root / "api/test-vectors/dpop/v1.json"),
+            "installation-family-v2.json": self.sha256(
+                root / "api/test-vectors/installation-family/v2.json"
+            ),
             "protocol-version.json": self.sha256(root / "api/protocol-version.json"),
         }
         self.init_and_commit(root)
@@ -179,7 +187,7 @@ class SyntheticWorkspace:
             root / "src/version.ts",
             'export const SDK_VERSION = "1.0.0";\n'
             'export const CONTRACT_VERSION = "1.0.0";\n'
-            "export const PROTOCOL_VERSION = 1;\n"
+            "export const PROTOCOL_VERSION = 2;\n"
             'export const SDK_KIND = "javascript";\n',
         )
         self.copy_fixtures(root / "test/fixtures/contract")
@@ -200,7 +208,7 @@ class SyntheticWorkspace:
             'public enum LatchwayVersion {\n'
             '  public static let sdk = "1.0.0"\n'
             '  public static let contract = "1.0.0"\n'
-            "  public static let protocolVersion = 1\n"
+            "  public static let protocolVersion = 2\n"
             "}\n",
         )
         self.write(
@@ -223,7 +231,7 @@ class SyntheticWorkspace:
             root / "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
             'public const val LATCHWAY_SDK_VERSION: String = "1.0.0"\n'
             'public const val LATCHWAY_CONTRACT_VERSION: String = "1.0.0"\n'
-            "public const val LATCHWAY_PROTOCOL_VERSION: Int = 1\n",
+            "public const val LATCHWAY_PROTOCOL_VERSION: Int = 2\n",
         )
         modules = "\n".join(
             f'    PublishedModule(path = ":{artifact}"),'
@@ -268,7 +276,7 @@ class SyntheticWorkspace:
             root / "src/version.ts",
             'export const SDK_VERSION = "1.0.0";\n'
             'export const CONTRACT_VERSION = "1.0.0";\n'
-            "export const PROTOCOL_VERSION = 1;\n"
+            "export const PROTOCOL_VERSION = 2;\n"
             'export const SDK_KIND = "react-native";\n',
         )
         self.write(
@@ -379,6 +387,10 @@ class SyntheticWorkspace:
         )
         shutil.copyfile(
             core / "test-vectors/dpop/v1.json", destination / "dpop-v1.json"
+        )
+        shutil.copyfile(
+            core / "test-vectors/installation-family/v2.json",
+            destination / "installation-family-v2.json",
         )
         shutil.copyfile(
             core / "protocol-version.json", destination / "protocol-version.json"

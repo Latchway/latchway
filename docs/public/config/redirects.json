@@ -1,0 +1,22 @@
+[
+  {
+    "source": "/getting-started",
+    "destination": "/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/concepts/installations",
+    "destination": "/concepts/installation-families",
+    "permanent": true
+  },
+  {
+    "source": "/app-extensions",
+    "destination": "/build/app-extensions/overview",
+    "permanent": true
+  },
+  {
+    "source": "/integrations",
+    "destination": "/integrations/overview",
+    "permanent": true
+  }
+]

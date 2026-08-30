@@ -1,0 +1,87 @@
+---
+title: "Native iOS"
+description: "Use the Swift SDK, device-bound DPoP keys, and Apple App Attest."
+---
+
+The iOS SDK provides the handwritten client, hardened transport, Keychain or
+Secure Enclave installation key, rotating sessions, and Apple App Attest
+integration. It uses Swift 6 strict concurrency and supports iOS 15 or newer.
+
+The intended version 1 Swift package and CocoaPods artifacts have not been
+published. Evaluate an authorized iOS source checkout as a local Swift package
+until release promotion completes.
+
+```swift
+.package(path: "../latchway-ios-sdk")
+```
+
+Link `Latchway` and `LatchwayAppAttest` to the application target.
+
+## Create and authorize a request
+
+```swift
+import Latchway
+import LatchwayAppAttest
+
+let appAttest = LatchwayAppAttestProvider(
+    applicationID: "app_01J00000000000000000000000",
+    environment: "production"
+)
+let configuration = LatchwayConfiguration(
+    baseURL: URL(string: "https://gateway.example.com")!,
+    applicationID: "app_01J00000000000000000000000",
+    environment: "production",
+    identityProvider: "firebase",
+    appVersion: "1.2.3",
+    softwareKeyFallbackPolicy: .disallow,
+    attestationProvider: appAttest
+)
+let client = LatchwayClient(
+    configuration: configuration,
+    identityTokenProvider: ApplicationIdentityProvider()
+)
+
+var request = URLRequest(
+    url: URL(string: "https://gateway.example.com/v1/responses")!
+)
+request.httpMethod = "POST"
+request.httpBody = requestBody
+request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+try await client.authorize(&request, feature: "habit-assistant")
+
+let (bytes, _) = try await client.makeURLSession().bytes(for: request)
+for try await byte in bytes {
+    consume(byte)
+}
+```
+
+## Security behavior
+
+The SDK signs RFC 9449 DPoP proofs, stores refresh state in a
+non-synchronizable this-device-only Keychain item, and coordinates refresh
+through an actor single flight. It strips or rejects caller-supplied provider
+credentials and signs only the configured gateway origin.
+
+Production App Attest requires a production entitlement, matching server
+application policy, an Apple-signed application, and a supported physical
+device. A simulator or fixture cannot produce release evidence.
+
+The provider single-flights first-use key creation, persists a generated key
+before surfacing ordinary caller cancellation, and uses reset epochs so an
+in-flight operation cannot restore cleared state. Invalid-key recovery is
+single-flight and bounded to one replacement transition per evidence call.
+
+`quota(feature:)`, `refresh()`, `revokeCurrentInstallation()`, and local
+diagnostics are available on the client actor. For an active session,
+`diagnostics()` makes a protected best-effort server read and accepts its
+enrichment only when contract/protocol, installation ID, iOS platform, active
+status, and DPoP public-key thumbprint agree with local state. The trust shown
+for the active client remains the trust bound into that accepted session grant.
+
+The result can include key-storage category, public key thumbprint, attestation
+support, session state/expiry, installation ID, server version, trust, and safe
+request/error IDs. It excludes tokens, DPoP proofs and private key material,
+raw attestation evidence, identity subjects or claims, and provider credentials.
+
+For release proof, disallow software-key fallback and follow
+[Physical-device proof](/mobile/device-proof).

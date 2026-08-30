@@ -1,5 +1,5 @@
 registry_version: 1
-contract_version: 0.5.1
+contract_version: 1.0.0
 problem_media_type: application/problem+json
 fields:
   required: [type, title, status, detail, code, request_id, retryable]
@@ -96,6 +96,91 @@ codes:
     title: Installation revoked
     retryable: false
     guidance: Contact the application operator or re-register when policy permits.
+  installation_family_revoked:
+    status: 403
+    title: Installation family revoked
+    retryable: false
+    guidance: Clear every component session in the family and re-register only when policy permits.
+  installation_family_not_found:
+    status: 404
+    title: Installation family not found
+    retryable: false
+    guidance: Start a new root-component registration flow for this application environment.
+  component_definition_not_found:
+    status: 404
+    title: Component definition not found
+    retryable: false
+    guidance: Use a component definition published by the active environment configuration.
+  component_not_configured:
+    status: 422
+    title: Component not configured
+    retryable: false
+    guidance: Ask the operator to configure this component definition before provisioning it.
+  component_not_provisioned:
+    status: 403
+    title: Component not provisioned
+    retryable: false
+    guidance: Obtain a fresh parent-authorized component grant before creating a component session.
+  component_revoked:
+    status: 403
+    title: Component revoked
+    retryable: false
+    guidance: Clear only this component's local state and provision it again when policy permits.
+  component_key_invalid:
+    status: 401
+    title: Component key invalid
+    retryable: false
+    guidance: Use the non-exportable P-256 key bound to this component and recreate the DPoP proof.
+  component_key_replaced:
+    status: 401
+    title: Component key replaced
+    retryable: false
+    guidance: Clear stale component credentials and use the replacement key and session.
+  component_delegation_expired:
+    status: 401
+    title: Component delegation expired
+    retryable: false
+    guidance: Ask the trusted parent component to provision a new bounded delegation.
+  component_feature_not_granted:
+    status: 403
+    title: Component feature not granted
+    retryable: false
+    guidance: Use only features in the component's sealed delegation or request a new grant.
+  component_parent_trust_expired:
+    status: 401
+    title: Parent component trust expired
+    retryable: false
+    guidance: Refresh or re-attest the trusted parent before provisioning or refreshing this component.
+  component_direct_attestation_required:
+    status: 401
+    title: Direct component attestation required
+    retryable: false
+    guidance: Complete the component definition's direct platform attestation flow.
+  containing_app_setup_required:
+    status: 409
+    title: Containing app setup required
+    retryable: false
+    guidance: Open and configure the trusted containing application before using this extension component.
+  framework_integration_unsupported:
+    status: 400
+    title: Framework integration unsupported
+    retryable: false
+    guidance: Use a framework integration declared compatible by the gateway discovery document.
+  framework_version_unsupported:
+    status: 400
+    title: Framework version unsupported
+    retryable: false
+    guidance: Upgrade or select a framework version listed in the compatibility registry.
+  transport_destination_not_allowed:
+    status: 403
+    title: Transport destination not allowed
+    retryable: false
+    guidance: Send authenticated requests only to the exact configured Latchway origin and allowed path.
+  transport_request_not_replayable:
+    status: 409
+    title: Transport request not replayable
+    retryable: false
+    guidance: Recreate the request body before retrying; the transport will not replay a consumed stream.
   feature_not_found:
     status: 404
     title: Feature not found

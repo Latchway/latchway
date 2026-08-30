@@ -1,0 +1,166 @@
+{
+  "tabs": [
+    {
+      "tab": "Start",
+      "groups": [
+        {
+          "group": "Get started",
+          "pages": [
+            "index",
+            "start/why-latchway",
+            "quickstart",
+            "start/architecture-at-a-glance",
+            "start/choose-an-integration",
+            "start/concepts",
+            "release-status"
+          ]
+        },
+        {
+          "group": "Runtime model",
+          "pages": [
+            "concepts/installation-families",
+            "concepts/client-components",
+            "concepts/trust-provenance"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Build",
+      "groups": [
+        {
+          "group": "Client SDKs",
+          "pages": [
+            "mobile/react-native",
+            "mobile/ios",
+            "mobile/android",
+            "mobile/device-proof"
+          ]
+        },
+        {
+          "group": "AI framework integrations",
+          "pages": [
+            "integrations/overview",
+            "integrations/raw-http",
+            "integrations/openai-js",
+            "integrations/vercel-ai-sdk",
+            "integrations/langchain-js",
+            "integrations/foundation-models",
+            "integrations/macpaw-openai",
+            "integrations/okhttp",
+            "integrations/react-native"
+          ]
+        },
+        {
+          "group": "App extensions",
+          "pages": [
+            "build/app-extensions/overview",
+            "build/app-extensions/widgetkit",
+            "build/app-extensions/share-extension",
+            "build/app-extensions/keychain-access-groups",
+            "build/app-extensions/containing-app-provisioning",
+            "build/app-extensions/direct-attestation-step-up"
+          ]
+        },
+        {
+          "group": "Features and routing",
+          "pages": [
+            "concepts/providers-and-protocols",
+            "concepts/routing-and-quotas"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Operate",
+      "groups": [
+        {
+          "group": "Configure and administer",
+          "pages": [
+            "administration/configuration",
+            "administration/console",
+            "administration/observability"
+          ]
+        },
+        {
+          "group": "Run Latchway",
+          "pages": [
+            "operations/deployment",
+            "operations/telemetry-and-jobs",
+            "operations/self-tests",
+            "operations/key-rotation",
+            "operations/backup-restore",
+            "operations/upgrades",
+            "operations/production-readiness"
+          ]
+        },
+        {
+          "group": "Installation Family operations",
+          "pages": [
+            "operate/installation-families/overview",
+            "operate/installation-families/component-limits",
+            "operate/installation-families/revocation",
+            "operate/installation-families/troubleshooting"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Security",
+      "groups": [
+        {
+          "group": "Trust model",
+          "pages": [
+            "concepts/security-boundary",
+            "concepts/identity-and-attestation",
+            "concepts/security-and-privacy",
+            "security/delegated-components"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Reference",
+      "groups": [
+        {
+          "group": "API and CLI",
+          "pages": [
+            "reference/client-api",
+            "reference/admin-api",
+            "reference/cli",
+            "reference/errors"
+          ]
+        },
+        {
+          "group": "Support contracts",
+          "pages": [
+            "reference/compatibility",
+            "reference/glossary"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Community",
+      "groups": [
+        {
+          "group": "Contribute",
+          "pages": [
+            "community/contributing",
+            "community/add-framework-integration",
+            "community/agent-resources"
+          ]
+        },
+        {
+          "group": "Help",
+          "pages": ["troubleshooting"]
+        }
+      ]
+    }
+  ],
+  "global": {
+    "versions": {
+      "$ref": "versions.json"
+    }
+  }
+}

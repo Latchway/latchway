@@ -262,6 +262,67 @@ type AttestationPolicy struct {
 	Platforms map[string]PlatformAttestation `json:"-"`
 }
 
+// ComponentIdentifiers binds a configured client surface to platform-owned
+// identifiers. The server compares these only with verified platform input;
+// an untrusted client cannot select a definition by spoofing an identifier.
+type ComponentIdentifiers struct {
+	BundleIdentifiers []string `json:"bundleIdentifiers,omitempty"`
+	PackageNames      []string `json:"packageNames,omitempty"`
+	Origins           []string `json:"origins,omitempty"`
+}
+
+func (identifiers ComponentIdentifiers) clone() ComponentIdentifiers {
+	identifiers.BundleIdentifiers = append([]string(nil), identifiers.BundleIdentifiers...)
+	identifiers.PackageNames = append([]string(nil), identifiers.PackageNames...)
+	identifiers.Origins = append([]string(nil), identifiers.Origins...)
+	return identifiers
+}
+
+// ComponentDelegationPolicy bounds which configured component may authorize
+// a child key and for how long. Delegation is never an attestation assertion.
+type ComponentDelegationPolicy struct {
+	AllowedParents       []string      `json:"allowedParents"`
+	MaximumLifetime      time.Duration `json:"-"`
+	AllowChildDelegation bool          `json:"allowChildDelegation"`
+}
+
+func (policy ComponentDelegationPolicy) clone() ComponentDelegationPolicy {
+	policy.AllowedParents = append([]string(nil), policy.AllowedParents...)
+	return policy
+}
+
+// ComponentAttestationPolicy records the definition's trust-establishment
+// strategy. DirectStepUp augments delegated trust; it never relabels the
+// delegation itself as directly attested.
+type ComponentAttestationPolicy struct {
+	Strategy     string `json:"strategy"`
+	Provider     string `json:"provider,omitempty"`
+	DirectStepUp bool   `json:"directStepUp"`
+}
+
+// ComponentDefinition is the immutable runtime view of one administratively
+// configured application surface.
+type ComponentDefinition struct {
+	ID              string
+	Platform        string
+	Kind            string
+	FamilyRole      string
+	Identifiers     ComponentIdentifiers
+	Delegation      *ComponentDelegationPolicy
+	Attestation     ComponentAttestationPolicy
+	AllowedFeatures []string
+}
+
+func (definition ComponentDefinition) clone() ComponentDefinition {
+	definition.Identifiers = definition.Identifiers.clone()
+	if definition.Delegation != nil {
+		delegation := definition.Delegation.clone()
+		definition.Delegation = &delegation
+	}
+	definition.AllowedFeatures = append([]string(nil), definition.AllowedFeatures...)
+	return definition
+}
+
 // UpstreamAuthentication identifies how server-held credentials are applied.
 // SecretRef is only a name; decrypted secret material never enters a snapshot.
 type UpstreamAuthentication struct {
@@ -634,6 +695,7 @@ type ActiveSnapshot struct {
 	session         SessionPolicy
 	identities      map[string]IdentityProvider
 	attestations    map[string]AttestationPolicy
+	components      map[string]ComponentDefinition
 	upstreams       map[string]Upstream
 	models          map[string]Model
 	inputAccounting map[string]InputAccountingProfile
@@ -696,6 +758,70 @@ func (snapshot ActiveSnapshot) IdentityProviders() []IdentityProvider {
 func (snapshot ActiveSnapshot) AttestationPolicy(policyID string) (AttestationPolicy, bool) {
 	policy, ok := snapshot.attestations[policyID]
 	return policy.clone(), ok
+}
+
+// ComponentDefinition returns a detached component definition from the exact
+// active configuration revision.
+func (snapshot ActiveSnapshot) ComponentDefinition(definitionID string) (ComponentDefinition, bool) {
+	definition, ok := snapshot.components[definitionID]
+	if !ok && len(snapshot.components) == 0 {
+		definition, ok = snapshot.legacyRootComponentDefinition(definitionID)
+	}
+	return definition.clone(), ok
+}
+
+// legacyRootComponentDefinition is the narrow upgrade bridge for schema-20
+// installations lifted transactionally into Installation Families by schema
+// 21. It is available only while an active legacy revision has no explicit
+// Component Definitions. Activating any explicit definition set disables the
+// bridge and requires a fresh direct root exchange, which can safely rebind the
+// migrated root to the administrator-selected definition.
+func (snapshot ActiveSnapshot) legacyRootComponentDefinition(definitionID string) (ComponentDefinition, bool) {
+	var platform, kind string
+	switch definitionID {
+	case "legacy-ios-root":
+		platform, kind = "ios", "main_app"
+	case "legacy-android-root":
+		platform, kind = "android", "android_app"
+	case "legacy-web-root":
+		platform, kind = "web", "browser"
+	case "legacy-node-root":
+		platform, kind = "node", "node_process"
+	case "legacy-react-native-ios-root":
+		platform, kind = "react_native_ios", "main_app"
+	case "legacy-react-native-android-root":
+		platform, kind = "react_native_android", "android_app"
+	default:
+		return ComponentDefinition{}, false
+	}
+	features := make([]string, 0, len(snapshot.features))
+	for featureID := range snapshot.features {
+		features = append(features, featureID)
+	}
+	sort.Strings(features)
+	if len(features) == 0 {
+		return ComponentDefinition{}, false
+	}
+	return ComponentDefinition{
+		ID: definitionID, Platform: platform, Kind: kind, FamilyRole: "root",
+		Attestation:     ComponentAttestationPolicy{Strategy: "identity_only"},
+		AllowedFeatures: features,
+	}, true
+}
+
+// ComponentDefinitions returns a stable detached list for persistence,
+// administration and conformance checks.
+func (snapshot ActiveSnapshot) ComponentDefinitions() []ComponentDefinition {
+	ids := make([]string, 0, len(snapshot.components))
+	for definitionID := range snapshot.components {
+		ids = append(ids, definitionID)
+	}
+	sort.Strings(ids)
+	definitions := make([]ComponentDefinition, 0, len(ids))
+	for _, definitionID := range ids {
+		definitions = append(definitions, snapshot.components[definitionID].clone())
+	}
+	return definitions
 }
 
 // Upstream returns a deep copy of one configured server-owned target.

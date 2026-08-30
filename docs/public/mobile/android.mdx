@@ -1,0 +1,79 @@
+---
+title: "Native Android"
+description: "Use the Kotlin SDK, Android Keystore, OkHttp, and Play Integrity."
+---
+
+The Android SDK provides an Android Keystore P-256 installation key, encrypted
+session state, RFC 9449 DPoP, OkHttp integration, and Google Play Integrity
+attestation. Native libraries support Android API 23 or newer.
+
+The intended version 1 artifacts have not been published to Maven Central.
+Use an authorized Android source checkout, its samples, and its conformance
+tools until release promotion completes.
+
+After publication, align modules with the Latchway BOM:
+
+```kotlin
+dependencies {
+    implementation(platform("dev.latchway:latchway-bom:1.0.0"))
+    implementation("dev.latchway:latchway-okhttp")
+    implementation("dev.latchway:latchway-play-integrity")
+    implementation("dev.latchway:latchway-firebase-auth") // optional
+}
+```
+
+## Create a client
+
+```kotlin
+val latchway = LatchwayClient(
+    configuration = LatchwayConfiguration(
+        baseUrl = "https://gateway.example.com/".toHttpUrl(),
+        applicationId = "app_01J00000000000000000000000",
+        environment = "production",
+        defaultFeature = "habit-assistant",
+    ),
+    identityTokenProvider = FirebaseIdentityTokenProvider(),
+    attestationProvider = PlayIntegrityAttestationProvider(
+        context = applicationContext,
+        cloudProjectNumber = cloudProjectNumber,
+    ),
+    context = applicationContext,
+)
+
+val http = OkHttpClient.Builder()
+    .addInterceptor(latchway.interceptor())
+    .addNetworkInterceptor(latchway.originGuard())
+    .authenticator(latchway.authenticator())
+    .build()
+```
+
+Install both `interceptor()` and `originGuard()`. The network guard blocks DPoP
+and Latchway headers before OkHttp can follow a redirect to another origin and
+catches credentials added later by application interceptors or cookie jars.
+
+The client also exposes `quota(feature)`, `refresh()`,
+`revokeCurrentInstallation()`, and `diagnostics()`. Diagnostics is a protected
+DPoP-bound read that reports server/contract/protocol versions, active
+installation status, Android key-storage category, session expiry, current
+refresh availability, and accepted trust provider/level/expiry.
+
+The server consumes the fresh proof replay key and requires the stored
+installation platform to match the Android SDK declaration. The response is
+no-store and excludes tokens, proofs, private keys, raw attestation evidence,
+identity subjects or claims, and provider credentials.
+
+## Production Play Integrity
+
+The SDK sends the server-provided canonical challenge binding directly as Play
+Integrity `requestHash`. The server validates project, request, application,
+licensing, and device verdicts.
+
+Provider warm-up is single-flight. An invalid standard-token provider can be
+renewed once per attestation, while generation-aware stale observations receive
+separately bounded retries so concurrent failures cannot rotate the provider
+without limit.
+
+Real success requires the exact signed application installed through the
+configured Google Play track. An emulator, fixture, or sideloaded APK is not
+valid production evidence. Continue with
+[Physical-device proof](/mobile/device-proof).

@@ -1,0 +1,66 @@
+---
+title: "Release status"
+description: "What the Latchway version 1 source candidate proves—and what remains externally gated."
+---
+
+Latchway version 1 is an implementation source candidate. The core and four
+SDK repositories build and pass their local conformance suites, but no public
+version 1 release should be inferred from source version strings.
+
+The current core binary identifies as `1.0.0-rc.1`. The intended stable server
+and SDK versions are `1.0.0`; draft contract `1.0.0` selects wire protocol `2`
+as current while retaining wire `1` for compatible legacy clients. Those
+coordinates are release intent until protected promotion completes.
+
+| Area | Current claim |
+| --- | --- |
+| Core gateway and control plane | Implemented and locally validated |
+| React Native, iOS, Android, and JavaScript SDK sources | Implemented and locally validated |
+| Protocol contract | Pinned and checked across repositories |
+| Public tags and immutable GitHub releases | Not yet promoted |
+| npm, Swift/CocoaPods, and Maven publication | Not yet published |
+| Production App Attest and Play Integrity | Requires protected physical-device evidence |
+| Live upstream-provider evidence | Requires protected credentials and bounded runs |
+| Cloud deployment and resilience evidence | Requires configured provider accounts |
+| Image signing, provenance, and post-publication checks | Required before support claim |
+| Independent security review | Workflow and schema implemented; protected reviewer receipt still required |
+| Client quota and diagnostics | Protected, redaction-safe, and locally validated |
+
+Promotion is evidence-driven. One exact candidate must pass protected live
+provider, mobile device, cloud deployment, multi-replica failure, backup and
+restore, upgrade, load, vulnerability, SBOM, signature, provenance, registry,
+and cross-repository conformance gates. Local tests cannot manufacture those
+receipts.
+
+Image publication, release promotion, public-state observation, deployment
+capture, and release-record finalization enforce a source/credential split:
+their candidate source is evaluated in credential-free jobs, while registry,
+GitHub, provider, and OIDC jobs accept bounded hash-verified handoffs without
+checking out that source. Live JavaScript conformance remains fail-closed until
+its identity and App Check or Turnstile proofs are delivered as single-use,
+run-bound capabilities on a gateway-egress-only ephemeral runner. The split
+closes specific workflow trust boundaries, but does not substitute for the
+external receipts.
+
+## What is usable now
+
+Authorized evaluators can build the source checkouts, run the isolated local
+verification suite, inspect the immutable control plane, integrate the mobile
+SDK examples, and prepare protected release infrastructure. Supplemental local
+container, multi-architecture, scan/SBOM, failure, recovery, and load work
+exists, but it is bound to local checkpoints and does not establish a released
+image.
+
+## What must remain gated
+
+Do not advertise production App Attest or Play Integrity, live provider
+compatibility, cloud support, multi-replica resilience, signed packages, or
+public availability until the matching external domain has an authenticated
+receipt for the exact candidate. Missing credentials, devices, provider
+accounts, or registry access produce an open gate, never a synthetic pass.
+
+<Info>
+  Until promotion completes, evaluate Latchway from repository-local tested
+  source checkouts. This is not an independent security audit. Do not assume
+  that `1.0.0` exists on a public package registry.
+</Info>

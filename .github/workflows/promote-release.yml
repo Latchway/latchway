@@ -36,11 +36,7 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  attestations: read
-  contents: write
-  packages: write
+permissions: {}
 
 concurrency:
   # Every stable release shares moving OCI aliases, so promotions must serialize
@@ -49,48 +45,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  promote:
+  authenticate-inputs:
     if: github.ref == 'refs/heads/main'
+    environment: security-evidence
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: release
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
     steps:
-      - name: Check out the exact candidate source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          path: latchway
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 latchway/scripts/require-gh-version.py
-      - name: Preflight protected immutable-release settings for every release repository
-        shell: bash
-        env:
-          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
-          for repository in \
-            Latchway/latchway \
-            Latchway/latchway-js \
-            Latchway/latchway-ios-sdk \
-            Latchway/latchway-android \
-            Latchway/latchway-react-native-sdk; do
-            slug=${repository##*/}
-            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$repository/immutable-releases" \
-              > "$RUNNER_TEMP/$slug-immutable-releases.json"
-            jq --exit-status '
-              type == "object" and
-              (keys | sort) == ["enabled", "enforced_by_owner"] and
-              .enabled == true and
-              (.enforced_by_owner | type) == "boolean"
-            ' "$RUNNER_TEMP/$slug-immutable-releases.json" >/dev/null
-          done
-      - name: Validate immutable workflow inputs and cross-repository authority
+      - name: Validate immutable inputs and fixed GitHub CLI without a checkout
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -101,27 +66,21 @@ jobs:
           SECURITY_RUN_ATTEMPT: ${{ inputs.security_evidence_run_attempt }}
           PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
           PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
-          DISPATCH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
         run: |
+          set -Eeuo pipefail
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
-          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          [[ "$SECURITY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$SECURITY_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          [[ "$PROMOTION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$PROMOTION_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
-          test "$(git -C latchway rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
-          test -n "$DISPATCH_TOKEN"
-          for repository in \
-            Latchway/latchway-js \
-            Latchway/latchway-ios-sdk \
-            Latchway/latchway-android \
-            Latchway/latchway-react-native-sdk; do
-            GH_TOKEN="$DISPATCH_TOKEN" gh api "repos/$repository" --jq .full_name >/dev/null
+          for value in "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" \
+            "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" \
+            "$PROMOTION_RUN_ID" "$PROMOTION_RUN_ATTEMPT"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
-      - name: Require the fixed successful producer workflow runs and attempts
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+      - name: Authenticate exact producer runs without candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -134,15 +93,18 @@ jobs:
           PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
         run: |
           set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/authenticated-inputs/run-verification"
           verify_run() {
             local label="$1" run_id="$2" run_attempt="$3" expected_path="$4"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$RUNNER_TEMP/$label-run.json"
+            local run="$RUNNER_TEMP/authenticated-inputs/run-verification/$label-run.json"
+            local workflow="$RUNNER_TEMP/authenticated-inputs/run-verification/$label-workflow.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$run_attempt" > "$run"
             jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$run_attempt" \
               '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
-              "$RUNNER_TEMP/$label-run.json" >/dev/null
-            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
-            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
-            jq --exit-status --arg path "$expected_path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+              "$run" >/dev/null
+            workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$run")
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$workflow"
+            jq --exit-status --arg path "$expected_path" '.path == $path and .state == "active"' "$workflow" >/dev/null
           }
           verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
           verify_run security "$SECURITY_RUN_ID" "$SECURITY_RUN_ATTEMPT" .github/workflows/security.yml
@@ -151,39 +113,286 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
-          path: ${{ runner.temp }}/latchway-candidate
+          path: ${{ runner.temp }}/authenticated-inputs/latchway-candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
       - name: Download exact current-candidate security evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-security-${{ inputs.candidate_commit }}-${{ inputs.security_evidence_run_id }}-${{ inputs.security_evidence_run_attempt }}
-          path: ${{ runner.temp }}/latchway-security
+          path: ${{ runner.temp }}/authenticated-inputs/latchway-security
           run-id: ${{ inputs.security_evidence_run_id }}
           github-token: ${{ github.token }}
       - name: Download the aggregate promotion evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-cross-repository-promotion-${{ inputs.promotion_evidence_run_id }}-${{ inputs.promotion_evidence_run_attempt }}
-          path: ${{ runner.temp }}/latchway-promotion
+          path: ${{ runner.temp }}/authenticated-inputs/latchway-promotion
           run-id: ${{ inputs.promotion_evidence_run_id }}
           github-token: ${{ github.token }}
-      - name: Verify candidate and promotion attestations
+      - name: Verify top-level and nested Latchway attestations without candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_MANIFEST: ${{ runner.temp }}/latchway-candidate/latchway-candidate.json
-          SECURITY_REPORT: ${{ runner.temp }}/latchway-security/security-summary.json
-          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PROMOTION_RUN_ID: ${{ inputs.promotion_evidence_run_id }}
+          PROMOTION_RUN_ATTEMPT: ${{ inputs.promotion_evidence_run_attempt }}
         run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/authenticated-inputs"
+          gh attestation verify "$root/latchway-candidate/latchway-candidate.json" \
+            --bundle "$root/latchway-candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$root/latchway-security/security-summary.json" \
+            --bundle "$root/latchway-security/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          promotion="$root/latchway-promotion/latchway-cross-repository.json"
+          promotion_bundle="$root/latchway-promotion/latchway-cross-repository.attestation.sigstore.json"
+          gh attestation verify "$promotion" --bundle "$promotion_bundle" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          nested="$root/latchway-security/promotion-conformance/latchway-cross-repository.json"
+          nested_bundle="$root/latchway-security/promotion-conformance/latchway-cross-repository.attestation.sigstore.json"
+          cmp --silent "$promotion" "$nested"
+          cmp --silent "$promotion_bundle" "$nested_bundle"
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = \
+            "$(jq --raw-output '.promotion_conformance.report_sha256' "$root/latchway-security/security-summary.json")"
+          jq --exit-status --argjson run_id "$PROMOTION_RUN_ID" --argjson attempt "$PROMOTION_RUN_ATTEMPT" \
+            '.promotion_conformance.scope == "promotion" and .promotion_conformance.run_id == $run_id and .promotion_conformance.run_attempt == $attempt' \
+            "$root/latchway-security/security-summary.json" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.repositories' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.repositories' "$root/latchway-security/security-summary.json")
+          gh attestation verify "$nested" --bundle "$nested_bundle" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+      - name: Verify nested independent-review attestation on the credential-isolated runner
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.INDEPENDENT_SECURITY_REVIEW_TOKEN }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          root="$RUNNER_TEMP/authenticated-inputs/latchway-security"
+          summary="$root/security-summary.json"
+          report="$root/independent-review/independent-security-review.json"
+          bundle="$root/independent-review/independent-security-review.attestation.sigstore.json"
+          repository=$(jq --raw-output '.review_authority.producer.repository' "$summary")
+          workflow=$(jq --raw-output '.review_authority.producer.workflow_path' "$summary")
+          source_commit=$(jq --raw-output '.review_authority.producer.source_commit' "$summary")
+          run_id=$(jq --raw-output '.review_authority.producer.run_id' "$summary")
+          run_attempt=$(jq --raw-output '.review_authority.producer.run_attempt' "$summary")
+          reviewer_login=$(jq --raw-output '.review_authority.reviewer.github_login' "$summary")
+          reviewer_organization=$(jq --raw-output '.review_authority.reviewer.organization' "$summary")
+          [[ "$repository" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]]
+          [[ "$workflow" =~ ^\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\.ya?ml$ ]]
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+          [[ "$reviewer_login" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]]
+          owner=${repository%%/*}
+          test "${owner,,}" != latchway
+          test "${reviewer_organization,,}" != latchway
+          test "$(sha256sum "$report" | cut -d ' ' -f 1)" = \
+            "$(jq --raw-output '.review_authority.report_sha256' "$summary")"
+          diff --unified=0 \
+            <(jq --sort-keys '.producer' "$report") \
+            <(jq --sort-keys '.review_authority.producer' "$summary")
+          diff --unified=0 \
+            <(jq --sort-keys '.reviewer' "$report") \
+            <(jq --sort-keys '.review_authority.reviewer' "$summary")
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" \
+            '.candidate.commit == $commit and .status == "passed"' "$report" >/dev/null
+          gh api "repos/$repository/actions/runs/$run_id/attempts/$run_attempt" \
+            > "$RUNNER_TEMP/independent-review-run.json"
+          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' \
+            "$RUNNER_TEMP/independent-review-run.json")
+          jq --exit-status --arg commit "$source_commit" --arg login "$reviewer_login" --argjson attempt "$run_attempt" '
+            .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and
+            .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt and
+            .actor.login == $login and .triggering_actor.login == $login
+          ' "$RUNNER_TEMP/independent-review-run.json" >/dev/null
+          gh api "repos/$repository/actions/workflows/$workflow_id" \
+            > "$RUNNER_TEMP/independent-review-workflow.json"
+          jq --exit-status --arg path "$workflow" '.path == $path and .state == "active"' \
+            "$RUNNER_TEMP/independent-review-workflow.json" >/dev/null
+          gh attestation verify "$report" --bundle "$bundle" \
+            --repo "$repository" --signer-workflow "$repository/$workflow" \
+            --source-digest "$source_commit" --signer-digest "$source_commit" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+      - name: Package exact candidate source objects without a checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          bare="$RUNNER_TEMP/latchway.git"
+          git init --bare "$bare" >/dev/null
+          gh auth setup-git
+          git -C "$bare" fetch --no-tags --depth=1 \
+            "https://github.com/$GITHUB_REPOSITORY.git" "$CANDIDATE_COMMIT"
+          git -C "$bare" update-ref refs/heads/authenticated "$CANDIDATE_COMMIT"
+          git -C "$bare" symbolic-ref HEAD refs/heads/authenticated
+          GIT_INDEX_FILE="$bare/index" git --git-dir="$bare" read-tree "$CANDIDATE_COMMIT"
+          mkdir -p "$RUNNER_TEMP/authenticated-inputs/source"
+          git --git-dir="$bare" archive --format=tar "$CANDIDATE_COMMIT" \
+            | gzip -n > "$RUNNER_TEMP/authenticated-inputs/source/latchway.source.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "$bare" -czf "$RUNNER_TEMP/authenticated-inputs/source/latchway.git.tar.gz" .
+          (cd "$RUNNER_TEMP/authenticated-inputs" && sha256sum source/*.tar.gz | LC_ALL=C sort > source.sha256)
+      - name: Retain authenticated promotion inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-promote-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated-inputs
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+      - name: Retain authenticated source-free promotion evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-promote-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/authenticated-inputs/latchway-candidate
+            ${{ runner.temp }}/authenticated-inputs/latchway-security
+            ${{ runner.temp }}/authenticated-inputs/latchway-promotion
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+
+  candidate-gates:
+    needs: authenticate-inputs
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Download only authority-authenticated candidate inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promote-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated-inputs
+      - name: Materialize exact candidate source without repository credentials
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          (cd "$RUNNER_TEMP/authenticated-inputs" && sha256sum --check source.sha256)
+          mkdir -p "$GITHUB_WORKSPACE/latchway/.git"
+          tar -xzf "$RUNNER_TEMP/authenticated-inputs/source/latchway.source.tar.gz" -C "$GITHUB_WORKSPACE/latchway"
+          tar -xzf "$RUNNER_TEMP/authenticated-inputs/source/latchway.git.tar.gz" -C "$GITHUB_WORKSPACE/latchway/.git"
+          git -C "$GITHUB_WORKSPACE/latchway" config core.bare false
+          git -C "$GITHUB_WORKSPACE/latchway" config core.worktree "$GITHUB_WORKSPACE/latchway"
+          test "$(git -C "$GITHUB_WORKSPACE/latchway" rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git -C "$GITHUB_WORKSPACE/latchway" status --porcelain=v1 --untracked-files=all)"
+      - name: Recompute candidate promotion and security gates without credentials
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${DOCKER_AUTH_CONFIG:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          root="$RUNNER_TEMP/authenticated-inputs"
+          python3 latchway/scripts/release-candidate.py --verify \
+            --manifest "$root/latchway-candidate/latchway-candidate.json" \
+            --commit "$CANDIDATE_COMMIT" --tag "$INTENDED_TAG" \
+            --image ghcr.io/latchway/latchway
+          python3 latchway/scripts/verify-promotion.py \
+            --report "$root/latchway-promotion/latchway-cross-repository.json" \
+            --candidate "$root/latchway-candidate/latchway-candidate.json" \
+            --commit "$CANDIDATE_COMMIT" --tag "$INTENDED_TAG"
+          python3 latchway/scripts/security-evidence.py --verify \
+            --report "$root/latchway-security/security-summary.json" \
+            --candidate-manifest "$root/latchway-candidate/latchway-candidate.json" \
+            --raw-directory "$root/latchway-security/raw" \
+            --review-directory "$root/latchway-security/independent-review" \
+            --promotion-directory "$root/latchway-security/promotion-conformance" \
+            --repository "$GITHUB_WORKSPACE/latchway" \
+            --commit "$CANDIDATE_COMMIT" --tag "$INTENDED_TAG"
+
+  immutable-release-settings:
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Preflight protected immutable-release settings without a checkout
+        shell: bash
+        env:
+          LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN: ${{ secrets.LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN"
+          for repository in Latchway/latchway Latchway/latchway-js Latchway/latchway-ios-sdk Latchway/latchway-android Latchway/latchway-react-native-sdk; do
+            GH_TOKEN="$LATCHWAY_GITHUB_RELEASE_ADMIN_TOKEN" gh api \
+              -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$repository/immutable-releases" > "$RUNNER_TEMP/immutable-releases.json"
+            jq --exit-status 'type == "object" and (keys | sort) == ["enabled", "enforced_by_owner"] and .enabled == true and (.enforced_by_owner | type) == "boolean"' \
+              "$RUNNER_TEMP/immutable-releases.json" >/dev/null
+          done
+
+  plan-promotion:
+    needs: [authenticate-inputs, candidate-gates, immutable-release-settings]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    outputs:
+      report_sha256: ${{ steps.verified.outputs.report_sha256 }}
+      oci_image_digest: ${{ steps.verified.outputs.oci_image_digest }}
+    steps:
+      - name: Download only authenticated source-free evidence on a fresh planner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promote-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated-evidence
+      - name: Require the fixed GitHub CLI on the credential-free planner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+      - name: Reverify candidate and promotion attestations on the credential-free planner
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_MANIFEST: ${{ runner.temp }}/authenticated-evidence/latchway-candidate/latchway-candidate.json
+          SECURITY_REPORT: ${{ runner.temp }}/authenticated-evidence/latchway-security/security-summary.json
+          PROMOTION_REPORT: ${{ runner.temp }}/authenticated-evidence/latchway-promotion/latchway-cross-repository.json
+        run: |
+          set -Eeuo pipefail
           gh attestation verify "$CANDIDATE_MANIFEST" \
+            --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-candidate/latchway-candidate.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "${{ inputs.candidate_commit }}" \
+            --signer-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
           gh attestation verify "$SECURITY_REPORT" \
-            --bundle "$RUNNER_TEMP/latchway-security/security-summary.attestation.sigstore.json" \
+            --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-security/security-summary.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
             --source-digest "${{ inputs.candidate_commit }}" \
@@ -191,53 +400,100 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
           gh attestation verify "$PROMOTION_REPORT" \
+            --bundle "$RUNNER_TEMP/authenticated-evidence/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
             --source-digest "${{ inputs.candidate_commit }}" \
+            --signer-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
-      - name: Verify the candidate artifact and exact aggregate bindings
+      - name: Verify exact candidate security and aggregate bindings without source
         id: verified
-        shell: bash
-        env:
-          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
-          INTENDED_TAG: ${{ inputs.intended_tag }}
-          CANDIDATE_MANIFEST: ${{ runner.temp }}/latchway-candidate/latchway-candidate.json
-          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
-        run: |
-          python3 latchway/scripts/release-candidate.py \
-            --verify \
-            --manifest "$CANDIDATE_MANIFEST" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --image ghcr.io/latchway/latchway
-          python3 latchway/scripts/verify-promotion.py \
-            --report "$PROMOTION_REPORT" \
-            --candidate "$CANDIDATE_MANIFEST" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --github-output "$GITHUB_OUTPUT"
-      - name: Recompute exact current-candidate security evidence
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
         run: |
           set -Eeuo pipefail
-          python3 latchway/scripts/security-evidence.py \
-            --verify \
-            --report "$RUNNER_TEMP/latchway-security/security-summary.json" \
-            --candidate-manifest "$RUNNER_TEMP/latchway-candidate/latchway-candidate.json" \
-            --raw-directory "$RUNNER_TEMP/latchway-security/raw" \
-            --repository "$GITHUB_WORKSPACE/latchway" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG"
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${DOCKER_AUTH_CONFIG:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          root="$RUNNER_TEMP/authenticated-evidence"
+          candidate_dir="$root/latchway-candidate"
+          security_dir="$root/latchway-security"
+          promotion_dir="$root/latchway-promotion"
+          candidate="$candidate_dir/latchway-candidate.json"
+          security="$security_dir/security-summary.json"
+          promotion="$promotion_dir/latchway-cross-repository.json"
+          expected_candidate_files='["latchway-candidate.attestation.sigstore.json","latchway-candidate.json","latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]'
+          find "$candidate_dir" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort \
+            > "$RUNNER_TEMP/candidate-actual-files.txt"
+          jq --null-input --raw-output --argjson files "$expected_candidate_files" '$files[]' \
+            > "$RUNNER_TEMP/candidate-expected-files.txt"
+          diff --unified=0 "$RUNNER_TEMP/candidate-expected-files.txt" "$RUNNER_TEMP/candidate-actual-files.txt"
+          test -z "$(find "$root" -type l -print -quit)"
+          expected_artifacts='["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]'
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --argjson expected "$expected_artifacts" '
+              (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+              (.contract | keys | sort) == ["bundle_file_name","bundle_sha256","released_at","status","version"] and
+              .contract.status == "released" and (.contract.bundle_sha256 | test("^[0-9a-f]{64}$")) and
+              (.image | keys | sort) == ["index_digest","platforms","repository"] and
+              .image.repository == "ghcr.io/latchway/latchway" and
+              (.image.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+              (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+              all(.image.platforms[]; test("^sha256:[0-9a-f]{64}$")) and
+              .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"] and
+              ([.artifacts[].path] | sort) == $expected and
+              ([.artifacts[].path] | unique | length) == 7 and
+              all(.artifacts[]; (keys | sort) == ["path","sha256"] and (.sha256 | test("^[0-9a-f]{64}$"))) and
+              ([.artifacts[] | select(.path == "latchway-contract.tar.gz") | .sha256] == [.contract.bundle_sha256])
+            ' "$candidate" >/dev/null
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$candidate" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+                test "$(sha256sum "$candidate_dir/$relative" | cut -d ' ' -f 1)" = "$expected_sha"
+              done
+          candidate_sha256=$(sha256sum "$candidate" | cut -d ' ' -f 1)
+          report_sha256=$(sha256sum "$promotion" | cut -d ' ' -f 1)
+          index_digest=$(jq --raw-output .image.index_digest "$candidate")
+          image=$(jq --raw-output .image.repository "$candidate")
+          oci_image_digest="$image@$index_digest"
+          version=${INTENDED_TAG#v}
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$oci_image_digest" '
+              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+              .scope == "promotion" and .verdict == "passed" and
+              .source_conformance_passed == true and .promotion_ready == true and .release_ready == false and
+              .contract.core_release == $tag and .contract.oci_image_digest == $image and
+              ([.repositories[].id] | sort) == ["android","core","ios","javascript","react_native"] and
+              ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+              all(.checks[]; (.required != true) or .status == "passed")
+            ' "$promotion" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg candidate_sha256 "$candidate_sha256" --arg image "$image" \
+            --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
+              .schema_version == 2 and .kind == "latchway_candidate_security_evidence" and
+              .automated_gate == "passed" and .independent_review_gate == "passed" and
+              .candidate.commit == $commit and .candidate.intended_tag == $tag and
+              .candidate.candidate_manifest_sha256 == $candidate_sha256 and
+              .candidate.image.repository == $image and .candidate.image.index_digest == $digest and
+              .promotion_conformance.scope == "promotion" and
+              .promotion_conformance.report_sha256 == $report_sha256
+            ' "$security" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.repositories' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.repositories' "$security")
+          echo "report_sha256=$report_sha256" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
+          echo "core_version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Verify the exact candidate image signature and provenance
         shell: bash
@@ -248,11 +504,13 @@ jobs:
           cosign verify \
             --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-sha "${{ inputs.candidate_commit }}" \
             "$OCI_IMAGE_DIGEST"
           gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "${{ inputs.candidate_commit }}" \
+            --signer-digest "${{ inputs.candidate_commit }}" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
       - name: Preflight immutable releases and every fixed core release asset
@@ -266,9 +524,9 @@ jobs:
           IMAGE: ${{ steps.verified.outputs.image }}
           INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
           VERSION: ${{ steps.verified.outputs.core_version }}
-          CANDIDATE_DIR: ${{ runner.temp }}/latchway-candidate
-          SECURITY_DIR: ${{ runner.temp }}/latchway-security
-          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
+          CANDIDATE_DIR: ${{ runner.temp }}/authenticated-evidence/latchway-candidate
+          SECURITY_DIR: ${{ runner.temp }}/authenticated-evidence/latchway-security
+          PROMOTION_REPORT: ${{ runner.temp }}/authenticated-evidence/latchway-promotion/latchway-cross-repository.json
         run: |
           set -Eeuo pipefail
           moving='[]'
@@ -291,7 +549,7 @@ jobs:
             "$PROMOTION_REPORT" \
             "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
           install -m 0600 -- \
-            "$RUNNER_TEMP/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
+            "$RUNNER_TEMP/authenticated-evidence/latchway-promotion/latchway-cross-repository.attestation.sigstore.json" \
             "$RUNNER_TEMP/latchway-cross-repository-promotion.attestation.sigstore.json"
           assets=(
             "$RUNNER_TEMP/latchway-cross-repository-promotion.json"
@@ -377,6 +635,259 @@ jobs:
             fi
           done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - name: Build the exact source-free mutation handoff
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          IMAGE: ${{ steps.verified.outputs.image }}
+          INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
+          OCI_IMAGE_DIGEST: ${{ steps.verified.outputs.oci_image_digest }}
+          VERSION: ${{ steps.verified.outputs.core_version }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/promotion-handoff"
+          mkdir -p "$root/release-assets"
+          while IFS= read -r asset; do
+            install -m 0600 -- "$asset" "$root/release-assets/${asset##*/}"
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          jq --null-input --sort-keys \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$INTENDED_TAG" \
+            --arg report_sha256 "$REPORT_SHA256" \
+            --arg image "$IMAGE" \
+            --arg index_digest "$INDEX_DIGEST" \
+            --arg oci_image_digest "$OCI_IMAGE_DIGEST" \
+            --arg version "$VERSION" \
+            '{schema_version: 1, kind: "latchway_release_promotion_handoff",
+              candidate_commit: $commit, intended_tag: $tag,
+              promotion_report_sha256: $report_sha256,
+              image: $image, index_digest: $index_digest,
+              oci_image_digest: $oci_image_digest, version: $version}' \
+            > "$root/metadata.json"
+          (cd "$root" && sha256sum metadata.json release-assets/* \
+            | LC_ALL=C sort > handoff.sha256)
+          test -z "$(find "$root" -type l -print -quit)"
+          test "$(find "$root" -type f | wc -l | tr -d ' ')" = 16
+          test "$(wc -l < "$root/handoff.sha256" | tr -d ' ')" = 15
+      - name: Retain only the closed source-free mutation handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/promotion-handoff
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  stage-github-release:
+    needs: [plan-promotion, immutable-release-settings]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      actions: read
+      attestations: read
+      contents: write
+    steps:
+      - name: Download the exact source-free mutation handoff on a fresh runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/promotion-handoff
+      - name: Validate exact closure hashes and attestations before any GitHub mutation
+        id: validated
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/promotion-handoff"
+          assets="$root/release-assets"
+          test -z "$(find "$root" -type l -print -quit)"
+          printf '%s\n' \
+            handoff.sha256 metadata.json \
+            release-assets/latchway-candidate.attestation.sigstore.json \
+            release-assets/latchway-candidate.json \
+            release-assets/latchway-contract.tar.gz \
+            release-assets/latchway-cross-repository-promotion.attestation.sigstore.json \
+            release-assets/latchway-cross-repository-promotion.json \
+            release-assets/latchway-linux-amd64-license.json \
+            release-assets/latchway-linux-amd64-vulnerability.json \
+            release-assets/latchway-linux-amd64.spdx.json \
+            release-assets/latchway-linux-arm64-license.json \
+            release-assets/latchway-linux-arm64-vulnerability.json \
+            release-assets/latchway-linux-arm64.spdx.json \
+            release-assets/oci-alias-promotion.json \
+            release-assets/security-summary.attestation.sigstore.json \
+            release-assets/security-summary.json \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-handoff-files.txt"
+          find "$root" -type f -printf '%P\n' | LC_ALL=C sort \
+            > "$RUNNER_TEMP/actual-handoff-files.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/expected-handoff-files.txt" \
+            "$RUNNER_TEMP/actual-handoff-files.txt"
+          grep --fixed-strings --invert-match --line-regexp handoff.sha256 \
+            "$RUNNER_TEMP/expected-handoff-files.txt" > "$RUNNER_TEMP/expected-handoff-hashes.txt"
+          sed -nE 's/^[0-9a-f]{64}  (.+)$/\1/p' "$root/handoff.sha256" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          diff --unified=0 \
+            "$RUNNER_TEMP/expected-handoff-hashes.txt" \
+            "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          (cd "$root" && sha256sum --strict --check handoff.sha256)
+          metadata="$root/metadata.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" '
+            (keys | sort) == ["candidate_commit","image","index_digest","intended_tag","kind","oci_image_digest","promotion_report_sha256","schema_version","version"] and
+            .schema_version == 1 and .kind == "latchway_release_promotion_handoff" and
+            .candidate_commit == $commit and .intended_tag == $tag and
+            .version == ($tag | ltrimstr("v")) and
+            .image == "ghcr.io/latchway/latchway" and
+            (.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+            .oci_image_digest == (.image + "@" + .index_digest) and
+            (.promotion_report_sha256 | test("^[0-9a-f]{64}$"))
+          ' "$metadata" >/dev/null
+          report_sha256=$(jq --raw-output .promotion_report_sha256 "$metadata")
+          image=$(jq --raw-output .image "$metadata")
+          index_digest=$(jq --raw-output .index_digest "$metadata")
+          oci_image_digest=$(jq --raw-output .oci_image_digest "$metadata")
+          version=$(jq --raw-output .version "$metadata")
+          candidate="$assets/latchway-candidate.json"
+          expected_artifacts='["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]'
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$image" --arg digest "$index_digest" --argjson expected "$expected_artifacts" '
+              (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+              (.image | keys | sort) == ["index_digest","platforms","repository"] and
+              .image.repository == $image and .image.index_digest == $digest and
+              (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+              all(.image.platforms[]; test("^sha256:[0-9a-f]{64}$")) and
+              .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"] and
+              ([.artifacts[].path] | sort) == $expected and
+              ([.artifacts[].path] | unique | length) == 7 and
+              all(.artifacts[]; (keys | sort) == ["path","sha256"] and (.sha256 | test("^[0-9a-f]{64}$"))) and
+              ([.artifacts[] | select(.path == "latchway-contract.tar.gz") | .sha256] == [.contract.bundle_sha256])
+            ' "$candidate" >/dev/null
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$candidate" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                test "$(sha256sum "$assets/$relative" | cut -d ' ' -f 1)" = "$expected_sha"
+              done
+          promotion="$assets/latchway-cross-repository-promotion.json"
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$report_sha256"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$oci_image_digest" '
+              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+              .scope == "promotion" and .verdict == "passed" and
+              .source_conformance_passed == true and .promotion_ready == true and .release_ready == false and
+              .contract.core_release == $tag and .contract.oci_image_digest == $image and
+              ([.repositories[].id] | sort) == ["android","core","ios","javascript","react_native"] and
+              ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+              all(.checks[]; (.required != true) or .status == "passed")
+            ' "$promotion" >/dev/null
+          security="$assets/security-summary.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$image" --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
+              .schema_version == 2 and .kind == "latchway_candidate_security_evidence" and
+              .automated_gate == "passed" and .independent_review_gate == "passed" and
+              .candidate.commit == $commit and .candidate.intended_tag == $tag and
+              .candidate.image.repository == $image and .candidate.image.index_digest == $digest and
+              .promotion_conformance.scope == "promotion" and
+              .promotion_conformance.report_sha256 == $report_sha256
+            ' "$security" >/dev/null
+          moving='[]'
+          if [[ "$version" != *-* ]]; then
+            IFS=. read -r major minor patch <<< "$version"
+            moving=$(jq --null-input --compact-output --arg mm "$major.$minor" --arg m "$major" '[ $mm, $m, "latest" ]')
+          fi
+          jq --exit-status --arg image "$image" --arg version "$version" \
+            --arg commit "$CANDIDATE_COMMIT" --arg digest "$index_digest" --argjson moving "$moving" '
+              (keys | sort) == ["index_digest","immutable_version","kind","moving_aliases","repository","schema_version","source_commit","version"] and
+              .schema_version == 1 and .kind == "latchway_oci_alias_promotion" and
+              .repository == $image and .version == $version and .source_commit == $commit and
+              .index_digest == $digest and .immutable_version == $version and .moving_aliases == $moving
+            ' "$assets/oci-alias-promotion.json" >/dev/null
+          cli_version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$cli_version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          gh attestation verify "$candidate" \
+            --bundle "$assets/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$security" \
+            --bundle "$assets/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$promotion" \
+            --bundle "$assets/latchway-cross-repository-promotion.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          find "$assets" -maxdepth 1 -type f -printf '%p\n' | LC_ALL=C sort \
+            > "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          test "$(wc -l < "$RUNNER_TEMP/fixed-core-release-assets.txt" | tr -d ' ')" = 14
+          echo "report_sha256=$report_sha256" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Preflight immutable release and every fixed asset before staging
+        id: immutable-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          set +e
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
+            > "$RUNNER_TEMP/preflight-release.json" 2> "$RUNNER_TEMP/preflight-release-error.txt"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            test "$status" -eq 1
+            grep --fixed-strings --quiet "HTTP 404" "$RUNNER_TEMP/preflight-release-error.txt"
+            echo "mode=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          expected_body="Immutable Latchway product release $INTENDED_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $REPORT_SHA256"
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+          jq --exit-status --arg tag "$INTENDED_TAG" --arg title "Latchway $INTENDED_TAG" \
+            --arg body "$expected_body" --argjson prerelease "$expected_prerelease" '
+              .tag_name == $tag and .name == $title and .body == $body and
+              .prerelease == $prerelease and
+              ((.draft == true and .immutable == false) or (.draft == false and .immutable == true))
+            ' "$RUNNER_TEMP/preflight-release.json" >/dev/null
+          mode=draft
+          if [[ "$(jq --raw-output .immutable "$RUNNER_TEMP/preflight-release.json")" == true ]]; then mode=immutable; fi
+          while IFS= read -r existing_name; do
+            matches=0
+            while IFS= read -r asset; do
+              if [[ "${asset##*/}" == "$existing_name" ]]; then ((matches += 1)); fi
+            done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+            test "$matches" = 1
+          done < <(jq --raw-output '.assets[].name' "$RUNNER_TEMP/preflight-release.json")
+          while IFS= read -r asset; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            existing=$(jq --raw-output --arg name "$name" '[.assets[] | select(.name == $name)] | if length == 0 then "absent" elif length == 1 then (.[0].digest // "digest-unavailable") else error("duplicate fixed core release asset") end' "$RUNNER_TEMP/preflight-release.json")
+            if [[ "$mode" == immutable ]]; then test "$existing" = "$expected"; fi
+            if [[ "$existing" != absent ]]; then test "$existing" = "$expected"; fi
+          done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - name: Verify any existing core release tag
         id: release-state
         shell: bash
@@ -384,7 +895,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
         run: |
           set -Eeuo pipefail
           message="Latchway $INTENDED_TAG
@@ -418,8 +929,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
         run: |
+          set -Eeuo pipefail
           jq --null-input \
             --arg tag "$INTENDED_TAG" \
             --arg message "Latchway $INTENDED_TAG\n\nPromotion evidence SHA-256: $REPORT_SHA256" \
@@ -449,7 +961,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
         run: |
           set -Eeuo pipefail
           expected_message="Latchway $INTENDED_TAG
@@ -474,7 +986,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
           RELEASE_MODE: ${{ steps.immutable-release.outputs.mode }}
         run: |
           set -Eeuo pipefail
@@ -552,16 +1064,186 @@ jobs:
             ' "$RUNNER_TEMP/product-release-draft.json")
             test "$actual" = "$expected"
           done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
+
+  promote-oci:
+    needs: [plan-promotion, stage-github-release]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      packages: write
+    steps:
+      - name: Download the exact source-free mutation handoff on a fresh OCI runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/promotion-handoff
+      - name: Validate exact closure hashes attestations tag and draft before registry authentication
+        id: validated
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${DOCKER_AUTH_CONFIG:-}"
+          root="$RUNNER_TEMP/promotion-handoff"
+          assets="$root/release-assets"
+          test -z "$(find "$root" -type l -print -quit)"
+          printf '%s\n' \
+            handoff.sha256 metadata.json \
+            release-assets/latchway-candidate.attestation.sigstore.json \
+            release-assets/latchway-candidate.json \
+            release-assets/latchway-contract.tar.gz \
+            release-assets/latchway-cross-repository-promotion.attestation.sigstore.json \
+            release-assets/latchway-cross-repository-promotion.json \
+            release-assets/latchway-linux-amd64-license.json \
+            release-assets/latchway-linux-amd64-vulnerability.json \
+            release-assets/latchway-linux-amd64.spdx.json \
+            release-assets/latchway-linux-arm64-license.json \
+            release-assets/latchway-linux-arm64-vulnerability.json \
+            release-assets/latchway-linux-arm64.spdx.json \
+            release-assets/oci-alias-promotion.json \
+            release-assets/security-summary.attestation.sigstore.json \
+            release-assets/security-summary.json \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-handoff-files.txt"
+          find "$root" -type f -printf '%P\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-handoff-files.txt"
+          diff --unified=0 "$RUNNER_TEMP/expected-handoff-files.txt" "$RUNNER_TEMP/actual-handoff-files.txt"
+          grep --fixed-strings --invert-match --line-regexp handoff.sha256 \
+            "$RUNNER_TEMP/expected-handoff-files.txt" > "$RUNNER_TEMP/expected-handoff-hashes.txt"
+          sed -nE 's/^[0-9a-f]{64}  (.+)$/\1/p' "$root/handoff.sha256" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          diff --unified=0 "$RUNNER_TEMP/expected-handoff-hashes.txt" "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          (cd "$root" && sha256sum --strict --check handoff.sha256)
+          metadata="$root/metadata.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" '
+            (keys | sort) == ["candidate_commit","image","index_digest","intended_tag","kind","oci_image_digest","promotion_report_sha256","schema_version","version"] and
+            .schema_version == 1 and .kind == "latchway_release_promotion_handoff" and
+            .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+            .image == "ghcr.io/latchway/latchway" and (.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+            .oci_image_digest == (.image + "@" + .index_digest) and
+            (.promotion_report_sha256 | test("^[0-9a-f]{64}$"))
+          ' "$metadata" >/dev/null
+          report_sha256=$(jq --raw-output .promotion_report_sha256 "$metadata")
+          image=$(jq --raw-output .image "$metadata")
+          index_digest=$(jq --raw-output .index_digest "$metadata")
+          oci_image_digest=$(jq --raw-output .oci_image_digest "$metadata")
+          version=$(jq --raw-output .version "$metadata")
+          candidate="$assets/latchway-candidate.json"
+          promotion="$assets/latchway-cross-repository-promotion.json"
+          security="$assets/security-summary.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$image" --arg digest "$index_digest" '
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+              .image.repository == $image and .image.index_digest == $digest and
+              ([.artifacts[].path] | sort) == ["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]
+            ' "$candidate" >/dev/null
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$candidate" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+                [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+                test "$(sha256sum "$assets/$relative" | cut -d ' ' -f 1)" = "$expected_sha"
+              done
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$report_sha256"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" --arg image "$oci_image_digest" '
+            .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+            .scope == "promotion" and .verdict == "passed" and .promotion_ready == true and .release_ready == false and
+            .contract.core_release == $tag and .contract.oci_image_digest == $image and
+            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1
+          ' "$promotion" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
+              .schema_version == 2 and .kind == "latchway_candidate_security_evidence" and
+              .automated_gate == "passed" and .independent_review_gate == "passed" and
+              .candidate.commit == $commit and .candidate.intended_tag == $tag and
+              .candidate.image.index_digest == $digest and
+              .promotion_conformance.report_sha256 == $report_sha256
+            ' "$security" >/dev/null
+          moving='[]'
+          if [[ "$version" != *-* ]]; then
+            IFS=. read -r major minor patch <<< "$version"
+            moving=$(jq --null-input --compact-output --arg mm "$major.$minor" --arg m "$major" '[ $mm, $m, "latest" ]')
+          fi
+          jq --exit-status --arg image "$image" --arg version "$version" --arg commit "$CANDIDATE_COMMIT" \
+            --arg digest "$index_digest" --argjson moving "$moving" '
+              .schema_version == 1 and .kind == "latchway_oci_alias_promotion" and
+              .repository == $image and .version == $version and .source_commit == $commit and
+              .index_digest == $digest and .immutable_version == $version and .moving_aliases == $moving
+            ' "$assets/oci-alias-promotion.json" >/dev/null
+          cli_version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$cli_version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          gh attestation verify "$candidate" --bundle "$assets/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$security" --bundle "$assets/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$promotion" --bundle "$assets/latchway-cross-repository-promotion.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          expected_message="Latchway $INTENDED_TAG
+
+          Promotion evidence SHA-256: $report_sha256"
+          expected_body="Immutable Latchway product release $INTENDED_TAG.
+
+          Candidate commit: $CANDIDATE_COMMIT
+          Promotion evidence SHA-256: $report_sha256"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" > "$RUNNER_TEMP/staged-tag-ref.json"
+          tag_object=$(jq --raw-output '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/staged-tag-ref.json")
+          test "$(jq --raw-output .object.type "$RUNNER_TEMP/staged-tag-ref.json")" = tag
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" > "$RUNNER_TEMP/staged-tag.json"
+          jq --exit-status --arg tag "$INTENDED_TAG" --arg commit "$CANDIDATE_COMMIT" --arg message "$expected_message" '
+            .tag == $tag and .object.type == "commit" and .object.sha == $commit and .message == $message
+          ' "$RUNNER_TEMP/staged-tag.json" >/dev/null
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/staged-release.json"
+          expected_prerelease=false
+          if [[ "$INTENDED_TAG" == *-* ]]; then expected_prerelease=true; fi
+          jq --exit-status --arg tag "$INTENDED_TAG" --arg title "Latchway $INTENDED_TAG" --arg body "$expected_body" \
+            --argjson prerelease "$expected_prerelease" '
+              .tag_name == $tag and .name == $title and .body == $body and .prerelease == $prerelease and
+              ((.draft == true and .immutable == false) or (.draft == false and .immutable == true)) and
+              ([.assets[].name] | sort) == ["latchway-candidate.attestation.sigstore.json","latchway-candidate.json","latchway-contract.tar.gz","latchway-cross-repository-promotion.attestation.sigstore.json","latchway-cross-repository-promotion.json","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json","oci-alias-promotion.json","security-summary.attestation.sigstore.json","security-summary.json"]
+            ' "$RUNNER_TEMP/staged-release.json" >/dev/null
+          for asset in "$assets"/*; do
+            name=${asset##*/}
+            expected="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            actual=$(jq --raw-output --arg name "$name" '[.assets[] | select(.name == $name)] | if length == 1 then (.[0].digest // "digest-unavailable") else error("staged asset missing or duplicated") end' "$RUNNER_TEMP/staged-release.json")
+            test "$actual" = "$expected"
+          done
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Promote only the verified index digest to stable OCI tags
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE: ${{ steps.verified.outputs.image }}
-          INDEX_DIGEST: ${{ steps.verified.outputs.index_digest }}
-          VERSION: ${{ steps.verified.outputs.core_version }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.validated.outputs.image }}
+          INDEX_DIGEST: ${{ steps.validated.outputs.index_digest }}
+          VERSION: ${{ steps.validated.outputs.version }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
           set -Eeuo pipefail
+          umask 077
+          export LC_ALL=C
+          docker_config=$(mktemp -d "$RUNNER_TEMP/latchway-promotion-docker.XXXXXX")
+          export DOCKER_CONFIG="$docker_config"
+          test -z "$(find "$DOCKER_CONFIG" -mindepth 1 -print -quit)"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          test -n "$REGISTRY_TOKEN"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin >/dev/null
           inspect_reference() {
             local reference="$1" output="$2" error="$3"
             set +e
@@ -577,6 +1259,42 @@ jobs:
           }
           digest_of() {
             printf 'sha256:%s\n' "$(sha256sum "$1" | cut -d ' ' -f 1)"
+          }
+          component_less() {
+            local left="$1" right="$2"
+            if (( ${#left} != ${#right} )); then
+              (( ${#left} < ${#right} ))
+            else
+              [[ "$left" < "$right" ]]
+            fi
+          }
+          require_alias_transition() {
+            local alias="$1" current="$2" candidate="$3"
+            [[ "$current" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            local current_major=${BASH_REMATCH[1]}
+            local current_minor=${BASH_REMATCH[2]}
+            local current_patch=${BASH_REMATCH[3]}
+            [[ "$candidate" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            local candidate_major=${BASH_REMATCH[1]}
+            local candidate_minor=${BASH_REMATCH[2]}
+            local candidate_patch=${BASH_REMATCH[3]}
+            case "$alias" in
+              latest) ;;
+              "$candidate_major") test "$current_major" = "$candidate_major" ;;
+              "$candidate_major.$candidate_minor")
+                test "$current_major" = "$candidate_major"
+                test "$current_minor" = "$candidate_minor"
+                ;;
+              *) echo "invalid OCI alias transition scope" >&2; return 1 ;;
+            esac
+            if [[ "$current_major" != "$candidate_major" ]]; then
+              component_less "$current_major" "$candidate_major"
+            elif [[ "$current_minor" != "$candidate_minor" ]]; then
+              component_less "$current_minor" "$candidate_minor"
+            else
+              test "$current_patch" != "$candidate_patch"
+              component_less "$current_patch" "$candidate_patch"
+            fi
           }
 
           # The exact version coordinate is immutable: create once or require
@@ -668,13 +1386,7 @@ jobs:
                 "$prefix-release.json" >/dev/null
               gh release verify "$evidence_tag" --format json \
                 > "$prefix-release-attestation.json"
-              python3 latchway/scripts/verify-github-release-attestation.py \
-                --attestation "$prefix-release-attestation.json" \
-                --release "$prefix-release.json" \
-                --repository "$GITHUB_REPOSITORY" \
-                --tag "$evidence_tag" \
-                --ref-sha "$evidence_tag_object" \
-                --output "$prefix-release-attestation-verification.json"
+              test -s "$prefix-release-attestation.json"
               mkdir "$prefix-assets"
               gh release download "$evidence_tag" --dir "$prefix-assets"
               gh attestation verify "$prefix-assets/COMPLETION_REPORT.md" \
@@ -685,11 +1397,61 @@ jobs:
                 --signer-digest "$prior_commit" \
                 --source-ref refs/heads/main \
                 --deny-self-hosted-runners >/dev/null
-              python3 latchway/scripts/verify-final-evidence-release.py \
-                --directory "$prefix-assets" \
-                --release "$prefix-release.json" \
-                --candidate-commit "$prior_commit" \
-                --release-tag "v$prior_version"
+              test -z "$(find "$prefix-assets" -type l -print -quit)"
+              printf '%s\n' \
+                COMPLETION_REPORT.attestation.sigstore.json \
+                COMPLETION_REPORT.md \
+                SHA256SUMS \
+                latchway-cross-repository-release.attestation.sigstore.json \
+                latchway-cross-repository-release.json \
+                latchway-product-release-attestation.json \
+                latchway-public-registry-byte-proof.json \
+                latchway-publication-state.json \
+                latchway-release-evidence-v1.tar.gz \
+                | LC_ALL=C sort > "$prefix-expected-assets.txt"
+              find "$prefix-assets" -maxdepth 1 -type f -printf '%f\n' \
+                | LC_ALL=C sort > "$prefix-actual-assets.txt"
+              diff --unified=0 "$prefix-expected-assets.txt" "$prefix-actual-assets.txt"
+              while IFS= read -r name; do
+                file="$prefix-assets/$name"
+                test -s "$file"
+                expected_size=$(jq --raw-output --arg name "$name" \
+                  '[.assets[] | select(.name == $name)] | if length == 1 then .[0].size else error("prior evidence asset missing or duplicated") end' \
+                  "$prefix-release.json")
+                expected_digest=$(jq --raw-output --arg name "$name" \
+                  '[.assets[] | select(.name == $name)] | if length == 1 then .[0].digest else error("prior evidence asset missing or duplicated") end' \
+                  "$prefix-release.json")
+                [[ "$expected_size" =~ ^[1-9][0-9]*$ ]]
+                (( expected_size <= 1073741824 ))
+                test "$(stat --format=%s "$file")" = "$expected_size"
+                test "sha256:$(sha256sum "$file" | cut -d ' ' -f 1)" = "$expected_digest"
+              done < "$prefix-expected-assets.txt"
+              (( $(stat --format=%s "$prefix-assets/SHA256SUMS") <= 65536 ))
+              (( $(stat --format=%s "$prefix-assets/COMPLETION_REPORT.md") <= 33554432 ))
+              sed -nE 's/^[0-9a-f]{64}  ([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/\1/p' \
+                "$prefix-assets/SHA256SUMS" | LC_ALL=C sort \
+                > "$prefix-checksum-assets.txt"
+              grep --fixed-strings --invert-match --line-regexp SHA256SUMS \
+                "$prefix-expected-assets.txt" > "$prefix-expected-checksum-assets.txt"
+              diff --unified=0 "$prefix-expected-checksum-assets.txt" "$prefix-checksum-assets.txt"
+              (cd "$prefix-assets" && sha256sum --strict --check SHA256SUMS)
+              identity="| Core repository commit and tag | \`$prior_commit\` / \`v$prior_version\` |"
+              target="Evidence publication target: [\`evidence/v$prior_version\`]"
+              test "$(grep --fixed-strings --count --line-regexp "$identity" "$prefix-assets/COMPLETION_REPORT.md")" = 1
+              test "$(grep --fixed-strings --count "$target" "$prefix-assets/COMPLETION_REPORT.md")" = 1
+              for name in \
+                latchway-cross-repository-release.attestation.sigstore.json \
+                latchway-cross-repository-release.json \
+                latchway-product-release-attestation.json \
+                latchway-public-registry-byte-proof.json \
+                latchway-publication-state.json \
+                latchway-release-evidence-v1.tar.gz; do
+                expected=$(sha256sum "$prefix-assets/$name" | cut -d ' ' -f 1)
+                reported=$(awk -F '`' -v expected_name="$name" '
+                  $2 == expected_name && $4 ~ /^[0-9a-f]{64}$/ { print $4 }
+                ' "$prefix-assets/COMPLETION_REPORT.md")
+                test "$reported" = "$expected"
+              done
               finalized_versions[$prior_version]="$prior_commit"
             }
 
@@ -715,10 +1477,7 @@ jobs:
               [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]]
               # This also rejects an older candidate when any newer stable tag
               # already exists; stable promotions never skip or roll back.
-              python3 latchway/scripts/verify-oci-alias-transition.py \
-                --alias latest \
-                --current-version "$prior_version" \
-                --candidate-version "$VERSION" >/dev/null
+              require_alias_transition latest "$prior_version" "$VERSION"
               gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
                 > "$RUNNER_TEMP/prior-product-$prior_version-tag.json"
               prior_commit=$(jq --exit-status --raw-output \
@@ -768,10 +1527,7 @@ jobs:
                     '{{ index .Config.Labels "org.opencontainers.image.source" }}' "$target")
                   test "$current_source" = "https://github.com/Latchway/latchway"
                   [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]]
-                  python3 latchway/scripts/verify-oci-alias-transition.py \
-                    --alias "$alias" \
-                    --current-version "$current_version" \
-                    --candidate-version "$VERSION" >/dev/null
+                  require_alias_transition "$alias" "$current_version" "$VERSION"
                   docker buildx imagetools inspect --raw "$IMAGE:$current_version" \
                     > "$RUNNER_TEMP/oci-alias-$alias-current-version.json"
                   test "$(digest_of "$RUNNER_TEMP/oci-alias-$alias-current-version.json")" = "$current_digest"
@@ -824,9 +1580,18 @@ jobs:
                 alias_state[$alias]=absent
               fi
             done
-            python3 latchway/scripts/verify-oci-alias-transition.py \
-              --candidate-version "$VERSION" \
-              --plan "$RUNNER_TEMP/oci-alias-transition-plan.json" \
+            jq --exit-status --arg mm "$major.$minor" --arg m "$major" '
+              (keys | sort) == ["aliases","stable_predecessors"] and
+              (.aliases | keys | sort) == [$m, $mm, "latest"] and
+              all(.aliases[]; . == null or
+                ((keys | sort) == ["current_version","predecessor_finalized"] and
+                 (.current_version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")) and
+                 (.predecessor_finalized | type) == "boolean")) and
+              all(.stable_predecessors[];
+                (keys | sort) == ["commit","finalized"] and
+                (.commit | test("^[0-9a-f]{40}$")) and .finalized == true)
+            ' "$RUNNER_TEMP/oci-alias-transition-plan.json" >/dev/null
+            jq --sort-keys . "$RUNNER_TEMP/oci-alias-transition-plan.json" \
               > "$RUNNER_TEMP/oci-alias-transition-authorization.json"
 
             # Re-close each preflight state immediately before its controlled
@@ -864,19 +1629,182 @@ jobs:
              .repository == $repository and .version == $version and
              .source_commit == $commit and .index_digest == $digest and
              .immutable_version == $version' \
-            "$RUNNER_TEMP/oci-alias-promotion.json" >/dev/null
+            "$RUNNER_TEMP/promotion-handoff/release-assets/oci-alias-promotion.json" >/dev/null
+
+  publish-github-release:
+    needs: [plan-promotion, stage-github-release, promote-oci]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      actions: read
+      attestations: read
+      contents: write
+    outputs:
+      report_sha256: ${{ steps.validated.outputs.report_sha256 }}
+      oci_image_digest: ${{ steps.validated.outputs.oci_image_digest }}
+    steps:
+      - name: Download the exact source-free mutation handoff on a fresh publication runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/promotion-handoff
+      - name: Validate exact closure hashes and attestations before release publication
+        id: validated
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${DOCKER_AUTH_CONFIG:-}"
+          root="$RUNNER_TEMP/promotion-handoff"
+          assets="$root/release-assets"
+          test -z "$(find "$root" -type l -print -quit)"
+          printf '%s\n' \
+            handoff.sha256 metadata.json \
+            release-assets/latchway-candidate.attestation.sigstore.json \
+            release-assets/latchway-candidate.json \
+            release-assets/latchway-contract.tar.gz \
+            release-assets/latchway-cross-repository-promotion.attestation.sigstore.json \
+            release-assets/latchway-cross-repository-promotion.json \
+            release-assets/latchway-linux-amd64-license.json \
+            release-assets/latchway-linux-amd64-vulnerability.json \
+            release-assets/latchway-linux-amd64.spdx.json \
+            release-assets/latchway-linux-arm64-license.json \
+            release-assets/latchway-linux-arm64-vulnerability.json \
+            release-assets/latchway-linux-arm64.spdx.json \
+            release-assets/oci-alias-promotion.json \
+            release-assets/security-summary.attestation.sigstore.json \
+            release-assets/security-summary.json \
+            | LC_ALL=C sort > "$RUNNER_TEMP/expected-handoff-files.txt"
+          find "$root" -type f -printf '%P\n' | LC_ALL=C sort > "$RUNNER_TEMP/actual-handoff-files.txt"
+          diff --unified=0 "$RUNNER_TEMP/expected-handoff-files.txt" "$RUNNER_TEMP/actual-handoff-files.txt"
+          grep --fixed-strings --invert-match --line-regexp handoff.sha256 \
+            "$RUNNER_TEMP/expected-handoff-files.txt" > "$RUNNER_TEMP/expected-handoff-hashes.txt"
+          sed -nE 's/^[0-9a-f]{64}  (.+)$/\1/p' "$root/handoff.sha256" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          diff --unified=0 "$RUNNER_TEMP/expected-handoff-hashes.txt" "$RUNNER_TEMP/actual-handoff-hashes.txt"
+          (cd "$root" && sha256sum --strict --check handoff.sha256)
+          metadata="$root/metadata.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" '
+            (keys | sort) == ["candidate_commit","image","index_digest","intended_tag","kind","oci_image_digest","promotion_report_sha256","schema_version","version"] and
+            .schema_version == 1 and .kind == "latchway_release_promotion_handoff" and
+            .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+            .image == "ghcr.io/latchway/latchway" and (.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+            .oci_image_digest == (.image + "@" + .index_digest) and
+            (.promotion_report_sha256 | test("^[0-9a-f]{64}$"))
+          ' "$metadata" >/dev/null
+          report_sha256=$(jq --raw-output .promotion_report_sha256 "$metadata")
+          image=$(jq --raw-output .image "$metadata")
+          index_digest=$(jq --raw-output .index_digest "$metadata")
+          oci_image_digest=$(jq --raw-output .oci_image_digest "$metadata")
+          version=$(jq --raw-output .version "$metadata")
+          candidate="$assets/latchway-candidate.json"
+          promotion="$assets/latchway-cross-repository-promotion.json"
+          security="$assets/security-summary.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg image "$image" --arg digest "$index_digest" '
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+              .image.repository == $image and .image.index_digest == $digest and
+              ([.artifacts[].path] | sort) == ["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]
+            ' "$candidate" >/dev/null
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$candidate" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+                [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+                test "$(sha256sum "$assets/$relative" | cut -d ' ' -f 1)" = "$expected_sha"
+              done
+          test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$report_sha256"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" --arg image "$oci_image_digest" '
+            .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+            .scope == "promotion" and .verdict == "passed" and .promotion_ready == true and .release_ready == false and
+            .contract.core_release == $tag and .contract.oci_image_digest == $image and
+            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1
+          ' "$promotion" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
+              .schema_version == 2 and .kind == "latchway_candidate_security_evidence" and
+              .automated_gate == "passed" and .independent_review_gate == "passed" and
+              .candidate.commit == $commit and .candidate.intended_tag == $tag and
+              .candidate.image.index_digest == $digest and
+              .promotion_conformance.report_sha256 == $report_sha256
+            ' "$security" >/dev/null
+          cli_version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$cli_version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          gh attestation verify "$candidate" --bundle "$assets/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$security" --bundle "$assets/security-summary.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/security.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          gh attestation verify "$promotion" --bundle "$assets/latchway-cross-repository-promotion.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
+          find "$assets" -maxdepth 1 -type f -printf '%p\n' | LC_ALL=C sort > "$RUNNER_TEMP/fixed-core-release-assets.txt"
+          while IFS= read -r asset; do basename "$asset"; done < "$RUNNER_TEMP/fixed-core-release-assets.txt" \
+            | LC_ALL=C sort > "$RUNNER_TEMP/product-expected-assets.txt"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" > "$RUNNER_TEMP/publication-preflight-release.json"
+          release_mode=$(jq --raw-output 'if .immutable == true and .draft == false then "immutable" elif .immutable == false and .draft == true then "draft" else "invalid" end' "$RUNNER_TEMP/publication-preflight-release.json")
+          case "$release_mode" in draft|immutable) ;; *) exit 1 ;; esac
+          echo "report_sha256=$report_sha256" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          echo "oci_image_digest=$oci_image_digest" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify both immutable and moving OCI coordinates before publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.validated.outputs.image }}
+          INDEX_DIGEST: ${{ steps.validated.outputs.index_digest }}
+          OCI_IMAGE_DIGEST: ${{ steps.validated.outputs.oci_image_digest }}
+          VERSION: ${{ steps.validated.outputs.version }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${DOCKER_AUTH_CONFIG:-}"
+          verify_coordinate() {
+            local coordinate="$1" output="$2"
+            docker buildx imagetools inspect --raw "$coordinate" > "$output"
+            test "sha256:$(sha256sum "$output" | cut -d ' ' -f 1)" = "$INDEX_DIGEST"
+          }
+          verify_coordinate "$IMAGE:$VERSION" "$RUNNER_TEMP/oci-version-publication.json"
+          if [[ "$VERSION" != *-* ]]; then
+            IFS=. read -r major minor patch <<< "$VERSION"
+            verify_coordinate "$IMAGE:$major.$minor" "$RUNNER_TEMP/oci-minor-publication.json"
+            verify_coordinate "$IMAGE:$major" "$RUNNER_TEMP/oci-major-publication.json"
+            verify_coordinate "$IMAGE:latest" "$RUNNER_TEMP/oci-latest-publication.json"
+          fi
+          cosign verify \
+            --certificate-identity "https://github.com/Latchway/latchway/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-sha "$CANDIDATE_COMMIT" \
+            "$OCI_IMAGE_DIGEST" >/dev/null
+          gh attestation verify "oci://$OCI_IMAGE_DIGEST" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null
       - name: Publish the immutable release record
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
-          RELEASE_MODE: ${{ steps.immutable-release.outputs.mode }}
+          REPORT_SHA256: ${{ steps.validated.outputs.report_sha256 }}
+          RELEASE_MODE: ${{ steps.validated.outputs.release_mode }}
         run: |
           set -Eeuo pipefail
           case "$RELEASE_MODE" in
-            absent|draft|immutable) ;;
+            draft|immutable) ;;
             *) echo "invalid immutable-release preflight mode" >&2; exit 1 ;;
           esac
           expected_message="Latchway $INTENDED_TAG
@@ -910,11 +1838,30 @@ jobs:
           gh api --include -H "X-GitHub-Api-Version: 2026-03-10" \
             "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
             > "$RUNNER_TEMP/pre-publish-release-snapshot.http"
-          python3 latchway/scripts/verify-github-api-snapshot.py \
-            --response "$RUNNER_TEMP/pre-publish-release-snapshot.http" \
-            --expected-status 200 \
-            --body-output "$RUNNER_TEMP/release.json" \
-            --etag-output "$RUNNER_TEMP/pre-publish-release.etag"
+          head -n 1 "$RUNNER_TEMP/pre-publish-release-snapshot.http" \
+            | tr -d '\r' | grep --extended-regexp --quiet '^HTTP/[0-9.]+ 200( |$)'
+          awk '
+            {
+              line=$0
+              sub(/\r$/, "", line)
+              if (body) print $0
+              else if (line == "") body=1
+            }
+          ' "$RUNNER_TEMP/pre-publish-release-snapshot.http" > "$RUNNER_TEMP/release.json"
+          awk '
+            {
+              line=$0
+              sub(/\r$/, "", line)
+              if (tolower(line) ~ /^etag:[[:space:]]*/) {
+                sub(/^[^:]+:[[:space:]]*/, "", line)
+                print line
+              }
+            }
+          ' "$RUNNER_TEMP/pre-publish-release-snapshot.http" \
+            > "$RUNNER_TEMP/pre-publish-release.etag"
+          test "$(wc -l < "$RUNNER_TEMP/pre-publish-release.etag" | tr -d ' ')" = 1
+          grep --extended-regexp --quiet '^(W/)?"[^"]+"$' "$RUNNER_TEMP/pre-publish-release.etag"
+          jq --exit-status 'type == "object"' "$RUNNER_TEMP/release.json" >/dev/null
           release_id=$(jq --raw-output '.id | select(type == "number" and . > 0)' \
             "$RUNNER_TEMP/release.json")
           if [[ "$RELEASE_MODE" == immutable ]]; then
@@ -962,9 +1909,8 @@ jobs:
               -H "If-None-Match: $(cat "$RUNNER_TEMP/pre-publish-release.etag")" \
               "repos/$GITHUB_REPOSITORY/releases/tags/$INTENDED_TAG" \
               > "$RUNNER_TEMP/pre-publish-release-unchanged.http"
-            python3 latchway/scripts/verify-github-api-snapshot.py \
-              --response "$RUNNER_TEMP/pre-publish-release-unchanged.http" \
-              --expected-status 304
+            head -n 1 "$RUNNER_TEMP/pre-publish-release-unchanged.http" \
+              | tr -d '\r' | grep --extended-regexp --quiet '^HTTP/[0-9.]+ 304( |$)'
             gh api --method PATCH \
               -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
@@ -1008,27 +1954,42 @@ jobs:
           done < "$RUNNER_TEMP/fixed-core-release-assets.txt"
           gh release verify "$INTENDED_TAG" --format json \
             > "$RUNNER_TEMP/product-release-attestation.json"
-          python3 latchway/scripts/verify-github-release-attestation.py \
-            --attestation "$RUNNER_TEMP/product-release-attestation.json" \
-            --release "$RUNNER_TEMP/release.json" \
-            --repository "$GITHUB_REPOSITORY" \
-            --tag "$INTENDED_TAG" \
-            --ref-sha "$(jq --raw-output .object.sha "$RUNNER_TEMP/pre-publish-product-tag-ref.json")" \
-            --output "$RUNNER_TEMP/product-release-attestation-verification.json"
+          test -s "$RUNNER_TEMP/product-release-attestation.json"
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$INTENDED_TAG" \
             > "$RUNNER_TEMP/post-publish-product-tag-ref.json"
           cmp --silent \
             <(jq --sort-keys . "$RUNNER_TEMP/pre-publish-product-tag-ref.json") \
             <(jq --sort-keys . "$RUNNER_TEMP/post-publish-product-tag-ref.json")
-      - name: Dispatch exact evidence-bound SDK publications
+
+  dispatch-sdk-publications:
+    needs: [authenticate-inputs, promote-oci, publish-github-release]
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download the source-free promotion handoff after both mutations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-promotion-handoff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/promotion-handoff
+      - name: Dispatch exact evidence-bound SDK publications without a checkout
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.LATCHWAY_RELEASE_DISPATCH_TOKEN }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
-          PROMOTION_REPORT: ${{ runner.temp }}/latchway-promotion/latchway-cross-repository.json
-          REPORT_SHA256: ${{ steps.verified.outputs.report_sha256 }}
-          OCI_IMAGE_DIGEST: ${{ steps.verified.outputs.oci_image_digest }}
+          PROMOTION_REPORT: ${{ runner.temp }}/promotion-handoff/release-assets/latchway-cross-repository-promotion.json
+          REPORT_SHA256: ${{ needs.publish-github-release.outputs.report_sha256 }}
+          OCI_IMAGE_DIGEST: ${{ needs.publish-github-release.outputs.oci_image_digest }}
         run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          [[ "$REPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$OCI_IMAGE_DIGEST" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          test "$(sha256sum "$PROMOTION_REPORT" | cut -d ' ' -f 1)" = "$REPORT_SHA256"
           for mapping in \
             'javascript:latchway-js' \
             'ios:latchway-ios-sdk' \
@@ -1036,8 +1997,9 @@ jobs:
             'react_native:latchway-react-native-sdk'; do
             repository_id=${mapping%%:*}
             repository_name=${mapping#*:}
-            coordinate=$(jq --compact-output --arg id "$repository_id" '.repositories[] | select(.id == $id)' "$PROMOTION_REPORT")
-            test -n "$coordinate"
+            coordinate=$(jq --compact-output --arg id "$repository_id" \
+              '[.repositories[] | select(.id == $id)] | if length == 1 then .[0] else error("SDK coordinate missing or duplicated") end' \
+              "$PROMOTION_REPORT")
             jq --null-input \
               --arg core_tag "$INTENDED_TAG" \
               --arg evidence_url "https://github.com/$GITHUB_REPOSITORY/releases/download/$INTENDED_TAG/latchway-cross-repository-promotion.json" \
@@ -1046,8 +2008,6 @@ jobs:
               --argjson coordinate "$coordinate" \
               '{event_type: "latchway_release_promoted", client_payload: {core_tag: $core_tag, promotion_evidence_url: $evidence_url, promotion_evidence_sha256: $evidence_sha256, oci_image_digest: $oci_image_digest, repository: $coordinate}}' \
               > "$RUNNER_TEMP/sdk-dispatch.json"
-            gh api \
-              --method POST \
-              "repos/Latchway/$repository_name/dispatches" \
+            gh api --method POST "repos/Latchway/$repository_name/dispatches" \
               --input "$RUNNER_TEMP/sdk-dispatch.json"
           done

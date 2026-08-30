@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/latchway/latchway/internal/buildinfo"
+	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/session"
@@ -15,7 +17,6 @@ import (
 const (
 	chatCompletionsPath = protocol.OpenAIChatPublicPath
 	providerChatPath    = protocol.OpenAIChatProviderPath
-	protocolVersion     = "1"
 
 	maximumAccessTokenBytes = 16 << 10
 	maximumDPoPProofBytes   = 16 << 10
@@ -27,12 +28,14 @@ var (
 )
 
 type declaration struct {
-	sdk             string
-	sdkVersion      string
-	feature         string
-	clientRequestID string
-	accessToken     session.AccessToken
-	dpopProof       session.DPoPProof
+	sdk              string
+	sdkVersion       string
+	framework        string
+	frameworkVersion string
+	feature          string
+	clientRequestID  string
+	accessToken      session.AccessToken
+	dpopProof        session.DPoPProof
 }
 
 type violation struct {
@@ -53,11 +56,11 @@ func requestViolation(path, message string) *violation {
 
 func parseDeclaration(request *http.Request) (declaration, *violation) {
 	version, ok := exactlyOneHeader(request.Header, "X-Latchway-Protocol-Version")
-	if !ok || version != protocolVersion {
+	if !ok || !buildinfo.SupportsProtocolVersion(version) {
 		return declaration{}, &violation{
 			code:      "protocol_version_unsupported",
-			detail:    "This gateway supports Latchway protocol version 1.",
-			supported: []int{1},
+			detail:    "This gateway supports Latchway protocol versions 1 and 2.",
+			supported: buildinfo.SupportedProtocolVersions(),
 		}
 	}
 	sdk, ok := exactlyOneHeader(request.Header, "X-Latchway-SDK")
@@ -67,6 +70,10 @@ func parseDeclaration(request *http.Request) (declaration, *violation) {
 	sdkVersion, ok := exactlyOneHeader(request.Header, "X-Latchway-SDK-Version")
 	if !ok || !validSemVer(sdkVersion) {
 		return declaration{}, requestViolation("header.X-Latchway-SDK-Version", "A semantic SDK version is required.")
+	}
+	framework, frameworkVersion, frameworkViolation := parseFrameworkDeclaration(request.Header, sdk)
+	if frameworkViolation != nil {
+		return declaration{}, frameworkViolation
 	}
 	feature, ok := exactlyOneHeader(request.Header, "X-Latchway-Feature")
 	if !ok || !identifierPattern.MatchString(feature) {
@@ -99,11 +106,41 @@ func parseDeclaration(request *http.Request) (declaration, *violation) {
 	}
 
 	return declaration{
-		sdk: sdk, sdkVersion: sdkVersion, feature: feature,
+		sdk: sdk, sdkVersion: sdkVersion, framework: framework,
+		frameworkVersion: frameworkVersion, feature: feature,
 		clientRequestID: validClientRequestHint(request.Header),
 		accessToken:     accessToken,
 		dpopProof:       dpopProof,
 	}, nil
+}
+
+func parseFrameworkDeclaration(header http.Header, sdk string) (string, string, *violation) {
+	framework, frameworkCount := oneRawHeader(header, "X-Latchway-Framework")
+	version, versionCount := oneRawHeader(header, "X-Latchway-Framework-Version")
+	if frameworkCount == 0 && versionCount == 0 {
+		return "", "", nil
+	}
+	if frameworkCount != 1 || versionCount != 1 || framework == "" || version == "" ||
+		strings.TrimSpace(framework) != framework || strings.TrimSpace(version) != version ||
+		strings.ContainsAny(framework, "\r\n\x00,") || strings.ContainsAny(version, "\r\n\x00,") {
+		return "", "", requestViolation(
+			"header.X-Latchway-Framework",
+			"Framework and framework version must be declared together exactly once.",
+		)
+	}
+	if !frameworkcompat.Compatible(sdk, framework) {
+		return "", "", &violation{
+			code:   "framework_integration_unsupported",
+			detail: "The declared framework integration is not supported by this SDK.",
+		}
+	}
+	if !frameworkcompat.ValidVersion(version) {
+		return "", "", &violation{
+			code:   "framework_version_unsupported",
+			detail: "The declared framework version is not supported.",
+		}
+	}
+	return framework, version, nil
 }
 
 func validSemVer(value string) bool {

@@ -7,6 +7,7 @@ export interface NativeTemplateInput {
   bundleID: string;
   bundleVersion: string;
   packageName: string;
+  clientSurface?: "native" | "react_native";
   cloudProject: number;
   certificateDigest: string;
   upstreamURL: string;
@@ -25,6 +26,14 @@ export interface NativeTemplateInput {
 }
 
 export function buildNativeTemplate(input: NativeTemplateInput): string {
+  if (input.bundleID === input.packageName) {
+    throw new Error("component_identifier_duplicate");
+  }
+  const clientSurface = input.clientSurface ?? "react_native";
+  const iosPlatform = clientSurface === "react_native" ? "react_native_ios" : "ios";
+  const androidPlatform = clientSurface === "react_native" ? "react_native_android" : "android";
+  const iosDefinitionID = clientSurface === "react_native" ? "react-native-ios-main" : "ios-main";
+  const androidDefinitionID = clientSurface === "react_native" ? "react-native-android-main" : "android-main";
   const appAttestSelection = {
     provider: "app_attest", mode: "required", minimumTrustLevel: "app_verified",
     appAttest: { appIdPrefix: input.appIDPrefix, bundleId: input.bundleID, environment: "production", allowedValidationCategories: [1], allowedBundleVersions: [input.bundleVersion] }
@@ -40,18 +49,35 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
       organization: input.organization,
       application: input.application,
       environment: input.environment,
-      description: "React Native iOS and Android production gateway"
+      description: clientSurface === "react_native"
+        ? "React Native iOS and Android production gateway"
+        : "Native iOS and Android production gateway"
     },
     spec: {
       identityProviders: [{ id: "firebase", type: "firebase", projectId: input.firebaseProject }],
       attestationPolicies: [{
         id: "native",
         platforms: {
-          ios: appAttestSelection,
-          android: playIntegritySelection,
-          react_native_ios: appAttestSelection,
-          react_native_android: playIntegritySelection
+          [iosPlatform]: appAttestSelection,
+          [androidPlatform]: playIntegritySelection
         }
+      }],
+      componentDefinitions: [{
+        id: iosDefinitionID,
+        platform: iosPlatform,
+        kind: "main_app",
+        identifiers: { bundleIdentifiers: [input.bundleID] },
+        familyRole: "root",
+        attestation: { strategy: "direct", provider: "app_attest" },
+        allowedFeatures: ["assistant"]
+      }, {
+        id: androidDefinitionID,
+        platform: androidPlatform,
+        kind: "android_app",
+        identifiers: { packageNames: [input.packageName] },
+        familyRole: "root",
+        attestation: { strategy: "direct", provider: "play_integrity" },
+        allowedFeatures: ["assistant"]
       }],
       upstreams: [{
         id: "primary", type: "openai_compatible", baseUrl: input.upstreamURL,

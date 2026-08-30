@@ -109,11 +109,13 @@ func (EvidencePayload) Format(state fmt.State, _ rune) {
 // RequestID never derives from an inbound correlation header. TargetURL never
 // derives from inbound Host or forwarding headers.
 type RequestMetadata struct {
-	RequestID  string
-	SDK        string
-	SDKVersion string
-	HTTPMethod string
-	TargetURL  url.URL
+	RequestID        string
+	SDK              string
+	SDKVersion       string
+	Framework        string
+	FrameworkVersion string
+	HTTPMethod       string
+	TargetURL        url.URL
 	// Origin is the exact canonical HTTPS browser Origin header. It is empty
 	// for native and server-side transports and never derives from Host or
 	// forwarding headers.
@@ -151,6 +153,54 @@ type ExchangeInput struct {
 type RefreshInput struct {
 	Metadata     RequestMetadata
 	RefreshToken SensitiveString
+}
+
+type ComponentPublicJWK struct {
+	Kty string `json:"kty"`
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
+}
+
+type ComponentClientMetadata struct {
+	AppVersion string
+	SDKVersion string
+}
+
+type ProvisionComponentInput struct {
+	Metadata          RequestMetadata
+	AccessToken       SensitiveString
+	DefinitionID      string
+	PublicJWK         ComponentPublicJWK
+	RequestedFeatures []string
+	ClientMetadata    ComponentClientMetadata
+}
+
+type ProvisionComponentResult struct {
+	ComponentID           string
+	InstallationFamilyID  string
+	TrustSource           string
+	TrustExpiresAt        time.Time
+	GrantedFeatures       []string
+	RefreshGrant          SensitiveString
+	RefreshGrantExpiresAt time.Time
+}
+
+type CreateComponentSessionInput struct {
+	Metadata     RequestMetadata
+	ComponentID  string
+	RefreshGrant SensitiveString
+}
+
+type RevokeComponentInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
+	ComponentID string
+}
+
+type RevokeFamilyInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
 }
 
 // RevokeInstallationInput contains the DPoP access credential and the
@@ -245,19 +295,42 @@ type InstallationSummary struct {
 }
 
 type TrustSummary struct {
-	Provider   string    `json:"provider"`
-	Level      string    `json:"level"`
-	VerifiedAt time.Time `json:"verified_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	Provider                  string    `json:"provider"`
+	Level                     string    `json:"level"`
+	Source                    string    `json:"source,omitempty"`
+	ParentComponentID         string    `json:"parent_component_id,omitempty"`
+	ParentAttestationProvider string    `json:"parent_attestation_provider,omitempty"`
+	DelegationID              string    `json:"delegation_id,omitempty"`
+	VerifiedAt                time.Time `json:"verified_at"`
+	ExpiresAt                 time.Time `json:"expires_at"`
+}
+
+type InstallationFamilySummary struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type ClientComponentSummary struct {
+	ID              string   `json:"id"`
+	DefinitionID    string   `json:"definition_id"`
+	Kind            string   `json:"kind"`
+	Platform        string   `json:"platform"`
+	IsRoot          bool     `json:"is_root"`
+	Status          string   `json:"status"`
+	DPoPJKT         string   `json:"dpop_jkt"`
+	GrantedFeatures []string `json:"granted_features"`
 }
 
 type GrantResult struct {
-	AccessToken      SensitiveString
-	ExpiresIn        int
-	RefreshToken     SensitiveString
-	RefreshExpiresIn int
-	Installation     InstallationSummary
-	Trust            TrustSummary
+	AccessToken        SensitiveString
+	ExpiresIn          int
+	RefreshToken       SensitiveString
+	RefreshExpiresIn   int
+	RefreshExpiresAt   time.Time
+	Installation       InstallationSummary
+	InstallationFamily *InstallationFamilySummary
+	Component          *ClientComponentSummary
+	Trust              TrustSummary
 }
 
 // Coordinator is the fail-closed application boundary behind the client wire
@@ -267,6 +340,10 @@ type Coordinator interface {
 	CreateChallenge(context.Context, ChallengeInput) (ChallengeResult, error)
 	ExchangeSession(context.Context, ExchangeInput) (GrantResult, error)
 	RefreshSession(context.Context, RefreshInput) (GrantResult, error)
+	ProvisionComponent(context.Context, ProvisionComponentInput) (ProvisionComponentResult, error)
+	CreateComponentSession(context.Context, CreateComponentSessionInput) (GrantResult, error)
+	RevokeComponent(context.Context, RevokeComponentInput) error
+	RevokeCurrentFamily(context.Context, RevokeFamilyInput) error
 	Diagnostics(context.Context, DiagnosticsInput) (DiagnosticsResult, error)
 	RevokeCurrentInstallation(context.Context, RevokeInstallationInput) error
 }

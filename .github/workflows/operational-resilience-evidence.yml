@@ -56,38 +56,24 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  contents: read
-  packages: read
+permissions: {}
 
 concurrency:
   group: operational-resilience-${{ inputs.candidate_commit }}
   cancel-in-progress: false
 
 jobs:
-  evidence:
+  authenticate:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 25
     environment: operational-resilience-evidence
     permissions:
       actions: read
-      artifact-metadata: write
-      attestations: write
       contents: read
-      id-token: write
       packages: read
     steps:
-      - name: Check out the exact candidate
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 scripts/require-gh-version.py
-      - name: Reject mutable or cross-candidate inputs
+      - name: Require a fixed GitHub CLI and immutable coordinates without a checkout
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -104,14 +90,15 @@ jobs:
           PREVIOUS_CANDIDATE_RUN_ATTEMPT: ${{ inputs.previous_candidate_run_attempt }}
           POSTGRES_IMAGE: ${{ inputs.postgres_image }}
         run: |
+          set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PREVIOUS_CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$PREVIOUS_CANDIDATE_COMMIT" != "$CANDIDATE_COMMIT"
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
-          test -z "$(git status --porcelain=v1)"
-          test "$(git rev-parse --verify "$PREVIOUS_CANDIDATE_COMMIT^{commit}")" = "$PREVIOUS_CANDIDATE_COMMIT"
-          git merge-base --is-ancestor "$PREVIOUS_CANDIDATE_COMMIT" "$CANDIDATE_COMMIT"
           for run_id in "$CANDIDATE_RUN_ID" "$PREVIOUS_CANDIDATE_RUN_ID" "$SOURCE_RUN_ID" "$LOAD_RUN_ID" "$FAILURE_RUN_ID"; do
             [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
           done
@@ -272,12 +259,13 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-failure-evidence.yml" \
             --signer-digest "$CANDIDATE_COMMIT" \
             --source-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
           jq --exit-status --arg run "$LOAD_RUN_ID" --argjson attempt "$LOAD_RUN_ATTEMPT" \
             '.producer.run_id == $run and .producer.run_attempt == $attempt' "$LOAD_MANIFEST" >/dev/null
           jq --exit-status --arg run "$FAILURE_RUN_ID" --argjson attempt "$FAILURE_RUN_ATTEMPT" \
             '.producer.run_id == $run and .producer.run_attempt == $attempt' "$FAILURE_MANIFEST" >/dev/null
-      - name: Validate and hash-bind the prior candidate run
+      - name: Hash-bind the authenticated prior candidate run without candidate code
         shell: bash
         env:
           PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
@@ -287,13 +275,17 @@ jobs:
           set -Eeuo pipefail
           manifest="$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
           bundle="$RUNNER_TEMP/previous-candidate/latchway-candidate.attestation.sigstore.json"
-          intended_tag=$(jq --raw-output .intended_tag "$manifest")
-          python3 scripts/release-candidate.py \
-            --verify \
-            --manifest "$manifest" \
-            --commit "$PREVIOUS_CANDIDATE_COMMIT" \
-            --tag "$intended_tag" \
-            --image ghcr.io/latchway/latchway >/dev/null
+          jq --exit-status --arg commit "$PREVIOUS_CANDIDATE_COMMIT" '
+            (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+            .schema_version == 1 and .kind == "latchway_release_candidate" and
+            .status == "passed" and .candidate_commit == $commit and
+            .intended_tag == ("v" + .version) and
+            (.image.repository == "ghcr.io/latchway/latchway") and
+            (.image.index_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+            all(.image.platforms[]; test("^sha256:[0-9a-f]{64}$")) and
+            .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"]
+          ' "$manifest" >/dev/null
           manifest_sha256=$(sha256sum "$manifest" | awk '{print $1}')
           attestation_sha256=$(sha256sum "$bundle" | awk '{print $1}')
           workflow_id=$(jq --raw-output .workflow_id "$RUNNER_TEMP/previous-candidate-run.json")
@@ -324,12 +316,264 @@ jobs:
               attestation_sha256: $attestation_sha256
             }' > "$RUNNER_TEMP/previous-candidate-run-receipt.json"
           test "$(jq --raw-output .run_attempt "$RUNNER_TEMP/previous-candidate-run-receipt.json")" = "$PREVIOUS_CANDIDATE_RUN_ATTEMPT"
-      - name: Authenticate for exact GHCR image pulls
+      - name: Authenticate only this no-checkout runner for immutable image export
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
+      - name: Export a bounded current, prior, and PostgreSQL image archive without candidate code
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+        run: |
+          set -Eeuo pipefail
+          current_manifest="$RUNNER_TEMP/candidate/latchway-candidate.json"
+          previous_manifest="$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
+          current_manifest_sha=$(sha256sum "$current_manifest" | awk '{print $1}')
+          previous_manifest_sha=$(sha256sum "$previous_manifest" | awk '{print $1}')
+          current_platform=$(jq --exit-status --raw-output --arg commit "$CANDIDATE_COMMIT" '
+            select(
+              .schema_version == 1 and .kind == "latchway_release_candidate" and
+              .status == "passed" and .candidate_commit == $commit and
+              .image.repository == "ghcr.io/latchway/latchway" and
+              (.image.platforms["linux/amd64"] | test("^sha256:[0-9a-f]{64}$"))
+            ) |
+            .image.repository + "@" + .image.platforms["linux/amd64"]
+          ' "$current_manifest")
+          previous_platform=$(jq --exit-status --raw-output --arg commit "$PREVIOUS_CANDIDATE_COMMIT" '
+            select(
+              .schema_version == 1 and .kind == "latchway_release_candidate" and
+              .status == "passed" and .candidate_commit == $commit and
+              .image.repository == "ghcr.io/latchway/latchway" and
+              (.image.platforms["linux/amd64"] | test("^sha256:[0-9a-f]{64}$"))
+            ) |
+            .image.repository + "@" + .image.platforms["linux/amd64"]
+          ' "$previous_manifest")
+          [[ "$current_platform" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$previous_platform" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$POSTGRES_IMAGE" =~ ^docker\.io/library/postgres@sha256:[0-9a-f]{64}$ ]]
+          test "$current_platform" != "$previous_platform"
+          docker pull --platform linux/amd64 "$current_platform" >/dev/null
+          docker pull --platform linux/amd64 "$previous_platform" >/dev/null
+          docker pull --platform linux/amd64 "$POSTGRES_IMAGE" >/dev/null
+          current_id=$(docker image inspect --format '{{.Id}}' "$current_platform")
+          previous_id=$(docker image inspect --format '{{.Id}}' "$previous_platform")
+          postgres_id=$(docker image inspect --format '{{.Id}}' "$POSTGRES_IMAGE")
+          for image_id in "$current_id" "$previous_id" "$postgres_id"; do
+            [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          done
+          test "$(printf '%s\n' "$current_id" "$previous_id" "$postgres_id" | sort -u | wc -l | tr -d ' ')" = 3
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$current_platform")" = "$CANDIDATE_COMMIT"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$previous_platform")" = "$PREVIOUS_CANDIDATE_COMMIT"
+          for image in "$current_platform" "$previous_platform" "$POSTGRES_IMAGE"; do
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
+          done
+          current_local="latchway-preloaded-current:${current_id#sha256:}"
+          previous_local="latchway-preloaded-previous:${previous_id#sha256:}"
+          postgres_local="latchway-preloaded-postgres:${postgres_id#sha256:}"
+          docker tag "$current_platform" "$current_local"
+          docker tag "$previous_platform" "$previous_local"
+          docker tag "$POSTGRES_IMAGE" "$postgres_local"
+          root="$RUNNER_TEMP/operational-images"
+          mkdir -p "$root"
+          docker save --output "$root/preloaded-images.tar" "$current_local" "$previous_local" "$postgres_local"
+          archive="$root/preloaded-images.tar"
+          archive_size=$(stat --format=%s "$archive")
+          (( archive_size >= 1024 && archive_size <= 2147483648 ))
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          jq -n \
+            --arg current_manifest_sha256 "$current_manifest_sha" \
+            --arg previous_manifest_sha256 "$previous_manifest_sha" \
+            --arg current_oci_platform_reference "$current_platform" \
+            --arg current_local_reference "$current_local" \
+            --arg current_image_id "$current_id" \
+            --arg current_revision "$CANDIDATE_COMMIT" \
+            --arg previous_oci_platform_reference "$previous_platform" \
+            --arg previous_local_reference "$previous_local" \
+            --arg previous_image_id "$previous_id" \
+            --arg previous_revision "$PREVIOUS_CANDIDATE_COMMIT" \
+            --arg postgres_oci_reference "$POSTGRES_IMAGE" \
+            --arg postgres_local_reference "$postgres_local" \
+            --arg postgres_image_id "$postgres_id" \
+            --arg archive_sha256 "$archive_sha" \
+            --argjson archive_size_bytes "$archive_size" '
+              {
+                schema_version: 1,
+                kind: "latchway_preloaded_image_archive",
+                current_manifest_sha256: $current_manifest_sha256,
+                previous_manifest_sha256: $previous_manifest_sha256,
+                archive: {path:"preloaded-images.tar",sha256:$archive_sha256,size_bytes:$archive_size_bytes},
+                images: {
+                  current: {oci_platform_reference:$current_oci_platform_reference,local_reference:$current_local_reference,image_id:$current_image_id,revision:$current_revision,platform:"linux/amd64"},
+                  previous: {oci_platform_reference:$previous_oci_platform_reference,local_reference:$previous_local_reference,image_id:$previous_image_id,revision:$previous_revision,platform:"linux/amd64"},
+                  postgres: {oci_reference:$postgres_oci_reference,local_reference:$postgres_local_reference,image_id:$postgres_image_id,platform:"linux/amd64"}
+                }
+              }
+            ' > "$root/preloaded-images.json"
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+          chmod 0444 "$root/preloaded-images.json" "$archive"
+      - name: Upload the bounded operational image archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-operational-resilience-images-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/operational-images/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Remove the no-checkout runner registry credential
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+      - name: Retain only authenticated operational inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/operational-authenticated"
+          cp -R -- \
+            "$RUNNER_TEMP/candidate" \
+            "$RUNNER_TEMP/failure" \
+            "$RUNNER_TEMP/load" \
+            "$RUNNER_TEMP/previous-candidate" \
+            "$RUNNER_TEMP/source" \
+            "$RUNNER_TEMP/operational-authenticated/"
+          install -m 0600 -- "$RUNNER_TEMP/previous-candidate-run-receipt.json" \
+            "$RUNNER_TEMP/operational-authenticated/previous-candidate-run-receipt.json"
+      - name: Upload authenticated operational inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-operational-resilience-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/operational-authenticated/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  finalize:
+    needs: authenticate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the exact candidate finalizer without retained credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download only authenticated operational inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-operational-resilience-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+      - name: Download the bounded operational image archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-operational-resilience-images-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preloaded-images
+      - name: Require the exact credential-free candidate ancestry
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(git rev-parse --verify "$PREVIOUS_CANDIDATE_COMMIT^{commit}")" = "$PREVIOUS_CANDIDATE_COMMIT"
+          git merge-base --is-ancestor "$PREVIOUS_CANDIDATE_COMMIT" "$CANDIDATE_COMMIT"
+      - name: Initialize an empty credential-free Docker client state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          config="$RUNNER_TEMP/credential-free-docker"
+          mkdir -p "$config"
+          chmod 0700 "$config"
+          test -z "$(find "$config" -mindepth 1 -print -quit)"
+          printf 'DOCKER_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
+      - name: Import and verify exact images without a registry credential or pull
+        id: preloaded
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/preloaded-images"
+          receipt="$root/preloaded-images.json"
+          archive="$root/preloaded-images.tar"
+          current_manifest="$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json"
+          previous_manifest="$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json"
+          test -f "$receipt" && test ! -L "$receipt" && test -s "$receipt"
+          test -f "$archive" && test ! -L "$archive" && test -s "$archive"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type f -print -quit)"
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+          current_manifest_sha=$(sha256sum "$current_manifest" | awk '{print $1}')
+          previous_manifest_sha=$(sha256sum "$previous_manifest" | awk '{print $1}')
+          current_platform=$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$current_manifest")
+          previous_platform=$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$previous_manifest")
+          archive_size=$(stat --format=%s "$archive")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg previous_commit "$PREVIOUS_CANDIDATE_COMMIT" \
+            --arg current_manifest_sha "$current_manifest_sha" \
+            --arg previous_manifest_sha "$previous_manifest_sha" \
+            --arg current_platform "$current_platform" \
+            --arg previous_platform "$previous_platform" \
+            --arg postgres "$POSTGRES_IMAGE" \
+            --arg archive_sha "$archive_sha" \
+            --argjson archive_size "$archive_size" '
+              (keys | sort) == ["archive","current_manifest_sha256","images","kind","previous_manifest_sha256","schema_version"] and
+              .schema_version == 1 and .kind == "latchway_preloaded_image_archive" and
+              .current_manifest_sha256 == $current_manifest_sha and
+              .previous_manifest_sha256 == $previous_manifest_sha and
+              .archive == {path:"preloaded-images.tar",sha256:$archive_sha,size_bytes:$archive_size} and
+              ($archive_size >= 1024 and $archive_size <= 2147483648) and
+              (.images | keys | sort) == ["current","postgres","previous"] and
+              all(.images[]; (.image_id | test("^sha256:[0-9a-f]{64}$")) and .platform == "linux/amd64") and
+              (.images.current | keys | sort) == ["image_id","local_reference","oci_platform_reference","platform","revision"] and
+              .images.current.oci_platform_reference == $current_platform and
+              (.images.current.local_reference | test("^latchway-preloaded-current:[0-9a-f]{64}$")) and
+              .images.current.revision == $commit and
+              (.images.previous | keys | sort) == ["image_id","local_reference","oci_platform_reference","platform","revision"] and
+              .images.previous.oci_platform_reference == $previous_platform and
+              (.images.previous.local_reference | test("^latchway-preloaded-previous:[0-9a-f]{64}$")) and
+              .images.previous.revision == $previous_commit and
+              (.images.postgres | keys | sort) == ["image_id","local_reference","oci_reference","platform"] and
+              .images.postgres.oci_reference == $postgres and
+              (.images.postgres.local_reference | test("^latchway-preloaded-postgres:[0-9a-f]{64}$")) and
+              ([.images.current.image_id,.images.previous.image_id,.images.postgres.image_id] | unique | length) == 3
+            ' "$receipt" >/dev/null
+          mkdir -p "$DOCKER_CONFIG"
+          chmod 0700 "$DOCKER_CONFIG"
+          if [[ -s "$DOCKER_CONFIG/config.json" ]]; then
+            jq --exit-status '((.auths // {}) | length) == 0 and ((.credHelpers // {}) | length) == 0 and (.credsStore // "") == ""' "$DOCKER_CONFIG/config.json" >/dev/null
+          fi
+          docker load --input "$archive" >/dev/null
+          current_id=$(jq --raw-output .images.current.image_id "$receipt")
+          previous_id=$(jq --raw-output .images.previous.image_id "$receipt")
+          postgres_id=$(jq --raw-output .images.postgres.image_id "$receipt")
+          test "$(docker image inspect --format '{{.Id}}' "$current_id")" = "$current_id"
+          test "$(docker image inspect --format '{{.Id}}' "$previous_id")" = "$previous_id"
+          test "$(docker image inspect --format '{{.Id}}' "$postgres_id")" = "$postgres_id"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$current_id")" = "$CANDIDATE_COMMIT"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$previous_id")" = "$PREVIOUS_CANDIDATE_COMMIT"
+          for image_id in "$current_id" "$previous_id" "$postgres_id"; do
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_id")" = linux/amd64
+          done
+          echo "current_id=$current_id" >> "$GITHUB_OUTPUT"
+          echo "previous_id=$previous_id" >> "$GITHUB_OUTPUT"
+          echo "postgres_id=$postgres_id" >> "$GITHUB_OUTPUT"
       - name: Resolve and verify both candidate image identities
         id: candidate
         shell: bash
@@ -338,11 +582,11 @@ jobs:
           PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
         run: |
           set -Eeuo pipefail
-          test -f "$RUNNER_TEMP/candidate/latchway-candidate.json"
-          image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/candidate/latchway-candidate.json")"
-          platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/candidate/latchway-candidate.json")"
-          previous_candidate_image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/previous-candidate/latchway-candidate.json")"
-          previous_candidate_platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/previous-candidate/latchway-candidate.json")"
+          test -f "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json"
+          image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json")"
+          platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json")"
+          previous_candidate_image="$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json")"
+          previous_candidate_platform_image="$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json")"
           [[ "$image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
           [[ "$platform_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
           [[ "$previous_candidate_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
@@ -350,9 +594,9 @@ jobs:
           test "$(printf '%s\n' "$image" "$platform_image" "$previous_candidate_image" "$previous_candidate_platform_image" | sort -u | wc -l | tr -d ' ')" = 4
           python3 scripts/release-candidate.py \
             --verify \
-            --manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
+            --manifest "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json" \
             --commit "$CANDIDATE_COMMIT" \
-            --tag "$(jq --raw-output .intended_tag "$RUNNER_TEMP/candidate/latchway-candidate.json")" \
+            --tag "$(jq --raw-output .intended_tag "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json")" \
             --image ghcr.io/latchway/latchway
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "platform_image=$platform_image" >> "$GITHUB_OUTPUT"
@@ -363,38 +607,246 @@ jobs:
           CANDIDATE_PLATFORM_IMAGE: ${{ steps.candidate.outputs.platform_image }}
           PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
           POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+          CURRENT_LOCAL_IMAGE_ID: ${{ steps.preloaded.outputs.current_id }}
+          PREVIOUS_LOCAL_IMAGE_ID: ${{ steps.preloaded.outputs.previous_id }}
+          POSTGRES_LOCAL_IMAGE_ID: ${{ steps.preloaded.outputs.postgres_id }}
         run: >-
           scripts/run-operational-resilience-drills.sh
           --acknowledge-isolated-destructive-drill
           --evidence-dir "$RUNNER_TEMP/operational-drills"
           --core-commit "$CANDIDATE_COMMIT"
           --previous-candidate-commit "$PREVIOUS_CANDIDATE_COMMIT"
-          --previous-candidate-manifest "$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
+          --previous-candidate-manifest "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json"
           --candidate-image "$CANDIDATE_IMAGE"
           --candidate-platform-image "$CANDIDATE_PLATFORM_IMAGE"
           --postgres-image "$POSTGRES_IMAGE"
+          --preloaded-candidate-platform-image-id "$CURRENT_LOCAL_IMAGE_ID"
+          --preloaded-previous-platform-image-id "$PREVIOUS_LOCAL_IMAGE_ID"
+          --preloaded-postgres-image-id "$POSTGRES_LOCAL_IMAGE_ID"
       - name: Seal the operational-resilience domain
         run: >-
           python3 scripts/operational-resilience-evidence.py
-          --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json"
-          --previous-candidate-manifest "$RUNNER_TEMP/previous-candidate/latchway-candidate.json"
-          --previous-candidate-attestation "$RUNNER_TEMP/previous-candidate/latchway-candidate.attestation.sigstore.json"
-          --previous-candidate-run "$RUNNER_TEMP/previous-candidate-run-receipt.json"
+          --candidate-manifest "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json"
+          --previous-candidate-manifest "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.json"
+          --previous-candidate-attestation "$RUNNER_TEMP/authenticated/previous-candidate/latchway-candidate.attestation.sigstore.json"
+          --previous-candidate-run "$RUNNER_TEMP/authenticated/previous-candidate-run-receipt.json"
           --previous-candidate-commit "${{ inputs.previous_candidate_commit }}"
           --previous-candidate-run-id "${{ inputs.previous_candidate_run_id }}"
-          --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json"
-          --load-report "$RUNNER_TEMP/load/load-v1.json"
-          --load-producer-manifest "$RUNNER_TEMP/load/load-producer.json"
-          --load-producer-attestation "$RUNNER_TEMP/load/load-producer.attestation.sigstore.json"
+          --source-conformance "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json"
+          --load-report "$RUNNER_TEMP/authenticated/load/load-v1.json"
+          --load-producer-manifest "$RUNNER_TEMP/authenticated/load/load-producer.json"
+          --load-producer-attestation "$RUNNER_TEMP/authenticated/load/load-producer.attestation.sigstore.json"
           --load-producer-run-id "${{ inputs.load_evidence_run_id }}"
-          --failure-report "$RUNNER_TEMP/failure/failure-release.json"
-          --failure-producer-manifest "$RUNNER_TEMP/failure/failure-producer.json"
-          --failure-producer-attestation "$RUNNER_TEMP/failure/failure-producer.attestation.sigstore.json"
+          --failure-report "$RUNNER_TEMP/authenticated/failure/failure-release.json"
+          --failure-producer-manifest "$RUNNER_TEMP/authenticated/failure/failure-producer.json"
+          --failure-producer-attestation "$RUNNER_TEMP/authenticated/failure/failure-producer.attestation.sigstore.json"
           --failure-producer-run-id "${{ inputs.failure_evidence_run_id }}"
-          --failure-evidence-dir "$RUNNER_TEMP/failure/live-failures"
+          --failure-evidence-dir "$RUNNER_TEMP/authenticated/failure/live-failures"
           --backup-restore-report "$RUNNER_TEMP/operational-drills/backup-restore.json"
           --upgrade-rollback-report "$RUNNER_TEMP/operational-drills/upgrade-rollback.json"
           --output-directory "$RUNNER_TEMP/operational-resilience"
+      - name: Retain the unsigned operational domain for a fresh attestation runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-operational-resilience-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/operational-resilience/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  attest:
+    needs: finalize
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the unsigned operational domain without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-operational-resilience-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/operational-resilience
+      - name: Download the independently authenticated operational inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-operational-resilience-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+      - name: Validate the complete operational domain without candidate code
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIOUS_CANDIDATE_COMMIT: ${{ inputs.previous_candidate_commit }}
+          PREVIOUS_CANDIDATE_RUN_ID: ${{ inputs.previous_candidate_run_id }}
+          PREVIOUS_CANDIDATE_RUN_ATTEMPT: ${{ inputs.previous_candidate_run_attempt }}
+          LOAD_RUN_ID: ${{ inputs.load_evidence_run_id }}
+          LOAD_RUN_ATTEMPT: ${{ inputs.load_evidence_run_attempt }}
+          FAILURE_RUN_ID: ${{ inputs.failure_evidence_run_id }}
+          FAILURE_RUN_ATTEMPT: ${{ inputs.failure_evidence_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/operational-resilience"
+          document="$root/operational_resilience.json"
+          artifacts="$root/artifacts/operational-resilience"
+          candidate="$artifacts/candidate-manifest.json"
+          previous="$artifacts/previous-candidate-manifest.json"
+          previous_bundle="$artifacts/previous-candidate.attestation.sigstore.json"
+          previous_run="$artifacts/previous-candidate-run.json"
+          load_producer="$artifacts/load-producer.json"
+          failure_producer="$artifacts/failure-producer.json"
+          raw_index="$artifacts/raw-artifact-index.json"
+          source="$artifacts/source-conformance.json"
+          test -f "$document" && test ! -L "$document" && test -s "$document"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type d ! -type f -print -quit)"
+          test -z "$(find "$RUNNER_TEMP/authenticated" -type l -print -quit)"
+          while IFS=$'\t' read -r authenticated_path sealed_path; do
+            test -f "$RUNNER_TEMP/authenticated/$authenticated_path"
+            test -f "$artifacts/$sealed_path"
+            cmp --silent \
+              "$RUNNER_TEMP/authenticated/$authenticated_path" \
+              "$artifacts/$sealed_path"
+          done <<'EOF'
+          candidate/latchway-candidate.json	candidate-manifest.json
+          previous-candidate/latchway-candidate.json	previous-candidate-manifest.json
+          previous-candidate/latchway-candidate.attestation.sigstore.json	previous-candidate.attestation.sigstore.json
+          previous-candidate-run-receipt.json	previous-candidate-run.json
+          source/latchway-cross-repository.json	source-conformance.json
+          load/load-v1.json	load-report.json
+          load/load-producer.json	load-producer.json
+          load/load-producer.attestation.sigstore.json	load-producer.attestation.sigstore.json
+          failure/failure-release.json	failure-report.json
+          failure/failure-producer.json	failure-producer.json
+          failure/failure-producer.attestation.sigstore.json	failure-producer.attestation.sigstore.json
+          EOF
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+            (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
+            .schema_version == 1 and
+            .kind == "latchway_cross_repository_external_evidence" and
+            .domain == "operational_resilience" and .status == "passed" and
+            .core_commit == $commit and
+            (.core_release | test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")) and
+            (.contract_version | type == "string" and length > 0) and
+            (.bundle_sha256 | test("^[0-9a-f]{64}$")) and
+            (.oci_image_digest | test("^ghcr\\.io/latchway/latchway@sha256:[0-9a-f]{64}$")) and
+            .claims == {backup_restore_drill_verified:true,live_failure_injection_verified:true,multi_replica_verified:true,previous_candidate_upgrade_rollback_verified:true,v1_load_targets_verified:true} and
+            (.repositories | keys | sort) == ["android","core","ios","javascript","react_native"] and
+            all(.repositories[]; type == "object" and (keys | sort) == ["commit","tag","version"] and (.commit | test("^[0-9a-f]{40}$")) and .tag == ("v" + .version)) and
+            .repositories.core.commit == $commit and
+            .repositories.core.tag == .core_release and
+            (.artifacts | type == "array" and length == 14) and
+            all(.artifacts[]; type == "object" and (keys | sort) == ["path","sha256"] and (.path | type == "string") and (.sha256 | test("^[0-9a-f]{64}$"))) and
+            (.artifacts | map(.path) | sort) == [
+              "artifacts/operational-resilience/backup-restore-report.json",
+              "artifacts/operational-resilience/candidate-manifest.json",
+              "artifacts/operational-resilience/failure-producer.attestation.sigstore.json",
+              "artifacts/operational-resilience/failure-producer.json",
+              "artifacts/operational-resilience/failure-report.json",
+              "artifacts/operational-resilience/load-producer.attestation.sigstore.json",
+              "artifacts/operational-resilience/load-producer.json",
+              "artifacts/operational-resilience/load-report.json",
+              "artifacts/operational-resilience/previous-candidate-manifest.json",
+              "artifacts/operational-resilience/previous-candidate-run.json",
+              "artifacts/operational-resilience/previous-candidate.attestation.sigstore.json",
+              "artifacts/operational-resilience/raw-artifact-index.json",
+              "artifacts/operational-resilience/source-conformance.json",
+              "artifacts/operational-resilience/upgrade-rollback-report.json"
+            ]
+          ' "$document" >/dev/null
+          actual="$RUNNER_TEMP/operational-actual-files"
+          expected="$RUNNER_TEMP/operational-expected-files"
+          find "$root" -type f -print0 | while IFS= read -r -d '' path; do
+            relative=${path#"$root/"}
+            if [[ "$relative" != operational_resilience.json ]]; then printf '%s\n' "$relative"; fi
+          done | LC_ALL=C sort > "$actual"
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$document" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+                [[ "/$relative/" != *"/../"* && "/$relative/" != *"/./"* && "$relative" != *"//"* ]]
+                test -f "$root/$relative" && test ! -L "$root/$relative"
+                test "$(sha256sum "$root/$relative" | awk '{print $1}')" = "$expected_sha"
+                printf '%s\n' "$relative"
+              done | LC_ALL=C sort > "$expected"
+          test -z "$(uniq -d "$expected")"
+          cmp --silent "$expected" "$actual"
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg previous_commit "$PREVIOUS_CANDIDATE_COMMIT" \
+            --arg previous_run "$PREVIOUS_CANDIDATE_RUN_ID" \
+            --argjson previous_attempt "$PREVIOUS_CANDIDATE_RUN_ATTEMPT" \
+            --arg load_run "$LOAD_RUN_ID" \
+            --argjson load_attempt "$LOAD_RUN_ATTEMPT" \
+            --arg failure_run "$FAILURE_RUN_ID" \
+            --argjson failure_attempt "$FAILURE_RUN_ATTEMPT" \
+            --slurpfile domain "$document" \
+            --slurpfile candidate "$candidate" \
+            --slurpfile previous "$previous" \
+            --slurpfile previous_receipt "$previous_run" \
+            --slurpfile source "$source" \
+            --slurpfile load "$load_producer" \
+            --slurpfile failure "$failure_producer" '
+              $candidate[0].candidate_commit == $commit and
+              $candidate[0].intended_tag == $domain[0].core_release and
+              $candidate[0].contract.version == $domain[0].contract_version and
+              $candidate[0].contract.bundle_sha256 == $domain[0].bundle_sha256 and
+              ($candidate[0].image.repository + "@" + $candidate[0].image.index_digest) == $domain[0].oci_image_digest and
+              $source[0].schema_version == 1 and
+              $source[0].scope == "source" and $source[0].verdict == "passed" and
+              $source[0].source_conformance_passed == true and
+              ($source[0].repositories | map(.id) | sort) == ["android","core","ios","javascript","react_native"] and
+              all($source[0].repositories[]; . as $coordinate |
+                $domain[0].repositories[$coordinate.id] == {commit:$coordinate.commit,tag:$coordinate.intended_tag,version:$coordinate.version}) and
+              $previous[0].candidate_commit == $previous_commit and
+              $previous[0].candidate_commit != $commit and
+              $previous_receipt[0].kind == "latchway_previous_candidate_run" and
+              $previous_receipt[0].repository == "Latchway/latchway" and
+              $previous_receipt[0].workflow_path == ".github/workflows/release.yml" and
+              $previous_receipt[0].run_id == $previous_run and
+              $previous_receipt[0].run_attempt == $previous_attempt and
+              $previous_receipt[0].head_sha == $previous_commit and
+              $previous_receipt[0].head_branch == "main" and
+              $previous_receipt[0].event == "workflow_dispatch" and
+              $previous_receipt[0].status == "completed" and
+              $previous_receipt[0].conclusion == "success" and
+              $load[0].candidate.core_commit == $commit and
+              $load[0].producer.run_id == $load_run and
+              $load[0].producer.run_attempt == $load_attempt and
+              $load[0].producer.workflow_ref == "Latchway/latchway/.github/workflows/release-load-evidence.yml@refs/heads/main" and
+              $failure[0].candidate.core_commit == $commit and
+              $failure[0].producer.run_id == $failure_run and
+              $failure[0].producer.run_attempt == $failure_attempt and
+              $failure[0].producer.workflow_ref == "Latchway/latchway/.github/workflows/release-failure-evidence.yml@refs/heads/main"
+          ' "$document" >/dev/null
+          previous_manifest_sha=$(sha256sum "$previous" | awk '{print $1}')
+          previous_bundle_sha=$(sha256sum "$previous_bundle" | awk '{print $1}')
+          previous_receipt_sha=$(sha256sum "$previous_run" | awk '{print $1}')
+          jq --exit-status \
+            --arg manifest_sha "$previous_manifest_sha" \
+            --arg bundle_sha "$previous_bundle_sha" '
+              .manifest_sha256 == $manifest_sha and
+              .attestation_sha256 == $bundle_sha
+          ' "$previous_run" >/dev/null
+          jq --exit-status \
+            --arg commit "$PREVIOUS_CANDIDATE_COMMIT" \
+            --arg run "$PREVIOUS_CANDIDATE_RUN_ID" \
+            --argjson attempt "$PREVIOUS_CANDIDATE_RUN_ATTEMPT" \
+            --arg manifest_sha "$previous_manifest_sha" \
+            --arg bundle_sha "$previous_bundle_sha" \
+            --arg receipt_sha "$previous_receipt_sha" '
+              (keys | sort) == ["backup_restore","failure_external","kind","previous_candidate","schema_version","upgrade_rollback"] and
+              .schema_version == 1 and .kind == "latchway_operational_resilience_raw_artifact_index" and
+              (.previous_candidate | keys | sort) == ["attestation_sha256","commit","intended_tag","manifest_sha256","oci_index_reference","oci_platform_reference","run_attempt","run_id","run_receipt_sha256","version"] and
+              .previous_candidate.commit == $commit and .previous_candidate.run_id == $run and
+              .previous_candidate.run_attempt == $attempt and
+              .previous_candidate.manifest_sha256 == $manifest_sha and
+              .previous_candidate.attestation_sha256 == $bundle_sha and
+              .previous_candidate.run_receipt_sha256 == $receipt_sha
+          ' "$raw_index" >/dev/null
       - name: Attest the hash-bound domain document
         id: attest
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
@@ -406,12 +858,10 @@ jobs:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: cp -- "$BUNDLE_PATH" "$RUNNER_TEMP/operational-resilience/operational_resilience.attestation.sigstore.json"
       - name: Retain the domain document and bounded reports
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latchway-operational-resilience-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/operational-resilience/
+          path: ${{ runner.temp }}/operational-resilience/
           if-no-files-found: error
           compression-level: 0
           retention-days: 90

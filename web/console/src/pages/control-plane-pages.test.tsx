@@ -18,7 +18,7 @@ vi.mock("../api/session", () => ({
   })
 }));
 
-import { AttestationFailuresPage, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage } from "./control-plane-pages";
+import { AttestationFailuresPage, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 
@@ -71,6 +71,19 @@ beforeEach(() => {
 });
 
 describe("rich usage and route-simulator views", () => {
+  it("links a selected pseudonymous user to an exact Installation Family filter", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const userID = "usr_0123456789abcdef";
+    adminRequestMock.mockResolvedValue({ data: { items: [{ created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: userID, identity_providers: ["firebase"], last_seen_at: "2026-08-29T00:01:00Z", normalized_claims: { plan: "subscriber" }, status: "active" }], page: { has_more: false } } });
+    const user = userEvent.setup();
+    render(<UsersPage />);
+    await user.type(screen.getByLabelText("Environment ID"), environmentID);
+    await user.click(screen.getByRole("button", { name: "List users" }));
+    await user.click(await screen.findByRole("button", { name: userID }));
+
+    expect(screen.getByRole("link", { name: "View this user's installation families" })).toHaveAttribute("href", `/installation-families?environment_id=${environmentID}&user_id=${userID}`);
+  });
+
   it("renders bounded per-user, latency, rate, dimension, and provenance analytics", async () => {
     adminRequestMock.mockImplementation(async (path: string) => path.includes("/summary") ? { data: {
       analytics: {
@@ -123,9 +136,11 @@ describe("rich usage and route-simulator views", () => {
 	  first_byte_at: "2026-08-29T00:00:01Z", http_status: 200, id: "atm_0123456789abcdeg", model: "openai/gpt",
 	  route: "fallback", started_at: "2026-08-29T00:00:00.500Z", status: "succeeded", upstream: "openrouter",
 	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "unknown"
-	}], completed_at: "2026-08-29T00:00:03Z", environment_id: "env_0123456789abcdef", feature: "assistant",
+	}], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z", component_definition_id: "ios-main", component_kind: "main_app", environment_id: "env_0123456789abcdef", feature: "assistant", framework: "swift-openai", framework_version: "4.6.0",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
+	  installation_family_id: "fam_0123456789abcdef",
 	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
+	  trust_source: "direct_attested",
 	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 1, output_tokens: 20, total_tokens: 30 },
 	  user_id: "usr_0123456789abcdef" };
 	adminRequestMock.mockImplementation(async (path: string) => path.endsWith(request.id) ? { data: request } : { data: { items: [request], page: { has_more: false } } });
@@ -145,6 +160,9 @@ describe("rich usage and route-simulator views", () => {
 	expect(screen.getByText("timeout")).toBeInTheDocument();
 	expect(screen.getByText("upstream_reported")).toBeInTheDocument();
 	expect(screen.getByText("openrouter_usage_cost")).toBeInTheDocument();
+	expect(screen.getAllByText("swift-openai 4.6.0")).toHaveLength(1);
+	expect(screen.getByText("cmp_0123456789abcdef")).toBeInTheDocument();
+	expect(screen.getByText("direct_attested")).toBeInTheDocument();
 	expect(screen.getByText(/closed, sanitized vocabulary/)).toBeInTheDocument();
 	expect(screen.queryByText("upstream_timeout")).not.toBeInTheDocument();
   });

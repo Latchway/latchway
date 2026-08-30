@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/frameworks.schema.json",
+  "title": "Latchway framework compatibility registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "frameworks"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "frameworks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/framework"
+      }
+    }
+  },
+  "$defs": {
+    "capabilityState": {
+      "enum": [true, false, "conditional", "planned"]
+    },
+    "framework": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "tier",
+        "ecosystem",
+        "package",
+        "integration",
+        "latchway_package",
+        "support",
+        "tested",
+        "capabilities",
+        "security",
+        "limitations"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "tier": {
+          "enum": ["tier_1", "tier_2"]
+        },
+        "ecosystem": {
+          "enum": ["javascript", "apple", "android", "react_native"]
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "integration": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,63}$"
+        },
+        "latchway_package": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "support": {
+          "enum": ["planned", "experimental", "supported", "unsupported"]
+        },
+        "tested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "latest"],
+          "properties": {
+            "minimum": {
+              "type": ["string", "null"],
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            },
+            "latest": {
+              "type": ["string", "null"],
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "responses",
+            "chat_completions",
+            "text",
+            "streaming",
+            "tools",
+            "structured_output",
+            "embeddings",
+            "audio",
+            "images",
+            "cancellation",
+            "app_extensions"
+          ],
+          "properties": {
+            "responses": {"$ref": "#/$defs/capabilityState"},
+            "chat_completions": {"$ref": "#/$defs/capabilityState"},
+            "text": {"$ref": "#/$defs/capabilityState"},
+            "streaming": {"$ref": "#/$defs/capabilityState"},
+            "tools": {"$ref": "#/$defs/capabilityState"},
+            "structured_output": {"$ref": "#/$defs/capabilityState"},
+            "embeddings": {"$ref": "#/$defs/capabilityState"},
+            "audio": {"$ref": "#/$defs/capabilityState"},
+            "images": {"$ref": "#/$defs/capabilityState"},
+            "cancellation": {"$ref": "#/$defs/capabilityState"},
+            "app_extensions": {"$ref": "#/$defs/capabilityState"}
+          }
+        },
+        "security": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dpop", "native_key_isolation"],
+          "properties": {
+            "dpop": {
+              "enum": ["full", "partial", "not_tested", "not_applicable"]
+            },
+            "native_key_isolation": {
+              "enum": ["full", "partial", "not_tested", "not_applicable"]
+            }
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "support": {
+                "enum": ["experimental", "supported", "unsupported"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tested": {
+                "properties": {
+                  "minimum": {"type": "string"},
+                  "latest": {"type": "string"}
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "tested": {
+                "properties": {
+                  "minimum": {"const": null},
+                  "latest": {"const": null}
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

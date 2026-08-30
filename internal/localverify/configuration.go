@@ -56,6 +56,15 @@ func (f *fixture) configurationDocument() ([]byte, error) {
 					"secretRef": "secret/debug-attestation-public-keys",
 				}},
 			}},
+			"componentDefinitions": []any{map[string]any{
+				"id": "react-native-ios-main", "platform": "react_native_ios", "kind": "main_app",
+				"identifiers": map[string]any{"bundleIdentifiers": []any{"dev.latchway.local-verify"}},
+				"familyRole":  "root",
+				"attestation": map[string]any{"strategy": "direct", "provider": "debug"},
+				"allowedFeatures": []any{
+					"assistant", "output_guard", "request_pacer", "stream_guard", "fallback",
+				},
+			}},
 			"upstreams": []any{
 				upstreamDocument("primary", configuredPrimary),
 				upstreamDocument("failure", configuredFailure),

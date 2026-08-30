@@ -19,7 +19,7 @@ func TestVersionJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if result["protocol_version"] != "1" {
+	if result["protocol_version"] != "2" {
 		t.Fatalf("protocol_version = %v", result["protocol_version"])
 	}
 }

@@ -47,14 +47,27 @@ if RELEASE_ATTESTATION_SPEC is None or RELEASE_ATTESTATION_SPEC.loader is None:
 RELEASE_ATTESTATION = importlib.util.module_from_spec(RELEASE_ATTESTATION_SPEC)
 RELEASE_ATTESTATION_SPEC.loader.exec_module(RELEASE_ATTESTATION)
 
-GH_VERSION_SCRIPT = Path(__file__).with_name("require-gh-version.py")
-GH_VERSION_SPEC = importlib.util.spec_from_file_location(
-    "latchway_require_gh_version", GH_VERSION_SCRIPT
+GITHUB_AUTHORITY_DOMAINS = frozenset(
+    {"supply_chain", "public_tags", "public_registries"}
 )
-if GH_VERSION_SPEC is None or GH_VERSION_SPEC.loader is None:
-    raise RuntimeError("GitHub CLI version policy cannot be loaded")
-GH_VERSION = importlib.util.module_from_spec(GH_VERSION_SPEC)
-GH_VERSION_SPEC.loader.exec_module(GH_VERSION)
+MAXIMUM_AUTHORITY_FILES = 256
+MAXIMUM_AUTHORITY_BYTES = 128 * 1024 * 1024
+MAXIMUM_AUTHORITY_WINDOW = EVIDENCE.timedelta(hours=2)
+FORBIDDEN_CANDIDATE_CREDENTIAL_ENV = frozenset(
+    {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "LATCHWAY_ADMIN_API_TOKEN",
+        "LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN",
+        "LATCHWAY_LIVE_SDK_FIREBASE_APP_CHECK_TOKEN",
+        "LATCHWAY_LIVE_SDK_IDENTITY_TOKEN",
+        "LATCHWAY_LIVE_SDK_TURNSTILE_TOKEN",
+        "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT",
+        "ONE_TIME_GRANT",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+    }
+)
 
 REPOSITORY_NAMES = {
     "core": "latchway",
@@ -82,19 +95,89 @@ SDK_BEHAVIOR_KEYS = {
     "sdk.behavior.quota-snapshots": "quota_snapshots",
     "sdk.behavior.protocol-version-rejection": "protocol_version_rejection",
 }
-LIVE_SDK_ENVIRONMENT_KEYS = frozenset(
+LIVE_SDK_JAVASCRIPT_PROVIDERS: Mapping[str, Mapping[str, str]] = {
+    "firebase_app_check": {
+        "observation": "sdk.javascript.firebase-app-check.release-image",
+        "audience": "firebase-app-check",
+        "runner_slug": "firebase",
+    },
+    "turnstile": {
+        "observation": "sdk.javascript.turnstile.release-image",
+        "audience": "turnstile",
+        "runner_slug": "turnstile",
+    },
+}
+LIVE_SDK_JAVASCRIPT_CONFIGURATION_KEYS = frozenset(
     {
-        "LATCHWAY_LIVE_SDK_APPLICATION_ID",
-        "LATCHWAY_LIVE_SDK_FEATURE",
-        "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
-        "LATCHWAY_LIVE_SDK_ATTESTATION_PROVIDER",
         "LATCHWAY_LIVE_SDK_ENVIRONMENT",
-        "LATCHWAY_LIVE_SDK_IDENTITY_PROVIDER",
-        "LATCHWAY_LIVE_SDK_MODEL",
-        "LATCHWAY_LIVE_SDK_IDENTITY_TOKEN",
-        "LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN",
+        "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE",
     }
 )
+LIVE_SDK_LEGACY_CREDENTIAL_ENV = frozenset(
+    {
+        "LATCHWAY_LIVE_SDK_ATTESTATION_TOKEN",
+        "LATCHWAY_LIVE_SDK_FIREBASE_APP_CHECK_TOKEN",
+        "LATCHWAY_LIVE_SDK_IDENTITY_TOKEN",
+        "LATCHWAY_LIVE_SDK_TURNSTILE_TOKEN",
+        "LATCHWAY_ONE_TIME_LIVE_SDK_GRANT",
+        "ONE_TIME_GRANT",
+    }
+)
+LIVE_SDK_ISOLATION_SUBJECTS = (
+    "collector-lease.json",
+    "collector-lease.sig",
+    "collector-teardown.json",
+    "collector-teardown.sig",
+    "execution.json",
+    "gateway-consumption-receipt.json",
+    "gateway-consumption-receipt.sig",
+    "gateway-receipt-public-key.pem",
+    "harness-manifest.json",
+    "report.json",
+)
+LIVE_SDK_ISOLATION_FILES = frozenset(
+    {"ISOLATION_SHA256SUMS", *LIVE_SDK_ISOLATION_SUBJECTS}
+)
+LIVE_SDK_ISOLATION_SIGNATURES = frozenset(
+    {
+        "collector-lease.sig",
+        "collector-teardown.sig",
+        "gateway-consumption-receipt.sig",
+    }
+)
+LIVE_PROVIDER_ISOLATION_PATHS: Mapping[str, str] = {
+    "manifest.json": "manifest.json",
+    "health.json": "health.json",
+    "self-test.json": "self-test.json",
+    "collector-lease.json": "collector-isolation/collector-lease.json",
+    "collector-lease.sig": "collector-isolation/collector-lease.sig",
+    "collector-trust-root.pem": "collector-isolation/collector-trust-root.pem",
+    "grant-consumption-receipt.json": "collector-isolation/grant-consumption-receipt.json",
+    "grant-consumption-receipt.sig": "collector-isolation/grant-consumption-receipt.sig",
+    "collector-teardown.json": "collector-isolation/collector-teardown.json",
+    "collector-teardown.sig": "collector-isolation/collector-teardown.sig",
+}
+LIVE_PROVIDER_ISOLATION_SIGNATURES = frozenset(
+    {
+        "collector-lease.sig",
+        "grant-consumption-receipt.sig",
+        "collector-teardown.sig",
+    }
+)
+RETAINED_INPUT_CONTAINERS: Mapping[str, tuple[str, str]] = {
+    "physical_device_receipt": (
+        "latchway_retained_physical_device_receipt",
+        "physical-receipt.json",
+    ),
+    "live_sdk_collector_isolation": (
+        "latchway_retained_live_sdk_collector_isolation",
+        "collector-isolation.json",
+    ),
+    "live_provider_collector_isolation": (
+        "latchway_retained_live_provider_collector_isolation",
+        "live-provider-isolation.json",
+    ),
+}
 LIVE_SDK_JAVASCRIPT_TESTS = (
     "dpop_authorized_request",
     "dpop_replay_rejected",
@@ -292,7 +375,6 @@ ALLOWED_ENVIRONMENT_OVERRIDES = frozenset(
         "GIT_CONFIG_NOSYSTEM",
         "GIT_TERMINAL_PROMPT",
         "GCM_INTERACTIVE",
-        "LATCHWAY_ADMIN_API_TOKEN",
         "LATCHWAY_CENTRAL_EXPECTED_REPOSITORY",
         "LATCHWAY_COCOAPODS_EXPECTED_ARCHIVE",
         "LATCHWAY_CENTRAL_SIGNING_FINGERPRINT",
@@ -301,7 +383,7 @@ ALLOWED_ENVIRONMENT_OVERRIDES = frozenset(
         "NPM_CONFIG_PROVENANCE",
         "NPM_CONFIG_USERCONFIG",
     )
-) | LIVE_SDK_ENVIRONMENT_KEYS
+)
 
 
 class ObservationError(EVIDENCE.EvidenceError):
@@ -442,9 +524,15 @@ class Observer:
         repositories: Mapping[str, Path],
         live_sdk_receipts: Mapping[str, Path] | None = None,
         live_sdk_runs: Mapping[str, tuple[str, str]] | None = None,
+        live_sdk_authority: Path | None = None,
+        javascript_captures: Mapping[str, Path] | None = None,
+        live_provider_capture: Path | None = None,
+        github_authority: Path | None = None,
         now: datetime,
     ):
         EVIDENCE.protected_context()
+        if any(os.environ.get(name) for name in FORBIDDEN_CANDIDATE_CREDENTIAL_ENV):
+            raise ObservationError("candidate_credentials_present")
         if domain not in EVIDENCE.CLAIM_REQUIREMENTS:
             raise ObservationError("domain_invalid")
         if not output.is_absolute() or output.exists() or output.is_symlink():
@@ -456,6 +544,13 @@ class Observer:
         self.repositories = dict(repositories)
         self.live_sdk_receipts = dict(live_sdk_receipts or {})
         self.live_sdk_runs = dict(live_sdk_runs or {})
+        self.live_sdk_authority = live_sdk_authority
+        self.javascript_captures = dict(javascript_captures or {})
+        self.live_provider_capture = live_provider_capture
+        self.github_authority = github_authority
+        self._github_authority_entries: dict[str, dict[str, Any]] = {}
+        self._github_authority_used: set[str] = set()
+        self._github_authority_manifest_sha256: str | None = None
         self.now = now
         self.identity, self.candidate, self.candidate_created = EVIDENCE.identity_from_inputs(
             source, candidate, now
@@ -467,6 +562,8 @@ class Observer:
             ),
         }
         self._validate_repositories()
+        if self.domain in GITHUB_AUTHORITY_DOMAINS:
+            self._validate_github_authority_directory()
         self.output.mkdir(parents=True, mode=0o700)
 
     def _validate_repositories(self) -> None:
@@ -489,6 +586,203 @@ class Observer:
                 raise ObservationError("repository_commit_mismatch")
             if status:
                 raise ObservationError("repository_checkout_dirty")
+
+    def _validate_github_authority_directory(self) -> None:
+        root = self.github_authority
+        if (
+            root is None
+            or not root.is_absolute()
+            or not root.is_dir()
+            or root.is_symlink()
+        ):
+            raise ObservationError("github_authority_directory_invalid")
+        manifest_path = root / "manifest.json"
+        try:
+            manifest_sha256 = EVIDENCE.sha256_file(
+                manifest_path, EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+            manifest = EVIDENCE.read_json(manifest_path)
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("github_authority_manifest_invalid") from None
+        if (
+            set(manifest)
+            != {
+                "schema_version",
+                "kind",
+                "domain",
+                "candidate",
+                "source_sha256",
+                "candidate_sha256",
+                "started_at",
+                "finished_at",
+                "files",
+            }
+            or manifest.get("schema_version") != 1
+            or manifest.get("kind") != "latchway_github_authority"
+            or manifest.get("domain") != self.domain
+            or manifest.get("candidate") != self.identity
+            or manifest.get("source_sha256") != self.input_hashes["source"]
+            or manifest.get("candidate_sha256") != self.input_hashes["candidate"]
+        ):
+            raise ObservationError("github_authority_manifest_invalid")
+        try:
+            started = EVIDENCE.parse_time(
+                manifest.get("started_at"), "github_authority_time_invalid"
+            )
+            finished = EVIDENCE.parse_time(
+                manifest.get("finished_at"), "github_authority_time_invalid"
+            )
+        except EVIDENCE.EvidenceError as error:
+            raise ObservationError(str(error)) from None
+        if (
+            started < self.candidate_created
+            or finished <= started
+            or finished > self.now
+            or finished - started > MAXIMUM_AUTHORITY_WINDOW
+        ):
+            raise ObservationError("github_authority_time_invalid")
+        files = manifest.get("files")
+        if (
+            not isinstance(files, list)
+            or not 1 <= len(files) <= MAXIMUM_AUTHORITY_FILES
+        ):
+            raise ObservationError("github_authority_file_set_invalid")
+        entries: dict[str, dict[str, Any]] = {}
+        total = 0
+        for item in files:
+            if not isinstance(item, dict) or set(item) != {
+                "path",
+                "bytes",
+                "sha256",
+                "started_at",
+                "finished_at",
+            }:
+                raise ObservationError("github_authority_file_set_invalid")
+            relative = item.get("path")
+            size = item.get("bytes")
+            digest = item.get("sha256")
+            if (
+                not EVIDENCE.safe_relative(relative)
+                or relative == "manifest.json"
+                or relative in entries
+                or not isinstance(size, int)
+                or isinstance(size, bool)
+                or not 1 <= size <= EVIDENCE.MAXIMUM_RAW_BYTES
+                or not isinstance(digest, str)
+                or EVIDENCE.SHA256.fullmatch(digest) is None
+            ):
+                raise ObservationError("github_authority_file_set_invalid")
+            try:
+                item_started = EVIDENCE.parse_time(
+                    item.get("started_at"), "github_authority_time_invalid"
+                )
+                item_finished = EVIDENCE.parse_time(
+                    item.get("finished_at"), "github_authority_time_invalid"
+                )
+                path = EVIDENCE.resolve_inside(root, relative)
+            except EVIDENCE.EvidenceError as error:
+                raise ObservationError(str(error)) from None
+            if (
+                item_started < started
+                or item_finished <= item_started
+                or item_finished > finished
+                or item_finished - item_started > MAXIMUM_AUTHORITY_WINDOW
+                or path.stat().st_size != size
+                or EVIDENCE.sha256_file(path, EVIDENCE.MAXIMUM_RAW_BYTES) != digest
+            ):
+                raise ObservationError("github_authority_file_invalid")
+            entries[relative] = {
+                **item,
+                "path_object": path,
+                "started": item_started,
+                "finished": item_finished,
+            }
+            total += size
+        actual: set[str] = set()
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ObservationError("github_authority_contains_symlink")
+            if path.is_file():
+                actual.add(path.relative_to(root).as_posix())
+        if actual != {"manifest.json", *entries} or total > MAXIMUM_AUTHORITY_BYTES:
+            raise ObservationError("github_authority_file_set_invalid")
+        self._github_authority_entries = entries
+        self._github_authority_used = set()
+        try:
+            final_manifest_sha256 = EVIDENCE.sha256_file(
+                manifest_path, EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("github_authority_manifest_invalid") from None
+        if final_manifest_sha256 != manifest_sha256:
+            raise ObservationError("github_authority_manifest_changed")
+        self._github_authority_manifest_sha256 = manifest_sha256
+
+    def _github_authority_file(
+        self, relative: str, *, maximum: int = EVIDENCE.MAXIMUM_RAW_BYTES
+    ) -> tuple[bytes, datetime, datetime]:
+        entry = self._github_authority_entries.get(relative)
+        if entry is None:
+            raise ObservationError("github_authority_file_missing")
+        try:
+            payload = EVIDENCE.read_bytes(entry["path_object"], maximum)
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("github_authority_file_invalid") from None
+        if hashlib.sha256(payload).hexdigest() != entry["sha256"]:
+            raise ObservationError("github_authority_file_changed")
+        self._github_authority_used.add(relative)
+        return payload, entry["started"], entry["finished"]
+
+    def _github_authority_json(
+        self, relative: str, code: str
+    ) -> tuple[Any, datetime, datetime]:
+        payload, started, finished = self._github_authority_file(
+            relative, maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
+        )
+        return load_output(payload, code), started, finished
+
+    def _validate_github_authority_consumed(self) -> None:
+        if self.domain not in GITHUB_AUTHORITY_DOMAINS:
+            return
+        if self._github_authority_used != set(self._github_authority_entries):
+            raise ObservationError("github_authority_file_set_invalid")
+        root = self.github_authority
+        if (
+            root is None
+            or not root.is_absolute()
+            or not root.is_dir()
+            or root.is_symlink()
+        ):
+            raise ObservationError("github_authority_directory_invalid")
+        actual: set[str] = set()
+        try:
+            for path in root.rglob("*"):
+                if path.is_symlink():
+                    raise ObservationError("github_authority_contains_symlink")
+                if path.is_file():
+                    actual.add(path.relative_to(root).as_posix())
+            if actual != {"manifest.json", *self._github_authority_entries}:
+                raise ObservationError("github_authority_file_set_invalid")
+            if (
+                self._github_authority_manifest_sha256 is None
+                or EVIDENCE.sha256_file(
+                    root / "manifest.json", EVIDENCE.MAXIMUM_RESULT_BYTES
+                )
+                != self._github_authority_manifest_sha256
+            ):
+                raise ObservationError("github_authority_manifest_changed")
+            for entry in self._github_authority_entries.values():
+                path = entry["path_object"]
+                if (
+                    path.stat().st_size != entry["bytes"]
+                    or EVIDENCE.sha256_file(path, EVIDENCE.MAXIMUM_RAW_BYTES)
+                    != entry["sha256"]
+                ):
+                    raise ObservationError("github_authority_file_changed")
+        except ObservationError:
+            raise
+        except (EVIDENCE.EvidenceError, OSError):
+            raise ObservationError("github_authority_file_changed") from None
 
     @staticmethod
     def _execute_command(
@@ -570,6 +864,7 @@ class Observer:
         invocation: Sequence[str],
         cwd: Path | None = None,
         retained_inputs: Mapping[str, bytes] | None = None,
+        retained_input_kind: str = "physical_device_receipt",
     ) -> None:
         if observation not in EVIDENCE.expected_observations(self.domain):
             raise ObservationError("observation_invalid")
@@ -580,7 +875,8 @@ class Observer:
             {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
         ]
         retained = retained_inputs or {}
-        if len(retained) > 64:
+        container = RETAINED_INPUT_CONTAINERS.get(retained_input_kind)
+        if len(retained) > 64 or (retained and container is None):
             raise ObservationError("observation_retained_input_set_invalid")
         retained_files: list[dict[str, str]] = []
         for name, retained_payload in sorted(retained.items()):
@@ -590,7 +886,17 @@ class Observer:
                 or not isinstance(retained_payload, bytes)
             ):
                 raise ObservationError("observation_retained_input_set_invalid")
-            EVIDENCE.scan_safe(retained_payload)
+            if (
+                retained_input_kind == "live_sdk_collector_isolation"
+                and name in LIVE_SDK_ISOLATION_SIGNATURES
+            ) or (
+                retained_input_kind == "live_provider_collector_isolation"
+                and name in LIVE_PROVIDER_ISOLATION_SIGNATURES
+            ):
+                if not 1 <= len(retained_payload) <= 16 * 1024:
+                    raise ObservationError("observation_retained_input_set_invalid")
+            else:
+                EVIDENCE.scan_safe(retained_payload)
             retained_files.append(
                 {
                     "name": name,
@@ -599,16 +905,17 @@ class Observer:
                 }
             )
         if retained_files:
+            assert container is not None
             retained_payload = canonical_json(
                 {
                     "schema_version": 1,
-                    "kind": "latchway_retained_physical_device_receipt",
+                    "kind": container[0],
                     "observation": observation,
                     "files": retained_files,
                 }
             )
             EVIDENCE.scan_safe(retained_payload)
-            retained_relative = f"artifacts/{slug}/physical-receipt.json"
+            retained_relative = f"artifacts/{slug}/{container[1]}"
             artifacts.append(
                 {
                     "path": retained_relative,
@@ -676,6 +983,7 @@ class Observer:
 
     def observe(self) -> None:
         getattr(self, f"observe_{self.domain}")()
+        self._validate_github_authority_consumed()
         self._validate_repositories()
         if (
             EVIDENCE.sha256_file(self.source, EVIDENCE.MAXIMUM_RESULT_BYTES)
@@ -692,16 +1000,107 @@ class Observer:
             raise ObservationError("observation_set_incomplete")
 
     def observe_live_provider(self) -> None:
-        required = {
-            "LATCHWAY_BASE_URL",
-            "LATCHWAY_ADMIN_API_TOKEN",
-            "LATCHWAY_PROVIDER_ENVIRONMENT_ID",
-            "LATCHWAY_PROVIDER_UPSTREAM_ID",
-            "LATCHWAY_PROVIDER_MODEL_ID",
-        }
-        if any(not os.environ.get(name) for name in required):
-            raise ObservationError("live_provider_configuration_missing")
-        base_url = os.environ["LATCHWAY_BASE_URL"].rstrip("/")
+        capture = self._load_live_provider_capture()
+        base_url = capture["gateway_origin"]
+        health = capture["files"]["health.json"]
+        self_test = capture["files"]["self-test.json"]
+        self._validate_gateway_identity(health["payload"], self.identity)
+        states = self._validate_provider_result(self_test["payload"])
+        self.emit(
+            "provider.gateway-identity",
+            health["payload"],
+            started=health["started"],
+            finished=health["finished"],
+            version="https-v1",
+            invocation=("https", "GET", f"{base_url}/healthz"),
+            retained_inputs=capture["retained_inputs"],
+            retained_input_kind="live_provider_collector_isolation",
+        )
+        request_digest = capture["request_sha256"]
+        invocation = (
+            "https",
+            "POST",
+            f"{base_url}/admin/v1/self-tests",
+            f"request-sha256:{request_digest}",
+        )
+        for observation, check in PROVIDER_CHECKS.items():
+            if states.get(check) != "passed":
+                raise ObservationError("live_provider_check_missing")
+            self.emit(
+                observation,
+                self_test["payload"],
+                started=self_test["started"],
+                finished=self_test["finished"],
+                version="admin-api-v1",
+                invocation=invocation,
+            )
+        # Re-open the complete sealed closure after output production so even a
+        # concurrent post-read mutation cannot survive validation.
+        confirmed = self._load_live_provider_capture()
+        if confirmed["manifest_sha256"] != capture["manifest_sha256"]:
+            raise ObservationError("live_provider_capture_changed")
+
+    def _load_live_provider_capture(self) -> dict[str, Any]:
+        root = self.live_provider_capture
+        if (
+            root is None
+            or not root.is_absolute()
+            or not root.is_dir()
+            or root.is_symlink()
+        ):
+            raise ObservationError("live_provider_capture_invalid")
+        actual: set[str] = set()
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ObservationError("live_provider_capture_symlink")
+            if path.is_file():
+                actual.add(path.relative_to(root).as_posix())
+        if actual != {
+            "manifest.json",
+            "health.json",
+            "self-test.json",
+            "collector-isolation/collector-lease.json",
+            "collector-isolation/collector-lease.sig",
+            "collector-isolation/collector-trust-root.pem",
+            "collector-isolation/grant-consumption-receipt.json",
+            "collector-isolation/grant-consumption-receipt.sig",
+            "collector-isolation/collector-teardown.json",
+            "collector-isolation/collector-teardown.sig",
+        }:
+            raise ObservationError("live_provider_capture_file_set_invalid")
+        try:
+            manifest_sha256 = EVIDENCE.sha256_file(
+                root / "manifest.json", EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+            manifest = EVIDENCE.read_json(root / "manifest.json")
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_provider_capture_invalid") from None
+        if (
+            set(manifest)
+            != {
+                "schema_version",
+                "kind",
+                "candidate",
+                "source_sha256",
+                "candidate_sha256",
+                "gateway_origin",
+                "request",
+                "request_sha256",
+                "started_at",
+                "finished_at",
+                "collector_isolation",
+                "files",
+            }
+            or manifest.get("schema_version") != 1
+            or manifest.get("kind") != "latchway_live_provider_capture"
+            or manifest.get("candidate") != self.identity
+            or manifest.get("source_sha256") != self.input_hashes["source"]
+            or manifest.get("candidate_sha256") != self.input_hashes["candidate"]
+        ):
+            raise ObservationError("live_provider_capture_invalid")
+        base_url = manifest.get("gateway_origin")
+        if not isinstance(base_url, str):
+            raise ObservationError("live_provider_gateway_invalid")
         parsed = urlsplit(base_url)
         if (
             parsed.scheme != "https"
@@ -713,65 +1112,443 @@ class Observer:
             or parsed.fragment
         ):
             raise ObservationError("live_provider_gateway_invalid")
-        max_cost = (
-            os.environ.get("LATCHWAY_PROVIDER_MAX_COST_NANO_USD") or "10000000"
-        )
+        request = manifest.get("request")
         if (
-            not max_cost.isascii()
-            or not max_cost.isdigit()
-            or not 1 <= int(max_cost) <= 100_000_000
+            not isinstance(request, dict)
+            or set(request)
+            != {"kind", "environment_id", "upstream", "model", "max_cost_nano_usd"}
+            or request.get("kind") != "openrouter"
+            or any(
+                not isinstance(request.get(name), str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request[name])
+                is None
+                for name in ("environment_id", "upstream", "model")
+            )
+            or not isinstance(request.get("max_cost_nano_usd"), int)
+            or isinstance(request.get("max_cost_nano_usd"), bool)
+            or not 1 <= request["max_cost_nano_usd"] <= 100_000_000
+            or manifest.get("request_sha256")
+            != hashlib.sha256(canonical_json(request)).hexdigest()
         ):
             raise ObservationError("live_provider_cost_bound_invalid")
-        self.run_command(
-            "provider.gateway-identity",
-            (
-                "curl",
-                "--fail-with-body",
-                "--silent",
-                "--show-error",
-                "--proto",
-                "=https",
-                "--tlsv1.2",
-                "--max-time",
-                "30",
-                f"{base_url}/healthz",
-            ),
-            validate=lambda payload: self._validate_gateway_identity(
-                payload, self.identity
-            ),
-            timeout=60,
-        )
-        executable = os.environ.get("LATCHWAY_CLI_PATH", "latchway")
-        command = (
-            executable,
-            "--output", "json",
-            "--base-url", base_url,
-            "verify", "openrouter",
-            "--api-token-env", "LATCHWAY_ADMIN_API_TOKEN",
-            "--environment", os.environ["LATCHWAY_PROVIDER_ENVIRONMENT_ID"],
-            "--upstream", os.environ["LATCHWAY_PROVIDER_UPSTREAM_ID"],
-            "--model", os.environ["LATCHWAY_PROVIDER_MODEL_ID"],
-            "--max-cost-nano-usd", max_cost,
-        )
-        payload, started, finished = self._execute_command(
-            command,
-            environment={
-                "LATCHWAY_ADMIN_API_TOKEN": os.environ["LATCHWAY_ADMIN_API_TOKEN"]
-            },
-            timeout=120,
-        )
-        states = self._validate_provider_result(payload)
-        for observation, check in PROVIDER_CHECKS.items():
-            if states.get(check) != "passed":
-                raise ObservationError("live_provider_check_missing")
-            self.emit(
-                observation,
-                payload,
-                started=started,
-                finished=finished,
-                version="1.0.0",
-                invocation=command,
+        try:
+            started = EVIDENCE.parse_time(
+                manifest.get("started_at"), "live_provider_capture_time_invalid"
             )
+            finished = EVIDENCE.parse_time(
+                manifest.get("finished_at"), "live_provider_capture_time_invalid"
+            )
+        except EVIDENCE.EvidenceError as error:
+            raise ObservationError(str(error)) from None
+        if (
+            started < self.candidate_created
+            or finished <= started
+            or finished > self.now
+            or finished - started > EVIDENCE.timedelta(minutes=10)
+        ):
+            raise ObservationError("live_provider_capture_time_invalid")
+        self._validate_live_provider_isolation(root, manifest, started, finished)
+        file_rows = manifest.get("files")
+        if not isinstance(file_rows, list) or len(file_rows) != 2:
+            raise ObservationError("live_provider_capture_file_set_invalid")
+        by_name: dict[str, dict[str, Any]] = {}
+        for row in file_rows:
+            if not isinstance(row, dict) or set(row) != {
+                "path",
+                "bytes",
+                "sha256",
+                "status_code",
+                "started_at",
+                "finished_at",
+            }:
+                raise ObservationError("live_provider_capture_file_set_invalid")
+            name = row.get("path")
+            expected_status = {"health.json": 200, "self-test.json": 202}.get(name)
+            if (
+                expected_status is None
+                or name in by_name
+                or row.get("status_code") != expected_status
+                or not isinstance(row.get("bytes"), int)
+                or isinstance(row.get("bytes"), bool)
+                or not 1 <= row["bytes"] <= EVIDENCE.MAXIMUM_RESULT_BYTES
+                or not isinstance(row.get("sha256"), str)
+                or EVIDENCE.SHA256.fullmatch(row["sha256"]) is None
+            ):
+                raise ObservationError("live_provider_capture_file_set_invalid")
+            try:
+                item_started = EVIDENCE.parse_time(
+                    row.get("started_at"), "live_provider_capture_time_invalid"
+                )
+                item_finished = EVIDENCE.parse_time(
+                    row.get("finished_at"), "live_provider_capture_time_invalid"
+                )
+                payload = EVIDENCE.read_bytes(
+                    root / name, EVIDENCE.MAXIMUM_RESULT_BYTES
+                )
+            except EVIDENCE.EvidenceError as error:
+                raise ObservationError(str(error)) from None
+            if (
+                item_started < started
+                or item_finished <= item_started
+                or item_finished > finished
+                or item_finished - item_started > EVIDENCE.timedelta(minutes=5)
+                or len(payload) != row["bytes"]
+                or hashlib.sha256(payload).hexdigest() != row["sha256"]
+            ):
+                raise ObservationError("live_provider_capture_file_invalid")
+            load_output(payload, "live_provider_capture_response_invalid")
+            by_name[name] = {
+                "payload": payload,
+                "started": item_started,
+                "finished": item_finished,
+            }
+        if set(by_name) != {"health.json", "self-test.json"}:
+            raise ObservationError("live_provider_capture_file_set_invalid")
+        try:
+            final_manifest_sha256 = EVIDENCE.sha256_file(
+                root / "manifest.json", EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_provider_capture_invalid") from None
+        if final_manifest_sha256 != manifest_sha256:
+            raise ObservationError("live_provider_capture_changed")
+        try:
+            retained_inputs = {
+                name: EVIDENCE.read_bytes(root / relative)
+                for name, relative in LIVE_PROVIDER_ISOLATION_PATHS.items()
+            }
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_provider_capture_changed") from None
+        return {
+            "gateway_origin": base_url.rstrip("/"),
+            "request_sha256": manifest["request_sha256"],
+            "manifest_sha256": manifest_sha256,
+            "files": by_name,
+            "retained_inputs": retained_inputs,
+        }
+
+    def _validate_live_provider_isolation(
+        self,
+        root: Path,
+        manifest: Mapping[str, Any],
+        started: datetime,
+        finished: datetime,
+    ) -> None:
+        code = "live_provider_collector_isolation_invalid"
+        isolation = manifest.get("collector_isolation")
+        expected_hashes = {
+            "lease_sha256": "collector-lease.json",
+            "lease_signature_sha256": "collector-lease.sig",
+            "trust_root_sha256": "collector-trust-root.pem",
+            "receipt_sha256": "grant-consumption-receipt.json",
+            "receipt_signature_sha256": "grant-consumption-receipt.sig",
+            "teardown_sha256": "collector-teardown.json",
+            "teardown_signature_sha256": "collector-teardown.sig",
+        }
+        if (
+            not isinstance(isolation, dict)
+            or set(isolation) != {"schema_version", *expected_hashes}
+            or isolation.get("schema_version")
+            != "latchway.live-provider-collector-isolation.v1"
+        ):
+            raise ObservationError(code)
+        isolation_root = root / "collector-isolation"
+        payloads: dict[str, bytes] = {}
+        try:
+            for field, name in expected_hashes.items():
+                payload = EVIDENCE.read_bytes(isolation_root / name, 2 * 1024 * 1024)
+                if (
+                    not isinstance(isolation.get(field), str)
+                    or EVIDENCE.SHA256.fullmatch(isolation[field]) is None
+                    or hashlib.sha256(payload).hexdigest() != isolation[field]
+                ):
+                    raise ObservationError(code)
+                payloads[name] = payload
+            lease = EVIDENCE.read_json(isolation_root / "collector-lease.json")
+            receipt = EVIDENCE.read_json(
+                isolation_root / "grant-consumption-receipt.json"
+            )
+            teardown = EVIDENCE.read_json(isolation_root / "collector-teardown.json")
+        except EVIDENCE.EvidenceError:
+            raise ObservationError(code) from None
+
+        for name in (
+            "collector-lease.sig",
+            "grant-consumption-receipt.sig",
+            "collector-teardown.sig",
+        ):
+            if not 8 <= len(payloads[name]) <= 4096:
+                raise ObservationError(code)
+        try:
+            trust_root = payloads["collector-trust-root.pem"].decode("ascii")
+        except UnicodeDecodeError:
+            raise ObservationError(code) from None
+        if (
+            "PRIVATE KEY" in trust_root
+            or re.fullmatch(
+                r"-----BEGIN PUBLIC KEY-----\n"
+                r"[A-Za-z0-9+/=\n]+"
+                r"-----END PUBLIC KEY-----\n?",
+                trust_root,
+            )
+            is None
+        ):
+            raise ObservationError(code)
+
+        workflow = lease.get("workflow") if isinstance(lease, dict) else None
+        runner = lease.get("runner") if isinstance(lease, dict) else None
+        grant = lease.get("grant") if isinstance(lease, dict) else None
+        candidate = lease.get("candidate") if isinstance(lease, dict) else None
+        gateway = lease.get("gateway") if isinstance(lease, dict) else None
+        core_commit = self.identity["core_commit"]
+        request_sha256 = manifest.get("request_sha256")
+        if (
+            not isinstance(lease, dict)
+            or set(lease)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "workflow",
+                "runner",
+                "credentials",
+                "supervisor",
+                "grant",
+                "candidate",
+                "gateway",
+                "issued_at_unix",
+                "expires_at_unix",
+            }
+            or lease.get("schema_version")
+            != "latchway.live-provider-collector-lease.v1"
+            or lease.get("repository") != EVIDENCE.REPOSITORY
+            or lease.get("core_commit") != core_commit
+            or not isinstance(workflow, dict)
+            or set(workflow) != {"run_id", "run_attempt", "job", "audience"}
+            or EVIDENCE.RUN_ID.fullmatch(str(workflow.get("run_id"))) is None
+            or re.fullmatch(r"[1-9][0-9]{0,5}", str(workflow.get("run_attempt")))
+            is None
+            or workflow.get("job") != "live_provider_capture"
+            or workflow.get("audience") != "latchway-live-provider/self-test"
+            or not isinstance(workflow.get("run_id"), str)
+            or not isinstance(workflow.get("run_attempt"), str)
+            or not isinstance(runner, dict)
+            or set(runner)
+            != {
+                "name",
+                "ephemeral",
+                "jit",
+                "max_jobs",
+                "fresh_boot",
+                "clean_workspace",
+                "repository_scope",
+                "destroy_after_job",
+                "image_digest",
+                "boot_id_sha256",
+            }
+            or runner.get("name")
+            != f"latchway-live-provider-{workflow.get('run_id')}-{workflow.get('run_attempt')}"
+            or runner.get("ephemeral") is not True
+            or runner.get("jit") is not True
+            or runner.get("max_jobs") != 1
+            or runner.get("fresh_boot") is not True
+            or runner.get("clean_workspace") is not True
+            or runner.get("repository_scope") != EVIDENCE.REPOSITORY
+            or runner.get("destroy_after_job") is not True
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", str(runner.get("image_digest")))
+            is None
+            or EVIDENCE.SHA256.fullmatch(str(runner.get("boot_id_sha256"))) is None
+            or lease.get("credentials")
+            != {
+                "long_lived": False,
+                "organization": False,
+                "administration": False,
+                "registry": False,
+                "oidc": False,
+            }
+            or lease.get("supervisor")
+            != {
+                "private_key_isolated": True,
+                "caller_supplied_claims_accepted": False,
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+                "grant_issuer_independent": True,
+                "one_use_verification": True,
+                "out_of_band_watchdog": True,
+            }
+            or not isinstance(grant, dict)
+            or set(grant)
+            != {
+                "audience",
+                "core_commit",
+                "run_id",
+                "run_attempt",
+                "sha256",
+                "scope",
+                "single_use",
+                "revocable",
+                "jti_sha256",
+                "request_sha256",
+                "issued_at_unix",
+                "expires_at_unix",
+            }
+            or grant.get("audience") != "latchway-live-provider/self-test"
+            or grant.get("core_commit") != core_commit
+            or grant.get("run_id") != workflow["run_id"]
+            or grant.get("run_attempt") != workflow["run_attempt"]
+            or grant.get("scope") != "run_self_tests"
+            or grant.get("single_use") is not True
+            or grant.get("revocable") is not True
+            or EVIDENCE.SHA256.fullmatch(str(grant.get("sha256"))) is None
+            or EVIDENCE.SHA256.fullmatch(str(grant.get("jti_sha256"))) is None
+            or grant.get("request_sha256") != request_sha256
+            or not isinstance(candidate, dict)
+            or candidate
+            != {
+                "source_report_sha256": self.input_hashes["source"],
+                "candidate_manifest_sha256": self.input_hashes["candidate"],
+            }
+            or gateway != {"origin": manifest.get("gateway_origin")}
+        ):
+            raise ObservationError(code)
+        numeric = (
+            lease.get("issued_at_unix"),
+            lease.get("expires_at_unix"),
+            grant.get("issued_at_unix"),
+            grant.get("expires_at_unix"),
+        )
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in numeric):
+            raise ObservationError(code)
+        lease_issued, lease_expires, grant_issued, grant_expires = numeric
+        if (
+            lease_issued < int(self.candidate_created.timestamp())
+            or lease_issued > int(started.timestamp())
+            or lease_expires < int(started.timestamp())
+            or not 1 <= lease_expires - lease_issued <= 600
+            or grant_issued < lease_issued
+            or grant_issued > int(started.timestamp())
+            or grant_expires < int(finished.timestamp())
+            or grant_expires > lease_expires
+            or not 1 <= grant_expires - grant_issued <= 300
+        ):
+            raise ObservationError(code)
+
+        if (
+            not isinstance(receipt, dict)
+            or set(receipt)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "run_id",
+                "run_attempt",
+                "audience",
+                "scope",
+                "grant_sha256",
+                "jti_sha256",
+                "single_use",
+                "consumption_count",
+                "consumed",
+                "revoked",
+                "request_sha256",
+                "health_sha256",
+                "self_test_sha256",
+                "consumed_at_unix",
+            }
+            or receipt.get("schema_version")
+            != "latchway.live-provider-grant-consumption.v1"
+            or receipt.get("repository") != EVIDENCE.REPOSITORY
+            or receipt.get("core_commit") != core_commit
+            or receipt.get("run_id") != workflow["run_id"]
+            or receipt.get("run_attempt") != workflow["run_attempt"]
+            or receipt.get("audience") != workflow["audience"]
+            or receipt.get("scope") != "run_self_tests"
+            or receipt.get("grant_sha256") != grant["sha256"]
+            or receipt.get("jti_sha256") != grant["jti_sha256"]
+            or receipt.get("single_use") is not True
+            or receipt.get("consumption_count") != 1
+            or receipt.get("consumed") is not True
+            or receipt.get("revoked") is not True
+            or receipt.get("request_sha256") != request_sha256
+            or receipt.get("health_sha256")
+            != hashlib.sha256(EVIDENCE.read_bytes(root / "health.json")).hexdigest()
+            or receipt.get("self_test_sha256")
+            != hashlib.sha256(EVIDENCE.read_bytes(root / "self-test.json")).hexdigest()
+            or not isinstance(receipt.get("consumed_at_unix"), int)
+            or isinstance(receipt.get("consumed_at_unix"), bool)
+            or not int(started.timestamp())
+            <= receipt["consumed_at_unix"]
+            <= int(finished.timestamp())
+        ):
+            raise ObservationError(code)
+
+        teardown_workflow = (
+            teardown.get("workflow") if isinstance(teardown, dict) else None
+        )
+        teardown_runner = teardown.get("runner") if isinstance(teardown, dict) else None
+        if (
+            not isinstance(teardown, dict)
+            or set(teardown)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "workflow",
+                "runner",
+                "grant",
+                "network",
+                "receipt_verified",
+                "evidence_eligible",
+                "lease_sha256",
+                "receipt_sha256",
+                "health_sha256",
+                "self_test_sha256",
+            }
+            or teardown.get("schema_version")
+            != "latchway.live-provider-collector-teardown.v1"
+            or teardown.get("repository") != EVIDENCE.REPOSITORY
+            or teardown.get("core_commit") != core_commit
+            or teardown_workflow != workflow
+            or not isinstance(teardown_runner, dict)
+            or set(teardown_runner)
+            != {
+                "name",
+                "deregistered",
+                "accepts_more_jobs",
+                "destroy_scheduled",
+                "destroy_deadline_unix",
+            }
+            or teardown_runner.get("name") != runner["name"]
+            or teardown_runner.get("deregistered") is not True
+            or teardown_runner.get("accepts_more_jobs") is not False
+            or teardown_runner.get("destroy_scheduled") is not True
+            or not isinstance(teardown_runner.get("destroy_deadline_unix"), int)
+            or isinstance(teardown_runner.get("destroy_deadline_unix"), bool)
+            or not int(finished.timestamp())
+            <= teardown_runner["destroy_deadline_unix"]
+            <= int(finished.timestamp()) + 600
+            or teardown.get("grant")
+            != {
+                "single_use": True,
+                "consumption_count": 1,
+                "zeroized": True,
+                "revoked": True,
+            }
+            or teardown.get("network")
+            != {
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+            }
+            or teardown.get("receipt_verified") is not True
+            or teardown.get("evidence_eligible") is not True
+            or teardown.get("lease_sha256") != isolation["lease_sha256"]
+            or teardown.get("receipt_sha256") != isolation["receipt_sha256"]
+            or teardown.get("health_sha256") != receipt["health_sha256"]
+            or teardown.get("self_test_sha256") != receipt["self_test_sha256"]
+        ):
+            raise ObservationError(code)
 
     @staticmethod
     def _validate_gateway_identity(
@@ -787,7 +1564,7 @@ class Observer:
             or build.get("version") != core.get("version")
             or build.get("commit") != identity.get("core_commit")
             or build.get("contract_version") != identity.get("contract_version")
-            or str(build.get("protocol_version")) != "1"
+            or str(build.get("protocol_version")) != "2"
         ):
             raise ObservationError("live_provider_gateway_identity_invalid")
 
@@ -887,27 +1664,37 @@ class Observer:
             ),
             validate=lambda payload: self._validate_cosign(payload, image, "cosign_result_invalid"),
         )
-        self.run_command(
-            "supply.github-provenance",
-            (
-                "gh", "attestation", "verify", f"oci://{image}",
-                "--repo", EVIDENCE.REPOSITORY,
-                "--signer-workflow", f"{EVIDENCE.REPOSITORY}/{EVIDENCE.CANDIDATE_WORKFLOW}",
-                "--source-digest", self.identity["core_commit"],
-                "--signer-digest", self.identity["core_commit"],
-                "--source-ref", "refs/heads/main",
-                "--deny-self-hosted-runners", "--format", "json",
-            ),
-            environment={"GH_TOKEN": self._github_token()},
-            validate=lambda payload: self._require_nonempty_list(payload, "provenance_result_invalid"),
+        provenance, started, finished = self._github_authority_file(
+            "supply-chain/github-provenance.json",
+            maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
         )
-
-    @staticmethod
-    def _github_token() -> str:
-        token = os.environ.get("GH_TOKEN", "")
-        if not token:
-            raise ObservationError("github_authentication_missing")
-        return token
+        self._require_nonempty_list(provenance, "provenance_result_invalid")
+        self.emit(
+            "supply.github-provenance",
+            provenance,
+            started=started,
+            finished=finished,
+            version="github-cli-v2",
+            invocation=(
+                "gh",
+                "attestation",
+                "verify",
+                f"oci://{image}",
+                "--repo",
+                EVIDENCE.REPOSITORY,
+                "--signer-workflow",
+                f"{EVIDENCE.REPOSITORY}/{EVIDENCE.CANDIDATE_WORKFLOW}",
+                "--source-digest",
+                self.identity["core_commit"],
+                "--signer-digest",
+                self.identity["core_commit"],
+                "--source-ref",
+                "refs/heads/main",
+                "--deny-self-hosted-runners",
+                "--format",
+                "json",
+            ),
+        )
 
     @staticmethod
     def _validate_index(
@@ -1023,9 +1810,14 @@ class Observer:
             coordinate = self.identity["repositories"][repository_id]
             repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
             tag = coordinate["tag"]
-            ref_payload = self._gh_json(("api", f"repos/{repository}/git/ref/tags/{tag}"))
+            root = f"public-tags/{repository_id}"
+            ref_payload, ref_started, ref_finished = self._github_authority_file(
+                f"{root}/tag-ref.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
             ref = self._validate_tag_ref(ref_payload, tag)
-            tag_payload = self._gh_json(("api", f"repos/{repository}/git/tags/{ref['object']['sha']}"))
+            tag_payload, tag_started, tag_finished = self._github_authority_file(
+                f"{root}/tag-object.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
             tag_object = self._validate_tag_object(
                 tag_payload, tag, coordinate["commit"]
             )
@@ -1051,22 +1843,18 @@ class Observer:
                     raise ObservationError("public_tag_message_mismatch")
             combined = canonical_json({"ref": ref, "tag": tag_object})
             observation = f"publication.annotated-tag.{repository_id}"
-            now = datetime.now(timezone.utc).replace(microsecond=0)
             self.emit(
                 observation,
                 combined,
-                started=now,
-                finished=now + EVIDENCE.timedelta(seconds=1),
-                version="system",
+                started=min(ref_started, tag_started),
+                finished=max(ref_finished, tag_finished),
+                version="github-cli-v2",
                 invocation=("gh", "api", repository, "annotated-tag", tag),
             )
 
-            release_payload = self._gh_json(
-                (
-                    "api",
-                    "-H",
-                    "X-GitHub-Api-Version: 2026-03-10",
-                    f"repos/{repository}/releases/tags/{tag}",
+            release_payload, release_started, release_finished = (
+                self._github_authority_file(
+                    f"{root}/release.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
                 )
             )
             expected_assets, adoption_required = self._expected_release_assets(
@@ -1086,11 +1874,14 @@ class Observer:
                     else None
                 ),
             )
-            release_attestation = self._verify_release_attestation(
-                repository,
-                tag,
-                ref["object"]["sha"],
-                release,
+            release_attestation, attestation_started, attestation_finished = (
+                self._release_attestation_from_authority(
+                    repository_id,
+                    repository,
+                    tag,
+                    ref["object"]["sha"],
+                    release,
+                )
             )
             retained_release_proof = canonical_json(
                 {
@@ -1110,13 +1901,12 @@ class Observer:
                 }
             )
             observation = f"publication.github-release.{repository_id}"
-            now = datetime.now(timezone.utc).replace(microsecond=0)
             self.emit(
                 observation,
                 retained_release_proof,
-                started=now,
-                finished=now + EVIDENCE.timedelta(seconds=1),
-                version="system",
+                started=min(release_started, attestation_started),
+                finished=max(release_finished, attestation_finished),
+                version="github-cli-v2",
                 invocation=("gh", "release", "verify", tag, "--repo", repository),
             )
 
@@ -1281,45 +2071,21 @@ class Observer:
                 raise ObservationError("github_release_asset_set_invalid")
         return value
 
-    def _verify_release_attestation(
+    def _release_attestation_from_authority(
         self,
+        repository_id: str,
         repository: str,
         tag: str,
         ref_sha: str,
         release: Mapping[str, Any],
-    ) -> bytes:
-        executable = shutil.which("gh")
-        if executable is None:
-            raise ObservationError("observation_tool_unavailable")
-        result = subprocess.run(
-            (
-                executable,
-                "release",
-                "verify",
-                tag,
-                "--repo",
-                repository,
-                "--format",
-                "json",
-            ),
-            check=False,
-            capture_output=True,
-            timeout=60,
-            env=command_environment({"GH_TOKEN": self._github_token()}),
+    ) -> tuple[bytes, datetime, datetime]:
+        payload, started, finished = self._github_authority_file(
+            f"public-tags/{repository_id}/release-attestation.json",
+            maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
         )
-        if (
-            result.returncode != 0
-            or not result.stdout
-            or len(result.stdout) > EVIDENCE.MAXIMUM_RESULT_BYTES
-        ):
-            raise ObservationError("github_release_attestation_invalid")
-        EVIDENCE.scan_safe(result.stdout)
-        value = load_output(result.stdout, "github_release_attestation_invalid")
-        if not isinstance(value, dict) or not value:
-            raise ObservationError("github_release_attestation_invalid")
         try:
             normalized = RELEASE_ATTESTATION.validate_bytes(
-                result.stdout,
+                payload,
                 repository=repository,
                 tag=tag,
                 ref_sha=ref_sha,
@@ -1327,24 +2093,7 @@ class Observer:
             )
         except RELEASE_ATTESTATION.AttestationError:
             raise ObservationError("github_release_attestation_invalid") from None
-        return canonical_json(normalized)
-
-    def _gh_json(self, arguments: Sequence[str]) -> bytes:
-        executable = shutil.which("gh")
-        token = self._github_token()
-        if executable is None:
-            raise ObservationError("observation_tool_unavailable")
-        result = subprocess.run(
-            (executable, *arguments),
-            check=False,
-            capture_output=True,
-            timeout=60,
-            env=command_environment({"GH_TOKEN": token}),
-        )
-        if result.returncode != 0 or not result.stdout:
-            raise ObservationError("github_api_failed")
-        EVIDENCE.scan_safe(result.stdout)
-        return result.stdout
+        return canonical_json(normalized), started, finished
 
     def observe_public_registries(self) -> None:
         image = self.identity["oci_image_digest"]
@@ -1613,23 +2362,16 @@ class Observer:
     def _verify_release_asset_attestation(
         self, path: Path, repository_id: str, coordinate: Mapping[str, str]
     ) -> Any:
-        repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
-        payload, _, _ = self._execute_command(
-            (
-                "gh", "attestation", "verify", str(path),
-                "--repo", repository,
-                "--signer-workflow", f"{repository}/.github/workflows/release.yml",
-                "--source-digest", coordinate["commit"],
-                "--signer-digest", coordinate["commit"],
-                "--source-ref", "refs/heads/main",
-                "--deny-self-hosted-runners",
-                "--format", "json",
-            ),
-            environment={"GH_TOKEN": self._github_token()},
-            timeout=120,
+        if repository_id not in REPOSITORY_NAMES or (
+            coordinate != self.identity["repositories"][repository_id]
+        ):
+            raise ObservationError("release_asset_attestation_invalid")
+        payload, _, _ = self._github_authority_file(
+            f"public-registries/{repository_id}/attestations/{path.name}.json",
+            maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
         )
         value = load_output(payload, "release_asset_attestation_invalid")
-        if not value:
+        if not isinstance(value, list) or not value:
             raise ObservationError("release_asset_attestation_invalid")
         return value
 
@@ -2086,9 +2828,8 @@ class Observer:
             ):
                 raise ObservationError("registry_npm_adoption_invalid")
             run_id, run_attempt = adoption["run_id"], adoption["run_attempt"]
-            run = self._github_api(
-                f"repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}",
-                self._github_token(),
+            run = self._github_run_from_authority(
+                repository_id, run_id, run_attempt
             )
             self._validate_npm_workflow_run(
                 run, repository, coordinate["commit"], run_id, run_attempt,
@@ -2307,8 +3048,8 @@ class Observer:
         ):
             raise ObservationError("registry_npm_provenance_binding_invalid")
         run_id, run_attempt = (int(value) for value in match.groups())
-        run = self._github_api(
-            f"repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}", self._github_token()
+        run = self._github_run_from_authority(
+            repository_id, run_id, run_attempt
         )
         self._validate_npm_workflow_run(
             run,
@@ -2393,18 +3134,34 @@ class Observer:
         }
         return provenance, live
 
+    def _github_run_from_authority(
+        self, repository_id: str, run_id: int, run_attempt: int
+    ) -> dict[str, Any]:
+        if (
+            repository_id not in ("javascript", "react_native")
+            or not isinstance(run_id, int)
+            or isinstance(run_id, bool)
+            or run_id < 1
+            or not isinstance(run_attempt, int)
+            or isinstance(run_attempt, bool)
+            or run_attempt < 1
+        ):
+            raise ObservationError("registry_npm_provenance_run_invalid")
+        value, _, _ = self._github_authority_json(
+            f"public-registries/{repository_id}/runs/{run_id}-{run_attempt}.json",
+            "registry_npm_provenance_run_invalid",
+        )
+        if not isinstance(value, dict):
+            raise ObservationError("registry_npm_provenance_run_invalid")
+        return value
+
     def _release_asset_set(
         self, repository_id: str
     ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
         coordinate = self.identity["repositories"][repository_id]
-        repository = f"Latchway/{REPOSITORY_NAMES[repository_id]}"
-        release_payload = self._gh_json(
-            (
-                "api",
-                "-H",
-                "X-GitHub-Api-Version: 2026-03-10",
-                f"repos/{repository}/releases/tags/{coordinate['tag']}",
-            )
+        root = f"public-registries/{repository_id}"
+        release_payload, _, _ = self._github_authority_file(
+            f"{root}/release.json", maximum=EVIDENCE.MAXIMUM_RESULT_BYTES
         )
         expected_assets, adoption_required = self._expected_release_assets(
             repository_id, coordinate["version"]
@@ -2421,12 +3178,26 @@ class Observer:
         downloaded: dict[str, dict[str, Any]] = {}
         for asset in assets:
             name = asset["name"]
-            payload = self._download_release_asset(repository, asset)
-            path = Path(tempfile.mkdtemp(prefix="latchway-release-asset-")) / name
-            path.write_bytes(payload)
-            immutable_verification = self._verify_immutable_release_asset(
-                path, repository, coordinate["tag"]
+            payload, _, _ = self._github_authority_file(f"{root}/assets/{name}")
+            if (
+                len(payload) != asset["size"]
+                or f"sha256:{hashlib.sha256(payload).hexdigest()}"
+                != asset["digest"]
+            ):
+                raise ObservationError("github_release_asset_digest_mismatch")
+            immutable_payload, _, _ = self._github_authority_file(
+                f"{root}/immutable/{name}.json",
+                maximum=EVIDENCE.MAXIMUM_RESULT_BYTES,
             )
+            immutable_value = load_output(
+                immutable_payload, "github_release_asset_attestation_invalid"
+            )
+            if not isinstance(immutable_value, dict) or not immutable_value:
+                raise ObservationError("github_release_asset_attestation_invalid")
+            immutable_verification = {
+                "sha256": hashlib.sha256(immutable_payload).hexdigest(),
+                "content_base64": base64.b64encode(immutable_payload).decode("ascii"),
+            }
             downloaded[name] = {
                 "bytes": payload,
                 "metadata": {
@@ -2438,62 +3209,11 @@ class Observer:
             }
         return release, downloaded
 
-    def _download_release_asset(
-        self, repository: str, asset: Mapping[str, Any]
-    ) -> bytes:
-        name = asset.get("name")
-        identifier, size, digest = asset.get("id"), asset.get("size"), asset.get("digest")
-        if (
-            not isinstance(name, str)
-            or
-            not isinstance(identifier, int)
-            or isinstance(identifier, bool)
-            or identifier < 1
-            or not isinstance(size, int)
-            or isinstance(size, bool)
-            or not 1 <= size <= EVIDENCE.MAXIMUM_RAW_BYTES
-            or not isinstance(digest, str)
-            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
-        ):
-            raise ObservationError("github_release_asset_invalid")
-        executable = shutil.which("gh")
-        if executable is None:
-            raise ObservationError("observation_tool_unavailable")
-        result = subprocess.run(
-            (executable, "api", "-H", "Accept: application/octet-stream", f"repos/{repository}/releases/assets/{identifier}"),
-            check=False,
-            capture_output=True,
-            timeout=120,
-            env=command_environment({"GH_TOKEN": self._github_token()}),
-        )
-        if result.returncode != 0 or len(result.stdout) != size or f"sha256:{hashlib.sha256(result.stdout).hexdigest()}" != digest:
-            raise ObservationError("github_release_asset_digest_mismatch")
-        return result.stdout
-
     def _release_asset_bytes(self, repository_id: str, name: str) -> tuple[bytes, dict[str, Any]]:
         _, assets = self._release_asset_set(repository_id)
         if name not in assets:
             raise ObservationError("github_release_asset_invalid")
         return assets[name]["bytes"], assets[name]["metadata"]
-
-    def _verify_immutable_release_asset(
-        self, path: Path, repository: str, tag: str
-    ) -> dict[str, Any]:
-        payload, _, _ = self._execute_command(
-            (
-                "gh", "release", "verify-asset", tag, str(path),
-                "--repo", repository, "--format", "json",
-            ),
-            environment={"GH_TOKEN": self._github_token()},
-            timeout=120,
-        )
-        value = load_output(payload, "github_release_asset_attestation_invalid")
-        if not isinstance(value, dict) or not value:
-            raise ObservationError("github_release_asset_attestation_invalid")
-        return {
-            "sha256": hashlib.sha256(payload).hexdigest(),
-            "content_base64": base64.b64encode(payload).decode("ascii"),
-        }
 
     @staticmethod
     def _download_https(url: Any, *, allowed_hosts: set[str], maximum: int) -> bytes:
@@ -3067,8 +3787,13 @@ class Observer:
             coordinate = self.identity["repositories"][policy["repository_id"]]
             cache_key = (policy["repository"], run_id, run_attempt)
             if cache_key not in run_cache:
-                metadata = self._github_api(
-                    f"repos/{policy['repository']}/actions/runs/{run_id}/attempts/{run_attempt}", token
+                metadata = (
+                    self._load_live_sdk_authority(f"{run_key.replace('_', '-')}-run.json")
+                    if self.live_sdk_authority is not None
+                    else self._github_api(
+                        f"repos/{policy['repository']}/actions/runs/{run_id}/attempts/{run_attempt}",
+                        token,
+                    )
                 )
                 run_cache[cache_key] = self._validate_sdk_run_metadata(
                     metadata,
@@ -3084,10 +3809,14 @@ class Observer:
             artifact_name = (
                 f"{policy['artifact_prefix']}-{run_id}-{run_attempt}"
             )
-            artifact = self._github_api(
-                f"repos/{policy['repository']}/actions/runs/{run_id}/artifacts"
-                f"?name={artifact_name}&per_page=100",
-                token,
+            artifact = (
+                self._load_live_sdk_authority(f"{receipt_id.replace('_', '-')}-artifact.json")
+                if self.live_sdk_authority is not None
+                else self._github_api(
+                    f"repos/{policy['repository']}/actions/runs/{run_id}/artifacts"
+                    f"?name={artifact_name}&per_page=100",
+                    token,
+                )
             )
             self._validate_sdk_artifact_metadata(
                 artifact,
@@ -3099,12 +3828,15 @@ class Observer:
             receipt = self._load_physical_receipt(
                 self.live_sdk_receipts[receipt_id], policy
             )
-            self._verify_physical_attestations(
-                receipt,
-                policy=policy,
-                commit=coordinate["commit"],
-                token=token,
-            )
+            if self.live_sdk_authority is not None:
+                self._validate_physical_attestation_authority(receipt_id, policy)
+            else:
+                self._verify_physical_attestations(
+                    receipt,
+                    policy=policy,
+                    commit=coordinate["commit"],
+                    token=token,
+                )
             self._rerun_physical_validator(
                 receipt,
                 policy=policy,
@@ -3168,40 +3900,54 @@ class Observer:
             }
 
         if include_javascript:
-            javascript_payload, javascript_started, javascript_finished = (
-                self._run_javascript_live_harness(
-                    gateway=gateway, environment=javascript_environment
+            javascript_isolations: dict[str, dict[str, Any]] = {}
+            for provider, provider_policy in LIVE_SDK_JAVASCRIPT_PROVIDERS.items():
+                (
+                    javascript_payload,
+                    javascript_started,
+                    javascript_finished,
+                    javascript_isolation,
+                ) = self._load_javascript_capture(
+                    provider,
+                    gateway=gateway,
+                    environment=javascript_environment[
+                        "LATCHWAY_LIVE_SDK_ENVIRONMENT"
+                    ],
                 )
-            )
-            javascript_report = self._validate_javascript_report(
-                javascript_payload, self.identity, gateway
-            )
-            javascript_summary = self._platform_summary(
-                platform="javascript",
-                repository="Latchway/latchway-js",
-                workflow="scripts/live-conformance.mjs",
-                run_id=None,
-                run_attempt=None,
-                artifact_name=None,
-                profile=None,
-                evidence=javascript_report,
-                receipt_hashes={},
-            )
-            platform_records["sdk.javascript.release-image"] = {
-                "summary": javascript_summary,
-                "started": javascript_started,
-                "finished": javascript_finished,
-                "version": self.identity["repositories"]["javascript"]["version"],
-                "invocation": (
-                    "node",
-                    "scripts/live-conformance.mjs",
-                    "--candidate-manifest",
-                    "candidate-manifest.json",
-                    "--gateway",
+                javascript_report = self._validate_javascript_report(
+                    javascript_payload,
+                    self.identity,
                     gateway,
-                ),
-                "cwd": self.repositories["javascript"],
-            }
+                    expected_provider=provider,
+                )
+                javascript_summary = self._platform_summary(
+                    platform="javascript",
+                    repository="Latchway/latchway-js",
+                    workflow="scripts/live-conformance.mjs",
+                    run_id=None,
+                    run_attempt=None,
+                    artifact_name=None,
+                    profile=None,
+                    evidence=javascript_report,
+                    receipt_hashes={},
+                    attestation_provider=provider,
+                )
+                platform_records[provider_policy["observation"]] = {
+                    "summary": javascript_summary,
+                    "started": javascript_started,
+                    "finished": javascript_finished,
+                    "version": self.identity["repositories"]["javascript"]["version"],
+                    "invocation": (
+                        "latchway-live-sdk-collector",
+                        "validate-isolation",
+                        provider,
+                    ),
+                    "cwd": self.repositories["javascript"],
+                    "retained_inputs": javascript_isolation["payloads"],
+                    "retained_input_kind": "live_sdk_collector_isolation",
+                }
+                javascript_isolations[provider] = javascript_isolation
+            self._validate_javascript_isolation_pair(javascript_isolations)
 
         for observation, item in platform_records.items():
             self.emit(
@@ -3213,6 +3959,9 @@ class Observer:
                 invocation=item["invocation"],
                 cwd=item["cwd"],
                 retained_inputs=item.get("retained_inputs"),
+                retained_input_kind=item.get(
+                    "retained_input_kind", "physical_device_receipt"
+                ),
             )
 
         if not include_javascript:
@@ -3240,6 +3989,14 @@ class Observer:
     def _live_sdk_configuration(
         self, *, require_javascript: bool,
     ) -> tuple[str, str, dict[str, str], dict[str, tuple[int, int]]]:
+        # Some unit fixtures construct a deliberately bare observer without
+        # invoking __init__. Preserve the online defaults for those fixtures.
+        if not hasattr(self, "live_sdk_authority"):
+            self.live_sdk_authority = None
+        if not hasattr(self, "javascript_captures"):
+            self.javascript_captures = {}
+        if any(os.environ.get(name) for name in LIVE_SDK_LEGACY_CREDENTIAL_ENV):
+            raise ObservationError("live_sdk_javascript_credentials_present")
         if (
             set(self.live_sdk_receipts) != set(LIVE_SDK_RECEIPTS)
             or set(self.live_sdk_runs) != {"ios", "android", "react_native"}
@@ -3261,9 +4018,17 @@ class Observer:
                 raise ObservationError("live_sdk_run_identity_invalid")
             parsed_runs[name] = (int(values[0]), int(values[1]))
 
-        required = {"GH_TOKEN", "LATCHWAY_BASE_URL"}
+        if self.live_sdk_authority is not None:
+            self._validate_live_sdk_authority_directory()
+        required = {"LATCHWAY_BASE_URL"}
+        if self.live_sdk_authority is None:
+            required.add("GH_TOKEN")
         if require_javascript:
-            required |= set(LIVE_SDK_ENVIRONMENT_KEYS)
+            required |= set(LIVE_SDK_JAVASCRIPT_CONFIGURATION_KEYS)
+        if require_javascript and set(self.javascript_captures) != set(LIVE_SDK_JAVASCRIPT_PROVIDERS):
+            raise ObservationError("live_sdk_javascript_capture_configuration_invalid")
+        if not require_javascript and self.javascript_captures:
+            raise ObservationError("live_sdk_javascript_capture_configuration_invalid")
         if any(not os.environ.get(name) for name in required):
             raise ObservationError("live_sdk_configuration_missing")
         gateway = os.environ["LATCHWAY_BASE_URL"].rstrip("/")
@@ -3278,12 +4043,650 @@ class Observer:
             or parsed.fragment
         ):
             raise ObservationError("live_sdk_gateway_invalid")
-        javascript_environment = (
-            {key: os.environ[key] for key in sorted(LIVE_SDK_ENVIRONMENT_KEYS)}
-            if require_javascript
-            else {}
+        if require_javascript:
+            javascript_environment = {
+                key: os.environ[key]
+                for key in sorted(LIVE_SDK_JAVASCRIPT_CONFIGURATION_KEYS)
+            }
+        else:
+            javascript_environment = {}
+        return gateway, os.environ.get("GH_TOKEN", ""), javascript_environment, parsed_runs
+
+    @staticmethod
+    def _physical_authority_files() -> set[str]:
+        files = {"ios-run.json", "android-run.json", "react-native-run.json"}
+        for receipt_id, policy in LIVE_SDK_RECEIPTS.items():
+            slug = receipt_id.replace("_", "-")
+            files.add(f"{slug}-artifact.json")
+            for subject in (policy["profile"], policy["evidence"], "SHA256SUMS"):
+                subject_slug = subject.lower().replace(".", "-")
+                files.add(f"{slug}-{subject_slug}-attestation.json")
+        return files
+
+    def _validate_live_sdk_authority_directory(self) -> None:
+        root = self.live_sdk_authority
+        if root is None:
+            return
+        if not root.is_absolute() or not root.is_dir() or root.is_symlink():
+            raise ObservationError("live_sdk_authority_directory_invalid")
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            raise ObservationError("live_sdk_authority_directory_invalid") from None
+        if (
+            {child.name for child in children} != self._physical_authority_files()
+            or any(not child.is_file() or child.is_symlink() for child in children)
+        ):
+            raise ObservationError("live_sdk_authority_file_set_invalid")
+
+    def _load_live_sdk_authority(self, name: str) -> Any:
+        root = self.live_sdk_authority
+        if root is None or name not in self._physical_authority_files():
+            raise ObservationError("live_sdk_authority_file_invalid")
+        try:
+            payload = EVIDENCE.read_bytes(root / name, EVIDENCE.MAXIMUM_RESULT_BYTES)
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_authority_file_invalid") from None
+        return load_output(payload, "live_sdk_authority_file_invalid")
+
+    def _validate_physical_attestation_authority(
+        self, receipt_id: str, policy: Mapping[str, Any]
+    ) -> None:
+        slug = receipt_id.replace("_", "-")
+        for subject in (policy["profile"], policy["evidence"], "SHA256SUMS"):
+            subject_slug = subject.lower().replace(".", "-")
+            result = self._load_live_sdk_authority(
+                f"{slug}-{subject_slug}-attestation.json"
+            )
+            if not isinstance(result, list) or not result:
+                raise ObservationError("live_sdk_attestation_invalid")
+
+    def _load_javascript_capture(
+        self,
+        provider: str,
+        *,
+        gateway: str,
+        environment: str,
+    ) -> tuple[bytes, datetime, datetime, dict[str, Any]]:
+        path = self.javascript_captures.get(provider)
+        if (
+            provider not in LIVE_SDK_JAVASCRIPT_PROVIDERS
+            or path is None
+            or not path.is_absolute()
+            or not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ObservationError("live_sdk_javascript_capture_invalid")
+        try:
+            capture_payload = EVIDENCE.read_bytes(
+                path, EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+            value = load_output(
+                capture_payload,
+                "live_sdk_javascript_capture_invalid",
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_javascript_capture_invalid") from None
+        if (
+            not isinstance(value, dict)
+            or set(value) != {
+                "schema_version",
+                "kind",
+                "attestation_provider",
+                "started_at",
+                "finished_at",
+                "report",
+                "collector_isolation",
+            }
+            or value.get("schema_version") != 1
+            or isinstance(value.get("schema_version"), bool)
+            or value.get("kind") != "latchway_live_javascript_capture"
+            or value.get("attestation_provider") != provider
+            or not isinstance(value.get("report"), dict)
+            or not isinstance(value.get("collector_isolation"), dict)
+        ):
+            raise ObservationError("live_sdk_javascript_capture_invalid")
+        try:
+            started = EVIDENCE.parse_time(
+                value.get("started_at"), "live_sdk_javascript_capture_invalid"
+            )
+            finished = EVIDENCE.parse_time(
+                value.get("finished_at"), "live_sdk_javascript_capture_invalid"
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_javascript_capture_invalid") from None
+        if (
+            started < self.candidate_created
+            or started >= finished
+            or finished > self.now
+            or self.now - finished > EVIDENCE.MAXIMUM_AGE
+            or finished - started > EVIDENCE.timedelta(minutes=30)
+        ):
+            raise ObservationError("live_sdk_javascript_capture_invalid")
+        isolation = self._validate_javascript_isolation(
+            path=path,
+            provider=provider,
+            capture=value,
+            capture_payload=capture_payload,
+            started=started,
+            finished=finished,
+            gateway=gateway,
+            environment=environment,
         )
-        return gateway, os.environ["GH_TOKEN"], javascript_environment, parsed_runs
+        return canonical_json(value["report"]), started, finished, isolation
+
+    def _validate_javascript_isolation(
+        self,
+        *,
+        path: Path,
+        provider: str,
+        capture: Mapping[str, Any],
+        capture_payload: bytes,
+        started: datetime,
+        finished: datetime,
+        gateway: str,
+        environment: str,
+    ) -> dict[str, Any]:
+        code = "live_sdk_javascript_isolation_invalid"
+        policy = LIVE_SDK_JAVASCRIPT_PROVIDERS[provider]
+        root = path.parent / f"{provider}-isolation"
+        if not root.is_dir() or root.is_symlink():
+            raise ObservationError(code)
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            raise ObservationError(code) from None
+        if (
+            {child.name for child in children} != LIVE_SDK_ISOLATION_FILES
+            or any(not child.is_file() or child.is_symlink() for child in children)
+        ):
+            raise ObservationError(code)
+
+        payloads: dict[str, bytes] = {}
+        total = 0
+        for child in children:
+            maximum = (
+                16 * 1024
+                if child.name in LIVE_SDK_ISOLATION_SIGNATURES
+                else EVIDENCE.MAXIMUM_RESULT_BYTES
+            )
+            try:
+                payload = EVIDENCE.read_bytes(child, maximum)
+                if child.name not in LIVE_SDK_ISOLATION_SIGNATURES:
+                    EVIDENCE.scan_safe(payload)
+            except EVIDENCE.EvidenceError:
+                raise ObservationError(code) from None
+            total += len(payload)
+            if total > EVIDENCE.MAXIMUM_DOMAIN_BYTES:
+                raise ObservationError(code)
+            payloads[child.name] = payload
+
+        checksum_payload = payloads["ISOLATION_SHA256SUMS"]
+        try:
+            checksum_text = checksum_payload.decode("ascii")
+        except UnicodeDecodeError:
+            raise ObservationError(code) from None
+        if not checksum_text.endswith("\n"):
+            raise ObservationError(code)
+        checksums: dict[str, str] = {}
+        for line in checksum_text.splitlines():
+            match = re.fullmatch(
+                r"([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]{0,127})",
+                line,
+            )
+            if match is None or match.group(2) in checksums:
+                raise ObservationError(code)
+            checksums[match.group(2)] = match.group(1)
+        if tuple(checksums) != LIVE_SDK_ISOLATION_SUBJECTS:
+            raise ObservationError(code)
+        if any(
+            hashlib.sha256(payloads[name]).hexdigest() != digest
+            for name, digest in checksums.items()
+        ):
+            raise ObservationError(code)
+
+        values = {
+            name: load_output(payloads[name], code)
+            for name in (
+                "collector-lease.json",
+                "collector-teardown.json",
+                "execution.json",
+                "gateway-consumption-receipt.json",
+                "harness-manifest.json",
+                "report.json",
+            )
+        }
+        lease = values["collector-lease.json"]
+        teardown = values["collector-teardown.json"]
+        execution = values["execution.json"]
+        receipt = values["gateway-consumption-receipt.json"]
+        harness = values["harness-manifest.json"]
+        report = values["report.json"]
+        collector = capture["collector_isolation"]
+        identity = self.identity
+        core_commit = identity["core_commit"]
+        javascript_commit = identity["repositories"]["javascript"]["commit"]
+
+        if (
+            set(collector)
+            != {
+                "schema_version",
+                "lease_sha256",
+                "teardown_sha256",
+                "gateway_receipt_sha256",
+                "harness_manifest_sha256",
+                "report_sha256",
+            }
+            or collector.get("schema_version")
+            != "latchway.live-sdk-collector-isolation.v1"
+            or collector.get("lease_sha256")
+            != hashlib.sha256(payloads["collector-lease.json"]).hexdigest()
+            or collector.get("teardown_sha256")
+            != hashlib.sha256(payloads["collector-teardown.json"]).hexdigest()
+            or collector.get("gateway_receipt_sha256")
+            != hashlib.sha256(
+                payloads["gateway-consumption-receipt.json"]
+            ).hexdigest()
+            or collector.get("harness_manifest_sha256")
+            != hashlib.sha256(payloads["harness-manifest.json"]).hexdigest()
+            or collector.get("report_sha256")
+            != hashlib.sha256(payloads["report.json"]).hexdigest()
+            or report != capture["report"]
+        ):
+            raise ObservationError(code)
+
+        if (
+            not isinstance(execution, dict)
+            or set(execution) != {"started_at_unix", "finished_at_unix"}
+            or any(
+                not isinstance(execution.get(name), int)
+                or isinstance(execution.get(name), bool)
+                for name in ("started_at_unix", "finished_at_unix")
+            )
+        ):
+            raise ObservationError(code)
+        execution_started = execution["started_at_unix"]
+        execution_finished = execution["finished_at_unix"]
+        try:
+            execution_started_time = datetime.fromtimestamp(
+                execution_started, tz=timezone.utc
+            )
+            execution_finished_time = datetime.fromtimestamp(
+                execution_finished, tz=timezone.utc
+            )
+        except (OverflowError, OSError, ValueError):
+            raise ObservationError(code) from None
+        if (
+            execution_started >= execution_finished
+            or execution_started_time != started
+            or execution_finished_time != finished
+            or capture.get("started_at") != EVIDENCE.format_time(started)
+            or capture.get("finished_at") != EVIDENCE.format_time(finished)
+        ):
+            raise ObservationError(code)
+
+        workflow = lease.get("workflow") if isinstance(lease, dict) else None
+        runner = lease.get("runner") if isinstance(lease, dict) else None
+        grant = lease.get("grant") if isinstance(lease, dict) else None
+        candidate = lease.get("candidate") if isinstance(lease, dict) else None
+        lease_gateway = lease.get("gateway") if isinstance(lease, dict) else None
+        if (
+            not isinstance(lease, dict)
+            or set(lease)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "javascript_commit",
+                "workflow",
+                "runner",
+                "credentials",
+                "supervisor",
+                "grant",
+                "candidate",
+                "gateway",
+                "issued_at_unix",
+                "expires_at_unix",
+            }
+            or lease.get("schema_version")
+            != "latchway.live-sdk-collector-lease.v1"
+            or lease.get("repository") != EVIDENCE.REPOSITORY
+            or lease.get("core_commit") != core_commit
+            or lease.get("javascript_commit") != javascript_commit
+            or not isinstance(workflow, dict)
+            or set(workflow) != {"run_id", "run_attempt", "job", "audience"}
+            or EVIDENCE.RUN_ID.fullmatch(str(workflow.get("run_id"))) is None
+            or re.fullmatch(r"[1-9][0-9]{0,5}", str(workflow.get("run_attempt")))
+            is None
+            or workflow.get("job") != "javascript_collect"
+            or workflow.get("audience") != policy["audience"]
+            or not isinstance(workflow.get("run_id"), str)
+            or not isinstance(workflow.get("run_attempt"), str)
+            or not isinstance(runner, dict)
+            or set(runner)
+            != {
+                "name",
+                "ephemeral",
+                "jit",
+                "max_jobs",
+                "fresh_boot",
+                "clean_workspace",
+                "repository_scope",
+                "destroy_after_job",
+                "image_digest",
+                "boot_id_sha256",
+            }
+            or runner.get("name")
+            != (
+                f"latchway-live-sdk-{policy['runner_slug']}-"
+                f"{workflow.get('run_id')}-{workflow.get('run_attempt')}"
+            )
+            or runner.get("ephemeral") is not True
+            or runner.get("jit") is not True
+            or not isinstance(runner.get("max_jobs"), int)
+            or isinstance(runner.get("max_jobs"), bool)
+            or runner.get("max_jobs") != 1
+            or runner.get("fresh_boot") is not True
+            or runner.get("clean_workspace") is not True
+            or runner.get("repository_scope") != EVIDENCE.REPOSITORY
+            or runner.get("destroy_after_job") is not True
+            or not isinstance(runner.get("image_digest"), str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", runner["image_digest"])
+            is None
+            or not isinstance(runner.get("boot_id_sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(runner["boot_id_sha256"]) is None
+            or not isinstance(lease.get("credentials"), dict)
+            or set(lease["credentials"])
+            != {
+                "long_lived",
+                "organization",
+                "administration",
+                "registry",
+                "oidc",
+            }
+            or any(value is not False for value in lease["credentials"].values())
+            or not isinstance(lease.get("supervisor"), dict)
+            or set(lease["supervisor"])
+            != {
+                "private_key_isolated",
+                "caller_supplied_claims_accepted",
+                "gateway_egress_only",
+                "dns_pinned",
+                "tls_verified",
+                "gateway_run_receipt_verification",
+                "one_use_invocation",
+            }
+            or lease["supervisor"].get("private_key_isolated") is not True
+            or lease["supervisor"].get("caller_supplied_claims_accepted")
+            is not False
+            or any(
+                lease["supervisor"].get(name) is not True
+                for name in (
+                    "gateway_egress_only",
+                    "dns_pinned",
+                    "tls_verified",
+                    "gateway_run_receipt_verification",
+                    "one_use_invocation",
+                )
+            )
+            or not isinstance(grant, dict)
+            or set(grant)
+            != {
+                "audience",
+                "core_commit",
+                "javascript_commit",
+                "run_id",
+                "run_attempt",
+                "provider",
+                "sha256",
+                "single_use",
+                "jti_sha256",
+                "request_sha256",
+            }
+            or grant.get("audience") != f"latchway-live-sdk/{provider}"
+            or grant.get("core_commit") != core_commit
+            or grant.get("javascript_commit") != javascript_commit
+            or grant.get("run_id") != workflow.get("run_id")
+            or grant.get("run_attempt") != workflow.get("run_attempt")
+            or grant.get("provider") != provider
+            or grant.get("single_use") is not True
+            or not isinstance(grant.get("sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(grant["sha256"]) is None
+            or not isinstance(grant.get("jti_sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(grant["jti_sha256"]) is None
+            or not isinstance(grant.get("request_sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(grant["request_sha256"]) is None
+            or not isinstance(candidate, dict)
+            or set(candidate)
+            != {
+                "harness_archive_sha256",
+                "harness_manifest_sha256",
+                "source_report_sha256",
+                "candidate_manifest_sha256",
+            }
+            or not isinstance(candidate.get("harness_archive_sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(candidate["harness_archive_sha256"])
+            is None
+            or candidate.get("harness_manifest_sha256")
+            != hashlib.sha256(payloads["harness-manifest.json"]).hexdigest()
+            or candidate.get("source_report_sha256")
+            != self.input_hashes["source"]
+            or candidate.get("candidate_manifest_sha256")
+            != self.input_hashes["candidate"]
+            or not isinstance(lease_gateway, dict)
+            or set(lease_gateway) != {"origin", "application_id", "environment"}
+            or lease_gateway.get("origin") != gateway
+            or lease_gateway.get("environment") != environment
+            or not isinstance(lease_gateway.get("application_id"), str)
+            or not 1 <= len(lease_gateway["application_id"]) <= 256
+            or any(character.isspace() for character in lease_gateway["application_id"])
+            or not isinstance(lease.get("issued_at_unix"), int)
+            or isinstance(lease.get("issued_at_unix"), bool)
+            or not isinstance(lease.get("expires_at_unix"), int)
+            or isinstance(lease.get("expires_at_unix"), bool)
+            or lease["issued_at_unix"]
+            < int(self.candidate_created.timestamp())
+            or lease["issued_at_unix"] > execution_started
+            or lease["expires_at_unix"] < execution_started
+            or not 1 <= lease["expires_at_unix"] - lease["issued_at_unix"] <= 300
+        ):
+            raise ObservationError(code)
+
+        harness_workflow = harness.get("workflow") if isinstance(harness, dict) else None
+        if (
+            not isinstance(harness, dict)
+            or set(harness)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "javascript_commit",
+                "workflow",
+                "source_archive_sha256",
+                "harness_archive_sha256",
+                "harness_bytes",
+            }
+            or harness.get("schema_version") != "latchway.live-sdk-harness.v1"
+            or harness.get("repository") != "Latchway/latchway-js"
+            or harness.get("core_commit") != core_commit
+            or harness.get("javascript_commit") != javascript_commit
+            or harness_workflow
+            != {
+                "run_id": workflow["run_id"],
+                "run_attempt": workflow["run_attempt"],
+            }
+            or not isinstance(harness.get("source_archive_sha256"), str)
+            or EVIDENCE.SHA256.fullmatch(harness["source_archive_sha256"]) is None
+            or harness.get("harness_archive_sha256")
+            != candidate["harness_archive_sha256"]
+            or not isinstance(harness.get("harness_bytes"), int)
+            or isinstance(harness.get("harness_bytes"), bool)
+            or not 1 <= harness["harness_bytes"] <= 512 * 1024 * 1024
+        ):
+            raise ObservationError(code)
+
+        if (
+            not isinstance(receipt, dict)
+            or set(receipt)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "javascript_commit",
+                "run_id",
+                "run_attempt",
+                "provider",
+                "grant_sha256",
+                "jti_sha256",
+                "single_use",
+                "consumption_count",
+                "consumed",
+                "report_sha256",
+                "request_sha256",
+                "consumed_at_unix",
+            }
+            or receipt.get("schema_version")
+            != "latchway.live-sdk-gateway-consumption.v1"
+            or receipt.get("repository") != EVIDENCE.REPOSITORY
+            or receipt.get("core_commit") != core_commit
+            or receipt.get("javascript_commit") != javascript_commit
+            or receipt.get("run_id") != workflow["run_id"]
+            or receipt.get("run_attempt") != workflow["run_attempt"]
+            or receipt.get("provider") != provider
+            or receipt.get("grant_sha256") != grant["sha256"]
+            or receipt.get("jti_sha256") != grant["jti_sha256"]
+            or receipt.get("single_use") is not True
+            or not isinstance(receipt.get("consumption_count"), int)
+            or isinstance(receipt.get("consumption_count"), bool)
+            or receipt.get("consumption_count") != 1
+            or receipt.get("consumed") is not True
+            or receipt.get("report_sha256") != collector["report_sha256"]
+            or receipt.get("request_sha256") != grant["request_sha256"]
+            or not isinstance(receipt.get("consumed_at_unix"), int)
+            or isinstance(receipt.get("consumed_at_unix"), bool)
+            or not execution_started
+            <= receipt["consumed_at_unix"]
+            <= execution_finished
+        ):
+            raise ObservationError(code)
+
+        teardown_workflow = (
+            teardown.get("workflow") if isinstance(teardown, dict) else None
+        )
+        teardown_runner = teardown.get("runner") if isinstance(teardown, dict) else None
+        if (
+            not isinstance(teardown, dict)
+            or set(teardown)
+            != {
+                "schema_version",
+                "repository",
+                "core_commit",
+                "javascript_commit",
+                "workflow",
+                "provider",
+                "runner",
+                "grant",
+                "network",
+                "gateway_receipt_verified",
+                "evidence_eligible",
+                "lease_sha256",
+                "gateway_receipt_sha256",
+                "report_sha256",
+            }
+            or teardown.get("schema_version")
+            != "latchway.live-sdk-collector-teardown.v1"
+            or teardown.get("repository") != EVIDENCE.REPOSITORY
+            or teardown.get("core_commit") != core_commit
+            or teardown.get("javascript_commit") != javascript_commit
+            or teardown_workflow != workflow
+            or teardown.get("provider") != provider
+            or not isinstance(teardown_runner, dict)
+            or set(teardown_runner)
+            != {
+                "name",
+                "deregistered",
+                "accepts_more_jobs",
+                "destroy_scheduled",
+                "destroy_deadline_unix",
+            }
+            or teardown_runner.get("name") != runner["name"]
+            or teardown_runner.get("deregistered") is not True
+            or teardown_runner.get("accepts_more_jobs") is not False
+            or teardown_runner.get("destroy_scheduled") is not True
+            or not isinstance(teardown_runner.get("destroy_deadline_unix"), int)
+            or isinstance(teardown_runner.get("destroy_deadline_unix"), bool)
+            or not execution_finished
+            <= teardown_runner["destroy_deadline_unix"]
+            <= execution_finished + 600
+            or not isinstance(teardown.get("grant"), dict)
+            or set(teardown["grant"])
+            != {"single_use", "consumption_count", "zeroized", "revoked"}
+            or teardown["grant"].get("single_use") is not True
+            or not isinstance(teardown["grant"].get("consumption_count"), int)
+            or isinstance(teardown["grant"].get("consumption_count"), bool)
+            or teardown["grant"].get("consumption_count") != 1
+            or teardown["grant"].get("zeroized") is not True
+            or teardown["grant"].get("revoked") is not True
+            or not isinstance(teardown.get("network"), dict)
+            or set(teardown["network"])
+            != {"gateway_egress_only", "dns_pinned", "tls_verified"}
+            or any(value is not True for value in teardown["network"].values())
+            or teardown.get("gateway_receipt_verified") is not True
+            or teardown.get("evidence_eligible") is not True
+            or teardown.get("lease_sha256") != collector["lease_sha256"]
+            or teardown.get("gateway_receipt_sha256")
+            != collector["gateway_receipt_sha256"]
+            or teardown.get("report_sha256") != collector["report_sha256"]
+        ):
+            raise ObservationError(code)
+
+        public_key = payloads["gateway-receipt-public-key.pem"]
+        try:
+            public_key_text = public_key.decode("ascii")
+        except UnicodeDecodeError:
+            raise ObservationError(code) from None
+        if (
+            "PRIVATE KEY" in public_key_text
+            or re.fullmatch(
+                r"-----BEGIN PUBLIC KEY-----\n"
+                r"[A-Za-z0-9+/=\n]+"
+                r"-----END PUBLIC KEY-----\n?",
+                public_key_text,
+            )
+            is None
+        ):
+            raise ObservationError(code)
+
+        retained = {"capture.json": capture_payload, **payloads}
+        return {
+            "payloads": retained,
+            "workflow": (workflow["run_id"], workflow["run_attempt"]),
+            "grant_sha256": grant["sha256"],
+            "jti_sha256": grant["jti_sha256"],
+            "runner_name": runner["name"],
+            "harness_manifest": payloads["harness-manifest.json"],
+            "gateway_public_key": public_key,
+        }
+
+    @staticmethod
+    def _validate_javascript_isolation_pair(
+        isolations: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        if set(isolations) != set(LIVE_SDK_JAVASCRIPT_PROVIDERS):
+            raise ObservationError("live_sdk_javascript_isolation_pair_invalid")
+        firebase = isolations["firebase_app_check"]
+        turnstile = isolations["turnstile"]
+        if (
+            firebase.get("workflow") != turnstile.get("workflow")
+            or firebase.get("harness_manifest")
+            != turnstile.get("harness_manifest")
+            or firebase.get("gateway_public_key")
+            != turnstile.get("gateway_public_key")
+            or firebase.get("grant_sha256") == turnstile.get("grant_sha256")
+            or firebase.get("jti_sha256") == turnstile.get("jti_sha256")
+            or firebase.get("runner_name") == turnstile.get("runner_name")
+        ):
+            raise ObservationError("live_sdk_javascript_isolation_pair_invalid")
 
     def _github_api(self, endpoint: str, token: str) -> Any:
         payload, _, _ = self._execute_command(
@@ -3896,43 +5299,14 @@ class Observer:
             ):
                 raise ObservationError("live_sdk_native_link_invalid")
 
-    def _run_javascript_live_harness(
-        self, *, gateway: str, environment: Mapping[str, str]
-    ) -> tuple[bytes, datetime, datetime]:
-        repository = self.repositories["javascript"]
-        with tempfile.TemporaryDirectory(
-            prefix="latchway-live-javascript-",
-            dir=os.environ.get("RUNNER_TEMP") or None,
-        ) as temporary:
-            manifest = Path(temporary) / "candidate-manifest.json"
-            write_bytes(
-                manifest,
-                canonical_json(
-                    {
-                        "schema_version": 1,
-                        "kind": "latchway_live_sdk_candidate",
-                        "candidate": self.identity,
-                        "gateway_origin": gateway,
-                    }
-                ),
-            )
-            return self._execute_command(
-                (
-                    "node",
-                    str(repository / "scripts" / "live-conformance.mjs"),
-                    "--candidate-manifest",
-                    str(manifest),
-                    "--gateway",
-                    gateway,
-                ),
-                cwd=repository,
-                environment=environment,
-                timeout=20 * 60,
-            )
-
     @classmethod
     def _validate_javascript_report(
-        cls, payload: bytes, identity: Mapping[str, Any], gateway: str
+        cls,
+        payload: bytes,
+        identity: Mapping[str, Any],
+        gateway: str,
+        *,
+        expected_provider: str,
     ) -> dict[str, Any]:
         report = load_output(payload, "live_sdk_javascript_report_invalid")
         build = nested(report, "gateway", "build")
@@ -3943,6 +5317,7 @@ class Observer:
                 "schema_version",
                 "kind",
                 "platform",
+                "attestation_provider",
                 "candidate",
                 "gateway",
                 "tests",
@@ -3951,6 +5326,8 @@ class Observer:
             or report.get("schema_version") != 1
             or report.get("kind") != "latchway_live_javascript_observation"
             or report.get("platform") != "javascript"
+            or expected_provider not in LIVE_SDK_JAVASCRIPT_PROVIDERS
+            or report.get("attestation_provider") != expected_provider
             or report.get("candidate") != identity
             or nested(report, "gateway", "origin") != gateway
             or nested(report, "gateway", "status") != "ok"
@@ -3958,7 +5335,7 @@ class Observer:
             or build.get("commit") != identity["core_commit"]
             or build.get("version") != identity["repositories"]["core"]["version"]
             or build.get("contract_version") != identity["contract_version"]
-            or str(build.get("protocol_version")) != "1"
+            or str(build.get("protocol_version")) != "2"
             or not isinstance(report.get("redaction"), dict)
             or any(value is not False for value in report["redaction"].values())
         ):
@@ -3983,6 +5360,7 @@ class Observer:
         profile: Mapping[str, Any] | None,
         evidence: Mapping[str, Any],
         receipt_hashes: Mapping[str, str],
+        attestation_provider: str | None = None,
     ) -> dict[str, Any]:
         tests = evidence.get("tests")
         concrete = [
@@ -4030,6 +5408,14 @@ class Observer:
             "receipt_sha256": dict(sorted(receipt_hashes.items())),
             "concrete_tests": sorted(concrete, key=lambda item: item["id"]),
         }
+        if attestation_provider is not None:
+            if (
+                platform != "javascript"
+                or attestation_provider not in LIVE_SDK_JAVASCRIPT_PROVIDERS
+                or evidence.get("attestation_provider") != attestation_provider
+            ):
+                raise ObservationError("live_sdk_javascript_provider_invalid")
+            summary["attestation_provider"] = attestation_provider
         EVIDENCE.scan_safe(canonical_json(summary))
         return summary
 
@@ -4104,14 +5490,34 @@ class Observer:
             ]
             if {test.get("id") for test in tests} != mapping[behavior]:
                 raise ObservationError("live_sdk_behavior_set_invalid")
-            selected.append(
-                {
-                    "platform": platform["platform"],
-                    "producer": platform["producer"],
-                    "tests": tests,
-                }
-            )
-        if len(selected) != 5:
+            selected_platform = {
+                "platform": platform["platform"],
+                "producer": platform["producer"],
+                "tests": tests,
+            }
+            if "attestation_provider" in platform:
+                selected_platform["attestation_provider"] = platform[
+                    "attestation_provider"
+                ]
+            selected.append(selected_platform)
+        javascript_providers = [
+            platform.get("attestation_provider")
+            for platform in platform_summaries
+            if platform.get("platform") == "javascript"
+        ]
+        native_provider_fields = [
+            platform
+            for platform in platform_summaries
+            if platform.get("platform") != "javascript"
+            and "attestation_provider" in platform
+        ]
+        if (
+            len(selected)
+            != len(LIVE_SDK_RECEIPTS) + len(LIVE_SDK_JAVASCRIPT_PROVIDERS)
+            or len(javascript_providers) != len(LIVE_SDK_JAVASCRIPT_PROVIDERS)
+            or set(javascript_providers) != set(LIVE_SDK_JAVASCRIPT_PROVIDERS)
+            or native_provider_fields
+        ):
             raise ObservationError("live_sdk_behavior_set_invalid")
         result = {
             "schema_version": 1,
@@ -4139,15 +5545,12 @@ def parser() -> argparse.ArgumentParser:
         option = run_id.replace("_", "-")
         value.add_argument(f"--{option}-run-id")
         value.add_argument(f"--{option}-run-attempt")
+    value.add_argument("--physical-authority-directory", type=Path)
+    value.add_argument("--javascript-firebase-app-check-capture", type=Path)
+    value.add_argument("--javascript-turnstile-capture", type=Path)
+    value.add_argument("--live-provider-capture-directory", type=Path)
+    value.add_argument("--github-authority-directory", type=Path)
     return value
-
-
-def require_github_cli() -> tuple[int, int, int]:
-    """Fail closed before the observer uses GitHub release/attestation commands."""
-    try:
-        return GH_VERSION.installed_version()
-    except GH_VERSION.VersionError as error:
-        raise ObservationError(str(error)) from error
 
 
 def main() -> int:
@@ -4170,8 +5573,16 @@ def main() -> int:
         if getattr(arguments, f"{run_id}_run_id") is not None
         or getattr(arguments, f"{run_id}_run_attempt") is not None
     }
+    javascript_captures = {
+        provider: getattr(
+            arguments, f"javascript_{provider.replace('-', '_')}_capture"
+        )
+        for provider in LIVE_SDK_JAVASCRIPT_PROVIDERS
+        if getattr(
+            arguments, f"javascript_{provider.replace('-', '_')}_capture"
+        ) is not None
+    }
     try:
-        require_github_cli()
         observer = Observer(
             domain=arguments.domain,
             source=arguments.source_conformance,
@@ -4180,6 +5591,10 @@ def main() -> int:
             repositories=repositories,
             live_sdk_receipts=live_sdk_receipts,
             live_sdk_runs=live_sdk_runs,
+            live_sdk_authority=arguments.physical_authority_directory,
+            javascript_captures=javascript_captures,
+            live_provider_capture=arguments.live_provider_capture_directory,
+            github_authority=arguments.github_authority_directory,
             now=datetime.now(timezone.utc).replace(microsecond=0),
         )
         observer.observe()

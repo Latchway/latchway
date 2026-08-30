@@ -105,6 +105,7 @@ Before activating a native production environment:
 3. Pin Apple application identifiers or Android package/signing identifiers.
 4. Require a trust level that matches the selected platform.
 5. Keep debug attestation disabled.
-6. Run the exact candidate's physical-device and live SDK workflows.
+6. Run the exact candidate's physical-device and live SDK workflows, including
+   both the Firebase App Check and Turnstile JavaScript matrix entries.
 7. Confirm revocation, refresh rotation, replay rejection, quota, streaming,
    and protocol-version rejection in the retained evidence.

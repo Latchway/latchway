@@ -75,6 +75,12 @@ on:
 permissions:
   contents: read
 
+env:
+  TRUSTED_WRANGLER_PACKAGE_JSON_SHA256: e65b3bedef41e581a85b006f4cf8ce769bb61a1f71c53af6ee4680cc4c25d839
+  TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256: d506545cdc465df003f47903c17ffdff69bc88fe182b6b55a2313fe8d312f5a2
+  TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256: 1468b2214885fdd9f6013c1d636ecbe85e47c88989215383fffa5e3304a50217
+  TRUSTED_WRANGLER_PACKAGE_COUNT: '91'
+
 concurrency:
   group: deployment-evidence-${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform || 'static' }}
   cancel-in-progress: false
@@ -99,19 +105,495 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  capture:
+  authenticate:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: deployment-evidence-authentication
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+      RELEASE_IMAGE: ${{ inputs.image }}
+      DEPLOYMENT_ENVIRONMENT: deployment-evidence-${{ inputs.platform }}
+    steps:
+      - name: Require a fixed GitHub CLI verifier without candidate code
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<<"$version"
+          test -n "$patch"
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          # Equivalent policy owner: scripts/require-gh-version.py
+      - name: Authenticate the immutable candidate producer run with no checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          [[ "$DEPLOYMENT_ENVIRONMENT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+          mkdir -p "$RUNNER_TEMP/authority"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/attempts/$CANDIDATE_RUN_ATTEMPT" > "$RUNNER_TEMP/authority/candidate-run.json"
+          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/authority/candidate-run.json")
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$CANDIDATE_RUN_ATTEMPT" \
+            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
+            "$RUNNER_TEMP/authority/candidate-run.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/authority/candidate-workflow.json"
+          jq --exit-status '.path == ".github/workflows/release.yml" and .state == "active"' "$RUNNER_TEMP/authority/candidate-workflow.json" >/dev/null
+      - name: Download the immutable candidate evidence on the no-checkout runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+          path: ${{ runner.temp }}/authority/latchway-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify immutable prepublication candidate authority with no checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          gh attestation verify "$candidate" \
+            --bundle "$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.attestation.sigstore.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/authority/candidate-attestation-verification.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" --arg image "$RELEASE_IMAGE" '
+            .candidate_commit == $commit and .intended_tag == $tag and .status == "passed" and
+            (.image.repository + "@" + .image.index_digest) == $image' "$candidate" >/dev/null
+      - name: Set up Buildx for fixed registry data capture without candidate code
+        if: inputs.platform == 'cloudflare_containers' || inputs.platform == 'compose'
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Authenticate only the no-checkout registry-data runner
+        if: inputs.platform == 'cloudflare_containers' || inputs.platform == 'compose'
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Capture the canonical Cloudflare platform manifest without candidate tooling
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          platform_digest=$(jq --exit-status --raw-output '.image.platforms["linux/amd64"] | select(test("^sha256:[0-9a-f]{64}$"))' "$candidate")
+          reference="ghcr.io/latchway/latchway@$platform_digest"
+          docker buildx imagetools inspect --raw "$reference" > "$RUNNER_TEMP/authority/cloudflare-canonical-manifest.json"
+          test "$(sha256sum "$RUNNER_TEMP/authority/cloudflare-canonical-manifest.json" | awk '{print $1}')" = "${platform_digest#sha256:}"
+          jq --exit-status '.schemaVersion == 2 and (.config.digest | test("^sha256:[0-9a-f]{64}$")) and (.layers | type == "array" and length > 0) and all(.layers[]; (.digest | test("^sha256:[0-9a-f]{64}$")) and (.size | type == "number" and . > 0))' \
+            "$RUNNER_TEMP/authority/cloudflare-canonical-manifest.json" >/dev/null
+      - name: Export bounded exact Compose images without candidate code
+        if: inputs.platform == 'compose'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          candidate_manifest_sha=$(sha256sum "$candidate" | awk '{print $1}')
+          candidate_platform=$(jq --exit-status --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$candidate")
+          postgres_source=docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+          [[ "$candidate_platform" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
+          docker pull --platform linux/amd64 "$candidate_platform" >/dev/null
+          docker pull --platform linux/amd64 "$postgres_source" >/dev/null
+          candidate_id=$(docker image inspect --format '{{.Id}}' "$candidate_platform")
+          postgres_id=$(docker image inspect --format '{{.Id}}' "$postgres_source")
+          [[ "$candidate_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$postgres_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$candidate_id" != "$postgres_id"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate_platform")" = linux/amd64
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgres_source")" = linux/amd64
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$candidate_platform")" = "$CANDIDATE_COMMIT"
+          candidate_local="latchway-preloaded-compose-candidate:${candidate_id#sha256:}"
+          postgres_local="latchway-preloaded-compose-postgres:${postgres_id#sha256:}"
+          docker tag "$candidate_platform" "$candidate_local"
+          docker tag "$postgres_source" "$postgres_local"
+          root="$RUNNER_TEMP/compose-images"
+          mkdir -p "$root"
+          docker save --output "$root/preloaded-images.tar" "$candidate_local" "$postgres_local"
+          archive_size=$(stat --format=%s "$root/preloaded-images.tar")
+          (( archive_size >= 1024 && archive_size <= 2147483648 ))
+          archive_sha=$(sha256sum "$root/preloaded-images.tar" | awk '{print $1}')
+          jq -n --sort-keys \
+            --arg candidate_manifest_sha256 "$candidate_manifest_sha" \
+            --arg candidate_index_reference "$RELEASE_IMAGE" \
+            --arg candidate_platform_reference "$candidate_platform" \
+            --arg candidate_local_reference "$candidate_local" \
+            --arg candidate_image_id "$candidate_id" \
+            --arg candidate_revision "$CANDIDATE_COMMIT" \
+            --arg postgres_source_reference "$postgres_source" \
+            --arg postgres_local_reference "$postgres_local" \
+            --arg postgres_image_id "$postgres_id" \
+            --arg archive_sha256 "$archive_sha" \
+            --argjson archive_size_bytes "$archive_size" '
+              {
+                schema_version: 1,
+                kind: "latchway_compose_preloaded_images",
+                candidate_manifest_sha256: $candidate_manifest_sha256,
+                archive: {path:"preloaded-images.tar",sha256:$archive_sha256,size_bytes:$archive_size_bytes},
+                images: {
+                  candidate: {
+                    oci_index_reference:$candidate_index_reference,
+                    oci_platform_reference:$candidate_platform_reference,
+                    local_reference:$candidate_local_reference,
+                    image_id:$candidate_image_id,
+                    revision:$candidate_revision,
+                    platform:"linux/amd64"
+                  },
+                  postgres: {
+                    source_reference:$postgres_source_reference,
+                    local_reference:$postgres_local_reference,
+                    image_id:$postgres_image_id,
+                    platform:"linux/amd64"
+                  }
+                }
+              }
+            ' > "$root/preloaded-images.json"
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+      - name: Retain bounded exact Compose images for a credential-free runner
+        if: inputs.platform == 'compose'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-deployment-compose-images-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/compose-images/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Remove the no-checkout registry credential
+        if: always() && (inputs.platform == 'cloudflare_containers' || inputs.platform == 'compose')
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+      - name: Retain authenticated candidate inputs for isolated consumers
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authority
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  cloudflare-toolchain-source:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Read only the committed Wrangler lock closure from the workflow revision
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/toolchains/wrangler/package.json
+            .github/toolchains/wrangler/package-lock.json
+            .github/toolchains/wrangler/allowed-packages.json
+          sparse-checkout-cone-mode: false
+      - name: Verify and isolate the exact committed Wrangler lock closure
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          source_root=.github/toolchains/wrangler
+          output="$RUNNER_TEMP/trusted-wrangler-lock"
+          test -z "$(find "$source_root" -type l -print -quit)"
+          test -z "$(find "$source_root" -mindepth 1 ! -type f -print -quit)"
+          test "$(find "$source_root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          test "$(sha256sum "$source_root/package.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256"
+          test "$(sha256sum "$source_root/package-lock.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256"
+          test "$(sha256sum "$source_root/allowed-packages.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256"
+          jq --exit-status --argjson count "$TRUSTED_WRANGLER_PACKAGE_COUNT" '
+            (keys | sort) == ["lockfileVersion","name","packages","requires","version"] and
+            .name == "@latchway/trusted-wrangler-toolchain" and .version == "1.0.0" and
+            .lockfileVersion == 3 and .requires == true and
+            (.packages | type == "object" and length == ($count + 1)) and
+            .packages[""] == {
+              name:"@latchway/trusted-wrangler-toolchain",version:"1.0.0",
+              dependencies:{wrangler:"4.127.1"},engines:{node:"24.19.0"}
+            } and
+            .packages["node_modules/wrangler"].version == "4.127.1" and
+            .packages["node_modules/wrangler"].integrity == "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==" and
+            all(.packages | to_entries[];
+              if .key == "" then true else
+                (.key | startswith("node_modules/")) and
+                (.key | startswith("/") | not) and
+                (.key | contains("/../") | not) and
+                (.value | type == "object") and
+                (.value.version | type == "string" and length > 0) and
+                (.value.resolved | type == "string" and test("^https://registry\\.npmjs\\.org/.+\\.tgz$") and (test("[?#[:space:]]") | not)) and
+                (.value.integrity | type == "string" and test("^sha512-[A-Za-z0-9+/]{86}==$"))
+              end
+            )
+          ' "$source_root/package-lock.json" >/dev/null
+          jq --sort-keys '{
+            schema_version:1,
+            kind:"latchway_trusted_npm_package_allowlist",
+            package_count:([.packages | to_entries[] | select(.key != "")] | length),
+            packages:([.packages | to_entries[] | select(.key != "") |
+              {path:.key,version:.value.version,resolved:.value.resolved,integrity:.value.integrity}] | sort_by(.path))
+          }' "$source_root/package-lock.json" > "$RUNNER_TEMP/expected-wrangler-packages.json"
+          cmp --silent "$source_root/allowed-packages.json" "$RUNNER_TEMP/expected-wrangler-packages.json"
+          mkdir -p "$output"
+          install -m 0444 "$source_root/package.json" "$output/package.json"
+          install -m 0444 "$source_root/package-lock.json" "$output/package-lock.json"
+          install -m 0444 "$source_root/allowed-packages.json" "$output/allowed-packages.json"
+      - name: Retain only the verified Wrangler lock closure
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-trusted-wrangler-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trusted-wrangler-lock/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  trusted-cloudflare-tool:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: [authenticate, cloudflare-toolchain-source]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - name: Set up Node.js for the fixed source-free Wrangler distribution
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+      - name: Download the verified committed Wrangler lock closure
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-trusted-wrangler-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trusted-wrangler-lock
+      - name: Build a lock-closed Wrangler distribution without candidate inputs
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        env:
+          WRANGLER_WRITE_LOGS: 'false'
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NPM_CONFIG_REPLACE_REGISTRY_HOST: never
+          NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+          NPM_CONFIG_AUDIT: 'false'
+          NPM_CONFIG_FUND: 'false'
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${NODE_AUTH_TOKEN:-}"
+          test -z "${NPM_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          lock_root="$RUNNER_TEMP/trusted-wrangler-lock"
+          root="$RUNNER_TEMP/trusted-wrangler"
+          output="$RUNNER_TEMP/trusted-wrangler-artifact"
+          test -z "$(find "$lock_root" -type l -print -quit)"
+          test -z "$(find "$lock_root" -mindepth 1 ! -type f -print -quit)"
+          test "$(find "$lock_root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          test "$(sha256sum "$lock_root/package.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256"
+          test "$(sha256sum "$lock_root/package-lock.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256"
+          test "$(sha256sum "$lock_root/allowed-packages.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256"
+          jq --exit-status --argjson count "$TRUSTED_WRANGLER_PACKAGE_COUNT" '
+            (keys | sort) == ["lockfileVersion","name","packages","requires","version"] and
+            .name == "@latchway/trusted-wrangler-toolchain" and .version == "1.0.0" and
+            .lockfileVersion == 3 and .requires == true and
+            (.packages | type == "object" and length == ($count + 1)) and
+            .packages[""] == {
+              name:"@latchway/trusted-wrangler-toolchain",version:"1.0.0",
+              dependencies:{wrangler:"4.127.1"},engines:{node:"24.19.0"}
+            } and
+            .packages["node_modules/wrangler"].version == "4.127.1" and
+            .packages["node_modules/wrangler"].integrity == "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==" and
+            all(.packages | to_entries[];
+              if .key == "" then true else
+                (.key | startswith("node_modules/")) and
+                (.key | startswith("/") | not) and
+                (.key | contains("/../") | not) and
+                (.value | type == "object") and
+                (.value.version | type == "string" and length > 0) and
+                (.value.resolved | type == "string" and test("^https://registry\\.npmjs\\.org/.+\\.tgz$") and (test("[?#[:space:]]") | not)) and
+                (.value.integrity | type == "string" and test("^sha512-[A-Za-z0-9+/]{86}==$"))
+              end
+            )
+          ' "$lock_root/package-lock.json" >/dev/null
+          jq --sort-keys '{
+            schema_version:1,
+            kind:"latchway_trusted_npm_package_allowlist",
+            package_count:([.packages | to_entries[] | select(.key != "")] | length),
+            packages:([.packages | to_entries[] | select(.key != "") |
+              {path:.key,version:.value.version,resolved:.value.resolved,integrity:.value.integrity}] | sort_by(.path))
+          }' "$lock_root/package-lock.json" > "$RUNNER_TEMP/expected-wrangler-packages.json"
+          cmp --silent "$lock_root/allowed-packages.json" "$RUNNER_TEMP/expected-wrangler-packages.json"
+          mkdir -p "$root" "$output"
+          install -m 0444 "$lock_root/package.json" "$root/package.json"
+          install -m 0444 "$lock_root/package-lock.json" "$root/package-lock.json"
+          install -m 0444 "$lock_root/allowed-packages.json" "$root/allowed-packages.json"
+          cd "$root"
+          test "$(npm config get registry)" = "https://registry.npmjs.org/"
+          test "$(npm config get replace-registry-host)" = never
+          npm ci --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/ --replace-registry-host=never
+          npm ls --all --json >/dev/null
+          test "$("$root/node_modules/.bin/wrangler" --version)" = 4.127.1
+          tar --format=posix --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -czf "$output/wrangler-4.127.1-linux-x64.tar.gz" -C "$root" \
+            node_modules package.json package-lock.json allowed-packages.json
+          archive="$output/wrangler-4.127.1-linux-x64.tar.gz"
+          archive_size=$(stat --format=%s "$archive")
+          (( archive_size >= 1024 && archive_size <= 536870912 ))
+          jq -n --sort-keys \
+            --arg archive_sha256 "$(sha256sum "$archive" | awk '{print $1}')" \
+            --argjson archive_size_bytes "$archive_size" \
+            --arg package_json_sha256 "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256" \
+            --arg package_lock_sha256 "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256" \
+            --arg allowed_packages_sha256 "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256" \
+            --argjson package_count "$TRUSTED_WRANGLER_PACKAGE_COUNT" '
+              {
+                schema_version:1,
+                kind:"latchway_trusted_wrangler_distribution",
+                node_version:"24.19.0",
+                wrangler_version:"4.127.1",
+                wrangler_integrity:"sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==",
+                package_json_sha256:$package_json_sha256,
+                package_lock_sha256:$package_lock_sha256,
+                allowed_packages_sha256:$allowed_packages_sha256,
+                package_count:$package_count,
+                archive:{path:"wrangler-4.127.1-linux-x64.tar.gz",sha256:$archive_sha256,size_bytes:$archive_size_bytes}
+              }
+            ' > "$output/trusted-wrangler.json"
+          test "$(find "$output" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+      - name: Retain only the fixed Wrangler distribution and receipt
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-trusted-wrangler-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trusted-wrangler-artifact/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: authenticate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out candidate deployment inputs without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind credential-free preparation to the candidate commit
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          mkdir -p "$RUNNER_TEMP/provider-inputs/cloudflare"
+          install -m 0644 deploy/compose/compose.release.yaml "$RUNNER_TEMP/provider-inputs/compose.review.yaml"
+          install -m 0644 deploy/fly/fly.toml "$RUNNER_TEMP/provider-inputs/fly.toml"
+      - name: Install pinned Fly CLI for credential-free configuration validation
+        if: inputs.platform == 'fly_io'
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+        with:
+          version: '0.4.89'
+      - name: Validate Fly configuration before any provider credential exists
+        if: inputs.platform == 'fly_io'
+        env:
+          FLY_APP: ${{ inputs.fly_app }}
+          FLY_NO_UPDATE_CHECK: '1'
+        run: flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"
+      - name: Set up pinned pnpm for credential-free Cloudflare preparation
+        if: inputs.platform == 'cloudflare_containers'
+        uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 10.15.0
+          run_install: false
+      - name: Set up pinned Node.js for credential-free Cloudflare preparation
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: deploy/cloudflare/pnpm-lock.yaml
+      - name: Build the candidate Cloudflare Worker without provider or OIDC credentials
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          pnpm --dir deploy/cloudflare install --frozen-lockfile --ignore-scripts
+          pnpm --dir deploy/cloudflare release:dry-run
+          test -f deploy/cloudflare/.wrangler-dist/release/index.js
+          test ! -L deploy/cloudflare/.wrangler-dist/release/index.js
+          install -m 0644 deploy/cloudflare/.wrangler-dist/release/index.js "$RUNNER_TEMP/provider-inputs/cloudflare/index.js"
+      - name: Hash-bind the bounded candidate provider inputs
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/provider-inputs"
+          artifacts='[]'
+          for relative in compose.review.yaml fly.toml; do
+            path="$root/$relative"
+            test -f "$path" && test ! -L "$path" && test -s "$path"
+            size=$(stat --format=%s "$path")
+            (( size > 0 && size <= 1048576 ))
+            artifacts=$(jq --arg path "$relative" --arg sha "$(sha256sum "$path" | awk '{print $1}')" --argjson size "$size" \
+              '. + [{path:$path,sha256:$sha,size_bytes:$size}]' <<< "$artifacts")
+          done
+          if [[ "$PLATFORM" == cloudflare_containers ]]; then
+            path="$root/cloudflare/index.js"
+            test -f "$path" && test ! -L "$path" && test -s "$path"
+            size=$(stat --format=%s "$path")
+            (( size > 0 && size <= 10485760 ))
+            artifacts=$(jq --arg path cloudflare/index.js --arg sha "$(sha256sum "$path" | awk '{print $1}')" --argjson size "$size" \
+              '. + [{path:$path,sha256:$sha,size_bytes:$size}]' <<< "$artifacts")
+          fi
+          jq -n --sort-keys --arg commit "$CANDIDATE_COMMIT" --arg platform "$PLATFORM" --argjson artifacts "$artifacts" '
+            {schema_version:1,kind:"latchway_deployment_provider_inputs",candidate_commit:$commit,platform:$platform,artifacts:$artifacts}
+          ' > "$root/provider-inputs.json"
+      - name: Retain bounded provider inputs for no-checkout capture jobs
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-provider-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provider-inputs
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  capture:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.platform != 'compose'
+    needs: [authenticate, trusted-cloudflare-tool, prepare]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: deployment-evidence-${{ inputs.platform }}
     permissions:
       actions: read
-      artifact-metadata: write
-      attestations: write
       contents: read
       id-token: write
-      packages: read
     env:
       PLATFORM: ${{ inputs.platform }}
       CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -134,55 +616,141 @@ jobs:
       CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
       FLY_NO_UPDATE_CHECK: '1'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 scripts/require-gh-version.py
-      - name: Download the immutable candidate evidence
+      - name: Download authenticated candidate inputs on the fresh provider runner
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
-          path: ${{ runner.temp }}/latchway-candidate
-          run-id: ${{ inputs.candidate_run_id }}
-          github-token: ${{ github.token }}
-      - name: Verify immutable prepublication candidate authority
+          name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authority
+      - name: Download credential-free provider inputs without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-provider-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provider-inputs
+      - name: Download the source-free fixed Wrangler distribution
+        if: inputs.platform == 'cloudflare_containers'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-trusted-wrangler-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trusted-wrangler-artifact
+      - name: Validate candidate provider inputs as data only
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          test "$GITHUB_REF" = refs/heads/main
-          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
-          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]]
-          [[ "$DEPLOYMENT_ENVIRONMENT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
-          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/attempts/$CANDIDATE_RUN_ATTEMPT" > "$RUNNER_TEMP/candidate-run.json"
-          workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/candidate-run.json")
-          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --argjson attempt "$CANDIDATE_RUN_ATTEMPT" \
-            '.event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .head_sha == $commit and .head_branch == "main" and .run_attempt == $attempt' \
-            "$RUNNER_TEMP/candidate-run.json" >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/candidate-workflow.json"
-          jq --exit-status '.path == ".github/workflows/release.yml" and .state == "active"' "$RUNNER_TEMP/candidate-workflow.json" >/dev/null
-          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
-          gh attestation verify "$candidate" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-digest "$CANDIDATE_COMMIT" \
-            --source-ref refs/heads/main \
-            --deny-self-hosted-runners
-          python3 scripts/release-candidate.py \
-            --verify \
-            --manifest "$candidate" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --image ghcr.io/latchway/latchway
-          test "$(jq -r '.image.repository + \"@\" + .image.index_digest' "$candidate")" = "$RELEASE_IMAGE"
+          root="$RUNNER_TEMP/provider-inputs"
+          receipt="$root/provider-inputs.json"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type f ! -type d -print -quit)"
+          jq --sort-keys . "$receipt" > "$RUNNER_TEMP/provider-inputs-canonical.json"
+          cmp --silent "$receipt" "$RUNNER_TEMP/provider-inputs-canonical.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg platform "$PLATFORM" '
+            (keys | sort) == ["artifacts","candidate_commit","kind","platform","schema_version"] and
+            .schema_version == 1 and .kind == "latchway_deployment_provider_inputs" and
+            .candidate_commit == $commit and .platform == $platform and
+            (.artifacts | type == "array") and
+            all(.artifacts[];
+              (keys | sort) == ["path","sha256","size_bytes"] and
+              (.path | test("^(compose\\.review\\.yaml|fly\\.toml|cloudflare/index\\.js)$")) and
+              (.sha256 | test("^[0-9a-f]{64}$")) and
+              (.size_bytes > 0 and .size_bytes <= 10485760)) and
+            ([.artifacts[].path] | unique | length) == (.artifacts | length) and
+            (if $platform == "cloudflare_containers" then
+              ([.artifacts[].path] | sort) == ["cloudflare/index.js","compose.review.yaml","fly.toml"]
+             else
+              ([.artifacts[].path] | sort) == ["compose.review.yaml","fly.toml"]
+             end)
+          ' "$receipt" >/dev/null
+          actual="$RUNNER_TEMP/provider-inputs-actual"
+          expected="$RUNNER_TEMP/provider-inputs-expected"
+          find "$root" -type f -print | while IFS= read -r path; do printf '%s\n' "${path#"$root/"}"; done | LC_ALL=C sort > "$actual"
+          { printf '%s\n' provider-inputs.json; jq --raw-output '.artifacts[].path' "$receipt"; } | LC_ALL=C sort > "$expected"
+          cmp --silent "$actual" "$expected"
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256,(.size_bytes|tostring)] | @tsv' "$receipt" |
+            while IFS=$'\t' read -r relative sha size; do
+              file="$root/$relative"
+              test -f "$file" && test ! -L "$file" && test -s "$file"
+              test "$(sha256sum "$file" | awk '{print $1}')" = "$sha"
+              test "$(stat --format=%s "$file")" = "$size"
+            done
+      - name: Validate and unpack only the fixed-integrity Wrangler distribution
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        env:
+          WRANGLER_WRITE_LOGS: 'false'
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/trusted-wrangler-artifact"
+          receipt="$root/trusted-wrangler.json"
+          archive="$root/wrangler-4.127.1-linux-x64.tar.gz"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type f -print -quit)"
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+          jq --sort-keys . "$receipt" > "$RUNNER_TEMP/trusted-wrangler-canonical.json"
+          cmp --silent "$receipt" "$RUNNER_TEMP/trusted-wrangler-canonical.json"
+          archive_size=$(stat --format=%s "$archive")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          jq --exit-status \
+            --arg archive_sha "$archive_sha" --argjson archive_size "$archive_size" \
+            --arg package_json_sha "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256" \
+            --arg package_lock_sha "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256" \
+            --arg allowed_packages_sha "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256" \
+            --argjson package_count "$TRUSTED_WRANGLER_PACKAGE_COUNT" '
+            (keys | sort) == ["allowed_packages_sha256","archive","kind","node_version","package_count","package_json_sha256","package_lock_sha256","schema_version","wrangler_integrity","wrangler_version"] and
+            .schema_version == 1 and .kind == "latchway_trusted_wrangler_distribution" and
+            .node_version == "24.19.0" and .wrangler_version == "4.127.1" and
+            .wrangler_integrity == "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==" and
+            .package_json_sha256 == $package_json_sha and
+            .package_lock_sha256 == $package_lock_sha and
+            .allowed_packages_sha256 == $allowed_packages_sha and
+            .package_count == $package_count and
+            .archive == {path:"wrangler-4.127.1-linux-x64.tar.gz",sha256:$archive_sha,size_bytes:$archive_size} and
+            ($archive_size >= 1024 and $archive_size <= 536870912)
+          ' "$receipt" >/dev/null
+          if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+            exit 1
+          fi
+          tool="$RUNNER_TEMP/cloudflare-tool"
+          mkdir -p "$tool"
+          tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$tool"
+          test "$(sha256sum "$tool/package.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256"
+          test "$(sha256sum "$tool/package-lock.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256"
+          test "$(sha256sum "$tool/allowed-packages.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256"
+          jq --exit-status --argjson count "$TRUSTED_WRANGLER_PACKAGE_COUNT" '
+            (keys | sort) == ["lockfileVersion","name","packages","requires","version"] and
+            .name == "@latchway/trusted-wrangler-toolchain" and .version == "1.0.0" and
+            .lockfileVersion == 3 and .requires == true and
+            (.packages | type == "object" and length == ($count + 1)) and
+            .packages[""] == {
+              name:"@latchway/trusted-wrangler-toolchain",version:"1.0.0",
+              dependencies:{wrangler:"4.127.1"},engines:{node:"24.19.0"}
+            } and
+            .packages["node_modules/wrangler"].version == "4.127.1" and
+            .packages["node_modules/wrangler"].integrity == "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==" and
+            all(.packages | to_entries[];
+              if .key == "" then true else
+                (.key | startswith("node_modules/")) and
+                (.key | startswith("/") | not) and
+                (.key | contains("/../") | not) and
+                (.value | type == "object") and
+                (.value.version | type == "string" and length > 0) and
+                (.value.resolved | type == "string" and test("^https://registry\\.npmjs\\.org/.+\\.tgz$") and (test("[?#[:space:]]") | not)) and
+                (.value.integrity | type == "string" and test("^sha512-[A-Za-z0-9+/]{86}==$"))
+              end
+            )
+          ' "$tool/package-lock.json" >/dev/null
+          jq --sort-keys '{
+            schema_version:1,
+            kind:"latchway_trusted_npm_package_allowlist",
+            package_count:([.packages | to_entries[] | select(.key != "")] | length),
+            packages:([.packages | to_entries[] | select(.key != "") |
+              {path:.key,version:.value.version,resolved:.value.resolved,integrity:.value.integrity}] | sort_by(.path))
+          }' "$tool/package-lock.json" > "$RUNNER_TEMP/expected-wrangler-packages.json"
+          cmp --silent "$tool/allowed-packages.json" "$RUNNER_TEMP/expected-wrangler-packages.json"
+          test "$("$tool/node_modules/.bin/wrangler" --version)" = 4.127.1
+      - name: Bind the provider runner to the authenticated candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(jq -r '.image.repository + "@" + .image.index_digest' "$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json")" = "$RELEASE_IMAGE"
           mkdir -p /tmp/latchway-deployment-capture
           date -u +%Y-%m-%dT%H:%M:%SZ > /tmp/latchway-deployment-started-at
       - name: Authenticate to Google Cloud with GitHub OIDC
@@ -208,134 +776,14 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
         with:
           version: '0.4.89'
-      - name: Validate Fly configuration with pinned CLI
-        if: inputs.platform == 'fly_io'
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
-      - name: Set up pinned pnpm for Cloudflare evidence
-        if: inputs.platform == 'cloudflare_containers'
-        uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
-        with:
-          version: 10.15.0
-          run_install: false
       - name: Set up pinned Node.js for Cloudflare evidence
         if: inputs.platform == 'cloudflare_containers'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
-          cache: pnpm
-          cache-dependency-path: deploy/cloudflare/pnpm-lock.yaml
       - name: Set up Docker Buildx for Cloudflare manifest verification
         if: inputs.platform == 'cloudflare_containers'
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-      - name: Authenticate to the candidate registry
-        if: inputs.platform == 'cloudflare_containers'
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: Capture Compose migration, runtime, and SIGTERM evidence
-        if: inputs.platform == 'compose'
-        shell: bash
-        env:
-          COMPOSE_PROJECT_NAME: latchway-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          set -Eeuo pipefail
-          capture=/tmp/latchway-deployment-capture
-          export LATCHWAY_IMAGE="$RELEASE_IMAGE"
-          export POSTGRES_PASSWORD
-          POSTGRES_PASSWORD=$(openssl rand -hex 24)
-          export LATCHWAY_DATABASE_URL="postgresql://latchway:${POSTGRES_PASSWORD}@postgres:5432/latchway?sslmode=disable"
-          export LATCHWAY_MASTER_KEY
-          LATCHWAY_MASTER_KEY=$(openssl rand -base64 32)
-          export LATCHWAY_PUBLIC_ORIGIN="$ENDPOINT"
-          export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
-          LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=$(openssl rand -hex 36)
-          export LATCHWAY_PORT="${ENDPOINT##*:}"
-          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" -f deploy/compose/compose.release.yaml)
-          "${compose[@]}" pull
-          "${compose[@]}" up -d --wait
-          gateway_id=$("${compose[@]}" ps -q latchway)
-          migration_id=$("${compose[@]}" ps -a -q migrate)
-          docker info --format '{{json .}}' > /tmp/docker-info.json
-          docker inspect "$gateway_id" > /tmp/gateway-inspect.json
-          docker image inspect "$RELEASE_IMAGE" > /tmp/image-inspect.json
-          set +e
-          "${compose[@]}" run --rm --no-deps latchway --output json migrate status > /tmp/migration-status.json
-          migration_status_exit=$?
-          set -e
-          docker inspect "$migration_id" > /tmp/migration-inspect.json
-          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          before_digest="sha256:${RELEASE_IMAGE##*@sha256:}"
-          docker stop --time 35 "$gateway_id" >/dev/null
-          stopped_exit=$(docker inspect --format '{{.State.ExitCode}}' "$gateway_id")
-          "${compose[@]}" up -d --wait latchway
-          gateway_id=$("${compose[@]}" ps -q latchway)
-          docker inspect "$gateway_id" > /tmp/gateway-restored.json
-          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          export CAPTURE_DIR="$capture" RESOURCE_ID="$COMPOSE_PROJECT_NAME" MIGRATION_STATUS_EXIT="$migration_status_exit"
-          export SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" STOPPED_EXIT="$stopped_exit" BEFORE_DIGEST="$before_digest"
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          out = Path(os.environ["CAPTURE_DIR"])
-          load = lambda p: json.loads(Path(p).read_text())
-          info = load("/tmp/docker-info.json")
-          gateway = load("/tmp/gateway-restored.json")[0]
-          image = load("/tmp/image-inspect.json")[0]
-          migration_container = load("/tmp/migration-inspect.json")[0]
-          status = load("/tmp/migration-status.json")
-          def write(name, value):
-              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
-          write("identity.json", {
-              "platform": "compose", "resource_id": os.environ["RESOURCE_ID"],
-              "observed_at": os.environ["SHUTDOWN_FINISHED"],
-              "provider_response": {key: info.get(key) for key in ("ID", "ServerVersion", "OSType", "Architecture")},
-          })
-          write("control_plane.json", {
-              "platform": "compose", "project": os.environ["RESOURCE_ID"],
-              "gateway": {
-                  "Config": {
-                      "Image": gateway["Config"]["Image"], "User": gateway["Config"].get("User"),
-                      "Labels": {"com.docker.compose.project": gateway["Config"].get("Labels", {}).get("com.docker.compose.project")},
-                  },
-                  "State": {"Running": gateway["State"]["Running"], "Health": gateway["State"].get("Health")},
-              },
-              "image": {key: image.get(key) for key in ("Id", "RepoDigests", "Os", "Architecture")},
-          })
-          write("migration.json", {
-              "command": ["/latchway", "--output", "json", "migrate", "status"],
-              "status": status,
-              "provider_execution": {
-                  "exit_code": int(os.environ["MIGRATION_STATUS_EXIT"]),
-                  "migration_container_exit_code": migration_container["State"]["ExitCode"],
-                  "reported_status": status,
-              },
-          })
-          write("secrets.json", {
-              "required_names": ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"],
-              "runtime_references": [
-                  {"name": "LATCHWAY_DATABASE_URL", "reference": "deployment-environment"},
-                  {"name": "LATCHWAY_MASTER_KEY", "reference": "deployment-environment"},
-              ],
-              "provider_resources": [],
-          })
-          digest = os.environ["BEFORE_DIGEST"]
-          write("shutdown.json", {
-              "method": "compose_sigterm_restart",
-              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
-              "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
-              "exit_code": int(os.environ["STOPPED_EXIT"]),
-              "readiness_restored": gateway["State"]["Running"] is True and gateway["State"].get("Health", {}).get("Status") == "healthy",
-              "before": {"image_digest": digest, "resource_id": os.environ["RESOURCE_ID"]},
-              "after": {"image_digest": digest, "resource_id": gateway["Id"]},
-          })
-          PY
-          printf '%s\n' "$COMPOSE_PROJECT_NAME" > /tmp/latchway-provider-resource-id
-
       - name: Capture Cloud Run migration, revision, secret, and rollout evidence
         if: inputs.platform == 'cloud_run'
         shell: bash
@@ -814,6 +1262,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_EVIDENCE_TOKEN: ${{ secrets.CLOUDFLARE_EVIDENCE_TOKEN }}
+          WRANGLER_WRITE_LOGS: 'false'
         run: |
           set -Eeuo pipefail
           [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]]
@@ -821,22 +1270,59 @@ jobs:
           test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -ge 32
           test "${#CLOUDFLARE_EVIDENCE_TOKEN}" -le 256
           capture=/tmp/latchway-deployment-capture
-          candidate="$RUNNER_TEMP/latchway-candidate/latchway-candidate.json"
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
           amd64_digest=$(jq -er '.image.platforms["linux/amd64"] | select(test("^sha256:[0-9a-f]{64}$"))' "$candidate")
           mirror_digest="${CLOUDFLARE_MIRROR_IMAGE##*@}"
-          pnpm --dir deploy/cloudflare install --frozen-lockfile
-          wrangler=(pnpm --dir deploy/cloudflare exec wrangler --config "$GITHUB_WORKSPACE/deploy/cloudflare/wrangler.release.jsonc")
-          pnpm --dir deploy/cloudflare exec wrangler containers registries credentials registry.cloudflare.com \
+          tool="$RUNNER_TEMP/cloudflare-tool"
+          deployment="$RUNNER_TEMP/cloudflare-deployment"
+          mkdir -p "$deployment" /tmp/cloudflare-provider-raw
+          # Recheck the committed closure at the credential boundary; never resolve
+          # or install a package while the provider token is in scope.
+          test "$(sha256sum "$tool/package.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_JSON_SHA256"
+          test "$(sha256sum "$tool/package-lock.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256"
+          test "$(sha256sum "$tool/allowed-packages.json" | awk '{print $1}')" = "$TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256"
+          jq --sort-keys '{
+            schema_version:1,
+            kind:"latchway_trusted_npm_package_allowlist",
+            package_count:([.packages | to_entries[] | select(.key != "")] | length),
+            packages:([.packages | to_entries[] | select(.key != "") |
+              {path:.key,version:.value.version,resolved:.value.resolved,integrity:.value.integrity}] | sort_by(.path))
+          }' "$tool/package-lock.json" > "$RUNNER_TEMP/credential-boundary-wrangler-packages.json"
+          cmp --silent "$tool/allowed-packages.json" "$RUNNER_TEMP/credential-boundary-wrangler-packages.json"
+          test "$("$tool/node_modules/.bin/wrangler" --version)" = "4.127.1"
+          install -m 0644 "$RUNNER_TEMP/provider-inputs/cloudflare/index.js" "$deployment/index.js"
+          jq --null-input --arg image "$CLOUDFLARE_MIRROR_IMAGE" '{
+            name: "latchway", main: "index.js", compatibility_date: "2026-08-29",
+            compatibility_flags: ["nodejs_compat"],
+            vars: {
+              LATCHWAY_CONTAINER_INSTANCES: "4", LATCHWAY_ROLE: "all", LATCHWAY_LOG_LEVEL: "info",
+              LATCHWAY_MIGRATE_ON_START: "true", LATCHWAY_DB_MAX_CONNECTIONS: "5",
+              LATCHWAY_SHUTDOWN_TIMEOUT: "30s"
+            },
+            durable_objects: {bindings: [{name: "LATCHWAY_CONTAINER", class_name: "LatchwayContainer"}]},
+            migrations: [{tag: "v1", new_sqlite_classes: ["LatchwayContainer"]}],
+            triggers: {crons: ["* * * * *"]},
+            containers: [{
+              name: "latchway", class_name: "LatchwayContainer", image: $image,
+              max_instances: 4, instance_type: "standard-1", rollout_step_percentage: [10, 50, 100],
+              rollout_active_grace_period: 35
+            }],
+            observability: {enabled: true, logs: {enabled: true, head_sampling_rate: 1}, traces: {enabled: true, head_sampling_rate: 0.1}}
+          }' > "$deployment/wrangler.json"
+          wrangler=("$tool/node_modules/.bin/wrangler" --config "$deployment/wrangler.json")
+          "${wrangler[@]}" containers registries credentials registry.cloudflare.com \
             --pull --expiration-minutes 15 --json > /tmp/cloudflare-registry-credentials.json
           registry_username=$(jq -er '.username | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json)
           jq -er '.password | select(type == "string" and length > 0)' /tmp/cloudflare-registry-credentials.json \
             | docker login registry.cloudflare.com --username "$registry_username" --password-stdin
-          docker buildx imagetools inspect --raw "ghcr.io/latchway/latchway@$amd64_digest" > /tmp/cloudflare-canonical-manifest.json
-          docker buildx imagetools inspect --raw "$CLOUDFLARE_MIRROR_IMAGE" > /tmp/cloudflare-mirror-manifest.json
           rm /tmp/cloudflare-registry-credentials.json
+          install -m 0444 "$RUNNER_TEMP/authority/cloudflare-canonical-manifest.json" /tmp/cloudflare-canonical-manifest.json
+          test "$(sha256sum /tmp/cloudflare-canonical-manifest.json | awk '{print $1}')" = "${amd64_digest#sha256:}"
+          docker buildx imagetools inspect --raw "$CLOUDFLARE_MIRROR_IMAGE" > /tmp/cloudflare-mirror-manifest.json
           docker logout registry.cloudflare.com >/dev/null
-          pnpm --dir deploy/cloudflare release:config -- --image "$CLOUDFLARE_MIRROR_IMAGE"
-          pnpm --dir deploy/cloudflare release:deploy
+          # The candidate bundle was already built in the credential-free job.
+          # Upload it as data; do not evaluate candidate build plugins here.
+          "${wrangler[@]}" deploy --no-bundle
           evidence_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           request_body=$(jq --null-input --compact-output --arg evidence_id "$evidence_id" '{evidence_id: $evidence_id}')
           migration_ready=0
@@ -902,89 +1388,798 @@ jobs:
           shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           "${wrangler[@]}" deployments list --name latchway --json > /tmp/cloudflare-deployments.json
           "${wrangler[@]}" versions list --name latchway --json > /tmp/cloudflare-versions.json
-          wrangler_version=$(pnpm --dir deploy/cloudflare exec wrangler --version)
-          python3 scripts/cloudflare-deployment-capture.py \
-            --candidate-manifest "$candidate" \
-            --canonical-manifest /tmp/cloudflare-canonical-manifest.json \
-            --mirror-manifest /tmp/cloudflare-mirror-manifest.json \
-            --mirror-image "$CLOUDFLARE_MIRROR_IMAGE" \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --whoami /tmp/cloudflare-whoami.json \
-            --applications /tmp/cloudflare-applications.json \
-            --instances-before /tmp/cloudflare-instances-before.json \
-            --instances-after /tmp/cloudflare-instances-after.json \
-            --deployments /tmp/cloudflare-deployments.json \
-            --versions /tmp/cloudflare-versions.json \
-            --secrets /tmp/cloudflare-secrets.json \
-            --migration /tmp/cloudflare-migration.json \
-            --shutdown /tmp/cloudflare-shutdown.json \
-            --observed-at "$shutdown_finished" \
-            --shutdown-started "$shutdown_started" \
-            --shutdown-finished "$shutdown_finished" \
-            --wrangler-version "$wrangler_version" \
-            --output-dir "$capture" \
-            --resource-id-output /tmp/latchway-provider-resource-id
+          "${wrangler[@]}" --version > /tmp/cloudflare-wrangler-version.txt
+          install -m 0644 /tmp/cloudflare-canonical-manifest.json /tmp/cloudflare-provider-raw/canonical-manifest.json
+          install -m 0644 /tmp/cloudflare-mirror-manifest.json /tmp/cloudflare-provider-raw/mirror-manifest.json
+          install -m 0644 /tmp/cloudflare-whoami.json /tmp/cloudflare-provider-raw/whoami.json
+          install -m 0644 /tmp/cloudflare-applications.json /tmp/cloudflare-provider-raw/applications.json
+          install -m 0644 /tmp/cloudflare-instances-before.json /tmp/cloudflare-provider-raw/instances-before.json
+          install -m 0644 /tmp/cloudflare-instances-after.json /tmp/cloudflare-provider-raw/instances-after.json
+          install -m 0644 /tmp/cloudflare-deployments.json /tmp/cloudflare-provider-raw/deployments.json
+          install -m 0644 /tmp/cloudflare-versions.json /tmp/cloudflare-provider-raw/versions.json
+          install -m 0644 /tmp/cloudflare-secrets.json /tmp/cloudflare-provider-raw/secrets.json
+          install -m 0644 /tmp/cloudflare-migration.json /tmp/cloudflare-provider-raw/migration.json
+          install -m 0644 /tmp/cloudflare-shutdown.json /tmp/cloudflare-provider-raw/shutdown.json
+          install -m 0644 /tmp/cloudflare-wrangler-version.txt /tmp/cloudflare-provider-raw/wrangler-version.txt
+          printf '%s\n' "$CLOUDFLARE_MIRROR_IMAGE" > /tmp/cloudflare-provider-raw/mirror-image.txt
+          printf '%s\n' "$CLOUDFLARE_ACCOUNT_ID" > /tmp/cloudflare-provider-raw/account-id.txt
+          printf '%s\n' "$shutdown_started" > /tmp/cloudflare-provider-raw/shutdown-started.txt
+          printf '%s\n' "$shutdown_finished" > /tmp/cloudflare-provider-raw/shutdown-finished.txt
+          printf '%s\n' "$app_id" > /tmp/latchway-provider-resource-id
 
-      - name: Capture bounded HTTPS health and readiness responses
-        run: >-
-          python3 scripts/deployment-evidence.py observe-http
-          --endpoint "$ENDPOINT"
-          --output-dir /tmp/latchway-deployment-capture
-          --timeout 15
-      - name: Bind observations to this protected workflow run
+      - name: Remove any temporary Cloudflare registry credential
+        if: always() && inputs.platform == 'cloudflare_containers'
+        shell: bash
+        run: |
+          docker logout registry.cloudflare.com >/dev/null 2>&1 || true
+          rm -f /tmp/cloudflare-registry-credentials.json
+
+      - name: Retain raw provider observations for fresh validation
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/latchway-deployment-capture
+            /tmp/latchway-deployment-started-at
+            /tmp/latchway-provider-resource-id
+            /tmp/cloudflare-provider-raw
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+  capture_compose:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.platform == 'compose'
+    needs: [authenticate, prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: deployment-evidence-compose
+    permissions:
+      actions: read
+      contents: read
+    env:
+      PLATFORM: compose
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      RELEASE_IMAGE: ${{ inputs.image }}
+      ENDPOINT: ${{ inputs.endpoint }}
+      DEPLOYMENT_ENVIRONMENT: deployment-evidence-compose
+      COMPOSE_PROJECT_NAME: latchway-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Download authenticated candidate inputs on the OIDC-free Compose runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authority
+      - name: Download the no-checkout exact Compose image archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-compose-images-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preloaded-images
+      - name: Import and bind exact images with an empty Docker credential store
+        id: preloaded
         shell: bash
         run: |
           set -Eeuo pipefail
-          finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          provider_resource_id=$(cat /tmp/latchway-provider-resource-id)
-          python3 scripts/deployment-evidence.py make-manifest \
-            --platform "$PLATFORM" \
-            --capture-dir /tmp/latchway-deployment-capture \
-            --started-at "$(cat /tmp/latchway-deployment-started-at)" \
-            --finished-at "$finished_at" \
-            --core-commit "$CANDIDATE_COMMIT" \
-            --core-release "$INTENDED_TAG" \
-            --image "$RELEASE_IMAGE" \
-            --endpoint "$ENDPOINT" \
-            --provider-resource-id "$provider_resource_id" \
-            --environment "$DEPLOYMENT_ENVIRONMENT"
-          python3 scripts/deployment-evidence.py validate-capture \
-            --capture-dir /tmp/latchway-deployment-capture \
-            --output /tmp/latchway-deployment-validation.json
-          python3 scripts/deployment-evidence.py seal \
-            --capture-dir /tmp/latchway-deployment-capture \
-            --output "/tmp/${PLATFORM}.tar.gz"
-      - name: Attest the bounded provider capture
-        id: attest
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
-        with:
-          subject-path: /tmp/${{ inputs.platform }}.tar.gz
-      - name: Name the attestation bundle deterministically
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          root="$RUNNER_TEMP/preloaded-images"
+          receipt="$root/preloaded-images.json"
+          archive="$root/preloaded-images.tar"
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type f -print -quit)"
+          test "$(find "$root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 2
+          candidate_manifest_sha=$(sha256sum "$candidate" | awk '{print $1}')
+          candidate_platform=$(jq --raw-output '.image.repository + "@" + .image.platforms["linux/amd64"]' "$candidate")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          archive_size=$(stat --format=%s "$archive")
+          jq --exit-status \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg manifest_sha "$candidate_manifest_sha" \
+            --arg index "$RELEASE_IMAGE" \
+            --arg platform "$candidate_platform" \
+            --arg archive_sha "$archive_sha" \
+            --argjson archive_size "$archive_size" '
+              (keys | sort) == ["archive","candidate_manifest_sha256","images","kind","schema_version"] and
+              .schema_version == 1 and .kind == "latchway_compose_preloaded_images" and
+              .candidate_manifest_sha256 == $manifest_sha and
+              .archive == {path:"preloaded-images.tar",sha256:$archive_sha,size_bytes:$archive_size} and
+              ($archive_size >= 1024 and $archive_size <= 2147483648) and
+              (.images | keys | sort) == ["candidate","postgres"] and
+              (.images.candidate | keys | sort) == ["image_id","local_reference","oci_index_reference","oci_platform_reference","platform","revision"] and
+              .images.candidate.oci_index_reference == $index and
+              .images.candidate.oci_platform_reference == $platform and
+              (.images.candidate.local_reference | test("^latchway-preloaded-compose-candidate:[0-9a-f]{64}$")) and
+              (.images.candidate.image_id | test("^sha256:[0-9a-f]{64}$")) and
+              .images.candidate.revision == $commit and .images.candidate.platform == "linux/amd64" and
+              (.images.postgres | keys | sort) == ["image_id","local_reference","platform","source_reference"] and
+              .images.postgres.source_reference == "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2" and
+              (.images.postgres.local_reference | test("^latchway-preloaded-compose-postgres:[0-9a-f]{64}$")) and
+              (.images.postgres.image_id | test("^sha256:[0-9a-f]{64}$")) and
+              .images.postgres.platform == "linux/amd64" and
+              .images.candidate.image_id != .images.postgres.image_id
+            ' "$receipt" >/dev/null
+          config="$RUNNER_TEMP/credential-free-docker"
+          mkdir -p "$config"
+          chmod 0700 "$config"
+          test -z "$(find "$config" -mindepth 1 -print -quit)"
+          export DOCKER_CONFIG="$config"
+          printf 'DOCKER_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
+          docker load --input "$archive" >/dev/null
+          candidate_id=$(jq --raw-output .images.candidate.image_id "$receipt")
+          candidate_local=$(jq --raw-output .images.candidate.local_reference "$receipt")
+          postgres_id=$(jq --raw-output .images.postgres.image_id "$receipt")
+          postgres_local=$(jq --raw-output .images.postgres.local_reference "$receipt")
+          test "$(docker image inspect --format '{{.Id}}' "$candidate_local")" = "$candidate_id"
+          test "$(docker image inspect --format '{{.Id}}' "$postgres_local")" = "$postgres_id"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate_local")" = linux/amd64
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgres_local")" = linux/amd64
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$candidate_local")" = "$CANDIDATE_COMMIT"
+          echo "candidate_local=$candidate_local" >> "$GITHUB_OUTPUT"
+          echo "postgres_local=$postgres_local" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/latchway-deployment-capture
+          date -u +%Y-%m-%dT%H:%M:%SZ > /tmp/latchway-deployment-started-at
+      - name: Capture Compose migration, runtime, and SIGTERM evidence without OIDC
         shell: bash
         env:
-          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
-        run: cp "$BUNDLE_PATH" "/tmp/${PLATFORM}.attestation.json"
-      - name: Upload signed provider evidence
+          CANDIDATE_LOCAL_IMAGE: ${{ steps.preloaded.outputs.candidate_local }}
+          POSTGRES_LOCAL_IMAGE: ${{ steps.preloaded.outputs.postgres_local }}
+        run: |
+          set -Eeuo pipefail
+          capture=/tmp/latchway-deployment-capture
+          export LATCHWAY_IMAGE="$CANDIDATE_LOCAL_IMAGE"
+          export POSTGRES_IMAGE="$POSTGRES_LOCAL_IMAGE"
+          export POSTGRES_PASSWORD
+          POSTGRES_PASSWORD=$(openssl rand -hex 24)
+          export LATCHWAY_DATABASE_URL="postgresql://latchway:${POSTGRES_PASSWORD}@postgres:5432/latchway?sslmode=disable"
+          export LATCHWAY_MASTER_KEY
+          LATCHWAY_MASTER_KEY=$(openssl rand -base64 32)
+          export LATCHWAY_PUBLIC_ORIGIN="$ENDPOINT"
+          export LATCHWAY_ADMIN_BOOTSTRAP_TOKEN
+          LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=$(openssl rand -hex 36)
+          export LATCHWAY_PORT="${ENDPOINT##*:}"
+          jq -n '{
+            name:"latchway-release",
+            services:{
+              postgres:{
+                image:"${POSTGRES_IMAGE:?}",pull_policy:"never",restart:"unless-stopped",stop_grace_period:"30s",
+                security_opt:["no-new-privileges:true"],
+                environment:{POSTGRES_DB:"${POSTGRES_DB:-latchway}",POSTGRES_USER:"${POSTGRES_USER:-latchway}",POSTGRES_PASSWORD:"${POSTGRES_PASSWORD:?}"},
+                healthcheck:{test:["CMD-SHELL","pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"],interval:"2s",timeout:"3s",retries:30},
+                volumes:["postgres-data:/var/lib/postgresql"]
+              },
+              migrate:{
+                image:"${LATCHWAY_IMAGE:?}",pull_policy:"never",restart:"no",read_only:true,user:"65532:65532",cap_drop:["ALL"],
+                security_opt:["no-new-privileges:true"],tmpfs:["/tmp:size=16m,mode=1777"],
+                depends_on:{postgres:{condition:"service_healthy"}},
+                environment:{LATCHWAY_DATABASE_URL:"${LATCHWAY_DATABASE_URL:?}"},command:["migrate","up"]
+              },
+              latchway:{
+                image:"${LATCHWAY_IMAGE:?}",pull_policy:"never",restart:"unless-stopped",init:true,read_only:true,user:"65532:65532",
+                stop_grace_period:"35s",cap_drop:["ALL"],security_opt:["no-new-privileges:true"],tmpfs:["/tmp:size=16m,mode=1777"],
+                depends_on:{migrate:{condition:"service_completed_successfully"}},
+                environment:{
+                  LATCHWAY_DATABASE_URL:"${LATCHWAY_DATABASE_URL:?}",LATCHWAY_MASTER_KEY:"${LATCHWAY_MASTER_KEY:?}",
+                  LATCHWAY_PUBLIC_ORIGIN:"${LATCHWAY_PUBLIC_ORIGIN:?}",LATCHWAY_ADMIN_BOOTSTRAP_TOKEN:"${LATCHWAY_ADMIN_BOOTSTRAP_TOKEN:-}",
+                  LATCHWAY_ROLE:"all",LATCHWAY_LOG_LEVEL:"${LATCHWAY_LOG_LEVEL:-info}",LATCHWAY_MIGRATE_ON_START:"false",
+                  LATCHWAY_DB_MAX_CONNECTIONS:"${LATCHWAY_DB_MAX_CONNECTIONS:-20}",LATCHWAY_SHUTDOWN_TIMEOUT:"30s",PORT:"8080"
+                },
+                ports:["127.0.0.1:${LATCHWAY_PORT:-8080}:8080"],
+                healthcheck:{test:["CMD","/latchway","doctor","--output","json"],interval:"5s",timeout:"5s",retries:30,start_period:"5s"}
+              }
+            },
+            volumes:{"postgres-data":{}}
+          }' > "$RUNNER_TEMP/trusted-compose.json"
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$RUNNER_TEMP/trusted-compose.json")
+          "${compose[@]}" config --quiet
+          "${compose[@]}" up -d --wait
+          gateway_id=$("${compose[@]}" ps -q latchway)
+          migration_id=$("${compose[@]}" ps -a -q migrate)
+          docker info --format '{{json .}}' > /tmp/docker-info.json
+          docker image inspect "$CANDIDATE_LOCAL_IMAGE" > /tmp/image-inspect.json
+          set +e
+          "${compose[@]}" run --rm --no-deps latchway --output json migrate status > /tmp/migration-status.json
+          migration_status_exit=$?
+          set -e
+          docker inspect "$migration_id" > /tmp/migration-inspect.json
+          shutdown_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          before_digest="sha256:${RELEASE_IMAGE##*@sha256:}"
+          docker stop --time 35 "$gateway_id" >/dev/null
+          stopped_exit=$(docker inspect --format '{{.State.ExitCode}}' "$gateway_id")
+          "${compose[@]}" up -d --wait latchway
+          gateway_id=$("${compose[@]}" ps -q latchway)
+          docker inspect "$gateway_id" > /tmp/gateway-restored.json
+          shutdown_finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          export CAPTURE_DIR="$capture" RESOURCE_ID="$COMPOSE_PROJECT_NAME" MIGRATION_STATUS_EXIT="$migration_status_exit" RELEASE_IMAGE
+          export SHUTDOWN_STARTED="$shutdown_started" SHUTDOWN_FINISHED="$shutdown_finished" STOPPED_EXIT="$stopped_exit" BEFORE_DIGEST="$before_digest"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          out = Path(os.environ["CAPTURE_DIR"])
+          load = lambda p: json.loads(Path(p).read_text())
+          info = load("/tmp/docker-info.json")
+          gateway = load("/tmp/gateway-restored.json")[0]
+          image = load("/tmp/image-inspect.json")[0]
+          migration_container = load("/tmp/migration-inspect.json")[0]
+          status = load("/tmp/migration-status.json")
+          def write(name, value):
+              (out / name).write_text(json.dumps(value, sort_keys=True) + "\n")
+          write("identity.json", {
+              "platform": "compose", "resource_id": os.environ["RESOURCE_ID"],
+              "observed_at": os.environ["SHUTDOWN_FINISHED"],
+              "provider_response": {key: info.get(key) for key in ("ID", "ServerVersion", "OSType", "Architecture")},
+          })
+          write("control_plane.json", {
+              "platform": "compose", "project": os.environ["RESOURCE_ID"],
+              "gateway": {
+                  "Config": {
+                      "Image": gateway["Config"]["Image"], "User": gateway["Config"].get("User"),
+                      "Labels": {"com.docker.compose.project": gateway["Config"].get("Labels", {}).get("com.docker.compose.project")},
+                  },
+                  "State": {"Running": gateway["State"]["Running"], "Health": gateway["State"].get("Health")},
+              },
+              "image": {
+                  "Id": image.get("Id"), "RepoDigests": [os.environ["RELEASE_IMAGE"]],
+                  "Os": image.get("Os"), "Architecture": image.get("Architecture"),
+              },
+          })
+          write("migration.json", {
+              "command": ["/latchway", "--output", "json", "migrate", "status"],
+              "status": status,
+              "provider_execution": {
+                  "exit_code": int(os.environ["MIGRATION_STATUS_EXIT"]),
+                  "migration_container_exit_code": migration_container["State"]["ExitCode"],
+                  "reported_status": status,
+              },
+          })
+          write("secrets.json", {
+              "required_names": ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"],
+              "runtime_references": [
+                  {"name": "LATCHWAY_DATABASE_URL", "reference": "deployment-environment"},
+                  {"name": "LATCHWAY_MASTER_KEY", "reference": "deployment-environment"},
+              ],
+              "provider_resources": [],
+          })
+          digest = os.environ["BEFORE_DIGEST"]
+          write("shutdown.json", {
+              "method": "compose_sigterm_restart",
+              "started_at": os.environ["SHUTDOWN_STARTED"], "finished_at": os.environ["SHUTDOWN_FINISHED"],
+              "signal": "SIGTERM", "platform_timeout_seconds": 35, "application_timeout_seconds": 30,
+              "exit_code": int(os.environ["STOPPED_EXIT"]),
+              "readiness_restored": gateway["State"]["Running"] is True and gateway["State"].get("Health", {}).get("Status") == "healthy",
+              "before": {"image_digest": digest, "resource_id": os.environ["RESOURCE_ID"]},
+              "after": {"image_digest": digest, "resource_id": gateway["Id"]},
+          })
+          PY
+          printf '%s\n' "$COMPOSE_PROJECT_NAME" > /tmp/latchway-provider-resource-id
+      - name: Retain raw Compose observations for fresh validation
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: latchway-deployment-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: latchway-deployment-raw-compose-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            /tmp/${{ inputs.platform }}.tar.gz
-            /tmp/${{ inputs.platform }}.attestation.json
-            /tmp/latchway-deployment-validation.json
-            /tmp/latchway-deployment-validation.json.junit.xml
+            /tmp/latchway-deployment-capture
+            /tmp/latchway-deployment-started-at
+            /tmp/latchway-provider-resource-id
           if-no-files-found: error
-          retention-days: 90
+          compression-level: 0
+          retention-days: 1
       - name: Tear down the ephemeral Compose deployment
-        if: always() && inputs.platform == 'compose'
+        if: always()
         shell: bash
         env:
-          COMPOSE_PROJECT_NAME: latchway-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          CANDIDATE_LOCAL_IMAGE: ${{ steps.preloaded.outputs.candidate_local }}
+          POSTGRES_LOCAL_IMAGE: ${{ steps.preloaded.outputs.postgres_local }}
         run: |
-          export LATCHWAY_IMAGE="$RELEASE_IMAGE"
+          export LATCHWAY_IMAGE="$CANDIDATE_LOCAL_IMAGE"
+          export POSTGRES_IMAGE="$POSTGRES_LOCAL_IMAGE"
           export POSTGRES_PASSWORD=cleanup
           export LATCHWAY_DATABASE_URL='postgresql://cleanup:cleanup@postgres:5432/cleanup?sslmode=disable'
           export LATCHWAY_MASTER_KEY='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
           export LATCHWAY_PUBLIC_ORIGIN="$ENDPOINT"
           export LATCHWAY_PORT="${ENDPOINT##*:}"
-          docker compose -p "$COMPOSE_PROJECT_NAME" -f deploy/compose/compose.release.yaml down --volumes
+          if [[ -f "$RUNNER_TEMP/trusted-compose.json" ]]; then
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f "$RUNNER_TEMP/trusted-compose.json" down --volumes
+          fi
+
+  finalize:
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      ((inputs.platform == 'compose' && needs.capture_compose.result == 'success') ||
+       (inputs.platform != 'compose' && needs.capture.result == 'success'))
+    needs: [capture, capture_compose]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: deployment-evidence-${{ inputs.platform }}
+    permissions:
+      actions: read
+      contents: read
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      RELEASE_IMAGE: ${{ inputs.image }}
+      ENDPOINT: ${{ inputs.endpoint }}
+      DEPLOYMENT_ENVIRONMENT: deployment-evidence-${{ inputs.platform }}
+    steps:
+      - name: Download authenticated candidate inputs on a fresh validator runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authority
+      - name: Download isolated raw provider observations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provider
+      - name: Check out the exact candidate validator without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the immutable candidate with no provider credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          python3 scripts/release-candidate.py --verify --manifest "$candidate" \
+            --commit "$CANDIDATE_COMMIT" --tag "$INTENDED_TAG" --image ghcr.io/latchway/latchway
+          test "$(jq -r '.image.repository + "@" + .image.index_digest' "$candidate")" = "$RELEASE_IMAGE"
+      - name: Normalize the pre-captured Cloudflare responses without provider credentials
+        if: inputs.platform == 'cloudflare_containers'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          raw="$RUNNER_TEMP/provider/cloudflare-provider-raw"
+          candidate="$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json"
+          python3 scripts/cloudflare-deployment-capture.py \
+            --candidate-manifest "$candidate" \
+            --canonical-manifest "$raw/canonical-manifest.json" \
+            --mirror-manifest "$raw/mirror-manifest.json" \
+            --mirror-image "$(cat "$raw/mirror-image.txt")" \
+            --account-id "$(cat "$raw/account-id.txt")" \
+            --whoami "$raw/whoami.json" \
+            --applications "$raw/applications.json" \
+            --instances-before "$raw/instances-before.json" \
+            --instances-after "$raw/instances-after.json" \
+            --deployments "$raw/deployments.json" \
+            --versions "$raw/versions.json" \
+            --secrets "$raw/secrets.json" \
+            --migration "$raw/migration.json" \
+            --shutdown "$raw/shutdown.json" \
+            --observed-at "$(cat "$raw/shutdown-finished.txt")" \
+            --shutdown-started "$(cat "$raw/shutdown-started.txt")" \
+            --shutdown-finished "$(cat "$raw/shutdown-finished.txt")" \
+            --wrangler-version "$(cat "$raw/wrangler-version.txt")" \
+            --output-dir "$RUNNER_TEMP/provider/latchway-deployment-capture" \
+            --resource-id-output "$RUNNER_TEMP/provider/latchway-provider-resource-id"
+      - name: Capture bounded HTTPS health and readiness responses
+        run: >-
+          python3 scripts/deployment-evidence.py observe-http
+          --endpoint "$ENDPOINT"
+          --output-dir "$RUNNER_TEMP/provider/latchway-deployment-capture"
+          --timeout 15
+      - name: Bind, validate, and seal observations without provider credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          capture="$RUNNER_TEMP/provider/latchway-deployment-capture"
+          finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          provider_resource_id=$(cat "$RUNNER_TEMP/provider/latchway-provider-resource-id")
+          mkdir -p "$RUNNER_TEMP/validated"
+          python3 scripts/deployment-evidence.py make-manifest \
+            --platform "$PLATFORM" --capture-dir "$capture" \
+            --started-at "$(cat "$RUNNER_TEMP/provider/latchway-deployment-started-at")" \
+            --finished-at "$finished_at" --core-commit "$CANDIDATE_COMMIT" \
+            --core-release "$INTENDED_TAG" --image "$RELEASE_IMAGE" --endpoint "$ENDPOINT" \
+            --provider-resource-id "$provider_resource_id" --environment "$DEPLOYMENT_ENVIRONMENT"
+          python3 scripts/deployment-evidence.py validate-capture --capture-dir "$capture" \
+            --output "$RUNNER_TEMP/validated/latchway-deployment-validation.json"
+          python3 scripts/deployment-evidence.py seal --capture-dir "$capture" \
+            --output "$RUNNER_TEMP/validated/${PLATFORM}.tar.gz"
+      - name: Retain validated unsigned deployment evidence for a fresh signer
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-unsigned-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validated
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  sign:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: finalize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: deployment-evidence-signing
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      INTENDED_TAG: ${{ inputs.intended_tag }}
+      RELEASE_IMAGE: ${{ inputs.image }}
+      ENDPOINT: ${{ inputs.endpoint }}
+      DEPLOYMENT_ENVIRONMENT: deployment-evidence-${{ inputs.platform }}
+    steps:
+      - name: Download validated evidence on a fresh no-checkout signer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-unsigned-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validated
+      - name: Download the exact raw provider artifact on the fresh signer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provider-raw
+      - name: Download authenticated candidate identity on the fresh signer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-deployment-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authority
+      - name: Independently bind the deterministic archive to authenticated raw capture
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          python3 - "$RUNNER_TEMP/validated" "$RUNNER_TEMP/provider-raw" "$RUNNER_TEMP/authority/latchway-candidate/latchway-candidate.json" <<'PY'
+          import gzip, hashlib, io, json, os, re, stat, sys, tarfile
+          from datetime import datetime, timezone
+          from pathlib import Path, PurePosixPath
+
+          validated, raw_root, candidate_path = map(Path, sys.argv[1:])
+          platform = os.environ["PLATFORM"]
+          commit = os.environ["CANDIDATE_COMMIT"]
+          release = os.environ["INTENDED_TAG"]
+          image = os.environ["RELEASE_IMAGE"]
+          endpoint = os.environ["ENDPOINT"].rstrip("/")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          run_attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+          environment = os.environ["DEPLOYMENT_ENVIRONMENT"]
+          sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
+          digest_pattern = re.compile(r"^sha256:[0-9a-f]{64}$")
+          commit_pattern = re.compile(r"^[0-9a-f]{40}$")
+          release_pattern = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+          expected_entries = [
+              "control_plane.json", "health.json", "identity.json", "manifest.json",
+              "migration.json", "readiness.json", "secrets.json", "shutdown.json",
+          ]
+
+          def fail(message):
+              raise SystemExit(message)
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      fail("duplicate JSON member")
+                  result[key] = value
+              return result
+
+          def regular(path, maximum=8 * 1024 * 1024):
+              try:
+                  value = path.lstat()
+              except OSError:
+                  fail(f"missing file: {path.name}")
+              if not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or not 0 < value.st_size <= maximum:
+                  fail(f"unsafe file: {path.name}")
+              return value.st_size
+
+          def load(path, maximum=8 * 1024 * 1024):
+              regular(path, maximum)
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+              except (UnicodeError, json.JSONDecodeError):
+                  fail(f"invalid JSON: {path.name}")
+
+          def digest_bytes(value):
+              return hashlib.sha256(value).hexdigest()
+
+          def digest_file(path):
+              regular(path, 64 * 1024 * 1024)
+              return digest_bytes(path.read_bytes())
+
+          def parse_time(value):
+              if not isinstance(value, str) or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", value) is None:
+                  fail("invalid timestamp")
+              try:
+                  return datetime.fromisoformat(value[:-1] + "+00:00").astimezone(timezone.utc)
+              except ValueError:
+                  fail("invalid timestamp")
+
+          if set(path.name for path in validated.iterdir()) != {
+              f"{platform}.tar.gz", "latchway-deployment-validation.json",
+              "latchway-deployment-validation.json.junit.xml",
+          } or any(path.is_symlink() or not path.is_file() for path in validated.iterdir()):
+              fail("unsigned artifact closure is invalid")
+          diagnostic = load(validated / "latchway-deployment-validation.json")
+          if not isinstance(diagnostic, dict) or diagnostic.get("verdict") != "passed" or diagnostic.get("platform") != platform or diagnostic.get("oci_image_digest") != image:
+              fail("candidate diagnostic is inconsistent")
+          regular(validated / "latchway-deployment-validation.json.junit.xml", 1024 * 1024)
+
+          archive_path = validated / f"{platform}.tar.gz"
+          archive_size = regular(archive_path, 32 * 1024 * 1024)
+          archive_bytes = archive_path.read_bytes()
+          if archive_bytes[:8] != bytes.fromhex("1f8b080000000000"):
+              fail("candidate gzip header is not deterministic")
+          candidate_archive_sha = digest_bytes(archive_bytes)
+          extracted = {}
+          with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
+              members = archive.getmembers()
+              if [member.name for member in members] != expected_entries:
+                  fail("candidate archive entry closure is invalid")
+              for member in members:
+                  path = PurePosixPath(member.name)
+                  if (not member.isfile() or len(path.parts) != 1 or path.name != member.name or
+                          member.uid != 0 or member.gid != 0 or member.mode != 0o644 or member.mtime != 0 or
+                          not 0 < member.size <= 8 * 1024 * 1024):
+                      fail("candidate archive metadata is unsafe")
+                  stream = archive.extractfile(member)
+                  if stream is None:
+                      fail("candidate archive entry is unreadable")
+                  payload = stream.read(8 * 1024 * 1024 + 1)
+                  if len(payload) != member.size:
+                      fail("candidate archive entry size mismatch")
+                  extracted[member.name] = payload
+
+          values = {}
+          for name, payload in extracted.items():
+              try:
+                  values[name] = json.loads(payload.decode("utf-8"), object_pairs_hook=reject_duplicates)
+              except (UnicodeError, json.JSONDecodeError):
+                  fail(f"archive JSON is invalid: {name}")
+          manifest = values["manifest.json"]
+          manifest_fields = {
+              "schema_version", "kind", "platform", "started_at", "finished_at", "core_commit",
+              "core_release", "contract_version", "bundle_sha256", "oci_image_digest", "endpoint",
+              "provider_resource_id", "collector", "observations",
+          }
+          if not isinstance(manifest, dict) or set(manifest) != manifest_fields:
+              fail("capture manifest fields are invalid")
+          collector = manifest.get("collector")
+          collector_fields = {"repository", "workflow_ref", "ref", "sha", "run_id", "run_attempt", "runner_environment", "environment"}
+          if (manifest.get("schema_version") != 1 or manifest.get("kind") != "latchway_cloud_deployment_capture" or
+                  manifest.get("platform") != platform or manifest.get("core_commit") != commit or
+                  manifest.get("core_release") != release or manifest.get("oci_image_digest") != image or
+                  manifest.get("endpoint") != endpoint or not release_pattern.fullmatch(release) or
+                  not commit_pattern.fullmatch(commit) or not sha256_pattern.fullmatch(str(manifest.get("bundle_sha256", ""))) or
+                  re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", str(manifest.get("contract_version", ""))) is None or
+                  not isinstance(collector, dict) or set(collector) != collector_fields or
+                  collector != {"repository": repository,
+                                "workflow_ref": f"{repository}/.github/workflows/deployment-evidence.yml@refs/heads/main",
+                                "ref": "refs/heads/main", "sha": commit, "run_id": run_id,
+                                "run_attempt": run_attempt, "runner_environment": "github-hosted",
+                                "environment": environment}):
+              fail("capture identity is not bound to this protected run")
+          started, finished = parse_time(manifest["started_at"]), parse_time(manifest["finished_at"])
+          if not started < finished or (finished - started).total_seconds() > 21600:
+              fail("capture window is invalid")
+          observations = manifest.get("observations")
+          observation_names = ("identity", "control_plane", "migration", "health", "readiness", "secrets", "shutdown")
+          if not isinstance(observations, dict) or set(observations) != set(observation_names):
+              fail("observation closure is invalid")
+          for name in observation_names:
+              item = observations[name]
+              path = f"{name}.json"
+              if not isinstance(item, dict) or item != {"path": path, "sha256": digest_bytes(extracted[path])}:
+                  fail("observation hash binding is invalid")
+
+          candidate = load(candidate_path)
+          candidate_image = candidate.get("image") if isinstance(candidate, dict) else None
+          if (not isinstance(candidate_image, dict) or
+                  candidate_image.get("repository") + "@" + str(candidate_image.get("index_digest")) != image or
+                  candidate.get("candidate_commit") != commit or candidate.get("intended_tag") != release or
+                  candidate.get("status") != "passed"):
+              fail("authenticated candidate identity is inconsistent")
+
+          raw_files = sorted(path for path in raw_root.rglob("*") if path.is_file())
+          if any(path.is_symlink() for path in raw_root.rglob("*")) or any(not path.is_dir() and not path.is_file() for path in raw_root.rglob("*")):
+              fail("raw provider artifact contains unsafe entries")
+          raw_names = [path.relative_to(raw_root).as_posix() for path in raw_files]
+          base_names = ["latchway-deployment-started-at", "latchway-provider-resource-id"]
+          if platform == "cloudflare_containers":
+              provider_names = [
+                  "account-id.txt", "applications.json", "canonical-manifest.json", "deployments.json",
+                  "instances-after.json", "instances-before.json", "migration.json", "mirror-image.txt",
+                  "mirror-manifest.json", "secrets.json", "shutdown-finished.txt", "shutdown-started.txt",
+                  "shutdown.json", "versions.json", "whoami.json", "wrangler-version.txt",
+              ]
+              expected_raw = sorted(base_names + [f"cloudflare-provider-raw/{name}" for name in provider_names])
+          else:
+              expected_raw = sorted(base_names + [f"latchway-deployment-capture/{name}.json" for name in ("identity", "control_plane", "migration", "secrets", "shutdown")])
+          if raw_names != expected_raw:
+              fail("raw provider artifact closure is invalid")
+          for path in raw_files:
+              regular(path)
+          raw_resource = (raw_root / "latchway-provider-resource-id").read_text(encoding="utf-8").rstrip("\n")
+          raw_started = (raw_root / "latchway-deployment-started-at").read_text(encoding="utf-8").rstrip("\n")
+          if raw_resource != manifest.get("provider_resource_id") or raw_started != manifest.get("started_at"):
+              fail("raw provider identity is not bound to the manifest")
+
+          if platform != "cloudflare_containers":
+              for name in ("identity", "control_plane", "migration", "secrets", "shutdown"):
+                  if (raw_root / "latchway-deployment-capture" / f"{name}.json").read_bytes() != extracted[f"{name}.json"]:
+                      fail("normalized capture is not byte-bound to provider raw data")
+          else:
+              raw = raw_root / "cloudflare-provider-raw"
+              account_id = (raw / "account-id.txt").read_text(encoding="utf-8").strip()
+              mirror_image = (raw / "mirror-image.txt").read_text(encoding="utf-8").strip()
+              shutdown_started = (raw / "shutdown-started.txt").read_text(encoding="utf-8").strip()
+              shutdown_finished = (raw / "shutdown-finished.txt").read_text(encoding="utf-8").strip()
+              wrangler_version = (raw / "wrangler-version.txt").read_text(encoding="utf-8").strip()
+              if re.fullmatch(r"[0-9a-f]{32}", account_id) is None or re.fullmatch(r"registry\.cloudflare\.com/[0-9a-f]{32}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}", mirror_image) is None:
+                  fail("Cloudflare raw identity is invalid")
+
+              def descriptor(path, expected):
+                  payload = path.read_bytes()
+                  if f"sha256:{digest_bytes(payload)}" != expected:
+                      fail("Cloudflare manifest digest mismatch")
+                  value = load(path)
+                  config = value.get("config") if isinstance(value, dict) else None
+                  layers = value.get("layers") if isinstance(value, dict) else None
+                  if (not isinstance(config, dict) or not digest_pattern.fullmatch(str(config.get("digest", ""))) or
+                          not isinstance(layers, list) or not layers or any(not isinstance(item, dict) or set(item) < {"digest", "size"} or
+                          not digest_pattern.fullmatch(str(item.get("digest", ""))) or type(item.get("size")) is not int or item["size"] < 1 for item in layers)):
+                      fail("Cloudflare manifest shape is invalid")
+                  return {"config_digest": config["digest"], "layers": [{"digest": item["digest"], "size": item["size"]} for item in layers]}
+
+              platform_digest = candidate_image.get("platforms", {}).get("linux/amd64")
+              mirror_digest = mirror_image.rsplit("@", 1)[-1]
+              canonical = descriptor(raw / "canonical-manifest.json", platform_digest)
+              mirror = descriptor(raw / "mirror-manifest.json", mirror_digest)
+              if canonical != mirror:
+                  fail("Cloudflare mirror is not content-equivalent")
+              applications = load(raw / "applications.json")
+              matching = [item for item in applications if isinstance(item, dict) and item.get("name") == "latchway"] if isinstance(applications, list) else []
+              if len(matching) != 1:
+                  fail("Cloudflare application identity is ambiguous")
+              app = matching[0]
+              app_reduced = {key: app.get(key) for key in ("id", "name", "state", "instances", "image", "version", "updated_at")}
+              if (app_reduced["id"] != raw_resource or app_reduced["image"] != mirror_image or app_reduced["state"] not in ("active", "ready") or
+                      type(app_reduced["instances"]) is not int or app_reduced["instances"] < 1 or type(app_reduced["version"]) is not int or app_reduced["version"] < 1):
+                  fail("Cloudflare application is invalid")
+
+              def one_instance(path):
+                  items = load(path)
+                  matches = [item for item in items if isinstance(item, dict) and item.get("name") == "instance-0"] if isinstance(items, list) else []
+                  if len(matches) != 1 or matches[0].get("state") != "running" or matches[0].get("version") != app_reduced["version"]:
+                      fail("Cloudflare instance is invalid")
+                  return {key: matches[0].get(key) for key in ("id", "name", "state", "location", "version", "created")}
+
+              before, after = one_instance(raw / "instances-before.json"), one_instance(raw / "instances-after.json")
+              before_resource = f"{before['id']}@{before['created']}"
+              after_resource = f"{after['id']}@{after['created']}"
+              if before_resource == after_resource:
+                  fail("Cloudflare instance was not replaced")
+              migration_raw, shutdown_raw = load(raw / "migration.json"), load(raw / "shutdown.json")
+              status_value = migration_raw.get("status") if isinstance(migration_raw, dict) else None
+              stop = shutdown_raw.get("stop") if isinstance(shutdown_raw, dict) else None
+              evidence_id = migration_raw.get("evidence_id") if isinstance(migration_raw, dict) else None
+              command = ["/latchway", "--output", "json", "migrate", "status"]
+              if (not isinstance(status_value, dict) or status_value.get("up_to_date") is not True or status_value.get("current") != status_value.get("available") or
+                      migration_raw.get("command") != command or migration_raw.get("exit_code") != 0 or not isinstance(stop, dict) or
+                      shutdown_raw.get("evidence_id") != evidence_id or stop.get("evidence_id") != evidence_id or stop.get("signal") != "SIGTERM" or
+                      stop.get("reason") != "runtime_signal" or stop.get("exit_code") != 0):
+                  fail("Cloudflare execution evidence is invalid")
+              whoami = load(raw / "whoami.json")
+              def contains(value, expected):
+                  return value == expected or (isinstance(value, dict) and any(contains(item, expected) for item in value.values())) or (isinstance(value, list) and any(contains(item, expected) for item in value))
+              if not contains(whoami, account_id):
+                  fail("Cloudflare account identity is not authenticated")
+              secrets_raw = load(raw / "secrets.json")
+              secret_items = secrets_raw.get("secrets") if isinstance(secrets_raw, dict) else secrets_raw
+              secret_names = {item.get("name") for item in secret_items if isinstance(item, dict)} if isinstance(secret_items, list) else set()
+              required_secrets = ["LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"]
+              if not set(required_secrets + ["LATCHWAY_EVIDENCE_TOKEN"]).issubset(secret_names):
+                  fail("Cloudflare secret references are incomplete")
+              whoami_sha = digest_bytes(json.dumps(whoami, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode())
+              expected_values = {
+                  "identity.json": {"platform": platform, "resource_id": raw_resource, "observed_at": shutdown_finished,
+                      "provider_response": {"account_id": account_id, "whoami_sha256": whoami_sha, "wrangler_version": wrangler_version}},
+                  "control_plane.json": {"platform": platform, "worker": {"status": "ready", "resource_id": raw_resource,
+                      "deployments": load(raw / "deployments.json"), "versions": load(raw / "versions.json")},
+                      "container": {"application": app_reduced, "instances": [after],
+                          "canonical": {"index_digest": candidate_image["index_digest"], "platform": "linux/amd64", "platform_digest": platform_digest, **canonical},
+                          "mirror": {"image": mirror_image, "manifest_digest": mirror_digest, **mirror}}},
+                  "migration.json": {"command": command, "status": status_value, "provider_execution": {"exit_code": 0, "evidence_id": evidence_id,
+                      "instance_name": "instance-0", "command": command, "reported_status": status_value}},
+                  "secrets.json": {"required_names": required_secrets,
+                      "runtime_references": [{"name": name, "reference": "cloudflare-worker-secret"} for name in required_secrets],
+                      "provider_resources": [{"resource_id": f"accounts/{account_id}/workers/scripts/latchway/secrets/{name}"} for name in required_secrets]},
+                  "shutdown.json": {"method": "cloudflare_container_replacement", "started_at": shutdown_started, "finished_at": shutdown_finished,
+                      "signal": "SIGTERM", "platform_timeout_seconds": 900, "application_timeout_seconds": 30, "exit_code": stop["exit_code"],
+                      "readiness_restored": True, "evidence_id": evidence_id, "provider_reason": stop["reason"],
+                      "before": {"image_digest": mirror_digest, "resource_id": before_resource},
+                      "after": {"image_digest": mirror_digest, "resource_id": after_resource}},
+              }
+              if any(values[name] != expected for name, expected in expected_values.items()):
+                  fail("Cloudflare normalized capture is not bound to raw responses")
+
+          identity = values["identity.json"]
+          if (not isinstance(identity, dict) or set(identity) != {"platform", "resource_id", "observed_at", "provider_response"} or
+                  identity.get("platform") != platform or identity.get("resource_id") != raw_resource or not isinstance(identity.get("provider_response"), dict)):
+              fail("provider identity observation is invalid")
+          for name, suffix in (("health.json", "/healthz"), ("readiness.json", "/readyz")):
+              item = values[name]
+              if (not isinstance(item, dict) or set(item) != {"url", "status_code", "observed_at", "tls", "body"} or
+                      item.get("url") != endpoint + suffix or item.get("status_code") != 200 or
+                      item.get("tls") is not (platform != "compose") or not isinstance(item.get("body"), dict) or
+                      not started <= parse_time(item.get("observed_at")) <= finished):
+                  fail("HTTP observation binding is invalid")
+          health = values["health.json"]["body"]
+          build = health.get("build") if isinstance(health, dict) else None
+          readiness = values["readiness.json"]["body"]
+          checks = readiness.get("checks") if isinstance(readiness, dict) else None
+          if (health.get("status") != "ok" or not isinstance(build, dict) or build.get("commit") != commit or
+                  build.get("contract_version") != manifest["contract_version"] or readiness.get("status") != "ready" or
+                  not isinstance(checks, dict) or any(checks.get(name) != "ok" for name in
+                  ("database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"))):
+              fail("HTTP release semantics are invalid")
+
+          candidate_entries = [{"path": name, "sha256": digest_bytes(extracted[name]), "size_bytes": len(extracted[name])} for name in expected_entries]
+          raw_entries = [{"path": path.relative_to(raw_root).as_posix(), "sha256": digest_file(path), "size_bytes": path.stat().st_size} for path in raw_files]
+          binding = {
+              "schema_version": 1,
+              "kind": "latchway_authenticated_deployment_capture",
+              "platform": platform,
+              "candidate_commit": commit,
+              "core_release": release,
+              "contract_version": manifest["contract_version"],
+              "bundle_sha256": manifest["bundle_sha256"],
+              "oci_image_digest": image,
+              "endpoint": endpoint,
+              "provider_resource_id": raw_resource,
+              "collector": collector,
+              "candidate_archive": {"sha256": candidate_archive_sha, "size_bytes": archive_size, "entries": candidate_entries},
+              "raw_capture": {"artifact": f"latchway-deployment-raw-{platform}-{commit}-{run_id}-{run_attempt}", "files": raw_entries},
+          }
+          binding_bytes = (json.dumps(binding, indent=2, sort_keys=True, ensure_ascii=True) + "\n").encode()
+          final_entries = dict(extracted)
+          final_entries["latchway-deployment-binding.json"] = binding_bytes
+          temporary = archive_path.with_suffix(".tmp")
+          with temporary.open("wb") as raw_output:
+              with gzip.GzipFile(filename="", mode="wb", fileobj=raw_output, mtime=0) as compressed:
+                  with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                      for name in sorted(final_entries):
+                          payload = final_entries[name]
+                          info = tarfile.TarInfo(name)
+                          info.size = len(payload)
+                          info.mode = 0o644
+                          info.uid = info.gid = 0
+                          info.uname = info.gname = ""
+                          info.mtime = 0
+                          archive.addfile(info, io.BytesIO(payload))
+          if temporary.stat().st_size > 32 * 1024 * 1024:
+              fail("authenticated archive is too large")
+          os.replace(temporary, archive_path)
+          PY
+          test -z "$(find "$RUNNER_TEMP/validated" "$RUNNER_TEMP/provider-raw" "$RUNNER_TEMP/authority" -type l -print -quit)"
+      - name: Attest the bounded provider capture
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/validated/${{ inputs.platform }}.tar.gz
+      - name: Name the attestation bundle deterministically
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" "$RUNNER_TEMP/validated/${PLATFORM}.attestation.json"
+      - name: Upload signed provider evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-deployment-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/validated/${{ inputs.platform }}.tar.gz
+            ${{ runner.temp }}/validated/${{ inputs.platform }}.attestation.json
+            ${{ runner.temp }}/validated/latchway-deployment-validation.json
+            ${{ runner.temp }}/validated/latchway-deployment-validation.json.junit.xml
+          if-no-files-found: error
+          retention-days: 90

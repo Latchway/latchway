@@ -6,6 +6,8 @@ import {
   APITokenMetadataSchema,
   CreatedAPITokenSchema,
   AdministratorSchema,
+  ClientComponentSchema,
+  InstallationFamilySchema,
   RequestSchema,
   RevisionSchema,
   SelfTestScheduleSchema,
@@ -161,6 +163,42 @@ describe("canonical Admin API browser client", () => {
     expect(() => SelfTestScheduleSchema.parse({ ...schedule, daily_cost_limit_nano_usd: 1 })).toThrow();
   });
 
+  it("validates complete family/component trust provenance without credential material", () => {
+    const usage = { cost_nano_usd: 42, input_tokens: 10, logical_requests: 1, output_tokens: 5, total_tokens: 15 };
+    const root = {
+      attestation_provider: "app_attest", component_key_id: "cky_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
+      definition_id: "ios-main", dpop_jkt: "A".repeat(43), environment_id: "env_0123456789abcdef",
+      granted_features: ["assistant"], id: "cmp_0123456789abcdef", installation_family_id: "fam_0123456789abcdef",
+      is_root: true, key_storage_claim: "secure_enclave", kind: "main_app", last_seen_at: "2026-08-29T00:00:00Z",
+      platform: "ios", refresh_reuse_count: 0, request_count: 1, session_failure_count: 0, session_family_id: "csf_0123456789abcdef",
+      session_status: "active", status: "active", trust_source: "direct_attested", updated_at: "2026-08-29T00:00:00Z",
+      usage, user_id: "usr_0123456789abcdef"
+    };
+    const child = {
+      ...root, component_key_id: "cky_1123456789abcdef", definition_id: "ios-widget", dpop_jkt: "B".repeat(43),
+      id: "cmp_1123456789abcdef", is_root: false, key_storage_claim: "keychain", kind: "widget", session_failure_count: 2,
+      parent_component_id: root.id, trust_source: "delegated_from_attested_root",
+      delegation: {
+        attestation_expires_at: "2026-08-30T00:00:00Z", attestation_provider: "app_attest",
+        configuration_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
+        expires_at: "2026-08-30T00:00:00Z", feature_scopes: ["assistant"], id: "dlg_0123456789abcdef",
+        identity_expires_at: "2026-08-30T00:00:00Z", parent_component_id: root.id, trust_level: "app_verified"
+      }
+    };
+    const family = {
+      component_count: 2, components: [root, child], created_at: "2026-08-29T00:00:00Z",
+      environment_id: "env_0123456789abcdef", id: "fam_0123456789abcdef", last_seen_at: "2026-08-29T00:00:00Z",
+      platform: "ios", request_count: 2, root_component_id: root.id, root_trust_source: "direct_attested",
+      status: "active", updated_at: "2026-08-29T00:00:00Z", usage, user_id: "usr_0123456789abcdef"
+    };
+
+    expect(ClientComponentSchema.parse(child).delegation?.parent_component_id).toBe(root.id);
+    expect(ClientComponentSchema.parse(child).session_failure_count).toBe(2);
+    expect(InstallationFamilySchema.parse(family).components).toHaveLength(2);
+    expect(() => ClientComponentSchema.parse({ ...child, refresh_grant: "must-not-render" })).toThrow();
+    expect(() => InstallationFamilySchema.parse({ ...family, components: [{ ...root, parent_component_id: child.id, is_root: false, delegation: child.delegation }, child] })).toThrow();
+  });
+
   it("keeps provider cost provenance and its fixed report source distinct", () => {
 	const attempt = {
 	  attempt_number: 1, completed_at: "2026-08-29T00:00:02Z",
@@ -175,6 +213,20 @@ describe("canonical Admin API browser client", () => {
 	  started_at: "2026-08-29T00:00:00Z", status: "succeeded",
 	  user_id: "usr_0123456789abcdef"
 	}).attempts[0]).toEqual(attempt);
+	expect(RequestSchema.parse({
+	  attempts: [attempt], client_component_id: "cmp_0123456789abcdef",
+	  completed_at: "2026-08-29T00:00:03Z", component_definition_id: "ios-main", component_kind: "main_app",
+	  environment_id: "env_0123456789abcdef", feature: "assistant", framework: "swift-openai",
+	  framework_version: "4.6.0", id: "req_0123456789abcdef", installation_family_id: "fam_0123456789abcdef",
+	  installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z",
+	  status: "succeeded", trust_source: "direct_attested", user_id: "usr_0123456789abcdef"
+	}).framework).toBe("swift-openai");
+	expect(() => RequestSchema.parse({
+	  attempts: [attempt], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z",
+	  environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef",
+	  installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z",
+	  status: "succeeded", user_id: "usr_0123456789abcdef"
+	})).toThrow();
 	expect(() => RequestSchema.parse({
 	  attempts: [{ ...attempt, cost_source: "secret source\n" }],
 	  environment_id: "env_0123456789abcdef", feature: "assistant",

@@ -48,6 +48,38 @@ func TestPrepareSnapshotSharesCanonicalRuleAndScopeIdentity(t *testing.T) {
 	}
 }
 
+func TestPrepareSnapshotSharesComponentScopeIdentity(t *testing.T) {
+	t.Parallel()
+	reserve := validReserveInput(t)
+	reserve.InstallationFamilyID = id.Must(id.InstallationFamily)
+	reserve.ClientComponentID = id.Must(id.ClientComponent)
+	reserve.ComponentDefinitionID = "ios-widget"
+	reserve.ComponentKind = "widget"
+	reserve.TrustSource = "delegated_from_attested_root"
+	reserve.Rules[0].Scope = []string{
+		"trust_source", "component_kind", "component_definition",
+		"client_component", "installation_family", "feature",
+	}
+	preparedReserve, err := prepareRequest(reserve)
+	if err != nil {
+		t.Fatalf("prepare component reservation: %v", err)
+	}
+	preparedSnapshot, err := prepareSnapshot(snapshotInputFromReserve(reserve))
+	if err != nil {
+		t.Fatalf("prepare component snapshot: %v", err)
+	}
+	if preparedSnapshot.rules[0].scopeKey != preparedReserve.rules[0].scopeKey ||
+		!slices.Equal(preparedSnapshot.rules[0].scopeDimensions, preparedReserve.rules[0].scopeDimensions) {
+		t.Fatalf("component snapshot identity = %+v, want %+v",
+			preparedSnapshot.rules[0], preparedReserve.rules[0])
+	}
+	partial := snapshotInputFromReserve(reserve)
+	partial.TrustSource = ""
+	if _, err := prepareSnapshot(partial); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("partial component snapshot accepted: %v", err)
+	}
+}
+
 func TestPrepareSnapshotAcceptsEveryExecutablePolicyShapeWithoutReservation(t *testing.T) {
 	t.Parallel()
 	input := validSnapshotInput(t)
@@ -316,8 +348,13 @@ func snapshotInputFromReserve(input ReserveInput) SnapshotInput {
 	return SnapshotInput{
 		OrganizationID: input.OrganizationID, ApplicationID: input.ApplicationID,
 		EnvironmentID: input.EnvironmentID, ApplicationUserID: input.ApplicationUserID,
-		InstallationID: input.InstallationID, ConfigRevisionID: input.ConfigRevisionID,
-		Platform: input.Platform, NormalizedClaimDigests: cloneStringMap(input.NormalizedClaimDigests),
+		InstallationID:        input.InstallationID,
+		InstallationFamilyID:  input.InstallationFamilyID,
+		ClientComponentID:     input.ClientComponentID,
+		ComponentDefinitionID: input.ComponentDefinitionID,
+		ComponentKind:         input.ComponentKind, TrustSource: input.TrustSource,
+		ConfigRevisionID: input.ConfigRevisionID,
+		Platform:         input.Platform, NormalizedClaimDigests: cloneStringMap(input.NormalizedClaimDigests),
 		FeatureKey: input.FeatureKey, LimitPlanKey: input.LimitPlanKey,
 		RouteKey: input.RouteKey, UpstreamKey: input.UpstreamKey, ModelKey: input.ModelKey,
 		Rules: rules,

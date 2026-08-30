@@ -1,0 +1,41 @@
+---
+title: "Delegated component security"
+description: "Review the target guarantees, limitations, expiry, and revocation behavior for root-authorized Client Components."
+---
+
+<Warning>
+  Delegated component trust is implemented in pre-release draft contract `1.0.0` on wire
+  protocol `2`. This page is not a publication or physical-device release
+  claim.
+</Warning>
+
+> Delegated trust proves that an attested root component authorized a component
+> key. It does not prove that the delegated component independently completed
+> App Attest.
+
+## What this establishes
+
+The server verified a bounded authorization from the currently trusted root,
+the delegated component proved possession of its named P-256 key, and all
+application, environment, user, family, definition, scope, and lifetime checks
+passed.
+
+## What this does not establish
+
+Delegation is not independent platform attestation. It does not prove that the
+component, operating system, or user is uncompromised. DPoP reduces the value
+of a stolen access token but does not prevent code able to invoke the component
+key from making requests.
+
+## What causes the relationship to expire
+
+Expiry, replay, key mismatch, identity change, application or environment
+mismatch, Component Definition change, root trust loss, root revocation,
+component revocation, or family revocation must fail closed.
+
+## Secret-storage boundary
+
+Shared storage may not contain private keys, rotating refresh tokens, access
+tokens, identity tokens, upstream credentials, or raw attestation evidence.
+Diagnostics and audit records must preserve provenance without storing or
+returning those secrets.

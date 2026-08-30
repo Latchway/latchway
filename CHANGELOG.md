@@ -6,6 +6,19 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Added
 
+- Add a fail-closed, separately controlled independent security-review gate
+  that binds eight required reviews and every accepted lower-severity risk to
+  the exact candidate source, contract, and multi-architecture image.
+- Require exact-image browser conformance evidence from both Firebase App
+  Check and Turnstile on provider-separated ephemeral JIT collectors, using
+  five-minute single-use grants, gateway-only egress, signed lease/consumption/
+  teardown receipts, unconditional grant zeroization, and runner destruction.
+- Separate release-evidence authentication, candidate-controlled validation,
+  and OIDC attestation across fresh runners so candidate code cannot execute
+  with external-review credentials or signing authority.
+- Split candidate image construction, registry publication, promotion,
+  provider observation, final-record preparation, and signing into strict
+  source-free credential boundaries with closed, hash-bound handoffs.
 - Add bounded per-process `stale`, `closed`, `open`, and `half_open` circuit
   observations for upstream-attempt telemetry without changing deterministic
   route selection or dispatch admission.
@@ -14,6 +27,13 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ### Fixed
 
+- Bind the default container version label to the source release-candidate
+  version and reject mismatched Docker build defaults during conformance.
+- Pin every PostgreSQL CI and deployment image by OCI digest and use the
+  PostgreSQL 18 major-version-aware `/var/lib/postgresql` volume layout.
+- Lock the complete Wrangler 4.127.1 transitive npm closure, reject non-registry
+  or integrity-less entries, and reverify the predeclared closure before any
+  Cloudflare credential can execute it.
 - Make the embedded console's browser proof fail closed if any same-origin
   mutation leaves the canonical Admin API.
 - Expire stale circuit failure history before recording a new outcome so old

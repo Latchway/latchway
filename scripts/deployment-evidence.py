@@ -69,6 +69,14 @@ MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_FILES = 64
 MAX_TOTAL_EXTRACTED = 64 * 1024 * 1024
 SIGNER_WORKFLOW = "github.com/Latchway/latchway/.github/workflows/deployment-evidence.yml"
+WRANGLER_TOOLCHAIN_ROOT = ROOT / ".github/toolchains/wrangler"
+WRANGLER_PACKAGE_JSON_SHA256 = "e65b3bedef41e581a85b006f4cf8ce769bb61a1f71c53af6ee4680cc4c25d839"
+WRANGLER_PACKAGE_LOCK_SHA256 = "d506545cdc465df003f47903c17ffdff69bc88fe182b6b55a2313fe8d312f5a2"
+WRANGLER_ALLOWED_PACKAGES_SHA256 = "1468b2214885fdd9f6013c1d636ecbe85e47c88989215383fffa5e3304a50217"
+WRANGLER_PACKAGE_COUNT = 91
+WRANGLER_INTEGRITY = "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw=="
+NPM_REGISTRY_TARBALL = re.compile(r"^https://registry\.npmjs\.org/[^?#\s]+\.tgz$")
+NPM_SHA512_INTEGRITY = re.compile(r"^sha512-[A-Za-z0-9+/]{86}==$")
 
 
 class EvidenceError(Exception):
@@ -339,6 +347,11 @@ def static_checks() -> list[Check]:
     check("static.aws_terraform", "AWS Terraform pins image, drain, health, and secret boundaries.", validate_aws_terraform)
     check("static.fly", "Fly config pins migration, health, and drain behavior.", validate_fly)
     check("static.cloudflare", "Cloudflare pins streaming, lifecycle, and protected live-evidence boundaries.", validate_cloudflare)
+    check(
+        "static.cloudflare_toolchain",
+        "The source-free Wrangler toolchain has an exact registry-only npm closure.",
+        validate_wrangler_toolchain,
+    )
     check("static.workflow", "The live evidence workflow uses protected, pinned collectors.", validate_workflow)
     return checks
 
@@ -392,6 +405,14 @@ def validate_compose() -> Mapping[str, Any]:
         raise EvidenceError("compose_invalid")
     gateway = service_by_name(document, "latchway")
     migrate = service_by_name(document, "migrate")
+    postgres = service_by_name(document, "postgres")
+    if postgres.get("image") != (
+        "docker.io/library/postgres@sha256:"
+        "d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2"
+    ):
+        raise EvidenceError("compose_postgres_image_not_pinned")
+    if postgres.get("volumes") != ["postgres-data:/var/lib/postgresql"]:
+        raise EvidenceError("compose_postgres_18_volume_layout_invalid")
     if "build" in gateway or "build" in migrate:
         raise EvidenceError("compose_build_fallback_forbidden")
     for service in (gateway, migrate):
@@ -606,6 +627,7 @@ def validate_cloudflare() -> Mapping[str, Any]:
             '"/__latchway/cloudflare/evidence/shutdown"',
             'Reflect.get(env, "LATCHWAY_EVIDENCE_TOKEN")',
             'crypto.subtle.digest("SHA-256"',
+            "crypto.subtle.timingSafeEqual(expectedDigest, providedDigest)",
             '"Cache-Control": "no-store"',
             'getByName("instance-0")',
         ),
@@ -616,12 +638,141 @@ def validate_cloudflare() -> Mapping[str, Any]:
     return {"wrangler_version": "4.127.1", "instances": 4}
 
 
+def validate_wrangler_lock_documents(
+    package: Any, lock: Any, allowlist: Any
+) -> Mapping[str, Any]:
+    expected_package = {
+        "name": "@latchway/trusted-wrangler-toolchain",
+        "version": "1.0.0",
+        "private": True,
+        "description": "Exact source-free Wrangler toolchain used by deployment evidence.",
+        "engines": {"node": "24.19.0"},
+        "dependencies": {"wrangler": "4.127.1"},
+    }
+    if package != expected_package:
+        raise EvidenceError("cloudflare_toolchain_package_invalid")
+    if not isinstance(lock, dict) or set(lock) != {
+        "name",
+        "version",
+        "lockfileVersion",
+        "requires",
+        "packages",
+    }:
+        raise EvidenceError("cloudflare_toolchain_lock_fields_invalid")
+    packages = lock.get("packages")
+    if (
+        lock.get("name") != expected_package["name"]
+        or lock.get("version") != expected_package["version"]
+        or lock.get("lockfileVersion") != 3
+        or lock.get("requires") is not True
+        or not isinstance(packages, dict)
+        or len(packages) != WRANGLER_PACKAGE_COUNT + 1
+        or packages.get("")
+        != {
+            "name": expected_package["name"],
+            "version": expected_package["version"],
+            "dependencies": expected_package["dependencies"],
+            "engines": expected_package["engines"],
+        }
+    ):
+        raise EvidenceError("cloudflare_toolchain_lock_identity_invalid")
+
+    allowed_packages: list[dict[str, str]] = []
+    for path, value in packages.items():
+        if path == "":
+            continue
+        if not isinstance(path, str):
+            raise EvidenceError("cloudflare_toolchain_package_path_invalid")
+        pure_path = PurePosixPath(path)
+        if (
+            not path.startswith("node_modules/")
+            or pure_path.is_absolute()
+            or any(part in ("", ".", "..") for part in pure_path.parts)
+            or not isinstance(value, dict)
+        ):
+            raise EvidenceError("cloudflare_toolchain_package_path_invalid")
+        version = value.get("version")
+        resolved = value.get("resolved")
+        integrity = value.get("integrity")
+        if not isinstance(version, str) or not version:
+            raise EvidenceError("cloudflare_toolchain_package_version_missing")
+        if not isinstance(resolved, str) or NPM_REGISTRY_TARBALL.fullmatch(resolved) is None:
+            raise EvidenceError("cloudflare_toolchain_package_registry_invalid", {"package": path})
+        if not isinstance(integrity, str) or NPM_SHA512_INTEGRITY.fullmatch(integrity) is None:
+            raise EvidenceError("cloudflare_toolchain_package_integrity_invalid", {"package": path})
+        allowed_packages.append(
+            {
+                "path": path,
+                "version": version,
+                "resolved": resolved,
+                "integrity": integrity,
+            }
+        )
+    wrangler = packages.get("node_modules/wrangler")
+    if (
+        not isinstance(wrangler, dict)
+        or wrangler.get("version") != "4.127.1"
+        or wrangler.get("integrity") != WRANGLER_INTEGRITY
+    ):
+        raise EvidenceError("cloudflare_toolchain_wrangler_invalid")
+    expected_allowlist = {
+        "schema_version": 1,
+        "kind": "latchway_trusted_npm_package_allowlist",
+        "package_count": WRANGLER_PACKAGE_COUNT,
+        "packages": sorted(allowed_packages, key=lambda item: item["path"]),
+    }
+    if allowlist != expected_allowlist:
+        raise EvidenceError("cloudflare_toolchain_allowlist_mismatch")
+    return {
+        "wrangler_version": "4.127.1",
+        "package_count": WRANGLER_PACKAGE_COUNT,
+        "registry": "https://registry.npmjs.org",
+    }
+
+
+def validate_wrangler_toolchain() -> Mapping[str, Any]:
+    package_path = WRANGLER_TOOLCHAIN_ROOT / "package.json"
+    lock_path = WRANGLER_TOOLCHAIN_ROOT / "package-lock.json"
+    allowlist_path = WRANGLER_TOOLCHAIN_ROOT / "allowed-packages.json"
+    expected_hashes = {
+        package_path: WRANGLER_PACKAGE_JSON_SHA256,
+        lock_path: WRANGLER_PACKAGE_LOCK_SHA256,
+        allowlist_path: WRANGLER_ALLOWED_PACKAGES_SHA256,
+    }
+    if any(not real_file(path) for path in expected_hashes):
+        raise EvidenceError("cloudflare_toolchain_file_invalid")
+    for path, expected in expected_hashes.items():
+        if sha256_file(path) != expected:
+            raise EvidenceError("cloudflare_toolchain_hash_mismatch", {"file": path.name})
+    return validate_wrangler_lock_documents(
+        read_json(package_path), read_json(lock_path), read_json(allowlist_path)
+    )
+
+
 def validate_workflow() -> Mapping[str, Any]:
     path = ROOT / ".github/workflows/deployment-evidence.yml"
     document = yaml_as_json(path)
     jobs = document.get("jobs") if isinstance(document, dict) else None
-    if not isinstance(jobs, dict) or set(jobs) != {"static", "capture"}:
+    if not isinstance(jobs, dict) or set(jobs) != {
+        "static",
+        "authenticate",
+        "cloudflare-toolchain-source",
+        "trusted-cloudflare-tool",
+        "prepare",
+        "capture",
+        "capture_compose",
+        "finalize",
+        "sign",
+    }:
         raise EvidenceError("deployment_workflow_jobs_invalid")
+    expected_toolchain_environment = {
+        "TRUSTED_WRANGLER_PACKAGE_JSON_SHA256": WRANGLER_PACKAGE_JSON_SHA256,
+        "TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256": WRANGLER_PACKAGE_LOCK_SHA256,
+        "TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256": WRANGLER_ALLOWED_PACKAGES_SHA256,
+        "TRUSTED_WRANGLER_PACKAGE_COUNT": str(WRANGLER_PACKAGE_COUNT),
+    }
+    if document.get("env") != expected_toolchain_environment:
+        raise EvidenceError("deployment_wrangler_toolchain_pins_invalid")
     uses: list[str] = []
     for job in jobs.values():
         if not isinstance(job, dict):
@@ -631,10 +782,183 @@ def validate_workflow() -> Mapping[str, Any]:
                 uses.append(step["uses"])
     if not uses or any(re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", item) is None for item in uses):
         raise EvidenceError("deployment_workflow_action_unpinned")
+    authenticate = jobs.get("authenticate")
+    cloudflare_toolchain_source = jobs.get("cloudflare-toolchain-source")
+    trusted_cloudflare_tool = jobs.get("trusted-cloudflare-tool")
+    prepare_job = jobs.get("prepare")
+    capture_job = jobs.get("capture")
+    compose_job = jobs.get("capture_compose")
+    finalize_job = jobs.get("finalize")
+    sign_job = jobs.get("sign")
+    if any(
+        not isinstance(item, dict)
+        for item in (
+            authenticate,
+            cloudflare_toolchain_source,
+            trusted_cloudflare_tool,
+            prepare_job,
+            capture_job,
+            compose_job,
+            finalize_job,
+            sign_job,
+        )
+    ):
+        raise EvidenceError("deployment_workflow_job_invalid")
+    for name, job in (
+        ("authenticate", authenticate),
+        ("trusted_cloudflare_tool", trusted_cloudflare_tool),
+        ("capture", capture_job),
+        ("capture_compose", compose_job),
+        ("sign", sign_job),
+    ):
+        if any(
+            isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+            for step in job.get("steps", [])
+        ):
+            raise EvidenceError(f"deployment_{name}_checkout_forbidden")
+    if authenticate.get("environment") != "deployment-evidence-authentication":
+        raise EvidenceError("deployment_authentication_environment_invalid")
+    if cloudflare_toolchain_source.get("permissions") != {"contents": "read"}:
+        raise EvidenceError("deployment_cloudflare_toolchain_source_permissions_invalid")
+    if trusted_cloudflare_tool.get("permissions") != {}:
+        raise EvidenceError("deployment_trusted_cloudflare_tool_permissions_invalid")
+    if capture_job.get("environment") != "deployment-evidence-${{ inputs.platform }}":
+        raise EvidenceError("deployment_capture_environment_invalid")
+    if compose_job.get("environment") != "deployment-evidence-compose":
+        raise EvidenceError("deployment_compose_environment_invalid")
+    if finalize_job.get("environment") != "deployment-evidence-${{ inputs.platform }}":
+        raise EvidenceError("deployment_finalize_environment_invalid")
+    if sign_job.get("environment") != "deployment-evidence-signing":
+        raise EvidenceError("deployment_signing_environment_invalid")
+    for name, job in (
+        ("prepare", prepare_job),
+        ("trusted_cloudflare_tool", trusted_cloudflare_tool),
+        ("capture", capture_job),
+        ("capture_compose", compose_job),
+        ("finalize", finalize_job),
+    ):
+        if any(
+            permission in job.get("permissions", {})
+            for permission in ("artifact-metadata", "attestations")
+        ):
+            raise EvidenceError(f"deployment_{name}_signing_permission_forbidden")
+    if compose_job.get("permissions", {}).get("id-token") == "write":
+        raise EvidenceError("deployment_compose_oidc_permission_forbidden")
+    if capture_job.get("permissions", {}).get("id-token") != "write":
+        raise EvidenceError("deployment_provider_oidc_permission_missing")
+    capture_text = json.dumps(capture_job, sort_keys=True)
+    if any(
+        fragment in capture_text
+        for fragment in (
+            "actions/checkout@",
+            "docker compose",
+            "npm ",
+            "npx ",
+            "pnpm ",
+            "yarn ",
+            "corepack ",
+            "scripts/cloudflare-deployment-capture.py",
+            "scripts/deployment-evidence.py",
+            "scripts/release-candidate.py",
+        )
+    ):
+        raise EvidenceError("deployment_oidc_candidate_execution_forbidden")
+    toolchain_source_text = json.dumps(cloudflare_toolchain_source, sort_keys=True)
+    if any(
+        fragment in toolchain_source_text
+        for fragment in (
+            "inputs.candidate_commit",
+            "provider-inputs",
+            "scripts/",
+            "secrets.",
+            "id-token",
+            "npm ",
+            "npx ",
+            "pnpm ",
+            "yarn ",
+            "corepack ",
+        )
+    ):
+        raise EvidenceError("deployment_cloudflare_toolchain_source_boundary_invalid")
+    for required_fragment in (
+        "${{ github.sha }}",
+        ".github/toolchains/wrangler/package.json",
+        ".github/toolchains/wrangler/package-lock.json",
+        ".github/toolchains/wrangler/allowed-packages.json",
+        "sparse-checkout-cone-mode",
+    ):
+        if required_fragment not in toolchain_source_text:
+            raise EvidenceError("deployment_cloudflare_toolchain_source_incomplete")
+    trusted_tool_text = json.dumps(trusted_cloudflare_tool, sort_keys=True)
+    if any(
+        fragment in trusted_tool_text
+        for fragment in (
+            "actions/checkout@",
+            "provider-inputs",
+            "scripts/",
+            "secrets.",
+            "id-token",
+        )
+    ):
+        raise EvidenceError("deployment_trusted_cloudflare_tool_boundary_invalid")
+    if (
+        "npm ci --ignore-scripts" not in trusted_tool_text
+        or "WRANGLER_WRITE_LOGS" not in trusted_tool_text
+        or "allowed-packages.json" not in trusted_tool_text
+        or any(
+            fragment in trusted_tool_text
+            for fragment in (
+                "npm install",
+                "npm i ",
+                "npm add",
+                "npm update",
+                "npm exec",
+                "npx ",
+                "pnpm ",
+                "yarn ",
+                "corepack ",
+            )
+        )
+    ):
+        raise EvidenceError("deployment_trusted_cloudflare_tool_integrity_invalid")
+    compose_text = json.dumps(compose_job, sort_keys=True)
+    if any(
+        fragment in compose_text
+        for fragment in (
+            "docker/login-action",
+            "provider-inputs/compose",
+            "compose.review.yaml",
+            "compose.release.yaml",
+            "packages",
+        )
+    ):
+        raise EvidenceError("deployment_compose_registry_boundary_invalid")
+    if "pull_policy:\\\"never\\\"" not in compose_text or "preloaded-images.tar" not in compose_text:
+        raise EvidenceError("deployment_compose_preloaded_images_missing")
     text = path.read_text(encoding="utf-8")
     required = (
         "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
         "environment: deployment-evidence-${{ inputs.platform }}",
+        "environment: deployment-evidence-authentication",
+        "environment: deployment-evidence-signing",
+        "Verify immutable prepublication candidate authority with no checkout",
+        "Build the candidate Cloudflare Worker without provider or OIDC credentials",
+        "Read only the committed Wrangler lock closure from the workflow revision",
+        "Verify and isolate the exact committed Wrangler lock closure",
+        "Build a lock-closed Wrangler distribution without candidate inputs",
+        "Validate and unpack only the fixed-integrity Wrangler distribution",
+        "npm ci --ignore-scripts --no-audit --no-fund",
+        "TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256",
+        "TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256",
+        "WRANGLER_WRITE_LOGS: 'false'",
+        '"${wrangler[@]}" deploy --no-bundle',
+        "Import and bind exact images with an empty Docker credential store",
+        "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+        "Retain raw provider observations for fresh validation",
+        "Normalize the pre-captured Cloudflare responses without provider credentials",
+        "Bind, validate, and seal observations without provider credentials",
+        "Download validated evidence on a fresh no-checkout signer",
         "name: latchway-candidate-${{ inputs.candidate_commit }}",
         "run-id: ${{ inputs.candidate_run_id }}",
         '--source-digest "$CANDIDATE_COMMIT"',
@@ -649,7 +973,7 @@ def validate_workflow() -> Mapping[str, Any]:
         "/__latchway/cloudflare/evidence/shutdown",
         "version: '540.0.0'",
         "version: '0.4.89'",
-        'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
+        'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"',
         "--args=--output,json,migrate,status",
         'command:["--output","json","migrate","status"]',
         "--signal SIGTERM --time 35",

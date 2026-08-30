@@ -1,0 +1,66 @@
+---
+title: "Troubleshooting"
+description: "Diagnose readiness, attestation, DPoP, quota, routing, and release-evidence failures."
+---
+
+## `/readyz` returns 503
+
+Readiness checks the database, migration version, active configuration,
+master and signing-key availability, and the worker heartbeat when required.
+
+```bash
+latchway doctor
+latchway migrate status
+docker compose logs --no-log-prefix latchway
+```
+
+Do not paste deployment logs into an issue without reviewing surrounding
+platform output for credentials.
+
+## The first-owner form is closed
+
+Bootstrap is intentionally one-time. An active owner can create another
+administrator or perform the documented recovery workflow. Leaving the
+bootstrap token configured cannot reopen the endpoint.
+
+## A revision will not activate
+
+Validate and plan the exact draft and strong ETag. Common causes are a stale
+ETag, a missing reference, incompatible model capability, unprovable input
+accounting, private-destination policy, a secret tombstone, or an active user
+override that the revision would strand.
+
+## `attestation_invalid` or `attestation_required`
+
+Check the SDK application resource ID, environment, public origin, platform,
+bundle or package identifier, signing identity, and cloud project against the
+active server policy. App Attest needs the matching entitlement and physical
+device. Production Play Integrity needs the exact signed Play-installed app.
+
+## DPoP or nonce errors
+
+Do not construct DPoP in application code. Use the platform SDK and disable
+redirects. A proof is single-use and bound to one method, public URL, access
+token, and optional server nonce. SDKs retry only a canonical pre-dispatch
+problem and never replay a streamed or non-replayable body.
+
+## Quota or output-limit errors
+
+The client cannot override a trusted input estimate or limit. Unsupported rich
+input fails closed when a hard input, total-token, or input-priced cost limit
+requires conservative proof. Unknown provider usage is charged conservatively
+rather than refunded.
+
+## Upstream unavailable or timed out
+
+Run the server-side self-test and inspect ordered request attempts. Check
+destination policy, credential metadata, provider capabilities, fallback
+conditions, bounds, and connect, header, first-byte, idle, and total timeouts.
+Latchway does not follow upstream redirects or retry after response commitment.
+
+## A release check says `unavailable`
+
+`unavailable` is a failed evidence gate, not an operator override. Supply the
+exact candidate's protected provider, physical-device, cloud, resilience,
+supply-chain, tag, registry, or post-publication receipt and rerun the fixed
+workflow. Local tests cannot replace external evidence.

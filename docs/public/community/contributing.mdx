@@ -1,0 +1,23 @@
+---
+title: "Contributing to documentation"
+description: "Change the canonical public Mintlify source without publishing internal plans or editing the deployment mirror by hand."
+---
+
+The canonical public site lives in the core repository at `docs/public/`. The
+standalone `latchway-docs` repository is a generated deployment mirror. Submit
+content changes to the core source, run its structural check and Mintlify
+checks, then use the deterministic mirror synchronizer.
+
+Implementation ledgers, internal plans, release evidence, and maintainer-only
+ADRs stay outside `docs/public/`. Do not add them to navigation or copy them
+into the mirror.
+
+## Before requesting review
+
+1. Give every MDX page a unique title and outcome-oriented description.
+2. Add the page to exactly one of the six navigation tabs.
+3. State exact server, SDK, contract, protocol, and framework versions where relevant.
+4. Mark target contracts and unsupported integrations as pre-release.
+5. Never recommend client-side upstream provider credentials.
+6. Run `pnpm check` from `docs/public/`.
+7. Run the mirror synchronizer in check mode after updating the deployment mirror.

@@ -172,23 +172,43 @@ passing assertions named:
 
 ## Protected load and failure producers
 
-`Protected exact-candidate load evidence` runs on GitHub-hosted Ubuntu in the
-`release-load-evidence` protected environment. It checks out the exact
-candidate commit from protected `main`, authenticates the candidate and source
-artifacts, resolves the candidate index and `linux/amd64` child, and executes
-the complete fixed load launcher against that child. It uploads
+`Protected exact-candidate load evidence` uses three fresh jobs. A no-checkout
+job in the `release-load-evidence` protected environment authenticates the
+exact candidate and source runs and their attestations. On that no-checkout
+runner only, it uses package-read authentication to pull the exact
+`linux/amd64` child, preloads PostgreSQL, exports both under local-only tags,
+and uploads a one-day, size-bounded archive with a SHA-256 receipt that binds
+the authenticated candidate manifest, OCI child, image IDs, revision, and
+platform. The fresh candidate job has neither package permission, registry
+configuration, protected external credential, nor OIDC permission. It checks
+out the exact protected-`main` commit, verifies the archive allowlist, size,
+hash, receipt, imported image IDs, revision, and platforms, and executes the
+complete fixed load launcher by immutable local image ID. The launcher keeps
+the canonical authenticated OCI index and child in the evidence and performs
+no registry pull in this preloaded mode. A final no-checkout job in
+`release-evidence-signing` validates the producer schema, invocation, complete
+file set, and every SHA-256 with fixed inline shell and `jq` before requesting
+OIDC and attesting the manifest. The signer redownloads the protected
+authenticator's immutable candidate and source artifact and independently
+matches their hashes and release coordinates to the unsigned producer. It uploads
 `latchway-release-load-<commit>` with `load-producer.json`, its Sigstore bundle,
 the primary report, exact configuration, redacted provisioning record, logs,
 and all other raw files hash-indexed by the manifest.
 
-`Protected exact-candidate destructive-failure evidence` runs only on a
-runner labeled `self-hosted`, `linux`, `x64`, and
-`latchway-release-failure`, behind the `release-failure-evidence` protected
-environment. The environment variable
+`Protected exact-candidate destructive-failure evidence` applies the same
+three-job boundary. Its protected no-checkout authenticator verifies the
+upstream runs and snapshots only the non-secret capture-directory coordinate.
+The candidate and fault validator run without OIDC or protected credentials on
+a runner labeled `self-hosted`, `linux`, `x64`, and
+`latchway-release-failure`. The protected environment variable
 `LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY` must point to the bounded raw
 capture created by the operator's isolated fault controller. The workflow
 rejects a symlinked capture, imports it into runner-temporary storage, runs the
-fixed release-scope validator with an exact PostgreSQL digest, and uploads
+fixed release-scope validator with an exact PostgreSQL digest, then transfers
+the unsigned evidence to a fresh hosted no-checkout signer. That signer checks
+the complete manifest and artifact tree with fixed inline logic before OIDC
+attestation, including an independent comparison to the authenticator's
+candidate and source inputs, and uploads
 `latchway-release-failure-<commit>` with `failure-producer.json`, its Sigstore
 bundle, the report, committed matrix, non-secret environment record, automated
 logs, and destructive observations.
@@ -218,7 +238,10 @@ scripts/run-operational-resilience-drills.sh \
   --previous-candidate-manifest /evidence/previous-candidate/latchway-candidate.json \
   --candidate-image "ghcr.io/latchway/latchway@sha256:$CANDIDATE_INDEX_DIGEST" \
   --candidate-platform-image "ghcr.io/latchway/latchway@sha256:$CANDIDATE_AMD64_DIGEST" \
-  --postgres-image "docker.io/library/postgres@sha256:$POSTGRES_DIGEST"
+  --postgres-image "docker.io/library/postgres@sha256:$POSTGRES_DIGEST" \
+  --preloaded-candidate-platform-image-id "$CANDIDATE_LOCAL_IMAGE_ID" \
+  --preloaded-previous-platform-image-id "$PREVIOUS_LOCAL_IMAGE_ID" \
+  --preloaded-postgres-image-id "$POSTGRES_LOCAL_IMAGE_ID"
 ```
 
 The launcher revalidates every artifact named by the prior manifest, derives
@@ -234,6 +257,12 @@ tag, a made-up v0.9 coordinate, or reusing the current candidate as its own
 predecessor is not acceptable evidence. If the prior binary cannot run the
 candidate schema, rollback evidence fails; restoring the pre-upgrade backup is
 a separate schema-recovery operation and does not satisfy application rollback.
+The three preloaded ID options are all-or-none. When present, each must be an
+exact distinct `sha256:<64 lowercase hexadecimal>` Docker image ID already
+imported by the workflow; the launcher verifies the IDs and platforms, skips
+all registry pulls, executes those local images, and continues to record the
+authenticated OCI index/child/PostgreSQL digest coordinates above. Existing
+offline callers may omit the three options and retain the original pull path.
 
 Raw observations are sealed by `operational-drill-report.py`. The sealer and
 the aggregate finalizer independently validate report shape, image identity,
@@ -242,14 +271,25 @@ artifact SHA-256.
 
 ## Finalize and export
 
-The protected `Operational resilience evidence` workflow downloads current
-and prior candidate, source, release-load, and release-failure artifacts by
-numeric run ID from the same repository. It queries both candidate and both
-producer run records to require their fixed workflow paths, successful
-`workflow_dispatch`, protected `main`, and exact head SHA. It verifies every
-attestation against its exact signer/source commit, executes the isolated
-drills, revalidates every report and producer checksum, attests the domain
-document with GitHub OIDC, and uploads the bounded reports.
+The protected `Operational resilience evidence` workflow also has three fresh
+jobs. Its no-checkout authenticator downloads current and prior candidate,
+source, release-load, and release-failure artifacts by numeric run ID from the
+same repository. It queries both candidate and both producer run records to
+require their fixed workflow paths, successful `workflow_dispatch`, protected
+`main`, exact head SHA, and exact run attempt, then verifies every upstream
+attestation. That no-checkout authenticator alone receives package-read access;
+it pulls the exact current, prior, and PostgreSQL digests and exports a
+size-bounded one-day archive plus SHA-256 receipt. The next fresh job has no
+package permission, Docker registry credential, protected environment, or OIDC
+permission. It checks out the exact candidate, proves the prior commit is a
+distinct ancestor, verifies and imports the archive, executes all images by
+the receipt's immutable local IDs without registry pulls, and revalidates every
+report and producer checksum. A final fresh no-checkout signer validates the domain schema, exact
+14-file allowlist, every SHA-256, current/prior candidate identities, and exact
+load/failure run coordinates using only fixed inline shell and `jq`. Only that
+last job can request GitHub OIDC and attest the domain document. It separately
+redownloads the protected authenticator artifact and byte-compares every
+upstream input copied into the final domain before signing.
 
 For offline verification of already captured inputs:
 

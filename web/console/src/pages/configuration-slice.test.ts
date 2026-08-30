@@ -112,6 +112,7 @@ describe("targeted configuration slice editing", () => {
       abuse: configurationAreas.abuse.collections[0]?.template,
       access: configurationAreas.access.collections[0]?.template,
       attestation: configurationAreas.attestation.collections[0]?.template,
+      component: configurationAreas.components.collections[0]?.template,
       feature: configurationAreas.features.collections[0]?.template,
       identity: configurationAreas.identity.collections[0]?.template,
       inputProfile: configurationAreas.modelsPricing.collections[1]?.template,
@@ -133,6 +134,7 @@ describe("targeted configuration slice editing", () => {
     expect(templates.access).toEqual({ access: { expression: "principal.authenticated" }, feature_id: "assistant" });
     expect(templates.abuse).toEqual({ access: { expression: "principal.authenticated" }, attestationPolicy: "native", feature_id: "assistant", limitPlan: { expression: "'free'" } });
     expect(templates.attestation).toEqual({ id: "new_attestation_policy", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } });
+    expect(templates.component).toEqual({ id: "new_component", platform: "ios", kind: "main_app", identifiers: { bundleIdentifiers: ["com.example.app"] }, familyRole: "root", attestation: { strategy: "direct", provider: "app_attest" }, allowedFeatures: ["assistant"] });
 
     const upstreams = configurationAreas.upstreams.collections[0];
     if (!upstreams || !templates.upstream) throw new Error("missing upstream template");

@@ -321,7 +321,7 @@ describe("AppShell", () => {
     const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
     const labels = [
       "Applications", "Environments", "Authentication providers", "Attestation",
-      "Users", "Installations", "Features", "Routes", "Upstreams", "Models & pricing",
+      "Users", "Installation families", "Installations", "Component definitions", "Features", "Routes", "Upstreams", "Models & pricing",
       "Secrets", "Access policies", "Limit plans", "User overrides", "Abuse controls",
       "Requests", "Usage", "Cost", "Latency", "Errors", "Attestation failures",
       "Configuration revisions", "Route simulator", "Self-tests", "Audit log", "System health"

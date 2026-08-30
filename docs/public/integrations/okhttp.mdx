@@ -1,0 +1,116 @@
+---
+title: "OkHttp integration"
+description: "Use the Android transport seam as the target foundation for raw OkHttp, Retrofit, and compatible Kotlin clients."
+---
+
+<Warning>
+  The Android source candidate contains OkHttp integration, but framework
+  compatibility remains pre-release: Maven artifacts, version rows, and release
+  conformance are not published. Treat the examples as source evaluation.
+</Warning>
+
+## 1. What this integration does
+
+The target transport combines a feature-bound interceptor, authenticator, and
+network origin guard. It can serve raw OkHttp and compatible libraries without
+adding a Latchway-specific model abstraction.
+
+## 2. Supported framework versions
+
+OkHttp `5.3.0` has an `experimental` generated compatibility row based on
+bounded local tests. No OkHttp, Retrofit, or higher-level client version is a
+published supported integration yet.
+
+## 3. Supported Latchway versions
+
+The source candidate targets draft contract `1.0.0` and current protocol `2`;
+protocol `1` remains accepted for compatible legacy routes. Installation
+Family component support is implemented locally but remains pre-release.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Present in source candidate; release evidence pending |
+| Private key remains native | Android Keystore target; release evidence pending |
+| Streaming | Transport must preserve response bodies; ecosystem evidence pending |
+| Cancellation | OkHttp call cancellation target; ecosystem evidence pending |
+| App extensions | Not applicable to Android app extensions; the component model remains pre-release |
+| Structured output | Passed through for compatible protocols; ecosystem evidence pending |
+| Tool calls | Passed through for compatible protocols; ecosystem evidence pending |
+| Protocol | Draft contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
+
+## 5. Install packages
+
+The intended BOM and `latchway-okhttp` artifacts are not published. Use only an
+authorized, pinned source checkout for evaluation.
+
+## 6. Create the Latchway client
+
+Follow [Native Android](/mobile/android) with exact candidate sources, Play
+Integrity configuration, and secure Android Keystore policy.
+
+## 7. Bind a feature
+
+Bind one configured feature to the client or interceptor. Never accept an
+upstream destination, provider credential, or physical model from app code.
+
+## 8. Create the framework client
+
+Install the interceptor, network origin guard, and authenticator on the exact
+OkHttp client the framework uses. A separate hidden client will bypass signing.
+
+## 9. Send a non-streaming request
+
+The client preserves the framework body while replacing prohibited
+authorization and Latchway-owned headers.
+
+## 10. Send a streaming request
+
+Consume the OkHttp response incrementally. Do not wrap the body in a helper
+that buffers it or retries after bytes arrive.
+
+## 11. Use tools
+
+Tool content belongs to the selected AI protocol and calling framework.
+Latchway does not execute tools.
+
+## 12. Use structured output
+
+Structured output passes through only when the protocol and framework support
+it; no generic OkHttp claim establishes semantic compatibility.
+
+## 13. Handle cancellation
+
+Cancel the active `Call`. Cancellation must not invoke the authenticator as a
+reason to replay an uncertain request.
+
+## 14. Handle quota failures
+
+Parse the canonical problem and retain its request ID. Do not convert a quota
+denial into an authentication refresh loop.
+
+## 15. Handle session renewal
+
+The authenticator may respond only to exact pre-dispatch session or nonce
+problems. Refresh is single-flight and each attempt gets a new DPoP proof.
+
+## 16. Known limitations
+
+Application interceptors, redirects, cookie jars, and framework-owned retry
+layers can mutate or duplicate requests. The network origin guard is required.
+
+## 17. Verify the integration
+
+Test raw OkHttp, Retrofit, one OpenAI-compatible Kotlin client, and one
+higher-level Android AI framework at exact pinned versions.
+
+## 18. Troubleshooting
+
+Confirm the framework uses the configured OkHttp instance and that credentials
+are rejected before any cross-origin redirect.
+
+## 19. Compatibility matrix
+
+No supported ecosystem row is published. See
+[Compatibility](/reference/compatibility).

@@ -1,0 +1,44 @@
+---
+title: "iOS app extensions"
+description: "Plan a containing app and extension as separate Client Components with independent keys, sessions, scopes, and diagnostics."
+---
+
+<Warning>
+  App-extension provisioning is a pre-release target. No released Latchway SDK
+  currently implements the Installation Family or delegated-component APIs
+  described here.
+</Warning>
+
+Treat every independently executing extension as its own Client Component. The
+containing app and extension may belong to one Installation Family, but they do
+not share DPoP keys, access tokens, or rotating refresh-token chains.
+
+## Target structure
+
+```text
+Application User
+└── Installation Family
+    ├── Containing app (root, directly attested)
+    ├── Widget extension (delegated component)
+    └── Share extension (delegated component)
+```
+
+## Required setup contract
+
+An eventual tested guide must name all of the following before support can be
+claimed:
+
+1. **Xcode target structure** and every target's deployment constraints.
+2. **Bundle identifiers** and the exact server Component Definitions they map to.
+3. **Keychain Access Groups** for component-local private material.
+4. **App Groups** only where non-secret handoff data is required.
+5. **Main-app preparation code** that authorizes a bounded component key.
+6. **Extension client code** that creates and keeps its own key and session.
+7. The **first-launch limitation** when the containing app has not prepared the extension.
+8. **Sign-out behavior** that invalidates prior family credentials.
+9. The **expected dashboard result** for the root and delegated components.
+10. Safe **diagnostics** for entitlement, definition, expiry, and revocation failures.
+
+Read [WidgetKit setup](/build/app-extensions/widgetkit) or [Share extension
+setup](/build/app-extensions/share-extension) for the surface-specific
+acceptance checklist.

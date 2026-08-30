@@ -11,7 +11,10 @@ usage: run-operational-resilience-drills.sh \
   --previous-candidate-manifest ABSOLUTE_PATH \
   --candidate-image ghcr.io/latchway/latchway@sha256:... \
   --candidate-platform-image ghcr.io/latchway/latchway@sha256:... \
-  --postgres-image docker.io/library/postgres@sha256:...
+  --postgres-image docker.io/library/postgres@sha256:... \
+  [--preloaded-candidate-platform-image-id sha256:... \
+   --preloaded-previous-platform-image-id sha256:... \
+   --preloaded-postgres-image-id sha256:...]
 EOF
   exit 2
 }
@@ -24,13 +27,16 @@ previous_candidate_manifest=
 candidate_image=
 candidate_platform_image=
 postgres_image=
+preloaded_candidate_platform_image_id=
+preloaded_previous_platform_image_id=
+preloaded_postgres_image_id=
 while (($#)); do
   case "$1" in
     --acknowledge-isolated-destructive-drill)
       acknowledged=true
       shift
       ;;
-    --evidence-dir|--core-commit|--previous-candidate-commit|--previous-candidate-manifest|--candidate-image|--candidate-platform-image|--postgres-image)
+    --evidence-dir|--core-commit|--previous-candidate-commit|--previous-candidate-manifest|--candidate-image|--candidate-platform-image|--postgres-image|--preloaded-candidate-platform-image-id|--preloaded-previous-platform-image-id|--preloaded-postgres-image-id)
       (($# >= 2)) || usage
       case "$1" in
         --evidence-dir) evidence_dir=$2 ;;
@@ -40,6 +46,9 @@ while (($#)); do
         --candidate-image) candidate_image=$2 ;;
         --candidate-platform-image) candidate_platform_image=$2 ;;
         --postgres-image) postgres_image=$2 ;;
+        --preloaded-candidate-platform-image-id) preloaded_candidate_platform_image_id=$2 ;;
+        --preloaded-previous-platform-image-id) preloaded_previous_platform_image_id=$2 ;;
+        --preloaded-postgres-image-id) preloaded_postgres_image_id=$2 ;;
       esac
       shift 2
       ;;
@@ -56,6 +65,25 @@ done
 [[ "$candidate_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]] || { echo "candidate image must be an exact Latchway OCI digest" >&2; exit 2; }
 [[ "$candidate_platform_image" =~ ^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$ ]] || { echo "candidate platform image must be an exact Latchway OCI digest" >&2; exit 2; }
 [[ "$postgres_image" =~ ^docker\.io/library/postgres@sha256:[0-9a-f]{64}$ ]] || { echo "PostgreSQL image must be an exact Docker Hub OCI digest" >&2; exit 2; }
+
+preloaded_mode=false
+if [[ -n "$preloaded_candidate_platform_image_id$preloaded_previous_platform_image_id$preloaded_postgres_image_id" ]]; then
+  [[ -n "$preloaded_candidate_platform_image_id" && -n "$preloaded_previous_platform_image_id" && -n "$preloaded_postgres_image_id" ]] || {
+    echo "credential-free preloaded mode requires all three immutable local image IDs" >&2
+    exit 2
+  }
+  for image_id in "$preloaded_candidate_platform_image_id" "$preloaded_previous_platform_image_id" "$preloaded_postgres_image_id"; do
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+      echo "preloaded image IDs must be immutable sha256 image IDs" >&2
+      exit 2
+    }
+  done
+  [[ "$(printf '%s\n' "$preloaded_candidate_platform_image_id" "$preloaded_previous_platform_image_id" "$preloaded_postgres_image_id" | sort -u | wc -l | tr -d ' ')" == 3 ]] || {
+    echo "preloaded candidate, prior-candidate, and PostgreSQL image IDs must differ" >&2
+    exit 2
+  }
+  preloaded_mode=true
+fi
 [[ ! -L "$evidence_dir" ]] || { echo "evidence directory cannot be a symbolic link" >&2; exit 2; }
 mkdir -p -- "$evidence_dir"
 [[ -d "$evidence_dir" ]] || { echo "evidence path is not a directory" >&2; exit 2; }
@@ -120,17 +148,30 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-docker pull --platform linux/amd64 "$previous_candidate_platform_image" >/dev/null
-docker pull --platform linux/amd64 "$candidate_platform_image" >/dev/null
-docker pull "$postgres_image" >/dev/null
+candidate_runtime_image=$candidate_platform_image
+previous_candidate_runtime_image=$previous_candidate_platform_image
+postgres_runtime_image=$postgres_image
+if [[ "$preloaded_mode" == true ]]; then
+  candidate_runtime_image=$preloaded_candidate_platform_image_id
+  previous_candidate_runtime_image=$preloaded_previous_platform_image_id
+  postgres_runtime_image=$preloaded_postgres_image_id
+  [[ "$(docker image inspect --format '{{.Id}}' "$candidate_runtime_image")" == "$preloaded_candidate_platform_image_id" ]]
+  [[ "$(docker image inspect --format '{{.Id}}' "$previous_candidate_runtime_image")" == "$preloaded_previous_platform_image_id" ]]
+  [[ "$(docker image inspect --format '{{.Id}}' "$postgres_runtime_image")" == "$preloaded_postgres_image_id" ]]
+else
+  docker pull --platform linux/amd64 "$previous_candidate_platform_image" >/dev/null
+  docker pull --platform linux/amd64 "$candidate_platform_image" >/dev/null
+  docker pull --platform linux/amd64 "$postgres_image" >/dev/null
+fi
 
-candidate_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$candidate_platform_image")
-previous_candidate_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$previous_candidate_platform_image")
-candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate_platform_image")
-previous_candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$previous_candidate_platform_image")
+candidate_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$candidate_runtime_image")
+previous_candidate_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$previous_candidate_runtime_image")
+candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate_runtime_image")
+previous_candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$previous_candidate_runtime_image")
+postgres_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgres_runtime_image")
 [[ "$candidate_revision" == "$core_commit" ]] || { echo "candidate image revision label does not match the candidate commit" >&2; exit 1; }
 [[ "$previous_candidate_revision" == "$previous_candidate_commit" ]] || { echo "previous candidate image revision label does not match its candidate commit" >&2; exit 1; }
-[[ "$candidate_platform" == linux/amd64 && "$previous_candidate_platform" == linux/amd64 ]] || { echo "drill images must be exact linux/amd64 children" >&2; exit 1; }
+[[ "$candidate_platform" == linux/amd64 && "$previous_candidate_platform" == linux/amd64 && "$postgres_platform" == linux/amd64 ]] || { echo "drill images must be exact linux/amd64 children" >&2; exit 1; }
 
 docker network create --internal "$network" >/dev/null
 network_created=true
@@ -157,7 +198,7 @@ start_postgres() {
     --env POSTGRES_DB \
     --env POSTGRES_USER \
     --env POSTGRES_PASSWORD \
-    "$postgres_image" >/dev/null
+    "$postgres_runtime_image" >/dev/null
   if [[ "$name" == "$source_postgres" ]]; then
     source_created=true
   elif [[ "$name" == "$restore_postgres" ]]; then
@@ -285,10 +326,10 @@ start_postgres "$source_postgres"
 source_identity=$(docker inspect --format '{{.Id}}' "$source_postgres")
 [[ "$source_identity" =~ ^[0-9a-f]{64}$ ]] || { echo "source database identity is not immutable" >&2; exit 1; }
 
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/.previous-migrate-up.json" migrate up
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/previous-migration.json" migrate status
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/previous-doctor.json" doctor
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/previous-version.json" version
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/.previous-migrate-up.json" migrate up
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/previous-migration.json" migrate status
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/previous-doctor.json" doctor
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/previous-version.json" version
 previous_version=$(jq --raw-output .version "$evidence_dir/previous-version.json")
 previous_version_commit=$(jq --raw-output .commit "$evidence_dir/previous-version.json")
 [[ "$previous_version" == "$previous_candidate_version" ]] || { echo "previous candidate runtime version does not match its manifest" >&2; exit 1; }
@@ -303,7 +344,7 @@ docker exec "$source_postgres" psql --username latchway --dbname latchway --set 
   VALUES ('env_01ARZ3NDEKTSV4RRFFQ69G5FAX', 'org_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'app_01ARZ3NDEKTSV4RRFFQ69G5FAW', 'operational-drill', 'Operational Drill', 'staging', 'disabled', now());
 " >/dev/null
 capture_state "$source_postgres" previous "$source_identity"
-start_gateway_and_capture "$previous_candidate_platform_image" "$source_postgres" previous
+start_gateway_and_capture "$previous_candidate_runtime_image" "$source_postgres" previous
 
 docker exec "$source_postgres" pg_dump \
   --username latchway \
@@ -328,27 +369,33 @@ docker exec "$restore_postgres" pg_restore \
   --no-acl \
   --exit-on-error \
   /tmp/latchway-operational.dump
-run_cli "$previous_candidate_platform_image" "$restore_postgres" "$evidence_dir/restore-migration.json" migrate status
-run_cli "$previous_candidate_platform_image" "$restore_postgres" "$evidence_dir/restore-doctor.json" doctor
+run_cli "$previous_candidate_runtime_image" "$restore_postgres" "$evidence_dir/restore-migration.json" migrate status
+run_cli "$previous_candidate_runtime_image" "$restore_postgres" "$evidence_dir/restore-doctor.json" doctor
 capture_state "$restore_postgres" restore "$restore_identity"
-start_gateway_and_capture "$previous_candidate_platform_image" "$restore_postgres" restore
+start_gateway_and_capture "$previous_candidate_runtime_image" "$restore_postgres" restore
 
-run_cli "$candidate_platform_image" "$source_postgres" "$evidence_dir/.candidate-migrate-up.json" migrate up
-run_cli "$candidate_platform_image" "$source_postgres" "$evidence_dir/candidate-migration.json" migrate status
-run_cli "$candidate_platform_image" "$source_postgres" "$evidence_dir/candidate-doctor.json" doctor
-run_cli "$candidate_platform_image" "$source_postgres" "$evidence_dir/candidate-version.json" version
+run_cli "$candidate_runtime_image" "$source_postgres" "$evidence_dir/.candidate-migrate-up.json" migrate up
+run_cli "$candidate_runtime_image" "$source_postgres" "$evidence_dir/candidate-migration.json" migrate status
+run_cli "$candidate_runtime_image" "$source_postgres" "$evidence_dir/candidate-doctor.json" doctor
+run_cli "$candidate_runtime_image" "$source_postgres" "$evidence_dir/candidate-version.json" version
 capture_state "$source_postgres" candidate "$source_identity"
-start_gateway_and_capture "$candidate_platform_image" "$source_postgres" candidate
+start_gateway_and_capture "$candidate_runtime_image" "$source_postgres" candidate
 
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/rollback-migration.json" migrate status
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/rollback-doctor.json" doctor
-run_cli "$previous_candidate_platform_image" "$source_postgres" "$evidence_dir/rollback-version.json" version
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/rollback-migration.json" migrate status
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/rollback-doctor.json" doctor
+run_cli "$previous_candidate_runtime_image" "$source_postgres" "$evidence_dir/rollback-version.json" version
 capture_state "$source_postgres" rollback "$source_identity"
-start_gateway_and_capture "$previous_candidate_platform_image" "$source_postgres" rollback
+start_gateway_and_capture "$previous_candidate_runtime_image" "$source_postgres" rollback
 
-candidate_platform_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$candidate_platform_image")
-previous_candidate_platform_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$previous_candidate_platform_image")
-postgres_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$postgres_image")
+if [[ "$preloaded_mode" == true ]]; then
+  candidate_platform_repo_digests=$(jq --compact-output --null-input --arg value "$candidate_platform_image" '[$value]')
+  previous_candidate_platform_repo_digests=$(jq --compact-output --null-input --arg value "$previous_candidate_platform_image" '[$value]')
+  postgres_repo_digests=$(jq --compact-output --null-input --arg value "$postgres_image" '[$value]')
+else
+  candidate_platform_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$candidate_platform_image")
+  previous_candidate_platform_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$previous_candidate_platform_image")
+  postgres_repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$postgres_image")
+fi
 jq -n \
   --arg candidate_oci_reference "$candidate_image" \
   --arg candidate_platform_oci_reference "$candidate_platform_image" \

@@ -12,6 +12,30 @@ import (
 	"github.com/latchway/latchway/internal/id"
 )
 
+func TestParseClientDeclarationAcceptsExactCompatibleFrameworkPair(t *testing.T) {
+	t.Parallel()
+
+	request := validClientRequest(http.MethodPost, challengePath, validChallengeBody("ios"), "ios", "1.2.3")
+	request.Header.Set("X-Latchway-Framework", "swift-openai")
+	request.Header.Set("X-Latchway-Framework-Version", "4.6.0")
+	declaration, violation := parseClientDeclaration(request)
+	if violation != nil || declaration.framework != "swift-openai" || declaration.frameworkVersion != "4.6.0" {
+		t.Fatalf("framework declaration = %+v violation=%+v", declaration, violation)
+	}
+}
+
+func TestParseClientDeclarationAcceptsCurrentAndLegacyWireVersions(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1", "2"} {
+		request := validClientRequest(http.MethodPost, challengePath, validChallengeBody("ios"), "ios", "1.2.3")
+		request.Header.Set("X-Latchway-Protocol-Version", version)
+		if _, violation := parseClientDeclaration(request); violation != nil {
+			t.Errorf("wire protocol %s rejected: %+v", version, violation)
+		}
+	}
+}
+
 func TestSessionTransportRejectsAmbiguousHeadersBodiesPathsAndQueries(t *testing.T) {
 	t.Parallel()
 
@@ -30,7 +54,7 @@ func TestSessionTransportRejectsAmbiguousHeadersBodiesPathsAndQueries(t *testing
 		{name: "query", method: http.MethodPost, path: challengePath + "?unexpected=1", body: validChallengeBody("ios"), wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "empty query marker", method: http.MethodPost, path: challengePath + "?", body: validChallengeBody("ios"), wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "missing protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Del("X-Latchway-Protocol-Version") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
-		{name: "unsupported protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "2") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
+		{name: "unsupported protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "3") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "noncanonical protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "01") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "duplicate protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Add("X-Latchway-Protocol-Version", "1") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "combined protocol", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "1, 1") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
@@ -40,6 +64,25 @@ func TestSessionTransportRejectsAmbiguousHeadersBodiesPathsAndQueries(t *testing
 		{name: "missing sdk version", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Del("X-Latchway-SDK-Version") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "invalid sdk version", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-SDK-Version", "v1") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
 		{name: "duplicate sdk version", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Add("X-Latchway-SDK-Version", "1.2.3") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
+		{name: "framework without version", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Framework", "swift-openai") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
+		{name: "framework version without framework", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Framework-Version", "4.6.0") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
+		{name: "case-duplicate framework", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) {
+			r.Header.Set("X-Latchway-Framework", "swift-openai")
+			r.Header["x-latchway-framework"] = []string{"swift-openai"}
+			r.Header.Set("X-Latchway-Framework-Version", "4.6.0")
+		}, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
+		{name: "noncanonical framework", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) {
+			r.Header.Set("X-Latchway-Framework", " swift-openai")
+			r.Header.Set("X-Latchway-Framework-Version", "4.6.0")
+		}, wantCode: "request_invalid", wantStatus: http.StatusBadRequest},
+		{name: "framework belongs to another sdk", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) {
+			r.Header.Set("X-Latchway-Framework", "vercel-ai-sdk")
+			r.Header.Set("X-Latchway-Framework-Version", "5.0.0")
+		}, wantCode: "framework_integration_unsupported", wantStatus: http.StatusBadRequest},
+		{name: "invalid framework version", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) {
+			r.Header.Set("X-Latchway-Framework", "swift-openai")
+			r.Header.Set("X-Latchway-Framework-Version", "latest")
+		}, wantCode: "framework_version_unsupported", wantStatus: http.StatusBadRequest},
 		{name: "missing DPoP", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Del("DPoP") }, wantCode: "dpop_missing", wantStatus: http.StatusUnauthorized},
 		{name: "empty DPoP", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Set("DPoP", "") }, wantCode: "dpop_invalid", wantStatus: http.StatusUnauthorized},
 		{name: "duplicate DPoP", method: http.MethodPost, path: challengePath, body: validChallengeBody("ios"), mutate: func(r *http.Request) { r.Header.Add("DPoP", "other.proof.value") }, wantCode: "dpop_invalid", wantStatus: http.StatusUnauthorized},
@@ -290,7 +333,7 @@ func TestCorrelationIDSelectionUsesSafePrecedenceAndFallback(t *testing.T) {
 	}
 }
 
-func TestProtocolUpgradeProblemAdvertisesOnlySupportedVersion(t *testing.T) {
+func TestProtocolUpgradeProblemAdvertisesSupportedRange(t *testing.T) {
 	t.Parallel()
 
 	coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
@@ -303,8 +346,43 @@ func TestProtocolUpgradeProblemAdvertisesOnlySupportedVersion(t *testing.T) {
 	var document map[string]any
 	decodeJSONResponse(t, response, &document)
 	versions, ok := document["supported_protocol_versions"].([]any)
-	if !ok || len(versions) != 1 || versions[0] != float64(1) {
+	if !ok || len(versions) != 2 || versions[0] != float64(1) || versions[1] != float64(2) {
 		t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
+	}
+}
+
+func TestFamilyAndComponentOperationsRequireCurrentWireProtocol(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "provision component", method: http.MethodPost, path: provisionComponentPath, body: `{}`},
+		{name: "create component session", method: http.MethodPost, path: componentSessionPath, body: `{}`},
+		{name: "revoke component", method: http.MethodDelete, path: revokeComponentPrefix + "cmp_01K3NQ7M8P9RSTVWXYZABCDE12"},
+		{name: "revoke family", method: http.MethodDelete, path: revokeFamilyPath},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			handler := newTestHandler(t, &fakeCoordinator{}, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+			request := validClientRequest(test.method, test.path, test.body, "ios", "1.2.3")
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			assertProblem(t, response, "protocol_version_unsupported", http.StatusUpgradeRequired)
+			var document map[string]any
+			decodeJSONResponse(t, response, &document)
+			versions, ok := document["supported_protocol_versions"].([]any)
+			if !ok || len(versions) != 1 || versions[0] != float64(2) {
+				t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
+			}
+		})
 	}
 }
 

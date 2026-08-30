@@ -1,0 +1,86 @@
+---
+title: "Physical-device proof"
+description: "Prepare production App Attest and Play Integrity evidence for native and React Native applications."
+---
+
+Production attestation is an external deployment gate. Repository fixtures,
+simulators, emulators, debug evidence, and locally sideloaded builds prove
+development behavior only.
+
+<Warning>
+  The current version 1 source candidate has not completed protected physical
+  App Attest or Play Integrity runs. Do not describe it as device-proven until
+  those exact-candidate receipts exist.
+</Warning>
+
+## iOS and React Native iOS
+
+Prepare all of the following:
+
+- an App Attest-capable physical iPhone or iPad;
+- a registered App ID with App Attest enabled;
+- matching Team ID, bundle ID, signing certificate, and provisioning profile;
+- the App Attest environment selected consistently in the entitlement,
+  application, gateway policy, and test runner;
+- a production-distributed application identity token;
+- the exact candidate gateway image and synchronized iOS or React Native SDK.
+
+Production policy should disallow software key fallback. The evidence run must
+observe Secure Enclave-backed installation material, real App Attest
+registration/assertion, the expected normalized trust, a DPoP-authorized
+request, and terminal revocation behavior.
+
+## Android and React Native Android
+
+Prepare all of the following:
+
+- a supported physical Android device;
+- the exact release package name and signing certificate digest;
+- the Play Integrity API and numeric Google Cloud project;
+- a signed build uploaded to an internal, closed, or production Google Play
+  track and installed from Google Play;
+- licensing and device-integrity policy matching the gateway environment;
+- the exact candidate gateway image and synchronized Android or React Native
+  SDK.
+
+The app passes the server challenge as Play Integrity `requestHash`. JavaScript
+and application code must never construct, read, or persist the integrity token.
+Exercise the hardware-backed or StrongBox policy variants required by your
+device matrix.
+
+## Minimum retained evidence
+
+For native iOS, native Android, React Native iOS, and React Native Android,
+retain a redacted report tied to the exact candidate that covers:
+
+1. installation creation and normalized hardware/application trust;
+2. session reuse, identity expiry, and reauthentication;
+3. DPoP proof replay and tamper rejection;
+4. server nonce handling and refresh-token rotation;
+5. quota inspection and a bounded streaming request;
+6. diagnostics without tokens, keys, proofs, or attestation objects;
+7. revocation followed by a fresh installation enrollment.
+
+The report should name application release, device and OS, gateway image
+digest, contract bundle checksum, SDK versions, and request IDs. It must not
+contain identity/session credentials, DPoP material, signing files, provider
+credentials, or raw attestation evidence.
+
+The release finalizer accepts only reports from the protected physical-device
+workflow for the same candidate. A handwritten success summary is not a
+substitute.
+
+## Runner custody
+
+Use an ephemeral or just-in-time physical-device runner dedicated to one
+candidate evidence run. It must not retain an organization token, package or
+registry credential, cloud OIDC authority, signing export, provisioning file,
+attestation object, or device proof after the run. Candidate checkout and test
+execution must occur without long-lived administrative credentials; any
+bootstrap grant should be short-lived, one-use, and bound to the repository,
+workflow run, candidate commit, and expected audience.
+
+Always destroy or reimage the runner after capture, revoke the bootstrap grant,
+and verify cleanup even when a test fails or is cancelled. A persistent runner
+that has executed candidate code is not a safe place to perform release
+mutation or hold organization-wide credentials.

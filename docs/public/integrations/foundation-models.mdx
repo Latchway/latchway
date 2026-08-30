@@ -1,0 +1,110 @@
+---
+title: "Apple Foundation Models integration"
+description: "Define the planned provider-protocol adapter that keeps Apple framework abstractions while routing a feature through Latchway."
+---
+
+<Warning>
+  `LatchwayFoundationModels` and its advertised types are pre-release. No released
+  Swift product or supported Apple Foundation Models version exists yet.
+</Warning>
+
+## 1. What this integration does
+
+The target Class B adapter implements Apple Foundation Models provider
+interfaces and uses an existing Latchway transport. It does not introduce a
+parallel chat, prompt, tool, transcript, or model framework.
+
+## 2. Supported framework versions
+
+None published. Availability and exact Apple SDK requirements must be generated
+from the tested Swift release bundle.
+
+## 3. Supported Latchway versions
+
+None published for this adapter. The current contract does not claim support.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Required through the Swift transport; not yet evidenced |
+| Private key remains native | Required; not yet evidenced |
+| Streaming | Target capability; not yet evidenced |
+| Cancellation | Required; not yet evidenced |
+| App extensions | Target only after Installation Family support |
+| Structured output | Advertise only when translation is reliable |
+| Tool calls | Advertise only when translation is reliable |
+| Protocol | Prefer OpenAI Responses through a future compatible contract |
+
+## 5. Install packages
+
+Do not link a product named `LatchwayFoundationModels` until it is present in a
+signed, published Swift package release.
+
+## 6. Create the Latchway client
+
+Use the Swift client with a supported identity provider, attestation provider,
+and feature-capable authenticated transport.
+
+## 7. Bind a feature
+
+The planned configuration binds the adapter to a Latchway feature and declared
+capabilities. It never exposes the physical model.
+
+## 8. Create the framework client
+
+The final adapter will implement the supported Apple provider interfaces. Type
+names are not stable enough for runnable examples in this foundation.
+
+## 9. Send a non-streaming request
+
+Single-turn and transcript translation must pass conformance before release.
+
+## 10. Send a streaming request
+
+Streaming must preserve incremental framework events and cancellation without
+buffering the complete response.
+
+## 11. Use tools
+
+Tool translation is present only when the adapter can represent semantics
+truthfully. Latchway does not execute tools.
+
+## 12. Use structured output
+
+Generated structured types are supported only when translation preserves the
+framework's constraints and failure behavior.
+
+## 13. Handle cancellation
+
+Task cancellation must cancel the active transport and must not replay work.
+
+## 14. Handle quota failures
+
+Map a canonical quota problem into an explicit framework error while retaining
+the safe Latchway request ID.
+
+## 15. Handle session renewal
+
+The Swift transport owns single-flight refresh and exact pre-dispatch retry
+rules; framework code never receives refresh credentials.
+
+## 16. Known limitations
+
+Unsupported framework capabilities must be absent, not silently degraded.
+Platform availability can constrain application and extension targets.
+
+## 17. Verify the integration
+
+Required cases include single-turn, transcripts, streaming, generated types,
+tools, cancellation, unavailable features, quotas, trust refresh, and extension
+component use.
+
+## 18. Troubleshooting
+
+Check platform availability, declared capabilities, feature policy, and safe
+transport diagnostics before treating a translation error as a server failure.
+
+## 19. Compatibility matrix
+
+No supported row is published. See [Compatibility](/reference/compatibility).

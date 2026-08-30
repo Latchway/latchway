@@ -17,10 +17,15 @@ import (
 )
 
 const (
-	PlatformDimension        = "platform"
-	NormalizedClaimPrefix    = "normalized_claim:"
-	NormalizedClaimScopeType = "normalized_claim"
-	MaximumDimensions        = 11
+	InstallationFamilyDimension  = "installation_family"
+	ClientComponentDimension     = "client_component"
+	ComponentDefinitionDimension = "component_definition"
+	ComponentKindDimension       = "component_kind"
+	TrustSourceDimension         = "trust_source"
+	PlatformDimension            = "platform"
+	NormalizedClaimPrefix        = "normalized_claim:"
+	NormalizedClaimScopeType     = "normalized_claim"
+	MaximumDimensions            = 16
 
 	normalizedClaimDigestDomain = "latchway/quota-normalized-claim/v1\x00"
 	maximumClaimStringBytes     = 2048
@@ -36,6 +41,11 @@ var (
 		"environment",
 		"user",
 		"installation",
+		InstallationFamilyDimension,
+		ClientComponentDimension,
+		ComponentDefinitionDimension,
+		ComponentKindDimension,
+		TrustSourceDimension,
 		"feature",
 		"route",
 		"upstream",

@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 75
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: latchway
           POSTGRES_USER: latchway
@@ -137,10 +137,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
     steps:
       - name: Check out the exact candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -162,11 +158,6 @@ jobs:
             "$INTENDED_TAG"
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve reproducible build metadata
         id: metadata
         shell: bash
@@ -176,14 +167,14 @@ jobs:
           echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
           echo "version=${INTENDED_TAG#v}" >> "$GITHUB_OUTPUT"
           echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Publish only the immutable multi-architecture candidate
+      - name: Build the exact amd64 candidate without registry credentials
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        id: build
+        id: build-amd64
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.metadata.outputs.image }}:candidate-${{ inputs.candidate_commit }}
+          platforms: linux/amd64
+          load: true
+          tags: latchway:candidate-amd64
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ inputs.candidate_commit }}
@@ -196,30 +187,30 @@ jobs:
             SOURCE=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: mode=max
-          sbom: true
-      - name: Resolve exact published platform children
-        id: platforms
-        shell: bash
-        env:
-          IMAGE: ${{ steps.metadata.outputs.image }}
-          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          docker buildx imagetools inspect --raw "$IMAGE@$INDEX_DIGEST" > "$RUNNER_TEMP/latchway-index.json"
-          python3 scripts/resolve-oci-platform-digests.py \
-            "$RUNNER_TEMP/latchway-index.json" \
-            linux/amd64 linux/arm64 >> "$GITHUB_OUTPUT"
-      - name: Pull exact candidate children
-        shell: bash
-        env:
-          IMAGE: ${{ steps.metadata.outputs.image }}
-          AMD64_DIGEST: ${{ steps.platforms.outputs.linux_amd64 }}
-          ARM64_DIGEST: ${{ steps.platforms.outputs.linux_arm64 }}
-        run: |
-          docker pull --platform linux/amd64 "$IMAGE@$AMD64_DIGEST"
-          docker tag "$IMAGE@$AMD64_DIGEST" latchway:candidate-amd64
-          docker pull --platform linux/arm64 "$IMAGE@$ARM64_DIGEST"
-          docker tag "$IMAGE@$ARM64_DIGEST" latchway:candidate-arm64
+          provenance: false
+          sbom: false
+      - name: Build the exact arm64 candidate without registry credentials
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        id: build-arm64
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: latchway:candidate-arm64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.candidate_commit }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+            org.opencontainers.image.created=${{ steps.metadata.outputs.date }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ inputs.candidate_commit }}
+            BUILD_DATE=${{ steps.metadata.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
       - name: Smoke both exact candidate children
         run: |
           scripts/container-smoke.sh latchway:candidate-amd64
@@ -282,93 +273,120 @@ jobs:
           format: spdx-json
           output-file: latchway-linux-arm64.spdx.json
           upload-artifact: false
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign and verify the candidate index with GitHub OIDC
-        shell: bash
-        env:
-          IMAGE: ${{ steps.metadata.outputs.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
-        run: |
-          cosign sign --yes "$IMAGE@$DIGEST"
-          cosign verify \
-            --certificate-identity "$CERTIFICATE_IDENTITY" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "$IMAGE@$DIGEST"
-      - name: Publish index provenance
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
-        with:
-          subject-name: ${{ steps.metadata.outputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-      - name: Publish exact platform SBOM attestations
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
-        with:
-          subject-name: ${{ steps.metadata.outputs.image }}
-          subject-digest: ${{ steps.platforms.outputs.linux_amd64 }}
-          sbom-path: latchway-linux-amd64.spdx.json
-          push-to-registry: true
-      - name: Publish exact arm64 SBOM attestation
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
-        with:
-          subject-name: ${{ steps.metadata.outputs.image }}
-          subject-digest: ${{ steps.platforms.outputs.linux_arm64 }}
-          sbom-path: latchway-linux-arm64.spdx.json
-          push-to-registry: true
-      - name: Build the hash-bound candidate manifest
+      - name: Build the credential-free image handoff
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
           IMAGE: ${{ steps.metadata.outputs.image }}
-          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
-          AMD64_DIGEST: ${{ steps.platforms.outputs.linux_amd64 }}
-          ARM64_DIGEST: ${{ steps.platforms.outputs.linux_arm64 }}
         run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
           mkdir -p dist/candidate
           python3 scripts/build-contract-bundle.py --output-directory dist/candidate
           bundle_name=$(jq --raw-output '.bundle.file_name' api/protocol-version.json)
           test -f "dist/candidate/$bundle_name"
           cp -- "dist/candidate/$bundle_name" latchway-contract.tar.gz
-          python3 scripts/release-candidate.py \
-            --create \
-            --manifest latchway-candidate.json \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --image "$IMAGE" \
-            --index-digest "$INDEX_DIGEST" \
-            --amd64-digest "$AMD64_DIGEST" \
-            --arm64-digest "$ARM64_DIGEST" \
-            --contract-bundle latchway-contract.tar.gz \
-            --sbom-amd64 latchway-linux-amd64.spdx.json \
-            --sbom-arm64 latchway-linux-arm64.spdx.json \
-            --vulnerability-amd64 latchway-linux-amd64-vulnerability.json \
-            --vulnerability-arm64 latchway-linux-arm64-vulnerability.json \
-            --license-amd64 latchway-linux-amd64-license.json \
-            --license-arm64 latchway-linux-arm64-license.json
-          python3 scripts/release-candidate.py \
-            --verify \
-            --manifest latchway-candidate.json \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --image "$IMAGE"
-      - name: Attest the candidate manifest
-        id: candidate-attestation
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+          amd64_id=$(docker image inspect --format '{{.Id}}' latchway:candidate-amd64)
+          arm64_id=$(docker image inspect --format '{{.Id}}' latchway:candidate-arm64)
+          [[ "$amd64_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$arm64_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$amd64_id" != "$arm64_id"
+          for architecture in amd64 arm64; do
+            reference="latchway:candidate-$architecture"
+            expected_platform="linux/$architecture"
+            if [[ "$architecture" == amd64 ]]; then
+              expected_id="$amd64_id"
+            else
+              expected_id="$arm64_id"
+            fi
+            test "$(docker image inspect --format '{{.Id}}' "$reference")" = "$expected_id"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$reference")" = "$expected_platform"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$reference")" = "$CANDIDATE_COMMIT"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$reference")" = "${INTENDED_TAG#v}"
+          done
+          docker save --output latchway-linux-amd64.image.tar latchway:candidate-amd64
+          docker save --output latchway-linux-arm64.image.tar latchway:candidate-arm64
+          amd64_archive_size=$(stat --format=%s latchway-linux-amd64.image.tar)
+          arm64_archive_size=$(stat --format=%s latchway-linux-arm64.image.tar)
+          (( amd64_archive_size >= 1024 && amd64_archive_size <= 2147483648 ))
+          (( arm64_archive_size >= 1024 && arm64_archive_size <= 2147483648 ))
+          artifact_names=(
+            latchway-contract.tar.gz
+            latchway-linux-amd64.spdx.json
+            latchway-linux-arm64.spdx.json
+            latchway-linux-amd64-vulnerability.json
+            latchway-linux-arm64-vulnerability.json
+            latchway-linux-amd64-license.json
+            latchway-linux-arm64-license.json
+          )
+          artifacts='[]'
+          for path in "${artifact_names[@]}"; do
+            test -f "$path" && test ! -L "$path" && test -s "$path"
+            sha=$(sha256sum "$path" | awk '{print $1}')
+            artifacts=$(jq --arg path "$path" --arg sha "$sha" '. + [{path:$path,sha256:$sha}]' <<< "$artifacts")
+          done
+          contract_version=$(jq --exit-status --raw-output .contract_version api/protocol-version.json)
+          released_at=$(jq --exit-status --raw-output .released_at api/protocol-version.json)
+          expected_bundle=$(jq --exit-status --raw-output .bundle.file_name api/protocol-version.json)
+          test "$expected_bundle" = "latchway-contract-$contract_version.tar.gz"
+          test "$bundle_name" = "$expected_bundle"
+          test "${INTENDED_TAG#v}" = "$(jq --raw-output .version web/console/package.json)"
+          jq -n --sort-keys \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$INTENDED_TAG" \
+            --arg image "$IMAGE" \
+            --arg contract_version "$contract_version" \
+            --arg released_at "$released_at" \
+            --arg bundle_name "$bundle_name" \
+            --arg bundle_sha "$(sha256sum latchway-contract.tar.gz | awk '{print $1}')" \
+            --arg amd64_id "$amd64_id" \
+            --arg amd64_archive_sha "$(sha256sum latchway-linux-amd64.image.tar | awk '{print $1}')" \
+            --argjson amd64_archive_size "$amd64_archive_size" \
+            --arg arm64_id "$arm64_id" \
+            --arg arm64_archive_sha "$(sha256sum latchway-linux-arm64.image.tar | awk '{print $1}')" \
+            --argjson arm64_archive_size "$arm64_archive_size" \
+            --argjson artifacts "$artifacts" '
+              {
+                schema_version: 1,
+                kind: "latchway_candidate_image_handoff",
+                candidate_commit: $commit,
+                intended_tag: $tag,
+                version: ($tag | ltrimstr("v")),
+                image_repository: $image,
+                contract: {
+                  version: $contract_version,
+                  status: "released",
+                  released_at: $released_at,
+                  bundle_file_name: $bundle_name,
+                  bundle_sha256: $bundle_sha
+                },
+                images: {
+                  "linux/amd64": {
+                    local_reference: "latchway:candidate-amd64",
+                    image_id: $amd64_id,
+                    archive: {path:"latchway-linux-amd64.image.tar",sha256:$amd64_archive_sha,size_bytes:$amd64_archive_size}
+                  },
+                  "linux/arm64": {
+                    local_reference: "latchway:candidate-arm64",
+                    image_id: $arm64_id,
+                    archive: {path:"latchway-linux-arm64.image.tar",sha256:$arm64_archive_sha,size_bytes:$arm64_archive_size}
+                  }
+                },
+                artifacts: $artifacts
+              }
+            ' > latchway-candidate-image-handoff.json
+          test "$(find . -maxdepth 1 -type f -name 'latchway-*' | wc -l | tr -d ' ')" -ge 10
+      - name: Retain the exact credential-free image handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          subject-path: latchway-candidate.json
-      - name: Retain the candidate attestation bundle
-        shell: bash
-        env:
-          BUNDLE_PATH: ${{ steps.candidate-attestation.outputs.bundle-path }}
-        run: cp -- "$BUNDLE_PATH" latchway-candidate.attestation.sigstore.json
-      - name: Retain immutable candidate evidence
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: latchway-candidate-image-handoff-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            latchway-candidate.json
-            latchway-candidate.attestation.sigstore.json
+            latchway-candidate-image-handoff.json
+            latchway-linux-amd64.image.tar
+            latchway-linux-arm64.image.tar
             latchway-contract.tar.gz
             latchway-linux-amd64.spdx.json
             latchway-linux-arm64.spdx.json
@@ -378,4 +396,421 @@ jobs:
             latchway-linux-arm64-license.json
           if-no-files-found: error
           compression-level: 0
+          retention-days: 1
+
+  publish-image:
+    if: github.ref == 'refs/heads/main'
+    needs: image
+    environment: release-image-publishing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    steps:
+      - name: Download the credential-free image handoff without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-image-handoff-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handoff
+      - name: Validate the exact closed handoff before registry authentication
+        id: handoff
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          root="$RUNNER_TEMP/handoff"
+          receipt="$root/latchway-candidate-image-handoff.json"
+          test -z "$(find "$root" -type l -print -quit)"
+          test -z "$(find "$root" -mindepth 1 ! -type f -print -quit)"
+          actual="$RUNNER_TEMP/handoff-actual"
+          expected="$RUNNER_TEMP/handoff-expected"
+          find "$root" -maxdepth 1 -type f -print | while IFS= read -r path; do basename "$path"; done | LC_ALL=C sort > "$actual"
+          printf '%s\n' \
+            latchway-candidate-image-handoff.json \
+            latchway-linux-amd64.image.tar \
+            latchway-linux-arm64.image.tar \
+            latchway-contract.tar.gz \
+            latchway-linux-amd64.spdx.json \
+            latchway-linux-arm64.spdx.json \
+            latchway-linux-amd64-vulnerability.json \
+            latchway-linux-arm64-vulnerability.json \
+            latchway-linux-amd64-license.json \
+            latchway-linux-arm64-license.json | LC_ALL=C sort > "$expected"
+          cmp --silent "$actual" "$expected"
+          jq --sort-keys . "$receipt" > "$RUNNER_TEMP/handoff-canonical.json"
+          cmp --silent "$receipt" "$RUNNER_TEMP/handoff-canonical.json"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" '
+            (keys | sort) == ["artifacts","candidate_commit","contract","image_repository","images","intended_tag","kind","schema_version","version"] and
+            .schema_version == 1 and .kind == "latchway_candidate_image_handoff" and
+            .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+            .image_repository == "ghcr.io/latchway/latchway" and
+            (.contract | keys | sort) == ["bundle_file_name","bundle_sha256","released_at","status","version"] and
+            .contract.status == "released" and
+            (.contract.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+            .contract.bundle_file_name == ("latchway-contract-" + .contract.version + ".tar.gz") and
+            (.contract.bundle_sha256 | test("^[0-9a-f]{64}$")) and
+            (.contract.released_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+            (.images | keys | sort) == ["linux/amd64","linux/arm64"] and
+            .images["linux/amd64"].local_reference == "latchway:candidate-amd64" and
+            .images["linux/arm64"].local_reference == "latchway:candidate-arm64" and
+            .images["linux/amd64"].archive.path == "latchway-linux-amd64.image.tar" and
+            .images["linux/arm64"].archive.path == "latchway-linux-arm64.image.tar" and
+            all(.images[];
+              (keys | sort) == ["archive","image_id","local_reference"] and
+              (.image_id | test("^sha256:[0-9a-f]{64}$")) and
+              (.archive | keys | sort) == ["path","sha256","size_bytes"] and
+              (.archive.path | test("^latchway-linux-(amd64|arm64)\\.image\\.tar$")) and
+              (.archive.sha256 | test("^[0-9a-f]{64}$")) and
+              (.archive.size_bytes >= 1024 and .archive.size_bytes <= 2147483648)) and
+            .images["linux/amd64"].image_id != .images["linux/arm64"].image_id and
+            (.artifacts | length) == 7 and
+            ([.artifacts[].path] | sort) == ["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"] and
+            ([.artifacts[].path] | unique | length) == 7 and
+            all(.artifacts[]; (keys | sort) == ["path","sha256"] and (.sha256 | test("^[0-9a-f]{64}$")))
+          ' "$receipt" >/dev/null
+          jq --exit-status --raw-output '.images[] | [.archive.path,.archive.sha256,(.archive.size_bytes|tostring)] | @tsv' "$receipt" |
+            while IFS=$'\t' read -r relative sha size; do
+              file="$root/$relative"
+              test -f "$file" && test ! -L "$file" && test -s "$file"
+              test "$(sha256sum "$file" | awk '{print $1}')" = "$sha"
+              test "$(stat --format=%s "$file")" = "$size"
+              tar -tf "$file" >/dev/null
+            done
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$receipt" |
+            while IFS=$'\t' read -r relative sha; do
+              file="$root/$relative"
+              test -f "$file" && test ! -L "$file" && test -s "$file"
+              test "$(sha256sum "$file" | awk '{print $1}')" = "$sha"
+            done
+          test "$(sha256sum "$root/latchway-contract.tar.gz" | awk '{print $1}')" = "$(jq --raw-output .contract.bundle_sha256 "$receipt")"
+          for architecture in amd64 arm64; do
+            jq --exit-status 'type == "object" and (.SchemaVersion | type == "integer" and . >= 2) and (.Results | type == "array") and all(.Results[]; type == "object" and ((.Vulnerabilities // []) | type == "array") and all((.Vulnerabilities // [])[]; type == "object" and .Severity != "HIGH" and .Severity != "CRITICAL"))' "$root/latchway-linux-$architecture-vulnerability.json" >/dev/null
+            jq --exit-status 'type == "object" and (.SchemaVersion | type == "integer" and . >= 2) and (.Results | type == "array") and all(.Results[]; type == "object" and ((.Licenses // []) | type == "array") and all((.Licenses // [])[]; type == "object" and .Severity != "HIGH" and .Severity != "CRITICAL"))' "$root/latchway-linux-$architecture-license.json" >/dev/null
+            jq --exit-status 'type == "object" and .spdxVersion == "SPDX-2.3" and (.SPDXID | type == "string" and startswith("SPDXRef-")) and (.documentNamespace | type == "string" and length > 0) and (.creationInfo.created | type == "string" and length > 0) and (.packages | type == "array" and length > 0) and all(.packages[]; type == "object" and (.SPDXID | type == "string" and startswith("SPDXRef-")) and (.name | type == "string" and length > 0))' "$root/latchway-linux-$architecture.spdx.json" >/dev/null
+          done
+          empty_config="$RUNNER_TEMP/credential-free-docker"
+          mkdir -p "$empty_config"
+          chmod 0700 "$empty_config"
+          test -z "$(find "$empty_config" -mindepth 1 -print -quit)"
+          printf 'DOCKER_CONFIG=%s\n' "$empty_config" >> "$GITHUB_ENV"
+          docker load --input "$root/latchway-linux-amd64.image.tar" >/dev/null
+          docker load --input "$root/latchway-linux-arm64.image.tar" >/dev/null
+          for architecture in amd64 arm64; do
+            reference=$(jq --raw-output --arg platform "linux/$architecture" '.images[$platform].local_reference' "$receipt")
+            expected_id=$(jq --raw-output --arg platform "linux/$architecture" '.images[$platform].image_id' "$receipt")
+            test "$(docker image inspect --format '{{.Id}}' "$reference")" = "$expected_id"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$reference")" = "linux/$architecture"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$reference")" = "$CANDIDATE_COMMIT"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$reference")" = "${INTENDED_TAG#v}"
+          done
+          echo "image=ghcr.io/latchway/latchway" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Authenticate only the fresh no-checkout publisher
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish exact platform images and assemble the immutable index
+        id: publish
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          IMAGE: ${{ steps.handoff.outputs.image }}
+        run: |
+          set -Eeuo pipefail
+          for architecture in amd64 arm64; do
+            local_reference="latchway:candidate-$architecture"
+            remote_tag="$IMAGE:candidate-$CANDIDATE_COMMIT-$architecture"
+            docker tag "$local_reference" "$remote_tag"
+            docker push "$remote_tag" > "$RUNNER_TEMP/push-$architecture.txt" 2>&1
+            digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-$architecture.txt")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s_digest=%s\n' "$architecture" "$digest" >> "$GITHUB_OUTPUT"
+          done
+          amd64_digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-amd64.txt")
+          arm64_digest=$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*$/\1/p' "$RUNNER_TEMP/push-arm64.txt")
+          docker buildx imagetools create \
+            --tag "$IMAGE:candidate-$CANDIDATE_COMMIT" \
+            "$IMAGE@$amd64_digest" "$IMAGE@$arm64_digest"
+          docker buildx imagetools inspect --raw "$IMAGE:candidate-$CANDIDATE_COMMIT" > "$RUNNER_TEMP/published-index.json"
+          jq --exit-status --arg amd64 "$amd64_digest" --arg arm64 "$arm64_digest" '
+            .schemaVersion == 2 and (.manifests | length) == 2 and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] == [$amd64]) and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] == [$arm64])
+          ' "$RUNNER_TEMP/published-index.json" >/dev/null
+          index_digest="sha256:$(sha256sum "$RUNNER_TEMP/published-index.json" | awk '{print $1}')"
+          echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect --raw "$IMAGE@$index_digest" > "$RUNNER_TEMP/published-index-by-digest.json"
+          cmp --silent "$RUNNER_TEMP/published-index.json" "$RUNNER_TEMP/published-index-by-digest.json"
+      - name: Construct the exact unsigned candidate manifest without candidate code
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          IMAGE: ${{ steps.handoff.outputs.image }}
+          INDEX_DIGEST: ${{ steps.publish.outputs.index_digest }}
+          AMD64_DIGEST: ${{ steps.publish.outputs.amd64_digest }}
+          ARM64_DIGEST: ${{ steps.publish.outputs.arm64_digest }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/handoff"
+          output="$RUNNER_TEMP/candidate"
+          receipt="$root/latchway-candidate-image-handoff.json"
+          mkdir -p "$output"
+          jq --raw-output '.artifacts[].path' "$receipt" | while IFS= read -r relative; do
+            install -m 0444 -- "$root/$relative" "$output/$relative"
+          done
+          created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n --sort-keys \
+            --arg created_at "$created_at" \
+            --arg commit "$CANDIDATE_COMMIT" \
+            --arg tag "$INTENDED_TAG" \
+            --arg image "$IMAGE" \
+            --arg index "$INDEX_DIGEST" \
+            --arg amd64 "$AMD64_DIGEST" \
+            --arg arm64 "$ARM64_DIGEST" \
+            --slurpfile receipt "$receipt" '
+              {
+                schema_version: 1,
+                kind: "latchway_release_candidate",
+                status: "passed",
+                created_at: $created_at,
+                candidate_commit: $commit,
+                intended_tag: $tag,
+                version: ($tag | ltrimstr("v")),
+                contract: $receipt[0].contract,
+                image: {repository:$image,index_digest:$index,platforms:{"linux/amd64":$amd64,"linux/arm64":$arm64}},
+                artifacts: $receipt[0].artifacts
+              }
+            ' > "$output/latchway-candidate.json"
+          test "$(find "$output" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 8
+      - name: Retain unsigned candidate evidence for a fresh signing runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-candidate-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Remove the no-checkout publisher registry credential
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+
+  sign:
+    if: github.ref == 'refs/heads/main'
+    needs: publish-image
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Download unsigned candidate evidence without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-candidate-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate
+      - name: Validate candidate identity, exact artifacts, scan results, and SBOMs without candidate code
+        id: candidate
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/candidate"
+          manifest="$root/latchway-candidate.json"
+          test -f "$manifest" && test ! -L "$manifest" && test -s "$manifest"
+          test -z "$(find "$root" -type l -print -quit)"
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.([1-9][0-9]*))?$ ]]
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          jq --sort-keys . "$manifest" > "$RUNNER_TEMP/candidate-canonical.json"
+          cmp --silent "$manifest" "$RUNNER_TEMP/candidate-canonical.json"
+          expected_artifacts='["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]'
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
+            --argjson expected "$expected_artifacts" '
+              (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == $tag and .version == ($tag | ltrimstr("v")) and
+              (.created_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+              (.contract | keys | sort) == ["bundle_file_name","bundle_sha256","released_at","status","version"] and
+              .contract.status == "released" and
+              (.contract.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              .contract.bundle_file_name == ("latchway-contract-" + .contract.version + ".tar.gz") and
+              (.contract.bundle_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              (.image | keys | sort) == ["index_digest","platforms","repository"] and
+              .image.repository == "ghcr.io/latchway/latchway" and
+              (.image.index_digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+              (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+              all(.image.platforms[]; type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+              .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"] and
+              (.artifacts | type == "array" and length == 7) and
+              ([.artifacts[].path] | sort) == $expected and
+              all(.artifacts[];
+                type == "object" and
+                (keys | sort) == ["path","sha256"] and
+                (.path | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
+                (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))) and
+              ([.artifacts[].path] | unique | length) == 7 and
+              ([.artifacts[] | select(.path == "latchway-contract.tar.gz") | .sha256] == [.contract.bundle_sha256])
+            ' "$manifest" >/dev/null
+          actual="$RUNNER_TEMP/candidate-actual-files"
+          expected="$RUNNER_TEMP/candidate-expected-files"
+          find "$root" -maxdepth 1 -type f -print \
+            | while IFS= read -r path; do basename "$path"; done \
+            | LC_ALL=C sort > "$actual"
+          {
+            printf '%s\n' latchway-candidate.json
+            jq --raw-output '.artifacts[].path' "$manifest"
+          } | LC_ALL=C sort > "$expected"
+          test -z "$(uniq -d "$expected")"
+          cmp --silent "$actual" "$expected"
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$manifest" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                file="$root/$relative"
+                test -f "$file" && test ! -L "$file"
+                test "$(sha256sum "$file" | awk '{print $1}')" = "$expected_sha"
+              done
+          for architecture in amd64 arm64; do
+            vulnerability="$root/latchway-linux-$architecture-vulnerability.json"
+            license="$root/latchway-linux-$architecture-license.json"
+            sbom="$root/latchway-linux-$architecture.spdx.json"
+            jq --exit-status '
+              type == "object" and
+              (.SchemaVersion | type == "integer" and . >= 2) and
+              (.Results | type == "array") and
+              all(.Results[];
+                type == "object" and
+                ((.Vulnerabilities // []) | type == "array") and
+                all((.Vulnerabilities // [])[];
+                  type == "object" and (.Severity != "HIGH" and .Severity != "CRITICAL")))
+            ' "$vulnerability" >/dev/null
+            jq --exit-status '
+              type == "object" and
+              (.SchemaVersion | type == "integer" and . >= 2) and
+              (.Results | type == "array") and
+              all(.Results[];
+                type == "object" and
+                ((.Licenses // []) | type == "array") and
+                all((.Licenses // [])[];
+                  type == "object" and (.Severity != "HIGH" and .Severity != "CRITICAL")))
+            ' "$license" >/dev/null
+            jq --exit-status '
+              type == "object" and .spdxVersion == "SPDX-2.3" and
+              (.SPDXID | type == "string" and startswith("SPDXRef-")) and
+              (.documentNamespace | type == "string" and length > 0) and
+              (.creationInfo.created | type == "string" and length > 0) and
+              (.packages | type == "array" and length > 0) and
+              all(.packages[];
+                type == "object" and
+                (.SPDXID | type == "string" and startswith("SPDXRef-")) and
+                (.name | type == "string" and length > 0))
+            ' "$sbom" >/dev/null
+          done
+          echo "image=$(jq --raw-output .image.repository "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "index_digest=$(jq --raw-output .image.index_digest "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "amd64_digest=$(jq --raw-output '.image.platforms["linux/amd64"]' "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "arm64_digest=$(jq --raw-output '.image.platforms["linux/arm64"]' "$manifest")" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify the registry index and exact platform children without candidate code
+        shell: bash
+        env:
+          IMAGE: ${{ steps.candidate.outputs.image }}
+          INDEX_DIGEST: ${{ steps.candidate.outputs.index_digest }}
+          AMD64_DIGEST: ${{ steps.candidate.outputs.amd64_digest }}
+          ARM64_DIGEST: ${{ steps.candidate.outputs.arm64_digest }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          set -Eeuo pipefail
+          reference="$IMAGE@${INDEX_DIGEST}"
+          docker buildx imagetools inspect --raw "$reference" > "$RUNNER_TEMP/registry-index.json"
+          jq --exit-status --arg amd64 "$AMD64_DIGEST" --arg arm64 "$ARM64_DIGEST" '
+            (.schemaVersion == 2) and (.manifests | type == "array") and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] == [$amd64]) and
+            ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] == [$arm64]) and
+            all(.manifests[];
+              (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+              (.size | type == "number" and . > 0) and
+              (.mediaType | type == "string" and length > 0))
+          ' "$RUNNER_TEMP/registry-index.json" >/dev/null
+          docker buildx imagetools inspect --raw \
+            "$IMAGE:candidate-$CANDIDATE_COMMIT" > "$RUNNER_TEMP/registry-tag-index.json"
+          cmp --silent "$RUNNER_TEMP/registry-index.json" "$RUNNER_TEMP/registry-tag-index.json"
+          test "$(sha256sum "$RUNNER_TEMP/registry-tag-index.json" | awk '{print $1}')" = "${INDEX_DIGEST#sha256:}"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the validated candidate index with GitHub OIDC
+        shell: bash
+        env:
+          IMAGE: ${{ steps.candidate.outputs.image }}
+          DIGEST: ${{ steps.candidate.outputs.index_digest }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -Eeuo pipefail
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE@$DIGEST"
+      - name: Publish index provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.candidate.outputs.image }}
+          subject-digest: ${{ steps.candidate.outputs.index_digest }}
+          push-to-registry: true
+      - name: Publish exact amd64 SBOM attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.candidate.outputs.image }}
+          subject-digest: ${{ steps.candidate.outputs.amd64_digest }}
+          sbom-path: ${{ runner.temp }}/candidate/latchway-linux-amd64.spdx.json
+          push-to-registry: true
+      - name: Publish exact arm64 SBOM attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.candidate.outputs.image }}
+          subject-digest: ${{ steps.candidate.outputs.arm64_digest }}
+          sbom-path: ${{ runner.temp }}/candidate/latchway-linux-arm64.spdx.json
+          push-to-registry: true
+      - name: Attest the exact validated candidate manifest
+        id: candidate-attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/candidate/latchway-candidate.json
+      - name: Retain the candidate attestation bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.candidate-attestation.outputs.bundle-path }}
+        run: install -m 0600 -- "$BUNDLE_PATH" "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json"
+      - name: Retain immutable signed candidate evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: latchway-candidate-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate/
+          if-no-files-found: error
+          compression-level: 0
           retention-days: 90
+      - name: Remove the source-free signer registry credential
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true

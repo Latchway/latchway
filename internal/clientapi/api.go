@@ -27,6 +27,10 @@ const (
 	exchangePath              = "/client/v1/sessions"
 	refreshPath               = "/client/v1/sessions/refresh"
 	revokePath                = "/client/v1/installations/current"
+	provisionComponentPath    = "/client/v1/installation-families/current/components"
+	componentSessionPath      = "/client/v1/component-sessions"
+	revokeFamilyPath          = "/client/v1/installation-families/current"
+	revokeComponentPrefix     = "/client/v1/installation-families/current/components/"
 	diagnosticsPath           = "/client/v1/diagnostics"
 	featureQuotaPrefix        = "/client/v1/features/"
 	featureQuotaSuffix        = "/quota"
@@ -59,8 +63,11 @@ func New(config Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets := make(map[string]url.URL, 5)
-	for _, path := range []string{challengePath, exchangePath, refreshPath, revokePath, diagnosticsPath} {
+	targets := make(map[string]url.URL, 9)
+	for _, path := range []string{
+		challengePath, exchangePath, refreshPath, revokePath, diagnosticsPath,
+		provisionComponentPath, componentSessionPath, revokeFamilyPath,
+	} {
 		targets[path] = url.URL{Scheme: origin.Scheme, Host: origin.Host, Path: path}
 	}
 	return &API{
@@ -148,6 +155,14 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.getFeatureQuota(w, r, correlationID, logicalID, feature)
 		return
 	}
+	if componentID, ok := componentFromRevokePath(path); ok {
+		if r.Method != http.MethodDelete {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.revokeComponent(w, r, correlationID, logicalID.String(), componentID, path)
+		return
+	}
 
 	switch path {
 	case challengePath:
@@ -168,6 +183,24 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		api.refreshSession(w, r, correlationID, logicalID.String())
+	case provisionComponentPath:
+		if r.Method != http.MethodPost {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.provisionComponent(w, r, correlationID, logicalID.String())
+	case componentSessionPath:
+		if r.Method != http.MethodPost {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.createComponentSession(w, r, correlationID, logicalID.String())
+	case revokeFamilyPath:
+		if r.Method != http.MethodDelete {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		api.revokeCurrentFamily(w, r, correlationID, logicalID.String())
 	case revokePath:
 		if r.Method != http.MethodDelete {
 			api.methodNotAllowed(w, correlationID)
@@ -195,6 +228,17 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.writeProblem(w, correlationID, problem.Error{Code: "resource_not_found", Detail: "The client endpoint was not found."})
 	}
+}
+
+func componentFromRevokePath(path string) (string, bool) {
+	if !strings.HasPrefix(path, revokeComponentPrefix) {
+		return "", false
+	}
+	componentID := strings.TrimPrefix(path, revokeComponentPrefix)
+	if strings.Contains(componentID, "/") || !clientComponentPattern.MatchString(componentID) {
+		return "", false
+	}
+	return componentID, true
 }
 
 func featureFromQuotaPath(path string) (string, bool) {
@@ -260,7 +304,7 @@ func (api *API) exchangeSession(w http.ResponseWriter, r *http.Request, requestI
 		api.writeDependencyFailure(w, requestID, err)
 		return
 	}
-	document, err := grantDocumentFor(result, declaration.sdk)
+	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion == buildinfo.ProtocolVersion)
 	if err != nil {
 		api.internal(w, requestID)
 		return
@@ -290,12 +334,156 @@ func (api *API) refreshSession(w http.ResponseWriter, r *http.Request, requestID
 		api.writeDependencyFailure(w, requestID, err)
 		return
 	}
-	document, err := grantDocumentFor(result, declaration.sdk)
+	document, err := grantDocumentFor(result, declaration.sdk, declaration.protocolVersion == buildinfo.ProtocolVersion)
 	if err != nil {
 		api.internal(w, requestID)
 		return
 	}
 	api.writeSuccess(w, requestID, http.StatusOK, "no-store", document)
+}
+
+func (api *API) provisionComponent(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input, violation := parseProvisionComponentRequest(r, declaration)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input.AccessToken = accessToken
+	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, provisionComponentPath, proof)
+	result, err := api.coordinator.ProvisionComponent(r.Context(), input)
+	if err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	document, err := provisionComponentDocumentFor(result)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
+}
+
+func (api *API) createComponentSession(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input, violation := parseComponentSessionRequest(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input.Metadata = api.metadata(r, logicalRequestID, declaration, http.MethodPost, componentSessionPath, proof)
+	result, err := api.coordinator.CreateComponentSession(r.Context(), input)
+	if err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	document, err := componentSessionDocumentFor(result, declaration.sdk)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
+}
+
+func (api *API) revokeComponent(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID, componentID, path string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	metadata := api.metadataForPath(r, logicalRequestID, declaration, http.MethodDelete, path, proof)
+	if err := api.coordinator.RevokeComponent(r.Context(), RevokeComponentInput{
+		Metadata: metadata, AccessToken: accessToken, ComponentID: componentID,
+	}); err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) revokeCurrentFamily(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if err := api.coordinator.RevokeCurrentFamily(r.Context(), RevokeFamilyInput{
+		Metadata:    api.metadata(r, logicalRequestID, declaration, http.MethodDelete, revokeFamilyPath, proof),
+		AccessToken: accessToken,
+	}); err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (api *API) revokeCurrentInstallation(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID string) {
@@ -391,6 +579,7 @@ func (api *API) getFeatureQuota(w http.ResponseWriter, r *http.Request, requestI
 	input := FeatureQuotaInput{
 		Metadata: RequestMetadata{
 			RequestID: logicalRequestID.String(), SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
+			Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
 			HTTPMethod: http.MethodGet, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
 		},
 		LogicalRequestID: logicalRequestID,
@@ -435,7 +624,8 @@ func (api *API) publicDiscovery(w http.ResponseWriter, r *http.Request, requestI
 	api.writeSuccess(w, requestID, http.StatusOK, "public, max-age=300", discoveryDocument{
 		ServerVersion:             buildinfo.Version,
 		ContractVersion:           buildinfo.ContractVersion,
-		SupportedProtocolVersions: []int{1},
+		CurrentProtocolVersion:    buildinfo.CurrentProtocolVersion,
+		SupportedProtocolVersions: buildinfo.SupportedProtocolVersions(),
 		SessionEndpoint:           exchangePath,
 		DPoPAlgorithms:            []string{"ES256"},
 		MaximumClockSkewSeconds:   300,
@@ -444,8 +634,18 @@ func (api *API) publicDiscovery(w http.ResponseWriter, r *http.Request, requestI
 
 func (api *API) metadata(r *http.Request, requestID string, declaration clientDeclaration, method, path string, proof SensitiveString) RequestMetadata {
 	target := api.targets[path]
+	return api.metadataForTarget(r, requestID, declaration, method, target, proof)
+}
+
+func (api *API) metadataForPath(r *http.Request, requestID string, declaration clientDeclaration, method, path string, proof SensitiveString) RequestMetadata {
+	target := url.URL{Scheme: api.origin.Scheme, Host: api.origin.Host, Path: path}
+	return api.metadataForTarget(r, requestID, declaration, method, target, proof)
+}
+
+func (api *API) metadataForTarget(r *http.Request, requestID string, declaration clientDeclaration, method string, target url.URL, proof SensitiveString) RequestMetadata {
 	return RequestMetadata{
 		RequestID: requestID, SDK: declaration.sdk, SDKVersion: declaration.sdkVersion,
+		Framework: declaration.framework, FrameworkVersion: declaration.frameworkVersion,
 		HTTPMethod: method, TargetURL: target, Origin: mustBrowserOrigin(r), DPoPProof: proof,
 	}
 }
@@ -470,14 +670,16 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 	expectedMethod := ""
 	path := r.URL.Path
 	switch path {
-	case challengePath, exchangePath, refreshPath:
+	case challengePath, exchangePath, refreshPath, provisionComponentPath, componentSessionPath:
 		expectedMethod = http.MethodPost
-	case revokePath:
+	case revokePath, revokeFamilyPath:
 		expectedMethod = http.MethodDelete
 	case diagnosticsPath, jwksPath, discoveryPath:
 		expectedMethod = http.MethodGet
 	default:
-		if _, ok := featureFromQuotaPath(path); ok {
+		if _, ok := componentFromRevokePath(path); ok {
+			expectedMethod = http.MethodDelete
+		} else if _, ok := featureFromQuotaPath(path); ok {
 			expectedMethod = http.MethodGet
 		}
 	}
@@ -492,7 +694,7 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 		return
 	}
 	w.Header().Set("Access-Control-Allow-Methods", expectedMethod)
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, DPoP, Idempotency-Key, X-Latchway-Protocol-Version, X-Latchway-Request-ID, X-Latchway-SDK, X-Latchway-SDK-Version")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, DPoP, Idempotency-Key, X-Latchway-Framework, X-Latchway-Framework-Version, X-Latchway-Protocol-Version, X-Latchway-Request-ID, X-Latchway-SDK, X-Latchway-SDK-Version")
 	w.Header().Set("Access-Control-Max-Age", "600")
 	w.Header().Set("Cache-Control", "no-store")
 	weborigin.AppendVary(w.Header(), "Access-Control-Request-Method")
@@ -508,6 +710,7 @@ func allowedClientPreflightHeaders(headers []string) bool {
 	allowed := map[string]struct{}{
 		"authorization": {}, "content-type": {}, "dpop": {}, "idempotency-key": {},
 		"x-latchway-protocol-version": {}, "x-latchway-request-id": {},
+		"x-latchway-framework": {}, "x-latchway-framework-version": {},
 		"x-latchway-sdk": {}, "x-latchway-sdk-version": {},
 	}
 	for _, header := range headers {
@@ -570,7 +773,7 @@ func (api *API) writeDependencyFailureForFeature(w http.ResponseWriter, requestI
 		value.Feature = feature
 	}
 	if failure.Code == "protocol_version_unsupported" {
-		value.SupportedProtocolVersions = []int{1}
+		value.SupportedProtocolVersions = buildinfo.SupportedProtocolVersions()
 	}
 	api.writeProblem(w, requestID, value)
 }
@@ -594,6 +797,14 @@ func allowedDependencyCode(code string) bool {
 		"attestation_required", "attestation_unsupported", "attestation_invalid", "attestation_stale", "attestation_step_up_required",
 		"dpop_missing", "dpop_invalid", "dpop_replayed", "dpop_nonce_required",
 		"session_expired", "session_revoked", "refresh_token_reused", "installation_revoked",
+		"installation_family_revoked", "installation_family_not_found",
+		"component_definition_not_found", "component_not_configured", "component_not_provisioned",
+		"component_revoked", "component_key_invalid", "component_key_replaced",
+		"component_delegation_expired", "component_feature_not_granted",
+		"component_parent_trust_expired", "component_direct_attestation_required",
+		"containing_app_setup_required", "framework_integration_unsupported",
+		"framework_version_unsupported", "transport_destination_not_allowed",
+		"transport_request_not_replayable",
 		"server_not_ready", "protocol_version_unsupported", "conflict", "internal_error":
 		return true
 	default:
@@ -648,6 +859,40 @@ func safeFailureDetail(code string) string {
 		return "Refresh-token reuse was detected and the token family is no longer active."
 	case "installation_revoked":
 		return "The installation is no longer active."
+	case "installation_family_revoked":
+		return "The installation family and all component sessions are no longer active."
+	case "installation_family_not_found":
+		return "The authenticated installation family could not be found."
+	case "component_definition_not_found":
+		return "The requested component definition is not configured."
+	case "component_not_configured":
+		return "The requested component is not permitted by the active configuration."
+	case "component_not_provisioned":
+		return "The component does not have a current provisioning grant."
+	case "component_revoked":
+		return "The component is no longer active."
+	case "component_key_invalid":
+		return "The component public key or proof is invalid."
+	case "component_key_replaced":
+		return "The component key has been replaced."
+	case "component_delegation_expired":
+		return "The component delegation is expired or already consumed."
+	case "component_feature_not_granted":
+		return "The requested feature set is outside the component delegation."
+	case "component_parent_trust_expired":
+		return "The parent component trust must be renewed before this operation."
+	case "component_direct_attestation_required":
+		return "The component must complete its configured direct attestation step."
+	case "containing_app_setup_required":
+		return "The trusted containing application must provision this component first."
+	case "framework_integration_unsupported":
+		return "The declared framework integration is not supported."
+	case "framework_version_unsupported":
+		return "The declared framework version is not supported."
+	case "transport_destination_not_allowed":
+		return "The authenticated transport destination is not allowed."
+	case "transport_request_not_replayable":
+		return "The consumed request body cannot be replayed safely."
 	case "feature_not_found":
 		return "The requested application feature is not configured."
 	case "feature_not_allowed":
@@ -659,7 +904,7 @@ func safeFailureDetail(code string) string {
 	case "server_not_ready":
 		return "The gateway is not ready to complete this session operation."
 	case "protocol_version_unsupported":
-		return "This gateway supports Latchway protocol version 1."
+		return "This gateway supports Latchway protocol versions 1 and 2."
 	case "conflict":
 		return "The one-time session state has already changed."
 	default:
@@ -806,6 +1051,7 @@ type challengeDocument struct {
 type discoveryDocument struct {
 	ServerVersion             string   `json:"server_version"`
 	ContractVersion           string   `json:"contract_version"`
+	CurrentProtocolVersion    int      `json:"current_protocol_version"`
 	SupportedProtocolVersions []int    `json:"supported_protocol_versions"`
 	SessionEndpoint           string   `json:"session_endpoint"`
 	DPoPAlgorithms            []string `json:"dpop_algorithms"`
@@ -883,7 +1129,7 @@ func diagnosticsDocumentFor(result DiagnosticsResult, sdk, requestID string) (di
 	}
 	return diagnosticsDocument{
 		RequestID: requestID, ServerVersion: buildinfo.Version,
-		ContractVersion: buildinfo.ContractVersion, ProtocolVersion: 1,
+		ContractVersion: buildinfo.ContractVersion, ProtocolVersion: buildinfo.CurrentProtocolVersion,
 		Installation: installation,
 		Session: diagnosticsSessionDocument{
 			ExpiresAt: result.SessionExpiresAt, RefreshAvailable: result.RefreshAvailable,
@@ -893,16 +1139,81 @@ func diagnosticsDocumentFor(result DiagnosticsResult, sdk, requestID string) (di
 }
 
 type grantDocument struct {
-	AccessToken      string              `json:"access_token"`
-	TokenType        string              `json:"token_type"`
-	ExpiresIn        int                 `json:"expires_in"`
-	RefreshToken     string              `json:"refresh_token"`
-	RefreshExpiresIn int                 `json:"refresh_expires_in"`
-	Installation     InstallationSummary `json:"installation"`
-	Trust            TrustSummary        `json:"trust"`
+	AccessToken        string                     `json:"access_token"`
+	TokenType          string                     `json:"token_type"`
+	ExpiresIn          int                        `json:"expires_in"`
+	RefreshToken       string                     `json:"refresh_token"`
+	RefreshExpiresIn   int                        `json:"refresh_expires_in"`
+	Installation       InstallationSummary        `json:"installation"`
+	InstallationFamily *InstallationFamilySummary `json:"installation_family,omitempty"`
+	Component          *ClientComponentSummary    `json:"component,omitempty"`
+	Trust              TrustSummary               `json:"trust"`
 }
 
-func grantDocumentFor(result GrantResult, sdk string) (grantDocument, error) {
+type provisionComponentDocument struct {
+	ComponentID           string                          `json:"component_id"`
+	InstallationFamilyID  string                          `json:"installation_family_id"`
+	Trust                 provisionComponentTrustDocument `json:"trust"`
+	GrantedFeatures       []string                        `json:"granted_features"`
+	RefreshGrant          string                          `json:"refresh_grant"`
+	RefreshGrantExpiresAt time.Time                       `json:"refresh_grant_expires_at"`
+}
+
+type provisionComponentTrustDocument struct {
+	Source    string    `json:"source"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func provisionComponentDocumentFor(result ProvisionComponentResult) (provisionComponentDocument, error) {
+	grant := result.RefreshGrant.Reveal()
+	if !clientComponentPattern.MatchString(result.ComponentID) ||
+		!installationFamilyPattern.MatchString(result.InstallationFamilyID) ||
+		(result.TrustSource != "delegated_from_attested_root" && result.TrustSource != "delegated_identity_only") ||
+		result.TrustExpiresAt.IsZero() || result.RefreshGrantExpiresAt.IsZero() ||
+		!result.RefreshGrantExpiresAt.Equal(result.TrustExpiresAt) ||
+		!validCredential(grant, 32, 2048) || len(result.GrantedFeatures) == 0 ||
+		len(result.GrantedFeatures) > 256 {
+		return provisionComponentDocument{}, errors.New("invalid component provisioning result")
+	}
+	features := append([]string(nil), result.GrantedFeatures...)
+	seen := make(map[string]struct{}, len(features))
+	for _, feature := range features {
+		if !identifierPattern.MatchString(feature) {
+			return provisionComponentDocument{}, errors.New("invalid component provisioning features")
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			return provisionComponentDocument{}, errors.New("duplicate component provisioning feature")
+		}
+		seen[feature] = struct{}{}
+	}
+	return provisionComponentDocument{
+		ComponentID: result.ComponentID, InstallationFamilyID: result.InstallationFamilyID,
+		Trust:           provisionComponentTrustDocument{Source: result.TrustSource, ExpiresAt: result.TrustExpiresAt.UTC()},
+		GrantedFeatures: features, RefreshGrant: grant,
+		RefreshGrantExpiresAt: result.RefreshGrantExpiresAt.UTC(),
+	}, nil
+}
+
+type componentSessionDocument struct {
+	AccessToken      string    `json:"access_token"`
+	ExpiresIn        int       `json:"expires_in"`
+	RefreshToken     string    `json:"refresh_token"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
+}
+
+func componentSessionDocumentFor(result GrantResult, sdk string) (componentSessionDocument, error) {
+	document, err := grantDocumentFor(result, sdk, true)
+	if err != nil || result.Component == nil || result.Component.IsRoot ||
+		result.RefreshExpiresAt.IsZero() || result.RefreshExpiresAt.Location() != time.UTC {
+		return componentSessionDocument{}, errors.New("invalid component session result")
+	}
+	return componentSessionDocument{
+		AccessToken: document.AccessToken, ExpiresIn: document.ExpiresIn,
+		RefreshToken: document.RefreshToken, RefreshExpiresAt: result.RefreshExpiresAt,
+	}, nil
+}
+
+func grantDocumentFor(result GrantResult, sdk string, includeComponentMetadata bool) (grantDocument, error) {
 	accessToken := result.AccessToken.Reveal()
 	refreshToken := result.RefreshToken.Reveal()
 	if !validCredential(accessToken, 64, 16384) || !validCredential(refreshToken, 32, 2048) || result.ExpiresIn < 60 || result.ExpiresIn > 3600 || result.RefreshExpiresIn < 300 || result.RefreshExpiresIn > 31536000 {
@@ -916,14 +1227,87 @@ func grantDocumentFor(result GrantResult, sdk string) (grantDocument, error) {
 	if !validAttestationProvider(trust.Provider) || !validTrustLevel(trust.Level) || trust.VerifiedAt.IsZero() || trust.ExpiresAt.IsZero() || !trust.ExpiresAt.After(trust.VerifiedAt) {
 		return grantDocument{}, errors.New("invalid trust result")
 	}
-	return grantDocument{
+	if (result.InstallationFamily == nil) != (result.Component == nil) ||
+		(includeComponentMetadata && result.Component == nil) {
+		return grantDocument{}, errors.New("incomplete component session result")
+	}
+	if result.Component != nil && !validComponentGrant(
+		*result.InstallationFamily, *result.Component, trust, installation,
+	) {
+		return grantDocument{}, errors.New("invalid component session result")
+	}
+	document := grantDocument{
 		AccessToken: accessToken, TokenType: "DPoP", ExpiresIn: result.ExpiresIn,
 		RefreshToken: refreshToken, RefreshExpiresIn: result.RefreshExpiresIn,
-		Installation: installation, Trust: TrustSummary{
+		Installation: installation,
+		Trust: TrustSummary{
 			Provider: trust.Provider, Level: trust.Level,
 			VerifiedAt: trust.VerifiedAt.UTC(), ExpiresAt: trust.ExpiresAt.UTC(),
 		},
-	}, nil
+	}
+	if includeComponentMetadata {
+		document.InstallationFamily = result.InstallationFamily
+		document.Component = result.Component
+		document.Trust.Source = trust.Source
+		document.Trust.ParentComponentID = trust.ParentComponentID
+		document.Trust.ParentAttestationProvider = trust.ParentAttestationProvider
+		document.Trust.DelegationID = trust.DelegationID
+	}
+	return document, nil
+}
+
+func validComponentGrant(
+	family InstallationFamilySummary,
+	component ClientComponentSummary,
+	trust TrustSummary,
+	installation InstallationSummary,
+) bool {
+	if !installationFamilyPattern.MatchString(family.ID) || family.Status != "active" ||
+		!clientComponentPattern.MatchString(component.ID) ||
+		!identifierPattern.MatchString(component.DefinitionID) ||
+		!validComponentKind(component.Kind) || !validPlatform(component.Platform) ||
+		component.Platform != installation.Platform || component.Status != "active" ||
+		component.DPoPJKT != installation.DPoPJKT || len(component.GrantedFeatures) == 0 ||
+		len(component.GrantedFeatures) > 256 || !validTrustSource(trust.Source) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(component.GrantedFeatures))
+	for _, feature := range component.GrantedFeatures {
+		if !identifierPattern.MatchString(feature) {
+			return false
+		}
+		if _, exists := seen[feature]; exists {
+			return false
+		}
+		seen[feature] = struct{}{}
+	}
+	if component.IsRoot {
+		return trust.ParentComponentID == "" &&
+			trust.ParentAttestationProvider == "" && trust.DelegationID == ""
+	}
+	return clientComponentPattern.MatchString(trust.ParentComponentID) &&
+		componentDelegationPattern.MatchString(trust.DelegationID)
+}
+
+func validComponentKind(value string) bool {
+	switch value {
+	case "main_app", "widget", "share_extension", "app_intent_extension",
+		"notification_service_extension", "action_extension", "sso_extension",
+		"watch_extension", "android_app", "wear_app", "browser", "node_process":
+		return true
+	default:
+		return false
+	}
+}
+
+func validTrustSource(value string) bool {
+	switch value {
+	case "direct_attested", "delegated_from_attested_root", "delegated_identity_only",
+		"identity_only", "web_risk_verified", "debug":
+		return true
+	default:
+		return false
+	}
 }
 
 func validCredential(value string, minimum, maximum int) bool {

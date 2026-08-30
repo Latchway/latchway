@@ -1,0 +1,99 @@
+---
+title: "Telemetry and jobs"
+description: "Operate redaction-safe metrics, optional OTLP traces, structured logs, readiness, and durable maintenance work."
+---
+
+Latchway exposes process telemetry for operators and keeps correctness-critical
+maintenance state in PostgreSQL. Telemetry is diagnostic; it is never the
+authoritative quota, replay, configuration, or audit store.
+
+## Process endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /healthz` | Process liveness |
+| `GET /readyz` | Database, migrations, active configuration, key material, and required worker-heartbeat readiness |
+| `GET /metrics` | Prometheus exposition backed by OpenTelemetry metrics |
+
+`/metrics` is unauthenticated at the application router. Restrict it at the
+private network, service mesh, load balancer, or scrape identity boundary; its
+bounded labels can still reveal deployment topology such as application,
+environment, feature, route, model alias, and plan.
+
+## Metrics
+
+The stable process surface includes:
+
+- `latchway_client_requests_total` and request-duration histograms;
+- `latchway_upstream_attempts_total` and time-to-first-token histograms;
+- input/output token and integer nano-USD cost counters;
+- quota, concurrency, identity, attestation, and DPoP outcome counters;
+- active request, stream, and reservation gauges;
+- reclaimed-reservation and configuration-activation counters;
+- scheduled self-test outcomes and worker-job duration.
+
+Upstream-attempt telemetry includes a bounded `circuit_state` vocabulary:
+`stale`, `closed`, `open`, and `half_open`. These are recent, per-process
+observations only. They can differ briefly between replicas and never reorder a
+route, suppress or admit a dispatch, or reserve a probe. PostgreSQL-backed
+policy and quota state remain authoritative.
+
+Labels use closed bounded vocabularies. User IDs, installation IDs, request IDs,
+identity subjects, tokens, proofs, credentials, prompt content, and arbitrary
+provider text are not metric labels.
+
+## Traces and logs
+
+Traces are disabled unless the standard OpenTelemetry environment selects the
+OTLP exporter. Configure an OTLP/HTTP endpoint and its authentication in the
+deployment secret boundary, then verify sampling and retention before enabling
+production traffic.
+
+Structured process logs pass through centralized redaction. Access records use
+normalized route families rather than raw paths, and dependency/provider errors
+are reduced to safe categories. Redaction is defense in depth: keep platform
+logs private and review exports before attaching them to an incident or issue.
+
+## Durable worker jobs
+
+At least one worker is required for production readiness. PostgreSQL provides
+claiming, leases, retry/recovery state, and multi-replica coordination for:
+
+- expired quota reservation and concurrency-lease recovery;
+- usage settlement reconciliation;
+- DPoP replay and session-challenge pruning;
+- gateway signing-key rotation;
+- identity-provider JWKS refresh;
+- hourly and daily usage rollups;
+- configured retention work;
+- scheduled credential-aware self-tests;
+- worker heartbeat and job reconciliation.
+
+Workers commit ownership and recovery markers before external effects. An
+ambiguous scheduled provider dispatch is recorded as recovery failure and is
+not automatically repeated.
+
+## Role topology
+
+Begin with `latchway serve --role all`. At higher scale, separate API and worker
+replicas but keep the combined connection budget below the PostgreSQL limit:
+
+```text
+maximum connections
+  = maximum API replicas × API pool size
+  + maximum worker replicas × worker pool size
+  + migration, backup, administration, and maintenance headroom
+```
+
+Leave at least 20 percent database headroom in addition to explicit operational
+slots. A connection pooler does not replace this end-to-end budget.
+
+## Alert baseline
+
+Alert on sustained readiness failure, missing worker heartbeat, migration drift,
+signing/JWKS refresh failure, reservation recovery, self-test rejection or
+recovery, attestation failure-rate shifts, quota-denial anomalies, upstream
+failure/latency, stream saturation, database pool exhaustion, and backup age.
+
+Tie alerts to immutable image, configuration revision, application,
+environment, and safe request IDs—not to secret values or user content.

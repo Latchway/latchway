@@ -1,0 +1,20 @@
+---
+title: "Operate Installation Families"
+description: "Prepare operator views and controls for family membership, trust provenance, component sessions, and aggregate revocation."
+---
+
+<Warning>
+  Installation Family administration is implemented in the draft `1.0.0` API
+  and source console. It remains pre-release until the exact candidate passes
+  protected promotion and publication gates.
+</Warning>
+
+An operator must be able to inspect one Installation Family without exposing
+keys, tokens, raw identity subjects, or attestation evidence. The view should
+show application and environment, pseudonymous user reference, component
+definitions, component trust provenance, session status, quota attribution,
+and revocation state.
+
+Family membership is not a general device graph. Components must share the
+authorized application, environment, user relationship, and logical
+installation boundary defined by the final contract.

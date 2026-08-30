@@ -44,30 +44,56 @@ type Confirmation struct {
 	JKT string `json:"jkt"`
 }
 
+type accessTrustClaims struct {
+	Source                    string `json:"source"`
+	AttestationProvider       string `json:"attestation_provider,omitempty"`
+	ParentComponentID         string `json:"parent_component_id,omitempty"`
+	ParentAttestationProvider string `json:"parent_attestation_provider,omitempty"`
+	DelegationID              string `json:"delegation_id,omitempty"`
+}
+
 type accessTokenClaims struct {
-	OrganizationID   string       `json:"organization_id"`
-	ApplicationID    string       `json:"application_id"`
-	EnvironmentID    string       `json:"environment_id"`
-	InstallationID   string       `json:"installation_id"`
-	SessionGrantID   string       `json:"session_grant_id"`
-	IdentityProvider string       `json:"identity_provider"`
-	AttestationLevel string       `json:"attestation_level"`
-	PolicyRevision   string       `json:"policy_revision"`
-	Confirmation     Confirmation `json:"cnf"`
+	OrganizationID        string             `json:"organization_id"`
+	ApplicationID         string             `json:"application_id"`
+	EnvironmentID         string             `json:"environment_id"`
+	InstallationID        string             `json:"installation_id"`
+	InstallationFamilyID  string             `json:"installation_family_id,omitempty"`
+	ComponentID           string             `json:"component_id,omitempty"`
+	ComponentDefinitionID string             `json:"component_definition_id,omitempty"`
+	ComponentKind         string             `json:"component_kind,omitempty"`
+	ComponentIsRoot       bool               `json:"component_is_root,omitempty"`
+	Trust                 *accessTrustClaims `json:"trust,omitempty"`
+	Features              []string           `json:"features,omitempty"`
+	SessionGrantID        string             `json:"session_grant_id"`
+	IdentityProvider      string             `json:"identity_provider"`
+	AttestationLevel      string             `json:"attestation_level"`
+	PolicyRevision        string             `json:"policy_revision"`
+	Confirmation          Confirmation       `json:"cnf"`
 	jwt.RegisteredClaims
 }
 
 type AccessIssueInput struct {
-	OrganizationID    string
-	ApplicationID     string
-	EnvironmentID     string
-	ApplicationUserID string
-	InstallationID    string
-	SessionGrantID    string
-	IdentityProvider  string
-	TrustLevel        string
-	PolicyRevisionID  string
-	DPoPJKT           string
+	OrganizationID            string
+	ApplicationID             string
+	EnvironmentID             string
+	ApplicationUserID         string
+	InstallationID            string
+	InstallationFamilyID      string
+	ComponentID               string
+	ComponentDefinitionID     string
+	ComponentKind             string
+	ComponentIsRoot           bool
+	TrustSource               string
+	AttestationProvider       string
+	ParentComponentID         string
+	ParentAttestationProvider string
+	DelegationID              string
+	Features                  []string
+	SessionGrantID            string
+	IdentityProvider          string
+	TrustLevel                string
+	PolicyRevisionID          string
+	DPoPJKT                   string
 }
 
 func (input AccessIssueInput) validate() error {
@@ -77,10 +103,56 @@ func (input AccessIssueInput) validate() error {
 	if !sessionIdentifierPattern.MatchString(input.IdentityProvider) || !trustLevelPattern.MatchString(input.TrustLevel) || !validThumbprint(input.DPoPJKT) {
 		return ErrTokenInvalid
 	}
+	componentAware := input.InstallationFamilyID != "" || input.ComponentID != "" ||
+		input.ComponentDefinitionID != "" || input.ComponentKind != "" || input.TrustSource != "" ||
+		len(input.Features) != 0
+	if componentAware {
+		if id.Validate(input.InstallationFamilyID, id.InstallationFamily) != nil ||
+			id.Validate(input.ComponentID, id.ClientComponent) != nil ||
+			!sessionIdentifierPattern.MatchString(input.ComponentDefinitionID) ||
+			!componentKindPattern.MatchString(input.ComponentKind) ||
+			!trustSourcePattern.MatchString(input.TrustSource) ||
+			!sessionIdentifierList(input.Features) {
+			return ErrTokenInvalid
+		}
+		if input.AttestationProvider != "" && !sessionIdentifierPattern.MatchString(input.AttestationProvider) {
+			return ErrTokenInvalid
+		}
+		if input.ComponentIsRoot {
+			if input.ParentComponentID != "" || input.ParentAttestationProvider != "" || input.DelegationID != "" {
+				return ErrTokenInvalid
+			}
+		} else if id.Validate(input.ParentComponentID, id.ClientComponent) != nil ||
+			id.Validate(input.DelegationID, id.ComponentDelegation) != nil {
+			return ErrTokenInvalid
+		}
+		if input.ParentAttestationProvider != "" && !sessionIdentifierPattern.MatchString(input.ParentAttestationProvider) {
+			return ErrTokenInvalid
+		}
+	}
 	return nil
 }
 
 var trustLevelPattern = regexp.MustCompile(`^(none|identity_only|web_risk_verified|app_verified|device_verified|strong_device_verified|debug)$`)
+var trustSourcePattern = regexp.MustCompile(`^(direct_attested|delegated_from_attested_root|delegated_identity_only|identity_only|web_risk_verified|debug)$`)
+var componentKindPattern = regexp.MustCompile(`^(main_app|widget|share_extension|app_intent_extension|notification_service_extension|action_extension|sso_extension|watch_extension|android_app|wear_app|browser|node_process)$`)
+
+func sessionIdentifierList(values []string) bool {
+	if len(values) == 0 || len(values) > 256 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !sessionIdentifierPattern.MatchString(value) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
 
 type IssuedAccess struct {
 	Token     AccessToken
@@ -211,6 +283,20 @@ func (prepared *preparedAccessTokenIssuer) IssueFor(input AccessIssueInput, life
 			NotBefore: jwt.NewNumericDate(now), ID: jti,
 		},
 	}
+	if input.ComponentID != "" {
+		claims.InstallationFamilyID = input.InstallationFamilyID
+		claims.ComponentID = input.ComponentID
+		claims.ComponentDefinitionID = input.ComponentDefinitionID
+		claims.ComponentKind = input.ComponentKind
+		claims.ComponentIsRoot = input.ComponentIsRoot
+		claims.Trust = &accessTrustClaims{
+			Source: input.TrustSource, AttestationProvider: input.AttestationProvider,
+			ParentComponentID:         input.ParentComponentID,
+			ParentAttestationProvider: input.ParentAttestationProvider,
+			DelegationID:              input.DelegationID,
+		}
+		claims.Features = append([]string(nil), input.Features...)
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["kid"] = key.KeyID()
 	token.Header["typ"] = "JWT"
@@ -270,19 +356,30 @@ func NewAccessTokenVerifier(config AccessTokenVerifierConfig) (*AccessTokenVerif
 // AccessPrincipal contains signed claims only. Callers must still load the
 // session grant, user, and installation from PostgreSQL before authorization.
 type AccessPrincipal struct {
-	OrganizationID    string
-	ApplicationID     string
-	EnvironmentID     string
-	ApplicationUserID string
-	InstallationID    string
-	SessionGrantID    string
-	IdentityProvider  string
-	TrustLevel        string
-	PolicyRevisionID  string
-	DPoPJKT           string
-	JTIHash           [sha256.Size]byte
-	IssuedAt          time.Time
-	ExpiresAt         time.Time
+	OrganizationID            string
+	ApplicationID             string
+	EnvironmentID             string
+	ApplicationUserID         string
+	InstallationID            string
+	InstallationFamilyID      string
+	ComponentID               string
+	ComponentDefinitionID     string
+	ComponentKind             string
+	ComponentIsRoot           bool
+	TrustSource               string
+	AttestationProvider       string
+	ParentComponentID         string
+	ParentAttestationProvider string
+	DelegationID              string
+	Features                  []string
+	SessionGrantID            string
+	IdentityProvider          string
+	TrustLevel                string
+	PolicyRevisionID          string
+	DPoPJKT                   string
+	JTIHash                   [sha256.Size]byte
+	IssuedAt                  time.Time
+	ExpiresAt                 time.Time
 
 	tokenHash [sha256.Size]byte
 	seal      [sha256.Size]byte
@@ -340,6 +437,19 @@ func (verifier *AccessTokenVerifier) Verify(ctx context.Context, token AccessTok
 		JTIHash: sha256.Sum256([]byte(claims.ID)), IssuedAt: claims.IssuedAt.UTC(),
 		ExpiresAt: claims.ExpiresAt.UTC(), tokenHash: sha256.Sum256([]byte(token.value)),
 	}
+	if claims.ComponentID != "" && claims.Trust != nil {
+		principal.InstallationFamilyID = claims.InstallationFamilyID
+		principal.ComponentID = claims.ComponentID
+		principal.ComponentDefinitionID = claims.ComponentDefinitionID
+		principal.ComponentKind = claims.ComponentKind
+		principal.ComponentIsRoot = claims.ComponentIsRoot
+		principal.TrustSource = claims.Trust.Source
+		principal.AttestationProvider = claims.Trust.AttestationProvider
+		principal.ParentComponentID = claims.Trust.ParentComponentID
+		principal.ParentAttestationProvider = claims.Trust.ParentAttestationProvider
+		principal.DelegationID = claims.Trust.DelegationID
+		principal.Features = append([]string(nil), claims.Features...)
+	}
 	principal.seal = accessPrincipalSeal(principal)
 	return principal, nil
 }
@@ -349,11 +459,23 @@ func accessPrincipalSeal(principal AccessPrincipal) [sha256.Size]byte {
 	for _, value := range []string{
 		principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
 		principal.ApplicationUserID, principal.InstallationID, principal.SessionGrantID,
+		principal.InstallationFamilyID, principal.ComponentID, principal.ComponentDefinitionID,
+		principal.ComponentKind, principal.TrustSource, principal.AttestationProvider,
+		principal.ParentComponentID, principal.ParentAttestationProvider, principal.DelegationID,
 		principal.IdentityProvider, principal.TrustLevel, principal.PolicyRevisionID,
 		principal.DPoPJKT, principal.IssuedAt.UTC().Format(time.RFC3339Nano),
 		principal.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	} {
 		payload = append(payload, value...)
+		payload = append(payload, 0)
+	}
+	if principal.ComponentIsRoot {
+		payload = append(payload, '1', 0)
+	} else {
+		payload = append(payload, '0', 0)
+	}
+	for _, feature := range principal.Features {
+		payload = append(payload, feature...)
 		payload = append(payload, 0)
 	}
 	payload = append(payload, principal.JTIHash[:]...)
@@ -371,9 +493,20 @@ func validateAccessClaims(claims accessTokenClaims, maximumLifetime time.Duratio
 		OrganizationID: claims.OrganizationID, ApplicationID: claims.ApplicationID,
 		EnvironmentID: claims.EnvironmentID, ApplicationUserID: claims.Subject,
 		InstallationID: claims.InstallationID, SessionGrantID: claims.SessionGrantID,
+		InstallationFamilyID: claims.InstallationFamilyID,
+		ComponentID:          claims.ComponentID, ComponentDefinitionID: claims.ComponentDefinitionID,
+		ComponentKind: claims.ComponentKind, ComponentIsRoot: claims.ComponentIsRoot,
 		IdentityProvider: claims.IdentityProvider, TrustLevel: claims.AttestationLevel,
 		PolicyRevisionID: claims.PolicyRevision, DPoPJKT: claims.Confirmation.JKT,
 	}
+	if claims.Trust != nil {
+		input.TrustSource = claims.Trust.Source
+		input.AttestationProvider = claims.Trust.AttestationProvider
+		input.ParentComponentID = claims.Trust.ParentComponentID
+		input.ParentAttestationProvider = claims.Trust.ParentAttestationProvider
+		input.DelegationID = claims.Trust.DelegationID
+	}
+	input.Features = append([]string(nil), claims.Features...)
 	if input.validate() != nil || claims.IssuedAt == nil || claims.ExpiresAt == nil || claims.ID == "" || len(claims.ID) > 128 || strings.ContainsAny(claims.ID, "\r\n\x00") {
 		return ErrTokenInvalid
 	}

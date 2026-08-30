@@ -1,0 +1,140 @@
+---
+title: "Client API"
+description: "Reference for discovery, DPoP-bound sessions, quota, and protected AI or HTTP requests."
+---
+
+Client applications should use a Latchway SDK. Correct session establishment
+requires platform attestation, secure key storage, RFC 9449 DPoP, origin
+pinning, bounded parsing, redaction, and replay-safe retry behavior; copying an
+HTTP example does not implement those controls.
+
+The current source contract is draft `1.0.0` with wire protocol `2`. The
+gateway also accepts wire protocol `1` on compatible legacy routes. Each
+deployment advertises its current and supported wire versions through
+discovery.
+
+## Discovery
+
+| Method and path | Purpose | Authentication |
+| --- | --- | --- |
+| `GET /.well-known/jwks.json` | Public gateway session-signing JWKS | None |
+| `GET /.well-known/latchway` | Contract, protocol, server, and SDK compatibility | None |
+
+## Session and installation routes
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /client/v1/session-challenges` | Verify the application identity input and create a one-time attestation challenge |
+| `POST /client/v1/sessions` | Consume the challenge, verify attestation, and issue a DPoP-bound session |
+| `POST /client/v1/sessions/refresh` | Rotate refresh state and issue a new short-lived access token |
+| `POST /client/v1/installation-families/current/components` | Provision a configured delegated component key from the authenticated root |
+| `POST /client/v1/component-sessions` | Consume a component provisioning grant and create its independent session family |
+| `DELETE /client/v1/installation-families/current/components/{component_id}` | Revoke one component without revoking siblings |
+| `DELETE /client/v1/installation-families/current` | Revoke the family and every component session beneath it |
+| `DELETE /client/v1/installations/current` | Revoke the current installation, sessions, and refresh family |
+| `GET /client/v1/features/{feature}/quota` | Return safe effective quota information for the current principal |
+| `GET /client/v1/diagnostics` | Return an allowlisted session, installation, trust, and compatibility snapshot |
+
+The initial challenge DPoP proof has no access-token hash. Protected and
+refresh proofs are bound to the exact public method and URL; a protected proof
+also binds the access token. Proof IDs are single-use across replicas.
+
+## Diagnostics
+
+Diagnostics is a protected bodyless `GET`. It requires the normal protocol and
+SDK declarations, a valid DPoP access token, and a fresh proof bound to the
+exact diagnostics URL. Session, revocation, origin, replay, and SDK/platform
+checks are the same authoritative boundaries used by protected requests.
+
+```json
+{
+  "request_id": "req_...",
+  "server_version": "1.0.0-rc.1",
+  "contract_version": "1.0.0",
+  "protocol_version": 2,
+  "installation": {
+    "id": "ins_...",
+    "platform": "react_native_ios",
+    "dpop_jkt": "base64url-public-key-thumbprint",
+    "status": "active"
+  },
+  "session": {
+    "expires_at": "2026-08-30T12:00:00Z",
+    "refresh_available": true
+  },
+  "trust": {
+    "provider": "app_attest",
+    "level": "app_verified",
+    "verified_at": "2026-08-30T11:45:00Z",
+    "expires_at": "2026-08-30T12:15:00Z"
+  }
+}
+```
+
+`refresh_available` is calculated from current durable refresh state for the
+authenticated session grant. It becomes `false` after that refresh credential
+has rotated, even while the older access token remains otherwise valid.
+
+The response is `Cache-Control: no-store` and is an exact allowlist. It excludes
+organization/application/user IDs, raw subjects and normalized claims,
+identity-provider details, policy and grant IDs, access or refresh tokens, DPoP
+proofs and private keys, attestation evidence, provider credentials, and
+forwarded request metadata. Bodies, query strings, trailing paths, mismatched
+SDK/platform declarations, and invalid or replayed proofs fail closed.
+
+## Protected data plane
+
+| Method and path | Request shape |
+| --- | --- |
+| `POST /v1/responses` | OpenAI Responses-compatible JSON or SSE |
+| `POST /v1/chat/completions` | OpenAI Chat Completions-compatible JSON or SSE |
+| `POST /v1/embeddings` | OpenAI Embeddings-compatible JSON |
+| `POST /v1/messages` | Anthropic Messages-compatible JSON or SSE |
+| `GET/POST/PUT/PATCH/DELETE /proxy/{feature}/{remainingPath}` | Explicitly restricted opaque HTTP route |
+
+AI routes require `X-Latchway-Feature`. Opaque routes name the feature in the
+path and must agree with any feature header supplied. The gateway validates the
+configured protocol, replaces trusted fields such as physical model and output
+bound, and never accepts a client-selected destination, credential, price,
+plan, user, or usage value.
+
+## Protocol headers
+
+SDKs own these headers:
+
+| Header | Meaning |
+| --- | --- |
+| `X-Latchway-Protocol-Version` | Exact wire protocol; `2` is current and `1` remains accepted on compatible legacy routes |
+| `X-Latchway-SDK` | `ios`, `android`, `javascript`, or `react-native` |
+| `X-Latchway-SDK-Version` | Semantic SDK version |
+| `X-Latchway-Feature` | Server-configured client-facing feature |
+| `X-Latchway-Request-ID` | Optional bounded client correlation hint; the server selects the authoritative value |
+| `Authorization: DPoP ...` | Short-lived Latchway access token |
+| `DPoP` | Fresh RFC 9449 proof from the installation key |
+| `Origin` | Exactly one canonical HTTPS origin for web; omitted by native platforms |
+
+Caller-supplied provider authorization, API keys, cookies, DPoP, and
+Latchway-owned headers are stripped or rejected by the SDK. Native requests
+must not add `Origin`; web requests cannot use cookies as client credentials.
+
+## Streaming and retries
+
+Successful AI responses are provider-compatible JSON or incrementally
+forwarded `text/event-stream` bytes. Embeddings are JSON. Restricted opaque
+responses are filtered and bounded by the selected route.
+
+No upstream retry or fallback occurs after a response byte reaches the client.
+SDKs may perform at most one pre-dispatch follow-up for an exact canonical
+`session_expired` or `dpop_nonce_required` problem, and only when the request is
+safe to replay under that SDK's body policy. Body-bearing React Native requests
+and streaming dispatches are not automatically replayed.
+
+## Problems and correlation
+
+Errors use `application/problem+json` with a stable code, HTTP status, safe
+detail, request ID, retry guidance, and optional operation ID. The response
+also includes `X-Latchway-Request-ID`; nonce challenges carry one bounded
+`DPoP-Nonce`.
+
+Preserve request IDs when reporting a failure. See [Error reference](/reference/errors)
+for the canonical categories and safe retry rules.

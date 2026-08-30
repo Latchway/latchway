@@ -1,0 +1,87 @@
+---
+title: "Backup and restore"
+description: "Protect PostgreSQL and the matching master key, then prove recovery in an isolated environment."
+---
+
+A recoverable Latchway environment requires both PostgreSQL and the exact
+`LATCHWAY_MASTER_KEY`. A database backup without that key cannot decrypt
+managed credentials or signing material; the key alone cannot reconstruct
+tenants, sessions, quotas, audit history, or configuration.
+
+## Backup set
+
+Retain together under separate access controls:
+
+- PostgreSQL physical backup/PITR or a `pg_dump` custom archive;
+- the matching master key in an external secrets vault;
+- deployed image digest, SBOM, signature/provenance references, and version;
+- public origin, replica roles, pool sizes, and non-secret platform settings;
+- contract/SDK coordinates and the latest restore-drill result.
+
+Managed secrets are already encrypted in PostgreSQL. Do not export their
+plaintext through an operational workaround.
+
+## Logical backup
+
+Run from a trusted administrative host. Supply database credentials through a
+protected environment or password file:
+
+```bash
+export PGAPPNAME=latchway-backup
+pg_dump \
+  --dbname="$LATCHWAY_DATABASE_URL" \
+  --format=custom \
+  --no-owner \
+  --no-acl \
+  --file=/secure/backup/latchway.dump
+sha256sum /secure/backup/latchway.dump > /secure/backup/latchway.dump.sha256
+```
+
+Encrypt the archive with the organization's backup key. Record database major,
+schema version, image digest, start/end time, checksum, and retention class.
+Use managed continuous backup and PITR in addition to periodic logical exports.
+
+## Restore drill
+
+Restore only into a newly created isolated database. The `--clean` command is
+destructive to its target; confirm the URL cannot resolve to production.
+
+```bash
+sha256sum --check /secure/backup/latchway.dump.sha256
+pg_restore \
+  --dbname="$LATCHWAY_RESTORE_DATABASE_URL" \
+  --clean \
+  --if-exists \
+  --no-owner \
+  --no-acl \
+  /secure/backup/latchway.dump
+
+LATCHWAY_DATABASE_URL="$LATCHWAY_RESTORE_DATABASE_URL" \
+  latchway migrate status
+LATCHWAY_DATABASE_URL="$LATCHWAY_RESTORE_DATABASE_URL" \
+  latchway doctor --output json
+```
+
+Install the escrowed master key and begin with the image that created the
+backup. Verify active configuration, signing and JWKS, secret decryption, audit
+continuity, quota snapshots, maintenance recovery, and one debug-only
+session/proxy flow. Then test the normal forward upgrade. Revoke test sessions
+and destroy the isolated environment after retaining safe evidence.
+
+## Production recovery
+
+1. Freeze writes or remove traffic and record the incident point.
+2. Restore into a new database or instance at the selected point in time.
+3. Install the matching master key and trusted image digest.
+4. Run migration status and doctor before deciding whether to migrate.
+5. Reconcile state read-only, then make one controlled verification request.
+6. Shift traffic gradually while watching worker heartbeat, quota recovery, and
+   signing/JWKS state.
+7. Preserve the failed environment for forensics under incident controls.
+
+Never overwrite the runtime master key to silence a mismatch. Recover the
+correct key or restore a database encrypted under the available key.
+
+The current source candidate has supplemental local restore evidence only. A
+production claim requires the protected exact-image isolated restore drill in
+the [Production-readiness checklist](/operations/production-readiness).

@@ -1,0 +1,19 @@
+---
+title: "Configure component-specific limits"
+description: "Define how component type and trust provenance narrow feature access and quota without weakening family-wide policy."
+---
+
+<Warning>
+  These pre-release component policy variables and limits are not present in the
+  current public contract. Wait for the generated schema and policy reference.
+</Warning>
+
+Component policy can only narrow the permissions available to its Installation
+Family and application user. A widget might receive a lower request rate and a
+smaller feature set than the containing app. Delegated trust can be prohibited
+for a sensitive feature even when the root may use it.
+
+Quota usage must attribute the exact component and also roll up to applicable
+family, user, application, and organization limits. The server reserves before
+upstream dispatch and settles from authoritative metering; the client cannot
+declare its own usage or price.

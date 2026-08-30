@@ -1,0 +1,105 @@
+---
+title: "Identity and attestation"
+description: "Configure existing login tokens and independent application-instance trust for Latchway sessions."
+---
+
+Latchway makes two independent decisions before it issues a client session:
+
+1. **Identity** establishes which signed-in application user is present.
+2. **Attestation** establishes what application instance and platform is
+   presenting that identity.
+
+Passing one never implies passing the other. The resulting session is also
+bound to the installation's P-256 key with DPoP.
+
+## Identity providers
+
+Your application keeps its existing login and account lifecycle. The SDK asks
+your identity callback for a fresh token when it needs to establish a session;
+Latchway verifies that token server-side.
+
+Version 1 supports:
+
+| Provider type | Configuration boundary |
+| --- | --- |
+| Firebase Authentication | Firebase project and the provider's signed ID tokens |
+| Supabase Auth | Exact project URL, issuer, and audience |
+| Clerk | Exact issuer, audience, algorithms, and key discovery |
+| Generic OIDC/JWT | Bounded issuer, audience, authorized party, algorithms, JWKS, and claim mappings |
+| Static public key | One operator-pinned asymmetric verification key |
+| HS256 | Explicit opt-in plus a server-owned secret and acknowledgement of symmetric-key risk |
+
+Issuer, audience, algorithm, time, and key selection fail closed. Shared JWKS
+refresh work is coordinated through PostgreSQL to avoid a replica stampede.
+Latchway derives a stable tenant-bounded HMAC lookup from the external subject;
+it does not store the raw subject by default.
+
+<Warning>
+  Put only a normal user identity token in the SDK callback. Identity-provider
+  administration credentials belong in the provider or deployment secret
+  manager and must never ship in an application.
+</Warning>
+
+## Attestation providers
+
+| Client platform | Production provider | Normalized boundary |
+| --- | --- | --- |
+| iOS / React Native iOS | Apple App Attest | Native application or policy-approved hardware trust |
+| Android / React Native Android | Google Play Integrity | Verdict-derived application and device trust |
+| Web | Firebase App Check | Web risk verification |
+| Web | Cloudflare Turnstile | Web risk verification |
+| Local development | Signed debug evidence | Debug only |
+
+Web risk signals are intentionally weaker than native attestation. A web token
+cannot satisfy a feature policy requiring native trust.
+
+### Apple App Attest
+
+The active policy pins the App ID prefix, bundle ID, Apple environment,
+accepted validation categories, and bundle versions. The server validates the
+Apple certificate chain, application identity, one-time challenge binding,
+attested key, assertion signature, and monotonic counter.
+
+Development and production App Attest environments are not interchangeable.
+Production proof requires the matching entitlement, an Apple-signed build, and
+a supported physical device.
+
+### Google Play Integrity
+
+The active policy pins the package name, numeric Cloud project, signing
+certificate digests, version-code range, licensing requirement, device verdict,
+and credential source. The native SDK passes the server's canonical challenge
+binding directly as Play Integrity `requestHash`; the server validates the
+decoded request, application, account, and device details.
+
+Production proof requires the exact signed application installed from the
+configured Google Play track. A sideloaded APK is not equivalent.
+
+### App Check and Turnstile
+
+Firebase App Check pins the Google project number and allowed Firebase app IDs.
+Turnstile pins exact HTTPS hostnames and an expected action and uses a
+server-owned validation secret. Web environments also pin exact canonical
+HTTPS origins.
+
+These tokens are short-lived challenge evidence. They are not retained in
+normal request records or logs.
+
+## Session lifecycle
+
+1. The SDK creates or loads a P-256 installation key.
+2. `POST /client/v1/session-challenges` binds application, environment,
+   identity provider, platform, identity token, and DPoP public key.
+3. The SDK obtains platform evidence for the returned one-time challenge.
+4. `POST /client/v1/sessions` verifies identity and evidence and issues a
+   short-lived DPoP-bound access token plus rotating refresh state.
+5. Refresh rotates the refresh credential on every successful use. Reuse
+   revokes the affected credential family.
+
+Identity reauthentication or attestation step-up creates a new challenge;
+refresh does not silently replace either proof. Revoking an installation
+invalidates sessions and causes native SDKs to destroy their local installation
+material at the terminal boundary.
+
+Continue with [Physical-device proof](/mobile/device-proof) before enabling a
+production native policy.

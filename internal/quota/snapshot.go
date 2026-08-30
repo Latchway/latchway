@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
@@ -23,6 +24,11 @@ type SnapshotInput struct {
 	EnvironmentID          string
 	ApplicationUserID      string
 	InstallationID         string
+	InstallationFamilyID   string
+	ClientComponentID      string
+	ComponentDefinitionID  string
+	ComponentKind          string
+	TrustSource            string
 	ConfigRevisionID       string
 	Platform               string
 	NormalizedClaimDigests map[string]string
@@ -142,17 +148,28 @@ func prepareSnapshot(input SnapshotInput) (preparedSnapshot, error) {
 		(override.Present() && override.LimitPlan != input.LimitPlanKey) {
 		return preparedSnapshot{}, ErrInvalidInput
 	}
+	if !validComponentAttribution(
+		input.InstallationFamilyID, input.ClientComponentID,
+		input.ComponentDefinitionID, input.ComponentKind, input.TrustSource,
+	) {
+		return preparedSnapshot{}, ErrInvalidInput
+	}
 
 	values, err := quotaScopeValues(map[string]string{
-		"organization": input.OrganizationID,
-		"application":  input.ApplicationID,
-		"environment":  input.EnvironmentID,
-		"user":         input.ApplicationUserID,
-		"installation": input.InstallationID,
-		"feature":      input.FeatureKey,
-		"route":        input.RouteKey,
-		"upstream":     input.UpstreamKey,
-		"model":        input.ModelKey,
+		"organization":                          input.OrganizationID,
+		"application":                           input.ApplicationID,
+		"environment":                           input.EnvironmentID,
+		"user":                                  input.ApplicationUserID,
+		"installation":                          input.InstallationID,
+		limitscope.InstallationFamilyDimension:  input.InstallationFamilyID,
+		limitscope.ClientComponentDimension:     input.ClientComponentID,
+		limitscope.ComponentDefinitionDimension: input.ComponentDefinitionID,
+		limitscope.ComponentKindDimension:       input.ComponentKind,
+		limitscope.TrustSourceDimension:         input.TrustSource,
+		"feature":                               input.FeatureKey,
+		"route":                                 input.RouteKey,
+		"upstream":                              input.UpstreamKey,
+		"model":                                 input.ModelKey,
 	}, input.Platform, input.NormalizedClaimDigests)
 	if err != nil {
 		return preparedSnapshot{}, err

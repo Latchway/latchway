@@ -68,32 +68,23 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  attestations: write
-  contents: read
-  id-token: write
+permissions: {}
 
 concurrency:
   group: cloud-deployment-aggregate-${{ inputs.candidate_commit }}
   cancel-in-progress: false
 
 jobs:
-  aggregate:
+  authenticate:
     if: github.ref == 'refs/heads/main'
     environment: release-evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: Check out the exact candidate finalizer
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 scripts/require-gh-version.py
-      - name: Require immutable candidate and run coordinates
+      - name: Require a fixed GitHub CLI and immutable coordinates without a checkout
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -114,6 +105,10 @@ jobs:
           CLOUDFLARE_CONTAINERS_RUN_ATTEMPT: ${{ inputs.cloudflare_containers_run_attempt }}
         run: |
           set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$INTENDED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
           for run_id in \
@@ -129,8 +124,6 @@ jobs:
             [[ "$attempt" =~ ^[1-9][0-9]*$ ]]
           done
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
-          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
-          test -z "$(git status --porcelain=v1)"
       - name: Verify every platform run belongs to the fixed producer
         shell: bash
         env:
@@ -222,7 +215,7 @@ jobs:
           path: ${{ runner.temp }}/captures/cloudflare_containers
           run-id: ${{ inputs.cloudflare_containers_run_id }}
           github-token: ${{ github.token }}
-      - name: Verify candidate and source-conformance attestations
+      - name: Verify candidate and source-conformance attestations without candidate code
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -248,29 +241,450 @@ jobs:
             --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
-          python3 scripts/release-candidate.py \
-            --verify \
-            --manifest "$candidate" \
-            --commit "$CANDIDATE_COMMIT" \
-            --tag "$INTENDED_TAG" \
-            --image ghcr.io/latchway/latchway
-      - name: Build exact release coordinates and stage signed captures
+      - name: Snapshot the trusted GitHub attestation root
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation trusted-root > "$RUNNER_TEMP/github-attestation-trusted-root.jsonl"
+      - name: Independently authenticate and validate every signed platform capture
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+          COMPOSE_RUN_ID: ${{ inputs.compose_run_id }}
+          COMPOSE_RUN_ATTEMPT: ${{ inputs.compose_run_attempt }}
+          CLOUD_RUN_RUN_ID: ${{ inputs.cloud_run_run_id }}
+          CLOUD_RUN_RUN_ATTEMPT: ${{ inputs.cloud_run_run_attempt }}
+          AWS_RUN_ID: ${{ inputs.aws_run_id }}
+          AWS_RUN_ATTEMPT: ${{ inputs.aws_run_attempt }}
+          FLY_IO_RUN_ID: ${{ inputs.fly_io_run_id }}
+          FLY_IO_RUN_ATTEMPT: ${{ inputs.fly_io_run_attempt }}
+          CLOUDFLARE_CONTAINERS_RUN_ID: ${{ inputs.cloudflare_containers_run_id }}
+          CLOUDFLARE_CONTAINERS_RUN_ATTEMPT: ${{ inputs.cloudflare_containers_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          for platform in compose cloud_run aws fly_io cloudflare_containers; do
+            archive="$RUNNER_TEMP/captures/$platform/$platform.tar.gz"
+            bundle="$RUNNER_TEMP/captures/$platform/$platform.attestation.json"
+            gh attestation verify "$archive" \
+              --bundle "$bundle" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/deployment-evidence.yml" \
+              --source-digest "$CANDIDATE_COMMIT" \
+              --signer-digest "$CANDIDATE_COMMIT" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              --format json > "$RUNNER_TEMP/attestation-$platform.json"
+          done
+          python3 - "$RUNNER_TEMP/captures" "$RUNNER_TEMP/candidate/latchway-candidate.json" "$RUNNER_TEMP/source/latchway-cross-repository.json" "$RUNNER_TEMP/github-attestation-trusted-root.jsonl" "$RUNNER_TEMP/cloud-capture-authority.json" <<'PY'
+          import hashlib, io, json, os, re, stat, sys, tarfile
+          from datetime import datetime, timezone
+          from pathlib import Path, PurePosixPath
+
+          captures, candidate_path, source_path, trusted_root, output = map(Path, sys.argv[1:])
+          platforms = ("compose", "cloud_run", "aws", "fly_io", "cloudflare_containers")
+          commit = os.environ["CANDIDATE_COMMIT"]
+          release = os.environ["INTENDED_TAG"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          expected_runs = {
+              "compose": (os.environ["COMPOSE_RUN_ID"], int(os.environ["COMPOSE_RUN_ATTEMPT"])),
+              "cloud_run": (os.environ["CLOUD_RUN_RUN_ID"], int(os.environ["CLOUD_RUN_RUN_ATTEMPT"])),
+              "aws": (os.environ["AWS_RUN_ID"], int(os.environ["AWS_RUN_ATTEMPT"])),
+              "fly_io": (os.environ["FLY_IO_RUN_ID"], int(os.environ["FLY_IO_RUN_ATTEMPT"])),
+              "cloudflare_containers": (os.environ["CLOUDFLARE_CONTAINERS_RUN_ID"], int(os.environ["CLOUDFLARE_CONTAINERS_RUN_ATTEMPT"])),
+          }
+          sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
+          digest_pattern = re.compile(r"^sha256:[0-9a-f]{64}$")
+          expected_entries = [
+              "control_plane.json", "health.json", "identity.json", "latchway-deployment-binding.json",
+              "manifest.json", "migration.json", "readiness.json", "secrets.json", "shutdown.json",
+          ]
+          unsigned_entries = [name for name in expected_entries if name != "latchway-deployment-binding.json"]
+
+          def fail(message):
+              raise SystemExit(message)
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      fail("duplicate JSON member")
+                  result[key] = value
+              return result
+
+          def regular(path, maximum=32 * 1024 * 1024):
+              try:
+                  value = path.lstat()
+              except OSError:
+                  fail(f"missing file: {path.name}")
+              if not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or not 0 < value.st_size <= maximum:
+                  fail(f"unsafe file: {path.name}")
+              return value.st_size
+
+          def load(path, maximum=8 * 1024 * 1024):
+              regular(path, maximum)
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+              except (UnicodeError, json.JSONDecodeError):
+                  fail(f"invalid JSON: {path.name}")
+
+          def load_bytes(value, name):
+              try:
+                  return json.loads(value.decode("utf-8"), object_pairs_hook=reject_duplicates)
+              except (UnicodeError, json.JSONDecodeError):
+                  fail(f"invalid archive JSON: {name}")
+
+          def sha(value):
+              return hashlib.sha256(value).hexdigest()
+
+          def sha_file(path):
+              regular(path)
+              return sha(path.read_bytes())
+
+          def parse_time(value):
+              if not isinstance(value, str) or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", value) is None:
+                  fail("timestamp is invalid")
+              try:
+                  return datetime.fromisoformat(value[:-1] + "+00:00").astimezone(timezone.utc)
+              except ValueError:
+                  fail("timestamp is invalid")
+
+          def image_digest(value):
+              match = re.search(r"(?:@)?sha256:([0-9a-f]{64})$", str(value))
+              return match.group(1) if match else None
+
+          def extract(path):
+              payload = path.read_bytes()
+              if payload[:8] != bytes.fromhex("1f8b080000000000"):
+                  fail("signed gzip header is not deterministic")
+              result = {}
+              with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+                  members = archive.getmembers()
+                  if [member.name for member in members] != expected_entries:
+                      fail("signed archive entry closure is invalid")
+                  for member in members:
+                      pure = PurePosixPath(member.name)
+                      if (not member.isfile() or len(pure.parts) != 1 or pure.name != member.name or
+                              member.uid != 0 or member.gid != 0 or member.mode != 0o644 or member.mtime != 0 or
+                              not 0 < member.size <= 8 * 1024 * 1024):
+                          fail("signed archive metadata is unsafe")
+                      stream = archive.extractfile(member)
+                      if stream is None:
+                          fail("signed archive entry is missing")
+                      value = stream.read(8 * 1024 * 1024 + 1)
+                      if len(value) != member.size:
+                          fail("signed archive size mismatch")
+                      result[member.name] = value
+              return payload, result
+
+          candidate = load(candidate_path)
+          image_value = candidate.get("image") if isinstance(candidate, dict) else None
+          contract = candidate.get("contract") if isinstance(candidate, dict) else None
+          if (not isinstance(image_value, dict) or not isinstance(contract, dict) or
+                  candidate.get("candidate_commit") != commit or candidate.get("intended_tag") != release or candidate.get("status") != "passed"):
+              fail("candidate identity is invalid")
+          image = str(image_value.get("repository")) + "@" + str(image_value.get("index_digest"))
+          if re.fullmatch(r"ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}", image) is None:
+              fail("candidate image identity is invalid")
+          contract_version = contract.get("version")
+          bundle_sha256 = contract.get("bundle_sha256")
+          if re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", str(contract_version)) is None or not sha256_pattern.fullmatch(str(bundle_sha256)):
+              fail("candidate contract identity is invalid")
+
+          source = load(source_path)
+          repositories = source.get("repositories") if isinstance(source, dict) else None
+          if source.get("scope") != "source" or source.get("verdict") != "passed" or source.get("source_conformance_passed") is not True or not isinstance(repositories, list) or len(repositories) != 5:
+              fail("source-conformance authority is invalid")
+          coordinate_map = {}
+          for item in repositories:
+              if not isinstance(item, dict) or set(item) != {"id", "commit", "version", "intended_tag"}:
+                  fail("source coordinates are invalid")
+              identifier = item["id"]
+              coordinate = {"commit": item["commit"], "tag": item["intended_tag"], "version": item["version"]}
+              if identifier in coordinate_map or identifier not in {"core", "javascript", "ios", "android", "react_native"} or not re.fullmatch(r"[0-9a-f]{40}", str(coordinate["commit"])) or coordinate["tag"] != f"v{coordinate['version']}":
+                  fail("source coordinates are invalid")
+              coordinate_map[identifier] = coordinate
+          if set(coordinate_map) != {"core", "javascript", "ios", "android", "react_native"} or coordinate_map["core"] != {"commit": commit, "tag": release, "version": release[1:]}:
+              fail("core source coordinate is invalid")
+
+          authoritative = {}
+          verification = {"schema_version": 1, "kind": "latchway_deployment_attestation_verification", "trusted_root_sha256": sha_file(trusted_root), "platforms": {}}
+          started_values, finished_values = [], []
+          for platform in platforms:
+              root = captures / platform
+              expected_files = {f"{platform}.tar.gz", f"{platform}.attestation.json", "latchway-deployment-validation.json", "latchway-deployment-validation.json.junit.xml"}
+              if set(path.name for path in root.iterdir()) != expected_files or any(path.is_symlink() or not path.is_file() for path in root.iterdir()):
+                  fail(f"{platform} signed artifact closure is invalid")
+              archive_path, bundle_path = root / f"{platform}.tar.gz", root / f"{platform}.attestation.json"
+              regular(bundle_path, 8 * 1024 * 1024)
+              archive_payload, entries = extract(archive_path)
+              values = {name: load_bytes(value, name) for name, value in entries.items()}
+              manifest, binding = values["manifest.json"], values["latchway-deployment-binding.json"]
+              manifest_fields = {"schema_version", "kind", "platform", "started_at", "finished_at", "core_commit", "core_release", "contract_version", "bundle_sha256", "oci_image_digest", "endpoint", "provider_resource_id", "collector", "observations"}
+              binding_fields = {"schema_version", "kind", "platform", "candidate_commit", "core_release", "contract_version", "bundle_sha256", "oci_image_digest", "endpoint", "provider_resource_id", "collector", "candidate_archive", "raw_capture"}
+              if not isinstance(manifest, dict) or set(manifest) != manifest_fields or not isinstance(binding, dict) or set(binding) != binding_fields:
+                  fail(f"{platform} signed identity fields are invalid")
+              expected_run_id, expected_attempt = expected_runs[platform]
+              collector = manifest.get("collector")
+              expected_collector = {"repository": repository,
+                  "workflow_ref": f"{repository}/.github/workflows/deployment-evidence.yml@refs/heads/main",
+                  "ref": "refs/heads/main", "sha": commit, "run_id": expected_run_id,
+                  "run_attempt": expected_attempt, "runner_environment": "github-hosted",
+                  "environment": f"deployment-evidence-{platform}"}
+              if (manifest.get("schema_version") != 1 or manifest.get("kind") != "latchway_cloud_deployment_capture" or
+                      manifest.get("platform") != platform or manifest.get("core_commit") != commit or manifest.get("core_release") != release or
+                      manifest.get("contract_version") != contract_version or manifest.get("bundle_sha256") != bundle_sha256 or
+                      manifest.get("oci_image_digest") != image or collector != expected_collector):
+                  fail(f"{platform} manifest is not bound to the authenticated producer")
+              if (binding.get("schema_version") != 1 or binding.get("kind") != "latchway_authenticated_deployment_capture" or
+                      binding.get("platform") != platform or binding.get("candidate_commit") != commit or binding.get("core_release") != release or
+                      binding.get("contract_version") != contract_version or binding.get("bundle_sha256") != bundle_sha256 or
+                      binding.get("oci_image_digest") != image or binding.get("endpoint") != manifest.get("endpoint") or
+                      binding.get("provider_resource_id") != manifest.get("provider_resource_id") or binding.get("collector") != expected_collector):
+                  fail(f"{platform} signer binding is invalid")
+              candidate_archive = binding.get("candidate_archive")
+              expected_candidate_entries = [{"path": name, "sha256": sha(entries[name]), "size_bytes": len(entries[name])} for name in unsigned_entries]
+              if (not isinstance(candidate_archive, dict) or set(candidate_archive) != {"sha256", "size_bytes", "entries"} or
+                      not sha256_pattern.fullmatch(str(candidate_archive.get("sha256", ""))) or
+                      type(candidate_archive.get("size_bytes")) is not int or not 0 < candidate_archive["size_bytes"] <= 32 * 1024 * 1024 or
+                      candidate_archive.get("entries") != expected_candidate_entries):
+                  fail(f"{platform} candidate archive closure is invalid")
+              raw_capture = binding.get("raw_capture")
+              raw_files = raw_capture.get("files") if isinstance(raw_capture, dict) else None
+              if (not isinstance(raw_capture, dict) or set(raw_capture) != {"artifact", "files"} or
+                      raw_capture.get("artifact") != f"latchway-deployment-raw-{platform}-{commit}-{expected_run_id}-{expected_attempt}" or
+                      not isinstance(raw_files, list) or not raw_files):
+                  fail(f"{platform} raw capture binding is invalid")
+              raw_paths = []
+              for item in raw_files:
+                  if (not isinstance(item, dict) or set(item) != {"path", "sha256", "size_bytes"} or
+                          not isinstance(item.get("path"), str) or PurePosixPath(item["path"]).is_absolute() or
+                          any(part in ("", ".", "..") for part in PurePosixPath(item["path"]).parts) or
+                          not sha256_pattern.fullmatch(str(item.get("sha256", ""))) or type(item.get("size_bytes")) is not int or
+                          not 0 < item["size_bytes"] <= 8 * 1024 * 1024):
+                      fail(f"{platform} raw capture file binding is invalid")
+                  raw_paths.append(item["path"])
+              base_raw = ["latchway-deployment-started-at", "latchway-provider-resource-id"]
+              if platform == "cloudflare_containers":
+                  provider_raw = ["account-id.txt", "applications.json", "canonical-manifest.json", "deployments.json", "instances-after.json", "instances-before.json", "migration.json", "mirror-image.txt", "mirror-manifest.json", "secrets.json", "shutdown-finished.txt", "shutdown-started.txt", "shutdown.json", "versions.json", "whoami.json", "wrangler-version.txt"]
+                  expected_raw = sorted(base_raw + [f"cloudflare-provider-raw/{name}" for name in provider_raw])
+              else:
+                  expected_raw = sorted(base_raw + [f"latchway-deployment-capture/{name}.json" for name in ("identity", "control_plane", "migration", "secrets", "shutdown")])
+              if raw_paths != expected_raw or len(raw_paths) != len(set(raw_paths)):
+                  fail(f"{platform} raw capture closure is incomplete")
+              observations = manifest.get("observations")
+              names = ("identity", "control_plane", "migration", "health", "readiness", "secrets", "shutdown")
+              if not isinstance(observations, dict) or set(observations) != set(names):
+                  fail(f"{platform} observation closure is invalid")
+              for name in names:
+                  if observations[name] != {"path": f"{name}.json", "sha256": sha(entries[f"{name}.json"])}:
+                      fail(f"{platform} observation hash is invalid")
+
+              started, finished = parse_time(manifest["started_at"]), parse_time(manifest["finished_at"])
+              if not started < finished or (finished - started).total_seconds() > 21600:
+                  fail(f"{platform} capture window is invalid")
+              identity, migration, secrets, shutdown = (values[f"{name}.json"] for name in ("identity", "migration", "secrets", "shutdown"))
+              if (not isinstance(identity, dict) or set(identity) != {"platform", "resource_id", "observed_at", "provider_response"} or
+                      identity.get("platform") != platform or identity.get("resource_id") != manifest.get("provider_resource_id") or
+                      not isinstance(identity.get("provider_response"), dict) or not started <= parse_time(identity.get("observed_at")) <= finished):
+                  fail(f"{platform} provider identity semantics are invalid")
+              command = ["/latchway", "--output", "json", "migrate", "status"]
+              status_value = migration.get("status") if isinstance(migration, dict) else None
+              execution = migration.get("provider_execution") if isinstance(migration, dict) else None
+              if (not isinstance(migration, dict) or set(migration) != {"command", "status", "provider_execution"} or migration.get("command") != command or
+                      not isinstance(status_value, dict) or set(status_value) != {"current", "available", "up_to_date"} or
+                      status_value.get("up_to_date") is not True or type(status_value.get("current")) is not int or status_value.get("current") < 1 or
+                      status_value.get("current") != status_value.get("available") or not isinstance(execution, dict) or execution.get("reported_status") != status_value):
+                  fail(f"{platform} migration semantics are invalid")
+              required_secret_names = {"LATCHWAY_DATABASE_URL", "LATCHWAY_MASTER_KEY"}
+              runtime_references = secrets.get("runtime_references") if isinstance(secrets, dict) else None
+              if (not isinstance(secrets, dict) or set(secrets) != {"required_names", "runtime_references", "provider_resources"} or
+                      set(secrets.get("required_names", [])) != required_secret_names or not isinstance(runtime_references, list) or
+                      {item.get("name") for item in runtime_references if isinstance(item, dict)} != required_secret_names):
+                  fail(f"{platform} secret-reference semantics are invalid")
+              for name, suffix in (("health.json", "/healthz"), ("readiness.json", "/readyz")):
+                  value = values[name]
+                  if (not isinstance(value, dict) or set(value) != {"url", "status_code", "observed_at", "tls", "body"} or
+                          value.get("url") != manifest.get("endpoint") + suffix or value.get("status_code") != 200 or
+                          value.get("tls") is not (platform != "compose") or not isinstance(value.get("body"), dict) or
+                          not started <= parse_time(value.get("observed_at")) <= finished):
+                      fail(f"{platform} HTTP observation is invalid")
+              health, readiness = values["health.json"]["body"], values["readiness.json"]["body"]
+              build = health.get("build") if isinstance(health, dict) else None
+              readiness_checks = readiness.get("checks") if isinstance(readiness, dict) else None
+              if (health.get("status") != "ok" or not isinstance(build, dict) or build.get("commit") != commit or build.get("contract_version") != contract_version or
+                      readiness.get("status") != "ready" or not isinstance(readiness_checks, dict) or any(readiness_checks.get(name) != "ok" for name in
+                      ("database", "schema", "active_configuration", "master_key", "signing_key", "worker_heartbeat"))):
+                  fail(f"{platform} HTTP release semantics are invalid")
+              if (not isinstance(shutdown, dict) or shutdown.get("signal") != "SIGTERM" or shutdown.get("exit_code") != 0 or
+                      shutdown.get("readiness_restored") is not True or not isinstance(shutdown.get("before"), dict) or not isinstance(shutdown.get("after"), dict) or
+                      not started <= parse_time(shutdown.get("started_at")) <= parse_time(shutdown.get("finished_at")) <= finished):
+                  fail(f"{platform} shutdown semantics are invalid")
+
+              control = values["control_plane.json"]
+              expected_index_digest = image_digest(image)
+              if platform == "compose":
+                  gateway = control.get("gateway") if isinstance(control, dict) else None
+                  repo_digests = control.get("image", {}).get("RepoDigests") if isinstance(control, dict) else None
+                  if (set(control) != {"platform", "project", "gateway", "image"} or control.get("platform") != platform or control.get("project") != manifest["provider_resource_id"] or
+                          not isinstance(gateway, dict) or gateway.get("State", {}).get("Running") is not True or gateway.get("State", {}).get("Health", {}).get("Status") != "healthy" or
+                          expected_index_digest not in {image_digest(item) for item in repo_digests or []} or execution.get("exit_code") != 0 or
+                          execution.get("migration_container_exit_code") != 0 or shutdown.get("method") != "compose_sigterm_restart" or
+                          shutdown.get("platform_timeout_seconds") != 35 or shutdown.get("application_timeout_seconds") != 30):
+                      fail("Compose deployment semantics are invalid")
+              elif platform == "cloud_run":
+                  service, revision, migration_job = control.get("service"), control.get("revision"), control.get("migration_job")
+                  containers = service.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []) if isinstance(service, dict) else []
+                  job_containers = migration_job.get("spec", {}).get("template", {}).get("spec", {}).get("template", {}).get("spec", {}).get("containers", []) if isinstance(migration_job, dict) else []
+                  conditions = execution.get("status", {}).get("conditions", [])
+                  if (set(control) != {"platform", "service", "revision", "migration_job"} or control.get("platform") != platform or
+                          not containers or image_digest(containers[0].get("image")) != expected_index_digest or not job_containers or image_digest(job_containers[0].get("image")) != expected_index_digest or
+                          image_digest(revision.get("status", {}).get("imageDigest")) != expected_index_digest or not any(isinstance(item, dict) and item.get("type") in ("Completed", "Ready") and str(item.get("status")).lower() == "true" for item in conditions) or
+                          shutdown.get("method") != "cloud_run_revision_rollout" or shutdown.get("platform_timeout_seconds") != 10 or shutdown.get("application_timeout_seconds") != 8):
+                      fail("Cloud Run deployment semantics are invalid")
+              elif platform == "aws":
+                  service, definition, tasks = control.get("service"), control.get("task_definition"), control.get("tasks")
+                  definitions = definition.get("containerDefinitions") if isinstance(definition, dict) else None
+                  stopped = execution.get("stopped_task")
+                  if (set(control) != {"platform", "service", "task_definition", "tasks"} or control.get("platform") != platform or not isinstance(service, dict) or
+                          service.get("status") != "ACTIVE" or service.get("runningCount") != service.get("desiredCount") or type(service.get("desiredCount")) is not int or service["desiredCount"] < 2 or
+                          not isinstance(definitions, list) or len(definitions) != 1 or image_digest(definitions[0].get("image")) != expected_index_digest or definitions[0].get("stopTimeout") != 35 or definitions[0].get("readonlyRootFilesystem") is not True or
+                          not isinstance(tasks, list) or len(tasks) < 2 or any(item.get("lastStatus") != "RUNNING" or image_digest(item.get("containers", [{}])[0].get("imageDigest")) != expected_index_digest for item in tasks if isinstance(item, dict)) or
+                          not isinstance(stopped, dict) or stopped.get("lastStatus") != "STOPPED" or stopped.get("containers", [{}])[0].get("exitCode") != 0 or
+                          shutdown.get("method") != "ecs_task_replacement" or shutdown.get("platform_timeout_seconds") != 35 or shutdown.get("application_timeout_seconds") != 30):
+                      fail("AWS deployment semantics are invalid")
+              elif platform == "fly_io":
+                  machines = control.get("machines") if isinstance(control, dict) else None
+                  if (set(control) != {"platform", "app", "machines"} or control.get("platform") != platform or not isinstance(machines, list) or len(machines) < 2 or
+                          any(not isinstance(item, dict) or item.get("state") != "started" or image_digest(item.get("image_ref", {}).get("digest")) != expected_index_digest for item in machines) or
+                          execution.get("exit_code") != 0 or execution.get("machine_id") not in {item.get("id") for item in machines} or
+                          shutdown.get("method") != "fly_machine_restart" or shutdown.get("platform_timeout_seconds") != 35 or shutdown.get("application_timeout_seconds") != 30 or
+                          shutdown.get("before", {}).get("resource_id") == shutdown.get("after", {}).get("resource_id")):
+                      fail("Fly.io deployment semantics are invalid")
+              else:
+                  worker = control.get("worker") if isinstance(control, dict) else None
+                  container = control.get("container") if isinstance(control, dict) else None
+                  application = container.get("application") if isinstance(container, dict) else None
+                  canonical = container.get("canonical") if isinstance(container, dict) else None
+                  mirror = container.get("mirror") if isinstance(container, dict) else None
+                  instances = container.get("instances") if isinstance(container, dict) else None
+                  mirror_digest = image_digest(mirror.get("manifest_digest")) if isinstance(mirror, dict) else None
+                  if (set(control) != {"platform", "worker", "container"} or control.get("platform") != platform or not isinstance(worker, dict) or worker.get("status") != "ready" or
+                          worker.get("resource_id") != manifest["provider_resource_id"] or not isinstance(application, dict) or application.get("id") != manifest["provider_resource_id"] or
+                          application.get("state") not in ("active", "ready") or not isinstance(canonical, dict) or canonical.get("index_digest") != image_value.get("index_digest") or
+                          canonical.get("config_digest") != mirror.get("config_digest") or canonical.get("layers") != mirror.get("layers") or
+                          not isinstance(instances, list) or not instances or any(item.get("state") != "running" or item.get("version") != application.get("version") for item in instances if isinstance(item, dict)) or
+                          execution.get("exit_code") != 0 or execution.get("evidence_id") != shutdown.get("evidence_id") or
+                          shutdown.get("method") != "cloudflare_container_replacement" or shutdown.get("provider_reason") != "runtime_signal" or
+                          shutdown.get("platform_timeout_seconds") != 900 or shutdown.get("application_timeout_seconds") != 30 or
+                          image_digest(shutdown.get("before", {}).get("image_digest")) != mirror_digest or image_digest(shutdown.get("after", {}).get("image_digest")) != mirror_digest):
+                      fail("Cloudflare Containers deployment semantics are invalid")
+
+              attestation_result = load(Path(os.environ["RUNNER_TEMP"]) / f"attestation-{platform}.json")
+              if not isinstance(attestation_result, list) or not attestation_result:
+                  fail(f"{platform} attestation verification is empty")
+              archive_sha, bundle_sha = sha(archive_payload), sha_file(bundle_path)
+              provider_resource_sha = sha(str(manifest["provider_resource_id"]).encode())
+              verification["platforms"][platform] = {"archive_sha256": archive_sha, "bundle_sha256": bundle_sha,
+                  "verified_attestations": len(attestation_result), "workflow_run_id": expected_run_id,
+                  "provider_resource_id_sha256": provider_resource_sha}
+              authoritative[platform] = {"archive_sha256": archive_sha, "bundle_sha256": bundle_sha,
+                  "manifest_sha256": sha(entries["manifest.json"]), "binding_sha256": sha(entries["latchway-deployment-binding.json"]),
+                  "workflow_run_id": expected_run_id, "workflow_run_attempt": expected_attempt,
+                  "provider_resource_id_sha256": provider_resource_sha}
+              started_values.append(started)
+              finished_values.append(finished)
+
+          started_at, finished_at = min(started_values), max(finished_values)
+          if not started_at < finished_at or (finished_at - started_at).total_seconds() > 604800:
+              fail("aggregate capture window is invalid")
+          authority = {"schema_version": 1, "kind": "latchway_authenticated_cloud_capture_closure",
+              "candidate_commit": commit, "core_release": release, "contract_version": contract_version,
+              "bundle_sha256": bundle_sha256, "oci_image_digest": image, "repositories": coordinate_map,
+              "started_at": started_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+              "finished_at": finished_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+              "captures": authoritative, "verification": verification}
+          output.write_text(json.dumps(authority, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
+          PY
+          test -z "$(find "$RUNNER_TEMP/captures" -type l -print -quit)"
+      - name: Retain only authenticated inputs for credential-free finalization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/cloud-authenticated"
+          cp -R -- \
+            "$RUNNER_TEMP/candidate" \
+            "$RUNNER_TEMP/captures" \
+            "$RUNNER_TEMP/source" \
+            "$RUNNER_TEMP/cloud-authenticated/"
+          install -m 0600 -- "$RUNNER_TEMP/github-attestation-trusted-root.jsonl" \
+            "$RUNNER_TEMP/cloud-authenticated/github-attestation-trusted-root.jsonl"
+      - name: Upload authenticated cloud-finalizer inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-cloud-deployments-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-authenticated/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Retain the fixed authenticated cloud-capture closure for the signer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-cloud-capture-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-capture-authority.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  finalize:
+    needs: authenticate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the exact candidate finalizer without retained credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download only authenticated cloud-finalizer inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cloud-deployments-inputs-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-authenticated
+      - name: Build exact release coordinates and stage signed captures without credentials or OIDC
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           INTENDED_TAG: ${{ inputs.intended_tag }}
         run: |
           set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          authenticated="$RUNNER_TEMP/cloud-authenticated"
+          candidate="$authenticated/candidate/latchway-candidate.json"
+          source="$authenticated/source/latchway-cross-repository.json"
+          python3 scripts/release-candidate.py \
+            --verify --manifest "$candidate" --commit "$CANDIDATE_COMMIT" \
+            --tag "$INTENDED_TAG" --image ghcr.io/latchway/latchway
           mkdir -p "$RUNNER_TEMP/cloud-final/artifacts/cloud-deployments"
           for platform in compose cloud_run aws fly_io cloudflare_containers; do
             install -m 0600 -- \
-              "$RUNNER_TEMP/captures/$platform/$platform.tar.gz" \
+              "$authenticated/captures/$platform/$platform.tar.gz" \
               "$RUNNER_TEMP/cloud-final/artifacts/cloud-deployments/$platform.tar.gz"
             install -m 0600 -- \
-              "$RUNNER_TEMP/captures/$platform/$platform.attestation.json" \
+              "$authenticated/captures/$platform/$platform.attestation.json" \
               "$RUNNER_TEMP/cloud-final/artifacts/cloud-deployments/$platform.attestation.json"
           done
-          python3 - "$RUNNER_TEMP/source/latchway-cross-repository.json" "$RUNNER_TEMP/release-coordinates.json" "$CANDIDATE_COMMIT" "$INTENDED_TAG" <<'PY'
+          python3 - "$source" "$RUNNER_TEMP/release-coordinates.json" "$CANDIDATE_COMMIT" "$INTENDED_TAG" <<'PY'
           import json, re, sys
           from pathlib import Path
           source_path, output_path, commit, intended_tag = sys.argv[1:]
@@ -294,7 +708,6 @@ jobs:
               raise SystemExit("core coordinate does not match the candidate")
           Path(output_path).write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
           PY
-          gh attestation trusted-root > "$RUNNER_TEMP/github-attestation-trusted-root.jsonl"
       - name: Verify and finalize the five signed cloud captures
         shell: bash
         env:
@@ -302,19 +715,198 @@ jobs:
           INTENDED_TAG: ${{ inputs.intended_tag }}
         run: |
           set -Eeuo pipefail
-          candidate="$RUNNER_TEMP/candidate/latchway-candidate.json"
+          candidate="$RUNNER_TEMP/cloud-authenticated/candidate/latchway-candidate.json"
           image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
           contract_version=$(jq --raw-output '.contract.version' "$candidate")
           bundle_sha256=$(jq --raw-output '.contract.bundle_sha256' "$candidate")
           python3 scripts/deployment-evidence.py finalize \
             --evidence-root "$RUNNER_TEMP/cloud-final" \
             --coordinates "$RUNNER_TEMP/release-coordinates.json" \
-            --trusted-root "$RUNNER_TEMP/github-attestation-trusted-root.jsonl" \
+            --trusted-root "$RUNNER_TEMP/cloud-authenticated/github-attestation-trusted-root.jsonl" \
             --core-commit "$CANDIDATE_COMMIT" \
             --core-release "$INTENDED_TAG" \
             --contract-version "$contract_version" \
             --bundle-sha256 "$bundle_sha256" \
             --image "$image"
+      - name: Retain the unsigned cloud-deployments domain for a fresh attestation runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-cloud-deployments-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-final/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  attest:
+    needs: finalize
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the unsigned cloud-deployments domain without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cloud-deployments-unsigned-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-final
+      - name: Download the fixed authenticated cloud-capture closure
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-cloud-capture-authority-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-authority
+      - name: Validate the complete cloud-deployments document without candidate code
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/cloud-final"
+          document="$root/cloud_deployments.json"
+          test -f "$document" && test ! -L "$document" && test -s "$document"
+          test -z "$(find "$root" -type l -print -quit)"
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" '
+            (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
+            .schema_version == 1 and
+            .kind == "latchway_cross_repository_external_evidence" and
+            .domain == "cloud_deployments" and .status == "passed" and
+            .core_commit == $commit and .core_release == $tag and
+            .claims == {compose_verified:true,cloud_run_verified:true,aws_verified:true,fly_io_verified:true,cloudflare_containers_verified:true} and
+            (.artifacts | type == "array" and length == 11) and
+            all(.artifacts[];
+              type == "object" and (keys | sort) == ["path","sha256"] and
+              (.path | type == "string") and
+              (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
+          ' "$document" >/dev/null
+          actual="$RUNNER_TEMP/cloud-actual-files"
+          expected="$RUNNER_TEMP/cloud-expected-files"
+          find "$root" -type f -print0 | while IFS= read -r -d '' path; do
+            relative=${path#"$root/"}
+            if [[ "$relative" != cloud_deployments.json ]]; then printf '%s\n' "$relative"; fi
+          done | LC_ALL=C sort > "$actual"
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$document" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+                [[ "$relative" != *..* && "$relative" != */ && "$relative" != *//* ]]
+                file="$root/$relative"
+                test -f "$file" && test ! -L "$file"
+                test "$(sha256sum "$file" | awk '{print $1}')" = "$expected_sha"
+                printf '%s\n' "$relative"
+              done | LC_ALL=C sort > "$expected"
+          test -z "$(uniq -d "$expected")"
+          cmp --silent "$actual" "$expected"
+      - name: Compare final claims with the independently authenticated capture closure
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          INTENDED_TAG: ${{ inputs.intended_tag }}
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          python3 - "$RUNNER_TEMP/cloud-final" "$RUNNER_TEMP/cloud-authority/cloud-capture-authority.json" <<'PY'
+          import hashlib, json, os, stat, sys
+          from pathlib import Path, PurePosixPath
+
+          root, authority_path = map(Path, sys.argv[1:])
+          commit, release = os.environ["CANDIDATE_COMMIT"], os.environ["INTENDED_TAG"]
+          platforms = ("compose", "cloud_run", "aws", "fly_io", "cloudflare_containers")
+
+          def fail(message):
+              raise SystemExit(message)
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      fail("duplicate JSON member")
+                  result[key] = value
+              return result
+
+          def regular(path, maximum=32 * 1024 * 1024):
+              try:
+                  value = path.lstat()
+              except OSError:
+                  fail(f"missing file: {path.name}")
+              if not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or not 0 < value.st_size <= maximum:
+                  fail(f"unsafe file: {path.name}")
+              return value.st_size
+
+          def load(path, maximum=8 * 1024 * 1024):
+              regular(path, maximum)
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+              except (UnicodeError, json.JSONDecodeError):
+                  fail(f"invalid JSON: {path.name}")
+
+          def sha_file(path):
+              regular(path)
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          authority = load(authority_path)
+          authority_fields = {"schema_version", "kind", "candidate_commit", "core_release", "contract_version", "bundle_sha256", "oci_image_digest", "repositories", "started_at", "finished_at", "captures", "verification"}
+          if (not isinstance(authority, dict) or set(authority) != authority_fields or authority.get("schema_version") != 1 or
+                  authority.get("kind") != "latchway_authenticated_cloud_capture_closure" or authority.get("candidate_commit") != commit or
+                  authority.get("core_release") != release or set(authority.get("captures", {})) != set(platforms)):
+              fail("authenticated cloud-capture authority is invalid")
+          document_path = root / "cloud_deployments.json"
+          document = load(document_path)
+          document_fields = {"schema_version", "kind", "domain", "status", "started_at", "finished_at", "core_commit", "core_release", "contract_version", "bundle_sha256", "oci_image_digest", "repositories", "claims", "artifacts"}
+          if (not isinstance(document, dict) or set(document) != document_fields or document.get("schema_version") != 1 or
+                  document.get("kind") != "latchway_cross_repository_external_evidence" or document.get("domain") != "cloud_deployments" or
+                  document.get("status") != "passed" or document.get("core_commit") != commit or document.get("core_release") != release):
+              fail("final cloud-deployments document identity is invalid")
+          for key in ("contract_version", "bundle_sha256", "oci_image_digest", "repositories", "started_at", "finished_at"):
+              authority_key = key
+              if document.get(key) != authority.get(authority_key):
+                  fail(f"final {key} is not authenticated")
+          expected_claims = {f"{platform}_verified": True for platform in platforms}
+          if document.get("claims") != expected_claims:
+              fail("final cloud claims are not derived from the authenticated platform set")
+          artifacts = document.get("artifacts")
+          if not isinstance(artifacts, list) or len(artifacts) != 11:
+              fail("final cloud artifact manifest is invalid")
+          artifact_map = {}
+          for item in artifacts:
+              if (not isinstance(item, dict) or set(item) != {"path", "sha256"} or not isinstance(item.get("path"), str) or
+                      PurePosixPath(item["path"]).is_absolute() or any(part in ("", ".", "..") for part in PurePosixPath(item["path"]).parts) or
+                      not isinstance(item.get("sha256"), str) or len(item["sha256"]) != 64 or item["path"] in artifact_map):
+                  fail("final cloud artifact manifest entry is invalid")
+              artifact_map[item["path"]] = item["sha256"]
+          expected_paths = {"artifacts/cloud-deployments/attestation-verification.json"}
+          for platform in platforms:
+              capture = authority["captures"][platform]
+              if not isinstance(capture, dict) or set(capture) != {"archive_sha256", "bundle_sha256", "manifest_sha256", "binding_sha256", "workflow_run_id", "workflow_run_attempt", "provider_resource_id_sha256"}:
+                  fail(f"{platform} authenticated capture authority is invalid")
+              archive_path = f"artifacts/cloud-deployments/{platform}.tar.gz"
+              bundle_path = f"artifacts/cloud-deployments/{platform}.attestation.json"
+              expected_paths.update((archive_path, bundle_path))
+              if artifact_map.get(archive_path) != capture["archive_sha256"] or artifact_map.get(bundle_path) != capture["bundle_sha256"]:
+                  fail(f"{platform} final artifact hash is not authenticated")
+          if set(artifact_map) != expected_paths:
+              fail("final cloud artifact path closure is invalid")
+          actual_paths = set()
+          for path in root.rglob("*"):
+              if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+                  fail("final cloud domain contains an unsafe entry")
+              if path.is_file() and path != document_path:
+                  relative = path.relative_to(root).as_posix()
+                  actual_paths.add(relative)
+                  if sha_file(path) != artifact_map.get(relative):
+                      fail(f"final cloud artifact hash mismatch: {relative}")
+          if actual_paths != expected_paths:
+              fail("final cloud domain file closure is invalid")
+          verification_path = root / "artifacts/cloud-deployments/attestation-verification.json"
+          verification = load(verification_path)
+          if verification != authority.get("verification") or artifact_map["artifacts/cloud-deployments/attestation-verification.json"] != sha_file(verification_path):
+              fail("candidate attestation summary does not match independent verification")
+          PY
       - name: Attest the finalized cloud-deployments domain
         id: cloud-attestation
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1

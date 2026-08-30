@@ -86,6 +86,11 @@ export const configurationAreas = {
     description: "Edit bounded native, React Native, web, or Node proof policy resources. Server validation remains authoritative for provider/platform combinations.",
     title: "Attestation"
   },
+  components: {
+    collections: [specArray("componentDefinitions", "Component definitions", "Edit one configured root or delegated client component, including exact platform identifiers, trust establishment, parent constraints, and feature grants.", { id: "new_component", platform: "ios", kind: "main_app", identifiers: { bundleIdentifiers: ["com.example.app"] }, familyRole: "root", attestation: { strategy: "direct", provider: "app_attest" }, allowedFeatures: ["assistant"] })],
+    description: "Define the only roots and delegated children that may join an Installation Family. The server validates platform identifiers, trust strategy, delegation ancestry, lifetime, and feature scope.",
+    title: "Component definitions"
+  },
   features: {
     collections: [specArray("features", "Features", "Edit a complete client-visible feature resource.", { access: { expression: "principal.authenticated" }, attestationPolicy: "native", id: "new_feature", limitPlan: { expression: "'free'" }, protocol: "openai_responses", routes: [{ id: "primary", model: "assistant_default", priority: 10, when: "true" }] })],
     description: "Edit complete feature resources without replacing identity providers, upstreams, model catalogs, or global limit plans.",

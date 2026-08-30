@@ -1,0 +1,113 @@
+---
+title: "MacPaw OpenAI integration"
+description: "Understand why MacPaw OpenAI 0.5.1 cannot provide the asynchronous streaming transport seam required by Latchway."
+---
+
+<Warning>
+  MacPaw OpenAI `0.5.1` is explicitly `unsupported`. Do not ship or advertise a
+  `LatchwayOpenAI` adapter for this framework version. Latchway contract
+  `1.0.0` is still pre-release.
+</Warning>
+
+## 1. What this integration does
+
+No safe transparent integration is shipped. The pinned capability spike found
+a synchronous public request middleware and no public streaming transport
+injection point.
+
+## 2. Supported framework versions
+
+None. Version `0.5.1` is the exact assessed and unsupported version, not a
+minimum or maximum supported range.
+
+## 3. Supported Latchway versions
+
+None for this adapter. Draft contract `1.0.0` and current wire protocol `2` do
+not make an unsafe framework seam compatible.
+
+## 4. Security level
+
+| Capability | Assessment |
+| --- | --- |
+| Full DPoP | Cannot be guaranteed through the synchronous public middleware seam |
+| Private key remains native | A Swift client can isolate keys, but the framework cannot request fresh authorization safely |
+| Streaming | No public injectable streaming transport seam was found |
+| Cancellation | Cannot be validated through a safe Latchway-owned transport |
+| App extensions | Unsupported because authenticated dispatch is unavailable |
+| Structured output | Irrelevant until authenticated dispatch is safe |
+| Tool calls | Irrelevant until authenticated dispatch is safe |
+| Protocol | Wire protocol `2` cannot make the missing transport seam safe |
+
+## 5. Install packages
+
+Do not install or publish a `LatchwayOpenAI` adapter for MacPaw OpenAI `0.5.1`.
+
+## 6. Create the Latchway client
+
+Use the first-party Swift transport directly or choose a framework with a safe
+asynchronous request-time transport seam.
+
+## 7. Bind a feature
+
+Feature binding cannot repair a transport that cannot generate fresh
+authorization for the final request attempt.
+
+## 8. Create the framework client
+
+Do not inject static Latchway access tokens, DPoP proofs, or custom
+authorization headers into a MacPaw OpenAI client.
+
+## 9. Send a non-streaming request
+
+No non-streaming adapter is supported. A synchronous middleware hook cannot
+perform Latchway session renewal and final-request DPoP signing safely.
+
+## 10. Send a streaming request
+
+No streaming adapter is supported. The assessed version exposes no public
+streaming transport injection point that can preserve signing and cancellation.
+
+## 11. Use tools
+
+Tool-call semantics do not change the authenticated transport requirement.
+
+## 12. Use structured output
+
+Structured-output semantics do not change the authenticated transport
+requirement.
+
+## 13. Handle cancellation
+
+There is no supported adapter through which Latchway can verify cancellation
+without weakening the transport boundary.
+
+## 14. Handle quota failures
+
+Without a supported adapter, do not attempt to translate Latchway quota
+problems through framework middleware.
+
+## 15. Handle session renewal
+
+Never cache a static access token or proof as a workaround. Renewal and signing
+must be asynchronous, single-flight, and performed for the final attempt.
+
+## 16. Known limitations
+
+The blocker is the public framework seam, not an undocumented configuration
+flag. Maintaining a private framework fork would not qualify as transparent
+supported compatibility.
+
+## 17. Verify the integration
+
+The source spike and generated registry record the unsupported conclusion. A
+future framework version requires a new pinned capability assessment.
+
+## 18. Troubleshooting
+
+If application code is adding static credentials or proofs, remove that path.
+Use a supported transport candidate instead of weakening DPoP.
+
+## 19. Compatibility matrix
+
+See [Compatibility](/reference/compatibility) for the canonical unsupported
+row and assessed version.

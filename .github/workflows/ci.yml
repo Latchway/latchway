@@ -68,9 +68,9 @@ jobs:
       matrix:
         postgres:
           - major: "15"
-            image: postgres:15.19-alpine
+            image: docker.io/library/postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b
           - major: "18"
-            image: postgres:18.6-alpine
+            image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     services:
       postgres:
         image: ${{ matrix.postgres.image }}
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: latchway
           POSTGRES_USER: latchway
@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: latchway
           POSTGRES_USER: latchway

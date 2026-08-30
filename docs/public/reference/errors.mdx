@@ -1,0 +1,60 @@
+---
+title: "Errors"
+description: "Handle stable RFC 9457 problem codes, bounded retries, and indeterminate mutations."
+---
+
+Latchway errors use `application/problem+json`. A canonical problem includes a
+stable code, title, safe detail, HTTP status, request ID, retryability, optional
+`Retry-After`, and—only where required—an operation ID. Provider payloads, raw
+internal errors, identity tokens, proofs, and credentials are excluded.
+
+## Identity, attestation, and session
+
+| Codes | Normal action |
+| --- | --- |
+| `identity_token_missing`, `identity_token_invalid`, `identity_token_expired`, `identity_reauthentication_required` | Obtain a valid current application identity token; do not loop refresh |
+| `attestation_required`, `attestation_unsupported`, `attestation_invalid`, `attestation_stale`, `attestation_step_up_required` | Fix platform support or re-establish a session with policy-satisfying evidence |
+| `dpop_missing`, `dpop_invalid`, `dpop_replayed` | Let the SDK create a fresh proof; never reuse or construct one in application code |
+| `dpop_nonce_required` | SDK may perform one exact pre-dispatch nonce follow-up |
+| `session_expired` | SDK may rotate or re-establish once before safe dispatch |
+| `session_revoked`, `refresh_token_reused`, `installation_revoked` | Treat the local session or installation as terminal and re-enroll only when policy permits |
+
+## Feature, quota, and upstream
+
+| Codes | Meaning |
+| --- | --- |
+| `feature_not_found`, `feature_not_allowed`, `model_not_allowed` | The active server policy does not permit the requested feature/model path |
+| `quota_exceeded`, `concurrency_exceeded` | A trusted server limit denied the request; respect `Retry-After` when present |
+| `output_limit_exceeded` | The requested output bound exceeds feature policy |
+| `pricing_unavailable` | A required trusted cost calculation cannot be proven |
+| `route_not_found` | No active route matches the verified facts |
+| `upstream_unavailable`, `upstream_timeout`, `upstream_protocol_error` | The selected upstream path failed before or during the bounded attempt |
+
+An error marked retryable is not permission to replay blindly. Retry only when
+the SDK or application can prove the operation did not reach an unsafe commit
+boundary and the route/session contract permits it.
+
+## Administration and configuration
+
+| Codes | Meaning |
+| --- | --- |
+| `authentication_required`, `permission_denied` | Administrator session or token is absent, expired, revoked, or under-scoped |
+| `resource_not_found` | Resource is absent or hidden by tenant boundaries |
+| `conflict` | The requested mutation conflicts with current durable state |
+| `etag_required`, `etag_mismatch` | Fetch the exact current revision and retry the reviewed mutation with its strong ETag |
+| `configuration_invalid` | The draft failed authoritative schema, reference, policy, accounting, or pricing validation |
+| `bootstrap_disabled` | The one-time first-owner flow is permanently closed |
+| `rate_limited` | The administrative rate limit rejected the call |
+| `operation_indeterminate` | The commit may have succeeded; reconcile the returned operation ID before any retry |
+
+## General protocol
+
+`request_invalid` means the request violated a bounded public contract.
+`protocol_version_unsupported` means the SDK and server wire ranges do not
+overlap. `server_not_ready` means an authoritative dependency or readiness
+condition is unavailable. `internal_error` is safe and intentionally generic;
+correlate its request ID with redacted server telemetry.
+
+For `operation_indeterminate`, retain both the operation ID and request ID,
+query audit or the affected resource, and decide from durable state. Repeating
+the mutation without reconciliation can duplicate an external effect.

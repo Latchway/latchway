@@ -1,0 +1,82 @@
+---
+title: "Operational views"
+description: "Inspect users, installations, requests, usage, cost, audit history, and system status safely."
+---
+
+The console, CLI, and Admin API expose tenant-scoped operational state without
+returning provider credentials, raw identity subjects, bearer or refresh
+tokens, DPoP proofs, attestation evidence, provider error bodies, or request
+content by default.
+
+## Users and installations
+
+Users are pseudonymous within the organization and environment. Operators can
+inspect safe normalized claims, block or unblock a user, and apply or clear one
+bounded limit-plan override. An override cannot change feature access or route
+selection.
+
+Installations expose platform, normalized trust, lifecycle, and safe diagnostic
+metadata. Revocation invalidates grants and refresh state; it does not reveal
+the installation key or attestation object.
+
+## Requests and attempts
+
+One logical request represents one client operation. Its detail view includes:
+
+- lifecycle status, start, completion, and duration;
+- aggregate normalized usage and integer nano-USD cost;
+- ordered physical attempts numbered 1 through 32;
+- selected route, upstream alias, physical model alias, and safe HTTP status;
+- start, optional first-byte, and optional completion timing;
+- a closed failure category;
+- independent token-usage and cost provenance.
+
+Fallback does not double-count the logical request. The public attempt failure
+vocabulary is `canceled`, `gateway_error`, `protocol_error`, `timeout`,
+`unavailable`, `upstream_rejected`, and `unknown`. Unknown durable values are
+collapsed to `unknown` rather than rendered as internal text.
+
+## Usage and analytics
+
+Usage summaries aggregate in PostgreSQL before bounded results are returned.
+They can include requests, active users, input/output/total tokens, integer
+nano-USD cost, request and first-token latency, failures, quota denials,
+attestation failures, fallback rates, and bounded feature/model/plan breakdowns.
+
+Estimated, calculated, provider-reported, and unknown provenance remain
+separate. A provider-reported OpenRouter cost is explicitly labeled
+`openrouter_usage_cost`; it is not confused with configured catalog cost.
+
+Summary ranges are half-open and limited to 366 days. Timeseries use UTC hours
+or days and cannot exceed 10,000 points. Collection pages use opaque keyset
+cursors with at most 200 rows; pass a returned cursor back unchanged.
+
+```bash
+latchway requests list --environment env_...
+latchway requests inspect req_...
+latchway usage summary --environment env_...
+latchway usage timeseries --environment env_... --interval hour
+```
+
+## Audit history
+
+Audit events are append-only, tenant-scoped, and redaction-safe. They contain
+opaque actor and target IDs plus ordered field, operation, and classification
+markers. They do not contain before/after values, free-form mutation reasons,
+passwords, tokens, secret values, or request bodies.
+
+```bash
+latchway audit --organization org_...
+```
+
+If a mutation returns `operation_indeterminate`, preserve its operation ID and
+request ID and reconcile the audit record before deciding whether to retry.
+
+## System health
+
+`GET /admin/v1/system` and `latchway status` report build, contract, protocol,
+process role, migration version, and readiness. Dependency detail is reduced to
+a readiness bit; database addresses and raw errors are not returned.
+
+For process-level metrics, traces, worker jobs, and alerting, continue with
+[Telemetry and jobs](/operations/telemetry-and-jobs).

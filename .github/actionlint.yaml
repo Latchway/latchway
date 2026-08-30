@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - latchway-release-failure
+    - latchway-live-sdk
+    - latchway-ephemeral-jit
+    - latchway-live-sdk-firebase
+    - latchway-live-sdk-turnstile
+    - latchway-live-provider

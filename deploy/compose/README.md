@@ -32,6 +32,13 @@ Use TLS for an external PostgreSQL service. After creating the first
 administrator, remove `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` and recreate only the
 Latchway service. Keep the database volume and master key.
 
+The release template pins PostgreSQL 18 and mounts its named volume at
+`/var/lib/postgresql`, the 18+ major-version-aware layout. Do not attach a
+volume created by a PostgreSQL 17-or-earlier `/var/lib/postgresql/data`
+deployment directly. Restore a verified backup or complete the documented
+`pg_upgrade` procedure before switching the image, then preserve the new named
+volume across ordinary Latchway upgrades.
+
 Before calling this a release deployment, use
 `scripts/deployment-evidence.py` as documented in
 `docs/deployment/README.md`. A successful `docker compose up` from a source

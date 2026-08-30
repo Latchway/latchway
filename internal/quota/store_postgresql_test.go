@@ -1452,6 +1452,110 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 	})
 }
 
+func TestStorePostgreSQLPersistsComponentFrameworkAndScopeAttribution(t *testing.T) {
+	fixture := newQuotaPostgreSQLFixture(t)
+	familyID := id.Must(id.InstallationFamily)
+	componentID := id.Must(id.ClientComponent)
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		INSERT INTO installation_families (
+			installation_family_id, organization_id, application_id, environment_id,
+			application_user_id, platform, root_installation_id
+		) VALUES ($1, $2, $3, $4, $5, 'ios', $6)
+	`, familyID, quotaTestOrganizationID, quotaTestApplicationID,
+		quotaTestEnvironmentID, quotaTestApplicationUserID, quotaTestInstallationID); err != nil {
+		t.Fatalf("insert quota test family: %v", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		INSERT INTO client_components (
+			client_component_id, organization_id, application_id, environment_id,
+			application_user_id, installation_family_id, component_definition_id,
+			component_kind, platform, is_root, trust_source, granted_features
+		) VALUES ($1, $2, $3, $4, $5, $6, 'ios-main', 'main_app', 'ios', true,
+		          'direct_attested', '["assistant"]'::jsonb)
+	`, componentID, quotaTestOrganizationID, quotaTestApplicationID,
+		quotaTestEnvironmentID, quotaTestApplicationUserID, familyID); err != nil {
+		t.Fatalf("insert quota test component: %v", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE installation_families SET root_component_id = $2
+		WHERE installation_family_id = $1
+	`, familyID, componentID); err != nil {
+		t.Fatalf("bind quota test root component: %v", err)
+	}
+
+	input := fixture.input(t, "component-attribution", 5)
+	input.InstallationFamilyID = familyID
+	input.ClientComponentID = componentID
+	input.ComponentDefinitionID = "ios-main"
+	input.ComponentKind = "main_app"
+	input.TrustSource = "direct_attested"
+	input.Framework = "swift-openai"
+	input.FrameworkVersion = "4.6.0"
+	input.Rules[0].Scope = []string{"feature", "client_component", "installation_family"}
+	if _, err := fixture.store.Reserve(fixture.ctx, input); err != nil {
+		t.Fatalf("reserve component-attributed request: %v", err)
+	}
+	var storedFamily, storedComponent, storedDefinition, storedKind, storedTrust string
+	var storedFramework, storedFrameworkVersion string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT installation_family_id, client_component_id, component_definition_id,
+		       component_kind, trust_source, framework, framework_version
+		FROM logical_requests WHERE logical_request_id = $1
+	`, input.LogicalRequestID.String()).Scan(
+		&storedFamily, &storedComponent, &storedDefinition, &storedKind, &storedTrust,
+		&storedFramework, &storedFrameworkVersion,
+	); err != nil {
+		t.Fatalf("read component request attribution: %v", err)
+	}
+	if storedFamily != familyID || storedComponent != componentID || storedDefinition != "ios-main" ||
+		storedKind != "main_app" || storedTrust != "direct_attested" ||
+		storedFramework != "swift-openai" || storedFrameworkVersion != "4.6.0" {
+		t.Fatalf("stored attribution = %q/%q/%q/%q/%q/%q/%q", storedFamily, storedComponent,
+			storedDefinition, storedKind, storedTrust, storedFramework, storedFrameworkVersion)
+	}
+	var dimensions []string
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT scope_dimensions FROM quota_buckets
+		WHERE environment_id = $1 AND limit_plan_key = $2 AND metric = 'logical_requests'
+	`, input.EnvironmentID, input.LimitPlanKey).Scan(&dimensions); err != nil {
+		t.Fatalf("read component quota dimensions: %v", err)
+	}
+	wantDimensions := []string{"installation_family", "client_component", "feature"}
+	if !slices.Equal(dimensions, wantDimensions) {
+		t.Fatalf("stored component scope dimensions = %#v, want %#v", dimensions, wantDimensions)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE logical_requests SET framework = 'unknown-framework'
+		WHERE logical_request_id = $1
+	`, input.LogicalRequestID.String()); err == nil {
+		t.Fatal("database accepted a framework outside the canonical registry")
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE logical_requests SET framework_version = NULL
+		WHERE logical_request_id = $1
+	`, input.LogicalRequestID.String()); err == nil {
+		t.Fatal("database accepted partial framework attribution")
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE logical_requests SET framework_version = '04.6.0'
+		WHERE logical_request_id = $1
+	`, input.LogicalRequestID.String()); err == nil {
+		t.Fatal("database accepted a noncanonical framework version")
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `
+		UPDATE logical_requests SET trust_source = NULL
+		WHERE logical_request_id = $1
+	`, input.LogicalRequestID.String()); err == nil {
+		t.Fatal("database accepted partial component provenance")
+	}
+
+	changedFramework := cloneReserveInput(input)
+	changedFramework.FrameworkVersion = "4.7.0"
+	if _, err := fixture.store.Reserve(fixture.ctx, changedFramework); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("framework-changing replay = %v, want invalid input", err)
+	}
+}
+
 func TestStorePostgreSQLOutputTokenQuota(t *testing.T) {
 	fixture := newQuotaPostgreSQLFixture(t)
 

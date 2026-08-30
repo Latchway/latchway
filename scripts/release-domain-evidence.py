@@ -66,7 +66,10 @@ REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
 # Observation IDs are deliberately distinct from the public claim names.
 CLAIM_REQUIREMENTS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
     "live_sdk_conformance": {
-        "javascript_against_release_image": ("sdk.javascript.release-image",),
+        "javascript_against_release_image": (
+            "sdk.javascript.firebase-app-check.release-image",
+            "sdk.javascript.turnstile.release-image",
+        ),
         "ios_against_release_image": ("sdk.ios.release-image",),
         "android_against_release_image": ("sdk.android.release-image",),
         "react_native_ios_against_release_image": ("sdk.react-native-ios.release-image",),

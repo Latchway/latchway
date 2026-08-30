@@ -89,17 +89,24 @@ type upstreamAttemptCLI struct {
 }
 
 type logicalRequestCLI struct {
-	ID             string               `json:"id"`
-	EnvironmentID  string               `json:"environment_id"`
-	UserID         string               `json:"user_id"`
-	InstallationID string               `json:"installation_id"`
-	Feature        string               `json:"feature"`
-	Protocol       string               `json:"protocol"`
-	StartedAt      string               `json:"started_at"`
-	CompletedAt    string               `json:"completed_at,omitempty"`
-	Status         string               `json:"status"`
-	Usage          *usageValuesCLI      `json:"usage,omitempty"`
-	Attempts       []upstreamAttemptCLI `json:"attempts"`
+	ID                    string               `json:"id"`
+	EnvironmentID         string               `json:"environment_id"`
+	UserID                string               `json:"user_id"`
+	InstallationID        string               `json:"installation_id"`
+	InstallationFamilyID  string               `json:"installation_family_id,omitempty"`
+	ClientComponentID     string               `json:"client_component_id,omitempty"`
+	ComponentDefinitionID string               `json:"component_definition_id,omitempty"`
+	ComponentKind         string               `json:"component_kind,omitempty"`
+	TrustSource           string               `json:"trust_source,omitempty"`
+	Framework             string               `json:"framework,omitempty"`
+	FrameworkVersion      string               `json:"framework_version,omitempty"`
+	Feature               string               `json:"feature"`
+	Protocol              string               `json:"protocol"`
+	StartedAt             string               `json:"started_at"`
+	CompletedAt           string               `json:"completed_at,omitempty"`
+	Status                string               `json:"status"`
+	Usage                 *usageValuesCLI      `json:"usage,omitempty"`
+	Attempts              []upstreamAttemptCLI `json:"attempts"`
 }
 
 type logicalRequestPageCLI struct {
@@ -897,6 +904,28 @@ func validPublicAttemptFailureCode(value string) bool {
 }
 
 func validLogicalRequestCLI(request logicalRequestCLI) bool {
+	componentFields := []string{
+		request.InstallationFamilyID, request.ClientComponentID,
+		request.ComponentDefinitionID, request.ComponentKind, request.TrustSource,
+	}
+	componentAware := componentFields[0] != ""
+	for _, value := range componentFields[1:] {
+		if (value != "") != componentAware {
+			return false
+		}
+	}
+	if componentAware && (id.Validate(request.InstallationFamilyID, id.InstallationFamily) != nil ||
+		id.Validate(request.ClientComponentID, id.ClientComponent) != nil ||
+		!operationalIdentifierPattern.MatchString(request.ComponentDefinitionID) ||
+		!operationalIdentifierPattern.MatchString(request.ComponentKind) ||
+		!operationalIdentifierPattern.MatchString(request.TrustSource)) {
+		return false
+	}
+	if (request.Framework == "") != (request.FrameworkVersion == "") ||
+		request.Framework != "" && (!operationalIdentifierPattern.MatchString(request.Framework) ||
+			len(request.FrameworkVersion) > 128 || strings.ContainsAny(request.FrameworkVersion, "\r\n\x00")) {
+		return false
+	}
 	startedAt, err := time.Parse(time.RFC3339Nano, request.StartedAt)
 	if err != nil || len(request.Attempts) > 32 {
 		return false
@@ -974,9 +1003,15 @@ func printRequests(opts *options, page logicalRequestPageCLI) error {
 	}
 	rows := make([][]string, 0, len(page.Items))
 	for _, request := range page.Items {
-		rows = append(rows, []string{request.ID, request.Feature, request.Protocol, request.Status, strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt)})
+		rows = append(rows, []string{
+			request.ID, request.ClientComponentID, request.Framework, request.FrameworkVersion,
+			request.Feature, request.Protocol, request.Status,
+			strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
+		})
 	}
-	if err := printControlTable(opts, []string{"REQUEST", "FEATURE", "PROTOCOL", "STATUS", "ATTEMPTS", "STARTED"}, rows); err != nil {
+	if err := printControlTable(opts, []string{
+		"REQUEST", "COMPONENT", "FRAMEWORK", "VERSION", "FEATURE", "PROTOCOL", "STATUS", "ATTEMPTS", "STARTED",
+	}, rows); err != nil {
 		return err
 	}
 	if page.Page.HasMore {
@@ -990,8 +1025,14 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 	if opts.output == "json" {
 		return printControlJSON(opts, request)
 	}
-	rows := [][]string{{request.ID, request.Feature, request.Status, strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt)}}
-	if err := printControlTable(opts, []string{"REQUEST", "FEATURE", "STATUS", "ATTEMPTS", "STARTED"}, rows); err != nil {
+	rows := [][]string{{
+		request.ID, request.InstallationFamilyID, request.ClientComponentID,
+		request.TrustSource, request.Framework, request.FrameworkVersion,
+		request.Feature, request.Status, strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
+	}}
+	if err := printControlTable(opts, []string{
+		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "FEATURE", "STATUS", "ATTEMPTS", "STARTED",
+	}, rows); err != nil {
 		return err
 	}
 	if len(request.Attempts) == 0 {

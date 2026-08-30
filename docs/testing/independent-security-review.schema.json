@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/independent-security-review.schema.json",
+  "title": "Latchway independent candidate security review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "review_window",
+    "candidate",
+    "reviewer",
+    "producer",
+    "reviews"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "latchway_independent_security_review" },
+    "status": { "const": "passed" },
+    "review_window": { "$ref": "#/$defs/window" },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "reviewer": { "$ref": "#/$defs/reviewer" },
+    "producer": { "$ref": "#/$defs/producer" },
+    "reviews": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/review" }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "review_id": {
+      "enum": [
+        "independent_p0_p2_review",
+        "ssrf_review",
+        "cryptography_review",
+        "app_attest_review",
+        "play_integrity_review",
+        "quota_race_review",
+        "admin_auth_review",
+        "browser_xss_review"
+      ]
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "finished_at", "maximum_age_seconds"],
+      "properties": {
+        "started_at": { "$ref": "#/$defs/utc" },
+        "finished_at": { "$ref": "#/$defs/utc" },
+        "maximum_age_seconds": { "const": 604800 }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "intended_tag",
+        "version",
+        "contract",
+        "image",
+        "promotion_conformance"
+      ],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "intended_tag": {
+          "type": "string",
+          "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "bundle_file_name", "bundle_sha256"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "bundle_file_name": {
+              "type": "string",
+              "pattern": "^latchway-contract-[A-Za-z0-9.-]+\\.tar\\.gz$"
+            },
+            "bundle_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "index_digest", "platforms"],
+          "properties": {
+            "repository": { "const": "ghcr.io/latchway/latchway" },
+            "index_digest": { "$ref": "#/$defs/digest" },
+            "platforms": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["linux/amd64", "linux/arm64"],
+              "properties": {
+                "linux/amd64": { "$ref": "#/$defs/digest" },
+                "linux/arm64": { "$ref": "#/$defs/digest" }
+              }
+            }
+          }
+        },
+        "promotion_conformance": { "$ref": "#/$defs/promotion_conformance" }
+      }
+    },
+    "repository_coordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "commit", "version", "intended_tag"],
+      "properties": {
+        "id": {
+          "enum": ["core", "javascript", "ios", "android", "react_native"]
+        },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "intended_tag": {
+          "type": "string",
+          "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        }
+      }
+    },
+    "promotion_conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "run_id", "run_attempt", "report_sha256", "repositories"],
+      "properties": {
+        "scope": { "const": "promotion" },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "report_sha256": { "$ref": "#/$defs/sha256" },
+        "repositories": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/repository_coordinate" }
+        }
+      }
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "organization",
+        "github_login",
+        "independent_from",
+        "control"
+      ],
+      "properties": {
+        "identity": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "organization": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "github_login": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+        },
+        "independent_from": { "const": "Latchway" },
+        "control": { "const": "separately_controlled" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow_path",
+        "run_id",
+        "run_attempt",
+        "source_commit"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$"
+        },
+        "workflow_path": {
+          "type": "string",
+          "pattern": "^\\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\\.ya?ml$"
+        },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_attempt": { "type": "integer", "minimum": 1 },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "severity_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical", "high", "medium", "low", "informational"],
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "informational": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "unresolved"],
+      "properties": {
+        "total": { "$ref": "#/$defs/severity_counts" },
+        "unresolved": { "$ref": "#/$defs/severity_counts" }
+      }
+    },
+    "accepted_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "summary", "acceptance_rationale"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "severity": { "enum": ["medium", "low", "informational"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "acceptance_rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "started_at",
+        "finished_at",
+        "findings",
+        "accepted_risks",
+        "artifact"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/review_id" },
+        "status": { "const": "passed" },
+        "started_at": { "$ref": "#/$defs/utc" },
+        "finished_at": { "$ref": "#/$defs/utc" },
+        "findings": { "$ref": "#/$defs/findings" },
+        "accepted_risks": {
+          "type": "array",
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/accepted_risk" }
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^reviews/(?:independent_p0_p2_review|ssrf_review|cryptography_review|app_attest_review|play_integrity_review|quota_race_review|admin_auth_review|browser_xss_review)\\.json$"
+            },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    }
+  }
+}

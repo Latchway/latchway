@@ -1,0 +1,27 @@
+---
+title: "Configure Keychain access groups"
+description: "Separate component private material while using narrowly scoped Keychain and App Group entitlements for app-extension provisioning."
+---
+
+<Warning>
+  This pre-release page does not define exact access-group identifiers or Swift
+  APIs. Do not invent entitlements from this design page.
+</Warning>
+
+Give each Client Component an independent key record and refresh chain. A
+shared Keychain access group must not become a bucket through which the
+containing app and extensions reuse one private key or rotating refresh token.
+
+Use an App Group only for non-secret provisioning data that the final SDK
+explicitly documents. Server challenges, public-key identifiers, bounded
+delegation envelopes, and status hints may be shareable if the final protocol
+permits them. Private keys, identity tokens, access tokens, refresh tokens, raw
+attestation objects, and upstream credentials are not.
+
+## Verification checklist
+
+- Confirm every target has the intended application identifier and entitlement.
+- Confirm a component cannot read another component's private-key record.
+- Confirm a cross-application or cross-environment envelope fails closed.
+- Confirm sign-out clears or invalidates all prior-user provisioning state.
+- Confirm diagnostics name the missing entitlement without printing a secret.

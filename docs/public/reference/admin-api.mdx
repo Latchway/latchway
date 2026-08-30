@@ -1,0 +1,112 @@
+---
+title: "Admin API"
+description: "Reference for the canonical tenant, configuration, secret, operational, and self-test control plane."
+---
+
+The console and CLI use the same `/admin/v1` API. The server derives the active
+organization and capabilities from the authenticated principal; cross-tenant
+IDs are not accepted as authority.
+
+## Authentication
+
+| Method and path | Operation |
+| --- | --- |
+| `POST /admin/v1/auth/bootstrap` | Consume the one-time token and create the first owner |
+| `POST /admin/v1/auth/login` | Create a secure administrator cookie session |
+| `GET /admin/v1/auth/session` | Return administrator, memberships, effective capabilities, and expiry |
+| `POST /admin/v1/auth/logout` | Revoke the active cookie session or bearer token |
+
+Cookie mutations require the same-origin session plus `X-CSRF-Token`. CLI and
+automation requests use a scoped bearer token; they do not use browser CSRF.
+Admin API tokens are supplied through an environment variable, never a command
+flag.
+
+## Tenancy and configuration
+
+| Method and path | Operation |
+| --- | --- |
+| `GET/POST /admin/v1/organizations` | List or create organizations |
+| `GET/POST /admin/v1/applications` | List or create tenant applications |
+| `GET/POST /admin/v1/applications/{applicationId}/environments` | List or create environments |
+| `GET /admin/v1/environments/{environmentId}/config` | Return the active immutable revision and ETag |
+| `GET/POST /admin/v1/environments/{environmentId}/config-revisions` | List revisions or create a draft |
+| `GET/PATCH /admin/v1/config-revisions/{revisionId}` | Read or replace one draft under `If-Match` |
+| `POST /admin/v1/config-revisions/{revisionId}/validate` | Validate schema, references, secrets, CEL, capabilities, accounting, and pricing |
+| `POST /admin/v1/config-revisions/{revisionId}/plan` | Produce a redacted structural change plan |
+| `POST /admin/v1/config-revisions/{revisionId}/simulate` | Explain exact feature, limit, route, model, fallback, and reservation selection without dispatch |
+| `POST /admin/v1/config-revisions/{revisionId}/activate` | Atomically activate a valid draft under `If-Match` |
+| `POST /admin/v1/environments/{environmentId}/rollback` | Atomically reactivate a previous valid revision |
+
+Configuration updates replace the complete document; there is no partial
+server model. A missing ETag returns `etag_required`; a stale one returns
+`etag_mismatch` before activation.
+
+## Secrets and administrators
+
+| Method and path | Operation |
+| --- | --- |
+| `GET/POST /admin/v1/secrets` | List redaction-safe metadata or create a write-only secret |
+| `POST /admin/v1/secrets/{secretId}/rotate` | Create a new encrypted version from the current version ID |
+| `DELETE /admin/v1/secrets/{secretId}` | Tombstone an unreferenced current secret |
+| `GET/POST /admin/v1/api-tokens` | List current-admin token metadata or create a one-time plaintext token |
+| `DELETE /admin/v1/api-tokens/{tokenId}` | Revoke one current-admin token |
+| `GET/POST /admin/v1/administrators` | List memberships or create an administrator |
+| `PUT /admin/v1/administrators/{adminUserId}/role` | Replace an organization role |
+| `POST /admin/v1/administrators/{adminUserId}/disable` | Disable membership and revoke scoped credentials |
+| `POST /admin/v1/administrators/{adminUserId}/enable` | Re-enable future authentication |
+| `POST /admin/v1/administrators/{adminUserId}/reset-password` | Replace password and revoke active administrator credentials |
+
+Secret plaintext is accepted only on create or rotate and never returned. An
+API-token value is shown exactly once; subsequent reads contain metadata only.
+The final active owner cannot be disabled or demoted.
+
+## Users, installations, requests, and usage
+
+| Method and path | Operation |
+| --- | --- |
+| `GET /admin/v1/users` | List pseudonymous application users |
+| `GET /admin/v1/users/{userId}` | Inspect one user and safe normalized claims |
+| `POST /admin/v1/users/{userId}/block` | Block a user and revoke active sessions |
+| `POST /admin/v1/users/{userId}/unblock` | Restore future session eligibility |
+| `PUT/DELETE /admin/v1/users/{userId}/limit-override` | Replace or clear a bounded plan override |
+| `GET /admin/v1/installations` | List tenant-scoped installations and normalized trust |
+| `GET /admin/v1/installations/{installationId}` | Inspect one installation |
+| `POST /admin/v1/installations/{installationId}/revoke` | Revoke installation, grants, and refresh state |
+| `GET /admin/v1/requests` | List redaction-safe logical requests |
+| `GET /admin/v1/requests/{requestId}` | Inspect a logical request and ordered upstream attempts |
+| `GET /admin/v1/usage/summary` | Aggregate requests, users, tokens, cost, latency, and rates |
+| `GET /admin/v1/usage/timeseries` | Return bounded UTC hourly or daily usage points |
+| `GET /admin/v1/audit-events` | List append-only redacted administrative audit events |
+
+Collection endpoints use opaque keyset cursors and return at most 200 items.
+Pass the cursor back unchanged. Request detail contains no prompt/response body,
+provider error text, identity subject, proof, token, or credential.
+
+## Self-tests and system
+
+| Method and path | Operation |
+| --- | --- |
+| `POST /admin/v1/self-tests` | Start a bounded local, upstream, or OpenRouter diagnostic |
+| `GET /admin/v1/self-tests/{selfTestId}` | Read one durable redaction-safe result |
+| `GET/POST /admin/v1/self-test-schedules` | List schedules or create one bound to the authenticating API token |
+| `GET/DELETE /admin/v1/self-test-schedules/{scheduleId}` | Inspect or permanently disable a schedule |
+| `GET /admin/v1/system` | Report build, contract, protocol, role, migration, and readiness status |
+
+A browser cookie cannot create a schedule. Creation must authenticate with the
+exact durable `run_self_tests` token that will authorize future executions;
+the request supplies no token ID or plaintext in JSON.
+
+The generic configured upstream self-test prefers an OpenAI Responses-capable
+model and falls back to Chat capability. The OpenRouter self-test requires
+Chat. Both require trusted input accounting, configured USD pricing, and a
+positive cost ceiling before dispatch.
+
+## Response and mutation rules
+
+All errors are canonical RFC 9457 problem documents. Mutations are audited.
+When a database commit outcome is ambiguous, the API returns
+`operation_indeterminate` with the operation ID that may have committed; use
+that ID to reconcile instead of blindly retrying.
+
+See [Admin console](/administration/console) for browser-specific behavior and
+[CLI reference](/reference/cli) for safer automation workflows.

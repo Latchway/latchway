@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/latchway/latchway/internal/clientapi"
 	"github.com/latchway/latchway/internal/configuration"
+	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/quota"
@@ -107,6 +109,9 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 	if !sdkMatchesPlatform(input.Metadata.SDK, authorization.InstallationPlatform) {
 		return clientapi.FeatureQuotaResult{}, &clientapi.DependencyError{Code: "request_invalid"}
 	}
+	if authorization.ComponentID != "" && !slices.Contains(authorization.GrantedFeatures, input.Feature) {
+		return clientapi.FeatureQuotaResult{}, &clientapi.DependencyError{Code: "component_feature_not_granted"}
+	}
 
 	snapshot, err := provider.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
 		OrganizationID: authorization.OrganizationID,
@@ -154,6 +159,11 @@ func (provider *FeatureQuotaProvider) FeatureQuota(
 		EnvironmentID:          authorization.EnvironmentID,
 		ApplicationUserID:      authorization.ApplicationUserID,
 		InstallationID:         authorization.InstallationID,
+		InstallationFamilyID:   projection.Scopes.InstallationFamilyID,
+		ClientComponentID:      projection.Scopes.ClientComponentID,
+		ComponentDefinitionID:  projection.Scopes.ComponentDefinitionID,
+		ComponentKind:          projection.Scopes.ComponentKind,
+		TrustSource:            projection.Scopes.TrustSource,
 		ConfigRevisionID:       snapshot.PolicyRevision(),
 		Platform:               projection.Scopes.Platform,
 		NormalizedClaimDigests: cloneClaimDigests(projection.Scopes.NormalizedClaims),
@@ -177,7 +187,8 @@ func (provider *FeatureQuotaProvider) validateInput(input clientapi.FeatureQuota
 	if !identifierPattern.MatchString(input.Feature) ||
 		id.Validate(logicalID, id.LogicalRequest) != nil ||
 		input.Metadata.RequestID != logicalID || input.Metadata.HTTPMethod != http.MethodGet ||
-		!validSDK(input.Metadata.SDK) || !validSemVer(input.Metadata.SDKVersion) {
+		!validSDK(input.Metadata.SDK) || !validSemVer(input.Metadata.SDKVersion) ||
+		!validFrameworkMetadata(input.Metadata.SDK, input.Metadata.Framework, input.Metadata.FrameworkVersion) {
 		return url.URL{}, errInvalidConfiguration
 	}
 	target := url.URL{
@@ -193,6 +204,13 @@ func (provider *FeatureQuotaProvider) validateInput(input clientapi.FeatureQuota
 		return url.URL{}, errInvalidConfiguration
 	}
 	return target, nil
+}
+
+func validFrameworkMetadata(sdk, framework, version string) bool {
+	if framework == "" || version == "" {
+		return framework == "" && version == ""
+	}
+	return frameworkcompat.Compatible(sdk, framework) && frameworkcompat.ValidVersion(version)
 }
 
 func containsPhysicalScope(scope []string) bool {
@@ -258,7 +276,8 @@ func featureQuotaFailure(err error) error {
 	code, _ := errorCode(err, time.Time{})
 	switch code {
 	case "dpop_invalid", "dpop_replayed", "session_expired", "session_revoked",
-		"installation_revoked", "attestation_stale", "attestation_step_up_required",
+		"installation_revoked", "installation_family_revoked", "component_revoked",
+		"component_feature_not_granted", "attestation_stale", "attestation_step_up_required",
 		"feature_not_found", "feature_not_allowed", "configuration_invalid",
 		"server_not_ready":
 		return &clientapi.DependencyError{Code: code}

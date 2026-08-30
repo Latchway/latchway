@@ -11,6 +11,7 @@ import { OverviewPage } from "../pages/overview-page";
 import { SystemHealthPage } from "../pages/system-health-page";
 import { AdministratorsPage } from "../pages/administrators-page";
 import { APITokensPage } from "../pages/api-tokens-page";
+import { InstallationFamiliesPage } from "../pages/installation-families-page";
 import {
   AttestationFailuresPage,
   AuditPageView,
@@ -33,6 +34,7 @@ import {
   AccessPoliciesConfigurationPage,
   AttestationConfigurationPage,
   AuthenticationProvidersPage,
+  ComponentDefinitionsConfigurationPage,
   FeaturesConfigurationPage,
   LimitPlansConfigurationPage,
   ModelsPricingConfigurationPage,
@@ -74,6 +76,8 @@ const authenticationProvidersRoute = createRoute({ component: AuthenticationProv
 const attestationRoute = createRoute({ component: AttestationConfigurationPage, getParentRoute: () => rootRoute, path: "/attestation" });
 const usersRoute = createRoute({ component: UsersPage, getParentRoute: () => rootRoute, path: "/users" });
 const installationsRoute = createRoute({ component: InstallationsPage, getParentRoute: () => rootRoute, path: "/installations" });
+const installationFamiliesRoute = createRoute({ component: InstallationFamiliesPage, getParentRoute: () => rootRoute, path: "/installation-families" });
+const componentDefinitionsRoute = createRoute({ component: ComponentDefinitionsConfigurationPage, getParentRoute: () => rootRoute, path: "/component-definitions" });
 const featuresRoute = createRoute({ component: FeaturesConfigurationPage, getParentRoute: () => rootRoute, path: "/features" });
 const routesRoute = createRoute({ component: RoutesConfigurationPage, getParentRoute: () => rootRoute, path: "/routes" });
 const upstreamsRoute = createRoute({ component: UpstreamsConfigurationPage, getParentRoute: () => rootRoute, path: "/upstreams" });
@@ -96,7 +100,8 @@ const auditRoute = createRoute({ component: AuditPageView, getParentRoute: () =>
 
 const routeTree = rootRoute.addChildren([
   indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute,
-  authenticationProvidersRoute, attestationRoute, usersRoute, installationsRoute,
+  authenticationProvidersRoute, attestationRoute, usersRoute, installationFamiliesRoute, installationsRoute,
+  componentDefinitionsRoute,
   featuresRoute, routesRoute, upstreamsRoute, modelsPricingRoute, secretsRoute, configurationRoute,
   accessPoliciesRoute, limitPlansRoute, userOverridesRoute, abuseControlsRoute,
   requestsRoute, usageRoute, costRoute, latencyRoute, errorsRoute, attestationFailuresRoute,

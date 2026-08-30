@@ -129,7 +129,7 @@ func TestRevokeCurrentInstallationRejectsAdversarialTransportBeforeCoordinator(t
 		{name: "chunked body declaration", mutate: func(r *http.Request) { r.Body = http.NoBody; r.TransferEncoding = []string{"chunked"} }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest, wantPath: "body"},
 		{name: "query", mutate: func(r *http.Request) { r.URL.RawQuery = "token=must-not-echo" }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest, wantPath: "query"},
 		{name: "empty query marker", mutate: func(r *http.Request) { r.URL.ForceQuery = true }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest, wantPath: "query"},
-		{name: "invalid protocol", mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "2") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
+		{name: "invalid protocol", mutate: func(r *http.Request) { r.Header.Set("X-Latchway-Protocol-Version", "3") }, wantCode: "protocol_version_unsupported", wantStatus: http.StatusUpgradeRequired},
 		{name: "invalid SDK", mutate: func(r *http.Request) { r.Header.Set("X-Latchway-SDK", "swift") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest, wantPath: "header.X-Latchway-SDK"},
 		{name: "invalid SDK version", mutate: func(r *http.Request) { r.Header.Set("X-Latchway-SDK-Version", "latest") }, wantCode: "request_invalid", wantStatus: http.StatusBadRequest, wantPath: "header.X-Latchway-SDK-Version"},
 	}

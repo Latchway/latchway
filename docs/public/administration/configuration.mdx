@@ -1,0 +1,139 @@
+---
+title: "Configuration"
+description: "Build, validate, simulate, and atomically activate an immutable Latchway environment revision."
+---
+
+An environment has one active immutable configuration revision. Editing never
+mutates that revision in place: Latchway creates a draft, replaces its complete
+document under a strong ETag, validates it, produces a redacted plan, and then
+atomically activates it.
+
+## Configuration shape
+
+Every document uses the following envelope:
+
+```json
+{
+  "apiVersion": "latchway.dev/v1alpha1",
+  "kind": "EnvironmentConfig",
+  "metadata": {
+    "organization": "example",
+    "application": "mobile-app",
+    "environment": "production"
+  },
+  "spec": {
+    "identityProviders": [],
+    "attestationPolicies": [],
+    "upstreams": [],
+    "models": [],
+    "inputAccountingProfiles": [],
+    "pricingCatalogs": [],
+    "limitPlans": [],
+    "features": [],
+    "session": {},
+    "privacy": {}
+  }
+}
+```
+
+The required `spec` collections connect in this direction:
+
+```text
+identity provider + attestation policy
+                 |
+managed secret -> upstream -> physical model
+                              |       |
+                input accounting   pricing
+                              \       /
+                       feature routes
+                              |
+                         limit plan
+```
+
+References are stable logical IDs. A feature protocol must agree with the
+selected model capability, an upstream authentication reference must resolve
+to a current secret, and hard input, total-token, or input-priced cost rules
+must have model-aware accounting and pricing that the server can prove.
+
+## Setup wizard
+
+The current embedded wizard generates a production-native template with
+Firebase Authentication, required App Attest and Play Integrity, and an OpenAI
+Responses feature. Use it only when those exact production inputs are
+available:
+
+1. Create the organization, application, and environment.
+2. Add the application's Firebase project.
+3. Add the exact App Attest and Play Integrity production identifiers.
+4. Store the upstream credential as a write-only secret.
+5. Configure upstream, physical model, input accounting, pricing, feature,
+   routes, and limit plan.
+6. Validate and inspect the structural plan.
+7. Simulate representative platforms, claims, trust levels, and request bounds.
+8. Activate and copy the generated SDK application resource ID and environment.
+
+The generated `app_...` application ID is not a display name, bundle ID,
+Android package name, or slug.
+
+Other supported identity providers, web attestation, protocol adapters, and
+signed debug policies are configured through the dedicated resource editors,
+full configuration editor, CLI, or Admin API. The isolated `verify local`
+command owns the supported turnkey debug path; the production wizard does not
+offer a debug switch.
+
+## CLI workflow
+
+Pull the redaction-safe active document and use it as a reviewed starting point:
+
+```bash
+latchway --output json config pull --environment env_... > active.json
+latchway config apply --environment env_... --file candidate.json --dry-run
+latchway config apply --environment env_... --file candidate.json
+```
+
+A normal apply creates the draft, validates it, plans against the active base,
+and activates with the newest ETag. To guard explicitly against a stale base:
+
+```bash
+latchway config apply \
+  --environment env_... \
+  --base-revision rev_... \
+  --file candidate.json
+```
+
+Individual lifecycle commands are available when a review process separates
+the stages:
+
+```bash
+latchway config validate rev_...
+latchway config plan rev_...
+latchway config diff rev_...
+latchway routes simulate rev_... \
+  --feature assistant \
+  --platform react_native_ios \
+  --trust-level app_verified \
+  --claims-file normalized-claims.json
+latchway config rollback rev_... --environment env_...
+```
+
+Simulation runs the exact compiled policy and route resolver without reserving
+quota or dispatching upstream traffic. Claims come from a bounded regular JSON
+file so they do not enter shell history.
+
+## Activation safety
+
+Validation covers schema, duplicate keys, references, secrets, identity and
+attestation settings, CEL, model capabilities, trusted input accounting,
+pricing, route bounds, destination policy, retries, limits, and active user
+overrides. Activation fails when the draft is invalid or its strong ETag is
+stale.
+
+Rollback atomically reactivates a previously valid revision; it does not edit
+history. Configuration activation is audited with actor, target, operation,
+and classification metadata, not secret or before/after values.
+
+<Info>
+  The public configuration envelope is versioned `v1alpha1` in the version 1
+  source candidate. Treat the candidate's schema and server as one synchronized
+  contract until release promotion completes.
+</Info>

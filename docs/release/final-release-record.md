@@ -62,22 +62,27 @@ performs those checks for every superseded alias before its separate mutation
 phase, so overlapping release runs fail closed without making an older
 finalizer impossible to resume.
 
-Registry coordinates accepted by the renderer are derived from the five exact
+Registry coordinates accepted by the finalizer are derived from the five exact
 repository coordinates in the attested conformance report. They are not
-workflow inputs. The rendered domain table preserves the public-registry
-document hash and every hash-bound raw proof artifact, so the record identifies
-the observed package metadata, integrity/checksum, signature, and OCI proof
-bytes rather than recording only a boolean claim.
+workflow inputs. The finalizer independently reconstructs the public-registry
+proof's exact five paths and hashes from the authenticated aggregate and
+requires the unprivileged prepared proof to be byte-identical. The canonical
+report binds the resulting proof and durable archive hashes, so the immutable
+record identifies the retained package metadata, integrity/checksum,
+signature, and OCI proof bytes rather than recording only a boolean claim.
 
 ## Output and resumability
 
-`render-completion-report.py` validates the proof chain offline and renders a
-deterministic `COMPLETION_REPORT.md` release asset. It contains the exact five
-repository commits, versions, and annotated tags; OCI index and platform
-digests; contract, wire protocol, bundle hash, and database schema; package
-coordinates; all release evidence domains; automated security checks;
-operational/mobile proof; candidate artifact hashes; and hashes of its four
-input documents.
+The unprivileged preparation job may run the repository validators, including
+`verify-public-registry-proof.py`, but neither that helper's status nor any
+candidate-rendered Markdown is accepted by the publisher. A fresh no-checkout
+finalizer validates the original evidence-only authority manifest, reopens the
+durable tar archive without extracting it, compares its exact entry closure and
+every file hash to the authenticated inputs, and only then generates the
+deterministic `COMPLETION_REPORT.md` with fixed inline workflow logic. The
+report contains the five repository commits, versions, and annotated tags;
+contract and OCI identity; exact public package coordinates; every required
+release evidence domain; and the SHA-256 of each durable release asset.
 
 The workflow attests that exact Markdown file and publishes it with
 `COMPLETION_REPORT.attestation.sigstore.json`. It creates or resumes the draft,

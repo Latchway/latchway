@@ -1,0 +1,87 @@
+---
+title: "Providers and protocols"
+description: "Configure protected AI and HTTP upstreams without exposing routes, models, or credentials to clients."
+---
+
+Latchway separates the public request shape from the protected upstream target.
+A client requests a feature; the active server configuration chooses the
+destination, credential, physical model, price, timeout, and retry policy.
+
+## Protocol adapters
+
+| Feature protocol | Public endpoint | Upstream family |
+| --- | --- | --- |
+| OpenAI Responses | `POST /v1/responses` | OpenAI-compatible |
+| OpenAI Chat Completions | `POST /v1/chat/completions` | OpenAI-compatible |
+| OpenAI Embeddings | `POST /v1/embeddings` | OpenAI-compatible |
+| Anthropic Messages | `POST /v1/messages` | Anthropic-compatible |
+| Restricted opaque HTTP | `/proxy/{feature}/{path...}` | Explicitly configured generic HTTP |
+
+Direct providers, OpenRouter, Bifrost, LiteLLM, Cloudflare AI Gateway, and
+internal compatible proxies are modeled as upstreams and physical models. They
+do not require provider-specific client credentials or client-side routing.
+
+## Store the credential
+
+Use the Secrets page or a scoped CLI token. The value is write-only,
+envelope-encrypted, and never returned:
+
+```bash
+printf '%s' "$UPSTREAM_API_KEY" | \
+  latchway secret set provider_key \
+  --environment env_... --from-stdin
+```
+
+Authentication modes are `none`, Bearer, one configured header, Basic, or one
+to eight independently secret-backed headers. Credential and static header
+names cannot collide with Latchway control fields, protocol-owned fields,
+forwarding fields, or hop-by-hop headers.
+
+## Configure a provider path
+
+1. Create the upstream with an HTTPS base URL and authentication reference.
+2. Add a physical model and the protocol capabilities it actually supports.
+3. Add a model-aware input-accounting profile and immutable pricing when hard
+   input, total-token, or cost enforcement depends on them.
+4. Create a feature and its ordered routes.
+5. Configure priorities, weights, sticky selection, fallback conditions,
+   bounded retry, replay safety, request limits, and timeouts.
+6. Validate, plan, simulate, and activate the immutable revision.
+
+The gateway resolves and pins DNS answers, rejects prohibited destination
+ranges, rejects redirects, strips client credentials, applies route bounds,
+rewrites the selected physical model and output limit, and only then injects
+the managed credential.
+
+## Timeouts and fallback
+
+Default upstream stages are:
+
+| Stage | Default |
+| --- | ---: |
+| Connect and TLS | 5 seconds |
+| Response headers | 30 seconds |
+| First response-body byte | 30 seconds |
+| Gap between later body reads | 1 minute |
+| Entire physical attempt | 2 minutes |
+
+A route can narrow or replace these values within the ten-minute total bound.
+Fallback and retry use the selected route's effective values and can happen
+only for configured conditions before any response bytes are committed.
+Restricted opaque HTTP also requires explicit method replay safety.
+
+## Trusted accounting
+
+Responses, Chat, Embeddings, and Anthropic text-only shapes can use a
+server-owned, model-aware input-accounting profile. Latchway rewrites the
+request first, then binds its exact body hash, byte and framing counts, input
+bound, output bound, total bound, profile, and physical model into the durable
+quota reservation.
+
+If an enabled hard limit cannot be conservatively proven for a richer request
+shape, the request fails closed. Missing or malformed provider usage retains
+the conservative charge. Provider-reported cost is accepted only through an
+explicit trusted parser; arbitrary response fields never become billing truth.
+
+See [Routing and quotas](/concepts/routing-and-quotas) for selection and
+reservation semantics.

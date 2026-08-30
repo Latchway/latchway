@@ -1,0 +1,70 @@
+---
+title: "Latchway documentation"
+description: "Self-hosted, attested access to AI infrastructure for mobile and web applications."
+---
+
+<Warning>
+  Latchway version 1 is a repository-local tested source candidate, not an
+  independently audited, published, or supported release. Public images,
+  packages, tags, and production evidence are still gated by the release
+  process.
+</Warning>
+
+Latchway is an Apache-2.0-licensed access gateway that lets untrusted iOS,
+Android, React Native, and web applications call configured AI infrastructure
+without embedding an upstream-provider credential.
+
+Your application keeps its existing identity provider and request format.
+Latchway verifies identity and platform trust, issues a short-lived DPoP-bound
+session, applies feature policy and quotas, selects a server-controlled route,
+injects the upstream credential, streams the response, and records redacted
+usage.
+
+```text
+Application
+  identity token + platform attestation + P-256 DPoP key + AI request
+      |
+      v
+Latchway
+  identity -> attestation -> policy -> quota -> routing -> streaming -> usage
+      |
+      v
+Configured AI or HTTP upstream
+```
+
+## Start with your application
+
+<CardGroup cols={2}>
+  <Card title="React Native" href="/mobile/react-native">
+    Use one fetch-shaped API backed by the native iOS and Android security
+    implementations.
+  </Card>
+  <Card title="Native iOS" href="/mobile/ios">
+    Use Swift concurrency, Keychain or Secure Enclave keys, and Apple App
+    Attest.
+  </Card>
+  <Card title="Native Android" href="/mobile/android">
+    Use Kotlin, Android Keystore, OkHttp, and Google Play Integrity.
+  </Card>
+  <Card title="Run locally" href="/quickstart">
+    Start the gateway, bootstrap its control plane, and run the isolated local
+    verification path.
+  </Card>
+</CardGroup>
+
+## Security boundary
+
+Applications can choose a feature and send supported request content. They
+cannot choose a trusted user, plan, physical model, upstream route, price, or
+usage result. They never receive an upstream-provider secret.
+
+Latchway does not replace your login system, store prompt bodies by default,
+or turn web risk signals into hardware-backed native attestation. Read
+[Security boundary](/concepts/security-boundary) before integrating a client.
+
+## Operator path
+
+One Go binary contains the gateway, worker, migrations, diagnostics, CLI, and
+embedded administration console. PostgreSQL is the only required durable
+service. Start with [Deployment](/operations/deployment), then complete the
+[Production-readiness checklist](/operations/production-readiness).

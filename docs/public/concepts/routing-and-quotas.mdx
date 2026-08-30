@@ -1,0 +1,51 @@
+---
+title: "Routing and quotas"
+description: "How features select routes and how Latchway reserves trusted usage before dispatch."
+---
+
+Applications request a **feature**, not an upstream credential or trusted
+physical model. The active immutable configuration maps that feature to policy,
+limit plans, routes, upstreams, physical models, pricing, and retry behavior.
+
+## Feature-first routing
+
+Routing evaluates server-owned inputs such as platform, normalized trust,
+verified identity claims, plan, health, configured weights, and sticky keys.
+The client cannot override the selected upstream, physical model, credential,
+or price.
+
+Latchway supports protocol-aware dispatch for OpenAI Chat Completions,
+Responses, Embeddings, Anthropic Messages, and explicitly restricted opaque
+HTTP routes. Protocol adapters bound and rewrite trusted fields before network
+dispatch.
+
+An upstream attempt may retry or fall back only when the route policy permits
+it and no response bytes have been committed. The logical request is counted
+once even when it has multiple upstream attempts.
+
+## Trusted input preflight
+
+When a hard input, total-token, or input-priced cost limit applies, Latchway
+must prove a conservative model-aware input estimate before dispatch. Rich
+input that cannot be safely accounted for fails closed rather than bypassing a
+quota.
+
+## Reserve, execute, settle
+
+1. Estimate the worst permitted usage and atomically reserve every applicable
+   quota and concurrency lease in PostgreSQL.
+2. Dispatch without holding an open database transaction.
+3. Parse provider-reported usage where trustworthy, otherwise apply the
+   configured conservative accounting rule.
+4. Settle to actual charge or release the unused reservation idempotently.
+
+This design prevents concurrent overspend and avoids refunding unknown usage as
+zero. Quotas can compose across environment, feature, plan, user override, and
+abuse-control scopes.
+
+## Operator verification
+
+Use route simulation against an exact configuration revision before activation.
+After traffic begins, inspect the logical request and its ordered attempts,
+including selected route, upstream, physical model, timing, usage and cost
+provenance, and sanitized failure category.

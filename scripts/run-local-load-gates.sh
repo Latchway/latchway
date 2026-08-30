@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-  echo "usage: $0 -acknowledge-load -evidence-dir ABSOLUTE_EMPTY_DIRECTORY [-release-image INDEX_OCI -release-platform-image AMD64_CHILD_OCI -core-commit COMMIT]" >&2
+  echo "usage: $0 -acknowledge-load -evidence-dir ABSOLUTE_EMPTY_DIRECTORY [-release-image INDEX_OCI -release-platform-image AMD64_CHILD_OCI -core-commit COMMIT [-preloaded-platform-image-id SHA256_ID -preloaded-postgres-image-id SHA256_ID]]" >&2
   exit 2
 }
 
@@ -11,6 +11,8 @@ evidence_dir=
 release_image=
 release_platform_image=
 requested_commit=
+preloaded_platform_image_id=
+preloaded_postgres_image_id=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -acknowledge-load)
@@ -37,6 +39,16 @@ while [ "$#" -gt 0 ]; do
       requested_commit=$2
       shift 2
       ;;
+    -preloaded-platform-image-id)
+      [ "$#" -ge 2 ] || usage
+      preloaded_platform_image_id=$2
+      shift 2
+      ;;
+    -preloaded-postgres-image-id)
+      [ "$#" -ge 2 ] || usage
+      preloaded_postgres_image_id=$2
+      shift 2
+      ;;
     *)
       usage
       ;;
@@ -61,6 +73,28 @@ if [ -n "$release_image$release_platform_image$requested_commit" ]; then
   case "$requested_commit" in *[!0-9a-f]*) echo "release core commit must be lowercase hexadecimal" >&2; exit 2 ;; esac
   [ "$release_image" != "$release_platform_image" ] || { echo "release index and platform child must differ" >&2; exit 2; }
   release_mode=true
+fi
+
+preloaded_mode=false
+if [ -n "$preloaded_platform_image_id$preloaded_postgres_image_id" ]; then
+  [ "$release_mode" = true ] || usage
+  [ -n "$preloaded_platform_image_id" ] && [ -n "$preloaded_postgres_image_id" ] || usage
+  case "$preloaded_platform_image_id" in
+    sha256:????????????????????????????????????????????????????????????????) ;;
+    *) echo "preloaded platform image ID must be an immutable sha256 image ID" >&2; exit 2 ;;
+  esac
+  case "$preloaded_postgres_image_id" in
+    sha256:????????????????????????????????????????????????????????????????) ;;
+    *) echo "preloaded PostgreSQL image ID must be an immutable sha256 image ID" >&2; exit 2 ;;
+  esac
+  case "${preloaded_platform_image_id#sha256:}${preloaded_postgres_image_id#sha256:}" in
+    *[!0-9a-f]*) echo "preloaded image IDs must be lowercase hexadecimal" >&2; exit 2 ;;
+  esac
+  [ "$preloaded_platform_image_id" != "$preloaded_postgres_image_id" ] || {
+    echo "preloaded candidate and PostgreSQL image IDs must differ" >&2
+    exit 2
+  }
+  preloaded_mode=true
 fi
 
 [ "$acknowledge" = true ] || usage
@@ -160,12 +194,21 @@ fi
 gateway_runtime_image=
 provision_local_image_id=
 if [ "$release_mode" = true ]; then
-  docker pull --platform linux/amd64 "$release_platform_image" >/dev/null
-  gateway_runtime_image=$release_platform_image
-  gateway_image_id=$(docker image inspect --format '{{.Id}}' "$release_platform_image")
-  observed_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$release_platform_image")
-  observed_os=$(docker image inspect --format '{{.Os}}' "$release_platform_image")
-  observed_architecture=$(docker image inspect --format '{{.Architecture}}' "$release_platform_image")
+  if [ "$preloaded_mode" = true ]; then
+    gateway_runtime_image=$preloaded_platform_image_id
+    gateway_image_id=$(docker image inspect --format '{{.Id}}' "$preloaded_platform_image_id")
+    [ "$gateway_image_id" = "$preloaded_platform_image_id" ] || {
+      echo "preloaded candidate image ID changed after import" >&2
+      exit 1
+    }
+  else
+    docker pull --platform linux/amd64 "$release_platform_image" >/dev/null
+    gateway_runtime_image=$release_platform_image
+    gateway_image_id=$(docker image inspect --format '{{.Id}}' "$release_platform_image")
+  fi
+  observed_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$gateway_runtime_image")
+  observed_os=$(docker image inspect --format '{{.Os}}' "$gateway_runtime_image")
+  observed_architecture=$(docker image inspect --format '{{.Architecture}}' "$gateway_runtime_image")
   [ "$observed_revision" = "$commit" ] || { echo "release platform image revision does not match source commit" >&2; exit 1; }
   [ "$observed_os/$observed_architecture" = linux/amd64 ] || { echo "release platform child is not linux/amd64" >&2; exit 1; }
 else
@@ -203,6 +246,20 @@ postgres_password=$(openssl rand -hex 32)
 export POSTGRES_DB=latchway
 export POSTGRES_USER=latchway
 export POSTGRES_PASSWORD=$postgres_password
+postgres_runtime_image=docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+if [ "$preloaded_mode" = true ]; then
+  postgres_runtime_image=$preloaded_postgres_image_id
+  observed_postgres_image_id=$(docker image inspect --format '{{.Id}}' "$postgres_runtime_image")
+  [ "$observed_postgres_image_id" = "$preloaded_postgres_image_id" ] || {
+    echo "preloaded PostgreSQL image ID changed after import" >&2
+    exit 1
+  }
+  observed_postgres_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgres_runtime_image")
+  [ "$observed_postgres_platform" = linux/amd64 ] || {
+    echo "preloaded PostgreSQL image is not linux/amd64" >&2
+    exit 1
+  }
+fi
 docker run --detach \
   --name "$postgres" \
   --network "$network" \
@@ -215,7 +272,7 @@ docker run --detach \
   --env POSTGRES_DB \
   --env POSTGRES_USER \
   --env POSTGRES_PASSWORD \
-  postgres:18.6-alpine \
+  "$postgres_runtime_image" \
   -c "max_connections=$postgres_max_connections" >/dev/null
 
 postgres_ready=false
@@ -332,7 +389,7 @@ printf '%s\n' \
   "  \"gateway_memory_swap_bytes\": $memory_swap_bytes," \
   "  \"gateway_db_pool_max_connections\": $gateway_db_pool_max_connections," \
   '  "gateway_expected_pid_in_shared_namespace": 1,' \
-  '  "postgres_image": "postgres:18.6-alpine",' \
+  '  "postgres_image": "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",' \
   "  \"postgres_local_docker_image_id\": \"$postgres_image_id\"," \
   "  \"postgres_cpu_millicores\": $postgres_cpu_millicores," \
   "  \"postgres_nano_cpus\": $postgres_observed_nano_cpus," \

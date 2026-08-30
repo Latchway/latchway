@@ -1,0 +1,116 @@
+---
+title: "Deployment"
+description: "Deploy the single Latchway image with PostgreSQL and production secret custody."
+---
+
+Latchway's source builds one non-root OCI candidate for API, worker, migrations,
+diagnostics, CLI commands, and the embedded administration console. PostgreSQL
+15 or newer is the only required external service. The checked-in release
+Compose template pins PostgreSQL 18.6 by immutable multi-architecture digest
+and mounts `/var/lib/postgresql`, the PostgreSQL 18 image's version-aware data
+root.
+
+<Warning>
+  No stable version 1 image has been published. Treat source-built images as
+  evaluation candidates until release promotion and provenance checks pass.
+</Warning>
+
+## Implemented deployment templates
+
+| Platform | Application and data shape |
+| --- | --- |
+| Docker Compose | Source-built candidate image, explicit migration service, and PostgreSQL |
+| Google Cloud Run | Private Cloud SQL, Secret Manager, HTTPS service, and migration job |
+| AWS | ECS/Fargate, private RDS, Secrets Manager, and HTTPS ALB |
+| Fly.io | Fly Machines, attached PostgreSQL, and release-command migrations |
+| Cloudflare | Streaming Worker shim around the same container application |
+
+The private core source candidate contains Compose, Terraform, Cloud Run YAML,
+Fly, and Cloudflare assets that pass repository-local static validation. That
+is source evidence only; it is not an independent deployment review or proof
+that an operator account deployed them.
+
+For the current source checkpoint, the PostgreSQL image reference is
+`docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2`.
+Do not replace it with a mutable tag in a release deployment. PostgreSQL 17 and
+older images commonly mounted `/var/lib/postgresql/data`; carrying that mount
+forward to PostgreSQL 18 prevents the official image from starting safely.
+
+## Required runtime values
+
+| Value | Purpose |
+| --- | --- |
+| `LATCHWAY_DATABASE_URL` | PostgreSQL connection string |
+| `LATCHWAY_MASTER_KEY` | Independently generated 32-byte root for encrypted secrets and signing material |
+| `LATCHWAY_PUBLIC_ORIGIN` | Exact external HTTPS origin used by clients and DPoP |
+| `LATCHWAY_ADMIN_BOOTSTRAP_TOKEN` | Temporary first-owner credential; remove after bootstrap |
+
+Keep secrets in the deployment platform's secret manager. Do not place them in
+container arguments, Terraform state output, CI logs, or client applications.
+
+The master key must decode to exactly 32 bytes. Generate it once, escrow it
+separately from PostgreSQL, and restore the matching value with the database.
+Changing it in place is not rotation.
+
+## Process roles
+
+Start with the combined `all` role. At higher scale, run `serve --role api` and
+`serve --role worker` separately. Configuration state, replay uniqueness,
+quota reservation, job ownership, key rotation, and recovery coordination are
+PostgreSQL-backed.
+
+Production requires at least one worker heartbeat. A deployment that starts
+only API replicas can be live while correctly remaining unready.
+
+## Network boundary
+
+`LATCHWAY_PUBLIC_ORIGIN` must be the exact external HTTPS origin used by SDKs;
+it is DPoP protocol input, not display metadata. Terminate TLS at a trusted
+boundary, preserve the external scheme and host correctly, and reject alternate
+origins.
+
+Keep PostgreSQL private. Restrict `/metrics` to the scraper or private network.
+Publish `/healthz` and `/readyz` only as required by the platform. Never enable
+response buffering for SSE, and keep the platform timeout longer than the
+longest supported stream.
+
+## Safe rollout
+
+1. Resolve the image by immutable digest and verify its signature, provenance,
+   and SPDX attestation.
+2. Back up PostgreSQL and prove a restore in isolation.
+3. Run `migrate up`, then require `migrate status` to report current equals
+   available.
+4. Require `/healthz` and `/readyz`; readiness includes required worker
+   heartbeat state.
+5. Keep the platform request timeout longer than the maximum supported stream.
+6. Give `SIGTERM` draining at least the configured 30-second default.
+7. Never enable response buffering for server-sent events.
+
+At higher scale, calculate the worst-case combined API and worker connection
+pool plus migration, backup, and administration headroom. Leave at least 20
+percent database capacity beyond those explicit reservations.
+
+## Cloud evidence boundary
+
+Template rendering and a successful local image do not prove a cloud
+deployment. A production-supported claim requires provider-observed evidence
+for the exact immutable candidate on every advertised platform: account and
+resource identity, resolved image digest, remote migration status, secret
+references without values, health/readiness, streaming behavior, and graceful
+replacement.
+
+The current source candidate has local static and Compose evidence. Cloud Run,
+AWS, Fly.io, and Cloudflare provider receipts remain open release gates.
+
+Protected deployment evidence separates credentials from candidate execution.
+Provider and registry authority is captured in jobs that do not check out or
+execute candidate source. Candidate validation is credential-free, and the
+provider capture job accepts only bounded, hash-verified deployment inputs. The
+Cloudflare capture installs and verifies the pinned Wrangler release and uses
+`--no-bundle`; the Compose capture imports preloaded immutable images into an
+empty Docker credential store and disables pulls. Operators should preserve
+that separation when adapting the workflows.
+
+Use the [production-readiness checklist](/operations/production-readiness)
+before accepting traffic.

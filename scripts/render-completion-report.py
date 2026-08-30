@@ -29,6 +29,8 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 OCI_DIGEST = re.compile(r"^ghcr\.io/latchway/latchway@sha256:[0-9a-f]{64}$")
 ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+ACCEPTED_RISK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 SEMVER = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 TAG = re.compile(r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 EVIDENCE_TAG = re.compile(
@@ -85,6 +87,21 @@ REQUIRED_SECURITY_CHECKS = frozenset(
         "image_amd64_license",
         "image_arm64_license",
     }
+)
+REQUIRED_INDEPENDENT_REVIEWS = frozenset(
+    {
+        "independent_p0_p2_review",
+        "ssrf_review",
+        "cryptography_review",
+        "app_attest_review",
+        "play_integrity_review",
+        "quota_race_review",
+        "admin_auth_review",
+        "browser_xss_review",
+    }
+)
+SECURITY_FINDING_SEVERITIES = frozenset(
+    {"critical", "high", "medium", "low", "informational"}
 )
 REQUIRED_EXTERNAL_CLAIMS = {
     "live_sdk_conformance": frozenset(
@@ -656,6 +673,18 @@ def validate_durable_evidence_root(
         "external/latchway-external-evidence/aggregate-manifest.json",
         "external/latchway-external-evidence/aggregate-manifest.attestation.sigstore.json",
         "source/final-report-metadata.json",
+        "security/independent-review/independent-security-review.json",
+        "security/independent-review/independent-security-review.attestation.sigstore.json",
+        "security/independent-review/producer-verification.json",
+        "security/independent-review/attestation-verification.json",
+        "security/promotion-conformance/latchway-cross-repository.json",
+        "security/promotion-conformance/latchway-cross-repository.attestation.sigstore.json",
+        "security/promotion-conformance/producer-verification.json",
+        "security/promotion-conformance/attestation-verification.json",
+        *{
+            f"security/independent-review/reviews/{identifier}.json"
+            for identifier in REQUIRED_INDEPENDENT_REVIEWS
+        },
     }
     if not required_fixed.issubset(files):
         raise ReportError("release_record_durable_evidence_incomplete")
@@ -717,6 +746,67 @@ def validate_durable_evidence_root(
     actual_security_raw = {path for path in files if path.startswith("security/raw/")}
     if actual_security_raw != expected_security_raw:
         raise ReportError("release_record_durable_security_raw_invalid")
+
+    review_evidence = security.get("review_evidence")
+    if not isinstance(review_evidence, list) or not review_evidence:
+        raise ReportError("release_record_durable_security_review_invalid")
+    expected_security_review: set[str] = set()
+    for item in review_evidence:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ReportError("release_record_durable_security_review_invalid")
+        relative = safe_relative(
+            item.get("path"), "release_record_durable_security_review_invalid"
+        )
+        if (
+            len(relative.parts) < 2
+            or relative.parts[0] != "independent-review"
+        ):
+            raise ReportError("release_record_durable_security_review_invalid")
+        durable_relative = f"security/{relative.as_posix()}"
+        expected = item.get("sha256")
+        if (
+            durable_relative in expected_security_review
+            or durable_relative not in files
+            or not isinstance(expected, str)
+            or SHA256.fullmatch(expected) is None
+            or sha256_file(files[durable_relative]) != expected
+        ):
+            raise ReportError("release_record_durable_security_review_invalid")
+        expected_security_review.add(durable_relative)
+    actual_security_review = {
+        path for path in files if path.startswith("security/independent-review/")
+    }
+    if actual_security_review != expected_security_review:
+        raise ReportError("release_record_durable_security_review_invalid")
+
+    promotion_evidence = security.get("promotion_evidence")
+    if not isinstance(promotion_evidence, list) or not promotion_evidence:
+        raise ReportError("release_record_durable_security_promotion_invalid")
+    expected_security_promotion: set[str] = set()
+    for item in promotion_evidence:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ReportError("release_record_durable_security_promotion_invalid")
+        relative = safe_relative(
+            item.get("path"), "release_record_durable_security_promotion_invalid"
+        )
+        if len(relative.parts) != 2 or relative.parts[0] != "promotion-conformance":
+            raise ReportError("release_record_durable_security_promotion_invalid")
+        durable_relative = f"security/{relative.as_posix()}"
+        expected = item.get("sha256")
+        if (
+            durable_relative in expected_security_promotion
+            or durable_relative not in files
+            or not isinstance(expected, str)
+            or SHA256.fullmatch(expected) is None
+            or sha256_file(files[durable_relative]) != expected
+        ):
+            raise ReportError("release_record_durable_security_promotion_invalid")
+        expected_security_promotion.add(durable_relative)
+    actual_security_promotion = {
+        path for path in files if path.startswith("security/promotion-conformance/")
+    }
+    if actual_security_promotion != expected_security_promotion:
+        raise ReportError("release_record_durable_security_promotion_invalid")
     for relative in sorted(expected_security_raw):
         if not relative.endswith(".result.json"):
             continue
@@ -862,7 +952,13 @@ def validate_durable_evidence_root(
             raise ReportError("release_record_durable_domain_invalid")
     physical_file_count = validate_physical_receipts(external)
     compatibility = derive_compatibility_from_registry_proofs(external)
-    return len(expected_security_raw), physical_file_count, compatibility
+    return (
+        len(expected_security_raw)
+        + len(expected_security_review)
+        + len(expected_security_promotion),
+        physical_file_count,
+        compatibility,
+    )
 
 
 def validate_durable_archive(archive: Path, root: Path) -> None:
@@ -1247,11 +1343,13 @@ def validate_security(
     tag: str,
     contract: Mapping[str, Any],
     image: Mapping[str, Any],
+    repositories: list[Mapping[str, Any]],
 ) -> list[Mapping[str, Any]]:
     if (
-        security.get("schema_version") != 1
+        security.get("schema_version") != 2
         or security.get("kind") != "latchway_candidate_security_evidence"
         or security.get("automated_gate") != "passed"
+        or security.get("independent_review_gate") != "passed"
     ):
         raise ReportError("release_record_security_not_passed")
     candidate = security.get("candidate")
@@ -1266,6 +1364,7 @@ def validate_security(
         or not isinstance(security_image, dict)
         or security_image.get("repository") != image["repository"]
         or security_image.get("index_digest") != image["index_digest"]
+        or security_image.get("platforms") != image["platforms"]
         or not isinstance(security_contract, dict)
         or security_contract.get("version") != contract["version"]
         or security_contract.get("bundle_sha256") != contract["bundle_sha256"]
@@ -1286,6 +1385,245 @@ def validate_security(
         identifiers.add(check["id"])
     if identifiers != REQUIRED_SECURITY_CHECKS:
         raise ReportError("release_record_security_checks_incomplete")
+
+    promotion = security.get("promotion_conformance")
+    if (
+        not isinstance(promotion, dict)
+        or set(promotion)
+        != {"scope", "run_id", "run_attempt", "report_sha256", "repositories"}
+        or promotion.get("scope") != "promotion"
+        or not isinstance(promotion.get("run_id"), int)
+        or isinstance(promotion.get("run_id"), bool)
+        or promotion["run_id"] < 1
+        or not isinstance(promotion.get("run_attempt"), int)
+        or isinstance(promotion.get("run_attempt"), bool)
+        or promotion["run_attempt"] < 1
+        or not isinstance(promotion.get("report_sha256"), str)
+        or SHA256.fullmatch(promotion["report_sha256"]) is None
+        or promotion.get("repositories") != repositories
+    ):
+        raise ReportError("release_record_security_promotion_binding_invalid")
+
+    promotion_evidence = security.get("promotion_evidence")
+    expected_promotion_paths = {
+        "promotion-conformance/latchway-cross-repository.json",
+        "promotion-conformance/latchway-cross-repository.attestation.sigstore.json",
+        "promotion-conformance/producer-verification.json",
+        "promotion-conformance/attestation-verification.json",
+    }
+    promotion_by_path: dict[str, str] = {}
+    if not isinstance(promotion_evidence, list):
+        raise ReportError("release_record_security_promotion_evidence_invalid")
+    for item in promotion_evidence:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"path", "sha256"}
+            or item.get("path") in promotion_by_path
+            or item.get("path") not in expected_promotion_paths
+            or not isinstance(item.get("sha256"), str)
+            or SHA256.fullmatch(item["sha256"]) is None
+        ):
+            raise ReportError("release_record_security_promotion_evidence_invalid")
+        promotion_by_path[item["path"]] = item["sha256"]
+    if (
+        set(promotion_by_path) != expected_promotion_paths
+        or promotion_by_path[
+            "promotion-conformance/latchway-cross-repository.json"
+        ]
+        != promotion["report_sha256"]
+    ):
+        raise ReportError("release_record_security_promotion_evidence_invalid")
+
+    authority = security.get("review_authority")
+    reviewer = authority.get("reviewer") if isinstance(authority, dict) else None
+    producer = authority.get("producer") if isinstance(authority, dict) else None
+    if (
+        not isinstance(authority, dict)
+        or set(authority) != {"reviewer", "producer", "report_sha256"}
+        or not isinstance(reviewer, dict)
+        or set(reviewer)
+        != {
+            "identity",
+            "organization",
+            "github_login",
+            "independent_from",
+            "control",
+        }
+        or not isinstance(reviewer.get("identity"), str)
+        or not isinstance(reviewer.get("organization"), str)
+        or not isinstance(reviewer.get("github_login"), str)
+        or GITHUB_LOGIN.fullmatch(reviewer["github_login"]) is None
+        or reviewer.get("independent_from") != "Latchway"
+        or reviewer.get("control") != "separately_controlled"
+        or reviewer["organization"].strip().casefold() == "latchway"
+        or not isinstance(producer, dict)
+        or set(producer)
+        != {"repository", "workflow_path", "run_id", "run_attempt", "source_commit"}
+        or not isinstance(producer.get("repository"), str)
+        or producer["repository"].split("/", 1)[0].casefold() == "latchway"
+        or not isinstance(producer.get("workflow_path"), str)
+        or not producer["workflow_path"].startswith(".github/workflows/")
+        or not isinstance(producer.get("run_id"), int)
+        or isinstance(producer.get("run_id"), bool)
+        or producer["run_id"] < 1
+        or not isinstance(producer.get("run_attempt"), int)
+        or isinstance(producer.get("run_attempt"), bool)
+        or producer["run_attempt"] < 1
+        or not isinstance(producer.get("source_commit"), str)
+        or COMMIT.fullmatch(producer["source_commit"]) is None
+        or not isinstance(authority.get("report_sha256"), str)
+        or SHA256.fullmatch(authority["report_sha256"]) is None
+    ):
+        raise ReportError("release_record_security_review_authority_invalid")
+
+    reviews = security.get("independent_reviews")
+    if not isinstance(reviews, list) or len(reviews) != len(REQUIRED_INDEPENDENT_REVIEWS):
+        raise ReportError("release_record_security_reviews_incomplete")
+    review_ids: set[str] = set()
+    accepted_risk_ids: set[str] = set()
+    review_artifacts: dict[str, str] = {}
+    for review in reviews:
+        findings = review.get("findings") if isinstance(review, dict) else None
+        accepted_risks = (
+            review.get("accepted_risks") if isinstance(review, dict) else None
+        )
+        artifact = review.get("artifact") if isinstance(review, dict) else None
+        identifier = review.get("id") if isinstance(review, dict) else None
+        if (
+            not isinstance(review, dict)
+            or set(review)
+            != {
+                "id",
+                "status",
+                "started_at",
+                "finished_at",
+                "findings",
+                "accepted_risks",
+                "artifact",
+            }
+            or identifier not in REQUIRED_INDEPENDENT_REVIEWS
+            or identifier in review_ids
+            or review.get("status") != "passed"
+            or not isinstance(review.get("started_at"), str)
+            or not isinstance(review.get("finished_at"), str)
+            or not isinstance(findings, dict)
+            or set(findings) != {"total", "unresolved"}
+            or not isinstance(accepted_risks, list)
+            or len(accepted_risks) > 512
+            or not isinstance(artifact, dict)
+            or set(artifact) != {"path", "sha256"}
+            or artifact.get("path") != f"reviews/{identifier}.json"
+            or not isinstance(artifact.get("sha256"), str)
+            or SHA256.fullmatch(artifact["sha256"]) is None
+        ):
+            raise ReportError("release_record_security_reviews_invalid")
+        parse_utc(review["started_at"], "release_record_security_reviews_invalid")
+        parse_utc(review["finished_at"], "release_record_security_reviews_invalid")
+        for category in ("total", "unresolved"):
+            counts = findings.get(category)
+            if (
+                not isinstance(counts, dict)
+                or set(counts) != SECURITY_FINDING_SEVERITIES
+                or any(
+                    not isinstance(count, int)
+                    or isinstance(count, bool)
+                    or count < 0
+                    for count in counts.values()
+                )
+            ):
+                raise ReportError("release_record_security_reviews_invalid")
+        if (
+            any(
+                findings["unresolved"][severity] > findings["total"][severity]
+                for severity in SECURITY_FINDING_SEVERITIES
+            )
+            or findings["unresolved"]["critical"] != 0
+            or findings["unresolved"]["high"] != 0
+        ):
+            raise ReportError("release_record_security_review_findings_unresolved")
+        accepted_counts = {
+            severity: 0 for severity in ("medium", "low", "informational")
+        }
+        local_risk_ids: list[str] = []
+        for risk in accepted_risks:
+            if not isinstance(risk, dict) or set(risk) != {
+                "id",
+                "severity",
+                "summary",
+                "acceptance_rationale",
+            }:
+                raise ReportError("release_record_security_accepted_risk_invalid")
+            risk_id = risk.get("id")
+            severity = risk.get("severity")
+            summary = risk.get("summary")
+            rationale = risk.get("acceptance_rationale")
+            if (
+                not isinstance(risk_id, str)
+                or ACCEPTED_RISK_ID.fullmatch(risk_id) is None
+                or not risk_id.startswith(f"{identifier}.")
+                or risk_id in accepted_risk_ids
+                or severity not in accepted_counts
+                or not isinstance(summary, str)
+                or summary != summary.strip()
+                or not 1 <= len(summary) <= 256
+                or not isinstance(rationale, str)
+                or rationale != rationale.strip()
+                or not 1 <= len(rationale) <= 2048
+                or any(
+                    ord(character) < 0x20 or ord(character) == 0x7F
+                    for value in (summary, rationale)
+                    for character in value
+                )
+            ):
+                raise ReportError("release_record_security_accepted_risk_invalid")
+            accepted_risk_ids.add(risk_id)
+            local_risk_ids.append(risk_id)
+            accepted_counts[severity] += 1
+        if (
+            local_risk_ids != sorted(local_risk_ids)
+            or accepted_counts
+            != {
+                severity: findings["unresolved"][severity]
+                for severity in ("medium", "low", "informational")
+            }
+        ):
+            raise ReportError("release_record_security_accepted_risks_incomplete")
+        review_ids.add(identifier)
+        review_artifacts[f"independent-review/reviews/{identifier}.json"] = artifact[
+            "sha256"
+        ]
+    if review_ids != REQUIRED_INDEPENDENT_REVIEWS:
+        raise ReportError("release_record_security_reviews_incomplete")
+
+    evidence = security.get("review_evidence")
+    expected_review_paths = {
+        "independent-review/independent-security-review.json",
+        "independent-review/independent-security-review.attestation.sigstore.json",
+        "independent-review/producer-verification.json",
+        "independent-review/attestation-verification.json",
+        *review_artifacts,
+    }
+    evidence_by_path: dict[str, str] = {}
+    if not isinstance(evidence, list):
+        raise ReportError("release_record_security_review_evidence_invalid")
+    for item in evidence:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"path", "sha256"}
+            or item.get("path") in evidence_by_path
+            or item.get("path") not in expected_review_paths
+            or not isinstance(item.get("sha256"), str)
+            or SHA256.fullmatch(item["sha256"]) is None
+        ):
+            raise ReportError("release_record_security_review_evidence_invalid")
+        evidence_by_path[item["path"]] = item["sha256"]
+    if (
+        set(evidence_by_path) != expected_review_paths
+        or any(evidence_by_path[path] != digest for path, digest in review_artifacts.items())
+        or evidence_by_path["independent-review/independent-security-review.json"]
+        != authority["report_sha256"]
+    ):
+        raise ReportError("release_record_security_review_evidence_invalid")
     return checks
 
 
@@ -1541,7 +1879,9 @@ def render(
     repositories, domains, checks = validate_conformance(
         conformance, commit, tag, contract, image
     )
-    security_checks = validate_security(security, commit, tag, contract, image)
+    security_checks = validate_security(
+        security, commit, tag, contract, image, repositories
+    )
     validate_publication(
         publication,
         commit,
@@ -1782,11 +2122,57 @@ def render(
             if isinstance(tool.get("version"), str):
                 tool_value += f" {tool['version']}"
         lines.append(f"| `{escape(check['id'])}` | `{escape(check['status'])}` | `{escape(tool_value)}` |")
+    lines.extend(
+        [
+            "",
+            "### Independent security review gate",
+            "",
+            "| Review | Result | Total findings (C/H/M/L/I) | Unresolved findings (C/H/M/L/I) |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for review in security["independent_reviews"]:
+        total = review["findings"]["total"]
+        unresolved = review["findings"]["unresolved"]
+        total_value = "/".join(str(total[item]) for item in ("critical", "high", "medium", "low", "informational"))
+        unresolved_value = "/".join(str(unresolved[item]) for item in ("critical", "high", "medium", "low", "informational"))
+        lines.append(
+            f"| `{escape(review['id'])}` | `passed` | `{total_value}` | `{unresolved_value}` |"
+        )
+    accepted_risks = [
+        (review["id"], risk)
+        for review in security["independent_reviews"]
+        for risk in review["accepted_risks"]
+    ]
+    lines.extend(
+        [
+            "",
+            "### Independently accepted lower-severity risks",
+            "",
+        ]
+    )
+    if accepted_risks:
+        lines.extend(
+            [
+                "| Risk | Review | Severity | Summary | Acceptance rationale |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for review_id, risk in accepted_risks:
+            lines.append(
+                f"| `{escape(risk['id'])}` | `{escape(review_id)}` | "
+                f"`{escape(risk['severity'])}` | {escape(risk['summary'])} | "
+                f"{escape(risk['acceptance_rationale'])} |"
+            )
+    else:
+        lines.append(
+            "No unresolved medium, low, or informational findings were accepted."
+        )
     required_checks = [item for item in checks if item.get("required") is True]
     lines.extend(
         [
             "",
-            f"All `{len(required_checks)}` required cross-repository checks and all `{len(security_checks)}` candidate security checks passed.",
+            f"All `{len(required_checks)}` required cross-repository checks, all `{len(security_checks)}` candidate security checks, and all `{len(REQUIRED_INDEPENDENT_REVIEWS)}` independent security reviews passed.",
             "",
             "## Operational proof",
             "",

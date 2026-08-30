@@ -30,18 +30,80 @@ attestation evidence is a canonical projection of the validated signed bundle;
 CLI transport URLs and time-varying diagnostic fields are not hashed into the
 immutable record.
 
-Promotion creates the product tag, recoverable draft, and complete fixed asset
-set before changing any stable OCI alias. Immediately before publication it
-re-fetches the protected annotated tag target, release ID and metadata, exact
-asset names, and every digest. The finalizer performs the same last-moment
-closure for the evidence tag and draft. After publication both workflows
-require the release API to report `immutable: true`, retain and structurally
-verify the automatically generated GitHub release attestation against the exact
-repository, tag-ref object, release ID, and complete asset set, and run
-`gh release verify-asset` for every local fixed asset. Existing drafts may be
-resumed only when every existing asset has the expected digest; existing
-immutable releases are verification-only and accepted only when the complete
-fixed asset set matches byte for byte.
+Release-candidate image production uses two additional protected boundaries.
+The candidate checkout builds, smokes, scans, and exports both platform images
+without registry or OIDC credentials. A fresh no-checkout
+`release-image-publishing` job validates the exact closed image handoff, loads
+it into an empty Docker credential store, and receives only `packages: write`
+while pushing the platform children and assembling the candidate index. A
+separate fresh no-checkout `release-evidence-signing` job validates the
+unsigned evidence and registry state before receiving OIDC to sign and attest
+it. Both registry-bearing jobs always log out; neither executes candidate
+source or repository scripts. Configure required reviewers on both
+environments and do not place reusable secrets in either one.
+
+Promotion separates candidate execution from every public mutation. A
+zero-repository-permission candidate job (`permissions: {}` with no explicit
+secret or token environment) recomputes the candidate, security, and promotion
+validators. After that gate passes, a fresh source-free read-only planner uses
+fixed workflow commands to produce a one-run handoff containing only fixed
+release assets, canonical promotion coordinates, and a strict SHA-256 manifest
+with an exact file closure. Fresh no-checkout jobs independently require that
+closure, every hash, the candidate artifact hashes, and the candidate, security,
+and promotion attestations before they can mutate anything. The handoff contains
+neither the candidate source archive nor candidate-owned scripts.
+
+The first write job has only `contents: write`; it creates or verifies the
+annotated product tag, creates or resumes the recoverable draft, and closes the
+complete fixed asset set. A second fresh job has `packages: write` but not
+`contents: write`; it revalidates the source-free handoff, protected tag, draft,
+and asset digests before registry authentication. That job uses a newly created
+empty `DOCKER_CONFIG`, installs an unconditional exit trap before login, and
+always attempts `docker logout ghcr.io`. It executes only fixed workflow
+commands while verifying or advancing OCI coordinates. A third fresh job has
+only `contents: write`, no registry credential, and no candidate source; it
+revalidates the handoff and every intended OCI coordinate before the sole
+release-publication PATCH. SDK dispatch runs only after both the OCI mutation
+and immutable GitHub publication jobs succeed, and downloads the source-free
+handoff rather than the candidate-source artifact.
+
+Finalization applies the same credential boundary to public-state
+reconciliation. A no-checkout read-only authority receives an evidence-only
+handoff whose exact file closure, per-file size, aggregate size, and SHA-256
+values were sealed before transport. It authenticates the product tag,
+immutable release, fixed assets, OCI aliases, signatures, attestations, and npm
+metadata using fixed workflow commands; it never receives or extracts the
+candidate source archive and never runs repository scripts. Its nine-file
+source-free result is closed by a second size-and-hash manifest. A fresh
+`permissions: {}` runner validates that complete handoff before extracting the
+candidate and runs candidate-owned verification tooling offline with no GitHub
+read/admin token, release secret, registry credential, or OIDC request
+credential. Candidate tooling may prepare data-only publication state, a
+registry-proof proposal, and a durable archive, but it does not render the
+authoritative completion report.
+
+The fresh no-checkout signer/publisher downloads the original authenticated
+evidence-only handoff as data, rechecks its strict manifest and aggregate file
+closure, and independently reconstructs the five-entry public-registry proof
+from the authenticated aggregate. The prepared proof must match that canonical
+reconstruction byte for byte. Fixed inline finalizer logic then opens the
+durable archive without extracting it, rejects links, devices, duplicate or
+unsafe paths, and requires the exact directory set, file set, owner, group,
+mode, timestamp, size, and SHA-256 for every retained candidate, security,
+independent-review, promotion, and external-evidence byte. Only after those
+checks does fixed no-checkout workflow logic create the canonical completion
+report. No checked-out candidate source, candidate helper, or candidate-rendered
+status/report is a trust root in the credentialed or OIDC-bearing job.
+
+Immediately before publication the final write job re-fetches the protected
+annotated tag target, release ID and metadata, exact asset names, and every
+digest. The finalizer performs the same last-moment closure for the evidence tag
+and draft. After publication both workflows require the release API to report
+`immutable: true`, verify the automatically generated GitHub release
+attestation, and run `gh release verify-asset` for every local fixed asset.
+Existing drafts may be resumed only when every existing asset has the expected
+digest; existing immutable releases are verification-only and accepted only
+when the complete fixed asset set matches byte for byte.
 
 The product title and body are deterministic. The body binds the exact
 candidate commit and the SHA-256 of the source-attested promotion report; the

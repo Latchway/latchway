@@ -27,6 +27,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/limitscope"
 	"github.com/latchway/latchway/internal/protocol"
@@ -103,6 +104,8 @@ const (
 	inputPreflightBindingDomain     = "latchway/quota-input-preflight-binding/v2\x00"
 	requestMeasurementBindingDomain = "latchway/quota-request-measurement-binding/v1\x00"
 	attemptDecisionBindingDomain    = "latchway/quota-attempt-decision/v1\x00"
+	componentAttributionDomain      = "latchway/quota-component-attribution/v1\x00"
+	frameworkAttributionDomain      = "latchway/quota-framework-attribution/v1\x00"
 )
 
 // Rule is a server-resolved limit rule. ReservedUnits is the trusted exact
@@ -176,14 +179,19 @@ type RequestMeasurementBinding struct {
 type ReserveInput struct {
 	LogicalRequestID requestidentity.LogicalID
 
-	OrganizationID    string
-	ApplicationID     string
-	EnvironmentID     string
-	ApplicationUserID string
-	InstallationID    string
-	SessionGrantID    string
-	ConfigRevisionID  string
-	Platform          string
+	OrganizationID        string
+	ApplicationID         string
+	EnvironmentID         string
+	ApplicationUserID     string
+	InstallationID        string
+	InstallationFamilyID  string
+	ClientComponentID     string
+	ComponentDefinitionID string
+	ComponentKind         string
+	TrustSource           string
+	SessionGrantID        string
+	ConfigRevisionID      string
+	Platform              string
 	// NormalizedClaimDigests contains only policy-derived, domain-separated
 	// values keyed by canonical normalized claim name. Raw claims are never
 	// accepted by quota and therefore cannot enter fingerprints or storage.
@@ -192,6 +200,8 @@ type ReserveInput struct {
 	FeatureKey          string
 	Protocol            string
 	ClientRequestID     string
+	Framework           string
+	FrameworkVersion    string
 	LimitPlanKey        string
 	RouteKey            string
 	UpstreamKey         string
@@ -268,16 +278,21 @@ type Reservation struct {
 // per-attempt units, but cannot replace the rules or scope identities used to
 // materialize that target's buckets.
 type reservationRetryPlan struct {
-	applicationUserID string
-	installationID    string
-	sessionGrantID    string
-	configRevisionID  string
-	featureKey        string
-	limitPlanKey      string
-	platform          string
-	claimDigests      map[string]string
-	streaming         bool
-	rules             []Rule
+	applicationUserID     string
+	installationID        string
+	installationFamilyID  string
+	clientComponentID     string
+	componentDefinitionID string
+	componentKind         string
+	trustSource           string
+	sessionGrantID        string
+	configRevisionID      string
+	featureKey            string
+	limitPlanKey          string
+	platform              string
+	claimDigests          map[string]string
+	streaming             bool
+	rules                 []Rule
 }
 
 // selectedPricing is copied into every opaque reservation and persisted on
@@ -411,6 +426,12 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 		id.Validate(input.ConfigRevisionID, id.ConfigRevision) != nil {
 		return preparedRequest{}, ErrInvalidInput
 	}
+	if !validComponentAttribution(
+		input.InstallationFamilyID, input.ClientComponentID,
+		input.ComponentDefinitionID, input.ComponentKind, input.TrustSource,
+	) || !validFrameworkAttribution(input.Framework, input.FrameworkVersion) {
+		return preparedRequest{}, ErrInvalidInput
+	}
 	for _, value := range []string{
 		input.FeatureKey,
 		input.LimitPlanKey,
@@ -437,15 +458,20 @@ func prepareRequest(input ReserveInput) (preparedRequest, error) {
 	}
 
 	values, err := quotaScopeValues(map[string]string{
-		"organization": input.OrganizationID,
-		"application":  input.ApplicationID,
-		"environment":  input.EnvironmentID,
-		"user":         input.ApplicationUserID,
-		"installation": input.InstallationID,
-		"feature":      input.FeatureKey,
-		"route":        input.RouteKey,
-		"upstream":     input.UpstreamKey,
-		"model":        input.ModelKey,
+		"organization":                          input.OrganizationID,
+		"application":                           input.ApplicationID,
+		"environment":                           input.EnvironmentID,
+		"user":                                  input.ApplicationUserID,
+		"installation":                          input.InstallationID,
+		limitscope.InstallationFamilyDimension:  input.InstallationFamilyID,
+		limitscope.ClientComponentDimension:     input.ClientComponentID,
+		limitscope.ComponentDefinitionDimension: input.ComponentDefinitionID,
+		limitscope.ComponentKindDimension:       input.ComponentKind,
+		limitscope.TrustSourceDimension:         input.TrustSource,
+		"feature":                               input.FeatureKey,
+		"route":                                 input.RouteKey,
+		"upstream":                              input.UpstreamKey,
+		"model":                                 input.ModelKey,
 	}, input.Platform, input.NormalizedClaimDigests)
 	if err != nil {
 		return preparedRequest{}, err
@@ -934,6 +960,34 @@ func quotaScopeValues(
 	return result, nil
 }
 
+func validComponentAttribution(familyID, componentID, definitionID, kind, trustSource string) bool {
+	present := familyID != "" || componentID != "" || definitionID != "" || kind != "" || trustSource != ""
+	if !present {
+		return true
+	}
+	return id.Validate(familyID, id.InstallationFamily) == nil &&
+		id.Validate(componentID, id.ClientComponent) == nil &&
+		identifierPattern.MatchString(definitionID) && identifierPattern.MatchString(kind) &&
+		identifierPattern.MatchString(trustSource)
+}
+
+func validFrameworkAttribution(framework, version string) bool {
+	if framework == "" || version == "" {
+		return framework == "" && version == ""
+	}
+	if len(framework) > 64 || len(version) > 128 || !frameworkcompat.Known(framework) ||
+		framework[0] < 'a' || framework[0] > 'z' {
+		return false
+	}
+	for index := range framework {
+		character := framework[index]
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+			return false
+		}
+	}
+	return frameworkcompat.ValidVersion(version)
+}
+
 func cloneStringMap(input map[string]string) map[string]string {
 	if input == nil {
 		return nil
@@ -990,6 +1044,16 @@ func requestFingerprint(prepared preparedRequest) string {
 		prepared.UpstreamKey,
 		prepared.ModelKey,
 		prepared.PhysicalModel,
+	}
+	if prepared.InstallationFamilyID != "" {
+		parts = append(parts,
+			componentAttributionDomain,
+			prepared.InstallationFamilyID, prepared.ClientComponentID,
+			prepared.ComponentDefinitionID, prepared.ComponentKind, prepared.TrustSource,
+		)
+	}
+	if prepared.Framework != "" {
+		parts = append(parts, frameworkAttributionDomain, prepared.Framework, prepared.FrameworkVersion)
 	}
 	for _, rule := range prepared.rules {
 		parts = append(parts, rule.ruleKey, rule.scopeKey, strconv.FormatInt(rule.Maximum, 10))
@@ -1250,16 +1314,21 @@ func cloneRequestMeasurementBinding(input *RequestMeasurementBinding) *RequestMe
 
 func retryPlanForRequest(prepared preparedRequest) *reservationRetryPlan {
 	return &reservationRetryPlan{
-		applicationUserID: prepared.ApplicationUserID,
-		installationID:    prepared.InstallationID,
-		sessionGrantID:    prepared.SessionGrantID,
-		configRevisionID:  prepared.ConfigRevisionID,
-		featureKey:        prepared.FeatureKey,
-		limitPlanKey:      prepared.LimitPlanKey,
-		platform:          prepared.Platform,
-		claimDigests:      cloneStringMap(prepared.NormalizedClaimDigests),
-		streaming:         prepared.Streaming,
-		rules:             cloneLimitRules(prepared.Rules),
+		applicationUserID:     prepared.ApplicationUserID,
+		installationID:        prepared.InstallationID,
+		installationFamilyID:  prepared.InstallationFamilyID,
+		clientComponentID:     prepared.ClientComponentID,
+		componentDefinitionID: prepared.ComponentDefinitionID,
+		componentKind:         prepared.ComponentKind,
+		trustSource:           prepared.TrustSource,
+		sessionGrantID:        prepared.SessionGrantID,
+		configRevisionID:      prepared.ConfigRevisionID,
+		featureKey:            prepared.FeatureKey,
+		limitPlanKey:          prepared.LimitPlanKey,
+		platform:              prepared.Platform,
+		claimDigests:          cloneStringMap(prepared.NormalizedClaimDigests),
+		streaming:             prepared.Streaming,
+		rules:                 cloneLimitRules(prepared.Rules),
 	}
 }
 

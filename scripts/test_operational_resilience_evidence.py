@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 import unittest
 
+import yaml
+
 
 SCRIPT = Path(__file__).with_name("operational-resilience-evidence.py")
 SPEC = importlib.util.spec_from_file_location("operational_resilience_evidence", SCRIPT)
@@ -36,6 +38,13 @@ PRODUCER_SPEC.loader.exec_module(PRODUCER)
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/operational-resilience-evidence.yml"
 LOAD_WORKFLOW = Path(__file__).parents[1] / ".github/workflows/release-load-evidence.yml"
 FAILURE_WORKFLOW = Path(__file__).parents[1] / ".github/workflows/release-failure-evidence.yml"
+AGGREGATE_WORKFLOW = (
+    Path(__file__).parents[1] / ".github/workflows/aggregate-release-evidence.yml"
+)
+LOAD_LAUNCHER = Path(__file__).with_name("run-local-load-gates.sh")
+OPERATIONAL_LAUNCHER = Path(__file__).with_name(
+    "run-operational-resilience-drills.sh"
+)
 
 
 class OperationalEvidenceFixture:
@@ -1159,7 +1168,7 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             workflow.count('--source-digest "$PREVIOUS_CANDIDATE_COMMIT"'), 1
         )
         self.assertEqual(workflow.count("--source-ref refs/heads/main"), 5)
-        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 4)
+        self.assertEqual(workflow.count("--deny-self-hosted-runners"), 5)
         self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
         self.assertIn('test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"', workflow)
         self.assertIn(
@@ -1202,6 +1211,12 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", load)
         self.assertIn("-release-image \"$CANDIDATE_INDEX\"", load)
         self.assertIn("-release-platform-image \"$CANDIDATE_AMD64\"", load)
+        self.assertIn(
+            "-preloaded-platform-image-id \"$CANDIDATE_LOCAL_IMAGE_ID\"", load
+        )
+        self.assertIn(
+            "-preloaded-postgres-image-id \"$POSTGRES_LOCAL_IMAGE_ID\"", load
+        )
         self.assertIn("--domain load", load)
         self.assertIn("load-producer.attestation.sigstore.json", load)
         self.assertIn("environment: release-failure-evidence", failure)
@@ -1214,6 +1229,288 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
         self.assertIn("-scope release", failure)
         self.assertIn("--domain failure", failure)
         self.assertIn("failure-producer.attestation.sigstore.json", failure)
+
+    def test_workflow_privilege_boundaries_are_job_isolated(self) -> None:
+        workflows = {
+            "operational-resilience-evidence.yml": (
+                WORKFLOW,
+                {"authenticate", "finalize", "attest"},
+                "authenticate",
+                "finalize",
+                "operational-resilience-evidence",
+            ),
+            "release-load-evidence.yml": (
+                LOAD_WORKFLOW,
+                {"authenticate", "load", "attest"},
+                "authenticate",
+                "load",
+                "release-load-evidence",
+            ),
+            "release-failure-evidence.yml": (
+                FAILURE_WORKFLOW,
+                {"authenticate", "failure", "attest"},
+                "authenticate",
+                "failure",
+                "release-failure-evidence",
+            ),
+        }
+        candidate_command = re.compile(
+            r"(?m)^\s*(?:sudo\s+)?(?:python3?|node|npm|pnpm|go|make|gradle|swift|"
+            r"xcodebuild|(?:\./)?scripts/)(?:\s|$)"
+        )
+        for workflow_name, (
+            path,
+            expected_jobs,
+            authentication_name,
+            candidate_name,
+            authentication_environment,
+        ) in workflows.items():
+            with self.subTest(workflow=workflow_name):
+                value = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self.assertEqual(value["permissions"], {})
+                jobs = value["jobs"]
+                self.assertEqual(set(jobs), expected_jobs)
+                authentication = jobs[authentication_name]
+                candidate = jobs[candidate_name]
+                attester = jobs["attest"]
+
+                self.assertEqual(
+                    authentication["environment"], authentication_environment
+                )
+                self.assertNotIn("environment", candidate)
+                self.assertEqual(attester["environment"], "release-evidence-signing")
+                self.assertEqual(candidate["needs"], authentication_name)
+                self.assertEqual(attester["needs"], candidate_name)
+
+                for name in (authentication_name, candidate_name):
+                    permissions = jobs[name]["permissions"]
+                    self.assertNotIn("id-token", permissions, name)
+                    self.assertNotIn("attestations", permissions, name)
+                    self.assertNotIn("artifact-metadata", permissions, name)
+                if workflow_name in {
+                    "operational-resilience-evidence.yml",
+                    "release-load-evidence.yml",
+                }:
+                    self.assertEqual(
+                        authentication["permissions"].get("packages"), "read"
+                    )
+                    self.assertNotIn("packages", candidate["permissions"])
+                self.assertEqual(attester["permissions"]["id-token"], "write")
+                self.assertEqual(attester["permissions"]["attestations"], "write")
+                self.assertEqual(
+                    attester["permissions"]["artifact-metadata"], "write"
+                )
+
+                authentication_text = json.dumps(authentication, sort_keys=True)
+                attester_text = json.dumps(attester, sort_keys=True)
+                self.assertNotIn("actions/checkout@", authentication_text)
+                self.assertNotIn("actions/checkout@", attester_text)
+                self.assertNotIn("${{ secrets.", authentication_text)
+                self.assertNotIn("${{ secrets.", attester_text)
+                self.assertNotIn("${{ github.token }}", attester_text)
+                for protected_job in (authentication, attester):
+                    for step in protected_job["steps"]:
+                        self.assertIsNone(
+                            candidate_command.search(str(step.get("run", ""))),
+                            step.get("name"),
+                        )
+
+                authentication_uses = [
+                    str(step.get("uses", "")) for step in authentication["steps"]
+                ]
+                candidate_uses = [
+                    str(step.get("uses", "")) for step in candidate["steps"]
+                ]
+                candidate_runs = "\n".join(
+                    str(step.get("run", "")) for step in candidate["steps"]
+                )
+                if workflow_name in {
+                    "operational-resilience-evidence.yml",
+                    "release-load-evidence.yml",
+                }:
+                    self.assertEqual(
+                        sum(
+                            value.startswith("docker/login-action@")
+                            for value in authentication_uses
+                        ),
+                        1,
+                    )
+                    authentication_runs = "\n".join(
+                        str(step.get("run", ""))
+                        for step in authentication["steps"]
+                    )
+                    for forbidden in (
+                        "docker run",
+                        "docker build",
+                        "docker load",
+                        "docker compose",
+                    ):
+                        self.assertNotIn(forbidden, authentication_runs)
+                    self.assertIn("docker pull --platform linux/amd64", authentication_runs)
+                    self.assertIn("docker save --output", authentication_runs)
+                    self.assertFalse(
+                        any(
+                            value.startswith("docker/login-action@")
+                            for value in candidate_uses
+                        )
+                    )
+                    self.assertNotIn("docker pull", candidate_runs)
+                    self.assertIn("docker load", candidate_runs)
+                    self.assertIn("preloaded-images.tar", candidate_runs)
+                    self.assertIn("archive_size <= 2147483648", candidate_runs)
+                    self.assertIn("(.auths // {}) | length", candidate_runs)
+                    self.assertIn(
+                        "DOCKER_CONFIG=%s\\n", candidate_runs
+                    )
+                    self.assertIn(
+                        "$RUNNER_TEMP/credential-free-docker", candidate_runs
+                    )
+
+                checkouts = [
+                    step
+                    for step in candidate["steps"]
+                    if str(step.get("uses", "")).startswith("actions/checkout@")
+                ]
+                self.assertEqual(len(checkouts), 1)
+                self.assertFalse(checkouts[0]["with"]["persist-credentials"])
+                candidate_text = json.dumps(candidate, sort_keys=True)
+                self.assertLessEqual(
+                    set(re.findall(r"\$\{\{ secrets\.([A-Za-z0-9_]+) \}\}", candidate_text)),
+                    {"GITHUB_TOKEN"},
+                )
+                self.assertIn(
+                    'test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"',
+                    "\n".join(str(step.get("run", "")) for step in candidate["steps"]),
+                )
+                attester_names = [step.get("name", "") for step in attester["steps"]]
+                self.assertTrue(
+                    any(
+                        name.startswith("Download the independently authenticated")
+                        for name in attester_names
+                    )
+                )
+                validation = next(
+                    step
+                    for step in attester["steps"]
+                    if step.get("name", "").startswith("Validate the complete")
+                )["run"]
+                self.assertIn("sha256sum", validation)
+                self.assertIn("cmp --silent", validation)
+
+                for job_name, job in jobs.items():
+                    permissions = job.get("permissions", {})
+                    privileged = (
+                        permissions.get("id-token") == "write"
+                        or permissions.get("attestations") == "write"
+                        or permissions.get("artifact-metadata") == "write"
+                    )
+                    if not privileged:
+                        continue
+                    serialized = json.dumps(job, sort_keys=True)
+                    self.assertNotIn("actions/checkout@", serialized, job_name)
+                    for step in job["steps"]:
+                        self.assertIsNone(
+                            candidate_command.search(str(step.get("run", ""))),
+                            step.get("name"),
+                        )
+
+    def test_preloaded_launchers_forbid_registry_fallback_and_preserve_coordinates(self) -> None:
+        load = LOAD_LAUNCHER.read_text(encoding="utf-8")
+        operational = OPERATIONAL_LAUNCHER.read_text(encoding="utf-8")
+
+        for value in (
+            "-preloaded-platform-image-id",
+            "-preloaded-postgres-image-id",
+            'preloaded_mode=true',
+            'gateway_runtime_image=$preloaded_platform_image_id',
+            'postgres_runtime_image=$preloaded_postgres_image_id',
+            '-release-oci-platform-reference "$release_platform_image"',
+        ):
+            self.assertIn(value, load)
+        self.assertIn('if [ "$preloaded_mode" = true ]; then', load)
+        self.assertIn('else\n    docker pull --platform linux/amd64', load)
+        self.assertIn('"$gateway_runtime_image" >/dev/null', load)
+        self.assertIn('"$postgres_runtime_image" \\', load)
+
+        for value in (
+            "--preloaded-candidate-platform-image-id",
+            "--preloaded-previous-platform-image-id",
+            "--preloaded-postgres-image-id",
+            'preloaded_mode=true',
+            'candidate_runtime_image=$preloaded_candidate_platform_image_id',
+            'previous_candidate_runtime_image=$preloaded_previous_platform_image_id',
+            'postgres_runtime_image=$preloaded_postgres_image_id',
+            '--candidate-platform-image "$candidate_platform_image"',
+            '--previous-candidate-platform-image "$previous_candidate_platform_image"',
+            '--postgres-image "$postgres_image"',
+        ):
+            self.assertIn(value, operational)
+        self.assertIn('if [[ "$preloaded_mode" == true ]]; then', operational)
+        self.assertIn('else\n  docker pull --platform linux/amd64', operational)
+        self.assertIn('run_cli "$candidate_runtime_image"', operational)
+        self.assertIn('run_cli "$previous_candidate_runtime_image"', operational)
+        self.assertIn('"$postgres_runtime_image" >/dev/null', operational)
+
+    def test_final_artifact_coordinates_match_every_consumer(self) -> None:
+        operational = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        load = yaml.safe_load(LOAD_WORKFLOW.read_text(encoding="utf-8"))
+        failure = yaml.safe_load(FAILURE_WORKFLOW.read_text(encoding="utf-8"))
+        aggregate = yaml.safe_load(AGGREGATE_WORKFLOW.read_text(encoding="utf-8"))
+
+        def artifact_name(workflow: dict, job: str, step_name: str) -> str:
+            step = next(
+                item
+                for item in workflow["jobs"][job]["steps"]
+                if item.get("name") == step_name
+            )
+            return step["with"]["name"]
+
+        self.assertEqual(
+            artifact_name(
+                load, "attest", "Retain only exact attested release-load evidence"
+            ),
+            "latchway-release-load-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        )
+        self.assertEqual(
+            artifact_name(
+                operational,
+                "authenticate",
+                "Download exact-release-image load evidence",
+            ),
+            "latchway-release-load-${{ inputs.candidate_commit }}-${{ inputs.load_evidence_run_id }}-${{ inputs.load_evidence_run_attempt }}",
+        )
+        self.assertEqual(
+            artifact_name(
+                failure,
+                "attest",
+                "Retain only exact attested destructive-failure evidence",
+            ),
+            "latchway-release-failure-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        )
+        self.assertEqual(
+            artifact_name(
+                operational,
+                "authenticate",
+                "Download release-scope destructive failure evidence",
+            ),
+            "latchway-release-failure-${{ inputs.candidate_commit }}-${{ inputs.failure_evidence_run_id }}-${{ inputs.failure_evidence_run_attempt }}",
+        )
+        self.assertEqual(
+            artifact_name(
+                operational,
+                "attest",
+                "Retain the domain document and bounded reports",
+            ),
+            "latchway-operational-resilience-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        )
+        self.assertEqual(
+            artifact_name(
+                aggregate,
+                "authenticate",
+                "Download operational-resilience domain",
+            ),
+            "latchway-operational-resilience-${{ inputs.candidate_commit }}-${{ inputs.operational_resilience_run_id }}-${{ inputs.operational_resilience_run_attempt }}",
+        )
 
     def test_rejects_tampered_or_unlisted_producer_artifact(self) -> None:
         config = self.fixture.load_dir / "load-config.json"

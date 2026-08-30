@@ -13,10 +13,13 @@ cross-repository domains that previously had only an envelope validator:
 It does not run in normal CI, publish anything, or manufacture evidence when an
 external account, registry, provider, device, or release does not exist. The
 manually dispatched `.github/workflows/release-domain-observations.yml`
-producer and `.github/workflows/release-domain-evidence.yml` finalizer are both
-restricted to the `release-evidence` GitHub environment and
-`refs/heads/main`. Configure that environment with required reviewers and
-prevent unreviewed deployments before using either workflow for a release.
+producer and `.github/workflows/release-domain-evidence.yml` finalizer are
+restricted to protected GitHub environments and `refs/heads/main`. Configure
+`release-evidence`, `release-evidence-live-provider`,
+`release-evidence-github-read`, `release-evidence-physical`,
+`release-evidence-firebase-app-check`, `release-evidence-turnstile`, and
+`release-evidence-signing` with required reviewers and prevent unreviewed
+deployments before using either workflow for a release.
 All six domains have executable protected observation plans. Live-SDK and
 physical-device evidence consume authenticated outputs from the existing
 self-hosted device workflows; the hosted core workflow never represents a
@@ -24,19 +27,35 @@ simulator or fixture as a physical-device run.
 
 ## Trust and identity model
 
-The observation workflow checks out the exact five repository commits and
-requires both the dispatch SHA and core `HEAD` to equal the candidate. It
-downloads two immutable GitHub artifacts by explicit run ID and fixed name:
+The observation workflow authenticates and downloads two immutable GitHub
+artifacts by explicit run ID and fixed name on a fresh hosted job that never
+checks out or executes candidate code:
 
 1. a passing source-scope cross-repository report;
 2. the immutable OCI candidate manifest and its hash-bound artifacts.
 
-It then executes the selected, source-controlled observation plan itself.
-There is no uploaded-results input and no generic command input. Exact Admin
-self-test, Docker/Trivy/Syft/Cosign/GitHub, tag/release API,
-npm, Swift, CocoaPods, and Maven commands are selected by
-`scripts/release-domain-observer.py`. The workflow seals their output in a
-machine-results manifest and attests that manifest with GitHub OIDC.
+Source retrieval is a separate protected job. It checks out the exact five
+repository commits with non-persisted credentials, verifies every `HEAD`,
+archives the clean worktrees, and ends without executing repository code. The
+selected source-controlled observation plan consumes only those archives.
+There is no uploaded-results input and no generic command input. Two additional
+fresh no-checkout jobs perform the privileged observations using fixed inline
+commands: one can call only the HTTPS health and Admin self-test endpoints, and
+one can perform only the fixed GitHub API, release, asset, Actions-run, and
+attestation reads for the selected domain. Each job emits a bounded, exact-file
+manifest containing the complete candidate identity, source and candidate
+hashes, per-file hashes and byte counts, and start/finish times. The
+source-controlled observer consumes those captures offline; it never receives
+the Admin or GitHub-read token and never invokes the Admin CLI or GitHub CLI for
+those observations. Docker/Trivy/Syft/Cosign, npm, Swift, CocoaPods, and Maven
+commands that need no protected credential remain selected by
+`scripts/release-domain-observer.py`. Candidate-controlled validation and
+manifest production run later on a fresh job without provider, sibling,
+GitHub-read, or physical-artifact credentials. A final no-checkout signer job
+alone receives GitHub OIDC permission and attests the validated manifest.
+No job that builds or executes a candidate SDK, CLI, observer, or validator has
+`id-token: write`, attestation, or artifact-metadata permission; workflow
+boundary tests enforce that invariant.
 
 The observer independently compares all five checkout `HEAD` values with the
 repository commits inside the verified source identity and requires every
@@ -45,12 +64,49 @@ cannot substitute a different SDK checkout. It also rehashes the source and
 candidate documents after every command. Observation subprocesses receive an
 explicit allowlisted environment; unrelated runner credentials and secret
 variables are not inherited, and tool-version probes are not run implicitly.
+Both candidate execution jobs additionally refuse to start if `GH_TOKEN`,
+`GITHUB_TOKEN`, `LATCHWAY_ADMIN_API_TOKEN`, or either GitHub OIDC request
+variable is present.
+
+The `release-evidence-live-provider` environment runs only on a newly
+provisioned, repository-scoped, single-job JIT collector named for the exact
+run and attempt. It must expose a freshly issued
+`LATCHWAY_ONE_TIME_LIVE_PROVIDER_GRANT`, never a reusable Admin token. The
+grant is bound to repository, candidate commit, run, attempt, audience,
+`run_self_tests` scope, the exact OpenRouter request, a unique JTI, and a
+maximum five-minute lifetime. Its SHA-256 and the same bindings are sealed into
+a root-owned externally signed collector lease. The runner declares no
+long-lived, organization, administration, registry, or OIDC credential and is
+restricted to DNS-pinned, TLS-verified gateway egress.
+
+The fixed capture sends the ephemeral Admin credential only to
+`POST /admin/v1/self-tests` through a mode-`0600` Curl configuration and
+separately calls unauthenticated `GET /healthz`. It rejects either the exact
+grant or any Admin-token shape in a response. A root-owned independent
+supervisor then proves exactly one consumption, revokes and zeroizes the grant,
+deregisters the runner, and arms an out-of-band destruction watchdog. The
+capture retains the signed lease, consumption receipt, teardown, signatures,
+and public trust root alongside the two bounded JSON responses and a hash-bound
+manifest. Missing external JIT provisioning, issuer, supervisor, signature, or
+destruction infrastructure makes the live-provider gate fail closed.
+
+The `release-evidence-github-read` environment must expose
+`LATCHWAY_RELEASE_EVIDENCE_GITHUB_READ_TOKEN`, a read-only token scoped only to
+the five Latchway repositories and their released packages. It must have no
+repository, package, workflow, or organization write capability.
+The fixed no-checkout capture uses it only for the selected domain: OCI
+provenance for `supply_chain`; annotated-tag, immutable-release, and release
+attestation records for `public_tags`; or immutable release metadata, exact
+assets, asset attestations, and bound Actions-run records for
+`public_registries`. The offline observer rejects a missing, extra, symlinked,
+oversized, stale, hash-changed, coordinate-changed, or unused capture file.
 
 For `live_sdk_conformance` and `physical_devices`, dispatch also supplies exact
 run IDs and run attempts for iOS App Attest, Android Play Integrity, and the
 two-job React Native physical workflow. A protected
 `LATCHWAY_RELEASE_EVIDENCE_ACTIONS_READ_TOKEN` must have only Actions read
-access to the three SDK repositories. The producer queries the Actions API and
+access to the three SDK repositories. A fresh no-checkout physical-authority
+job queries the Actions API and
 requires the exact repository, workflow path, `workflow_dispatch` event,
 `main` branch, successful conclusion, source commit, run ID, and attempt. It
 also requires the completed workflow and device timestamps to fall after the
@@ -62,10 +118,14 @@ only these derived artifact names:
 - `react-native-ios-physical-<run>-<attempt>`; and
 - `react-native-android-physical-<run>-<attempt>`.
 
-Every receipt has an exact file set and an attested `SHA256SUMS`. The observer
-verifies the profile, evidence, and checksum subjects against the retained
+Every receipt has an exact file set and an attested `SHA256SUMS`. The isolated
+physical-authority job verifies the profile, evidence, and checksum subjects
+against the retained
 Sigstore bundle, pinning the exact SDK repository, protected physical workflow,
-`refs/heads/main`, and both source and signer digest to the SDK commit. These
+`refs/heads/main`, and both source and signer digest to the SDK commit, then
+retains bounded verification records beside the receipts. The secret-free
+observer revalidates the exact authority file set, run metadata, artifact
+metadata, receipts, and verification records. These
 physical producers intentionally use protected self-hosted runners, so this
 verification does not apply the hosted-runner rejection used for core source,
 candidate, machine-result, and final evidence attestations. The checked-out
@@ -80,10 +140,37 @@ versions, contract bundle, OCI index digest, gateway origin and configuration,
 production distribution, hardware-backed provider, and physical-device state.
 React Native's linked native profile/evidence bytes must exactly equal the
 independently authenticated iOS or Android receipt and its native hash/version
-pins. The live-SDK domain additionally builds the exact JavaScript checkout
-and runs `scripts/live-conformance.mjs` against the same HTTPS gateway. Its
-protected credentials appear only in the allowlisted child environment, never
-in argv or retained output.
+pins. The live-SDK domain builds the exact JavaScript checkout on a
+credential-free hosted runner. Firebase App Check and Turnstile then execute in
+different protected environments on provider-specific, ephemeral JIT runners.
+Each runner is registered for one job, starts from a fresh image and workspace,
+has gateway-only egress, and carries no long-lived, organization,
+administration, registry, or OIDC credential. A root-owned external supervisor
+that is not part of the candidate checkout verifies a signed collector lease,
+accepts only the exact run/attempt, core and JavaScript commits, provider,
+audience, harness hashes, candidate hashes, gateway, and request hash, and
+invokes the candidate with a single-use grant whose lifetime is at most five
+minutes. The grant is consumed exactly once and then zeroed and revoked.
+
+This external supervisor is a release gate, not workflow-created trust. Before
+dispatch, operators must provision the fresh JIT runner, signed lease,
+root-owned run/finalize hooks, isolated signing key, gateway receipt verifier,
+restricted network policy, and automatic runner destruction. The workflow
+fails if the runner name or freshness contract is wrong, either hook is
+writable by the job user, the lease or gateway receipt signature is invalid,
+the grant is reused, teardown does not deregister and schedule destruction, or
+the gateway does not issue a one-consumption receipt. The candidate cannot
+self-report those properties.
+
+The secret-free aggregation job verifies the signatures again before executing
+observer code. The observer then requires both provider captures, rejects the
+former reusable identity/attestation-token environment path, revalidates the
+exact capture and isolation schemas, checksum closure, identity, run, provider,
+gateway, harness, one-use, receipt, and teardown bindings, and retains the
+capture plus every isolation file as hash-bound machine-result inputs. The two
+providers must share the exact harness and gateway verification key but have
+different grants, JTIs, runner identities, and protected environments.
+Credentials never appear in argv or retained output.
 
 The producer revalidates the source report and candidate manifest using the
 same strict validators as the operational-resilience finalizer. Consequently
@@ -91,11 +178,11 @@ every result must bind the exact five repository commits, package tags and
 versions, contract version, bundle SHA-256, core release, and immutable OCI
 index digest.
 
-Private sibling checkouts use the protected
+Private sibling retrieval uses the protected
 `LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` secret. It must be a fine-grained
 Contents: read credential scoped only to the four SDK repositories. The token
-is not persisted by checkout and is unnecessary when those repositories are
-public.
+is not persisted by checkout, no repository code executes in that job, and the
+token is unnecessary when those repositories are public.
 
 The finalizer accepts only the artifact name derived from the domain and
 candidate commit. It queries the GitHub Actions API and requires the supplied
@@ -151,7 +238,7 @@ adding `.json`. For example,
   "candidate": {
     "core_commit": "<exact 40-character commit>",
     "core_release": "v1.0.0",
-    "contract_version": "0.5.1",
+    "contract_version": "1.0.0",
     "bundle_sha256": "<exact 64-character SHA-256>",
     "oci_image_digest": "ghcr.io/latchway/latchway@sha256:<exact digest>",
     "repositories": {
@@ -197,30 +284,39 @@ The exact observation-to-claim mapping and expected tool identities are code,
 not workflow input. They are defined by `CLAIM_REQUIREMENTS` and
 `OBSERVATION_TOOLS` in `scripts/release-domain-evidence.py`.
 
-- Live SDK evidence requires five release-image platform runs and explicit
+- Live SDK evidence requires six release-image platform runs: one JavaScript
+  run with Firebase App Check, one JavaScript run with Cloudflare Turnstile,
+  and the four native/React Native physical paths. It also requires explicit
   DPoP-vector, error-mapping, refresh, revocation, streaming, quota-snapshot,
   and protocol-version-rejection results. The fixed tool is
   `latchway-live-sdk-harness`. Native and React Native observations come only
-  from authenticated physical receipts; JavaScript comes only from the real
-  live harness.
+  from authenticated physical receipts; JavaScript comes only from two real
+  live-harness executions. The JavaScript observations bind the non-secret
+  `attestation_provider` value to `firebase_app_check` or `turnstile`, and the
+  public JavaScript release-image claim requires both observations.
 - Physical-device evidence reuses the four authenticated native/React Native
   platform observations and derives only the canonical physical-device
   claims. It is finalized and attested independently as
   `physical_devices.json`; the live-SDK document is not a substitute.
-- Live provider evidence first verifies the HTTPS gateway `/healthz` build
-  commit, package version, contract version, and wire protocol against the
-  candidate identity, then requires the five bounded OpenRouter Admin
-  self-test observations. The bounded token is present only in the child
-  process environment selected by `--api-token-env`, never in argv or output.
+- Live provider evidence consumes the sealed HTTPS capture, first verifies the
+  `/healthz` build commit, package version, contract version, and wire protocol
+  against the candidate identity, then requires the five bounded OpenRouter
+  Admin self-test observations. No candidate CLI or validator process receives
+  the `run_self_tests` token; it is never present in argv or retained output.
 - Supply-chain evidence requires the OCI index, both exact platform children,
   both vulnerability scans, both license scans, both SPDX SBOMs, keyless cosign
   verification, and GitHub provenance verification. Tool identities are fixed
   to Docker/Buildx, the source-controlled validators for the attested candidate
   Trivy/SPDX reports, Cosign, and GitHub attestation verification.
-- Public-tag evidence requires an annotated tag and GitHub release observation
-  for every one of the five repositories.
+- Public-tag evidence requires an annotated tag, immutable GitHub release, and
+  authenticated release-verification observation for every one of the five
+  repositories, all consumed from the sealed GitHub authority capture.
 - Public-registry evidence requires the exact GHCR digest, both npm packages,
   Swift package resolution, CocoaPods resolution, and Maven Central resolution.
+  GitHub release assets, immutable-asset verification, source attestations, and
+  npm provenance/adoption workflow runs are consumed only from the sealed
+  GitHub authority capture; public registry resolution itself remains live and
+  credential-free.
   The Maven observation replays verification with the exact v2 upload intent,
   deployment record, and terminal deployment status. It requires the canonical
   15-field proof, six-field embedded deployment, 144-entry public manifest,
@@ -239,9 +335,18 @@ external operation exists, supplying the exact five repository commits and the
 source/candidate run IDs. For live SDK or physical-device evidence, also supply
 the three physical run IDs and exact attempts. Then dispatch `Protected release-domain evidence`
 with that successful observation run ID. Artifact names are derived, not user
-supplied. Neither job runs in ordinary CI. The bounded live-provider token is
-read only from the protected environment and must never be copied into raw
-output.
+supplied. Neither job runs in ordinary CI. The Firebase App Check and
+Turnstile environments each receive a separately minted, run-bound one-use
+grant containing only that provider's identity and attestation capability; a
+reusable identity token, generic attestation token, or static per-provider
+token is rejected by the observer path. The grant is exposed only to the
+root-owned collector hook for its selected provider and is destroyed during
+unconditional teardown. The
+physical Actions-read token is confined to its no-checkout authentication job.
+The `run_self_tests` Admin token and GitHub-read token are confined to their
+respective fixed no-checkout capture jobs. Candidate observation, aggregation,
+and signing run on fresh runners without those credentials. None of these
+tokens may be copied into raw output.
 
 The retained output contains:
 
@@ -250,6 +355,10 @@ The retained output contains:
 - the exact source report, candidate manifest, machine-results manifest, and
   all three Sigstore bundles;
 - redacted machine result envelopes and their raw outputs; and
+- for each JavaScript provider, the exact capture plus `ISOLATION_SHA256SUMS`,
+  signed lease and teardown, execution record, signed gateway-consumption
+  receipt, gateway verification key, harness manifest, and redacted report;
+  and
 - JSON results of all three GitHub attestation verifications.
 
 The finalizer writes into an empty absolute directory through an atomic staging
@@ -264,12 +373,15 @@ This tooling makes absent proof fail closed; it does not make external proof
 appear. Before version 1 release evidence can pass, the responsible protected
 producers must still execute against the exact candidate:
 
-- all five live SDK/platform paths. The producer is implemented, but real
+- all six live SDK/platform paths. The producer is implemented, but real
   evidence still requires protected physical iOS/Android runners and devices,
   production-signed or Play-distributed apps, configured App Attest and Play
   Integrity services, exact retained native receipts for React Native linkage,
   the cross-repository Actions-read token, a deployed candidate gateway, and
-  protected JavaScript identity and attestation credentials;
+  separately minted Firebase App Check and Turnstile one-use grants, two fresh
+  provider-specific JIT runners, the external signed-lease supervisor and
+  isolated keys, gateway receipt signing, restricted network policy, and
+  externally enforced teardown/destruction;
 - a bounded live OpenRouter self-test using an operator-owned credential;
 - image signature/provenance and scan tools against the published candidate;
   and

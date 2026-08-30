@@ -138,7 +138,7 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 	}
 	sessionStore, err := session.NewStore(session.StoreConfig{
 		Pool: f.pool, AccessTokens: accessIssuer, Configuration: f.configurationStore,
-		Now: func() time.Time { return f.now },
+		Now: func() time.Time { return f.now }, RotationProtector: f.envelope,
 	})
 	if err != nil {
 		return err

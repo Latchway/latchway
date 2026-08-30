@@ -59,8 +59,8 @@ func TestClientDiagnosticsUsesCanonicalAuthenticatedInputAndExactRedactedContrac
 		"request_id", "server_version", "contract_version", "protocol_version",
 		"installation", "session", "trust",
 	)
-	if document["request_id"] != logicalLookingHint || document["contract_version"] != "0.5.1" ||
-		document["protocol_version"] != float64(1) {
+	if document["request_id"] != logicalLookingHint || document["contract_version"] != "1.0.0" ||
+		document["protocol_version"] != float64(2) {
 		t.Fatalf("diagnostics identity = %#v", document)
 	}
 	installation := document["installation"].(map[string]any)

@@ -1,24 +1,14 @@
 import { LatchwayContainer } from "./container";
+import { evidenceIdentifier } from "./evidence";
 
 export { LatchwayContainer };
 
 const PLATFORM_HEALTH_PATH = "/__latchway/cloudflare/healthz";
 const EVIDENCE_MIGRATION_PATH = "/__latchway/cloudflare/evidence/migration";
 const EVIDENCE_SHUTDOWN_PATH = "/__latchway/cloudflare/evidence/shutdown";
-const MAX_EVIDENCE_BODY_BYTES = 1024;
-const EVIDENCE_ID = /^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$/;
 const MAX_CONFIGURED_INSTANCES = 4;
 
 type EvidenceContainerStub = DurableObjectStub<LatchwayContainer>;
-
-function secureEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false;
-  let difference = 0;
-  for (let index = 0; index < left.byteLength; index += 1) {
-    difference |= left[index]! ^ right[index]!;
-  }
-  return difference === 0;
-}
 
 async function authorizedEvidenceRequest(request: Request, env: Env): Promise<boolean> {
   const expected = Reflect.get(env, "LATCHWAY_EVIDENCE_TOKEN");
@@ -38,27 +28,7 @@ async function authorizedEvidenceRequest(request: Request, env: Env): Promise<bo
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),
     crypto.subtle.digest("SHA-256", encoder.encode(authorization.slice(7))),
   ]);
-  return secureEqual(new Uint8Array(expectedDigest), new Uint8Array(providedDigest));
-}
-
-async function evidenceIdentifier(request: Request): Promise<string> {
-  const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
-  if (!Number.isSafeInteger(declaredLength) || declaredLength > MAX_EVIDENCE_BODY_BYTES) {
-    throw new Error("invalid evidence request length");
-  }
-  const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_EVIDENCE_BODY_BYTES) {
-    throw new Error("evidence request exceeded its bound");
-  }
-  const value: unknown = JSON.parse(body);
-  const evidenceId =
-    typeof value === "object" && value !== null
-      ? Reflect.get(value, "evidence_id")
-      : undefined;
-  if (typeof evidenceId !== "string" || !EVIDENCE_ID.test(evidenceId)) {
-    throw new Error("invalid evidence identifier");
-  }
-  return evidenceId;
+  return crypto.subtle.timingSafeEqual(expectedDigest, providedDigest);
 }
 
 function evidenceJSON(value: unknown, status = 200): Response {

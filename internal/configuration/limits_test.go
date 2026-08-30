@@ -278,6 +278,24 @@ func TestNormalizeExecutableLimitAcceptsBoundedProductionRules(t *testing.T) {
 	}
 }
 
+func TestNormalizeExecutableLimitAcceptsComponentQuotaScopes(t *testing.T) {
+	t.Parallel()
+	limit, _, ok := normalizeExecutableLimit(Limit{
+		Metric: "logical_requests", Algorithm: "calendar", Window: "1h", Maximum: 10, Hard: true,
+		Scope: []string{
+			"feature", "trust_source", "component_kind", "component_definition",
+			"client_component", "installation_family", "user",
+		},
+	})
+	want := []string{
+		"user", "installation_family", "client_component", "component_definition",
+		"component_kind", "trust_source", "feature",
+	}
+	if !ok || !slices.Equal(limit.Scope, want) {
+		t.Fatalf("component quota scope = %#v ok=%t, want %#v", limit.Scope, ok, want)
+	}
+}
+
 func TestNormalizeExecutableLimitCanonicalizesPlatformAndNormalizedClaimScopes(t *testing.T) {
 	t.Parallel()
 

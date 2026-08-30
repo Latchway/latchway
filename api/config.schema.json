@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://latchway.dev/schemas/config/0.5.1/environment-config.schema.json",
+  "$id": "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json",
   "title": "Latchway EnvironmentConfig",
   "description": "Immutable, revisioned configuration for one Latchway application environment.",
   "type": "object",
@@ -70,6 +70,12 @@
           "minItems": 1,
           "maxItems": 32,
           "items": { "$ref": "#/$defs/AttestationPolicy" }
+        },
+        "componentDefinitions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/ComponentDefinition" },
+          "default": []
         },
         "upstreams": {
           "type": "array",
@@ -300,6 +306,176 @@
           }
         }
       }
+    },
+    "ComponentDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "platform",
+        "kind",
+        "familyRole",
+        "attestation",
+        "allowedFeatures"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "platform": {
+          "enum": [
+            "ios",
+            "android",
+            "web",
+            "node",
+            "react_native_ios",
+            "react_native_android",
+            "watchos",
+            "wearos"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "main_app",
+            "widget",
+            "share_extension",
+            "app_intent_extension",
+            "notification_service_extension",
+            "action_extension",
+            "sso_extension",
+            "watch_extension",
+            "android_app",
+            "wear_app",
+            "browser",
+            "node_process"
+          ]
+        },
+        "identifiers": { "$ref": "#/$defs/ComponentIdentifiers" },
+        "familyRole": { "enum": ["root", "delegated"] },
+        "delegation": { "$ref": "#/$defs/ComponentDelegationPolicy" },
+        "attestation": { "$ref": "#/$defs/ComponentAttestationPolicy" },
+        "allowedFeatures": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/Identifier" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "familyRole": { "const": "root" } },
+            "required": ["familyRole"]
+          },
+          "then": {
+            "not": { "required": ["delegation"] },
+            "properties": {
+              "attestation": {
+                "properties": { "strategy": { "enum": ["direct", "identity_only"] } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "familyRole": { "const": "delegated" } },
+            "required": ["familyRole"]
+          },
+          "then": {
+            "required": ["delegation"],
+            "properties": {
+              "attestation": {
+                "properties": { "strategy": { "const": "delegated" } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ComponentIdentifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bundleIdentifiers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$"
+          }
+        },
+        "packageNames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+          }
+        },
+        "origins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "maxLength": 2048
+          }
+        }
+      }
+    },
+    "ComponentDelegationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedParents", "maximumLifetime"],
+      "properties": {
+        "allowedParents": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/Identifier" }
+        },
+        "maximumLifetime": { "$ref": "#/$defs/Duration" },
+        "allowChildDelegation": { "type": "boolean", "default": false }
+      }
+    },
+    "ComponentAttestationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": {
+        "strategy": { "enum": ["direct", "delegated", "identity_only"] },
+        "provider": {
+          "enum": ["app_attest", "play_integrity", "firebase_app_check", "turnstile", "debug"]
+        },
+        "directStepUp": { "type": "boolean", "default": false }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "strategy": { "const": "direct" } },
+            "required": ["strategy"]
+          },
+          "then": { "required": ["provider"] }
+        },
+        {
+          "if": {
+            "properties": { "strategy": { "enum": ["delegated", "identity_only"] } },
+            "required": ["strategy"]
+          },
+          "then": { "not": { "required": ["provider"] } }
+        }
+      ]
     },
     "PlatformAttestation": {
       "type": "object",
@@ -904,11 +1080,11 @@
         "scope": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 11,
+          "maxItems": 16,
           "uniqueItems": true,
           "items": {
             "oneOf": [
-              { "enum": ["organization", "application", "environment", "user", "installation", "feature", "route", "upstream", "model", "platform"] },
+              { "enum": ["organization", "application", "environment", "user", "installation", "installation_family", "client_component", "component_definition", "component_kind", "trust_source", "feature", "route", "upstream", "model", "platform"] },
               { "type": "string", "pattern": "^normalized_claim:[a-z][a-z0-9_]{0,62}$" }
             ]
           },

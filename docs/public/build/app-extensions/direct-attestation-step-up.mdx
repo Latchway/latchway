@@ -1,0 +1,25 @@
+---
+title: "Step up to direct attestation"
+description: "Plan the transition from delegated trust to direct component evidence without reusing the root key or session."
+---
+
+<Warning>
+  Direct-attestation step-up for Client Components is a pre-release design. No
+  released SDK currently exposes this flow.
+</Warning>
+
+A component can become directly trusted only by completing the platform
+attestation flow for its own component key when that platform and component
+type support it. A root assertion cannot be relabeled as component attestation.
+
+Step-up must preserve the component identity while recording new trust
+provenance. It must not copy the root key, adopt the root refresh chain, or
+erase the audit trail that the component began with delegated trust.
+
+## Acceptance conditions
+
+- The platform verifier binds evidence to the component's application identity and key.
+- Policy permits direct evidence for the component type.
+- Existing delegated sessions are rotated or invalidated according to the final contract.
+- Dashboard and diagnostics show the provenance transition without raw evidence.
+- Root or family revocation continues to apply under documented policy.

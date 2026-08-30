@@ -391,20 +391,26 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 	command, err := tx.Exec(ctx, `
 		INSERT INTO logical_requests (
 			logical_request_id, organization_id, application_id, environment_id,
-			application_user_id, installation_id, session_grant_id,
+			application_user_id, installation_id,
+			installation_family_id, client_component_id, component_definition_id,
+			component_kind, trust_source, session_grant_id,
 			config_revision_id, feature_key, selected_limit_plan_key,
-			protocol, client_request_id,
+			protocol, client_request_id, framework, framework_version,
 			trusted_decision_fingerprint, status, requested_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			$12, $13, 'reserved', $14
+			$12, $13, $14, $15, $16, $17, $18, $19, $20,
+			'reserved', $21
 		)
 		ON CONFLICT DO NOTHING
 	`, logicalRequestID, prepared.OrganizationID, prepared.ApplicationID,
 		prepared.EnvironmentID, prepared.ApplicationUserID, prepared.InstallationID,
-		prepared.SessionGrantID, prepared.ConfigRevisionID, prepared.FeatureKey,
-		prepared.LimitPlanKey, prepared.Protocol, nullableString(prepared.ClientRequestID),
-		fingerprint, requestedAt)
+		nullableString(prepared.InstallationFamilyID), nullableString(prepared.ClientComponentID),
+		nullableString(prepared.ComponentDefinitionID), nullableString(prepared.ComponentKind),
+		nullableString(prepared.TrustSource), prepared.SessionGrantID, prepared.ConfigRevisionID,
+		prepared.FeatureKey, prepared.LimitPlanKey, prepared.Protocol,
+		nullableString(prepared.ClientRequestID), nullableString(prepared.Framework),
+		nullableString(prepared.FrameworkVersion), fingerprint, requestedAt)
 	if err != nil {
 		return Reservation{}, mapWriteError("insert logical request", err)
 	}
@@ -637,23 +643,34 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		applicationUserID, installationID            string
 		sessionGrantID, configRevisionID             string
 		featureKey, protocol, status                 string
+		installationFamilyID, clientComponentID      *string
+		componentDefinitionID, componentKind         *string
+		trustSource, framework, frameworkVersion     *string
 		clientRequestID, fingerprint, failureCode    *string
 		requestedAt                                  time.Time
 	}
 	var logical existingLogical
 	err := tx.QueryRow(ctx, `
 		SELECT organization_id, application_id, environment_id,
-		       application_user_id, installation_id, session_grant_id,
+		       application_user_id, installation_id,
+		       installation_family_id, client_component_id,
+		       component_definition_id, component_kind, trust_source,
+		       session_grant_id,
 		       config_revision_id, feature_key, protocol, client_request_id,
+		       framework, framework_version,
 		       trusted_decision_fingerprint, status, failure_code, requested_at
 		FROM logical_requests
 		WHERE logical_request_id = $1
 		FOR UPDATE
 	`, prepared.LogicalRequestID.String()).Scan(
 		&logical.organizationID, &logical.applicationID, &logical.environmentID,
-		&logical.applicationUserID, &logical.installationID, &logical.sessionGrantID,
+		&logical.applicationUserID, &logical.installationID,
+		&logical.installationFamilyID, &logical.clientComponentID,
+		&logical.componentDefinitionID, &logical.componentKind, &logical.trustSource,
+		&logical.sessionGrantID,
 		&logical.configRevisionID, &logical.featureKey, &logical.protocol,
-		&logical.clientRequestID, &logical.fingerprint, &logical.status,
+		&logical.clientRequestID, &logical.framework, &logical.frameworkVersion,
+		&logical.fingerprint, &logical.status,
 		&logical.failureCode, &logical.requestedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -667,11 +684,18 @@ func loadExistingReserve(ctx context.Context, tx pgx.Tx, prepared preparedReques
 		logical.environmentID != prepared.EnvironmentID ||
 		logical.applicationUserID != prepared.ApplicationUserID ||
 		logical.installationID != prepared.InstallationID ||
+		!nullableStringMatches(logical.installationFamilyID, prepared.InstallationFamilyID) ||
+		!nullableStringMatches(logical.clientComponentID, prepared.ClientComponentID) ||
+		!nullableStringMatches(logical.componentDefinitionID, prepared.ComponentDefinitionID) ||
+		!nullableStringMatches(logical.componentKind, prepared.ComponentKind) ||
+		!nullableStringMatches(logical.trustSource, prepared.TrustSource) ||
 		logical.sessionGrantID != prepared.SessionGrantID ||
 		logical.configRevisionID != prepared.ConfigRevisionID ||
 		logical.featureKey != prepared.FeatureKey ||
 		logical.protocol != prepared.Protocol ||
 		!nullableStringMatches(logical.clientRequestID, prepared.ClientRequestID) ||
+		!nullableStringMatches(logical.framework, prepared.Framework) ||
+		!nullableStringMatches(logical.frameworkVersion, prepared.FrameworkVersion) ||
 		logical.fingerprint == nil || *logical.fingerprint != fingerprint {
 		return Reservation{}, ErrInvalidInput
 	}

@@ -1,0 +1,22 @@
+---
+title: "Core concepts"
+description: "Learn the boundaries among users, trust evidence, possession keys, features, routes, and server-held upstream credentials."
+---
+
+| Term | Meaning |
+| --- | --- |
+| Authentication | Determines who the application user is. |
+| Attestation | Supplies evidence about the client application or environment. |
+| Authorization | Determines what the authenticated principal may do. |
+| DPoP | Proves possession of the key bound to a Latchway session. |
+| Installation Family | Groups related application components in one logical installation under the draft wire-2 contract. |
+| Client Component | Represents one independently executing application surface under the draft wire-2 contract. |
+| Feature | Names the application-facing capability the client may select. |
+| Route | Applies a server-side selection rule for an upstream and physical model. |
+| Upstream | Receives the request after Latchway applies policy and injects a server-held credential. |
+
+The current source contract is draft `1.0.0` with current wire protocol `2` and
+includes Installation Families and Client Components. Wire `1` remains a
+legacy compatibility path. Follow [Release status](/release-status) and the
+generated compatibility matrix before treating a resource or adapter as a
+published release.

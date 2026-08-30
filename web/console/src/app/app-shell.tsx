@@ -16,7 +16,9 @@ type ConsoleRoute =
   | "/authentication-providers"
   | "/attestation"
   | "/users"
+  | "/installation-families"
   | "/installations"
+  | "/component-definitions"
   | "/features"
   | "/routes"
   | "/upstreams"
@@ -155,9 +157,11 @@ export function AppShell() {
             <NavigationLink description="Issuer and claim trust" to="/authentication-providers">Authentication providers</NavigationLink>
             <NavigationLink description="Platform proof policies" to="/attestation">Attestation</NavigationLink>
             <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>
-            <NavigationLink description="Trust and revocation" to="/installations">Installations</NavigationLink>
+            <NavigationLink description="Component trust and revocation" to="/installation-families">Installation families</NavigationLink>
+            <NavigationLink description="Legacy root installation records" to="/installations">Installations</NavigationLink>
 
             <p className="nav-group-label nav-group-label--spaced">AI Configuration</p>
+            <NavigationLink description="Allowed roots, children, and feature grants" to="/component-definitions">Component definitions</NavigationLink>
             <NavigationLink description="Client-visible capabilities" to="/features">Features</NavigationLink>
             <NavigationLink description="Ordered production resolution" to="/routes">Routes</NavigationLink>
             <NavigationLink description="Provider destinations" to="/upstreams">Upstreams</NavigationLink>

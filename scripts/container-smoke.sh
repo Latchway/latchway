@@ -30,7 +30,7 @@ docker run --detach \
   --env POSTGRES_DB \
   --env POSTGRES_USER \
   --env POSTGRES_PASSWORD \
-  postgres:18.6-alpine >/dev/null
+  docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 >/dev/null
 
 postgres_ready=false
 for _ in $(seq 1 60); do

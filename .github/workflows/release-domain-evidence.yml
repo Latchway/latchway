@@ -43,32 +43,23 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  attestations: write
-  contents: read
-  id-token: write
+permissions: {}
 
 concurrency:
   group: release-domain-evidence-${{ inputs.domain }}-${{ inputs.candidate_commit }}
   cancel-in-progress: false
 
 jobs:
-  evidence:
+  authenticate:
     if: github.ref == 'refs/heads/main'
     environment: release-evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: Check out the exact candidate finalizer
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ inputs.candidate_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require a fixed GitHub CLI verifier
-        run: python3 scripts/require-gh-version.py
-      - name: Require exact main commit and immutable run IDs
+      - name: Require a fixed GitHub CLI, exact main commit, and immutable run IDs without a checkout
         shell: bash
         env:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
@@ -79,6 +70,11 @@ jobs:
           MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
           MACHINE_RESULTS_RUN_ATTEMPT: ${{ inputs.machine_results_run_attempt }}
         run: |
+          set -Eeuo pipefail
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
           [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
@@ -87,7 +83,6 @@ jobs:
           [[ "$MACHINE_RESULTS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$MACHINE_RESULTS_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
-          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
       - name: Verify every input run and attempt belongs to its fixed producer
         shell: bash
         env:
@@ -100,6 +95,8 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
         run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/authenticated/producer-verification"
           verify_run() {
             local label="$1" run_id="$2" attempt="$3" path="$4"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RUNNER_TEMP/$label-run.json"
@@ -109,6 +106,13 @@ jobs:
             workflow_id=$(jq --raw-output '.workflow_id | select(type == "number" and . > 0)' "$RUNNER_TEMP/$label-run.json")
             gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id" > "$RUNNER_TEMP/$label-workflow.json"
             jq --exit-status --arg path "$path" '.path == $path and .state == "active"' "$RUNNER_TEMP/$label-workflow.json" >/dev/null
+            jq -n --arg label "$label" --arg repository "$GITHUB_REPOSITORY" \
+              --arg workflow_path "$path" --arg head_sha "$CANDIDATE_COMMIT" \
+              --argjson run_id "$run_id" --argjson run_attempt "$attempt" \
+              '{schema_version:1,kind:"latchway_release_domain_input_producer_verification",input:$label,
+                repository:$repository,workflow_path:$workflow_path,run_id:$run_id,run_attempt:$run_attempt,
+                event:"workflow_dispatch",status:"completed",conclusion:"success",head_sha:$head_sha,head_branch:"main"}' \
+              > "$RUNNER_TEMP/authenticated/producer-verification/$label.json"
           }
           verify_run source "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
           verify_run candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
@@ -117,21 +121,21 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-cross-repository-source-${{ inputs.source_evidence_run_id }}-${{ inputs.source_evidence_run_attempt }}
-          path: ${{ runner.temp }}/source
+          path: ${{ runner.temp }}/authenticated/source
           run-id: ${{ inputs.source_evidence_run_id }}
           github-token: ${{ github.token }}
       - name: Download the candidate and its attestation bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-candidate-${{ inputs.candidate_commit }}-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
-          path: ${{ runner.temp }}/candidate
+          path: ${{ runner.temp }}/authenticated/candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
       - name: Download only the fixed producer's attested machine results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: latchway-${{ inputs.domain }}-machine-results-${{ inputs.candidate_commit }}-${{ inputs.machine_results_run_id }}-${{ inputs.machine_results_run_attempt }}
-          path: ${{ runner.temp }}/observations
+          path: ${{ runner.temp }}/authenticated/observations
           run-id: ${{ inputs.machine_results_run_id }}
           github-token: ${{ github.token }}
       - name: Verify all three exact attestation bundles before finalization
@@ -142,52 +146,406 @@ jobs:
           MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
           MACHINE_RESULTS_RUN_ATTEMPT: ${{ inputs.machine_results_run_attempt }}
         run: |
-          gh attestation verify "$RUNNER_TEMP/source/latchway-cross-repository.json" \
-            --bundle "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
+          set -Eeuo pipefail
+          gh attestation verify "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json" \
+            --bundle "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
             --source-digest "$CANDIDATE_COMMIT" \
             --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/source-attestation-verification.json"
-          gh attestation verify "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --bundle "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
+            --format json > "$RUNNER_TEMP/authenticated/source-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json" \
+            --bundle "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$CANDIDATE_COMMIT" \
             --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/candidate-attestation-verification.json"
-          gh attestation verify "$RUNNER_TEMP/observations/machine-results-manifest.json" \
-            --bundle "$RUNNER_TEMP/observations/machine-results.attestation.sigstore.json" \
+            --format json > "$RUNNER_TEMP/authenticated/candidate-attestation-verification.json"
+          gh attestation verify "$RUNNER_TEMP/authenticated/observations/machine-results-manifest.json" \
+            --bundle "$RUNNER_TEMP/authenticated/observations/machine-results.attestation.sigstore.json" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-observations.yml" \
             --source-digest "$CANDIDATE_COMMIT" \
             --signer-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/machine-attestation-verification.json"
+            --format json > "$RUNNER_TEMP/authenticated/machine-attestation-verification.json"
           jq --exit-status --arg run "$MACHINE_RESULTS_RUN_ID" --argjson attempt "$MACHINE_RESULTS_RUN_ATTEMPT" \
             '.producer.run_id == $run and .producer.run_attempt == $attempt' \
-            "$RUNNER_TEMP/observations/machine-results-manifest.json" >/dev/null
+            "$RUNNER_TEMP/authenticated/observations/machine-results-manifest.json" >/dev/null
+      - name: Retain only authenticated inputs for credential-free finalization
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-authenticated-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  finalize:
+    needs: authenticate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the exact candidate finalizer without retained credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download only authority-authenticated inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-authenticated-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
       - name: Finalize the external release-domain document
         shell: bash
         env:
           EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
         run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$CANDIDATE_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
           python3 scripts/release-domain-evidence.py \
             --finalize \
             --domain "$EVIDENCE_DOMAIN" \
-            --source-conformance "$RUNNER_TEMP/source/latchway-cross-repository.json" \
-            --source-attestation "$RUNNER_TEMP/source/latchway-cross-repository.attestation.sigstore.json" \
-            --candidate-manifest "$RUNNER_TEMP/candidate/latchway-candidate.json" \
-            --candidate-attestation "$RUNNER_TEMP/candidate/latchway-candidate.attestation.sigstore.json" \
-            --raw-directory "$RUNNER_TEMP/observations/raw" \
-            --receipt "$RUNNER_TEMP/observations/machine-results-manifest.json" \
-            --receipt-attestation "$RUNNER_TEMP/observations/machine-results.attestation.sigstore.json" \
+            --source-conformance "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.json" \
+            --source-attestation "$RUNNER_TEMP/authenticated/source/latchway-cross-repository.attestation.sigstore.json" \
+            --candidate-manifest "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.json" \
+            --candidate-attestation "$RUNNER_TEMP/authenticated/candidate/latchway-candidate.attestation.sigstore.json" \
+            --raw-directory "$RUNNER_TEMP/authenticated/observations/raw" \
+            --receipt "$RUNNER_TEMP/authenticated/observations/machine-results-manifest.json" \
+            --receipt-attestation "$RUNNER_TEMP/authenticated/observations/machine-results.attestation.sigstore.json" \
             --output-directory "$RUNNER_TEMP/final"
+      - name: Retain the unsigned domain for a fresh attestation runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  attest:
+    needs: finalize
+    if: github.ref == 'refs/heads/main'
+    environment: release-evidence-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the authority-authenticated source closure without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-authenticated-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/authenticated
+      - name: Download the unsigned domain without a checkout
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: latchway-${{ inputs.domain }}-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final
+      - name: Validate the exact domain document and retained file set without candidate code
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_DOMAIN: ${{ inputs.domain }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SOURCE_RUN_ID: ${{ inputs.source_evidence_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_evidence_run_attempt }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          MACHINE_RESULTS_RUN_ID: ${{ inputs.machine_results_run_id }}
+          MACHINE_RESULTS_RUN_ATTEMPT: ${{ inputs.machine_results_run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/final"
+          authenticated="$RUNNER_TEMP/authenticated"
+          source="$authenticated/source/latchway-cross-repository.json"
+          source_bundle="$authenticated/source/latchway-cross-repository.attestation.sigstore.json"
+          candidate="$authenticated/candidate/latchway-candidate.json"
+          candidate_bundle="$authenticated/candidate/latchway-candidate.attestation.sigstore.json"
+          receipt="$authenticated/observations/machine-results-manifest.json"
+          receipt_bundle="$authenticated/observations/machine-results.attestation.sigstore.json"
+          raw="$authenticated/observations/raw"
+          document="$root/$EVIDENCE_DOMAIN.json"
+          slug=${EVIDENCE_DOMAIN//_/-}
+          test -f "$document" && test ! -L "$document" && test -s "$document"
+          for input in "$source" "$source_bundle" "$candidate" "$candidate_bundle" "$receipt" "$receipt_bundle"; do
+            test -f "$input" && test ! -L "$input" && test -s "$input"
+          done
+          test -d "$raw" && test ! -L "$raw"
+          test -z "$(find "$root" "$authenticated" -type l -print -quit)"
+          validate_producer() {
+            local label="$1" run_id="$2" run_attempt="$3" workflow_path="$4"
+            jq --exit-status --arg label "$label" --arg repository "$GITHUB_REPOSITORY" \
+              --arg workflow_path "$workflow_path" --arg head_sha "$CANDIDATE_COMMIT" \
+              --argjson run_id "$run_id" --argjson run_attempt "$run_attempt" '
+                . == {schema_version:1,kind:"latchway_release_domain_input_producer_verification",input:$label,
+                  repository:$repository,workflow_path:$workflow_path,run_id:$run_id,run_attempt:$run_attempt,
+                  event:"workflow_dispatch",status:"completed",conclusion:"success",head_sha:$head_sha,head_branch:"main"}
+              ' "$authenticated/producer-verification/$label.json" >/dev/null
+          }
+          validate_producer source "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" .github/workflows/cross-repository-conformance.yml
+          validate_producer candidate "$CANDIDATE_RUN_ID" "$CANDIDATE_RUN_ATTEMPT" .github/workflows/release.yml
+          validate_producer machine "$MACHINE_RESULTS_RUN_ID" "$MACHINE_RESULTS_RUN_ATTEMPT" .github/workflows/release-domain-observations.yml
+          version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
+          read -r major minor patch <<< "$version"
+          [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]
+          (( major > 2 || (major == 2 && minor >= 97) ))
+          gh attestation verify "$source" --bundle "$source_bundle" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/signer-source-attestation.json"
+          gh attestation verify "$candidate" --bundle "$candidate_bundle" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/signer-candidate-attestation.json"
+          gh attestation verify "$receipt" --bundle "$receipt_bundle" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-domain-observations.yml" \
+            --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
+            --source-ref refs/heads/main --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/signer-machine-attestation.json"
+          case "$EVIDENCE_DOMAIN" in
+            live_sdk_conformance)
+              expected_claims='["android_against_release_image","dpop_vectors","error_mapping","installation_revocation","ios_against_release_image","javascript_against_release_image","protocol_version_rejection","quota_snapshots","react_native_android_against_release_image","react_native_ios_against_release_image","session_refresh","streaming"]'
+              expected_observations='["sdk.android.release-image","sdk.behavior.dpop-vectors","sdk.behavior.error-mapping","sdk.behavior.installation-revocation","sdk.behavior.protocol-version-rejection","sdk.behavior.quota-snapshots","sdk.behavior.session-refresh","sdk.behavior.streaming","sdk.ios.release-image","sdk.javascript.firebase-app-check.release-image","sdk.javascript.turnstile.release-image","sdk.react-native-android.release-image","sdk.react-native-ios.release-image"]'
+              ;;
+            physical_devices)
+              expected_claims='["app_attest_production_verified","play_integrity_play_distributed_verified","react_native_android_verified","react_native_ios_verified"]'
+              expected_observations='["sdk.android.release-image","sdk.ios.release-image","sdk.react-native-android.release-image","sdk.react-native-ios.release-image"]'
+              ;;
+            live_provider)
+              expected_claims='["error_normalization_verified","openrouter_nonstreaming_verified","openrouter_streaming_verified","output_clamp_verified","usage_verified"]'
+              expected_observations='["provider.gateway-identity","provider.openrouter.error-normalization","provider.openrouter.non-streaming","provider.openrouter.output-clamp","provider.openrouter.streaming","provider.openrouter.usage"]'
+              ;;
+            supply_chain)
+              expected_claims='["license_scan_verified","multi_arch_image_verified","provenance_verified","sbom_verified","signature_verified","vulnerability_scan_verified"]'
+              expected_observations='["supply.cosign-signature","supply.github-provenance","supply.license.amd64","supply.license.arm64","supply.oci-index","supply.platform.amd64","supply.platform.arm64","supply.sbom.amd64","supply.sbom.arm64","supply.vulnerability.amd64","supply.vulnerability.arm64"]'
+              ;;
+            public_tags)
+              expected_claims='["github_releases_verified","remote_annotated_tags_verified"]'
+              expected_observations='["publication.annotated-tag.android","publication.annotated-tag.core","publication.annotated-tag.ios","publication.annotated-tag.javascript","publication.annotated-tag.react_native","publication.github-release.android","publication.github-release.core","publication.github-release.ios","publication.github-release.javascript","publication.github-release.react_native"]'
+              ;;
+            public_registries)
+              expected_claims='["cocoapods_verified","maven_central_verified","npm_javascript_verified","npm_react_native_verified","oci_digest_verified","swift_package_verified"]'
+              expected_observations='["registry.cocoapods","registry.maven-central","registry.npm.javascript","registry.npm.react-native","registry.oci","registry.swift"]'
+              ;;
+            *) exit 1 ;;
+          esac
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
+              .scope == "source" and .verdict == "passed" and .source_conformance_passed == true and
+              .promotion_ready == false and .release_ready == false and .evidence_window == null and
+              .contract.status == "released" and .contract.core_release == ("v" + .contract.version) and
+              .contract.oci_image_digest == null and
+              (.contract.bundle_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              (.repositories | map(.id) | sort) == ["android","core","ios","javascript","react_native"] and
+              (.repositories[] | select(.id == "core") | .commit) == $commit
+            ' "$source" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+              (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and
+              .schema_version == 1 and .kind == "latchway_release_candidate" and .status == "passed" and
+              .candidate_commit == $commit and .intended_tag == ("v" + .version) and
+              .contract.version == .version and .contract.status == "released" and
+              .contract.bundle_file_name == ("latchway-contract-" + .version + ".tar.gz") and
+              (.contract.bundle_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              .image.repository == "ghcr.io/latchway/latchway" and
+              (.image.index_digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+              (.image.platforms | keys | sort) == ["linux/amd64","linux/arm64"] and
+              all(.image.platforms[]; type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+              .image.platforms["linux/amd64"] != .image.platforms["linux/arm64"]
+            ' "$candidate" >/dev/null
+          expected_candidate_artifacts='["latchway-contract.tar.gz","latchway-linux-amd64-license.json","latchway-linux-amd64-vulnerability.json","latchway-linux-amd64.spdx.json","latchway-linux-arm64-license.json","latchway-linux-arm64-vulnerability.json","latchway-linux-arm64.spdx.json"]'
+          jq --exit-status --argjson expected "$expected_candidate_artifacts" '
+              (.artifacts | map(.path) | sort) == $expected and
+              all(.artifacts[];
+                (keys | sort) == ["path","sha256"] and
+                (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
+            ' "$candidate" >/dev/null
+          while IFS=$'\t' read -r name expected_sha; do
+            [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+            file="$authenticated/candidate/$name"
+            test -f "$file" && test ! -L "$file"
+            test "$(sha256sum "$file" | awk '{print $1}')" = "$expected_sha"
+          done < <(jq --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$candidate")
+          source_tag=$(jq --raw-output '.contract.core_release' "$source")
+          candidate_tag=$(jq --raw-output '.intended_tag' "$candidate")
+          test "$source_tag" = "$candidate_tag"
+          source_bundle_sha=$(jq --raw-output '.contract.bundle_sha256' "$source")
+          candidate_bundle_sha=$(jq --raw-output '.contract.bundle_sha256' "$candidate")
+          test "$source_bundle_sha" = "$candidate_bundle_sha"
+          jq -S '[.repositories[] | {key:.id,value:{commit:.commit,tag:.intended_tag,version:.version}}] | from_entries' \
+            "$source" > "$RUNNER_TEMP/expected-domain-repositories.json"
+          jq -S '.repositories' "$document" > "$RUNNER_TEMP/actual-domain-repositories.json"
+          cmp --silent "$RUNNER_TEMP/expected-domain-repositories.json" "$RUNNER_TEMP/actual-domain-repositories.json"
+          jq -S '{core_commit:(.repositories[]|select(.id=="core")|.commit),core_release:.contract.core_release,contract_version:.contract.version,bundle_sha256:.contract.bundle_sha256,oci_image_digest:null,repositories:([.repositories[]|{key:.id,value:{commit:.commit,tag:.intended_tag,version:.version}}]|from_entries)}' \
+            "$source" > "$RUNNER_TEMP/expected-machine-candidate-base.json"
+          image=$(jq --raw-output '.image.repository + "@" + .image.index_digest' "$candidate")
+          jq -S --arg image "$image" '.oci_image_digest=$image' "$RUNNER_TEMP/expected-machine-candidate-base.json" \
+            > "$RUNNER_TEMP/expected-machine-candidate.json"
+          jq --exit-status \
+            --arg domain "$EVIDENCE_DOMAIN" --arg run "$MACHINE_RESULTS_RUN_ID" \
+            --argjson attempt "$MACHINE_RESULTS_RUN_ATTEMPT" --argjson observations "$expected_observations" '
+              (keys | sort) == ["candidate","domain","finished_at","kind","observations","producer","schema_version","started_at"] and
+              .schema_version == 1 and .kind == "latchway_release_domain_producer_receipt" and .domain == $domain and
+              .producer == {repository:"Latchway/latchway",workflow:".github/workflows/release-domain-observations.yml",run_id:$run,run_attempt:$attempt} and
+              (.observations | map(.id)) == $observations and
+              all(.observations[];
+                (keys | sort) == ["artifacts","id","result_path","result_sha256"] and
+                .result_path == ((.id | gsub("\\."; "-")) + ".json") and
+                (.result_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+                (.artifacts | type == "array" and length > 0) and
+                all(.artifacts[];
+                  (keys | sort) == ["path","sha256"] and
+                  (.path | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._/-]*$")) and
+                  (.path | contains("..") | not) and
+                  (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))))
+            ' "$receipt" >/dev/null
+          jq -S '.candidate' "$receipt" > "$RUNNER_TEMP/actual-machine-candidate.json"
+          cmp --silent "$RUNNER_TEMP/expected-machine-candidate.json" "$RUNNER_TEMP/actual-machine-candidate.json"
+          expected_raw="$RUNNER_TEMP/expected-raw-files"
+          actual_raw="$RUNNER_TEMP/actual-raw-files"
+          jq --raw-output '.observations[] | .result_path, (.artifacts[] | .path)' "$receipt" | LC_ALL=C sort > "$expected_raw"
+          find "$raw" -type f -print0 \
+            | while IFS= read -r -d '' path; do printf '%s\n' "${path#"$raw/"}"; done \
+            | LC_ALL=C sort > "$actual_raw"
+          test -s "$expected_raw" && test -z "$(uniq -d "$expected_raw")"
+          cmp --silent "$expected_raw" "$actual_raw"
+          expected_final="$RUNNER_TEMP/expected-final-artifacts"
+          {
+            for name in \
+              source-conformance.json source-attestation.sigstore.json \
+              candidate-manifest.json candidate-attestation.sigstore.json \
+              machine-results-manifest.json machine-results-attestation.sigstore.json \
+              source-attestation-verification.json candidate-attestation-verification.json \
+              producer-attestation-verification.json; do
+              printf 'artifacts/%s/%s\n' "$slug" "$name"
+            done
+            jq --raw-output '.observations[] | "artifacts/'"$slug"'/result-" + .result_path, (.artifacts[] | "artifacts/'"$slug"'/" + (.path | gsub("/"; "--")))' "$receipt"
+          } | LC_ALL=C sort > "$expected_final"
+          jq --raw-output '.artifacts[].path' "$document" | LC_ALL=C sort > "$RUNNER_TEMP/document-final-artifacts"
+          test -z "$(uniq -d "$expected_final")"
+          cmp --silent "$expected_final" "$RUNNER_TEMP/document-final-artifacts"
+          artifact_root="$root/artifacts/$slug"
+          cmp --silent "$source" "$artifact_root/source-conformance.json"
+          cmp --silent "$source_bundle" "$artifact_root/source-attestation.sigstore.json"
+          cmp --silent "$candidate" "$artifact_root/candidate-manifest.json"
+          cmp --silent "$candidate_bundle" "$artifact_root/candidate-attestation.sigstore.json"
+          cmp --silent "$receipt" "$artifact_root/machine-results-manifest.json"
+          cmp --silent "$receipt_bundle" "$artifact_root/machine-results-attestation.sigstore.json"
+          while IFS=$'\t' read -r observation result_path result_sha; do
+            input="$raw/$result_path"
+            test "$(sha256sum "$input" | awk '{print $1}')" = "$result_sha"
+            cmp --silent "$input" "$artifact_root/result-$result_path"
+            expected_tool=
+            case "$observation" in
+              sdk.*) expected_tool=latchway-live-sdk-harness ;;
+              provider.gateway-identity) expected_tool=latchway-gateway-health ;;
+              provider.openrouter.*) expected_tool=latchway-admin-self-test ;;
+              supply.oci-index|supply.platform.*) expected_tool=docker-buildx ;;
+              supply.vulnerability.*|supply.license.*) expected_tool=candidate-trivy-report-validator ;;
+              supply.sbom.*) expected_tool=candidate-spdx-report-validator ;;
+              supply.cosign-signature) expected_tool=cosign ;;
+              supply.github-provenance) expected_tool=github-attestation ;;
+              publication.*) expected_tool=github-api ;;
+              registry.oci) expected_tool=cosign ;;
+              registry.npm.*) expected_tool=npm ;;
+              registry.swift) expected_tool=swift ;;
+              registry.cocoapods) expected_tool=cocoapods ;;
+              registry.maven-central) expected_tool=maven ;;
+              *) exit 1 ;;
+            esac
+            jq --exit-status --arg domain "$EVIDENCE_DOMAIN" --arg observation "$observation" \
+              --arg tool "$expected_tool" --slurpfile identity "$RUNNER_TEMP/expected-machine-candidate.json" '
+                (keys | sort) == ["artifacts","candidate","domain","exit_code","finished_at","kind","observation","schema_version","started_at","tool"] and
+                .schema_version == 1 and .kind == "latchway_release_machine_result" and
+                .domain == $domain and .observation == $observation and .candidate == $identity[0] and
+                .exit_code == 0 and .tool.name == $tool and
+                (.tool.version | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$")) and
+                (.tool.invocation_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+              ' "$input" >/dev/null
+          done < <(jq --raw-output '.observations[] | [.id,.result_path,.result_sha256] | @tsv' "$receipt")
+          while IFS=$'\t' read -r relative expected_sha; do
+            input="$raw/$relative"
+            test "$(sha256sum "$input" | awk '{print $1}')" = "$expected_sha"
+            safe_name=${relative//\//--}
+            cmp --silent "$input" "$artifact_root/$safe_name"
+          done < <(jq --raw-output '.observations[].artifacts[] | [.path,.sha256] | @tsv' "$receipt")
+          jq --sort-keys . "$document" > "$RUNNER_TEMP/domain-canonical.json"
+          cmp --silent "$document" "$RUNNER_TEMP/domain-canonical.json"
+          jq --exit-status --arg domain "$EVIDENCE_DOMAIN" --arg commit "$CANDIDATE_COMMIT" \
+            --arg slug "$slug" --argjson claims "$expected_claims" \
+            --arg expected_tag "$source_tag" --arg expected_version "${source_tag#v}" \
+            --arg expected_bundle "$source_bundle_sha" --arg expected_image "$image" '
+              (keys | sort) == ["artifacts","bundle_sha256","claims","contract_version","core_commit","core_release","domain","finished_at","kind","oci_image_digest","repositories","schema_version","started_at","status"] and
+              .schema_version == 1 and
+              .kind == "latchway_cross_repository_external_evidence" and
+              .domain == $domain and .status == "passed" and .core_commit == $commit and
+              .started_at == $ARGS.named.started_at and .finished_at == $ARGS.named.finished_at and
+              (.contract_version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?$")) and
+              .core_release == $expected_tag and .contract_version == $expected_version and
+              .bundle_sha256 == $expected_bundle and .oci_image_digest == $expected_image and
+              (.repositories | keys | sort) == ["android","core","ios","javascript","react_native"] and
+              all(.repositories[];
+                type == "object" and
+                (keys | sort) == ["commit","tag","version"] and
+                (.commit | type == "string" and test("^[0-9a-f]{40}$")) and
+                (.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?$")) and
+                .tag == ("v" + .version)) and
+              .repositories.core.commit == $commit and
+              .repositories.core.tag == .core_release and
+              (.claims | keys | sort) == $claims and all(.claims[]; . == true) and
+              (.artifacts | type == "array" and length > 0) and
+              all(.artifacts[];
+                type == "object" and
+                (keys | sort) == ["path","sha256"] and
+                (.path | type == "string" and startswith("artifacts/" + $slug + "/")) and
+                (.sha256 | type == "string" and test("^[0-9a-f]{64}$")))
+            ' --arg started_at "$(jq --raw-output '.started_at' "$receipt")" \
+              --arg finished_at "$(jq --raw-output '.finished_at' "$receipt")" "$document" >/dev/null
+          actual="$RUNNER_TEMP/domain-actual-files"
+          expected="$RUNNER_TEMP/domain-expected-files"
+          find "$root" -type f -print0 \
+            | while IFS= read -r -d '' path; do
+                relative=${path#"$root/"}
+                if [[ "$relative" != "$EVIDENCE_DOMAIN.json" ]]; then printf '%s\n' "$relative"; fi
+              done \
+            | LC_ALL=C sort > "$actual"
+          jq --exit-status --raw-output '.artifacts[] | [.path,.sha256] | @tsv' "$document" \
+            | while IFS=$'\t' read -r relative expected_sha; do
+                [[ "$relative" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+                [[ "$relative" != *..* && "$relative" != */ && "$relative" != *//* ]]
+                file="$root/$relative"
+                test -f "$file" && test ! -L "$file"
+                test "$(sha256sum "$file" | awk '{print $1}')" = "$expected_sha"
+                printf '%s\n' "$relative"
+              done | LC_ALL=C sort > "$expected"
+          test -s "$expected"
+          test -z "$(uniq -d "$expected")"
+          cmp --silent "$actual" "$expected"
       - name: Attest the exact external evidence document
         id: domain-attestation
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1

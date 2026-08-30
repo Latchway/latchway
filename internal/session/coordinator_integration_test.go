@@ -133,7 +133,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	sessionStore, err := NewStore(StoreConfig{
 		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
-		Now: func() time.Time { return now },
+		Now: func() time.Time { return now }, RotationProtector: envelope,
 	})
 	if err != nil {
 		t.Fatalf("construct session store: %v", err)
@@ -307,6 +307,208 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	assertClientHTTPAccessToken(t, ctx, keyManager, refreshed.AccessToken, fixture, revisionID, dpopJKT, now)
 
+	childPrivateKey, childPublicJWK, childJKT := newChallengeKey(t)
+	provisionComponentTarget := clientHTTPURL(t, "/client/v1/installation-families/current/components")
+	provisionComponentProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodPost, provisionComponentTarget, now,
+		refreshed.AccessToken, "client-http-provision-widget",
+	)
+	var provisionedComponent clientHTTPProvisionComponentDocument
+	clientHTTPPostJSONAuthorized(
+		t, handler, "/client/v1/installation-families/current/components",
+		refreshed.AccessToken, provisionComponentProof,
+		map[string]any{
+			"component_definition_id": "ios-widget",
+			"public_jwk":              childPublicJWK,
+			"requested_features":      []any{"assistant"},
+			"client_metadata": map[string]any{
+				"app_version": "1.0.0", "sdk_version": "1.2.3",
+			},
+		},
+		http.StatusCreated,
+		&provisionedComponent,
+	)
+	if id.Validate(provisionedComponent.ComponentID, id.ClientComponent) != nil ||
+		refreshed.InstallationFamily == nil ||
+		provisionedComponent.InstallationFamilyID != refreshed.InstallationFamily.ID ||
+		provisionedComponent.Trust.Source != "delegated_identity_only" ||
+		!provisionedComponent.Trust.ExpiresAt.Equal(now.Add(10*time.Minute)) ||
+		!provisionedComponent.RefreshGrantExpiresAt.Equal(provisionedComponent.Trust.ExpiresAt) ||
+		len(provisionedComponent.RefreshGrant) < 32 ||
+		len(provisionedComponent.GrantedFeatures) != 1 ||
+		provisionedComponent.GrantedFeatures[0] != "assistant" {
+		t.Fatalf("component provisioning response violated the delegated contract: component=%q family=%q source=%q trust_expiry=%s grant_expiry=%s features=%v",
+			provisionedComponent.ComponentID, provisionedComponent.InstallationFamilyID,
+			provisionedComponent.Trust.Source, provisionedComponent.Trust.ExpiresAt,
+			provisionedComponent.RefreshGrantExpiresAt, provisionedComponent.GrantedFeatures)
+	}
+
+	componentSessionTarget := clientHTTPURL(t, "/client/v1/component-sessions")
+	componentSessionProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, componentSessionTarget, now,
+		"client-http-create-widget-session",
+	)
+	var componentSession clientHTTPComponentSessionDocument
+	clientHTTPPostJSON(
+		t, handler, "/client/v1/component-sessions", componentSessionProof,
+		map[string]any{
+			"component_id":  provisionedComponent.ComponentID,
+			"refresh_grant": provisionedComponent.RefreshGrant,
+		},
+		http.StatusCreated,
+		&componentSession,
+	)
+	if componentSession.ExpiresIn != 600 || len(componentSession.AccessToken) < 64 ||
+		len(componentSession.RefreshToken) < 32 ||
+		!componentSession.RefreshExpiresAt.Equal(provisionedComponent.RefreshGrantExpiresAt) {
+		t.Fatalf("component session response violated the independent-session contract: expires_in=%d refresh_expiry=%s access_present=%t refresh_present=%t",
+			componentSession.ExpiresIn, componentSession.RefreshExpiresAt,
+			componentSession.AccessToken != "", componentSession.RefreshToken != "")
+	}
+	componentAccessToken, err := NewAccessToken(componentSession.AccessToken)
+	if err != nil {
+		t.Fatalf("parse component access token: %v", err)
+	}
+	componentPrincipal, err := accessVerifier.Verify(ctx, componentAccessToken)
+	if err != nil {
+		t.Fatalf("verify component access token: %v", err)
+	}
+	if componentPrincipal.InstallationFamilyID != provisionedComponent.InstallationFamilyID ||
+		componentPrincipal.ComponentID != provisionedComponent.ComponentID ||
+		componentPrincipal.ComponentDefinitionID != "ios-widget" ||
+		componentPrincipal.ComponentKind != "widget" || componentPrincipal.ComponentIsRoot ||
+		componentPrincipal.DPoPJKT != childJKT ||
+		componentPrincipal.TrustSource != "delegated_identity_only" ||
+		refreshed.Component == nil || componentPrincipal.ParentComponentID != refreshed.Component.ID ||
+		componentPrincipal.ParentAttestationProvider != "debug" ||
+		id.Validate(componentPrincipal.DelegationID, id.ComponentDelegation) != nil ||
+		len(componentPrincipal.Features) != 1 || componentPrincipal.Features[0] != "assistant" {
+		t.Fatalf("component access token omitted the delegated principal boundary: %#v", componentPrincipal)
+	}
+
+	componentRefreshProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget",
+	)
+	var refreshedComponent clientHTTPGrantDocument
+	clientHTTPPostJSON(
+		t, handler, "/client/v1/sessions/refresh", componentRefreshProof,
+		map[string]any{"refresh_token": componentSession.RefreshToken},
+		http.StatusOK,
+		&refreshedComponent,
+	)
+	if refreshedComponent.TokenType != "DPoP" || refreshedComponent.ExpiresIn != 600 ||
+		refreshedComponent.RefreshExpiresIn != 600 ||
+		refreshedComponent.AccessToken == componentSession.AccessToken ||
+		refreshedComponent.RefreshToken == componentSession.RefreshToken ||
+		refreshedComponent.Installation.DPoPJKT != childJKT ||
+		refreshedComponent.InstallationFamily == nil ||
+		refreshedComponent.InstallationFamily.ID != provisionedComponent.InstallationFamilyID ||
+		refreshedComponent.Component == nil ||
+		refreshedComponent.Component.ID != provisionedComponent.ComponentID ||
+		refreshedComponent.Component.IsRoot ||
+		refreshedComponent.Trust.Source != "delegated_identity_only" ||
+		refreshedComponent.Trust.ParentComponentID != refreshed.Component.ID {
+		t.Fatalf("component refresh response violated the independent rotation contract: expires_in=%d refresh_expires_in=%d family=%v component=%v source=%q parent=%q",
+			refreshedComponent.ExpiresIn, refreshedComponent.RefreshExpiresIn,
+			refreshedComponent.InstallationFamily, refreshedComponent.Component,
+			refreshedComponent.Trust.Source, refreshedComponent.Trust.ParentComponentID)
+	}
+	componentRefreshRetryProof := signedSessionDPoP(
+		t, childPrivateKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget-idempotent-retry",
+	)
+	var retriedComponent clientHTTPGrantDocument
+	clientHTTPPostJSON(
+		t, handler, "/client/v1/sessions/refresh", componentRefreshRetryProof,
+		map[string]any{"refresh_token": componentSession.RefreshToken},
+		http.StatusOK,
+		&retriedComponent,
+	)
+	if retriedComponent.AccessToken != refreshedComponent.AccessToken ||
+		retriedComponent.RefreshToken != refreshedComponent.RefreshToken ||
+		!retriedComponent.Trust.ExpiresAt.Equal(refreshedComponent.Trust.ExpiresAt) {
+		t.Fatal("component refresh retry did not recover the exact committed rotation")
+	}
+	wrongComponentKey, _, _ := newChallengeKey(t)
+	wrongComponentRefreshProof := signedSessionDPoP(
+		t, wrongComponentKey, http.MethodPost, refreshTarget, now,
+		"client-http-refresh-widget-wrong-key",
+	)
+	wrongComponentRefreshResponse := clientHTTPPostJSONResponse(
+		t, handler, "/client/v1/sessions/refresh", wrongComponentRefreshProof,
+		map[string]any{"refresh_token": componentSession.RefreshToken},
+	)
+	assertClientHTTPProblem(t, wrongComponentRefreshResponse, http.StatusUnauthorized, "dpop_invalid")
+
+	componentDiagnosticsTarget := clientHTTPURL(t, "/client/v1/diagnostics")
+	componentDiagnosticsProof := signedSessionAccessDPoP(
+		t, childPrivateKey, http.MethodGet, componentDiagnosticsTarget, now,
+		refreshedComponent.AccessToken, "client-http-widget-diagnostics",
+	)
+	componentDiagnosticsResponse := clientHTTPGetDiagnostics(
+		t, handler, refreshedComponent.AccessToken, componentDiagnosticsProof, "ios",
+	)
+	if componentDiagnosticsResponse.Code != http.StatusOK {
+		rawComponentAccess, parseErr := NewAccessToken(refreshedComponent.AccessToken)
+		if parseErr != nil {
+			t.Fatalf("parse refreshed component access token after diagnostics failure: %v", parseErr)
+		}
+		failedPrincipal, verifyErr := accessVerifier.Verify(ctx, rawComponentAccess)
+		if verifyErr != nil {
+			t.Fatalf("verify refreshed component access token after diagnostics failure: %v", verifyErr)
+		}
+		failedState, stateErr := loadAuthorizationState(ctx, pool, failedPrincipal, "")
+		if stateErr != nil {
+			t.Fatalf("component diagnostics status=%d body=%s state_load=%v",
+				componentDiagnosticsResponse.Code, componentDiagnosticsResponse.Body.String(), stateErr)
+		}
+		t.Fatalf("component diagnostics status=%d body=%s state_error=%v family=%q component=%q key=%q component_session=%q installation=%q grant_revoked=%t installation_trust=%q grant_trust=%q access_expiry=%s identity_expiry=%s attestation_expiry=%s",
+			componentDiagnosticsResponse.Code, componentDiagnosticsResponse.Body.String(),
+			authorizationStateError(failedState, now, false), failedState.familyStatus,
+			failedState.componentStatus, failedState.componentKeyStatus,
+			failedState.componentSessionStatus, failedState.installationStatus,
+			failedState.grantRevoked, failedState.installationTrust, failedState.TrustLevel,
+			failedState.AccessExpiresAt, failedState.IdentityExpiresAt, failedState.AttestationExpiresAt)
+	}
+	var componentDiagnostics clientHTTPDiagnosticsDocument
+	if err := json.NewDecoder(componentDiagnosticsResponse.Body).Decode(&componentDiagnostics); err != nil {
+		t.Fatalf("decode component diagnostics: %v", err)
+	}
+	if componentDiagnostics.Installation.DPoPJKT != childJKT ||
+		!componentDiagnostics.Session.RefreshAvailable ||
+		componentDiagnostics.Trust.Source != "delegated_identity_only" ||
+		componentDiagnostics.Trust.ParentComponentID != refreshed.Component.ID {
+		t.Fatalf("component diagnostics crossed the principal boundary: %#v", componentDiagnostics)
+	}
+
+	componentRevokePath := "/client/v1/installation-families/current/components/" + provisionedComponent.ComponentID
+	componentRevokeTarget := clientHTTPURL(t, componentRevokePath)
+	componentRevokeProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodDelete, componentRevokeTarget, now,
+		refreshed.AccessToken, "client-http-revoke-widget",
+	)
+	componentRevokeResponse := clientHTTPDeleteAuthorized(
+		t, handler, componentRevokePath, refreshed.AccessToken, componentRevokeProof,
+	)
+	assertClientHTTPNoContent(t, componentRevokeResponse)
+	componentRevokeRetryProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodDelete, componentRevokeTarget, now,
+		refreshed.AccessToken, "client-http-revoke-widget-idempotent",
+	)
+	componentRevokeRetryResponse := clientHTTPDeleteAuthorized(
+		t, handler, componentRevokePath, refreshed.AccessToken, componentRevokeRetryProof,
+	)
+	assertClientHTTPNoContent(t, componentRevokeRetryResponse)
+	postComponentRevokeProof := signedSessionAccessDPoP(
+		t, childPrivateKey, http.MethodGet, componentDiagnosticsTarget, now,
+		refreshedComponent.AccessToken, "client-http-widget-diagnostics-after-revoke",
+	)
+	postComponentRevokeResponse := clientHTTPGetDiagnostics(
+		t, handler, refreshedComponent.AccessToken, postComponentRevokeProof, "ios",
+	)
+	assertClientHTTPProblem(t, postComponentRevokeResponse, http.StatusForbidden, "component_revoked")
+
 	diagnosticsTarget := clientHTTPURL(t, "/client/v1/diagnostics")
 	mismatchedSDKProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodGet, diagnosticsTarget,
 		now, refreshed.AccessToken, "client-http-diagnostics-mismatched-sdk")
@@ -341,7 +543,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 	if diagnostics.RequestID == "" || diagnostics.RequestID != diagnosticsResponse.Header().Get("X-Latchway-Request-ID") ||
 		diagnostics.ServerVersion != buildinfo.Version || diagnostics.ContractVersion != buildinfo.ContractVersion ||
-		diagnostics.ProtocolVersion != 1 || diagnostics.Installation != refreshed.Installation ||
+		diagnostics.ProtocolVersion != buildinfo.CurrentProtocolVersion || diagnostics.Installation != refreshed.Installation ||
 		!diagnostics.Session.ExpiresAt.Equal(now.Add(10*time.Minute)) || !diagnostics.Session.RefreshAvailable ||
 		diagnostics.Trust != refreshed.Trust {
 		t.Fatalf("client diagnostics violated the redacted session contract: %#v", diagnostics)
@@ -377,6 +579,17 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	assertClientHTTPProblem(t, wrongAccessHashResponse, http.StatusUnauthorized, "dpop_invalid")
 	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
 
+	familyRevokePath := "/client/v1/installation-families/current"
+	familyRevokeTarget := clientHTTPURL(t, familyRevokePath)
+	familyRevokeProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodDelete, familyRevokeTarget, now,
+		refreshed.AccessToken, "client-http-revoke-family",
+	)
+	familyRevokeResponse := clientHTTPDeleteAuthorized(
+		t, handler, familyRevokePath, refreshed.AccessToken, familyRevokeProof,
+	)
+	assertClientHTTPNoContent(t, familyRevokeResponse)
+
 	revokeProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
 		now, refreshed.AccessToken, "client-http-revoke")
 	revokeResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, revokeProof)
@@ -394,7 +607,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		now, "client-http-refresh-after-revoke")
 	postRevocationRefreshResponse := clientHTTPPostJSONResponse(t, handler, "/client/v1/sessions/refresh",
 		postRevocationRefreshProof, map[string]any{"refresh_token": refreshed.RefreshToken})
-	assertClientHTTPProblem(t, postRevocationRefreshResponse, http.StatusUnauthorized, "session_revoked")
+	assertClientHTTPProblem(t, postRevocationRefreshResponse, http.StatusForbidden, "installation_family_revoked")
 
 	request := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	request.Host = "untrusted-inbound.example.test"
@@ -417,6 +630,7 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	}
 
 	var activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants int
+	var activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE status = 'active'),
 		       count(*) FILTER (WHERE status = 'rotated'),
@@ -430,9 +644,21 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	`).Scan(&grantCount, &revokedGrants); err != nil {
 		t.Fatalf("inspect session grants: %v", err)
 	}
-	if activeRefresh != 0 || rotatedRefresh != 1 || revokedRefresh != 1 || grantCount != 2 || revokedGrants != 2 {
-		t.Fatalf("persisted revoked session state = active:%d rotated:%d revoked:%d grants:%d revoked_grants:%d",
-			activeRefresh, rotatedRefresh, revokedRefresh, grantCount, revokedGrants)
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE status = 'active'),
+		       count(*) FILTER (WHERE status = 'rotated'),
+		       count(*) FILTER (WHERE status = 'revoked')
+		FROM component_refresh_tokens
+	`).Scan(&activeComponentRefresh, &rotatedComponentRefresh, &revokedComponentRefresh); err != nil {
+		t.Fatalf("inspect component refresh rotation state: %v", err)
+	}
+	if activeRefresh != 0 || rotatedRefresh != 0 || revokedRefresh != 0 ||
+		activeComponentRefresh != 0 || rotatedComponentRefresh != 3 || revokedComponentRefresh != 2 ||
+		grantCount != 4 || revokedGrants != 4 {
+		t.Fatalf("persisted revoked session state = legacy(active:%d rotated:%d revoked:%d) component(active:%d rotated:%d revoked:%d) grants:%d revoked_grants:%d",
+			activeRefresh, rotatedRefresh, revokedRefresh,
+			activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh,
+			grantCount, revokedGrants)
 	}
 	metricResponse := httptest.NewRecorder()
 	metrics.Handler().ServeHTTP(metricResponse, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -614,12 +840,28 @@ type clientHTTPGrantDocument struct {
 		DPoPJKT  string `json:"dpop_jkt"`
 		Status   string `json:"status"`
 	} `json:"installation"`
-	Trust struct {
-		Provider   string    `json:"provider"`
-		Level      string    `json:"level"`
-		VerifiedAt time.Time `json:"verified_at"`
-		ExpiresAt  time.Time `json:"expires_at"`
+	InstallationFamily *clientapi.InstallationFamilySummary `json:"installation_family,omitempty"`
+	Component          *clientapi.ClientComponentSummary    `json:"component,omitempty"`
+	Trust              clientapi.TrustSummary               `json:"trust"`
+}
+
+type clientHTTPProvisionComponentDocument struct {
+	ComponentID          string `json:"component_id"`
+	InstallationFamilyID string `json:"installation_family_id"`
+	Trust                struct {
+		Source    string    `json:"source"`
+		ExpiresAt time.Time `json:"expires_at"`
 	} `json:"trust"`
+	GrantedFeatures       []string  `json:"granted_features"`
+	RefreshGrant          string    `json:"refresh_grant"`
+	RefreshGrantExpiresAt time.Time `json:"refresh_grant_expires_at"`
+}
+
+type clientHTTPComponentSessionDocument struct {
+	AccessToken      string    `json:"access_token"`
+	ExpiresIn        int       `json:"expires_in"`
+	RefreshToken     string    `json:"refresh_token"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 }
 
 type clientHTTPDiagnosticsDocument struct {
@@ -716,6 +958,25 @@ func activateClientHTTPConfigurationWithAttestation(
 				"id": "native", "maxAge": "10m",
 				"platforms": map[string]any{"ios": selection},
 			}},
+			"componentDefinitions": []any{
+				map[string]any{
+					"id": "ios-main", "platform": "ios", "kind": "main_app",
+					"identifiers":     map[string]any{"bundleIdentifiers": []any{"com.example.latchway"}},
+					"familyRole":      "root",
+					"attestation":     map[string]any{"strategy": "direct", "provider": selection["provider"]},
+					"allowedFeatures": []any{"assistant"},
+				},
+				map[string]any{
+					"id": "ios-widget", "platform": "ios", "kind": "widget",
+					"identifiers": map[string]any{"bundleIdentifiers": []any{"com.example.latchway.widget"}},
+					"familyRole":  "delegated",
+					"delegation": map[string]any{
+						"allowedParents": []any{"ios-main"}, "maximumLifetime": "7d",
+					},
+					"attestation":     map[string]any{"strategy": "delegated"},
+					"allowedFeatures": []any{"assistant"},
+				},
+			},
 			"upstreams": []any{map[string]any{
 				"id": "primary", "type": "openai_compatible", "baseUrl": "https://api.example.test/v1",
 				"authentication": map[string]any{"type": "none"},
@@ -827,14 +1088,58 @@ func clientHTTPPostJSONResponse(t *testing.T, handler http.Handler, path string,
 	return response
 }
 
-func clientHTTPDeleteInstallation(t *testing.T, handler http.Handler, accessToken string, proof DPoPProof) *httptest.ResponseRecorder {
+func clientHTTPPostJSONAuthorized(
+	t *testing.T,
+	handler http.Handler,
+	path string,
+	accessToken string,
+	proof DPoPProof,
+	body any,
+	wantStatus int,
+	output any,
+) {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodDelete, "/client/v1/installations/current", nil)
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode authorized client HTTP request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	request.Header.Set("Content-Type", "application/json")
+	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != wantStatus {
+		var failure struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &failure)
+		t.Fatalf("authorized client HTTP %s status = %d, problem code = %q, body=%s",
+			path, response.Code, failure.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" ||
+		response.Header().Get("Content-Type") != "application/json" ||
+		response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("authorized client HTTP %s omitted required success headers", path)
+	}
+	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
+		t.Fatalf("decode authorized client HTTP %s response: %v", path, err)
+	}
+}
+
+func clientHTTPDeleteAuthorized(t *testing.T, handler http.Handler, path, accessToken string, proof DPoPProof) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodDelete, path, nil)
 	request.Header.Set("Authorization", "DPoP "+accessToken)
 	setClientHTTPProtectedHeaders(request, proof)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func clientHTTPDeleteInstallation(t *testing.T, handler http.Handler, accessToken string, proof DPoPProof) *httptest.ResponseRecorder {
+	t.Helper()
+	return clientHTTPDeleteAuthorized(t, handler, "/client/v1/installations/current", accessToken, proof)
 }
 
 func clientHTTPGetDiagnostics(t *testing.T, handler http.Handler, accessToken string, proof DPoPProof, sdk string) *httptest.ResponseRecorder {
@@ -853,7 +1158,7 @@ func setClientHTTPProtectedHeaders(request *http.Request, proof DPoPProof) {
 	request.Header.Set("Forwarded", "host=untrusted-forwarded.example.test;proto=http")
 	request.Header.Set("X-Forwarded-Host", "untrusted-forwarded.example.test")
 	request.Header.Set("X-Forwarded-Proto", "http")
-	request.Header.Set("X-Latchway-Protocol-Version", "1")
+	request.Header.Set("X-Latchway-Protocol-Version", buildinfo.ProtocolVersion)
 	request.Header.Set("X-Latchway-SDK", "ios")
 	request.Header.Set("X-Latchway-SDK-Version", "1.2.3")
 	request.Header.Set("DPoP", proof.value)
@@ -891,7 +1196,16 @@ func assertClientHTTPInstallationLive(t *testing.T, ctx context.Context, pool *p
 	if err := pool.QueryRow(ctx, `
 		SELECT status,
 		       (SELECT count(*) FROM session_grants WHERE installation_id = $1 AND revoked_at IS NULL),
-		       (SELECT count(*) FROM refresh_tokens WHERE installation_id = $1 AND status = 'active')
+		       (SELECT count(*) FROM refresh_tokens WHERE installation_id = $1 AND status = 'active') +
+		       (SELECT count(*)
+		          FROM component_refresh_tokens AS component_refresh
+		          JOIN component_session_families AS component_session
+		            ON component_session.component_session_family_id = component_refresh.component_session_family_id
+		          JOIN installation_families AS family
+		            ON family.installation_family_id = component_session.installation_family_id
+		         WHERE family.root_installation_id = $1
+		           AND component_refresh.status = 'active'
+		           AND component_refresh.grant_kind = 'session')
 		FROM installations WHERE installation_id = $1
 	`, installationID).Scan(&status, &liveGrants, &activeRefresh); err != nil {
 		t.Fatalf("inspect live client HTTP installation: %v", err)
@@ -917,7 +1231,15 @@ func assertClientHTTPGrant(t *testing.T, grant clientHTTPGrantDocument, dpopJKT 
 		len(grant.AccessToken) < 64 || len(grant.RefreshToken) < 32 ||
 		id.Validate(grant.Installation.ID, id.Installation) != nil || grant.Installation.Platform != "ios" ||
 		grant.Installation.DPoPJKT != dpopJKT || grant.Installation.Status != "active" ||
+		grant.InstallationFamily == nil || id.Validate(grant.InstallationFamily.ID, id.InstallationFamily) != nil ||
+		grant.InstallationFamily.Status != "active" || grant.Component == nil ||
+		id.Validate(grant.Component.ID, id.ClientComponent) != nil || grant.Component.DefinitionID != "ios-main" ||
+		grant.Component.Kind != "main_app" || grant.Component.Platform != "ios" || !grant.Component.IsRoot ||
+		grant.Component.Status != "active" || grant.Component.DPoPJKT != dpopJKT ||
+		len(grant.Component.GrantedFeatures) != 1 || grant.Component.GrantedFeatures[0] != "assistant" ||
 		grant.Trust.Provider != "debug" || grant.Trust.Level != "debug" ||
+		grant.Trust.Source != "debug" || grant.Trust.ParentComponentID != "" ||
+		grant.Trust.ParentAttestationProvider != "" || grant.Trust.DelegationID != "" ||
 		grant.Trust.VerifiedAt.IsZero() || !grant.Trust.ExpiresAt.After(grant.Trust.VerifiedAt) {
 		t.Fatal("client HTTP grant response violated the session contract")
 	}

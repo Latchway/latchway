@@ -151,6 +151,10 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         observer.repositories = {}
         observer.live_sdk_receipts = {}
         observer.live_sdk_runs = {}
+        observer.live_provider_capture = None
+        observer.github_authority = None
+        observer._github_authority_entries = {}
+        observer._github_authority_used = set()
         commits = {
             "core": "a" * 40,
             "javascript": "b" * 40,
@@ -175,8 +179,510 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         }
         observer.candidate = {"image": {"index_digest": "sha256:" + "c" * 64}}
         observer.candidate_created = self.candidate_created
+        observer.input_hashes = {"source": "1" * 64, "candidate": "2" * 64}
         observer.now = self.now
         return observer
+
+    def live_provider_capture_fixture(
+        self, observer: MODULE.Observer, name: str
+    ) -> Path:
+        root = self.root / name
+        root.mkdir()
+        health = MODULE.canonical_json(
+            {
+                "status": "ok",
+                "build": {
+                    "version": "1.0.0",
+                    "commit": "a" * 40,
+                    "contract_version": "0.5.1",
+                    "protocol_version": "2",
+                },
+            }
+        )
+        self_test = MODULE.canonical_json(
+            {
+                "kind": "openrouter",
+                "state": "passed",
+                "checks": [
+                    {"name": check, "state": "passed"}
+                    for check in MODULE.PROVIDER_CHECKS.values()
+                ],
+            }
+        )
+        (root / "health.json").write_bytes(health)
+        (root / "self-test.json").write_bytes(self_test)
+        request = {
+            "kind": "openrouter",
+            "environment_id": "env_00000000000000000000000000",
+            "upstream": "openrouter",
+            "model": "canary",
+            "max_cost_nano_usd": 10_000_000,
+        }
+        request_sha256 = hashlib.sha256(MODULE.canonical_json(request)).hexdigest()
+        isolation_root = root / "collector-isolation"
+        isolation_root.mkdir()
+        run_id = "123456"
+        run_attempt = "2"
+        started_unix = int(self.workflow_started.timestamp())
+        finished_unix = int(
+            datetime(2026, 8, 29, 10, 0, tzinfo=timezone.utc).timestamp()
+        )
+        grant_sha256 = "3" * 64
+        jti_sha256 = "4" * 64
+        workflow = {
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+            "job": "live_provider_capture",
+            "audience": "latchway-live-provider/self-test",
+        }
+        lease = {
+            "schema_version": "latchway.live-provider-collector-lease.v1",
+            "repository": MODULE.EVIDENCE.REPOSITORY,
+            "core_commit": observer.identity["core_commit"],
+            "workflow": workflow,
+            "runner": {
+                "name": f"latchway-live-provider-{run_id}-{run_attempt}",
+                "ephemeral": True,
+                "jit": True,
+                "max_jobs": 1,
+                "fresh_boot": True,
+                "clean_workspace": True,
+                "repository_scope": MODULE.EVIDENCE.REPOSITORY,
+                "destroy_after_job": True,
+                "image_digest": "sha256:" + "5" * 64,
+                "boot_id_sha256": "6" * 64,
+            },
+            "credentials": {
+                "long_lived": False,
+                "organization": False,
+                "administration": False,
+                "registry": False,
+                "oidc": False,
+            },
+            "supervisor": {
+                "private_key_isolated": True,
+                "caller_supplied_claims_accepted": False,
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+                "grant_issuer_independent": True,
+                "one_use_verification": True,
+                "out_of_band_watchdog": True,
+            },
+            "grant": {
+                "audience": "latchway-live-provider/self-test",
+                "core_commit": observer.identity["core_commit"],
+                "run_id": run_id,
+                "run_attempt": run_attempt,
+                "sha256": grant_sha256,
+                "scope": "run_self_tests",
+                "single_use": True,
+                "revocable": True,
+                "jti_sha256": jti_sha256,
+                "request_sha256": request_sha256,
+                "issued_at_unix": started_unix,
+                "expires_at_unix": finished_unix,
+            },
+            "candidate": {
+                "source_report_sha256": observer.input_hashes["source"],
+                "candidate_manifest_sha256": observer.input_hashes["candidate"],
+            },
+            "gateway": {"origin": "https://gateway.example.test"},
+            "issued_at_unix": started_unix - 60,
+            "expires_at_unix": finished_unix + 240,
+        }
+        lease_payload = MODULE.canonical_json(lease)
+        (isolation_root / "collector-lease.json").write_bytes(lease_payload)
+        (isolation_root / "collector-lease.sig").write_bytes(b"lease-signature")
+        (isolation_root / "collector-trust-root.pem").write_text(
+            "-----BEGIN PUBLIC KEY-----\nQUJDREVGR0g=\n-----END PUBLIC KEY-----\n",
+            encoding="ascii",
+        )
+        health_sha256 = hashlib.sha256(health).hexdigest()
+        self_test_sha256 = hashlib.sha256(self_test).hexdigest()
+        receipt = {
+            "schema_version": "latchway.live-provider-grant-consumption.v1",
+            "repository": MODULE.EVIDENCE.REPOSITORY,
+            "core_commit": observer.identity["core_commit"],
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+            "audience": "latchway-live-provider/self-test",
+            "scope": "run_self_tests",
+            "grant_sha256": grant_sha256,
+            "jti_sha256": jti_sha256,
+            "single_use": True,
+            "consumption_count": 1,
+            "consumed": True,
+            "revoked": True,
+            "request_sha256": request_sha256,
+            "health_sha256": health_sha256,
+            "self_test_sha256": self_test_sha256,
+            "consumed_at_unix": started_unix + 180,
+        }
+        receipt_payload = MODULE.canonical_json(receipt)
+        (isolation_root / "grant-consumption-receipt.json").write_bytes(
+            receipt_payload
+        )
+        (isolation_root / "grant-consumption-receipt.sig").write_bytes(
+            b"receipt-signature"
+        )
+        teardown = {
+            "schema_version": "latchway.live-provider-collector-teardown.v1",
+            "repository": MODULE.EVIDENCE.REPOSITORY,
+            "core_commit": observer.identity["core_commit"],
+            "workflow": workflow,
+            "runner": {
+                "name": f"latchway-live-provider-{run_id}-{run_attempt}",
+                "deregistered": True,
+                "accepts_more_jobs": False,
+                "destroy_scheduled": True,
+                "destroy_deadline_unix": finished_unix + 300,
+            },
+            "grant": {
+                "single_use": True,
+                "consumption_count": 1,
+                "zeroized": True,
+                "revoked": True,
+            },
+            "network": {
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+            },
+            "receipt_verified": True,
+            "evidence_eligible": True,
+            "lease_sha256": hashlib.sha256(lease_payload).hexdigest(),
+            "receipt_sha256": hashlib.sha256(receipt_payload).hexdigest(),
+            "health_sha256": health_sha256,
+            "self_test_sha256": self_test_sha256,
+        }
+        (isolation_root / "collector-teardown.json").write_bytes(
+            MODULE.canonical_json(teardown)
+        )
+        (isolation_root / "collector-teardown.sig").write_bytes(
+            b"teardown-signature"
+        )
+        rows = []
+        for path, payload, status, started, finished in (
+            (
+                "health.json",
+                health,
+                200,
+                "2026-08-29T09:55:00Z",
+                "2026-08-29T09:56:00Z",
+            ),
+            (
+                "self-test.json",
+                self_test,
+                202,
+                "2026-08-29T09:56:00Z",
+                "2026-08-29T10:00:00Z",
+            ),
+        ):
+            rows.append(
+                {
+                    "path": path,
+                    "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "status_code": status,
+                    "started_at": started,
+                    "finished_at": finished,
+                }
+            )
+        manifest = {
+            "schema_version": 1,
+            "kind": "latchway_live_provider_capture",
+            "candidate": observer.identity,
+            "source_sha256": observer.input_hashes["source"],
+            "candidate_sha256": observer.input_hashes["candidate"],
+            "gateway_origin": "https://gateway.example.test",
+            "request": request,
+            "request_sha256": request_sha256,
+            "started_at": "2026-08-29T09:55:00Z",
+            "finished_at": "2026-08-29T10:00:00Z",
+            "collector_isolation": {
+                "schema_version": "latchway.live-provider-collector-isolation.v1",
+                "lease_sha256": hashlib.sha256(
+                    (isolation_root / "collector-lease.json").read_bytes()
+                ).hexdigest(),
+                "lease_signature_sha256": hashlib.sha256(
+                    (isolation_root / "collector-lease.sig").read_bytes()
+                ).hexdigest(),
+                "trust_root_sha256": hashlib.sha256(
+                    (isolation_root / "collector-trust-root.pem").read_bytes()
+                ).hexdigest(),
+                "receipt_sha256": hashlib.sha256(
+                    (isolation_root / "grant-consumption-receipt.json").read_bytes()
+                ).hexdigest(),
+                "receipt_signature_sha256": hashlib.sha256(
+                    (isolation_root / "grant-consumption-receipt.sig").read_bytes()
+                ).hexdigest(),
+                "teardown_sha256": hashlib.sha256(
+                    (isolation_root / "collector-teardown.json").read_bytes()
+                ).hexdigest(),
+                "teardown_signature_sha256": hashlib.sha256(
+                    (isolation_root / "collector-teardown.sig").read_bytes()
+                ).hexdigest(),
+            },
+            "files": rows,
+        }
+        (root / "manifest.json").write_bytes(MODULE.canonical_json(manifest))
+        return root
+
+    def javascript_isolation_fixture(
+        self,
+        observer: MODULE.Observer,
+        provider: str,
+        *,
+        report: dict | None = None,
+    ) -> Path:
+        policy = MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS[provider]
+        capture = self.root / f"{provider}.json"
+        isolation = self.root / f"{provider}-isolation"
+        isolation.mkdir()
+        started = int(self.workflow_started.timestamp())
+        finished = int(self.workflow_finished.timestamp())
+        run_id = "123456"
+        run_attempt = "2"
+        provider_index = list(MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS).index(provider)
+        grant_sha256 = str(3 + provider_index) * 64
+        jti_sha256 = str(5 + provider_index) * 64
+        request_sha256 = str(7 + provider_index) * 64
+        harness_archive_sha256 = "9" * 64
+        report_value = report or {"redacted": True, "provider": provider}
+        report_payload = MODULE.canonical_json(report_value)
+        harness = {
+            "schema_version": "latchway.live-sdk-harness.v1",
+            "repository": "Latchway/latchway-js",
+            "core_commit": observer.identity["core_commit"],
+            "javascript_commit": observer.identity["repositories"]["javascript"][
+                "commit"
+            ],
+            "workflow": {"run_id": run_id, "run_attempt": run_attempt},
+            "source_archive_sha256": "8" * 64,
+            "harness_archive_sha256": harness_archive_sha256,
+            "harness_bytes": 4096,
+        }
+        harness_payload = MODULE.canonical_json(harness)
+        runner_name = (
+            f"latchway-live-sdk-{policy['runner_slug']}-{run_id}-{run_attempt}"
+        )
+        workflow = {
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+            "job": "javascript_collect",
+            "audience": policy["audience"],
+        }
+        lease = {
+            "schema_version": "latchway.live-sdk-collector-lease.v1",
+            "repository": "Latchway/latchway",
+            "core_commit": observer.identity["core_commit"],
+            "javascript_commit": observer.identity["repositories"]["javascript"][
+                "commit"
+            ],
+            "workflow": workflow,
+            "runner": {
+                "name": runner_name,
+                "ephemeral": True,
+                "jit": True,
+                "max_jobs": 1,
+                "fresh_boot": True,
+                "clean_workspace": True,
+                "repository_scope": "Latchway/latchway",
+                "destroy_after_job": True,
+                "image_digest": "sha256:" + "a" * 64,
+                "boot_id_sha256": "b" * 64,
+            },
+            "credentials": {
+                "long_lived": False,
+                "organization": False,
+                "administration": False,
+                "registry": False,
+                "oidc": False,
+            },
+            "supervisor": {
+                "private_key_isolated": True,
+                "caller_supplied_claims_accepted": False,
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+                "gateway_run_receipt_verification": True,
+                "one_use_invocation": True,
+            },
+            "grant": {
+                "audience": f"latchway-live-sdk/{provider}",
+                "core_commit": observer.identity["core_commit"],
+                "javascript_commit": observer.identity["repositories"][
+                    "javascript"
+                ]["commit"],
+                "run_id": run_id,
+                "run_attempt": run_attempt,
+                "provider": provider,
+                "sha256": grant_sha256,
+                "single_use": True,
+                "jti_sha256": jti_sha256,
+                "request_sha256": request_sha256,
+            },
+            "candidate": {
+                "harness_archive_sha256": harness_archive_sha256,
+                "harness_manifest_sha256": hashlib.sha256(
+                    harness_payload
+                ).hexdigest(),
+                "source_report_sha256": observer.input_hashes["source"],
+                "candidate_manifest_sha256": observer.input_hashes["candidate"],
+            },
+            "gateway": {
+                "origin": "https://gateway.example.test",
+                "application_id": "app_00000000000000000000000000",
+                "environment": "production",
+            },
+            "issued_at_unix": started - 30,
+            "expires_at_unix": started + 270,
+        }
+        lease_payload = MODULE.canonical_json(lease)
+        execution_payload = MODULE.canonical_json(
+            {"started_at_unix": started, "finished_at_unix": finished}
+        )
+        receipt = {
+            "schema_version": "latchway.live-sdk-gateway-consumption.v1",
+            "repository": "Latchway/latchway",
+            "core_commit": observer.identity["core_commit"],
+            "javascript_commit": observer.identity["repositories"]["javascript"][
+                "commit"
+            ],
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+            "provider": provider,
+            "grant_sha256": grant_sha256,
+            "jti_sha256": jti_sha256,
+            "single_use": True,
+            "consumption_count": 1,
+            "consumed": True,
+            "report_sha256": hashlib.sha256(report_payload).hexdigest(),
+            "request_sha256": request_sha256,
+            "consumed_at_unix": started + 30,
+        }
+        receipt_payload = MODULE.canonical_json(receipt)
+        teardown = {
+            "schema_version": "latchway.live-sdk-collector-teardown.v1",
+            "repository": "Latchway/latchway",
+            "core_commit": observer.identity["core_commit"],
+            "javascript_commit": observer.identity["repositories"]["javascript"][
+                "commit"
+            ],
+            "workflow": workflow,
+            "provider": provider,
+            "runner": {
+                "name": runner_name,
+                "deregistered": True,
+                "accepts_more_jobs": False,
+                "destroy_scheduled": True,
+                "destroy_deadline_unix": finished + 300,
+            },
+            "grant": {
+                "single_use": True,
+                "consumption_count": 1,
+                "zeroized": True,
+                "revoked": True,
+            },
+            "network": {
+                "gateway_egress_only": True,
+                "dns_pinned": True,
+                "tls_verified": True,
+            },
+            "gateway_receipt_verified": True,
+            "evidence_eligible": True,
+            "lease_sha256": hashlib.sha256(lease_payload).hexdigest(),
+            "gateway_receipt_sha256": hashlib.sha256(receipt_payload).hexdigest(),
+            "report_sha256": hashlib.sha256(report_payload).hexdigest(),
+        }
+        payloads = {
+            "collector-lease.json": lease_payload,
+            "collector-lease.sig": b"\x00\xffcollector-lease-signature",
+            "collector-teardown.json": MODULE.canonical_json(teardown),
+            "collector-teardown.sig": b"\x00\xffcollector-teardown-signature",
+            "execution.json": execution_payload,
+            "gateway-consumption-receipt.json": receipt_payload,
+            "gateway-consumption-receipt.sig": b"\x00\xffgateway-signature",
+            "gateway-receipt-public-key.pem": (
+                b"-----BEGIN PUBLIC KEY-----\n"
+                b"dGVzdC1wdWJsaWMta2V5Cg==\n"
+                b"-----END PUBLIC KEY-----\n"
+            ),
+            "harness-manifest.json": harness_payload,
+            "report.json": report_payload,
+        }
+        for name, payload in payloads.items():
+            (isolation / name).write_bytes(payload)
+        checksum_payload = "".join(
+            f"{hashlib.sha256(payloads[name]).hexdigest()}  {name}\n"
+            for name in MODULE.LIVE_SDK_ISOLATION_SUBJECTS
+        ).encode("ascii")
+        (isolation / "ISOLATION_SHA256SUMS").write_bytes(checksum_payload)
+        collector = {
+            "schema_version": "latchway.live-sdk-collector-isolation.v1",
+            "lease_sha256": hashlib.sha256(lease_payload).hexdigest(),
+            "teardown_sha256": hashlib.sha256(
+                payloads["collector-teardown.json"]
+            ).hexdigest(),
+            "gateway_receipt_sha256": hashlib.sha256(receipt_payload).hexdigest(),
+            "harness_manifest_sha256": hashlib.sha256(harness_payload).hexdigest(),
+            "report_sha256": hashlib.sha256(report_payload).hexdigest(),
+        }
+        capture.write_bytes(
+            MODULE.canonical_json(
+                {
+                    "schema_version": 1,
+                    "kind": "latchway_live_javascript_capture",
+                    "attestation_provider": provider,
+                    "started_at": MODULE.EVIDENCE.format_time(
+                        self.workflow_started
+                    ),
+                    "finished_at": MODULE.EVIDENCE.format_time(
+                        self.workflow_finished
+                    ),
+                    "report": report_value,
+                    "collector_isolation": collector,
+                }
+            )
+        )
+        return capture
+
+    def github_authority_fixture(
+        self,
+        observer: MODULE.Observer,
+        name: str,
+        files: dict[str, bytes],
+    ) -> Path:
+        root = self.root / name
+        root.mkdir()
+        rows = []
+        for relative, payload in sorted(files.items()):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+            rows.append(
+                {
+                    "path": relative,
+                    "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "started_at": "2026-08-29T09:55:00Z",
+                    "finished_at": "2026-08-29T09:56:00Z",
+                }
+            )
+        manifest = {
+            "schema_version": 1,
+            "kind": "latchway_github_authority",
+            "domain": observer.domain,
+            "candidate": observer.identity,
+            "source_sha256": observer.input_hashes["source"],
+            "candidate_sha256": observer.input_hashes["candidate"],
+            "started_at": "2026-08-29T09:55:00Z",
+            "finished_at": "2026-08-29T10:00:00Z",
+            "files": rows,
+        }
+        (root / "manifest.json").write_bytes(MODULE.canonical_json(manifest))
+        return root
 
     def test_public_tags_validate_core_first_independent_of_json_key_order(self) -> None:
         observer = self.bare_observer("public_tags")
@@ -211,8 +717,8 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 for index, name in enumerate(names)
             ]
             responses.extend((
-                json.dumps({"ref": "refs/tags/v1.0.0", "object": {"type": "tag", "sha": "f" * 40}}).encode(),
-                json.dumps({
+                (json.dumps({"ref": "refs/tags/v1.0.0", "object": {"type": "tag", "sha": "f" * 40}}).encode(), self.workflow_started, self.workflow_finished),
+                (json.dumps({
                     "tag": "v1.0.0",
                     "object": {"type": "commit", "sha": coordinate["commit"]},
                     "message": (
@@ -220,8 +726,8 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                         if repository_id == "core"
                         else f"{titles[repository_id]} v1.0.0\n\nCore promotion: v1.0.0\nPromotion evidence SHA-256: {promotion_hash}"
                     ),
-                }).encode(),
-                json.dumps({
+                }).encode(), self.workflow_started, self.workflow_finished),
+                (json.dumps({
                     "id": release_id,
                     "tag_name": "v1.0.0",
                     "name": (
@@ -238,12 +744,14 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     "prerelease": False,
                     "immutable": True,
                     "assets": assets,
-                }).encode(),
+                }).encode(), self.workflow_started, self.workflow_finished),
             ))
             release_id += 1
         attestation = b'{"verification":"passed"}\n'
-        with mock.patch.object(observer, "_gh_json", side_effect=responses), mock.patch.object(
-            observer, "_verify_release_attestation", return_value=attestation
+        with mock.patch.object(observer, "_github_authority_file", side_effect=responses), mock.patch.object(
+            observer,
+            "_release_attestation_from_authority",
+            return_value=(attestation, self.workflow_started, self.workflow_finished),
         ), mock.patch.object(observer, "emit") as emit:
             observer.observe_public_tags()
         release_calls = [
@@ -448,6 +956,48 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 )
         identity.assert_not_called()
 
+    def test_constructor_rejects_github_admin_and_oidc_credentials_before_parsing_inputs(self) -> None:
+        for name in sorted(MODULE.FORBIDDEN_CANDIDATE_CREDENTIAL_ENV):
+            with (
+                self.subTest(name=name),
+                mock.patch.dict(os.environ, {name: "must-not-reach-candidate"}, clear=True),
+                mock.patch.object(MODULE.EVIDENCE, "protected_context", return_value={}),
+                mock.patch.object(MODULE.EVIDENCE, "identity_from_inputs") as identity,
+                self.assertRaisesRegex(
+                    MODULE.ObservationError, "candidate_credentials_present"
+                ),
+            ):
+                MODULE.Observer(
+                    domain="live_provider",
+                    source=self.root / "source.json",
+                    candidate=self.root / "candidate.json",
+                    output=self.root / f"output-{name.lower()}",
+                    repositories={},
+                    now=datetime.now(timezone.utc),
+                )
+            identity.assert_not_called()
+
+    def test_cli_contract_exposes_only_explicit_offline_privileged_captures(self) -> None:
+        options = {
+            option
+            for action in MODULE.parser()._actions
+            for option in action.option_strings
+        }
+        self.assertIn("--live-provider-capture-directory", options)
+        self.assertIn("--github-authority-directory", options)
+        for removed in (
+            "--api-token-env",
+            "--server",
+            "--server-owned",
+            "--upstream",
+            "--model",
+            "--max-cost-nano-usd",
+        ):
+            self.assertNotIn(removed, options)
+        self.assertNotIn(
+            "LATCHWAY_ADMIN_API_TOKEN", MODULE.ALLOWED_ENVIRONMENT_OVERRIDES
+        )
+
     def test_repository_checkouts_bind_every_exact_source_commit_and_clean_tree(self) -> None:
         fixture = FIXTURE_MODULE.EvidenceFixture(
             self.root / "fixture", "live_provider"
@@ -621,8 +1171,19 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 runner.assert_called_once()
                 emit.assert_not_called()
 
-    def test_live_provider_selects_health_and_self_test_commands_without_token_argv(self) -> None:
+    def test_live_provider_consumes_only_the_offline_health_and_self_test_capture(self) -> None:
         observer = self.bare_observer()
+        health_payload = json.dumps(
+            {
+                "status": "ok",
+                "build": {
+                    "version": "1.0.0",
+                    "commit": "a" * 40,
+                    "contract_version": "0.5.1",
+                    "protocol_version": "2",
+                },
+            }
+        ).encode()
         result = {
             "kind": "openrouter",
             "state": "passed",
@@ -631,52 +1192,69 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 for name in MODULE.PROVIDER_CHECKS.values()
             ],
         }
-        environment = {
-            "LATCHWAY_BASE_URL": "https://gateway.example.test",
-            "LATCHWAY_ADMIN_API_TOKEN": "admin-token-value",
-            "LATCHWAY_PROVIDER_ENVIRONMENT_ID": "env_00000000000000000000000000",
-            "LATCHWAY_PROVIDER_UPSTREAM_ID": "ups_00000000000000000000000000",
-            "LATCHWAY_PROVIDER_MODEL_ID": "mdl_00000000000000000000000000",
-            "LATCHWAY_CLI_PATH": "/runner/latchway",
+        self_test_payload = json.dumps(result).encode()
+        capture = {
+            "gateway_origin": "https://gateway.example.test",
+            "request_sha256": "9" * 64,
+            "manifest_sha256": "8" * 64,
+            "retained_inputs": {"manifest.json": b"{}\n"},
+            "files": {
+                "health.json": {
+                    "payload": health_payload,
+                    "started": self.workflow_started,
+                    "finished": self.workflow_started.replace(minute=56),
+                },
+                "self-test.json": {
+                    "payload": self_test_payload,
+                    "started": self.workflow_started.replace(minute=56),
+                    "finished": self.workflow_started.replace(minute=57),
+                },
+            },
         }
         with (
-            mock.patch.dict(os.environ, environment, clear=True),
-            mock.patch.object(MODULE.shutil, "which", return_value="/runner/latchway"),
-            mock.patch.object(observer, "run_command", return_value=b"{}") as health,
-            mock.patch.object(
-                observer,
-                "_execute_command",
-                return_value=(
-                    json.dumps(result).encode(),
-                    datetime(2026, 8, 29, 10, 0, tzinfo=timezone.utc),
-                    datetime(2026, 8, 29, 10, 1, tzinfo=timezone.utc),
-                ),
-            ) as execute,
+            mock.patch.object(observer, "_load_live_provider_capture", return_value=capture),
+            mock.patch.object(observer, "_execute_command") as execute,
+            mock.patch.object(observer, "run_command") as run_command,
             mock.patch.object(observer, "emit") as emit,
         ):
             observer.observe_live_provider()
-        health_command = health.call_args.args[1]
-        self.assertEqual(health.call_args.args[0], "provider.gateway-identity")
-        self.assertEqual(health_command[-1], "https://gateway.example.test/healthz")
-        command = execute.call_args.args[0]
+        execute.assert_not_called()
+        run_command.assert_not_called()
+        self.assertEqual(emit.call_count, len(MODULE.PROVIDER_CHECKS) + 1)
+        self.assertEqual(emit.call_args_list[0].args[0], "provider.gateway-identity")
+        self.assertEqual(emit.call_args_list[0].args[1], health_payload)
         self.assertEqual(
-            command[:6],
+            emit.call_args_list[0].kwargs["retained_input_kind"],
+            "live_provider_collector_isolation",
+        )
+        self.assertEqual(
+            emit.call_args_list[0].kwargs["retained_inputs"],
+            capture["retained_inputs"],
+        )
+        command = emit.call_args_list[1].kwargs["invocation"]
+        self.assertEqual(
+            command,
             (
-                "/runner/latchway",
-                "--output",
-                "json",
-                "--base-url",
-                "https://gateway.example.test",
-                "verify",
+                "https",
+                "POST",
+                "https://gateway.example.test/admin/v1/self-tests",
+                "request-sha256:" + "9" * 64,
             ),
         )
-        self.assertIn("--api-token-env", command)
-        self.assertNotIn("admin-token-value", command)
-        self.assertEqual(
-            execute.call_args.kwargs["environment"],
-            {"LATCHWAY_ADMIN_API_TOKEN": "admin-token-value"},
-        )
-        self.assertEqual(emit.call_count, len(MODULE.PROVIDER_CHECKS))
+
+        changed_capture = {**capture, "manifest_sha256": "7" * 64}
+        with (
+            mock.patch.object(
+                observer,
+                "_load_live_provider_capture",
+                side_effect=(capture, changed_capture),
+            ),
+            mock.patch.object(observer, "emit"),
+            self.assertRaisesRegex(
+                MODULE.ObservationError, "live_provider_capture_changed"
+            ),
+        ):
+            observer.observe_live_provider()
 
     def test_live_provider_validators_reject_identity_and_check_tampering(self) -> None:
         observer = self.bare_observer()
@@ -687,7 +1265,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 "version": "1.0.0",
                 "commit": "a" * 40,
                 "contract_version": "0.5.1",
-                "protocol_version": "1",
+                "protocol_version": "2",
             },
         }
         MODULE.Observer._validate_gateway_identity(
@@ -715,6 +1293,252 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             MODULE.ObservationError, "live_provider_check_missing"
         ):
             MODULE.Observer._validate_provider_result(json.dumps(result).encode())
+
+    def test_live_provider_observation_retains_the_signed_collector_closure(self) -> None:
+        observer = self.bare_observer("live_provider")
+        observer.live_provider_capture = self.live_provider_capture_fixture(
+            observer, "provider-retained-closure"
+        )
+
+        observer.observe_live_provider()
+
+        result = json.loads(
+            (observer.output / "provider-gateway-identity.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            [row["path"] for row in result["artifacts"]],
+            [
+                "artifacts/provider-gateway-identity/tool-output.json",
+                "artifacts/provider-gateway-identity/live-provider-isolation.json",
+            ],
+        )
+        retained = json.loads(
+            (
+                observer.output
+                / "artifacts/provider-gateway-identity/live-provider-isolation.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            retained["kind"],
+            "latchway_retained_live_provider_collector_isolation",
+        )
+        self.assertEqual(
+            {row["name"] for row in retained["files"]},
+            set(MODULE.LIVE_PROVIDER_ISOLATION_PATHS),
+        )
+
+    def test_live_provider_capture_rejects_missing_extra_symlink_hash_time_and_coordinate_mutations(self) -> None:
+        observer = self.bare_observer("live_provider")
+        valid = self.live_provider_capture_fixture(observer, "provider-valid")
+        observer.live_provider_capture = valid
+        capture = observer._load_live_provider_capture()
+        self.assertEqual(capture["gateway_origin"], "https://gateway.example.test")
+        self.assertEqual(
+            set(capture["retained_inputs"]),
+            set(MODULE.LIVE_PROVIDER_ISOLATION_PATHS),
+        )
+
+        missing = self.live_provider_capture_fixture(observer, "provider-missing")
+        (missing / "health.json").unlink()
+        observer.live_provider_capture = missing
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_capture_file_set_invalid"
+        ):
+            observer._load_live_provider_capture()
+
+        extra = self.live_provider_capture_fixture(observer, "provider-extra")
+        (extra / "unexpected.json").write_text("{}\n", encoding="utf-8")
+        observer.live_provider_capture = extra
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_capture_file_set_invalid"
+        ):
+            observer._load_live_provider_capture()
+
+        linked = self.live_provider_capture_fixture(observer, "provider-symlink")
+        (linked / "link.json").symlink_to(linked / "health.json")
+        observer.live_provider_capture = linked
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_capture_symlink"
+        ):
+            observer._load_live_provider_capture()
+
+        changed = self.live_provider_capture_fixture(observer, "provider-hash")
+        (changed / "health.json").write_text('{"tampered":true}\n', encoding="utf-8")
+        observer.live_provider_capture = changed
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_collector_isolation_invalid"
+        ):
+            observer._load_live_provider_capture()
+
+        invalid_time = self.live_provider_capture_fixture(observer, "provider-time")
+        manifest = json.loads(
+            (invalid_time / "manifest.json").read_text(encoding="utf-8")
+        )
+        manifest["files"][0]["finished_at"] = manifest["files"][0]["started_at"]
+        (invalid_time / "manifest.json").write_bytes(MODULE.canonical_json(manifest))
+        observer.live_provider_capture = invalid_time
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_capture_file_invalid"
+        ):
+            observer._load_live_provider_capture()
+
+        coordinate = self.live_provider_capture_fixture(observer, "provider-coordinate")
+        manifest = json.loads((coordinate / "manifest.json").read_text(encoding="utf-8"))
+        manifest["candidate"]["core_commit"] = "f" * 40
+        (coordinate / "manifest.json").write_bytes(MODULE.canonical_json(manifest))
+        observer.live_provider_capture = coordinate
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_provider_capture_invalid"
+        ):
+            observer._load_live_provider_capture()
+
+    def test_github_authority_rejects_closure_hash_time_coordinate_run_and_attestation_mutations(self) -> None:
+        observer = self.bare_observer("public_registries")
+        run = {
+            "id": 123,
+            "run_attempt": 2,
+            "event": "repository_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "b" * 40,
+            "head_branch": "main",
+            "path": ".github/workflows/release.yml",
+            "repository": {"full_name": "Latchway/latchway-js"},
+        }
+        attestation = [{"verificationResult": {"signature": {"verified": True}}}]
+        files = {
+            "public-registries/javascript/runs/123-2.json": MODULE.canonical_json(run),
+            "public-registries/javascript/attestations/package-evidence.json.json": MODULE.canonical_json(attestation),
+        }
+        valid = self.github_authority_fixture(observer, "github-valid", files)
+        observer.github_authority = valid
+        observer._validate_github_authority_directory()
+        authenticated_run = observer._github_run_from_authority("javascript", 123, 2)
+        observer._validate_npm_workflow_run(
+            authenticated_run,
+            "Latchway/latchway-js",
+            "b" * 40,
+            123,
+            2,
+            conclusions={"success"},
+        )
+        subject = self.root / "package-evidence.json"
+        subject.write_text("{}\n", encoding="utf-8")
+        self.assertEqual(
+            observer._verify_release_asset_attestation(
+                subject,
+                "javascript",
+                observer.identity["repositories"]["javascript"],
+            ),
+            attestation,
+        )
+        observer._validate_github_authority_consumed()
+
+        changed_after_read = self.github_authority_fixture(
+            observer, "github-changed-after-read", files
+        )
+        observer.github_authority = changed_after_read
+        observer._validate_github_authority_directory()
+        for relative in files:
+            observer._github_authority_file(relative)
+        (
+            changed_after_read
+            / "public-registries/javascript/runs/123-2.json"
+        ).write_text('{"tampered":true}\n', encoding="utf-8")
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "github_authority_file_changed"
+        ):
+            observer._validate_github_authority_consumed()
+
+        for mutation in (
+            "missing",
+            "extra",
+            "symlink",
+            "hash",
+            "time",
+            "coordinate",
+        ):
+            changed = self.github_authority_fixture(
+                observer, f"github-{mutation}", files
+            )
+            if mutation == "missing":
+                (changed / "public-registries/javascript/runs/123-2.json").unlink()
+            elif mutation == "extra":
+                (changed / "extra.json").write_text("{}\n", encoding="utf-8")
+            elif mutation == "symlink":
+                (changed / "link.json").symlink_to(changed / "manifest.json")
+            elif mutation == "hash":
+                (changed / "public-registries/javascript/runs/123-2.json").write_text(
+                    '{"tampered":true}\n', encoding="utf-8"
+                )
+            elif mutation == "time":
+                manifest = json.loads(
+                    (changed / "manifest.json").read_text(encoding="utf-8")
+                )
+                manifest["files"][0]["finished_at"] = manifest["files"][0][
+                    "started_at"
+                ]
+                (changed / "manifest.json").write_bytes(
+                    MODULE.canonical_json(manifest)
+                )
+            else:
+                manifest = json.loads(
+                    (changed / "manifest.json").read_text(encoding="utf-8")
+                )
+                manifest["candidate"]["repositories"]["javascript"]["commit"] = "f" * 40
+                (changed / "manifest.json").write_bytes(
+                    MODULE.canonical_json(manifest)
+                )
+            observer.github_authority = changed
+            with self.subTest(mutation=mutation), self.assertRaises(
+                MODULE.ObservationError
+            ):
+                observer._validate_github_authority_directory()
+
+        bad_run = dict(run)
+        bad_run["event"] = "push"
+        invalid_run = self.github_authority_fixture(
+            observer,
+            "github-run-mutation",
+            {
+                "public-registries/javascript/runs/123-2.json": MODULE.canonical_json(
+                    bad_run
+                )
+            },
+        )
+        observer.github_authority = invalid_run
+        observer._validate_github_authority_directory()
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "registry_npm_provenance_run_invalid"
+        ):
+            observer._validate_npm_workflow_run(
+                observer._github_run_from_authority("javascript", 123, 2),
+                "Latchway/latchway-js",
+                "b" * 40,
+                123,
+                2,
+                conclusions={"success"},
+            )
+
+        invalid_attestation = self.github_authority_fixture(
+            observer,
+            "github-attestation-mutation",
+            {
+                "public-registries/javascript/attestations/package-evidence.json.json": b"{}\n"
+            },
+        )
+        observer.github_authority = invalid_attestation
+        observer._validate_github_authority_directory()
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "release_asset_attestation_invalid"
+        ):
+            observer._verify_release_asset_attestation(
+                subject,
+                "javascript",
+                observer.identity["repositories"]["javascript"],
+            )
 
     def test_supply_chain_validators_reject_digest_scan_sbom_and_signature_tampering(self) -> None:
         platforms = {
@@ -844,11 +1668,16 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.ObservationError, "github_release_invalid"):
             MODULE.Observer._validate_release(json.dumps(release).encode(), tag)
 
-    def test_release_attestation_verification_is_required_and_retained_as_json(self) -> None:
+    def test_release_attestation_is_consumed_only_from_offline_authority(self) -> None:
         observer = self.bare_observer("public_tags")
-        verified = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b'{"verified":true}\n', stderr=b""
+        retained = b'{"verified":true}\n'
+        authority = self.github_authority_fixture(
+            observer,
+            "public-tag-attestation",
+            {"public-tags/core/release-attestation.json": retained},
         )
+        observer.github_authority = authority
+        observer._validate_github_authority_directory()
         release = {
             "id": 42,
             "tag_name": "v1.0.0",
@@ -856,41 +1685,45 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "immutable": True,
             "assets": [],
         }
-        with mock.patch.dict(os.environ, {"GH_TOKEN": "test-token"}), mock.patch.object(
-            MODULE.shutil, "which", return_value="/usr/bin/gh"
-        ), mock.patch.object(MODULE.subprocess, "run", return_value=verified) as run, mock.patch.object(
-            MODULE.RELEASE_ATTESTATION, "validate_bytes", return_value={"status": "passed"}
-        ):
-            payload = observer._verify_release_attestation(
+        with mock.patch.object(
+            MODULE.RELEASE_ATTESTATION,
+            "validate_bytes",
+            return_value={"status": "passed"},
+        ) as validate:
+            payload, started, finished = observer._release_attestation_from_authority(
+                "core",
                 "Latchway/latchway", "v1.0.0", "f" * 40, release
             )
-        self.assertEqual(
-            payload,
-            MODULE.canonical_json({"status": "passed"}),
+        self.assertEqual(payload, MODULE.canonical_json({"status": "passed"}))
+        self.assertEqual(started, self.workflow_started)
+        self.assertEqual(finished, self.workflow_started.replace(minute=56))
+        validate.assert_called_once_with(
+            retained,
+            repository="Latchway/latchway",
+            tag="v1.0.0",
+            ref_sha="f" * 40,
+            release=release,
         )
-        command = run.call_args.args[0]
-        self.assertEqual(
-            command[1:],
-            (
-                "release",
-                "verify",
-                "v1.0.0",
-                "--repo",
-                "Latchway/latchway",
-                "--format",
-                "json",
-            ),
-        )
+        observer._validate_github_authority_consumed()
 
-        rejected = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout=b"", stderr=b"not immutable"
+        rejected_authority = self.github_authority_fixture(
+            observer,
+            "public-tag-attestation-rejected",
+            {"public-tags/core/release-attestation.json": b"{}\n"},
         )
-        with mock.patch.dict(os.environ, {"GH_TOKEN": "test-token"}), mock.patch.object(
-            MODULE.shutil, "which", return_value="/usr/bin/gh"
-        ), mock.patch.object(MODULE.subprocess, "run", return_value=rejected), self.assertRaisesRegex(
+        observer.github_authority = rejected_authority
+        observer._validate_github_authority_directory()
+        with mock.patch.object(
+            MODULE.RELEASE_ATTESTATION,
+            "validate_bytes",
+            side_effect=MODULE.RELEASE_ATTESTATION.AttestationError(
+                "release_attestation_invalid"
+            ),
+        ), self.assertRaisesRegex(
             MODULE.ObservationError, "github_release_attestation_invalid"
         ):
-            observer._verify_release_attestation(
+            observer._release_attestation_from_authority(
+                "core",
                 "Latchway/latchway", "v1.0.0", "f" * 40, release
             )
 
@@ -1590,6 +2423,242 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         ):
             observer._live_sdk_configuration(require_javascript=False)
 
+    def test_live_sdk_configuration_requires_both_isolated_captures_and_rejects_legacy_credentials(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        observer.live_sdk_receipts = {
+            receipt_id: self.root for receipt_id in MODULE.LIVE_SDK_RECEIPTS
+        }
+        observer.live_sdk_runs = {
+            "ios": ("12345", "2"),
+            "android": ("12346", "1"),
+            "react_native": ("12347", "3"),
+        }
+        observer.javascript_captures = {
+            "firebase_app_check": self.root / "firebase_app_check.json",
+        }
+        environment = {
+            "GH_TOKEN": "github-token",
+            "LATCHWAY_BASE_URL": "https://gateway.example.test",
+            "LATCHWAY_LIVE_SDK_ENVIRONMENT": "production",
+            "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE": "missing_feature",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True), self.assertRaisesRegex(
+            MODULE.ObservationError,
+            "live_sdk_javascript_capture_configuration_invalid",
+        ):
+            observer._live_sdk_configuration(require_javascript=True)
+
+        observer.javascript_captures["turnstile"] = self.root / "turnstile.json"
+        with mock.patch.dict(os.environ, environment, clear=True):
+            gateway, token, javascript_environment, runs = (
+                observer._live_sdk_configuration(require_javascript=True)
+            )
+        self.assertEqual(gateway, "https://gateway.example.test")
+        self.assertEqual(token, "github-token")
+        self.assertEqual(
+            set(javascript_environment),
+            set(MODULE.LIVE_SDK_JAVASCRIPT_CONFIGURATION_KEYS),
+        )
+        self.assertEqual(set(runs), {"ios", "android", "react_native"})
+
+        for legacy_name in MODULE.LIVE_SDK_LEGACY_CREDENTIAL_ENV:
+            with self.subTest(legacy_name=legacy_name):
+                legacy = {**environment, legacy_name: "reusable-secret"}
+                with mock.patch.dict(
+                    os.environ, legacy, clear=True
+                ), self.assertRaisesRegex(
+                    MODULE.ObservationError,
+                    "live_sdk_javascript_credentials_present",
+                ):
+                    observer._live_sdk_configuration(require_javascript=True)
+
+    def test_offline_sdk_configuration_needs_no_cross_repo_or_provider_secret(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        observer.live_sdk_receipts = {
+            receipt_id: self.root for receipt_id in MODULE.LIVE_SDK_RECEIPTS
+        }
+        observer.live_sdk_runs = {
+            "ios": ("12345", "2"),
+            "android": ("12346", "1"),
+            "react_native": ("12347", "3"),
+        }
+        authority = self.root / "authority"
+        authority.mkdir()
+        for name in observer._physical_authority_files():
+            value = [{}] if name.endswith("-attestation.json") else {}
+            (authority / name).write_text(json.dumps(value) + "\n", encoding="utf-8")
+        observer.live_sdk_authority = authority
+        observer.javascript_captures = {
+            provider: self.root / f"{provider}.json"
+            for provider in MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS
+        }
+        with mock.patch.dict(
+            os.environ,
+            {
+                "LATCHWAY_BASE_URL": "https://gateway.example.test",
+                "LATCHWAY_LIVE_SDK_ENVIRONMENT": "production",
+                "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE": "missing_feature",
+            },
+            clear=True,
+        ):
+            gateway, token, javascript_environment, runs = (
+                observer._live_sdk_configuration(require_javascript=True)
+            )
+        self.assertEqual(gateway, "https://gateway.example.test")
+        self.assertEqual(token, "")
+        self.assertEqual(
+            javascript_environment,
+            {
+                "LATCHWAY_LIVE_SDK_ENVIRONMENT": "production",
+                "LATCHWAY_LIVE_SDK_ERROR_MAPPING_FEATURE": "missing_feature",
+            },
+        )
+        self.assertEqual(set(runs), {"ios", "android", "react_native"})
+
+    def test_offline_javascript_capture_is_strictly_bound_to_one_use_isolation(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        path = self.javascript_isolation_fixture(
+            observer, "firebase_app_check"
+        )
+        observer.javascript_captures = {"firebase_app_check": path}
+        payload, started, finished, isolation = observer._load_javascript_capture(
+            "firebase_app_check",
+            gateway="https://gateway.example.test",
+            environment="production",
+        )
+        self.assertEqual(
+            json.loads(payload),
+            {"redacted": True, "provider": "firebase_app_check"},
+        )
+        self.assertLess(started, finished)
+        self.assertEqual(
+            set(isolation["payloads"]),
+            {"capture.json", *MODULE.LIVE_SDK_ISOLATION_FILES},
+        )
+
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["attestation_provider"] = "turnstile"
+        path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_capture_invalid"
+        ):
+            observer._load_javascript_capture(
+                "firebase_app_check",
+                gateway="https://gateway.example.test",
+                environment="production",
+            )
+
+    def test_javascript_isolation_rejects_closure_hash_schema_and_binding_mutations(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        path = self.javascript_isolation_fixture(observer, "firebase_app_check")
+        observer.javascript_captures = {"firebase_app_check": path}
+
+        def load() -> None:
+            observer._load_javascript_capture(
+                "firebase_app_check",
+                gateway="https://gateway.example.test",
+                environment="production",
+            )
+
+        isolation = path.parent / "firebase_app_check-isolation"
+        extra = isolation / "extra.json"
+        extra.write_text("{}\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_isolation_invalid"
+        ):
+            load()
+        extra.unlink()
+
+        checksum = isolation / "ISOLATION_SHA256SUMS"
+        original_checksum = checksum.read_bytes()
+        checksum.write_bytes(original_checksum.replace(b"a", b"b", 1))
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_isolation_invalid"
+        ):
+            load()
+        checksum.write_bytes(original_checksum)
+
+        lease_path = isolation / "collector-lease.json"
+        original_lease = lease_path.read_bytes()
+        lease = json.loads(original_lease)
+        lease["grant"]["single_use"] = False
+        lease_path.write_bytes(MODULE.canonical_json(lease))
+        checksum.write_bytes(
+            original_checksum.replace(
+                hashlib.sha256(original_lease).hexdigest().encode(),
+                hashlib.sha256(lease_path.read_bytes()).hexdigest().encode(),
+                1,
+            )
+        )
+        capture = json.loads(path.read_text(encoding="utf-8"))
+        capture["collector_isolation"]["lease_sha256"] = hashlib.sha256(
+            lease_path.read_bytes()
+        ).hexdigest()
+        path.write_bytes(MODULE.canonical_json(capture))
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_isolation_invalid"
+        ):
+            load()
+
+    def test_javascript_isolation_pair_and_retention_bind_every_file(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        captures = {
+            provider: self.javascript_isolation_fixture(observer, provider)
+            for provider in MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS
+        }
+        observer.javascript_captures = captures
+        isolations = {}
+        for provider in MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS:
+            payload, started, finished, isolation = observer._load_javascript_capture(
+                provider,
+                gateway="https://gateway.example.test",
+                environment="production",
+            )
+            isolations[provider] = isolation
+            observer.emit(
+                MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS[provider]["observation"],
+                payload,
+                started=started,
+                finished=finished,
+                version="1.0.0",
+                invocation=("latchway-live-sdk-collector", "validate-isolation", provider),
+                retained_inputs=isolation["payloads"],
+                retained_input_kind="live_sdk_collector_isolation",
+            )
+            slug = MODULE.LIVE_SDK_JAVASCRIPT_PROVIDERS[provider][
+                "observation"
+            ].replace(".", "-")
+            retained_path = (
+                observer.output / "artifacts" / slug / "collector-isolation.json"
+            )
+            retained = json.loads(retained_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                retained["kind"],
+                "latchway_retained_live_sdk_collector_isolation",
+            )
+            retained_files = {item["name"]: item for item in retained["files"]}
+            self.assertEqual(set(retained_files), set(isolation["payloads"]))
+            for name, source in isolation["payloads"].items():
+                self.assertEqual(
+                    retained_files[name]["sha256"], hashlib.sha256(source).hexdigest()
+                )
+                self.assertEqual(
+                    base64.b64decode(
+                        retained_files[name]["content_base64"], validate=True
+                    ),
+                    source,
+                )
+        observer._validate_javascript_isolation_pair(isolations)
+
+        changed = copy.deepcopy(isolations)
+        changed["turnstile"]["jti_sha256"] = isolations["firebase_app_check"][
+            "jti_sha256"
+        ]
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_isolation_pair_invalid"
+        ):
+            observer._validate_javascript_isolation_pair(changed)
+
     def test_live_sdk_physical_receipt_rejects_candidate_and_behavior_tampering(self) -> None:
         observer = self.bare_observer("live_sdk_conformance")
         policy = MODULE.LIVE_SDK_RECEIPTS["ios"]
@@ -1699,6 +2768,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "schema_version": 1,
             "kind": "latchway_live_javascript_observation",
             "platform": "javascript",
+            "attestation_provider": "firebase_app_check",
             "candidate": observer.identity,
             "gateway": {
                 "origin": "https://gateway.example.test",
@@ -1708,7 +2778,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     "commit": "a" * 40,
                     "build_date": "2026-08-29T10:00:00Z",
                     "contract_version": "0.5.1",
-                    "protocol_version": "1",
+                    "protocol_version": "2",
                 },
             },
             "tests": self.concrete_tests("ios", javascript=True),
@@ -1725,6 +2795,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             json.dumps(report).encode(),
             observer.identity,
             "https://gateway.example.test",
+            expected_provider="firebase_app_check",
         )
         changed = copy.deepcopy(report)
         changed["candidate"]["core_commit"] = "f" * 40
@@ -1735,6 +2806,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 json.dumps(changed).encode(),
                 observer.identity,
                 "https://gateway.example.test",
+                expected_provider="firebase_app_check",
             )
         changed = copy.deepcopy(report)
         next(item for item in changed["tests"] if item["id"] == "quota")[
@@ -1747,6 +2819,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 json.dumps(changed).encode(),
                 observer.identity,
                 "https://gateway.example.test",
+                expected_provider="firebase_app_check",
             )
         changed = copy.deepcopy(report)
         changed["gateway"]["build"]["build_date"] = "api_key=secret-value"
@@ -1755,6 +2828,18 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 json.dumps(changed).encode(),
                 observer.identity,
                 "https://gateway.example.test",
+                expected_provider="firebase_app_check",
+            )
+        changed = copy.deepcopy(report)
+        changed["attestation_provider"] = "turnstile"
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_javascript_report_invalid"
+        ):
+            MODULE.Observer._validate_javascript_report(
+                json.dumps(changed).encode(),
+                observer.identity,
+                "https://gateway.example.test",
+                expected_provider="firebase_app_check",
             )
 
     def test_live_sdk_react_native_links_are_exact_bytes_and_candidate_native_versions(self) -> None:
@@ -1819,43 +2904,66 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         ):
             MODULE.Observer._validate_react_native_links(receipts)
 
-    def test_live_sdk_behavior_derivation_requires_all_five_concrete_sets(self) -> None:
+    def test_live_sdk_behavior_derivation_requires_both_web_providers_and_four_physical_sets(self) -> None:
         observer = self.bare_observer("live_sdk_conformance")
         platforms = []
-        for index, platform in enumerate(
-            (
-                "javascript",
-                "ios_app_attest",
-                "android_play_integrity",
-                "react_native_ios_app_attest",
-                "react_native_android_play_integrity",
-            )
-        ):
+        specifications = (
+            ("javascript", "firebase_app_check", None),
+            ("javascript", "turnstile", None),
+            ("ios_app_attest", None, "ios"),
+            ("android_play_integrity", None, "android"),
+            ("react_native_ios_app_attest", None, "react_native_ios"),
+            ("react_native_android_play_integrity", None, "react_native_android"),
+        )
+        for index, (platform, provider, receipt_id) in enumerate(specifications):
+            javascript = provider is not None
             tests = self.concrete_tests(
-                "ios" if index == 0 else tuple(MODULE.LIVE_SDK_RECEIPTS)[index - 1],
-                javascript=index == 0,
+                receipt_id or "ios",
+                javascript=javascript,
             )
-            platforms.append(
-                {
-                    "platform": platform,
-                    "producer": {"repository": f"repository-{index}"},
-                    "concrete_tests": [
-                        MODULE.Observer._redacted_test_record(item)
-                        for item in tests
-                        if item["id"] in observer._behavior_test_ids()
-                    ],
-                }
-            )
+            summary = {
+                "platform": platform,
+                "producer": {"repository": f"repository-{index}"},
+                "concrete_tests": [
+                    MODULE.Observer._redacted_test_record(item)
+                    for item in tests
+                    if item["id"] in observer._behavior_test_ids()
+                ],
+            }
+            if provider is not None:
+                summary["attestation_provider"] = provider
+            platforms.append(summary)
         result = MODULE.Observer._behavior_summary(
             "session_refresh", platforms, observer.identity
         )
-        self.assertEqual(len(result["platforms"]), 5)
+        self.assertEqual(len(result["platforms"]), 6)
+        self.assertEqual(
+            {
+                item.get("attestation_provider")
+                for item in result["platforms"]
+                if item["platform"] == "javascript"
+            },
+            {"firebase_app_check", "turnstile"},
+        )
         self.assertNotIn("passed", json.dumps(result))
-        platforms[4]["concrete_tests"] = [
+        platforms[5]["concrete_tests"] = [
             item
-            for item in platforms[4]["concrete_tests"]
+            for item in platforms[5]["concrete_tests"]
             if item["id"] != "session_refresh_rotation"
         ]
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_behavior_set_invalid"
+        ):
+            MODULE.Observer._behavior_summary(
+                "session_refresh", platforms, observer.identity
+            )
+
+        platforms[5]["concrete_tests"] = [
+            MODULE.Observer._redacted_test_record(item)
+            for item in self.concrete_tests("react_native_android")
+            if item["id"] in observer._behavior_test_ids()
+        ]
+        platforms[1]["attestation_provider"] = "firebase_app_check"
         with self.assertRaisesRegex(
             MODULE.ObservationError, "live_sdk_behavior_set_invalid"
         ):

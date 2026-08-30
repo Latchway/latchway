@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/latchway/latchway/internal/buildinfo"
+	"github.com/latchway/latchway/internal/frameworkcompat"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/weborigin"
@@ -16,6 +18,7 @@ const (
 	maximumChallengeBodyBytes = 128 << 10
 	maximumExchangeBodyBytes  = 96 << 10
 	maximumRefreshBodyBytes   = 4 << 10
+	maximumComponentBodyBytes = 32 << 10
 	maximumEvidenceBytes      = 64 << 10
 	maximumEvidenceMembers    = 64
 	maximumDPoPBytes          = 16 << 10
@@ -24,12 +27,15 @@ const (
 )
 
 var (
-	identifierPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	sdkVersionPattern   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
-	challengeIDPattern  = regexp.MustCompile(`^chl_[A-Za-z0-9_-]{16,128}$`)
-	requestIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
-	base64URLPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	installationPattern = regexp.MustCompile(`^ins_[A-Za-z0-9_-]{16,128}$`)
+	identifierPattern          = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	sdkVersionPattern          = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
+	challengeIDPattern         = regexp.MustCompile(`^chl_[A-Za-z0-9_-]{16,128}$`)
+	requestIDPattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+	base64URLPattern           = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	installationPattern        = regexp.MustCompile(`^ins_[A-Za-z0-9_-]{16,128}$`)
+	installationFamilyPattern  = regexp.MustCompile(`^fam_[A-Za-z0-9_-]{16,128}$`)
+	clientComponentPattern     = regexp.MustCompile(`^cmp_[A-Za-z0-9_-]{16,128}$`)
+	componentDelegationPattern = regexp.MustCompile(`^dlg_[A-Za-z0-9_-]{16,128}$`)
 )
 
 type requestViolation struct {
@@ -48,17 +54,20 @@ func invalidAt(path, message string) *requestViolation {
 }
 
 type clientDeclaration struct {
-	sdk        string
-	sdkVersion string
+	protocolVersion  string
+	sdk              string
+	sdkVersion       string
+	framework        string
+	frameworkVersion string
 }
 
 func parseClientDeclaration(r *http.Request) (clientDeclaration, *requestViolation) {
 	protocolVersion, ok := exactlyOneHeader(r.Header, "X-Latchway-Protocol-Version")
-	if !ok || protocolVersion != "1" {
+	if !ok || !buildinfo.SupportsProtocolVersion(protocolVersion) {
 		return clientDeclaration{}, &requestViolation{
 			code:                      "protocol_version_unsupported",
-			detail:                    "This gateway supports Latchway protocol version 1.",
-			supportedProtocolVersions: []int{1},
+			detail:                    "This gateway supports Latchway protocol versions 1 and 2.",
+			supportedProtocolVersions: buildinfo.SupportedProtocolVersions(),
 		}
 	}
 	sdk, ok := exactlyOneHeader(r.Header, "X-Latchway-SDK")
@@ -69,7 +78,37 @@ func parseClientDeclaration(r *http.Request) (clientDeclaration, *requestViolati
 	if !ok || len(sdkVersion) > 128 || !sdkVersionPattern.MatchString(sdkVersion) {
 		return clientDeclaration{}, invalidAt("header.X-Latchway-SDK-Version", "A semantic SDK version is required.")
 	}
-	return clientDeclaration{sdk: sdk, sdkVersion: sdkVersion}, nil
+	framework, frameworkCount := oneRawClientHeader(r.Header, "X-Latchway-Framework")
+	frameworkVersion, frameworkVersionCount := oneRawClientHeader(r.Header, "X-Latchway-Framework-Version")
+	if frameworkCount == 0 && frameworkVersionCount == 0 {
+		return clientDeclaration{protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion}, nil
+	}
+	if frameworkCount != 1 || frameworkVersionCount != 1 || framework == "" || frameworkVersion == "" ||
+		strings.TrimSpace(framework) != framework || strings.TrimSpace(frameworkVersion) != frameworkVersion ||
+		strings.ContainsAny(framework, "\r\n\x00,") || strings.ContainsAny(frameworkVersion, "\r\n\x00,") {
+		return clientDeclaration{}, invalidAt("header.X-Latchway-Framework", "Framework and framework version must be declared together exactly once.")
+	}
+	if !frameworkcompat.Compatible(sdk, framework) {
+		return clientDeclaration{}, &requestViolation{code: "framework_integration_unsupported", detail: "The declared framework integration is not supported by this SDK."}
+	}
+	if !frameworkcompat.ValidVersion(frameworkVersion) {
+		return clientDeclaration{}, &requestViolation{code: "framework_version_unsupported", detail: "The declared framework version is not supported."}
+	}
+	return clientDeclaration{
+		protocolVersion: protocolVersion, sdk: sdk, sdkVersion: sdkVersion, framework: framework,
+		frameworkVersion: frameworkVersion,
+	}, nil
+}
+
+func requireCurrentProtocol(declaration clientDeclaration) *requestViolation {
+	if declaration.protocolVersion == buildinfo.ProtocolVersion {
+		return nil
+	}
+	return &requestViolation{
+		code:                      "protocol_version_unsupported",
+		detail:                    "This operation requires Latchway protocol version 2.",
+		supportedProtocolVersions: []int{buildinfo.CurrentProtocolVersion},
+	}
 }
 
 func parseDPoPHeader(r *http.Request) (SensitiveString, *requestViolation) {
@@ -114,15 +153,31 @@ func validAuthorizationCredential(value string) bool {
 }
 
 func exactlyOneHeader(header http.Header, name string) (string, bool) {
-	values := header.Values(name)
-	if len(values) != 1 {
+	value, count := oneRawClientHeader(header, name)
+	if count != 1 {
 		return "", false
 	}
-	value := strings.TrimSpace(values[0])
-	if value == "" || strings.ContainsAny(value, "\r\n\x00,") {
+	if value == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00,") {
 		return "", false
 	}
 	return value, true
+}
+
+func oneRawClientHeader(header http.Header, name string) (string, int) {
+	var value string
+	count := 0
+	for candidate, values := range header {
+		if !strings.EqualFold(candidate, name) {
+			continue
+		}
+		for _, raw := range values {
+			count++
+			if count == 1 {
+				value = raw
+			}
+		}
+	}
+	return value, count
 }
 
 func validateJSONMediaType(r *http.Request) *requestViolation {
@@ -258,6 +313,88 @@ func parseRefreshRequest(r *http.Request) (RefreshInput, *requestViolation) {
 		return RefreshInput{}, invalidAt("body.refresh_token", "refresh_token must satisfy the protocol length limits.")
 	}
 	return RefreshInput{RefreshToken: NewSensitiveString(refreshToken)}, nil
+}
+
+func parseProvisionComponentRequest(r *http.Request, declaration clientDeclaration) (ProvisionComponentInput, *requestViolation) {
+	object, violation := decodeRequestObject(r, maximumComponentBodyBytes)
+	if violation != nil {
+		return ProvisionComponentInput{}, violation
+	}
+	if !hasExactFields(object, []string{"component_definition_id", "public_jwk", "requested_features", "client_metadata"}, nil) {
+		return ProvisionComponentInput{}, invalidAt("body", "The component provisioning object has missing or unsupported fields.")
+	}
+	definitionID, ok := stringMatching(object["component_definition_id"], identifierPattern, 63)
+	if !ok {
+		return ProvisionComponentInput{}, invalidAt("body.component_definition_id", "component_definition_id must be a canonical identifier.")
+	}
+	jwkObject, ok := object["public_jwk"].(map[string]any)
+	if !ok || !hasExactFields(jwkObject, []string{"kty", "crv", "x", "y"}, nil) {
+		return ProvisionComponentInput{}, invalidAt("body.public_jwk", "public_jwk must be an exact public P-256 JWK.")
+	}
+	kty, ktyOK := jwkObject["kty"].(string)
+	crv, crvOK := jwkObject["crv"].(string)
+	x, xOK := jwkObject["x"].(string)
+	y, yOK := jwkObject["y"].(string)
+	if !ktyOK || !crvOK || !xOK || !yOK || kty != "EC" || crv != "P-256" ||
+		!validCanonicalBase64URL(x, 32) || !validCanonicalBase64URL(y, 32) {
+		return ProvisionComponentInput{}, invalidAt("body.public_jwk", "public_jwk must be an exact public P-256 JWK.")
+	}
+	featuresValue, ok := object["requested_features"].([]any)
+	if !ok || len(featuresValue) == 0 || len(featuresValue) > 256 {
+		return ProvisionComponentInput{}, invalidAt("body.requested_features", "requested_features must be a nonempty bounded identifier list.")
+	}
+	features := make([]string, len(featuresValue))
+	seen := make(map[string]struct{}, len(featuresValue))
+	for index, value := range featuresValue {
+		feature, ok := stringMatching(value, identifierPattern, 63)
+		if !ok {
+			return ProvisionComponentInput{}, invalidAt("body.requested_features", "requested_features must contain canonical identifiers.")
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			return ProvisionComponentInput{}, invalidAt("body.requested_features", "requested_features must not contain duplicates.")
+		}
+		seen[feature] = struct{}{}
+		features[index] = feature
+	}
+	metadataObject, ok := object["client_metadata"].(map[string]any)
+	if !ok || !hasExactFields(metadataObject, []string{"app_version", "sdk_version"}, nil) {
+		return ProvisionComponentInput{}, invalidAt("body.client_metadata", "client_metadata has missing or unsupported fields.")
+	}
+	appVersion, ok := boundedString(metadataObject["app_version"], 1, 128)
+	if !ok || strings.TrimSpace(appVersion) != appVersion || strings.ContainsAny(appVersion, "\r\n\x00") {
+		return ProvisionComponentInput{}, invalidAt("body.client_metadata.app_version", "app_version must satisfy the protocol length limits.")
+	}
+	sdkVersion, ok := boundedString(metadataObject["sdk_version"], 1, 128)
+	if !ok || sdkVersion != declaration.sdkVersion {
+		return ProvisionComponentInput{}, invalidAt("body.client_metadata.sdk_version", "sdk_version must match X-Latchway-SDK-Version.")
+	}
+	return ProvisionComponentInput{
+		DefinitionID:      definitionID,
+		PublicJWK:         ComponentPublicJWK{Kty: kty, Crv: crv, X: x, Y: y},
+		RequestedFeatures: features,
+		ClientMetadata:    ComponentClientMetadata{AppVersion: appVersion, SDKVersion: sdkVersion},
+	}, nil
+}
+
+func parseComponentSessionRequest(r *http.Request) (CreateComponentSessionInput, *requestViolation) {
+	object, violation := decodeRequestObject(r, maximumRefreshBodyBytes)
+	if violation != nil {
+		return CreateComponentSessionInput{}, violation
+	}
+	if !hasExactFields(object, []string{"component_id", "refresh_grant"}, nil) {
+		return CreateComponentSessionInput{}, invalidAt("body", "The component session object has missing or unsupported fields.")
+	}
+	componentID, ok := object["component_id"].(string)
+	if !ok || !clientComponentPattern.MatchString(componentID) {
+		return CreateComponentSessionInput{}, invalidAt("body.component_id", "component_id is invalid.")
+	}
+	refreshGrant, ok := boundedString(object["refresh_grant"], 32, 2048)
+	if !ok || strings.TrimSpace(refreshGrant) != refreshGrant || strings.ContainsAny(refreshGrant, "\r\n\x00") {
+		return CreateComponentSessionInput{}, invalidAt("body.refresh_grant", "refresh_grant must satisfy the protocol length limits.")
+	}
+	return CreateComponentSessionInput{
+		ComponentID: componentID, RefreshGrant: NewSensitiveString(refreshGrant),
+	}, nil
 }
 
 func parseAttestation(object map[string]any, path string) (AttestationEvidence, *requestViolation) {

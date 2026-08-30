@@ -15,6 +15,7 @@ import tempfile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "api"
+COMPATIBILITY_ROOT = REPOSITORY_ROOT / "compatibility"
 
 
 def sha256(path: Path) -> str:
@@ -72,12 +73,22 @@ def build(output_directory: Path) -> Path:
             raise FileNotFoundError(f"missing contract source: api/{relative}")
     if not (API_ROOT / "test-vectors").is_dir():
         raise FileNotFoundError("missing contract source: api/test-vectors")
+    compatibility_files = ["frameworks.schema.json", "frameworks.yaml"]
+    for relative in compatibility_files:
+        if not (COMPATIBILITY_ROOT / relative).is_file():
+            raise FileNotFoundError(f"missing contract source: compatibility/{relative}")
 
     with tempfile.TemporaryDirectory(prefix="latchway-contract-") as temporary:
         staging = Path(temporary)
         for relative in files:
             shutil.copyfile(API_ROOT / relative, staging / relative)
         shutil.copytree(API_ROOT / "test-vectors", staging / "test-vectors")
+        (staging / "compatibility").mkdir()
+        for relative in compatibility_files:
+            shutil.copyfile(
+                COMPATIBILITY_ROOT / relative,
+                staging / "compatibility" / relative,
+            )
 
         payloads = sorted(
             path for path in staging.rglob("*") if path.is_file() and path.name != "SHA256SUMS"

@@ -1,0 +1,189 @@
+---
+title: "CLI"
+description: "Operate the gateway and canonical Admin API without placing credentials in flags or output."
+---
+
+The `latchway` binary contains server, migration, diagnostics, and Admin API
+commands. Except for `serve`, `migrate`, `doctor`, and the isolated
+`verify local` gate, control-plane commands use HTTP and do not open PostgreSQL.
+
+## Connection and authentication
+
+```bash
+export LATCHWAY_SERVER=https://gateway.example.com
+export LATCHWAY_ADMIN_API_TOKEN='value-from-a-secret-manager'
+
+latchway --output table status
+latchway --output json status
+latchway login
+```
+
+`login` validates the environment-supplied bearer and prints safe principal,
+organization, capability, and expiry metadata. It does not accept a password or
+persist a credential. `logout` revokes that bearer server-side; unset the dead
+value from the parent shell afterward.
+
+```bash
+latchway logout
+unset LATCHWAY_ADMIN_API_TOKEN
+```
+
+Use `--api-token-env NAME` to select another variable. The token is never
+accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
+
+## Runtime and database
+
+| Command | Purpose |
+| --- | --- |
+| `latchway serve --role all` | Run API and worker roles together |
+| `latchway serve --role api` | Run client/Admin API and console only |
+| `latchway serve --role worker` | Run PostgreSQL-backed maintenance work |
+| `latchway migrate up` | Apply embedded forward-only migrations |
+| `latchway migrate status` | Compare current and available schema |
+| `latchway doctor` | Run local deployment diagnostics |
+| `latchway version` | Print build, contract, and protocol metadata |
+| `latchway status` | Read authenticated remote system status |
+
+## Configuration, secrets, and routes
+
+```bash
+latchway --output json config pull --environment env_...
+latchway config apply --environment env_... --file environment.json --dry-run
+latchway config apply --environment env_... --file environment.json
+latchway config validate rev_...
+latchway config plan rev_...
+latchway config diff rev_...
+latchway config rollback rev_... --environment env_...
+
+printf '%s' "$PROVIDER_KEY" | \
+  latchway secret set provider_key --environment env_... --from-stdin
+latchway secret list --environment env_...
+latchway secret rotate sec_... --value-env NEW_PROVIDER_KEY
+latchway secret delete sec_...
+
+latchway routes simulate rev_... \
+  --feature assistant \
+  --platform react_native_ios \
+  --trust-level app_verified \
+  --claims-file normalized-claims.json
+```
+
+Secret values can come from stdin, a regular file, a file descriptor, or a
+named environment variable. They are not accepted as command arguments or
+returned in output.
+
+## Administrators and API tokens
+
+```bash
+latchway admin accounts list
+latchway admin accounts create \
+  --email operator@example.com \
+  --display-name Operator \
+  --role operator \
+  --value-file ./new-administrator-password
+latchway admin accounts role adm_... --role admin
+latchway admin accounts disable adm_...
+latchway admin accounts enable adm_...
+latchway admin accounts reset-password adm_... --from-stdin
+
+latchway admin api-tokens list
+latchway admin api-tokens create \
+  --name mobile-ci \
+  --scope inspect_users \
+  --scope run_self_tests \
+  --token-output-file ./mobile-ci.token
+latchway admin api-tokens revoke tok_...
+```
+
+Token creation writes plaintext exactly once to a new regular mode-`0600` file.
+It refuses existing paths and symlinks and compensating-revokes the token if the
+file cannot be completed safely. Move the value into the intended secret
+manager, then remove the local file using your approved secure workflow.
+
+## Operational commands
+
+```bash
+latchway users list --environment env_...
+latchway users inspect usr_... --environment env_...
+latchway users block usr_... --environment env_...
+latchway users unblock usr_... --environment env_...
+
+latchway admin users limit-override set usr_... \
+  --environment env_... --limit-plan priority \
+  --reason 'operator-approved temporary plan'
+latchway admin users limit-override clear usr_... --environment env_...
+
+latchway installations list --environment env_...
+latchway installations inspect ins_...
+latchway installations revoke ins_... --reason 'operator-approved response'
+
+latchway requests list --environment env_...
+latchway requests inspect req_...
+latchway usage summary --environment env_...
+latchway usage timeseries --environment env_... --interval hour
+latchway audit --organization org_...
+```
+
+List commands print opaque cursors for the next bounded page. Do not decode or
+modify them.
+
+## Verification
+
+Run the destructive local vertical only against a database role allowed to
+create and drop short-lived schemas:
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://...'
+latchway verify local --timeout 2m --junit ./local-verify.xml
+```
+
+It applies migrations, creates an ephemeral tenant and deterministic fixtures,
+executes the production session/proxy/quota/routing/recovery paths, and then
+proves the temporary schema was dropped—even after a failed check.
+
+Ephemeral upstream verification keeps the provider key local to the CLI. Its
+generic protocol is OpenAI Chat in version 1:
+
+```bash
+PROVIDER_API_KEY=... latchway verify upstream \
+  --base-url https://api.example.com/v1 \
+  --protocol openai_chat \
+  --api-key-env PROVIDER_API_KEY \
+  --model provider-model
+
+OPENROUTER_API_KEY=... latchway verify openrouter \
+  --api-key-env OPENROUTER_API_KEY \
+  --model openai/gpt-4o-mini \
+  --max-cost-usd 0.01
+```
+
+To exercise a configured server-owned target without reading its credential:
+
+```bash
+latchway verify upstream --server-owned \
+  --environment env_... --upstream primary --model canary
+latchway verify openrouter --server-owned \
+  --environment env_... --upstream openrouter --model canary \
+  --max-cost-nano-usd 10000000
+```
+
+Manage persistent canaries with:
+
+```bash
+latchway verify schedule create \
+  --environment env_... --kind upstream \
+  --upstream primary --model canary \
+  --interval-seconds 3600 \
+  --max-cost-nano-usd 10000000 \
+  --daily-cost-limit-nano-usd 240000000
+latchway verify schedule list --environment env_...
+latchway verify schedule get sts_...
+latchway verify schedule disable sts_...
+```
+
+## Completion and exit behavior
+
+Generate shell completion with `latchway completion bash`, `zsh`, `fish`, or
+`powershell`. Invalid input, denied operations, invalid response documents, and
+RFC 9457 failures return a non-zero exit status. JSON output is intended for
+bounded automation but still contains no credential values.

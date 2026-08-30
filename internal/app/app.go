@@ -202,6 +202,7 @@ func newAPIRuntime(
 	}
 	sessionStore, err := session.NewStore(session.StoreConfig{
 		Pool: pool, AccessTokens: accessIssuer, Configuration: configurationStore,
+		RotationProtector: envelope,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct client session store: %w", err)

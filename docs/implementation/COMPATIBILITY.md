@@ -1,126 +1,124 @@
-# Protocol compatibility
+# Compatibility policy and current matrix
 
-This document records the exact version 1 source baseline. It is a local source
-compatibility declaration, not proof that packages or images exist in public
-registries.
+This document separates the historical legacy baseline from the draft version
+1 contract. It is a source compatibility ledger, not proof of public
+packages, live providers, physical devices, or production support.
 
-## Normative baseline
+## Contract boundary
 
-| Field | Value |
-| --- | --- |
-| Server release coordinate | `v1.0.0` |
-| Contract version | `0.5.1` |
-| Contract status | `released` |
-| Contract released at | `2026-08-29T07:14:27Z` |
-| Wire protocol | `1` |
-| Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Passing RC implementation and release-tooling checkpoint | `3c2da120a729f05ac5d8ddf799acb21eb013e833` (`1.0.0-rc.1`), including successful hosted CI run `33287170804`; the exact candidate is the later protected-`main` descendant dispatched to `release.yml` |
-| Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
-| Contract archive | `latchway-contract-0.5.1.tar.gz` |
-| Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
-| Database schema | `20` |
-| Minimum server | `1.0.0` |
-| Maximum tested server series | `1.0.x` |
+| Field | Legacy compatibility | Draft current contract |
+| --- | --- | --- |
+| Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `draft`, `released_at: null` |
+| Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
+| Database | Historical schema `20` | Schema `22`, including family/component and component-scoped quota state |
+| Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
+| Sessions | One installation key/session family | Independent component keys/session families |
+| Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
+| Framework metadata | Optional declarations accepted on retained routes | Framework name/version headers in the contract and audit/request views |
+| Framework support | None claimed | Registry-driven, version-pinned conformance required |
 
-`contract_status: released` means that the normative contract source is
-frozen. It does not mean that server `v1.0.0`, its OCI image, or any SDK package
-has been publicly tagged or published.
+The released `0.5.1` bundle and SDK locks remain byte-frozen historical
+coordinates at their normative commits. The current source emits a distinct,
+deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
+historical coordinate. SDK locks move only after the exact draft checkpoint is
+committed and synchronized across repositories.
 
-The normative checkpoint identifies the byte-frozen `api/` contract consumed
-by every SDK lock. The passing RC implementation checkpoint identifies the
-server, CLI, dashboard, and release-hardening source that passed the full
-hosted review suite. The separate source/load
-checkpoint identifies the implementation and ADR 0022 corrected load contract
-that passed the unchanged complete local suite. They are deliberately different
-coordinates; neither local result is protected exact-image release evidence or
-a support claim.
-Documentation-only descendants may follow the candidate without changing that
-implementation claim; a later code change must become a new candidate and
-rerun the affected evidence.
-This source contains such a repository-local reviewed code-bearing descendant;
-until its hosted checks pass and a ledger-only descendant records its exact
-commit, the table above deliberately retains the last hosted-green checkpoint.
+## Framework registry
 
-The operational-resilience gate also requires one non-public canonical
-`v1.0.0-rc.1` source checkpoint and candidate run before the final `v1.0.0`
-source descendant is built. Both commits retain this exact frozen contract and
-SDK compatibility baseline. The RC coordinate is immutable candidate evidence,
-not a Git tag, published package version, public release, or supported
-compatibility coordinate.
+The canonical source is
+[`compatibility/frameworks.yaml`](../../compatibility/frameworks.yaml),
+validated against
+[`compatibility/frameworks.schema.json`](../../compatibility/frameworks.schema.json).
+The public compatibility page is generated at
+[`docs/public/reference/compatibility.mdx`](../public/reference/compatibility.mdx).
 
-## Version 1 component matrix
+Six entries are `experimental` at exact locally tested versions: OkHttp 5.3.0,
+`@langchain/openai` 1.5.10, OpenAI JavaScript 7.8.0, React Native 0.82.0,
+SwiftOpenAI 4.6.0, and Vercel AI SDK 7.0.85. Foundation Models remains
+`planned` because its runtime tests were skipped on the older host OS.
+MacPaw/OpenAI 0.5.1 is `unsupported` because its public seams cannot preserve
+fresh asynchronous DPoP and streaming dispatch. No entry is `supported`.
 
-| Component | Package coordinate | Version | Exact source commit | Minimum platform/runtime |
-| --- | --- | --- | --- | --- |
-| Core server, CLI, dashboard | `github.com/latchway/latchway` | `1.0.0-rc.1` (intended stable `1.0.0`) | Hosted-green RC implementation checkpoint `3c2da120a729f05ac5d8ddf799acb21eb013e833` (CI run `33287170804`); exact protected candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | PostgreSQL 15+; OCI `linux/amd64` and `linux/arm64` |
-| JavaScript | `@latchway/client` | `1.0.0` | `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8` | Node `>=24.19.0`; pnpm `10.15.0`; standards-based browser WebCrypto/fetch runtime |
-| Swift | Swift package `Latchway`; CocoaPods `Latchway/AppAttest` | `1.0.0` | `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | iOS 15+; macOS 12+ for supported package surfaces; Swift tools 6.2 |
-| Android | `dev.latchway:latchway-core`, `latchway-okhttp`, `latchway-play-integrity`, `latchway-firebase-auth`, `latchway-bom` | `1.0.0` | `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Android API 23+; Java 17; compile SDK 37 |
-| React Native | `@latchway/react-native` | `1.0.0` | `3e80e47302773d209b98f51b4bedd412213e1605` | React Native `0.82.x`; React `19.1.x`; iOS 15+; Android API 24+; Node `>=24.19.0` |
+Support states mean:
 
-The React Native release manifest deliberately pins these native dependency
-commits rather than accepting whatever happens to be latest:
+- `planned`: target integration; no tested-version claim;
+- `experimental`: pinned minimum/latest versions and conformance exist, but the
+  compatibility surface is not stable;
+- `supported`: pinned versions, common conformance, release evidence, public
+  documentation, and limitations satisfy the release policy;
+- `unsupported`: the required safe request-time seam is unavailable or the
+  integration is intentionally excluded.
 
-- JavaScript: `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`
-- Swift: `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`
-- Android: `a41c0a5fd648365258695b2fe0abda44b618b9d6`
+Static headers, dependency resolution, compilation, or one successful request
+cannot elevate a framework to `experimental` or `supported`.
 
-## Shared fixture identity
+## Compatibility generation and validation
 
-The core bundle and every SDK contain byte-identical copies of the required
-fixtures:
+Run:
 
-| Fixture | SHA-256 |
-| --- | --- |
-| `attestation-binding-v1.json` | `e24ec75cc37b331060c67637fe3a4421c644e354fe73b9049b652d61a9e2896b` |
-| `dpop-v1.json` | `d14702db02a4498e8d52b5b39d5bc25d141dcf87ea4f7c4aeb929fd191eb8101` |
-| `protocol-version.json` | `c469ab7c23c78dc5de2430bdc1d524268afe400f7af7eb8efb36b1c5d739fd51` |
+```sh
+python3 scripts/framework_compatibility.py --check-generated
+python3 -m unittest scripts/test_framework_compatibility.py
+python3 scripts/validate-contracts.py
+```
 
-Every SDK lock contains contract `0.5.1`, wire protocol `1`, core release
-`v1.0.0`, core checkpoint
-`2f5e5e67c824e270431f1232cc6dc2824848e380`, bundle SHA-256
-`52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`,
-minimum server `1.0.0`, and maximum tested server series `1.0.x`.
+The validator rejects duplicate YAML keys/IDs, unknown fields, unsorted IDs,
+invalid capability/security states, unpinned support claims, reversed version
+ranges, schema drift, and stale generated Markdown. Public documentation must
+consume generated registry output rather than maintain a second table.
 
-## Required client declaration
+The registry and its strict schema are deterministic members of the draft
+`1.0.0` contract bundle under `compatibility/`. Contract validation checks the
+schema, semantic policy, generated Markdown, archive closure, and checksums.
+The remaining cross-repository step is to synchronize the exact contract
+checkpoint, bundle hash, wire-2 constants, and generated fixtures into every
+SDK lock.
 
-SDKs send the versioned transport headers:
+## Current SDK baseline
+
+These coordinates record prior repository-local validation of the legacy wire-1
+SDKs. They are not framework or Installation Family support claims.
+
+| SDK | Legacy source checkpoint | Legacy minimum runtime | Merged status |
+| --- | --- | --- | --- |
+| JavaScript `@latchway/client` | `5765a905086bbd39cdfb3d4b5c571a5df0066787` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport foundation; component sessions/framework adapters pending |
+| Swift `Latchway` | `73677929adfc4703e014927e11c28192426d4660` | iOS 15+, macOS 12+ supported surfaces | Root installation foundation; app-extension component model pending |
+| Android `dev.latchway:latchway-*` | `f9132d307cdc1b0bc971caeff07d9ab00254a015` | Android API 23+, Java 17 | OkHttp foundation; new headers/component contract/framework matrices pending |
+| React Native `@latchway/react-native` | `fddd9db30e9678d5edd597784c05f1a10d8584e5` | RN 0.82.x, iOS 15+, Android API 24+ | Native bridge foundation; component isolation/native-backed framework fetch pending |
+
+Every legacy SDK lock points to core contract checkpoint
+`2f5e5e67c824e270431f1232cc6dc2824848e380` and the legacy `0.5.1` bundle.
+Those locks must change together only after Phase 2.
+
+## Header compatibility
+
+Compatible legacy wire-1 clients declare:
 
 ```http
 X-Latchway-SDK: ios|android|javascript|react-native
-X-Latchway-SDK-Version: 1.0.0
+X-Latchway-SDK-Version: <sdk-version>
 X-Latchway-Protocol-Version: 1
 X-Latchway-Feature: <configured-feature>
+X-Latchway-Request-ID: <optional-correlation-hint>
 ```
 
-`X-Latchway-Request-ID` is an optional correlation hint and is never an
-authorization input. The server returns the stable
-`protocol_version_unsupported` problem when a wire version is outside its
-supported set.
+Wire 2 is current, uses `X-Latchway-Protocol-Version: 2`, and can additionally
+declare the paired `X-Latchway-Framework` and
+`X-Latchway-Framework-Version` headers. Installation Family and Client
+Component operations require wire 2. Discovery and diagnostics always
+advertise current wire 2 while discovery reports the supported range `[1, 2]`.
 
-## Compatibility policy
+## Support evidence policy
 
-- The contract bundle uses Semantic Versioning. Wire changes are explicit in
-  `api/protocol-version.json`; editorial or Admin-only changes do not silently
-  change the wire protocol.
-- Public SDK APIs are handwritten and idiomatic. Generated contract DTOs do not
-  define the public API.
-- A matching lock, fixture, version, and source commit is necessary but not
-  sufficient. A supported compatibility claim additionally requires the exact
-  release image, live conformance, platform-specific proof, public dependency
-  resolution, and post-publication smoke tests.
-- Production App Attest and Play Integrity compatibility requires real device
-  observations. Simulator, emulator, fixture, and debug-attestation results do
-  not satisfy that requirement.
-- Later core commits may contain release automation or documentation while SDKs
-  remain pinned to the normative checkpoint only when `api/` is byte-unchanged
-  from that checkpoint.
+A supported server/SDK/framework tuple requires all of:
 
-## Evidence still required for a supported pair
+1. one immutable prerelease/final contract bundle and matching SDK locks;
+2. minimum and latest framework version jobs plus scheduled newest-compatible
+   observation without automatic range widening;
+3. common authentication, request, framework, security, streaming,
+   cancellation, refresh, revocation, and component conformance;
+4. platform-specific key isolation and physical attestation where applicable;
+5. exact-image live and clean-public-consumer evidence;
+6. generated public compatibility and accurate limitations/release notes.
 
-The source matrix above has passed repository-local contract, package, and
-consumer gates. A supported public server/SDK pair is intentionally not
-declared until the protected release process verifies live SDK behavior against
-the exact image, physical native attestation, provider canaries, cloud
-deployments, resilience, signatures/provenance, public tags, and public
-registry installations.
+Until then this ledger records plans and historical baselines, not support.

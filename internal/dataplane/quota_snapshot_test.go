@@ -88,6 +88,38 @@ func TestFeatureQuotaProviderAuthenticatesAndProjectsEffectiveRules(t *testing.T
 	}
 }
 
+func TestFeatureQuotaProviderCarriesComponentScopeFacts(t *testing.T) {
+	fixture := newFeatureQuotaFixture(t)
+	fixture.authorization.InstallationFamilyID = id.Must(id.InstallationFamily)
+	fixture.authorization.InstallationFamilyStatus = "active"
+	fixture.authorization.ComponentID = id.Must(id.ClientComponent)
+	fixture.authorization.ComponentDefinitionID = "ios-widget"
+	fixture.authorization.ComponentKind = "widget"
+	fixture.authorization.TrustSource = "delegated_from_attested_root"
+	fixture.authorization.GrantedFeatures = []string{"assistant"}
+	fixture.sessions.authorization = fixture.authorization
+	fixture.policies.projection.Scopes = policy.QuotaScopeFacts{
+		InstallationFamilyID:  fixture.authorization.InstallationFamilyID,
+		ClientComponentID:     fixture.authorization.ComponentID,
+		ComponentDefinitionID: fixture.authorization.ComponentDefinitionID,
+		ComponentKind:         fixture.authorization.ComponentKind,
+		TrustSource:           fixture.authorization.TrustSource,
+	}
+	fixture.input.Metadata.Framework = "swift-openai"
+	fixture.input.Metadata.FrameworkVersion = "4.6.0"
+
+	if _, err := fixture.provider(t).FeatureQuota(context.Background(), fixture.input); err != nil {
+		t.Fatalf("component FeatureQuota() error = %v", err)
+	}
+	captured := fixture.quotas.input
+	if captured.InstallationFamilyID != fixture.authorization.InstallationFamilyID ||
+		captured.ClientComponentID != fixture.authorization.ComponentID ||
+		captured.ComponentDefinitionID != "ios-widget" || captured.ComponentKind != "widget" ||
+		captured.TrustSource != "delegated_from_attested_root" {
+		t.Fatalf("component snapshot input = %+v", captured)
+	}
+}
+
 func TestFeatureQuotaProviderProjectsTrustedInputAndTotalTokenAlgorithms(t *testing.T) {
 	fixture := newFeatureQuotaFixture(t)
 	fixture.policies.projection.LimitPlan.Limits = []configuration.Limit{
@@ -166,6 +198,30 @@ func TestFeatureQuotaProviderFailsClosedBeforeQuotaRead(t *testing.T) {
 				fixture.sessions.authorization = fixture.authorization
 			},
 			code: "request_invalid",
+		},
+		{
+			name: "framework missing version",
+			edit: func(fixture *featureQuotaFixture) {
+				fixture.input.Metadata.Framework = "swift-openai"
+			},
+			code: "server_not_ready",
+		},
+		{
+			name: "framework belongs to another SDK",
+			edit: func(fixture *featureQuotaFixture) {
+				fixture.input.Metadata.Framework = "vercel-ai-sdk"
+				fixture.input.Metadata.FrameworkVersion = "5.0.0"
+			},
+			code: "server_not_ready",
+		},
+		{
+			name: "component feature not granted",
+			edit: func(fixture *featureQuotaFixture) {
+				fixture.authorization.ComponentID = id.Must(id.ClientComponent)
+				fixture.authorization.GrantedFeatures = []string{"weekly_summary"}
+				fixture.sessions.authorization = fixture.authorization
+			},
+			code: "component_feature_not_granted",
 		},
 		{
 			name: "stale active revision",

@@ -1,0 +1,114 @@
+---
+title: "OpenAI JavaScript integration"
+description: "Evaluate the experimental custom-fetch adapter for the official OpenAI JavaScript SDK without treating local evidence as released support."
+---
+
+<Warning>
+  `@latchway/openai` is pre-release and unpublished. OpenAI JavaScript `7.8.0`
+  has an experimental local-evidence row, not a supported release.
+</Warning>
+
+## 1. What this integration does
+
+The source Class A adapter configures the official OpenAI JavaScript client with
+a Latchway base URL, placeholder credential, feature-bound custom fetch, and
+framework metadata. The transport replaces the placeholder before dispatch.
+
+## 2. Supported framework versions
+
+OpenAI JavaScript `7.8.0` is the exact locally tested experimental version.
+The generated compatibility registry is canonical; no supported range is
+published.
+
+## 3. Supported Latchway versions
+
+None published for this adapter. Draft contract `1.0.0` uses current wire
+protocol `2`, but a contract coordinate does not establish framework support.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Required; not yet evidenced |
+| Private key remains native | Required on native-backed runtimes; not yet evidenced |
+| Streaming | Required; not yet evidenced |
+| Cancellation | Required; not yet evidenced |
+| App extensions | Requires Installation Family SDK support; unavailable |
+| Structured output | Must pass conformance; not yet evidenced |
+| Tool calls | Must pass conformance; not yet evidenced |
+| Protocol | Target is OpenAI Responses and Chat Completions through a future compatible contract |
+
+## 5. Install packages
+
+Do not install an unverified package named `@latchway/openai`. Publication and
+integrity metadata are release gates.
+
+## 6. Create the Latchway client
+
+Use the platform client that owns identity, trust, DPoP keys, and session state.
+No adapter should receive reusable credentials from it.
+
+## 7. Bind a feature
+
+The planned helper accepts a feature ID such as `habit-assistant`. It must not
+expose the physical model or upstream selection.
+
+## 8. Create the framework client
+
+The planned helper creates the OpenAI client with a guarded custom fetch. Its
+signature is not stable enough to document as runnable code.
+
+## 9. Send a non-streaming request
+
+Responses and Chat Completions must preserve the official SDK request and
+response types while Latchway rewrites trusted routing fields.
+
+## 10. Send a streaming request
+
+The adapter must preserve incremental delivery, backpressure, usage frames,
+provider errors, and cancellation without buffering the stream.
+
+## 11. Use tools
+
+Tool definitions and calls remain OpenAI SDK concepts. Latchway forwards valid
+protocol content and does not execute tools.
+
+## 12. Use structured output
+
+Structured output remains an OpenAI SDK feature and requires an explicit passing
+conformance case before it appears as supported.
+
+## 13. Handle cancellation
+
+Abort signals must reach the active request. Cancellation must not trigger a
+hidden replay.
+
+## 14. Handle quota failures
+
+Map the canonical Latchway quota problem without converting it into a provider
+authentication error.
+
+## 15. Handle session renewal
+
+Refresh must be single-flight. A retry is permitted only for an exact
+pre-dispatch response and must carry a fresh DPoP proof.
+
+## 16. Known limitations
+
+Static base URL and API-key configuration alone cannot implement full DPoP.
+Secondary URLs must never receive Latchway credentials.
+
+## 17. Verify the integration
+
+Required cases include Responses, Chat Completions, streaming, structured
+output, tools, cancellation, refresh, quotas, provider errors, and placeholder
+credential stripping.
+
+## 18. Troubleshooting
+
+Confirm the request used the guarded custom fetch and the configured Latchway
+origin. Preserve only safe request IDs and diagnostics.
+
+## 19. Compatibility matrix
+
+No supported row is published. See [Compatibility](/reference/compatibility).

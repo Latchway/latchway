@@ -122,7 +122,8 @@ func testAuthorization(now time.Time, claims map[string]any) Authorization {
 		PolicyRevisionID: "rev_00000000000000000000000000", IdentityProvider: "firebase",
 		DPoPJKT: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", TrustLevel: "device_verified",
 		AttestationProvider: "app_attest", NormalizedClaims: claims,
-		IdentityExpiresAt: now.Add(time.Hour), AttestedAt: now.Add(-time.Minute),
+		IdentityVerifiedAt: now.Add(-2 * time.Minute), IdentityExpiresAt: now.Add(time.Hour),
+		AttestedAt:           now.Add(-time.Minute),
 		AttestationExpiresAt: now.Add(time.Hour), AccessExpiresAt: now.Add(10 * time.Minute),
 	}
 }

@@ -35,6 +35,8 @@ UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 TOOL_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+ -]{0,127}$")
 MAXIMUM_AGE = timedelta(days=7)
 MAXIMUM_RAW_BYTES = 128 * 1024 * 1024
+MAXIMUM_REVIEW_BYTES = 4 * 1024 * 1024
+MAXIMUM_ACCEPTED_RISKS = 512
 IMAGE_REPOSITORY = "ghcr.io/latchway/latchway"
 BLOCKED_SEVERITIES = ("CRITICAL", "HIGH")
 FORBIDDEN_CLAIM_FIELDS = frozenset(("claim", "claims", "passed", "success", "verdict"))
@@ -141,7 +143,7 @@ TRIVY_CHECKS: tuple[tuple[str, str, tuple[str, ...], str | None], ...] = (
     ),
 )
 
-EXTERNAL_OBSERVATIONS = (
+INDEPENDENT_REVIEWS = (
     "independent_p0_p2_review",
     "ssrf_review",
     "cryptography_review",
@@ -151,6 +153,34 @@ EXTERNAL_OBSERVATIONS = (
     "admin_auth_review",
     "browser_xss_review",
 )
+REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
+FINDING_SEVERITIES = ("critical", "high", "medium", "low", "informational")
+REPOSITORY_COORDINATE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})$"
+)
+WORKFLOW_PATH = re.compile(r"^\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\.ya?ml$")
+REVIEWER_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:@./+ _-]{0,255}$")
+GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+ACCEPTED_RISK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+SENSITIVE_REVIEW_KEY = re.compile(
+    r"(?:^|_)(?:access_token|api_key|authorization|cookie|credential|identity_token|"
+    r"password|private_key|refresh_token|secret)(?:$|_)",
+    re.IGNORECASE,
+)
+SENSITIVE_REVIEW_VALUE = re.compile(
+    r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:^|\s)Bearer\s+[A-Za-z0-9._~+/=-]+|"
+    r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})",
+    re.IGNORECASE,
+)
+REVIEW_REPORT_NAME = "independent-security-review.json"
+REVIEW_BUNDLE_NAME = "independent-security-review.attestation.sigstore.json"
+REVIEW_PRODUCER_VERIFICATION_NAME = "producer-verification.json"
+REVIEW_ATTESTATION_VERIFICATION_NAME = "attestation-verification.json"
+PROMOTION_REPORT_NAME = "latchway-cross-repository.json"
+PROMOTION_BUNDLE_NAME = "latchway-cross-repository.attestation.sigstore.json"
+PROMOTION_PRODUCER_VERIFICATION_NAME = "producer-verification.json"
+PROMOTION_ATTESTATION_VERIFICATION_NAME = "attestation-verification.json"
+PROMOTION_WORKFLOW = ".github/workflows/cross-repository-conformance.yml"
 
 
 class SecurityEvidenceError(Exception):
@@ -223,6 +253,84 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SecurityEvidenceError("security_evidence_json_invalid")
     return value
+
+
+def load_review_snapshot(path: Path) -> tuple[dict[str, Any], bytes, str]:
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    close_on_exec = getattr(os, "O_CLOEXEC", 0)
+    if no_follow is None:
+        raise SecurityEvidenceError("security_review_file_invalid")
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | no_follow | close_on_exec)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size < 1
+            or before.st_size > MAXIMUM_REVIEW_BYTES
+        ):
+            raise SecurityEvidenceError("security_review_file_invalid")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, MAXIMUM_REVIEW_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > MAXIMUM_REVIEW_BYTES:
+                raise SecurityEvidenceError("security_review_file_invalid")
+        after = os.fstat(descriptor)
+    except OSError:
+        raise SecurityEvidenceError("security_review_file_invalid") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    identity = lambda metadata: (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+    payload = b"".join(chunks)
+    if identity(before) != identity(after) or len(payload) != before.st_size:
+        raise SecurityEvidenceError("security_review_file_changed")
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=strict_object,
+            parse_constant=reject_nonfinite,
+        )
+    except SecurityEvidenceError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise SecurityEvidenceError("security_review_json_invalid") from None
+    if not isinstance(value, dict):
+        raise SecurityEvidenceError("security_review_json_invalid")
+    reject_sensitive_review_value(value)
+    return value, payload, sha256_bytes(payload)
+
+
+def load_review_json(path: Path) -> dict[str, Any]:
+    return load_review_snapshot(path)[0]
+
+
+def reject_sensitive_review_value(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or SENSITIVE_REVIEW_KEY.search(key):
+                raise SecurityEvidenceError("security_review_redaction_failed")
+            reject_sensitive_review_value(item)
+    elif isinstance(value, list):
+        for item in value:
+            reject_sensitive_review_value(item)
+    elif isinstance(value, str) and SENSITIVE_REVIEW_VALUE.search(value):
+        raise SecurityEvidenceError("security_review_redaction_failed")
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -816,13 +924,646 @@ def validate_raw_directory(raw_directory: Path) -> None:
         raise SecurityEvidenceError("security_raw_file_invalid")
 
 
+def positive_integer(value: Any, code: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise SecurityEvidenceError(code)
+    return value
+
+
+def validate_finding_counts(value: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(value, dict) or set(value) != {"total", "unresolved"}:
+        raise SecurityEvidenceError("security_review_findings_invalid")
+    result: dict[str, dict[str, int]] = {}
+    for category in ("total", "unresolved"):
+        counts = value.get(category)
+        if not isinstance(counts, dict) or set(counts) != set(FINDING_SEVERITIES):
+            raise SecurityEvidenceError("security_review_findings_invalid")
+        if any(
+            not isinstance(count, int) or isinstance(count, bool) or count < 0
+            for count in counts.values()
+        ):
+            raise SecurityEvidenceError("security_review_findings_invalid")
+        result[category] = dict(counts)
+    if any(
+        result["unresolved"][severity] > result["total"][severity]
+        for severity in FINDING_SEVERITIES
+    ):
+        raise SecurityEvidenceError("security_review_findings_invalid")
+    if result["unresolved"]["critical"] or result["unresolved"]["high"]:
+        raise SecurityEvidenceError("security_review_blocking_findings")
+    return result
+
+
+def bounded_review_text(value: Any, *, maximum: int) -> str:
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or not value
+        or len(value) > maximum
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise SecurityEvidenceError("security_review_accepted_risk_invalid")
+    return value
+
+
+def validate_accepted_risks(
+    value: Any,
+    findings: Mapping[str, Mapping[str, int]],
+    *,
+    review_id: str,
+) -> list[dict[str, str]]:
+    expected_count = sum(
+        findings["unresolved"][severity]
+        for severity in ("medium", "low", "informational")
+    )
+    if (
+        not isinstance(value, list)
+        or len(value) != expected_count
+        or len(value) > MAXIMUM_ACCEPTED_RISKS
+    ):
+        raise SecurityEvidenceError("security_review_accepted_risks_incomplete")
+    accepted: list[dict[str, str]] = []
+    identifiers: set[str] = set()
+    counts = {severity: 0 for severity in ("medium", "low", "informational")}
+    for risk in value:
+        if not isinstance(risk, dict) or set(risk) != {
+            "id",
+            "severity",
+            "summary",
+            "acceptance_rationale",
+        }:
+            raise SecurityEvidenceError("security_review_accepted_risk_invalid")
+        identifier = risk.get("id")
+        severity = risk.get("severity")
+        if (
+            not isinstance(identifier, str)
+            or ACCEPTED_RISK_ID.fullmatch(identifier) is None
+            or not identifier.startswith(f"{review_id}.")
+            or identifier in identifiers
+            or severity not in counts
+        ):
+            raise SecurityEvidenceError("security_review_accepted_risk_invalid")
+        identifiers.add(identifier)
+        counts[severity] += 1
+        accepted.append(
+            {
+                "id": identifier,
+                "severity": severity,
+                "summary": bounded_review_text(risk.get("summary"), maximum=256),
+                "acceptance_rationale": bounded_review_text(
+                    risk.get("acceptance_rationale"), maximum=2048
+                ),
+            }
+        )
+    if counts != {
+        severity: findings["unresolved"][severity]
+        for severity in ("medium", "low", "informational")
+    } or [risk["id"] for risk in accepted] != sorted(identifiers):
+        raise SecurityEvidenceError("security_review_accepted_risks_incomplete")
+    return accepted
+
+
+def review_file_hash(path: Path) -> str:
+    return load_review_snapshot(path)[2]
+
+
+def validate_review_tree(review_directory: Path) -> None:
+    try:
+        metadata = review_directory.lstat()
+        root = review_directory.resolve(strict=True)
+        entries = list(root.iterdir())
+    except OSError:
+        raise SecurityEvidenceError("security_review_directory_invalid") from None
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise SecurityEvidenceError("security_review_directory_invalid")
+    if {entry.name for entry in entries} != {
+        REVIEW_REPORT_NAME,
+        REVIEW_BUNDLE_NAME,
+        REVIEW_PRODUCER_VERIFICATION_NAME,
+        REVIEW_ATTESTATION_VERIFICATION_NAME,
+        "reviews",
+    }:
+        raise SecurityEvidenceError("security_review_file_set_invalid")
+    reviews = root / "reviews"
+    try:
+        reviews_metadata = reviews.lstat()
+        review_entries = list(reviews.iterdir())
+    except OSError:
+        raise SecurityEvidenceError("security_review_directory_invalid") from None
+    if not stat.S_ISDIR(reviews_metadata.st_mode) or stat.S_ISLNK(
+        reviews_metadata.st_mode
+    ):
+        raise SecurityEvidenceError("security_review_directory_invalid")
+    if {entry.name for entry in review_entries} != {
+        f"{identifier}.json" for identifier in INDEPENDENT_REVIEWS
+    }:
+        raise SecurityEvidenceError("security_review_file_set_invalid")
+
+
+def validate_promotion_conformance(
+    *,
+    promotion_directory: Path,
+    candidate: Mapping[str, Any],
+    candidate_created_at: datetime,
+    expected_commit: str,
+    expected_tag: str,
+    expected_run_id: int,
+    expected_run_attempt: int,
+    now: datetime,
+) -> tuple[dict[str, Any], list[dict[str, str]], datetime]:
+    positive_integer(expected_run_id, "security_promotion_run_invalid")
+    positive_integer(expected_run_attempt, "security_promotion_run_invalid")
+    try:
+        metadata = promotion_directory.lstat()
+        root = promotion_directory.resolve(strict=True)
+        entries = list(root.iterdir())
+    except OSError:
+        raise SecurityEvidenceError("security_promotion_directory_invalid") from None
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise SecurityEvidenceError("security_promotion_directory_invalid")
+    expected_names = {
+        PROMOTION_REPORT_NAME,
+        PROMOTION_BUNDLE_NAME,
+        PROMOTION_PRODUCER_VERIFICATION_NAME,
+        PROMOTION_ATTESTATION_VERIFICATION_NAME,
+    }
+    if {entry.name for entry in entries} != expected_names:
+        raise SecurityEvidenceError("security_promotion_file_set_invalid")
+
+    report_path = root / PROMOTION_REPORT_NAME
+    report, _, report_hash = load_review_snapshot(report_path)
+    if set(report) != {
+        "schema_version",
+        "kind",
+        "scope",
+        "verdict",
+        "source_conformance_passed",
+        "promotion_ready",
+        "release_ready",
+        "contract",
+        "repositories",
+        "evidence_window",
+        "evidence_domains",
+        "checks",
+    } or (
+        report.get("schema_version") != 1
+        or report.get("kind") != "latchway_cross_repository_conformance_evidence"
+        or report.get("scope") != "promotion"
+        or report.get("verdict") != "passed"
+        or report.get("source_conformance_passed") is not True
+        or report.get("promotion_ready") is not True
+        or report.get("release_ready") is not False
+    ):
+        raise SecurityEvidenceError("security_promotion_report_invalid")
+
+    candidate_contract = candidate["contract"]
+    candidate_image = candidate["image"]
+    contract = report.get("contract")
+    if not isinstance(contract, dict) or set(contract) != {
+        "version",
+        "status",
+        "released_at",
+        "wire_protocol",
+        "bundle_file_name",
+        "bundle_sha256",
+        "core_release",
+        "oci_image_digest",
+    } or (
+        contract.get("version") != candidate_contract["version"]
+        or contract.get("status") != candidate_contract["status"]
+        or contract.get("released_at") != candidate_contract["released_at"]
+        or contract.get("bundle_file_name") != candidate_contract["bundle_file_name"]
+        or contract.get("bundle_sha256") != candidate_contract["bundle_sha256"]
+        or contract.get("core_release") != expected_tag
+        or contract.get("oci_image_digest")
+        != f"{candidate_image['repository']}@{candidate_image['index_digest']}"
+        or not isinstance(contract.get("wire_protocol"), int)
+        or isinstance(contract.get("wire_protocol"), bool)
+        or contract["wire_protocol"] < 1
+    ):
+        raise SecurityEvidenceError("security_promotion_contract_mismatch")
+
+    repositories = report.get("repositories")
+    if not isinstance(repositories, list) or len(repositories) != len(REPOSITORY_IDS):
+        raise SecurityEvidenceError("security_promotion_repositories_invalid")
+    normalized_repositories: list[dict[str, str]] = []
+    seen_repositories: set[str] = set()
+    for coordinate in repositories:
+        if not isinstance(coordinate, dict) or set(coordinate) != {
+            "id",
+            "commit",
+            "version",
+            "intended_tag",
+        }:
+            raise SecurityEvidenceError("security_promotion_repositories_invalid")
+        repository_id = coordinate.get("id")
+        commit = coordinate.get("commit")
+        version = coordinate.get("version")
+        intended_tag = coordinate.get("intended_tag")
+        if (
+            repository_id not in REPOSITORY_IDS
+            or repository_id in seen_repositories
+            or not isinstance(commit, str)
+            or COMMIT.fullmatch(commit) is None
+            or not isinstance(version, str)
+            or intended_tag != f"v{version}"
+            or not isinstance(intended_tag, str)
+            or TAG.fullmatch(intended_tag) is None
+        ):
+            raise SecurityEvidenceError("security_promotion_repositories_invalid")
+        seen_repositories.add(repository_id)
+        normalized_repositories.append(dict(coordinate))
+    if seen_repositories != set(REPOSITORY_IDS):
+        raise SecurityEvidenceError("security_promotion_repositories_invalid")
+    normalized_repositories.sort(key=lambda item: REPOSITORY_IDS.index(item["id"]))
+    core = normalized_repositories[0]
+    if (
+        core["id"] != "core"
+        or core["commit"] != expected_commit
+        or core["version"] != candidate["version"]
+        or core["intended_tag"] != expected_tag
+    ):
+        raise SecurityEvidenceError("security_promotion_core_mismatch")
+
+    evidence_window = report.get("evidence_window")
+    if not isinstance(evidence_window, dict) or set(evidence_window) != {
+        "started_at",
+        "finished_at",
+        "maximum_age_seconds",
+    }:
+        raise SecurityEvidenceError("security_promotion_window_invalid")
+    started_at = parse_time(
+        evidence_window.get("started_at"), "security_promotion_window_invalid"
+    )
+    finished_at = parse_time(
+        evidence_window.get("finished_at"), "security_promotion_window_invalid"
+    )
+    if (
+        evidence_window.get("maximum_age_seconds")
+        != int(MAXIMUM_AGE.total_seconds())
+        or started_at < candidate_created_at
+        or finished_at <= started_at
+        or finished_at > now
+        or now - finished_at > MAXIMUM_AGE
+        or finished_at - started_at > MAXIMUM_AGE
+    ):
+        raise SecurityEvidenceError("security_promotion_window_invalid")
+
+    producer_path = root / PROMOTION_PRODUCER_VERIFICATION_NAME
+    producer, _, producer_hash = load_review_snapshot(producer_path)
+    expected_producer = {
+        "schema_version": 1,
+        "kind": "latchway_security_promotion_conformance_producer_verification",
+        "repository": "Latchway/latchway",
+        "workflow_path": PROMOTION_WORKFLOW,
+        "run_id": expected_run_id,
+        "run_attempt": expected_run_attempt,
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": expected_commit,
+        "head_branch": "main",
+    }
+    if producer != expected_producer:
+        raise SecurityEvidenceError("security_promotion_producer_invalid")
+
+    attestation_path = root / PROMOTION_ATTESTATION_VERIFICATION_NAME
+    attestation, _, attestation_hash = load_review_snapshot(attestation_path)
+    expected_attestation = {
+        "schema_version": 1,
+        "kind": "latchway_security_promotion_conformance_attestation_verification",
+        "repository": "Latchway/latchway",
+        "signer_workflow": f"Latchway/latchway/{PROMOTION_WORKFLOW}",
+        "source_digest": expected_commit,
+        "source_ref": "refs/heads/main",
+        "subject_sha256": report_hash,
+        "hosted_runner": True,
+        "verified": True,
+    }
+    if attestation != expected_attestation:
+        raise SecurityEvidenceError("security_promotion_attestation_invalid")
+    _, _, bundle_hash = load_review_snapshot(root / PROMOTION_BUNDLE_NAME)
+
+    binding = {
+        "scope": "promotion",
+        "run_id": expected_run_id,
+        "run_attempt": expected_run_attempt,
+        "report_sha256": report_hash,
+        "repositories": normalized_repositories,
+    }
+    hashes = {
+        PROMOTION_REPORT_NAME: report_hash,
+        PROMOTION_BUNDLE_NAME: bundle_hash,
+        PROMOTION_PRODUCER_VERIFICATION_NAME: producer_hash,
+        PROMOTION_ATTESTATION_VERIFICATION_NAME: attestation_hash,
+    }
+    evidence = [
+        {"path": f"promotion-conformance/{name}", "sha256": digest}
+        for name, digest in sorted(hashes.items())
+    ]
+    return binding, evidence, finished_at
+def validate_independent_review(
+    *,
+    review_directory: Path,
+    candidate: Mapping[str, Any],
+    candidate_created_at: datetime,
+    promotion_binding: Mapping[str, Any],
+    promotion_finished_at: datetime,
+    expected_commit: str,
+    expected_tag: str,
+    expected_repository: str,
+    expected_workflow: str,
+    expected_reviewer_identity: str,
+    expected_reviewer_organization: str,
+    expected_reviewer_login: str,
+    expected_run_id: int,
+    expected_run_attempt: int,
+    now: datetime,
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, str]],
+    datetime,
+    datetime,
+]:
+    validate_review_tree(review_directory)
+    if (
+        not isinstance(expected_repository, str)
+        or REPOSITORY_COORDINATE.fullmatch(expected_repository) is None
+        or not isinstance(expected_workflow, str)
+        or WORKFLOW_PATH.fullmatch(expected_workflow) is None
+        or not isinstance(expected_reviewer_identity, str)
+        or REVIEWER_VALUE.fullmatch(expected_reviewer_identity) is None
+        or not isinstance(expected_reviewer_organization, str)
+        or REVIEWER_VALUE.fullmatch(expected_reviewer_organization) is None
+        or not isinstance(expected_reviewer_login, str)
+        or GITHUB_LOGIN.fullmatch(expected_reviewer_login) is None
+    ):
+        raise SecurityEvidenceError("security_review_authority_invalid")
+    producer_owner = expected_repository.split("/", 1)[0]
+    if (
+        producer_owner.casefold() == "latchway"
+        or expected_reviewer_organization.strip().casefold() == "latchway"
+    ):
+        raise SecurityEvidenceError("security_review_not_independent")
+    positive_integer(expected_run_id, "security_review_run_invalid")
+    positive_integer(expected_run_attempt, "security_review_run_invalid")
+
+    root = review_directory.resolve(strict=True)
+    report_path = root / REVIEW_REPORT_NAME
+    report, _, report_hash = load_review_snapshot(report_path)
+    if set(report) != {
+        "schema_version",
+        "kind",
+        "status",
+        "review_window",
+        "candidate",
+        "reviewer",
+        "producer",
+        "reviews",
+    }:
+        raise SecurityEvidenceError("security_review_report_fields_invalid")
+    if (
+        report.get("schema_version") != 1
+        or report.get("kind") != "latchway_independent_security_review"
+        or report.get("status") != "passed"
+    ):
+        raise SecurityEvidenceError("security_review_report_invalid")
+
+    candidate_binding = report.get("candidate")
+    contract = candidate["contract"]
+    image = candidate["image"]
+    expected_candidate_binding = {
+        "commit": expected_commit,
+        "intended_tag": expected_tag,
+        "version": candidate["version"],
+        "contract": {
+            "version": contract["version"],
+            "bundle_file_name": contract["bundle_file_name"],
+            "bundle_sha256": contract["bundle_sha256"],
+        },
+        "image": {
+            "repository": image["repository"],
+            "index_digest": image["index_digest"],
+            "platforms": image["platforms"],
+        },
+        "promotion_conformance": promotion_binding,
+    }
+    if candidate_binding != expected_candidate_binding:
+        raise SecurityEvidenceError("security_review_candidate_mismatch")
+
+    reviewer = report.get("reviewer")
+    expected_reviewer = {
+        "identity": expected_reviewer_identity,
+        "organization": expected_reviewer_organization,
+        "github_login": expected_reviewer_login,
+        "independent_from": "Latchway",
+        "control": "separately_controlled",
+    }
+    if reviewer != expected_reviewer:
+        raise SecurityEvidenceError("security_review_reviewer_mismatch")
+
+    producer = report.get("producer")
+    if not isinstance(producer, dict) or set(producer) != {
+        "repository",
+        "workflow_path",
+        "run_id",
+        "run_attempt",
+        "source_commit",
+    }:
+        raise SecurityEvidenceError("security_review_producer_invalid")
+    if (
+        producer.get("repository") != expected_repository
+        or producer.get("workflow_path") != expected_workflow
+        or producer.get("run_id") != expected_run_id
+        or producer.get("run_attempt") != expected_run_attempt
+        or not isinstance(producer.get("source_commit"), str)
+        or COMMIT.fullmatch(producer["source_commit"]) is None
+    ):
+        raise SecurityEvidenceError("security_review_producer_mismatch")
+
+    review_window = report.get("review_window")
+    if not isinstance(review_window, dict) or set(review_window) != {
+        "started_at",
+        "finished_at",
+        "maximum_age_seconds",
+    }:
+        raise SecurityEvidenceError("security_review_window_invalid")
+    review_started = parse_time(
+        review_window.get("started_at"), "security_review_window_invalid"
+    )
+    review_finished = parse_time(
+        review_window.get("finished_at"), "security_review_window_invalid"
+    )
+    if (
+        review_window.get("maximum_age_seconds")
+        != int(MAXIMUM_AGE.total_seconds())
+        or review_started < candidate_created_at
+        or review_started < promotion_finished_at
+        or review_finished <= review_started
+        or review_finished > now
+        or review_finished - review_started > MAXIMUM_AGE
+        or now - review_finished > MAXIMUM_AGE
+    ):
+        raise SecurityEvidenceError("security_review_window_invalid")
+
+    reviews = report.get("reviews")
+    if not isinstance(reviews, list) or len(reviews) != len(INDEPENDENT_REVIEWS):
+        raise SecurityEvidenceError("security_review_results_incomplete")
+    normalized_reviews: list[dict[str, Any]] = []
+    retained: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for review in reviews:
+        if not isinstance(review, dict) or set(review) != {
+            "id",
+            "status",
+            "started_at",
+            "finished_at",
+            "findings",
+            "accepted_risks",
+            "artifact",
+        }:
+            raise SecurityEvidenceError("security_review_result_invalid")
+        identifier = review.get("id")
+        if identifier not in INDEPENDENT_REVIEWS or identifier in seen:
+            raise SecurityEvidenceError("security_review_results_incomplete")
+        seen.add(identifier)
+        started_at = parse_time(
+            review.get("started_at"), "security_review_result_time_invalid"
+        )
+        finished_at = parse_time(
+            review.get("finished_at"), "security_review_result_time_invalid"
+        )
+        findings = validate_finding_counts(review.get("findings"))
+        accepted_risks = validate_accepted_risks(
+            review.get("accepted_risks"), findings, review_id=identifier
+        )
+        artifact = review.get("artifact")
+        expected_relative = f"reviews/{identifier}.json"
+        if (
+            review.get("status") != "passed"
+            or started_at < review_started
+            or finished_at <= started_at
+            or finished_at > review_finished
+            or not isinstance(artifact, dict)
+            or set(artifact) != {"path", "sha256"}
+            or artifact.get("path") != expected_relative
+            or not isinstance(artifact.get("sha256"), str)
+            or SHA256.fullmatch(artifact["sha256"]) is None
+        ):
+            raise SecurityEvidenceError("security_review_result_invalid")
+        artifact_path = root / expected_relative
+        receipt, _, receipt_hash = load_review_snapshot(artifact_path)
+        expected_receipt = {
+            "schema_version": 1,
+            "kind": "latchway_independent_security_review_result",
+            "id": identifier,
+            "status": "passed",
+            "candidate_commit": expected_commit,
+            "reviewer": reviewer,
+            "started_at": review["started_at"],
+            "finished_at": review["finished_at"],
+            "findings": findings,
+            "accepted_risks": accepted_risks,
+        }
+        if receipt != expected_receipt or receipt_hash != artifact["sha256"]:
+            raise SecurityEvidenceError("security_review_artifact_mismatch")
+        normalized_reviews.append(dict(review))
+        retained.append(
+            {
+                "path": f"independent-review/{expected_relative}",
+                "sha256": artifact["sha256"],
+            }
+        )
+    if seen != set(INDEPENDENT_REVIEWS):
+        raise SecurityEvidenceError("security_review_results_incomplete")
+
+    producer_verification_path = root / REVIEW_PRODUCER_VERIFICATION_NAME
+    producer_verification, _, producer_verification_hash = load_review_snapshot(
+        producer_verification_path
+    )
+    expected_producer_verification = {
+        "schema_version": 1,
+        "kind": "latchway_independent_security_review_producer_verification",
+        "repository": expected_repository,
+        "workflow_path": expected_workflow,
+        "run_id": expected_run_id,
+        "run_attempt": expected_run_attempt,
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": producer["source_commit"],
+        "head_branch": "main",
+        "actor_login": expected_reviewer_login,
+        "triggering_actor_login": expected_reviewer_login,
+    }
+    if producer_verification != expected_producer_verification:
+        raise SecurityEvidenceError("security_review_producer_verification_invalid")
+
+    attestation_verification_path = root / REVIEW_ATTESTATION_VERIFICATION_NAME
+    attestation_verification, _, attestation_verification_hash = load_review_snapshot(
+        attestation_verification_path
+    )
+    expected_attestation_verification = {
+        "schema_version": 1,
+        "kind": "latchway_independent_security_review_attestation_verification",
+        "repository": expected_repository,
+        "signer_workflow": f"{expected_repository}/{expected_workflow}",
+        "source_digest": producer["source_commit"],
+        "source_ref": "refs/heads/main",
+        "subject_sha256": report_hash,
+        "hosted_runner": True,
+        "verified": True,
+    }
+    if attestation_verification != expected_attestation_verification:
+        raise SecurityEvidenceError("security_review_attestation_verification_invalid")
+
+    _, _, bundle_hash = load_review_snapshot(root / REVIEW_BUNDLE_NAME)
+    fixed_hashes = {
+        REVIEW_REPORT_NAME: report_hash,
+        REVIEW_BUNDLE_NAME: bundle_hash,
+        REVIEW_PRODUCER_VERIFICATION_NAME: producer_verification_hash,
+        REVIEW_ATTESTATION_VERIFICATION_NAME: attestation_verification_hash,
+    }
+    for relative, digest in fixed_hashes.items():
+        retained.append(
+            {
+                "path": f"independent-review/{relative}",
+                "sha256": digest,
+            }
+        )
+    authority = {
+        "reviewer": reviewer,
+        "producer": producer,
+        "report_sha256": report_hash,
+    }
+    return (
+        authority,
+        sorted(normalized_reviews, key=lambda item: item["id"]),
+        sorted(retained, key=lambda item: item["path"]),
+        review_started,
+        review_finished,
+    )
+
+
 def derive_summary(
     *,
     candidate_manifest: Path,
     raw_directory: Path,
+    review_directory: Path,
+    promotion_directory: Path,
     repository: Path,
     expected_commit: str,
     expected_tag: str,
+    expected_review_repository: str,
+    expected_review_workflow: str,
+    expected_reviewer_identity: str,
+    expected_reviewer_organization: str,
+    expected_reviewer_login: str,
+    expected_review_run_id: int,
+    expected_review_run_attempt: int,
+    expected_promotion_run_id: int,
+    expected_promotion_run_attempt: int,
     now: datetime,
 ) -> dict[str, Any]:
     tree = validate_clean_repository(repository, expected_commit)
@@ -833,9 +1574,44 @@ def derive_summary(
         expected_tag=expected_tag,
         now=now,
     )
+    promotion_binding, promotion_evidence, promotion_finished = (
+        validate_promotion_conformance(
+            promotion_directory=promotion_directory,
+            candidate=candidate,
+            candidate_created_at=candidate_created_at,
+            expected_commit=expected_commit,
+            expected_tag=expected_tag,
+            expected_run_id=expected_promotion_run_id,
+            expected_run_attempt=expected_promotion_run_attempt,
+            now=now,
+        )
+    )
+    (
+        review_authority,
+        independent_reviews,
+        review_evidence,
+        review_started,
+        review_finished,
+    ) = validate_independent_review(
+        review_directory=review_directory,
+        candidate=candidate,
+        candidate_created_at=candidate_created_at,
+        promotion_binding=promotion_binding,
+        promotion_finished_at=promotion_finished,
+        expected_commit=expected_commit,
+        expected_tag=expected_tag,
+        expected_repository=expected_review_repository,
+        expected_workflow=expected_review_workflow,
+        expected_reviewer_identity=expected_reviewer_identity,
+        expected_reviewer_organization=expected_reviewer_organization,
+        expected_reviewer_login=expected_reviewer_login,
+        expected_run_id=expected_review_run_id,
+        expected_run_attempt=expected_review_run_attempt,
+        now=now,
+    )
     validate_raw_directory(raw_directory)
-    started_times: list[datetime] = []
-    finished_times: list[datetime] = []
+    started_times: list[datetime] = [review_started]
+    finished_times: list[datetime] = [review_finished]
     raw_evidence: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
 
@@ -910,9 +1686,10 @@ def derive_summary(
     contract = candidate["contract"]
     image = candidate["image"]
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "latchway_candidate_security_evidence",
         "automated_gate": "passed",
+        "independent_review_gate": "passed",
         "candidate": {
             "commit": expected_commit,
             "intended_tag": expected_tag,
@@ -943,15 +1720,12 @@ def derive_summary(
             "raw_claims_accepted": False,
         },
         "checks": checks,
-        "external_observations": [
-            {
-                "id": identifier,
-                "status": "unavailable",
-                "reason": "no_candidate_bound_protected_external_result",
-            }
-            for identifier in EXTERNAL_OBSERVATIONS
-        ],
+        "promotion_conformance": promotion_binding,
+        "review_authority": review_authority,
+        "independent_reviews": independent_reviews,
         "raw_evidence": sorted(raw_evidence, key=lambda item: item["path"]),
+        "review_evidence": review_evidence,
+        "promotion_evidence": promotion_evidence,
     }
     candidate_after, hashes_after, created_after = validate_candidate(
         candidate_manifest,
@@ -972,6 +1746,18 @@ def derive_summary(
             raw_directory / relative, allow_empty=relative.endswith(".log")
         ) != artifact["sha256"]:
             raise SecurityEvidenceError("security_raw_changed_during_validation")
+    for artifact in summary["review_evidence"]:
+        relative = artifact["path"].removeprefix("independent-review/")
+        if relative == artifact["path"] or review_file_hash(
+            review_directory / relative
+        ) != artifact["sha256"]:
+            raise SecurityEvidenceError("security_review_changed_during_validation")
+    for artifact in summary["promotion_evidence"]:
+        relative = artifact["path"].removeprefix("promotion-conformance/")
+        if relative == artifact["path"] or review_file_hash(
+            promotion_directory / relative
+        ) != artifact["sha256"]:
+            raise SecurityEvidenceError("security_promotion_changed_during_validation")
     if validate_clean_repository(repository, expected_commit) != tree:
         raise SecurityEvidenceError("security_source_changed_during_validation")
     return summary
@@ -988,13 +1774,38 @@ def copy_real_file(source: Path, destination: Path, *, allow_empty: bool = False
         raise SecurityEvidenceError("security_evidence_changed_during_copy")
 
 
+def copy_review_snapshot(source: Path, destination: Path, expected_digest: str) -> None:
+    _, payload, digest = load_review_snapshot(source)
+    if digest != expected_digest:
+        raise SecurityEvidenceError("security_review_changed_during_copy")
+    try:
+        with destination.open("xb") as output:
+            output.write(payload)
+        destination.chmod(0o600)
+    except OSError:
+        raise SecurityEvidenceError("security_evidence_copy_failed") from None
+    if review_file_hash(destination) != expected_digest:
+        raise SecurityEvidenceError("security_review_changed_during_copy")
+
+
 def seal(
     *,
     candidate_manifest: Path,
     raw_directory: Path,
+    review_directory: Path,
+    promotion_directory: Path,
     repository: Path,
     expected_commit: str,
     expected_tag: str,
+    expected_review_repository: str,
+    expected_review_workflow: str,
+    expected_reviewer_identity: str,
+    expected_reviewer_organization: str,
+    expected_reviewer_login: str,
+    expected_review_run_id: int,
+    expected_review_run_attempt: int,
+    expected_promotion_run_id: int,
+    expected_promotion_run_attempt: int,
     output_directory: Path,
     now: datetime,
 ) -> dict[str, Any]:
@@ -1008,9 +1819,20 @@ def seal(
     summary = derive_summary(
         candidate_manifest=candidate_manifest,
         raw_directory=raw_directory,
+        review_directory=review_directory,
+        promotion_directory=promotion_directory,
         repository=repository,
         expected_commit=expected_commit,
         expected_tag=expected_tag,
+        expected_review_repository=expected_review_repository,
+        expected_review_workflow=expected_review_workflow,
+        expected_reviewer_identity=expected_reviewer_identity,
+        expected_reviewer_organization=expected_reviewer_organization,
+        expected_reviewer_login=expected_reviewer_login,
+        expected_review_run_id=expected_review_run_id,
+        expected_review_run_attempt=expected_review_run_attempt,
+        expected_promotion_run_id=expected_promotion_run_id,
+        expected_promotion_run_attempt=expected_promotion_run_attempt,
         now=now,
     )
     staging = Path(
@@ -1020,12 +1842,34 @@ def seal(
     )
     try:
         (staging / "raw").mkdir(mode=0o700)
+        (staging / "independent-review" / "reviews").mkdir(
+            mode=0o700, parents=True
+        )
+        (staging / "promotion-conformance").mkdir(mode=0o700)
         copy_real_file(candidate_manifest, staging / "latchway-candidate.json")
         for name in sorted(expected_raw_names()):
             copy_real_file(
                 raw_directory / name,
                 staging / "raw" / name,
                 allow_empty=name.endswith(".log"),
+            )
+        for artifact in summary["review_evidence"]:
+            relative = artifact["path"].removeprefix("independent-review/")
+            if relative == artifact["path"]:
+                raise SecurityEvidenceError("security_review_copy_invalid")
+            copy_review_snapshot(
+                review_directory / relative,
+                staging / "independent-review" / relative,
+                artifact["sha256"],
+            )
+        for artifact in summary["promotion_evidence"]:
+            relative = artifact["path"].removeprefix("promotion-conformance/")
+            if relative == artifact["path"]:
+                raise SecurityEvidenceError("security_promotion_copy_invalid")
+            copy_review_snapshot(
+                promotion_directory / relative,
+                staging / "promotion-conformance" / relative,
+                artifact["sha256"],
             )
         write_json(staging / "security-summary.json", summary)
         os.replace(staging, output_directory)
@@ -1035,23 +1879,110 @@ def seal(
     return summary
 
 
+def verify_review(
+    *,
+    candidate_manifest: Path,
+    review_directory: Path,
+    promotion_directory: Path,
+    expected_commit: str,
+    expected_tag: str,
+    expected_review_repository: str,
+    expected_review_workflow: str,
+    expected_reviewer_identity: str,
+    expected_reviewer_organization: str,
+    expected_reviewer_login: str,
+    expected_review_run_id: int,
+    expected_review_run_attempt: int,
+    expected_promotion_run_id: int,
+    expected_promotion_run_attempt: int,
+    now: datetime,
+) -> dict[str, Any]:
+    candidate, _, candidate_created_at = validate_candidate(
+        candidate_manifest,
+        expected_commit=expected_commit,
+        expected_tag=expected_tag,
+        now=now,
+    )
+    promotion_binding, promotion_evidence, promotion_finished = (
+        validate_promotion_conformance(
+            promotion_directory=promotion_directory,
+            candidate=candidate,
+            candidate_created_at=candidate_created_at,
+            expected_commit=expected_commit,
+            expected_tag=expected_tag,
+            expected_run_id=expected_promotion_run_id,
+            expected_run_attempt=expected_promotion_run_attempt,
+            now=now,
+        )
+    )
+    authority, reviews, evidence, started_at, finished_at = validate_independent_review(
+        review_directory=review_directory,
+        candidate=candidate,
+        candidate_created_at=candidate_created_at,
+        promotion_binding=promotion_binding,
+        promotion_finished_at=promotion_finished,
+        expected_commit=expected_commit,
+        expected_tag=expected_tag,
+        expected_repository=expected_review_repository,
+        expected_workflow=expected_review_workflow,
+        expected_reviewer_identity=expected_reviewer_identity,
+        expected_reviewer_organization=expected_reviewer_organization,
+        expected_reviewer_login=expected_reviewer_login,
+        expected_run_id=expected_review_run_id,
+        expected_run_attempt=expected_review_run_attempt,
+        now=now,
+    )
+    return {
+        "status": "passed",
+        "authority": authority,
+        "review_ids": [item["id"] for item in reviews],
+        "evidence_sha256": [item["sha256"] for item in evidence],
+        "promotion_evidence_sha256": [
+            item["sha256"] for item in promotion_evidence
+        ],
+        "started_at": canonical_time(started_at),
+        "finished_at": canonical_time(finished_at),
+    }
+
+
 def verify(
     *,
     report: Path,
     candidate_manifest: Path,
     raw_directory: Path,
+    review_directory: Path,
+    promotion_directory: Path,
     repository: Path,
     expected_commit: str,
     expected_tag: str,
     now: datetime,
 ) -> dict[str, Any]:
     actual = load_json(report)
+    authority = actual.get("review_authority")
+    reviewer = authority.get("reviewer") if isinstance(authority, dict) else None
+    producer = authority.get("producer") if isinstance(authority, dict) else None
+    if not isinstance(reviewer, dict) or not isinstance(producer, dict):
+        raise SecurityEvidenceError("security_review_authority_invalid")
+    promotion = actual.get("promotion_conformance")
+    if not isinstance(promotion, dict):
+        raise SecurityEvidenceError("security_promotion_binding_invalid")
     expected = derive_summary(
         candidate_manifest=candidate_manifest,
         raw_directory=raw_directory,
+        review_directory=review_directory,
+        promotion_directory=promotion_directory,
         repository=repository,
         expected_commit=expected_commit,
         expected_tag=expected_tag,
+        expected_review_repository=producer.get("repository"),
+        expected_review_workflow=producer.get("workflow_path"),
+        expected_reviewer_identity=reviewer.get("identity"),
+        expected_reviewer_organization=reviewer.get("organization"),
+        expected_reviewer_login=reviewer.get("github_login"),
+        expected_review_run_id=producer.get("run_id"),
+        expected_review_run_attempt=producer.get("run_attempt"),
+        expected_promotion_run_id=promotion.get("run_id"),
+        expected_promotion_run_attempt=promotion.get("run_attempt"),
         now=now,
     )
     if actual != expected:
@@ -1065,16 +1996,28 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument("--capture", choices=sorted(COMMAND_BY_ID))
     modes.add_argument("--begin-scan", action="store_true")
     modes.add_argument("--finish-scan", action="store_true")
+    modes.add_argument("--verify-review", action="store_true")
     modes.add_argument("--seal", action="store_true")
     modes.add_argument("--verify", action="store_true")
     parser.add_argument("--candidate-manifest", type=Path)
     parser.add_argument("--raw-directory", type=Path)
+    parser.add_argument("--review-directory", type=Path)
+    parser.add_argument("--promotion-directory", type=Path)
     parser.add_argument("--repository", type=Path)
     parser.add_argument("--commit")
     parser.add_argument("--tag")
     parser.add_argument("--window", type=Path)
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--review-repository")
+    parser.add_argument("--review-workflow")
+    parser.add_argument("--reviewer-identity")
+    parser.add_argument("--reviewer-organization")
+    parser.add_argument("--reviewer-login")
+    parser.add_argument("--review-run-id", type=int)
+    parser.add_argument("--review-run-attempt", type=int)
+    parser.add_argument("--promotion-run-id", type=int)
+    parser.add_argument("--promotion-run-attempt", type=int)
     return parser
 
 
@@ -1101,13 +2044,50 @@ def main() -> int:
         elif arguments.finish_scan:
             finish_scan(required(arguments.window), required(arguments.commit))
             result = {"status": "scan_finished"}
+        elif arguments.verify_review:
+            result = verify_review(
+                candidate_manifest=required(arguments.candidate_manifest),
+                review_directory=required(arguments.review_directory),
+                promotion_directory=required(arguments.promotion_directory),
+                expected_commit=required(arguments.commit),
+                expected_tag=required(arguments.tag),
+                expected_review_repository=required(arguments.review_repository),
+                expected_review_workflow=required(arguments.review_workflow),
+                expected_reviewer_identity=required(arguments.reviewer_identity),
+                expected_reviewer_organization=required(
+                    arguments.reviewer_organization
+                ),
+                expected_reviewer_login=required(arguments.reviewer_login),
+                expected_review_run_id=required(arguments.review_run_id),
+                expected_review_run_attempt=required(arguments.review_run_attempt),
+                expected_promotion_run_id=required(arguments.promotion_run_id),
+                expected_promotion_run_attempt=required(
+                    arguments.promotion_run_attempt
+                ),
+                now=now,
+            )
         elif arguments.seal:
             result = seal(
                 candidate_manifest=required(arguments.candidate_manifest),
                 raw_directory=required(arguments.raw_directory),
+                review_directory=required(arguments.review_directory),
+                promotion_directory=required(arguments.promotion_directory),
                 repository=required(arguments.repository),
                 expected_commit=required(arguments.commit),
                 expected_tag=required(arguments.tag),
+                expected_review_repository=required(arguments.review_repository),
+                expected_review_workflow=required(arguments.review_workflow),
+                expected_reviewer_identity=required(arguments.reviewer_identity),
+                expected_reviewer_organization=required(
+                    arguments.reviewer_organization
+                ),
+                expected_reviewer_login=required(arguments.reviewer_login),
+                expected_review_run_id=required(arguments.review_run_id),
+                expected_review_run_attempt=required(arguments.review_run_attempt),
+                expected_promotion_run_id=required(arguments.promotion_run_id),
+                expected_promotion_run_attempt=required(
+                    arguments.promotion_run_attempt
+                ),
                 output_directory=required(arguments.output_directory),
                 now=now,
             )
@@ -1116,6 +2096,8 @@ def main() -> int:
                 report=required(arguments.report),
                 candidate_manifest=required(arguments.candidate_manifest),
                 raw_directory=required(arguments.raw_directory),
+                review_directory=required(arguments.review_directory),
+                promotion_directory=required(arguments.promotion_directory),
                 repository=required(arguments.repository),
                 expected_commit=required(arguments.commit),
                 expected_tag=required(arguments.tag),

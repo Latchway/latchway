@@ -1,0 +1,115 @@
+---
+title: "Raw HTTP integration"
+description: "Evaluate the full session, DPoP, origin, streaming, cancellation, and retry obligations behind a direct protocol integration."
+---
+
+<Warning>
+  The current pre-release client HTTP contract is documented, but a handwritten request is
+  not a substitute for a Latchway SDK. Do not call raw HTTP a supported client
+  integration without platform conformance evidence.
+</Warning>
+
+## 1. What this integration does
+
+Raw HTTP exposes the underlying discovery, session, quota, diagnostics, AI, and
+restricted proxy routes. The client must implement every security property that
+an SDK normally owns.
+
+## 2. Supported framework versions
+
+Not applicable. Raw HTTP has no framework dependency.
+
+## 3. Supported Latchway versions
+
+The current authored reference describes draft contract `1.0.0` and current
+wire protocol `2`, including Installation Family and Client Component
+endpoints. Wire `1` remains accepted on compatible legacy routes.
+
+## 4. Security level
+
+| Capability | Status |
+| --- | --- |
+| Full DPoP preserved | Required; the client creates a fresh proof for every attempt |
+| Private key remains native | Client responsibility; use platform secure storage where available |
+| Streaming | Protocol permits it; the client must avoid buffering |
+| Cancellation | Client responsibility |
+| App extensions | Draft component endpoints exist; correct platform key isolation remains the client's responsibility |
+| Structured output | Passed through only when the selected upstream protocol supports it |
+| Tool calls | Passed through only when the selected upstream protocol supports them |
+| Protocol | Draft contract `1.0.0`, current wire protocol `2`; compatible legacy routes also accept wire `1` |
+
+## 5. Install packages
+
+No framework package is required. Use a Latchway SDK instead of rebuilding the
+security protocol when one exists for your platform.
+
+## 6. Create the Latchway client
+
+Load discovery, configure the exact HTTPS origin, obtain identity input, create
+a P-256 key, and implement attestation and session storage from the normative
+OpenAPI and conformance contract.
+
+## 7. Bind a feature
+
+Send one server-configured `X-Latchway-Feature`. Never substitute a physical
+model or upstream name.
+
+## 8. Create the framework client
+
+Not applicable. A later framework client must receive a request-time transport,
+not a static Latchway access token.
+
+## 9. Send a non-streaming request
+
+Follow [Client API](/reference/client-api). Strip caller credentials, sign the
+exact method and public URL, and validate the destination after redirects.
+
+## 10. Send a streaming request
+
+Preserve incremental bytes, backpressure, terminal usage frames, and upstream
+errors. Do not retry after response bytes arrive.
+
+## 11. Use tools
+
+Tool-call payloads belong to the selected upstream protocol. Latchway does not
+execute tools.
+
+## 12. Use structured output
+
+Structured-output payloads pass through protocol validation. Latchway does not
+define the framework's result types.
+
+## 13. Handle cancellation
+
+Cancel the active network operation and do not translate cancellation into an
+automatic replay.
+
+## 14. Handle quota failures
+
+Read the canonical problem code and request ID. Do not infer quota state from a
+provider error or client-calculated usage.
+
+## 15. Handle session renewal
+
+Single-flight refresh and retry only an exact pre-dispatch response with a
+replayable body. Generate a fresh DPoP proof for every attempt.
+
+## 16. Known limitations
+
+Raw HTTP is easy to implement incorrectly. Dynamic DPoP also makes a static
+browser-based API playground misleading for protected routes.
+
+## 17. Verify the integration
+
+Run the framework-independent conformance suite for the exact platform,
+contract, and server candidate before claiming support.
+
+## 18. Troubleshooting
+
+Capture safe diagnostics and request IDs. Never log credentials, DPoP private
+material, proofs, raw attestation evidence, identity tokens, or request bodies.
+
+## 19. Compatibility matrix
+
+No generated raw-HTTP conformance row is published in this foundation. See
+[Compatibility](/reference/compatibility).

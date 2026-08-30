@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from framework_compatibility import validate_repository as validate_framework_compatibility
+
 
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / "api"
@@ -557,12 +559,114 @@ def validate_attestation_vectors(vector_set: dict[str, Any]) -> None:
             raise ValueError(f"attestation vector {vector['id']} SHA-256 mismatch")
 
 
+def validate_installation_family_vectors(vector_set: dict[str, Any]) -> None:
+    family = vector_set["family"]
+    root = vector_set["root_component"]
+    root_claims = vector_set["root_session_claims"]
+    if family["status"] != "active" or not root["is_root"] or root["status"] != "active":
+        raise ValueError("installation-family vector must begin with one active root")
+    root_expected = {
+        "installation_family_id": family["id"],
+        "client_component_id": root["id"],
+        "component_definition_id": root["definition_id"],
+        "component_kind": root["kind"],
+        "component_is_root": True,
+        "granted_features": root["granted_features"],
+    }
+    if any(root_claims.get(key) != value for key, value in root_expected.items()):
+        raise ValueError("root component claims do not match the family fixture")
+    if "parent_component_id" in root_claims or "delegation_id" in root_claims:
+        raise ValueError("root component claims contain delegated provenance")
+
+    child_ids: list[str] = []
+    delegation_ids: list[str] = []
+    public_keys: list[str] = []
+    for vector in vector_set["provisioned_components"]:
+        request = vector["request"]
+        response = vector["response"]
+        exchange = vector["session_exchange"]
+        claims = vector["expected_session_claims"]
+        trust = response["trust"]
+        if response["installation_family_id"] != family["id"]:
+            raise ValueError(f"component vector {vector['id']} crosses installation families")
+        if exchange["request"] != {
+            "component_id": response["component_id"],
+            "refresh_grant": response["refresh_grant"],
+        }:
+            raise ValueError(f"component vector {vector['id']} does not consume its exact grant")
+        expected_claims = {
+            "installation_family_id": family["id"],
+            "client_component_id": response["component_id"],
+            "component_definition_id": request["component_definition_id"],
+            "component_is_root": False,
+            "granted_features": response["granted_features"],
+            "trust_source": trust["source"],
+            "parent_component_id": root["id"],
+            "delegation_id": trust["delegation_id"],
+        }
+        if any(claims.get(key) != value for key, value in expected_claims.items()):
+            raise ValueError(f"component vector {vector['id']} claims drift from provisioning")
+        if request["requested_features"] != response["granted_features"]:
+            raise ValueError(f"component vector {vector['id']} silently changes feature grants")
+        if trust["parent_component_id"] != root["id"]:
+            raise ValueError(f"component vector {vector['id']} has the wrong trust parent")
+        verified = dt.datetime.fromisoformat(trust["verified_at"].replace("Z", "+00:00"))
+        expires = dt.datetime.fromisoformat(trust["expires_at"].replace("Z", "+00:00"))
+        refresh_expires = dt.datetime.fromisoformat(
+            response["refresh_grant_expires_at"].replace("Z", "+00:00")
+        )
+        if expires <= verified or refresh_expires > expires:
+            raise ValueError(f"component vector {vector['id']} outlives delegated trust")
+        child_ids.append(response["component_id"])
+        delegation_ids.append(trust["delegation_id"])
+        public_keys.append(json.dumps(request["public_jwk"], sort_keys=True))
+    if len(set(child_ids)) != 2 or root["id"] in child_ids:
+        raise ValueError("component vectors must use two distinct non-root component IDs")
+    if len(set(delegation_ids)) != 2 or len(set(public_keys)) != 2:
+        raise ValueError("component vectors must use independent delegations and keys")
+
+    component_revoke, family_revoke = vector_set["revocations"]
+    if component_revoke["scope"] != "component" or component_revoke["target_id"] not in child_ids:
+        raise ValueError("first revocation vector must target one delegated component")
+    if component_revoke["expected_family_status"] != "active":
+        raise ValueError("component revocation must preserve the family")
+    component_states = {
+        item["component_id"]: item["status"]
+        for item in component_revoke["expected_components"]
+    }
+    sibling = next(value for value in child_ids if value != component_revoke["target_id"])
+    if component_states != {
+        root["id"]: "active",
+        component_revoke["target_id"]: "revoked",
+        sibling: "active",
+    }:
+        raise ValueError("component revocation vector does not preserve root and sibling isolation")
+    if (
+        family_revoke["scope"] != "family"
+        or family_revoke["target_id"] != family["id"]
+        or family_revoke["expected_family_status"] != "revoked"
+    ):
+        raise ValueError("second revocation vector must revoke the whole family")
+    family_states = {
+        item["component_id"]: item["status"]
+        for item in family_revoke["expected_components"]
+    }
+    if family_states != {identifier: "revoked" for identifier in [root["id"], *child_ids]}:
+        raise ValueError("family revocation vector must revoke every component")
+
+
 def main() -> None:
     manifest_path = API / "protocol-version.json"
     manifest = load_document(manifest_path)
     contract_version = manifest["contract_version"]
-    if contract_version != "0.5.1" or manifest["wire_protocol"]["current"] != 1:
+    if contract_version != "1.0.0" or manifest["wire_protocol"] != {
+        "current": 2,
+        "supported": [1, 2],
+        "minimum": 1,
+    }:
         raise ValueError("unexpected contract or wire protocol version")
+    if manifest.get("contract_status") != "draft" or manifest.get("released_at") is not None:
+        raise ValueError("unpublished v1 contract must remain an undated draft")
 
     client_path = API / "client.openapi.yaml"
     admin_path = API / "admin.openapi.yaml"
@@ -601,6 +705,8 @@ def main() -> None:
     config_schema = load_document(config_path)
     if config_schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
         raise ValueError("configuration schema is not JSON Schema 2020-12")
+    if config_schema.get("$id") != "https://latchway.dev/schemas/config/1.0.0/environment-config.schema.json":
+        raise ValueError("configuration schema identity differs from the contract coordinate")
     walk_refs(config_path, config_schema)
     for index, example in enumerate(config_schema.get("examples", [])):
         errors = schema_errors(config_path, config_schema, example, f"config.examples[{index}]")
@@ -633,9 +739,17 @@ def main() -> None:
 
     attestation_schema_path = API / "attestation-binding.schema.json"
     attestation_schema = load_document(attestation_schema_path)
+    if attestation_schema.get("$id") != (
+        "https://latchway.dev/schemas/protocol/1.0.0/attestation-binding-v1.schema.json"
+    ):
+        raise ValueError("attestation-binding schema identity differs from the contract coordinate")
     walk_refs(attestation_schema_path, attestation_schema)
     attestation_vector_schema_path = API / "test-vectors/attestation-binding/vector.schema.json"
     attestation_vector_schema = load_document(attestation_vector_schema_path)
+    if attestation_vector_schema.get("$id") != (
+        "https://latchway.dev/schemas/test-vectors/1.0.0/attestation-binding-vector-set.schema.json"
+    ):
+        raise ValueError("attestation vector schema identity differs from the contract coordinate")
     attestation_vectors = load_document(API / "test-vectors/attestation-binding/v1.json")
     errors = schema_errors(attestation_vector_schema_path, attestation_vector_schema, attestation_vectors, "attestation_vectors")
     if errors:
@@ -644,11 +758,45 @@ def main() -> None:
 
     dpop_vector_schema_path = API / "test-vectors/dpop/vector.schema.json"
     dpop_vector_schema = load_document(dpop_vector_schema_path)
+    if dpop_vector_schema.get("$id") != (
+        "https://latchway.dev/schemas/test-vectors/1.0.0/dpop-vector-set.schema.json"
+    ):
+        raise ValueError("DPoP vector schema identity differs from the contract coordinate")
     dpop_vectors = load_document(API / "test-vectors/dpop/v1.json")
     errors = schema_errors(dpop_vector_schema_path, dpop_vector_schema, dpop_vectors, "dpop_vectors")
     if errors:
         raise ValueError("DPoP vector schema failed:\n" + "\n".join(errors))
     validate_dpop_vectors(dpop_vectors)
+
+    family_vector_schema_path = API / "test-vectors/installation-family/vector.schema.json"
+    family_vector_schema = load_document(family_vector_schema_path)
+    if family_vector_schema.get("$id") != (
+        "https://latchway.dev/schemas/test-vectors/1.0.0/installation-family-v2-vector-set.schema.json"
+    ):
+        raise ValueError("installation-family vector schema identity differs from the contract coordinate")
+    family_vectors = load_document(API / "test-vectors/installation-family/v2.json")
+    errors = schema_errors(
+        family_vector_schema_path,
+        family_vector_schema,
+        family_vectors,
+        "installation_family_vectors",
+    )
+    if errors:
+        raise ValueError("installation-family vector schema failed:\n" + "\n".join(errors))
+    validate_installation_family_vectors(family_vectors)
+
+    compatibility_schema_path = ROOT / "compatibility/frameworks.schema.json"
+    compatibility_schema = load_document(compatibility_schema_path)
+    compatibility_registry = load_document(ROOT / "compatibility/frameworks.yaml")
+    walk_refs(compatibility_schema_path, compatibility_schema)
+    errors = schema_errors(
+        compatibility_schema_path,
+        compatibility_schema,
+        compatibility_registry,
+        "framework_compatibility",
+    )
+    if errors:
+        raise ValueError("framework compatibility schema failed:\n" + "\n".join(errors))
 
     required = set(manifest["bundle"]["required_entries"])
     actual = {
@@ -659,12 +807,14 @@ def main() -> None:
         "release-evidence.schema.json",
         "error-codes.yaml",
         "protocol-version.json",
+        "compatibility",
         "test-vectors",
         "SHA256SUMS",
     }
     if required != actual:
         raise ValueError(f"bundle manifest entries differ from builder: {sorted(required ^ actual)}")
-    print("contract validation passed: OpenAPI structure/refs, registry, schemas/examples, release evidence, attestation hashes, DPoP signatures/semantics")
+    validate_framework_compatibility(check_generated=True)
+    print("contract validation passed: OpenAPI structure/refs, registries, schemas/examples, release evidence, attestation hashes, DPoP signatures/semantics, family/component wire-2 semantics, generated framework compatibility")
 
 
 if __name__ == "__main__":

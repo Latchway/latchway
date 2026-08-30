@@ -60,6 +60,22 @@ func (fake *fakeCoordinator) RefreshSession(_ context.Context, input RefreshInpu
 	return fake.refreshResult, fake.refreshErr
 }
 
+func (fake *fakeCoordinator) ProvisionComponent(_ context.Context, _ ProvisionComponentInput) (ProvisionComponentResult, error) {
+	return ProvisionComponentResult{}, nil
+}
+
+func (fake *fakeCoordinator) CreateComponentSession(_ context.Context, _ CreateComponentSessionInput) (GrantResult, error) {
+	return fake.refreshResult, fake.refreshErr
+}
+
+func (fake *fakeCoordinator) RevokeComponent(_ context.Context, _ RevokeComponentInput) error {
+	return fake.revokeErr
+}
+
+func (fake *fakeCoordinator) RevokeCurrentFamily(_ context.Context, _ RevokeFamilyInput) error {
+	return fake.revokeErr
+}
+
 func (fake *fakeCoordinator) Diagnostics(_ context.Context, input DiagnosticsInput) (DiagnosticsResult, error) {
 	fake.diagnosticsInputs = append(fake.diagnosticsInputs, input)
 	return fake.diagnosticsResult, fake.diagnosticsErr
@@ -354,6 +370,68 @@ func TestExchangeAndRefreshUseExactRequestAndResponseShapes(t *testing.T) {
 	assertGrantDocument(t, refreshResponse)
 }
 
+func TestSessionGrantWireVersionsPreserveLegacyShapeAndRequireCurrentMetadata(t *testing.T) {
+	t.Parallel()
+
+	currentResult := validGrantResult("ios")
+	family := InstallationFamilySummary{ID: "fam_01J00000000000000000000000", Status: "active"}
+	component := ClientComponentSummary{
+		ID: "cmp_01J00000000000000000000000", DefinitionID: "ios-main",
+		Kind: "main_app", Platform: "ios", IsRoot: true, Status: "active",
+		DPoPJKT: currentResult.Installation.DPoPJKT, GrantedFeatures: []string{"assistant"},
+	}
+	currentResult.InstallationFamily = &family
+	currentResult.Component = &component
+	currentResult.Trust.Source = "debug"
+
+	t.Run("legacy wire one omits family metadata", func(t *testing.T) {
+		coordinator := &fakeCoordinator{exchangeResult: currentResult}
+		handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, validClientRequest(http.MethodPost, exchangePath, validExchangeBody(), "ios", "1.2.3"))
+
+		if response.Code != http.StatusCreated {
+			t.Fatalf("exchange status = %d, body = %s", response.Code, response.Body.String())
+		}
+		assertGrantDocument(t, response)
+	})
+
+	t.Run("current wire two exposes family metadata", func(t *testing.T) {
+		coordinator := &fakeCoordinator{exchangeResult: currentResult}
+		handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+		request := validClientRequest(http.MethodPost, exchangePath, validExchangeBody(), "ios", "1.2.3")
+		request.Header.Set("X-Latchway-Protocol-Version", "2")
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusCreated {
+			t.Fatalf("exchange status = %d, body = %s", response.Code, response.Body.String())
+		}
+		var document map[string]any
+		decodeJSONResponse(t, response, &document)
+		assertExactKeys(t, document, "access_token", "token_type", "expires_in", "refresh_token", "refresh_expires_in", "installation", "installation_family", "component", "trust")
+		if document["installation_family"].(map[string]any)["id"] != family.ID ||
+			document["component"].(map[string]any)["id"] != component.ID ||
+			document["trust"].(map[string]any)["source"] != "debug" {
+			t.Fatalf("wire two grant metadata = %#v", document)
+		}
+	})
+
+	t.Run("current wire two fails closed without family metadata", func(t *testing.T) {
+		coordinator := &fakeCoordinator{exchangeResult: validGrantResult("ios")}
+		handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+		request := validClientRequest(http.MethodPost, exchangePath, validExchangeBody(), "ios", "1.2.3")
+		request.Header.Set("X-Latchway-Protocol-Version", "2")
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, request)
+
+		assertProblem(t, response, "internal_error", http.StatusInternalServerError)
+	})
+}
+
 func TestRefreshRejectsUnboundIdentityAndAttestationBeforeCoordinator(t *testing.T) {
 	t.Parallel()
 
@@ -444,14 +522,14 @@ func TestPublicDiscoveryUsesLockedWireShape(t *testing.T) {
 	var document map[string]any
 	decodeJSONResponse(t, response, &document)
 	assertExactKeys(t, document,
-		"server_version", "contract_version", "supported_protocol_versions",
+		"server_version", "contract_version", "current_protocol_version", "supported_protocol_versions",
 		"session_endpoint", "dpop_algorithms", "maximum_clock_skew_seconds",
 	)
-	if document["contract_version"] != "0.5.1" || document["session_endpoint"] != exchangePath || document["maximum_clock_skew_seconds"] != float64(300) {
+	if document["contract_version"] != "1.0.0" || document["current_protocol_version"] != float64(2) || document["session_endpoint"] != exchangePath || document["maximum_clock_skew_seconds"] != float64(300) {
 		t.Fatalf("discovery document = %#v", document)
 	}
 	versions, ok := document["supported_protocol_versions"].([]any)
-	if !ok || len(versions) != 1 || versions[0] != float64(1) {
+	if !ok || len(versions) != 2 || versions[0] != float64(1) || versions[1] != float64(2) {
 		t.Fatalf("supported versions = %#v", document["supported_protocol_versions"])
 	}
 	algorithms, ok := document["dpop_algorithms"].([]any)

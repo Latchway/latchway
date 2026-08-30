@@ -43,6 +43,39 @@ Do not change the environment master key during an ordinary upgrade. Do not
 combine a schema migration, public-origin change, signing-key emergency
 rotation, and upstream configuration rewrite in one rollout.
 
+## Schema 21: Installation Families
+
+Schema 21 upgrades each legacy installation transactionally into one
+Installation Family, one root client component, its existing public P-256 key,
+and a component session family. The identifiers are deterministic: the legacy
+ULID payload is retained under the `fam_`, `cmp_`, `cky_`, and `csf_` prefixes.
+Attestation and logical-request rows gain family/component provenance without
+rewriting already-issued access grants.
+
+Legacy refresh rows are retained for rollback analysis and duplicated into the
+component refresh table so the next successful rotation becomes
+component-aware. The old schema allowed separate refresh families for one
+installation to each contain an active token. Schema 21 intentionally permits
+only one active refresh credential per component, so the newest active token is
+kept active in the component table and older active branches are marked revoked
+there. Existing short-lived access tokens remain valid until their normal
+expiry; an older refresh branch fails closed on a schema-21 replica.
+
+Before this upgrade:
+
+1. ensure clients can recover from a refresh rejection by returning through the
+   containing application's normal authenticated session exchange;
+2. avoid a prolonged mixed-version window in which an old replica can create a
+   new legacy refresh branch after the backfill;
+3. retain the pre-upgrade backup until component refresh, family/component
+   revocation, request attribution, and the application rollback drill pass;
+4. run the populated upgrade proof with
+   `go test ./internal/database -run TestMigratorPostgreSQLUpgradeV21InstallationFamilies`.
+
+The migration does not copy a private key, provider credential, bearer token,
+or plaintext refresh token. Public JWKs and stored token hashes retain their
+existing confidentiality classification.
+
 ## Application rollback
 
 Stop the rollout and route traffic to the previous digest when readiness,
@@ -63,6 +96,18 @@ There are no down migrations. If a migration itself must be undone:
 
 Directly deleting migration-ledger rows or hand-editing production tables is
 unsupported and can invalidate quota, audit, signing, or replay guarantees.
+
+## PostgreSQL major upgrades
+
+Treat a PostgreSQL major-version change as a database migration, not an image
+refresh. The Compose templates pin PostgreSQL 18 and mount the named volume at
+`/var/lib/postgresql`, which lets the official 18+ image place data in its
+major-version-specific subdirectory. A PostgreSQL 17-or-earlier volume mounted
+at `/var/lib/postgresql/data` is not directly reusable by that image. Take and
+verify a backup, rehearse `pg_upgrade` (or restore into a fresh PostgreSQL 18
+database), validate the Latchway state fingerprint and `doctor`, and switch
+only after the isolated rehearsal passes. Never change the image and volume
+layout together on the production database without that proof.
 
 ## Release evidence drill
 

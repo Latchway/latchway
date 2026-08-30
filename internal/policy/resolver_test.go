@@ -819,6 +819,54 @@ func TestInputReusesOpaqueLogicalRequestIdentity(t *testing.T) {
 	}
 }
 
+func TestResolverExposesSealedComponentFamilyAndTrustContext(t *testing.T) {
+	t.Parallel()
+	input := policyInput("premium")
+	input.authorization.installationFamilyID = "fam_00000000000000000000000000"
+	input.authorization.installationFamilyStatus = "active"
+	input.authorization.componentID = "cmp_00000000000000000000000000"
+	input.authorization.componentDefinitionID = "ios-widget"
+	input.authorization.componentKind = "widget"
+	input.authorization.componentIsRoot = false
+	input.authorization.trustSource = "delegated_from_attested_root"
+
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.AccessExpression = `principal.user_id == "usr_00000000000000000000000000" &&
+		client.family.id == "fam_00000000000000000000000000" &&
+		client.family.status == "active" &&
+		client.component.id == "cmp_00000000000000000000000000" &&
+		client.component.definition_id == "ios-widget" &&
+		client.component.kind == "widget" && !client.component.is_root &&
+		client.component.platform == "ios" &&
+		client.trust.source == "delegated_from_attested_root" &&
+		client.trust.attestation_provider == "app_attest" &&
+		client.trust.delegated && !client.trust.direct_attestation &&
+		client.trust.verified_at < client.trust.expires_at`
+	snapshot.features["assistant"] = feature
+	snapshot.plans["premium"] = configuration.LimitPlan{
+		ID: "premium",
+		Limits: []configuration.Limit{{
+			Metric: "logical_requests", Algorithm: "calendar", Window: "1d", Maximum: 5, Hard: true,
+			Scope: []string{"feature", "trust_source", "component_kind", "component_definition", "client_component", "installation_family"},
+		}},
+	}
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatalf("resolve component policy: %v", err)
+	}
+	if plan.Scopes.InstallationFamilyID != input.authorization.installationFamilyID ||
+		plan.Scopes.ClientComponentID != input.authorization.componentID ||
+		plan.Scopes.ComponentDefinitionID != "ios-widget" || plan.Scopes.ComponentKind != "widget" ||
+		plan.Scopes.TrustSource != "delegated_from_attested_root" {
+		t.Fatalf("component quota facts = %+v", plan.Scopes)
+	}
+}
+
 func TestResolverPreservesCancellation(t *testing.T) {
 	t.Parallel()
 

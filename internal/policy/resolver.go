@@ -63,23 +63,30 @@ type EnvironmentFacts struct {
 }
 
 type authorizationFacts struct {
-	organizationID       string
-	applicationID        string
-	environmentID        string
-	policyRevisionID     string
-	userOverrideID       string
-	limitPlanOverride    string
-	userID               string
-	installationID       string
-	installationPlatform string
-	identityProvider     string
-	trustLevel           string
-	attestationProvider  string
-	claims               map[string]any
-	identityExpiresAt    time.Time
-	attestedAt           time.Time
-	attestationExpiresAt time.Time
-	accessExpiresAt      time.Time
+	organizationID           string
+	applicationID            string
+	environmentID            string
+	policyRevisionID         string
+	userOverrideID           string
+	limitPlanOverride        string
+	userID                   string
+	installationID           string
+	installationFamilyID     string
+	installationFamilyStatus string
+	componentID              string
+	componentDefinitionID    string
+	componentKind            string
+	componentIsRoot          bool
+	trustSource              string
+	installationPlatform     string
+	identityProvider         string
+	trustLevel               string
+	attestationProvider      string
+	claims                   map[string]any
+	identityExpiresAt        time.Time
+	attestedAt               time.Time
+	attestationExpiresAt     time.Time
+	accessExpiresAt          time.Time
 }
 
 // Input is an opaque, immutable policy activation. Production callers can
@@ -101,22 +108,29 @@ type Input struct {
 // Production data-plane callers continue to use NewInput and a sealed session
 // authorization.
 type SimulationFacts struct {
-	OrganizationID       string
-	ApplicationID        string
-	EnvironmentID        string
-	EnvironmentKind      string
-	PolicyRevisionID     string
-	ApplicationUserID    string
-	InstallationID       string
-	LogicalRequestID     string
-	InstallationPlatform string
-	IdentityProvider     string
-	TrustLevel           string
-	AttestationProvider  string
-	Authenticated        bool
-	NormalizedClaims     map[string]any
-	Streaming            bool
-	EvaluatedAt          time.Time
+	OrganizationID           string
+	ApplicationID            string
+	EnvironmentID            string
+	EnvironmentKind          string
+	PolicyRevisionID         string
+	ApplicationUserID        string
+	InstallationID           string
+	InstallationFamilyID     string
+	InstallationFamilyStatus string
+	ComponentID              string
+	ComponentDefinitionID    string
+	ComponentKind            string
+	ComponentIsRoot          bool
+	TrustSource              string
+	LogicalRequestID         string
+	InstallationPlatform     string
+	IdentityProvider         string
+	TrustLevel               string
+	AttestationProvider      string
+	Authenticated            bool
+	NormalizedClaims         map[string]any
+	Streaming                bool
+	EvaluatedAt              time.Time
 }
 
 // NewSimulationInput constructs a synthetic policy activation exclusively for
@@ -151,6 +165,11 @@ func NewSimulationInput(facts SimulationFacts) (Input, error) {
 			organizationID: facts.OrganizationID, applicationID: facts.ApplicationID,
 			environmentID: facts.EnvironmentID, policyRevisionID: facts.PolicyRevisionID,
 			userID: facts.ApplicationUserID, installationID: facts.InstallationID,
+			installationFamilyID:     facts.InstallationFamilyID,
+			installationFamilyStatus: facts.InstallationFamilyStatus,
+			componentID:              facts.ComponentID, componentDefinitionID: facts.ComponentDefinitionID,
+			componentKind: facts.ComponentKind, componentIsRoot: facts.ComponentIsRoot,
+			trustSource:          facts.TrustSource,
 			installationPlatform: facts.InstallationPlatform, identityProvider: facts.IdentityProvider,
 			trustLevel: facts.TrustLevel, attestationProvider: facts.AttestationProvider,
 			claims: cloneClaims(facts.NormalizedClaims), identityExpiresAt: horizon,
@@ -199,6 +218,12 @@ func inputFromAuthorization(authorization session.Authorization, logicalID reque
 			environmentID: authorization.EnvironmentID, policyRevisionID: authorization.PolicyRevisionID,
 			userOverrideID: authorization.UserOverrideID, limitPlanOverride: authorization.LimitPlanOverride,
 			userID: authorization.ApplicationUserID, installationID: authorization.InstallationID,
+			installationFamilyID:     authorization.InstallationFamilyID,
+			installationFamilyStatus: authorization.InstallationFamilyStatus,
+			componentID:              authorization.ComponentID,
+			componentDefinitionID:    authorization.ComponentDefinitionID,
+			componentKind:            authorization.ComponentKind, componentIsRoot: authorization.ComponentIsRoot,
+			trustSource:          authorization.TrustSource,
 			installationPlatform: authorization.InstallationPlatform, identityProvider: authorization.IdentityProvider,
 			trustLevel: authorization.TrustLevel, attestationProvider: authorization.AttestationProvider,
 			claims: cloneClaims(authorization.NormalizedClaims), identityExpiresAt: authorization.IdentityExpiresAt,
@@ -235,8 +260,13 @@ type Decision struct {
 // domain-separated digests keyed by configured normalized claim name; raw
 // normalized claim values never cross into quota, replay, or persistence.
 type QuotaScopeFacts struct {
-	Platform         string
-	NormalizedClaims map[string]string
+	Platform              string
+	InstallationFamilyID  string
+	ClientComponentID     string
+	ComponentDefinitionID string
+	ComponentKind         string
+	TrustSource           string
+	NormalizedClaims      map[string]string
 }
 
 // RouteDecision is one server-owned physical candidate in a deterministic
@@ -329,6 +359,7 @@ func newResolver(now func() time.Time) (*Resolver, error) {
 	}
 	environment, err := cel.NewEnv(
 		cel.Variable("principal", cel.DynType),
+		cel.Variable("client", cel.DynType),
 		cel.Variable("installation", cel.DynType),
 		cel.Variable("request", cel.DynType),
 		cel.Variable("environment", cel.DynType),
@@ -633,12 +664,25 @@ func quotaScopeFacts(
 		digests[name] = digest
 	}
 	return QuotaScopeFacts{
-		Platform: authorization.installationPlatform, NormalizedClaims: digests,
+		Platform:              authorization.installationPlatform,
+		InstallationFamilyID:  authorization.installationFamilyID,
+		ClientComponentID:     authorization.componentID,
+		ComponentDefinitionID: authorization.componentDefinitionID,
+		ComponentKind:         authorization.componentKind,
+		TrustSource:           authorization.trustSource,
+		NormalizedClaims:      digests,
 	}, nil
 }
 
 func cloneQuotaScopeFacts(input QuotaScopeFacts) QuotaScopeFacts {
-	result := QuotaScopeFacts{Platform: input.Platform}
+	result := QuotaScopeFacts{
+		Platform:              input.Platform,
+		InstallationFamilyID:  input.InstallationFamilyID,
+		ClientComponentID:     input.ClientComponentID,
+		ComponentDefinitionID: input.ComponentDefinitionID,
+		ComponentKind:         input.ComponentKind,
+		TrustSource:           input.TrustSource,
+	}
 	if input.NormalizedClaims != nil {
 		result.NormalizedClaims = make(map[string]string, len(input.NormalizedClaims))
 		for name, digest := range input.NormalizedClaims {
@@ -649,7 +693,17 @@ func cloneQuotaScopeFacts(input QuotaScopeFacts) QuotaScopeFacts {
 }
 
 func validInput(input Input) bool {
-	return id.Validate(input.authorization.organizationID, id.Organization) == nil &&
+	componentAware := input.authorization.installationFamilyID != "" || input.authorization.installationFamilyStatus != "" ||
+		input.authorization.componentID != "" || input.authorization.componentDefinitionID != "" ||
+		input.authorization.componentKind != "" || input.authorization.trustSource != ""
+	componentValid := !componentAware ||
+		(id.Validate(input.authorization.installationFamilyID, id.InstallationFamily) == nil &&
+			input.authorization.installationFamilyStatus == "active" &&
+			id.Validate(input.authorization.componentID, id.ClientComponent) == nil &&
+			policyIdentifierPattern.MatchString(input.authorization.componentDefinitionID) &&
+			policyIdentifierPattern.MatchString(input.authorization.componentKind) &&
+			policyIdentifierPattern.MatchString(input.authorization.trustSource))
+	return componentValid && id.Validate(input.authorization.organizationID, id.Organization) == nil &&
 		id.Validate(input.authorization.applicationID, id.Application) == nil &&
 		id.Validate(input.authorization.environmentID, id.Environment) == nil &&
 		id.Validate(input.authorization.userID, id.ApplicationUser) == nil &&
@@ -1058,8 +1112,30 @@ func boundedActivation(input Input) (map[string]any, error) {
 	state := activationState{}
 	activation := make(map[string]any, 4)
 	principal := map[string]any{
+		"user_id":       input.authorization.userID,
 		"authenticated": !input.unauthenticated,
 		"claims":        cloneClaims(input.authorization.claims),
+	}
+	client := map[string]any{
+		"family": map[string]any{
+			"id":     input.authorization.installationFamilyID,
+			"status": input.authorization.installationFamilyStatus,
+		},
+		"component": map[string]any{
+			"id":            input.authorization.componentID,
+			"definition_id": input.authorization.componentDefinitionID,
+			"kind":          input.authorization.componentKind,
+			"is_root":       input.authorization.componentIsRoot,
+			"platform":      input.authorization.installationPlatform,
+		},
+		"trust": map[string]any{
+			"source":               input.authorization.trustSource,
+			"attestation_provider": input.authorization.attestationProvider,
+			"delegated":            strings.HasPrefix(input.authorization.trustSource, "delegated_"),
+			"direct_attestation":   input.authorization.trustSource == "direct_attested",
+			"verified_at":          input.authorization.attestedAt,
+			"expires_at":           input.authorization.attestationExpiresAt,
+		},
 	}
 	installation := map[string]any{
 		"platform":    input.authorization.installationPlatform,
@@ -1068,7 +1144,7 @@ func boundedActivation(input Input) (map[string]any, error) {
 	request := map[string]any{"streaming": input.request.Streaming}
 	environment := map[string]any{"kind": input.environment.Kind}
 	for name, value := range map[string]map[string]any{
-		"principal": principal, "installation": installation,
+		"principal": principal, "client": client, "installation": installation,
 		"request": request, "environment": environment,
 	} {
 		converted, err := state.convert(value, 0)
@@ -1099,6 +1175,11 @@ func (state *activationState) convert(value any, depth int) (any, error) {
 			return nil, ErrInvalidInput
 		}
 		return typed, nil
+	case time.Time:
+		if typed.IsZero() {
+			return nil, ErrInvalidInput
+		}
+		return typed.UTC(), nil
 	case float32:
 		if math.IsNaN(float64(typed)) || math.IsInf(float64(typed), 0) {
 			return nil, ErrInvalidInput

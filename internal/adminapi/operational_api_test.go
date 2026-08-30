@@ -140,6 +140,49 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if installationGet.Code != http.StatusOK || bytes.Contains(installationGet.Body.Bytes(), fixture.refreshHash) {
 		t.Fatalf("installation get status/body=%d %s", installationGet.Code, installationGet.Body.String())
 	}
+	familyList := performGET(handler, "/admin/v1/installation-families"+baseQuery, cookie)
+	if familyList.Code != http.StatusOK ||
+		!bytes.Contains(familyList.Body.Bytes(), []byte(fixture.familyID)) ||
+		!bytes.Contains(familyList.Body.Bytes(), []byte(`"component_count":1`)) ||
+		!bytes.Contains(familyList.Body.Bytes(), []byte(`"cost_nano_usd":123`)) {
+		t.Fatalf("installation-family list status/body=%d %s", familyList.Code, familyList.Body.String())
+	}
+	filteredFamilyList := performGET(handler, "/admin/v1/installation-families"+baseQuery+
+		"&user_id="+url.QueryEscape(fixture.userID), cookie)
+	if filteredFamilyList.Code != http.StatusOK ||
+		!bytes.Contains(filteredFamilyList.Body.Bytes(), []byte(fixture.familyID)) {
+		t.Fatalf("filtered installation-family list status/body=%d %s",
+			filteredFamilyList.Code, filteredFamilyList.Body.String())
+	}
+	otherUserFamilyList := performGET(handler, "/admin/v1/installation-families"+baseQuery+
+		"&user_id="+url.QueryEscape(id.Must(id.ApplicationUser)), cookie)
+	if otherUserFamilyList.Code != http.StatusOK ||
+		bytes.Contains(otherUserFamilyList.Body.Bytes(), []byte(fixture.familyID)) {
+		t.Fatalf("other-user installation-family list status/body=%d %s",
+			otherUserFamilyList.Code, otherUserFamilyList.Body.String())
+	}
+	familyGet := performGET(handler, "/admin/v1/installation-families/"+fixture.familyID, cookie)
+	if familyGet.Code != http.StatusOK ||
+		!bytes.Contains(familyGet.Body.Bytes(), []byte(fixture.componentID)) ||
+		!bytes.Contains(familyGet.Body.Bytes(), []byte(`"root_trust_source":"debug"`)) ||
+		bytes.Contains(familyGet.Body.Bytes(), fixture.refreshHash) {
+		t.Fatalf("installation-family detail status/body=%d %s", familyGet.Code, familyGet.Body.String())
+	}
+	componentList := performGET(handler, "/admin/v1/client-components"+baseQuery+
+		"&installation_family_id="+url.QueryEscape(fixture.familyID), cookie)
+	if componentList.Code != http.StatusOK ||
+		!bytes.Contains(componentList.Body.Bytes(), []byte(fixture.componentID)) ||
+		!bytes.Contains(componentList.Body.Bytes(), []byte(`"granted_features":["assistant"]`)) {
+		t.Fatalf("client-component list status/body=%d %s", componentList.Code, componentList.Body.String())
+	}
+	componentGet := performGET(handler, "/admin/v1/client-components/"+fixture.componentID, cookie)
+	if componentGet.Code != http.StatusOK ||
+		!bytes.Contains(componentGet.Body.Bytes(), []byte(`"session_status":"active"`)) ||
+		!bytes.Contains(componentGet.Body.Bytes(), []byte(`"session_failure_count":0`)) ||
+		!bytes.Contains(componentGet.Body.Bytes(), []byte(`"request_count":1`)) ||
+		bytes.Contains(componentGet.Body.Bytes(), fixture.refreshHash) {
+		t.Fatalf("client-component detail status/body=%d %s", componentGet.Code, componentGet.Body.String())
+	}
 
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO usage_records (
@@ -156,7 +199,11 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	requestList := performGET(handler, "/admin/v1/requests"+baseQuery, cookie)
 	if requestList.Code != http.StatusOK || !bytes.Contains(requestList.Body.Bytes(), []byte(fixture.requestID)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"cost_nano_usd":123`)) ||
-		!bytes.Contains(requestList.Body.Bytes(), []byte(`"input_tokens":262`)) || requestList.Body.Len() > 16<<10 {
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"input_tokens":262`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"client_component_id":"`+fixture.componentID+`"`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework":"swift-openai"`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework_version":"4.6.0"`)) ||
+		requestList.Body.Len() > 16<<10 {
 		t.Fatalf("request list status/body=%d %s", requestList.Code, requestList.Body.String())
 	}
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
@@ -225,6 +272,52 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		t.Fatalf("inspect-token mutation status=%d body=%s", inspectMutation.Code, inspectMutation.Body.String())
 	}
 	revokeToken := createUserOverrideAPIToken(t, handler, cookie, csrf, "operational-revoke", []string{"revoke_installations"})
+	invalidReattestation := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/client-components/"+fixture.componentID+"/require-reattestation",
+		map[string]string{"reason": strings.Repeat("r", 101)}, revokeToken)
+	if invalidReattestation.Code != http.StatusBadRequest {
+		t.Fatalf("invalid component re-attestation status/body=%d %s",
+			invalidReattestation.Code, invalidReattestation.Body.String())
+	}
+	requiredReattestation := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/client-components/"+fixture.componentID+"/require-reattestation",
+		map[string]string{"reason": "operator-reattestation"}, revokeToken)
+	if requiredReattestation.Code != http.StatusOK ||
+		!bytes.Contains(requiredReattestation.Body.Bytes(), []byte(`"status":"active"`)) ||
+		!bytes.Contains(requiredReattestation.Body.Bytes(), []byte(`"trust_expires_at":`)) {
+		t.Fatalf("require component re-attestation status/body=%d %s",
+			requiredReattestation.Code, requiredReattestation.Body.String())
+	}
+	var preBlockGrantRevoked bool
+	var renewalComponentRefreshStatus, legacyRefreshStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT revoked_at IS NOT NULL FROM session_grants WHERE session_grant_id = $1`,
+		fixture.grantID).Scan(&preBlockGrantRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM component_refresh_tokens WHERE component_refresh_token_id = $1`,
+		fixture.componentRefreshID).Scan(&renewalComponentRefreshStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM refresh_tokens WHERE refresh_token_id = $1`,
+		fixture.refreshID).Scan(&legacyRefreshStatus); err != nil {
+		t.Fatal(err)
+	}
+	if preBlockGrantRevoked || renewalComponentRefreshStatus != "revoked" || legacyRefreshStatus != "revoked" {
+		t.Fatalf("re-attestation credentials grant_revoked=%t component_refresh=%q legacy_refresh=%q",
+			preBlockGrantRevoked, renewalComponentRefreshStatus, legacyRefreshStatus)
+	}
+	requiredRenewal := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/installation-families/"+fixture.familyID+"/require-renewal",
+		map[string]string{"reason": "operator-renewal"}, revokeToken)
+	if requiredRenewal.Code != http.StatusOK ||
+		!bytes.Contains(requiredRenewal.Body.Bytes(), []byte(`"status":"active"`)) ||
+		!bytes.Contains(requiredRenewal.Body.Bytes(), []byte(`"root_trust_expires_at":`)) {
+		t.Fatalf("require installation-family renewal status/body=%d %s",
+			requiredRenewal.Code, requiredRenewal.Body.String())
+	}
 
 	blocked := performBearerJSON(t, handler, http.MethodPost,
 		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, nil, revokeToken)
@@ -246,6 +339,55 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 	if !grantRevoked || refreshStatus != "revoked" {
 		t.Fatalf("blocked-user credentials grant_revoked=%t refresh_status=%q", grantRevoked, refreshStatus)
+	}
+
+	invalidComponentRevocation := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/client-components/"+fixture.componentID+"/revoke",
+		map[string]string{"reason": strings.Repeat("r", 101)}, revokeToken)
+	if invalidComponentRevocation.Code != http.StatusBadRequest {
+		t.Fatalf("invalid component revocation status/body=%d %s",
+			invalidComponentRevocation.Code, invalidComponentRevocation.Body.String())
+	}
+	componentRevoked := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/client-components/"+fixture.componentID+"/revoke",
+		map[string]string{"reason": "root-compromised"}, revokeToken)
+	if componentRevoked.Code != http.StatusOK ||
+		!bytes.Contains(componentRevoked.Body.Bytes(), []byte(`"status":"revoked"`)) ||
+		!bytes.Contains(componentRevoked.Body.Bytes(), []byte(`"session_failure_count":1`)) {
+		t.Fatalf("revoke root component status/body=%d %s",
+			componentRevoked.Code, componentRevoked.Body.String())
+	}
+	var familyStatus, componentKeyStatus, componentSessionStatus, componentRefreshStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT family.status, component_key.status, component_session.status,
+		       component_refresh.status
+		FROM installation_families AS family
+		JOIN client_components AS component
+		  ON component.client_component_id = family.root_component_id
+		JOIN component_keys AS component_key
+		  ON component_key.component_key_id = component.current_component_key_id
+		JOIN component_session_families AS component_session
+		  ON component_session.client_component_id = component.client_component_id
+		JOIN component_refresh_tokens AS component_refresh
+		  ON component_refresh.component_session_family_id = component_session.component_session_family_id
+		WHERE family.installation_family_id = $1
+	`, fixture.familyID).Scan(
+		&familyStatus, &componentKeyStatus, &componentSessionStatus, &componentRefreshStatus,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if familyStatus != "revoked" || componentKeyStatus != "revoked" ||
+		componentSessionStatus != "revoked" || componentRefreshStatus != "revoked" {
+		t.Fatalf("root revocation family/key/session/refresh = %q/%q/%q/%q",
+			familyStatus, componentKeyStatus, componentSessionStatus, componentRefreshStatus)
+	}
+	familyRevoked := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/installation-families/"+fixture.familyID+"/revoke",
+		map[string]string{"reason": "operator-family-confirmation"}, revokeToken)
+	if familyRevoked.Code != http.StatusOK ||
+		!bytes.Contains(familyRevoked.Body.Bytes(), []byte(`"status":"revoked"`)) {
+		t.Fatalf("idempotent family revocation status/body=%d %s",
+			familyRevoked.Code, familyRevoked.Body.String())
 	}
 
 	invalidRevocation := performBearerJSON(t, handler, http.MethodPost,
@@ -492,7 +634,9 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 
 	audit := performGET(handler, "/admin/v1/audit-events?page_size=200", cookie)
 	for _, action := range []string{
-		"admin.user_block", "admin.user_unblock", "admin.installation_revoke", "admin.self_test_run",
+		"admin.user_block", "admin.user_unblock", "admin.client_component_require_reattestation",
+		"admin.installation_family_require_renewal", "admin.client_component_revoke",
+		"admin.installation_family_revoke", "admin.installation_revoke", "admin.self_test_run",
 		"admin.self_test_schedule_create", "admin.self_test_schedule_disable",
 	} {
 		if audit.Code != http.StatusOK || !bytes.Contains(audit.Body.Bytes(), []byte(action)) {
@@ -538,17 +682,22 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 }
 
 type operationalFixture struct {
-	revisionID      string
-	userID          string
-	installationID  string
-	grantID         string
-	refreshID       string
-	requestID       string
-	attemptID       string
-	secondAttemptID string
-	recordedAt      time.Time
-	subjectHMAC     []byte
-	refreshHash     []byte
+	revisionID         string
+	userID             string
+	installationID     string
+	familyID           string
+	componentID        string
+	componentKeyID     string
+	componentSessionID string
+	componentRefreshID string
+	grantID            string
+	refreshID          string
+	requestID          string
+	attemptID          string
+	secondAttemptID    string
+	recordedAt         time.Time
+	subjectHMAC        []byte
+	refreshHash        []byte
 }
 
 func seedOperationalFixture(
@@ -595,7 +744,10 @@ func seedOperationalFixture(
 	fixture := operationalFixture{
 		revisionID: revisionID,
 		userID:     id.Must(id.ApplicationUser), installationID: id.Must(id.Installation),
-		grantID: id.Must(id.SessionGrant), refreshID: id.Must(id.RefreshToken),
+		familyID: id.Must(id.InstallationFamily), componentID: id.Must(id.ClientComponent),
+		componentKeyID: id.Must(id.ComponentKey), componentSessionID: id.Must(id.ComponentSession),
+		componentRefreshID: id.Must(id.ComponentRefresh),
+		grantID:            id.Must(id.SessionGrant), refreshID: id.Must(id.RefreshToken),
 		requestID: id.Must(id.LogicalRequest), attemptID: id.Must(id.UpstreamAttempt),
 		secondAttemptID: id.Must(id.UpstreamAttempt),
 		recordedAt:      now.Add(-10 * time.Minute), subjectHMAC: fixtureBytes("subject"),
@@ -631,12 +783,84 @@ func seedOperationalFixture(
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_definitions (
+		    environment_id, config_revision_id, component_definition_id,
+		    platform, component_kind, family_role, definition, created_at
+		) VALUES (
+		    $1, $2, 'ios-main', 'ios', 'main_app', 'root',
+		    '{"id":"ios-main","platform":"ios","kind":"main_app","familyRole":"root","allowedFeatures":["assistant"]}'::jsonb,
+		    $3
+		)
+	`, environmentID, revisionID, now.Add(-80*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO installation_families (
+		    installation_family_id, organization_id, application_id, environment_id,
+		    application_user_id, platform, status, root_installation_id,
+		    created_at, updated_at, last_seen_at
+		) VALUES ($1, $2, $3, $4, $5, 'ios', 'active', $6, $7, $7, $8)
+	`, fixture.familyID, organizationID, applicationID, environmentID,
+		fixture.userID, fixture.installationID, now.Add(-80*time.Minute), now.Add(-5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO client_components (
+		    client_component_id, organization_id, application_id, environment_id,
+		    application_user_id, installation_family_id, component_definition_id,
+		    component_kind, platform, is_root, status, trust_source,
+		    trust_attestation_provider, trust_verified_at, trust_expires_at,
+		    trust_signals, granted_features, key_storage_claim, app_version, sdk_version,
+		    created_at, updated_at, last_seen_at
+		) VALUES (
+		    $1, $2, $3, $4, $5, $6, 'ios-main', 'main_app', 'ios', true,
+		    'active', 'debug', 'debug', $7, $8, '{"fixture":true}'::jsonb,
+		    '["assistant"]'::jsonb, 'secure_enclave', '1.0.0', '1.0.0-rc.1',
+		    $9, $9, $10
+		)
+	`, fixture.componentID, organizationID, applicationID, environmentID,
+		fixture.userID, fixture.familyID, now.Add(-60*time.Minute), now.Add(time.Hour),
+		now.Add(-80*time.Minute), now.Add(-5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_keys (
+		    component_key_id, organization_id, application_id, environment_id,
+		    installation_family_id, client_component_id, dpop_jkt, public_jwk,
+		    status, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb, 'active', $8)
+	`, fixture.componentKeyID, organizationID, applicationID, environmentID,
+		fixture.familyID, fixture.componentID, dpopJKT, now.Add(-80*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE client_components SET current_component_key_id = $2
+		WHERE client_component_id = $1;
+		UPDATE installation_families SET root_component_id = $1
+		WHERE installation_family_id = $3
+	`, pgx.QueryExecModeSimpleProtocol, fixture.componentID, fixture.componentKeyID, fixture.familyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_session_families (
+		    component_session_family_id, organization_id, application_id, environment_id,
+		    application_user_id, installation_family_id, client_component_id,
+		    component_key_id, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $9)
+	`, fixture.componentSessionID, organizationID, applicationID, environmentID,
+		fixture.userID, fixture.familyID, fixture.componentID, fixture.componentKeyID,
+		now.Add(-40*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO attestation_events (
 		    attestation_event_id, organization_id, application_id, environment_id,
-		    installation_id, provider, outcome, trust_level, normalized_signals, occurred_at
-		) VALUES ($1, $2, $3, $4, $5, 'debug', 'accepted', 'app_verified', '{}'::jsonb, $6)
+		    installation_id, provider, outcome, trust_level, normalized_signals, occurred_at,
+		    installation_family_id, client_component_id, trust_source
+		) VALUES ($1, $2, $3, $4, $5, 'debug', 'accepted', 'app_verified',
+		          '{}'::jsonb, $6, $7, $8, 'debug')
 	`, id.Must(id.AttestationEvent), organizationID, applicationID, environmentID,
-		fixture.installationID, now.Add(-60*time.Minute)); err != nil {
+		fixture.installationID, now.Add(-60*time.Minute), fixture.familyID, fixture.componentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -644,12 +868,16 @@ func seedOperationalFixture(
 		    session_grant_id, organization_id, application_id, environment_id,
 		    application_user_id, installation_id, access_token_jti_hash, dpop_jkt,
 		    policy_revision_id, trust_level, identity_verified_at, attested_at,
-		    attestation_provider, attestation_expires_at, issued_at, expires_at
+		    attestation_provider, attestation_expires_at, issued_at, expires_at,
+		    installation_family_id, client_component_id, component_definition_id,
+		    component_kind, component_is_root, trust_source, component_session_family_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-		          'app_verified', $10, $10, 'debug', $12, $11, $12)
+		          'app_verified', $10, $10, 'debug', $12, $11, $12,
+		          $13, $14, 'ios-main', 'main_app', true, 'debug', $15)
 	`, fixture.grantID, organizationID, applicationID, environmentID, fixture.userID,
 		fixture.installationID, fixtureBytes("access-token-jti"), dpopJKT, revisionID,
-		now.Add(-45*time.Minute), now.Add(-40*time.Minute), now.Add(time.Hour)); err != nil {
+		now.Add(-45*time.Minute), now.Add(-40*time.Minute), now.Add(time.Hour),
+		fixture.familyID, fixture.componentID, fixture.componentSessionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -664,15 +892,30 @@ func seedOperationalFixture(
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
+		INSERT INTO component_refresh_tokens (
+		    component_refresh_token_id, component_session_family_id,
+		    client_component_id, component_key_id, session_grant_id,
+		    grant_kind, token_hash, status, issued_at, expires_at
+		) VALUES ($1, $2, $3, $4, $5, 'session', $6, 'active', $7, $8)
+	`, fixture.componentRefreshID, fixture.componentSessionID, fixture.componentID,
+		fixture.componentKeyID, fixture.grantID, fixture.refreshHash,
+		now.Add(-40*time.Minute), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO logical_requests (
 		    logical_request_id, organization_id, application_id, environment_id,
 		    application_user_id, installation_id, session_grant_id, config_revision_id,
-		    feature_key, protocol, status, requested_at, dispatched_at, completed_at
+		    feature_key, protocol, status, requested_at, dispatched_at, completed_at,
+		    installation_family_id, client_component_id, component_definition_id,
+		    component_kind, trust_source, framework, framework_version
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-		          'assistant', 'openai_chat', 'succeeded', $9, $10, $11)
+		          'assistant', 'openai_chat', 'succeeded', $9, $10, $11,
+		          $12, $13, 'ios-main', 'main_app', 'debug', 'swift-openai', '4.6.0')
 	`, fixture.requestID, organizationID, applicationID, environmentID, fixture.userID,
 		fixture.installationID, fixture.grantID, revisionID, fixture.recordedAt.Add(-time.Minute),
-		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt); err != nil {
+		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt,
+		fixture.familyID, fixture.componentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `

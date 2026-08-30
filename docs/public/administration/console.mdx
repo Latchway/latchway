@@ -1,0 +1,86 @@
+---
+title: "Admin console"
+description: "Use the embedded same-origin console and its capability-scoped administrative workflows."
+---
+
+The embedded console is a same-origin client of the canonical Admin API. It
+does not connect directly to PostgreSQL, evaluate policy in the browser, keep
+credentials in Web Storage, or maintain a second configuration model.
+
+## Authentication
+
+The first owner consumes the one-time bootstrap token. After that, bootstrap is
+permanently closed and administrators sign in with a secure same-origin cookie
+session. Mutations require both a validated Origin and the session-bound CSRF
+token.
+
+API automation uses scoped, expirable, revocable bearer tokens instead. A token
+cannot exceed its owner's current organization role or its explicit scopes.
+
+| Capability | Typical use |
+| --- | --- |
+| `manage_owners` | Administrator membership and owner lifecycle |
+| `manage_secrets` | Create, rotate, and retire write-only secrets |
+| `activate_configuration` | Create tenant resources and activate configuration |
+| `run_self_tests` | Immediate and scheduled bounded verification |
+| `inspect_users` | Users, installations, requests, usage, and audit views |
+| `revoke_installations` | Block users and revoke installations |
+| `view_prompt_bodies` | Separately gated optional body access when policy permits it |
+
+## Console areas
+
+| Group | Views |
+| --- | --- |
+| Workspace | Applications, Environments, Setup wizard |
+| Administration | Administrators, API tokens |
+| Identity | Authentication providers, Attestation, Users, Installations |
+| AI configuration | Features, Routes, Upstreams, Models and pricing, Secrets, Full configuration |
+| Governance | Access policies, Limit plans, User overrides, Abuse controls |
+| Observability | Requests, Usage, Cost, Latency, Errors, Attestation failures |
+| Operations | Configuration revisions, Route simulator, Self-tests, Audit log |
+| System | System health |
+
+Resource editors clone the complete active document, replace only the selected
+resource wrapper, preserve every other parsed value, and submit the full draft
+under its ETag. The server remains authoritative for validation, planning,
+simulation, activation, tenancy, and auditing.
+
+## Secrets
+
+Secret lists show only metadata. Create and rotate inputs are password fields;
+the browser clears plaintext before the request completes and the server never
+returns it. Deletion displays the exact current secret version, explains the
+permanent name tombstone, requires the operator to type the logical name, and
+rechecks the name-to-ID binding before sending the mutation.
+
+A referenced, stale, superseded, or cross-tenant secret cannot be deleted.
+
+## Users and installations
+
+User records use opaque IDs and safe normalized claims rather than raw external
+subjects. Blocking a user prevents future sessions and revokes current grants
+and refresh state. Unblocking permits a future enrollment but never restores a
+revoked credential.
+
+Installation revocation destroys that installation's sessions and rotating
+refresh family. Record an operator-approved reason without including identity
+tokens or incident secrets.
+
+## Scheduled self-test exception
+
+Creating a durable self-test schedule cannot use a browser cookie as future
+execution authority. The operator supplies an existing `run_self_tests` token
+in a password field for one request. The console sends only that bearer with
+cookies omitted, does not add CSRF, clears the field, and persists only the
+stable token ID returned by the server.
+
+## Strong client boundary
+
+Console response schemas are strict and bounded. An unknown response field,
+including an accidentally returned secret value, fails closed. Request details
+show ordered attempts and safe provenance, never provider bodies, internal
+errors, identity subjects, proofs, or credentials.
+
+Use [Configuration](/administration/configuration) for the revision lifecycle
+and [Operational views](/administration/observability) for requests, usage,
+audit, and system status.

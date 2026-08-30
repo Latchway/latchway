@@ -43,6 +43,22 @@ func (fake *blackBoxCoordinator) RefreshSession(_ context.Context, input clienta
 	return blackBoxGrant(), nil
 }
 
+func (fake *blackBoxCoordinator) ProvisionComponent(_ context.Context, _ clientapi.ProvisionComponentInput) (clientapi.ProvisionComponentResult, error) {
+	return clientapi.ProvisionComponentResult{}, nil
+}
+
+func (fake *blackBoxCoordinator) CreateComponentSession(_ context.Context, _ clientapi.CreateComponentSessionInput) (clientapi.GrantResult, error) {
+	return blackBoxGrant(), nil
+}
+
+func (fake *blackBoxCoordinator) RevokeComponent(_ context.Context, _ clientapi.RevokeComponentInput) error {
+	return nil
+}
+
+func (fake *blackBoxCoordinator) RevokeCurrentFamily(_ context.Context, _ clientapi.RevokeFamilyInput) error {
+	return nil
+}
+
 func (fake *blackBoxCoordinator) Diagnostics(_ context.Context, input clientapi.DiagnosticsInput) (clientapi.DiagnosticsResult, error) {
 	return clientapi.DiagnosticsResult{}, nil
 }

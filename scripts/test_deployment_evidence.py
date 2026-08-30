@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -322,27 +323,310 @@ def capture(root: Path, platform: str) -> dict[str, object]:
 
 
 class DeploymentEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def embedded_python(run: str) -> str:
+        marker = "<<'PY'\n"
+        if marker not in run:
+            raise AssertionError("fixed inline Python heredoc is missing")
+        body = run.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        compile(body, "deployment-evidence-workflow-inline.py", "exec")
+        return body
+
     def test_workflow_is_prepublication_and_candidate_attested(self) -> None:
         result = deployment.validate_workflow()
         self.assertGreaterEqual(result["pinned_actions"], 1)
-        text = (SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml").read_text()
+        workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"
+        text = workflow_path.read_text()
+        workflow = deployment.yaml_as_json(workflow_path)
+        jobs = workflow["jobs"]
+        self.assertEqual(
+            workflow["env"],
+            {
+                "TRUSTED_WRANGLER_PACKAGE_JSON_SHA256": deployment.WRANGLER_PACKAGE_JSON_SHA256,
+                "TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256": deployment.WRANGLER_PACKAGE_LOCK_SHA256,
+                "TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256": deployment.WRANGLER_ALLOWED_PACKAGES_SHA256,
+                "TRUSTED_WRANGLER_PACKAGE_COUNT": str(deployment.WRANGLER_PACKAGE_COUNT),
+            },
+        )
+        self.assertEqual(
+            set(jobs),
+            {
+                "static",
+                "authenticate",
+                "cloudflare-toolchain-source",
+                "trusted-cloudflare-tool",
+                "prepare",
+                "capture",
+                "capture_compose",
+                "finalize",
+                "sign",
+            },
+        )
+        for name in (
+            "authenticate",
+            "trusted-cloudflare-tool",
+            "capture",
+            "capture_compose",
+            "sign",
+        ):
+            self.assertFalse(
+                any(
+                    str(step.get("uses", "")).startswith("actions/checkout@")
+                    for step in jobs[name]["steps"]
+                ),
+                name,
+            )
+        toolchain_source = jobs["cloudflare-toolchain-source"]
+        self.assertEqual(toolchain_source["permissions"], {"contents": "read"})
+        toolchain_source_text = json.dumps(toolchain_source, sort_keys=True)
+        self.assertIn("${{ github.sha }}", toolchain_source_text)
+        self.assertIn("sparse-checkout-cone-mode", toolchain_source_text)
+        self.assertNotIn("inputs.candidate_commit", toolchain_source_text)
+        self.assertNotIn("scripts/", toolchain_source_text)
+        self.assertNotIn("${{ secrets.", toolchain_source_text)
+        for name in (
+            "authenticate",
+            "trusted-cloudflare-tool",
+            "prepare",
+            "capture_compose",
+            "finalize",
+            "sign",
+        ):
+            self.assertNotIn("${{ secrets.", json.dumps(jobs[name], sort_keys=True))
+        self.assertNotIn("attestations", jobs["capture"]["permissions"])
+        self.assertNotIn("artifact-metadata", jobs["capture"]["permissions"])
+        self.assertEqual(jobs["capture"]["permissions"]["id-token"], "write")
+        self.assertNotIn("packages", jobs["capture"]["permissions"])
+        self.assertNotIn("id-token", jobs["capture_compose"]["permissions"])
+        self.assertNotIn("packages", jobs["capture_compose"]["permissions"])
+        self.assertEqual(jobs["trusted-cloudflare-tool"]["permissions"], {})
+        self.assertEqual(
+            jobs["authenticate"]["environment"], "deployment-evidence-authentication"
+        )
+        self.assertEqual(jobs["sign"]["environment"], "deployment-evidence-signing")
         self.assertNotIn("refs/tags/", text)
         self.assertIn('--source-digest "$CANDIDATE_COMMIT"', text)
         self.assertIn('--core-commit "$CANDIDATE_COMMIT"', text)
         self.assertIn("version: '0.4.89'", text)
         self.assertIn(
-            'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
+            'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"',
             text,
         )
         self.assertLess(
             text.index("uses: superfly/flyctl-actions/setup-flyctl@"),
-            text.index('flyctl config validate --strict --app "$FLY_APP"'),
+            text.index(
+                'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"'
+            ),
+        )
+
+    def test_oidc_jobs_never_checkout_or_execute_candidate_helpers(self) -> None:
+        workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"
+        jobs = deployment.yaml_as_json(workflow_path)["jobs"]
+        privileged = {
+            name
+            for name, job in jobs.items()
+            if job.get("permissions", {}).get("id-token") == "write"
+            or "attestations" in job.get("permissions", {})
+        }
+        self.assertEqual(privileged, {"capture", "sign"})
+        for name in privileged:
+            serialized = json.dumps(jobs[name], sort_keys=True)
+            self.assertNotIn("actions/checkout@", serialized, name)
+        capture = json.dumps(jobs["capture"], sort_keys=True)
+        for forbidden in (
+            "docker compose",
+            "npm ",
+            "npx ",
+            "pnpm ",
+            "yarn ",
+            "corepack ",
+            "scripts/cloudflare-deployment-capture.py",
+            "scripts/deployment-evidence.py",
+            "scripts/release-candidate.py",
+        ):
+            self.assertNotIn(forbidden, capture)
+        self.assertNotIn("id-token", jobs["prepare"].get("permissions", {}))
+        self.assertNotIn(
+            "actions/checkout@",
+            json.dumps(jobs["trusted-cloudflare-tool"], sort_keys=True),
+        )
+        self.assertNotIn(
+            "provider-inputs",
+            json.dumps(jobs["trusted-cloudflare-tool"], sort_keys=True),
+        )
+        self.assertNotIn("id-token", jobs["capture_compose"]["permissions"])
+        self.assertNotIn("id-token", jobs["finalize"]["permissions"])
+        self.assertIn(
+            "Build the candidate Cloudflare Worker without provider or OIDC credentials",
+            [step.get("name", "") for step in jobs["prepare"]["steps"]],
+        )
+        self.assertIn(
+            "Normalize the pre-captured Cloudflare responses without provider credentials",
+            [step.get("name", "") for step in jobs["finalize"]["steps"]],
+        )
+        compose = json.dumps(jobs["capture_compose"], sort_keys=True)
+        self.assertNotIn("docker/login-action", compose)
+        self.assertNotIn("compose.review.yaml", compose)
+        self.assertNotIn("compose.release.yaml", compose)
+        self.assertIn("preloaded-images.tar", compose)
+        self.assertIn('pull_policy:\\"never\\"', compose)
+        capture_names = [step.get("name", "") for step in jobs["capture"]["steps"]]
+        self.assertIn(
+            "Validate and unpack only the fixed-integrity Wrangler distribution",
+            capture_names,
+        )
+        self.assertIn(
+            "Build a lock-closed Wrangler distribution without candidate inputs",
+            [
+                step.get("name", "")
+                for step in jobs["trusted-cloudflare-tool"]["steps"]
+            ],
+        )
+        trusted_tool = json.dumps(jobs["trusted-cloudflare-tool"], sort_keys=True)
+        self.assertIn("npm ci --ignore-scripts --no-audit --no-fund", trusted_tool)
+        self.assertNotIn("npm install", trusted_tool)
+        self.assertIn("allowed-packages.json", trusted_tool)
+        self.assertIn("WRANGLER_WRITE_LOGS", trusted_tool)
+        capture_job = jobs["capture"]
+        cloudflare_step = next(
+            step
+            for step in capture_job["steps"]
+            if step.get("name")
+            == "Capture Cloudflare Container image, migration, secret, and replacement evidence"
+        )
+        cloudflare_run = cloudflare_step["run"]
+        self.assertIn("TRUSTED_WRANGLER_PACKAGE_LOCK_SHA256", cloudflare_run)
+        self.assertIn("TRUSTED_WRANGLER_ALLOWED_PACKAGES_SHA256", cloudflare_run)
+        self.assertIn("credential-boundary-wrangler-packages.json", cloudflare_run)
+        self.assertNotIn("npm ", cloudflare_run)
+        self.assertNotIn("npx ", cloudflare_run)
+        self.assertNotIn("pnpm ", cloudflare_run)
+        self.assertIn(
+            '"${wrangler[@]}" deploy --no-bundle', workflow_path.read_text()
+        )
+        self.assertIn(
+            "docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+            compose,
+        )
+
+    def test_fresh_signer_authenticates_raw_capture_and_archive_closure(self) -> None:
+        workflow_path = SCRIPT.parent.parent / ".github/workflows/deployment-evidence.yml"
+        jobs = deployment.yaml_as_json(workflow_path)["jobs"]
+        signer = jobs["sign"]
+        names = [step.get("name", "") for step in signer["steps"]]
+        raw_download = names.index(
+            "Download the exact raw provider artifact on the fresh signer"
+        )
+        authority_download = names.index(
+            "Download authenticated candidate identity on the fresh signer"
+        )
+        binding_index = names.index(
+            "Independently bind the deterministic archive to authenticated raw capture"
+        )
+        attestation_index = names.index("Attest the bounded provider capture")
+        self.assertLess(raw_download, binding_index)
+        self.assertLess(authority_download, binding_index)
+        self.assertLess(binding_index, attestation_index)
+        self.assertFalse(
+            any(
+                str(step.get("uses", "")).startswith("actions/checkout@")
+                for step in signer["steps"]
+            )
+        )
+        serialized = json.dumps(signer, sort_keys=True)
+        for forbidden in (
+            "scripts/deployment-evidence.py",
+            "scripts/cloudflare-deployment-capture.py",
+            "scripts/release-candidate.py",
+            "${{ secrets.",
+        ):
+            self.assertNotIn(forbidden, serialized)
+        binding_step = signer["steps"][binding_index]
+        run = binding_step["run"]
+        body = self.embedded_python(run)
+        for required in (
+            "candidate archive entry closure is invalid",
+            "raw provider artifact closure is invalid",
+            "normalized capture is not byte-bound to provider raw data",
+            "Cloudflare normalized capture is not bound to raw responses",
+            "latchway_authenticated_deployment_capture",
+            "latchway-deployment-binding.json",
+            '"run_id": run_id',
+            '"provider_resource_id": raw_resource',
+            'info.uid = info.gid = 0',
+            'info.mtime = 0',
+        ):
+            self.assertIn(required, body)
+        self.assertIn(
+            "latchway-deployment-raw-${{ inputs.platform }}-${{ inputs.candidate_commit }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            workflow_path.read_text(encoding="utf-8"),
         )
 
     def test_static_assets_pass(self) -> None:
         checks = deployment.static_checks()
         self.assertTrue(checks)
         self.assertTrue(all(item.status == "passed" for item in checks), checks)
+        compose = deployment.yaml_as_json(
+            SCRIPT.parent.parent / "deploy/compose/compose.release.yaml"
+        )
+        postgres = compose["services"]["postgres"]
+        self.assertEqual(
+            postgres["image"],
+            "docker.io/library/postgres@sha256:"
+            "d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+        )
+        self.assertEqual(postgres["volumes"], ["postgres-data:/var/lib/postgresql"])
+        quickstart = deployment.yaml_as_json(SCRIPT.parent.parent / "compose.yaml")
+        self.assertEqual(
+            quickstart["services"]["postgres"]["image"],
+            "docker.io/library/postgres@sha256:"
+            "d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+        )
+        self.assertEqual(
+            quickstart["services"]["postgres"]["volumes"],
+            ["postgres-data:/var/lib/postgresql"],
+        )
+
+    def test_wrangler_toolchain_closure_is_exact_and_registry_only(self) -> None:
+        result = deployment.validate_wrangler_toolchain()
+        self.assertEqual(result["wrangler_version"], "4.127.1")
+        self.assertEqual(result["package_count"], 91)
+        root = SCRIPT.parent.parent / ".github/toolchains/wrangler"
+        package = deployment.read_json(root / "package.json")
+        lock = deployment.read_json(root / "package-lock.json")
+        allowlist = deployment.read_json(root / "allowed-packages.json")
+
+        non_registry = copy.deepcopy(lock)
+        non_registry["packages"]["node_modules/wrangler"]["resolved"] = (
+            "https://packages.example.invalid/wrangler-4.127.1.tgz"
+        )
+        with self.assertRaises(deployment.EvidenceError) as raised:
+            deployment.validate_wrangler_lock_documents(
+                package, non_registry, allowlist
+            )
+        self.assertEqual(
+            raised.exception.code, "cloudflare_toolchain_package_registry_invalid"
+        )
+
+        missing_integrity = copy.deepcopy(lock)
+        del missing_integrity["packages"]["node_modules/wrangler"]["integrity"]
+        with self.assertRaises(deployment.EvidenceError) as raised:
+            deployment.validate_wrangler_lock_documents(
+                package, missing_integrity, allowlist
+            )
+        self.assertEqual(
+            raised.exception.code, "cloudflare_toolchain_package_integrity_invalid"
+        )
+
+        incomplete_allowlist = copy.deepcopy(allowlist)
+        incomplete_allowlist["packages"].pop()
+        with self.assertRaises(deployment.EvidenceError) as raised:
+            deployment.validate_wrangler_lock_documents(
+                package, lock, incomplete_allowlist
+            )
+        self.assertEqual(
+            raised.exception.code, "cloudflare_toolchain_allowlist_mismatch"
+        )
 
     def test_each_platform_capture_passes(self) -> None:
         for platform in deployment.PLATFORMS:

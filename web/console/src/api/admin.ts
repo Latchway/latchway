@@ -13,6 +13,59 @@ const Identifier = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const Instant = z.iso.datetime({ offset: true });
 const OptionalInstant = Instant.optional();
 const NonnegativeSafeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const Platform = z.enum([
+  "ios",
+  "android",
+  "web",
+  "node",
+  "react_native_ios",
+  "react_native_android",
+  "watchos",
+  "wearos"
+]);
+const ComponentKind = z.enum([
+  "main_app",
+  "widget",
+  "share_extension",
+  "app_intent_extension",
+  "notification_service_extension",
+  "action_extension",
+  "sso_extension",
+  "watch_extension",
+  "android_app",
+  "wear_app",
+  "browser",
+  "node_process"
+]);
+const TrustLevel = z.enum([
+  "none",
+  "identity_only",
+  "web_risk_verified",
+  "app_verified",
+  "device_verified",
+  "strong_device_verified",
+  "debug"
+]);
+const TrustSource = z.enum([
+  "direct_attested",
+  "delegated_from_attested_root",
+  "delegated_identity_only",
+  "identity_only",
+  "web_risk_verified",
+  "debug"
+]);
+const AttestationProvider = z.enum([
+  "app_attest",
+  "play_integrity",
+  "firebase_app_check",
+  "turnstile",
+  "debug"
+]);
+const InstallationFamilyID = z.string().regex(/^fam_[A-Za-z0-9_-]{16,128}$/);
+const ClientComponentID = z.string().regex(/^cmp_[A-Za-z0-9_-]{16,128}$/);
+const ComponentKeyID = z.string().regex(/^cky_[A-Za-z0-9_-]{16,128}$/);
+const ComponentSessionFamilyID = z.string().regex(/^csf_[A-Za-z0-9_-]{16,128}$/);
+const ComponentDelegationID = z.string().regex(/^dlg_[A-Za-z0-9_-]{16,128}$/);
 const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
@@ -123,7 +176,7 @@ export const InstallationPageSchema = z
   .object({ items: z.array(InstallationSchema).max(200), page: PageInfo })
   .strict();
 
-const UsageValues = z
+export const UsageValuesSchema = z
   .object({
     cost_nano_usd: NonnegativeSafeInteger,
     input_tokens: NonnegativeSafeInteger,
@@ -131,6 +184,163 @@ const UsageValues = z
     output_tokens: NonnegativeSafeInteger,
     total_tokens: NonnegativeSafeInteger
   })
+  .strict();
+
+export const ComponentDelegationSchema = z
+  .object({
+    attestation_expires_at: Instant,
+    attestation_provider: AttestationProvider,
+    configuration_revision_id: OpaqueID,
+    consumed_at: OptionalInstant,
+    created_at: Instant,
+    expires_at: Instant,
+    feature_scopes: z.array(Identifier).max(256).refine((features) => new Set(features).size === features.length, {
+      message: "Delegated feature scopes must be unique."
+    }),
+    id: ComponentDelegationID,
+    identity_expires_at: Instant,
+    parent_component_id: ClientComponentID,
+    revoked_at: OptionalInstant,
+    trust_level: TrustLevel
+  })
+  .strict();
+
+export const ClientComponentSchema = z
+  .object({
+    app_version: z.string().min(1).max(128).optional(),
+    attestation_provider: AttestationProvider.optional(),
+    component_key_id: ComponentKeyID,
+    created_at: Instant,
+    definition_id: Identifier,
+    delegation: ComponentDelegationSchema.optional(),
+    dpop_jkt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    environment_id: OpaqueID,
+    granted_features: z.array(Identifier).max(256).refine((features) => new Set(features).size === features.length, {
+      message: "Granted features must be unique."
+    }),
+    id: ClientComponentID,
+    installation_family_id: InstallationFamilyID,
+    is_root: z.boolean(),
+    key_storage_claim: z.enum([
+      "unknown",
+      "secure_enclave",
+      "keychain",
+      "strongbox",
+      "tee",
+      "software",
+      "webcrypto",
+      "memory"
+    ]),
+    kind: ComponentKind,
+    last_seen_at: Instant,
+    parent_attestation_event_id: OpaqueID.optional(),
+    parent_component_id: ClientComponentID.optional(),
+    platform: Platform,
+    refresh_reuse_count: NonnegativeSafeInteger,
+    request_count: NonnegativeSafeInteger,
+    revocation_reason: z.string().min(1).max(100).optional(),
+    revoked_at: OptionalInstant,
+    sdk_version: z.string().min(1).max(128).optional(),
+    session_expires_at: OptionalInstant,
+    session_failure_count: NonnegativeSafeInteger,
+    session_family_id: ComponentSessionFamilyID.optional(),
+    session_status: z.enum(["active", "revoked", "expired", "replaced"]).optional(),
+    status: z.enum(["active", "suspended", "revoked", "replaced"]),
+    trust_expires_at: OptionalInstant,
+    trust_source: TrustSource,
+    trust_verified_at: OptionalInstant,
+    updated_at: Instant,
+    usage: UsageValuesSchema,
+    user_id: OpaqueID
+  })
+  .strict()
+  .superRefine((component, context) => {
+    if (component.is_root === Boolean(component.parent_component_id)) {
+      context.addIssue({ code: "custom", message: "Only delegated components have a parent component.", path: ["parent_component_id"] });
+    }
+    if (component.is_root && component.delegation) {
+      context.addIssue({ code: "custom", message: "Root components cannot contain delegation provenance.", path: ["delegation"] });
+    }
+    if (!component.is_root && (!component.delegation || component.delegation.parent_component_id !== component.parent_component_id)) {
+      context.addIssue({ code: "custom", message: "Delegated component ancestry is incomplete or inconsistent.", path: ["delegation"] });
+    }
+    if (Boolean(component.session_family_id) !== Boolean(component.session_status)) {
+      context.addIssue({ code: "custom", message: "Component session identity and status must appear together.", path: ["session_family_id"] });
+    }
+    if ((component.status === "revoked" || component.status === "replaced") !== Boolean(component.revoked_at)) {
+      context.addIssue({ code: "custom", message: "Component revocation lifecycle fields are inconsistent.", path: ["revoked_at"] });
+    }
+    if (Boolean(component.revoked_at) !== Boolean(component.revocation_reason)) {
+      context.addIssue({ code: "custom", message: "Component revocation time and reason must appear together.", path: ["revocation_reason"] });
+    }
+  });
+
+export const ClientComponentPageSchema = z
+  .object({ items: z.array(ClientComponentSchema).max(200), page: PageInfo })
+  .strict();
+
+export const InstallationFamilySchema = z
+  .object({
+    component_count: NonnegativeSafeInteger.min(1).max(128),
+    components: z.array(ClientComponentSchema).max(128).optional(),
+    created_at: Instant,
+    environment_id: OpaqueID,
+    id: InstallationFamilyID,
+    last_seen_at: Instant,
+    platform: Platform,
+    request_count: NonnegativeSafeInteger,
+    revocation_reason: z.string().min(1).max(100).optional(),
+    revoked_at: OptionalInstant,
+    root_component_id: ClientComponentID,
+    root_trust_expires_at: OptionalInstant,
+    root_trust_source: TrustSource,
+    status: z.enum(["active", "suspended", "revoked"]),
+    updated_at: Instant,
+    usage: UsageValuesSchema,
+    user_id: OpaqueID
+  })
+  .strict()
+  .superRefine((family, context) => {
+    if (family.components && family.components.length !== family.component_count) {
+      context.addIssue({ code: "custom", message: "Family detail must contain every counted component.", path: ["components"] });
+    }
+    if (family.components) {
+      if (new Set(family.components.map((component) => component.id)).size !== family.components.length) {
+        context.addIssue({ code: "custom", message: "Family component identities must be unique.", path: ["components"] });
+      }
+      if (family.components.some((component) => component.installation_family_id !== family.id || component.environment_id !== family.environment_id)) {
+        context.addIssue({ code: "custom", message: "Family components must share the family and environment scope.", path: ["components"] });
+      }
+      if (!family.components.some((component) => component.id === family.root_component_id && component.is_root)) {
+        context.addIssue({ code: "custom", message: "Family detail must contain its root component.", path: ["root_component_id"] });
+      }
+      const byID = new Map(family.components.map((component) => [component.id, component]));
+      for (const component of family.components) {
+        if (component.parent_component_id && !byID.has(component.parent_component_id)) {
+          context.addIssue({ code: "custom", message: "A component parent is outside the returned family.", path: ["components"] });
+        }
+        const visited = new Set<string>();
+        let cursor: typeof component | undefined = component;
+        while (cursor?.parent_component_id) {
+          if (visited.has(cursor.id)) {
+            context.addIssue({ code: "custom", message: "The component trust graph contains a cycle.", path: ["components"] });
+            break;
+          }
+          visited.add(cursor.id);
+          cursor = byID.get(cursor.parent_component_id);
+        }
+      }
+    }
+    if ((family.status === "revoked") !== Boolean(family.revoked_at)) {
+      context.addIssue({ code: "custom", message: "Family revocation lifecycle fields are inconsistent.", path: ["revoked_at"] });
+    }
+    if (Boolean(family.revoked_at) !== Boolean(family.revocation_reason)) {
+      context.addIssue({ code: "custom", message: "Family revocation time and reason must appear together.", path: ["revocation_reason"] });
+    }
+  });
+
+export const InstallationFamilyPageSchema = z
+  .object({ items: z.array(InstallationFamilySchema).max(200), page: PageInfo })
   .strict();
 
 const PublicAttemptFailureCode = z.enum([
@@ -156,7 +366,7 @@ const AttemptSchema = z
     started_at: Instant,
     status: z.enum(["succeeded", "failed", "canceled", "unknown"]),
     upstream: Identifier,
-    usage: UsageValues.optional(),
+    usage: UsageValuesSchema.optional(),
     usage_provenance: z.enum([
       "upstream_reported",
       "calculated",
@@ -205,11 +415,24 @@ const AttemptSchema = z
 export const RequestSchema = z
   .object({
     attempts: z.array(AttemptSchema).max(32),
+    client_component_id: ClientComponentID.optional(),
     completed_at: OptionalInstant,
+    component_definition_id: Identifier.optional(),
+    component_kind: ComponentKind.optional(),
     environment_id: OpaqueID,
     feature: Identifier,
+    framework: Identifier.optional(),
+    framework_version: z
+      .string()
+      .min(1)
+      .max(128)
+      .refine((value) => !value.includes("\r") && !value.includes("\n") && !value.includes("\0"), {
+        message: "Framework versions cannot contain line breaks or NUL bytes."
+      })
+      .optional(),
     id: OpaqueID,
     installation_id: OpaqueID,
+    installation_family_id: InstallationFamilyID.optional(),
     protocol: z.enum([
       "openai_responses",
       "openai_chat",
@@ -219,11 +442,26 @@ export const RequestSchema = z
     ]),
     started_at: Instant,
     status: z.enum(["succeeded", "failed", "canceled", "unknown"]),
-    usage: UsageValues.optional(),
+    trust_source: TrustSource.optional(),
+    usage: UsageValuesSchema.optional(),
     user_id: OpaqueID
   })
   .strict()
   .superRefine((request, context) => {
+    const componentAttribution = [
+      request.installation_family_id,
+      request.client_component_id,
+      request.component_definition_id,
+      request.component_kind,
+      request.trust_source
+    ];
+    const attributed = componentAttribution.filter(Boolean).length;
+    if (attributed !== 0 && attributed !== componentAttribution.length) {
+      context.addIssue({ code: "custom", message: "Component request attribution must be complete.", path: ["client_component_id"] });
+    }
+    if (Boolean(request.framework) !== Boolean(request.framework_version)) {
+      context.addIssue({ code: "custom", message: "Framework identity and version must appear together.", path: ["framework"] });
+    }
     const startedAt = Date.parse(request.started_at);
     const completedAt = request.completed_at ? Date.parse(request.completed_at) : undefined;
     if (completedAt !== undefined && completedAt < startedAt) {
@@ -273,7 +511,7 @@ export const UsageSummarySchema = z
               .object({
                 cost_source: Identifier.optional(),
                 provenance: z.enum(["upstream_reported", "calculated", "estimated", "unknown"]),
-                values: UsageValues
+                values: UsageValuesSchema
               })
               .strict()
           )
@@ -283,7 +521,7 @@ export const UsageSummarySchema = z
     end: Instant,
     provenance: z.array(z.string()).max(5),
     start: Instant,
-    values: UsageValues
+    values: UsageValuesSchema
   })
   .strict();
 
@@ -320,7 +558,7 @@ function usageBreakdownSchema() {
               active_users: NonnegativeSafeInteger,
               key: z.string().min(1).max(512),
               request_count: NonnegativeSafeInteger,
-              values: UsageValues
+              values: UsageValuesSchema
             })
             .strict()
         )
@@ -335,7 +573,7 @@ export const UsageTimeseriesSchema = z
   .object({
     interval: z.enum(["hour", "day"]),
     points: z
-      .array(z.object({ timestamp: Instant, values: UsageValues }).strict())
+      .array(z.object({ timestamp: Instant, values: UsageValuesSchema }).strict())
       .max(10_000)
   })
   .strict();
@@ -628,6 +866,10 @@ export type CreatedAPIToken = z.infer<typeof CreatedAPITokenSchema>;
 export type ApplicationUserPage = z.infer<typeof UserPageSchema>;
 export type Installation = z.infer<typeof InstallationSchema>;
 export type InstallationPage = z.infer<typeof InstallationPageSchema>;
+export type InstallationFamily = z.infer<typeof InstallationFamilySchema>;
+export type InstallationFamilyPage = z.infer<typeof InstallationFamilyPageSchema>;
+export type ClientComponent = z.infer<typeof ClientComponentSchema>;
+export type ClientComponentPage = z.infer<typeof ClientComponentPageSchema>;
 export type LogicalRequest = z.infer<typeof RequestSchema>;
 export type LogicalRequestPage = z.infer<typeof RequestPageSchema>;
 export type UsageSummary = z.infer<typeof UsageSummarySchema>;

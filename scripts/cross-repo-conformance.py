@@ -52,6 +52,7 @@ SDK_FIXTURES = {
 FIXTURE_MEMBERS = {
     "attestation-binding-v1.json": "test-vectors/attestation-binding/v1.json",
     "dpop-v1.json": "test-vectors/dpop/v1.json",
+    "installation-family-v2.json": "test-vectors/installation-family/v2.json",
     "protocol-version.json": "protocol-version.json",
 }
 FIXED_CONTRACT_FILES = (
@@ -62,6 +63,10 @@ FIXED_CONTRACT_FILES = (
     "error-codes.yaml",
     "protocol-version.json",
     "release-evidence.schema.json",
+)
+FIXED_COMPATIBILITY_FILES = (
+    "frameworks.schema.json",
+    "frameworks.yaml",
 )
 REQUIRED_SDK_KINDS = frozenset(("ios", "android", "javascript", "react-native"))
 
@@ -1262,6 +1267,12 @@ def validate_bundle(core: Path, archive: Path) -> dict[str, bytes]:
     expected_paths: dict[str, Path] = {
         name: core / "api" / name for name in FIXED_CONTRACT_FILES
     }
+    expected_paths.update(
+        {
+            f"compatibility/{name}": core / "compatibility" / name
+            for name in FIXED_COMPATIBILITY_FILES
+        }
+    )
     vectors = core / "api/test-vectors"
     if not vectors.is_dir() or vectors.is_symlink():
         raise VerificationError("core_test_vectors_missing")

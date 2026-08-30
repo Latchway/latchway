@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/database/dbsql"
@@ -21,7 +22,7 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
-const latestTestSchemaVersion int64 = 20
+const latestTestSchemaVersion int64 = 22
 
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()
@@ -92,6 +93,299 @@ func TestMigratorPostgreSQL(t *testing.T) {
 	}
 	if current != available || available == 0 {
 		t.Fatalf("schema versions current=%d available=%d", current, available)
+	}
+}
+
+func TestMigratorPostgreSQLUpgradeV21InstallationFamilies(t *testing.T) {
+	ctx, pool := newPostgreSQLIntegrationPool(t)
+	applyMigrationsThrough(t, ctx, pool, 20)
+
+	const (
+		organizationID   = "org_00000000000000000000000021"
+		applicationID    = "app_00000000000000000000000021"
+		environmentID    = "env_00000000000000000000000021"
+		adminUserID      = "adm_00000000000000000000000021"
+		membershipID     = "amb_00000000000000000000000021"
+		configRevisionID = "rev_00000000000000000000000021"
+		applicationUser  = "usr_00000000000000000000000021"
+		installationID   = "ins_00000000000000000000000021"
+		sessionGrantID   = "sgr_00000000000000000000000021"
+		olderRefreshID   = "rft_00000000000000000000000021"
+		newerRefreshID   = "rft_00000000000000000000000022"
+		olderFamilyID    = "rff_00000000000000000000000021"
+		newerFamilyID    = "rff_00000000000000000000000022"
+		attestationID    = "aev_00000000000000000000000021"
+		logicalRequestID = "req_00000000000000000000000021"
+
+		familyID          = "fam_00000000000000000000000021"
+		componentID       = "cmp_00000000000000000000000021"
+		componentKeyID    = "cky_00000000000000000000000021"
+		componentSession  = "csf_00000000000000000000000021"
+		olderComponentRef = "crf_00000000000000000000000021"
+		newerComponentRef = "crf_00000000000000000000000022"
+	)
+	anchor := time.Now().UTC().Truncate(time.Microsecond)
+	createdAt := anchor.Add(-2 * time.Hour)
+	identityVerifiedAt := anchor.Add(-90 * time.Minute)
+	attestedAt := anchor.Add(-80 * time.Minute)
+	issuedAt := anchor.Add(-70 * time.Minute)
+	olderRefreshIssuedAt := anchor.Add(-60 * time.Minute)
+	newerRefreshIssuedAt := anchor.Add(-50 * time.Minute)
+	expiresAt := anchor.Add(2 * time.Hour)
+	dpopJKT := strings.Repeat("v", 43)
+	accessTokenHash := bytes.Repeat([]byte{0x51}, 32)
+	olderRefreshHash := bytes.Repeat([]byte{0x61}, 32)
+	newerRefreshHash := bytes.Repeat([]byte{0x62}, 32)
+	evidenceHash := bytes.Repeat([]byte{0x71}, 32)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO organizations (organization_id, slug, display_name, created_at, updated_at)
+		VALUES ($1, 'upgrade-v21', 'Upgrade V21', $9, $9);
+
+		INSERT INTO applications (
+			application_id, organization_id, slug, display_name, created_at, updated_at
+		) VALUES ($2, $1, 'upgrade-v21-app', 'Upgrade V21 App', $9, $9);
+
+		INSERT INTO environments (
+			environment_id, organization_id, application_id, slug, display_name,
+			kind, created_at, updated_at
+		) VALUES ($3, $1, $2, 'production', 'Production', 'production', $9, $9);
+
+		INSERT INTO admin_users (
+			admin_user_id, email, email_normalized, display_name, created_at, updated_at
+		) VALUES ($4, 'upgrade-v21@example.test', 'upgrade-v21@example.test',
+			'Upgrade V21 Admin', $9, $9);
+
+		INSERT INTO admin_memberships (
+			admin_membership_id, organization_id, admin_user_id, role, created_at, updated_at
+		) VALUES ($5, $1, $4, 'owner', $9, $9);
+
+		INSERT INTO config_revisions (
+			config_revision_id, organization_id, application_id, environment_id,
+			revision_number, etag, status, document, compiled_document,
+			validation_errors, validation_report, created_by_admin_user_id,
+			created_at, validated_at
+		) VALUES (
+			$6, $1, $2, $3, 1, 'upgrade-v21-etag-0001', 'valid', '{}'::jsonb,
+			'{"spec":{"features":[{"id":"assistant"}]}}'::jsonb,
+			'[]'::jsonb, '{"valid":true}'::jsonb, $4, $9, $10
+		);
+
+		INSERT INTO active_config_revisions (
+			organization_id, application_id, environment_id, config_revision_id,
+			revision_status, activated_by_admin_user_id, activated_at
+		) VALUES ($1, $2, $3, $6, 'valid', $4, $10);
+
+		INSERT INTO application_users (
+			application_user_id, organization_id, application_id, created_at, updated_at
+		) VALUES ($7, $1, $2, $9, $9);
+
+		INSERT INTO installations (
+			installation_id, organization_id, application_id, environment_id,
+			application_user_id, platform, dpop_jkt, dpop_public_jwk,
+			key_storage, trust_level, status, app_version,
+			created_at, updated_at, last_seen_at
+		) VALUES (
+			$8, $1, $2, $3, $7, 'ios', $11,
+			'{"kty":"EC","crv":"P-256","x":"x","y":"y"}'::jsonb,
+			'secure_enclave', 'app_verified', 'active', '1.0.0', $9, $10, $10
+		)
+	`, pgx.QueryExecModeSimpleProtocol,
+		organizationID, applicationID, environmentID, adminUserID, membershipID,
+		configRevisionID, applicationUser, installationID, createdAt,
+		anchor.Add(-100*time.Minute), dpopJKT); err != nil {
+		t.Fatalf("seed version 20 tenant and installation: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_grants (
+			session_grant_id, organization_id, application_id, environment_id,
+			application_user_id, installation_id, access_token_jti_hash, dpop_jkt,
+			policy_revision_id, trust_level, identity_provider_key,
+			identity_verified_at, identity_expires_at, attested_at,
+			attestation_provider, attestation_expires_at, issued_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, 'app_verified', 'oidc',
+			$10, $11, $12, 'app_attest', $13, $14, $15
+		)
+	`, sessionGrantID, organizationID, applicationID, environmentID,
+		applicationUser, installationID, accessTokenHash, dpopJKT, configRevisionID,
+		identityVerifiedAt, expiresAt, attestedAt, expiresAt, issuedAt, expiresAt); err != nil {
+		t.Fatalf("seed version 20 session grant: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO refresh_tokens (
+			refresh_token_id, family_id, organization_id, application_id,
+			environment_id, application_user_id, installation_id, session_grant_id,
+			token_hash, status, issued_at, expires_at
+		) VALUES
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $12),
+			($13, $14, $3, $4, $5, $6, $7, $8, $15, 'active', $11, $12)
+	`, olderRefreshID, olderFamilyID, organizationID, applicationID, environmentID,
+		applicationUser, installationID, sessionGrantID, olderRefreshHash,
+		olderRefreshIssuedAt, newerRefreshIssuedAt, expiresAt,
+		newerRefreshID, newerFamilyID, newerRefreshHash); err != nil {
+		t.Fatalf("seed independently active version 20 refresh families: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO attestation_events (
+			attestation_event_id, organization_id, application_id, environment_id,
+			installation_id, provider, outcome, trust_level, evidence_hash,
+			normalized_signals, occurred_at
+		) VALUES ($1, $2, $3, $4, $5, 'app_attest', 'accepted',
+			'app_verified', $6, '{"environment":"production"}'::jsonb, $7)
+	`, attestationID, organizationID, applicationID, environmentID,
+		installationID, evidenceHash, attestedAt); err != nil {
+		t.Fatalf("seed version 20 attestation event: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO logical_requests (
+			logical_request_id, organization_id, application_id, environment_id,
+			application_user_id, installation_id, session_grant_id,
+			config_revision_id, feature_key, protocol, status,
+			requested_at, dispatched_at, completed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'assistant',
+			'openai_responses', 'succeeded', $9, $10, $11)
+	`, logicalRequestID, organizationID, applicationID, environmentID,
+		applicationUser, installationID, sessionGrantID, configRevisionID,
+		issuedAt, issuedAt.Add(time.Second), issuedAt.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed version 20 logical request: %v", err)
+	}
+
+	if err := NewMigrator(pool).Up(ctx); err != nil {
+		t.Fatalf("upgrade populated version 20 schema to version 21: %v", err)
+	}
+
+	var (
+		gotFamilyID, gotRootComponentID string
+		gotFamilyStatus                 string
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT installation_family_id, root_component_id, status
+		FROM installation_families WHERE root_installation_id = $1
+	`, installationID).Scan(&gotFamilyID, &gotRootComponentID, &gotFamilyStatus); err != nil {
+		t.Fatalf("read migrated installation family: %v", err)
+	}
+	if gotFamilyID != familyID || gotRootComponentID != componentID || gotFamilyStatus != "active" {
+		t.Fatalf("migrated family = (%q, %q, %q), want (%q, %q, active)",
+			gotFamilyID, gotRootComponentID, gotFamilyStatus, familyID, componentID)
+	}
+
+	var (
+		gotDefinitionID, gotComponentKeyID, gotTrustSource, gotProvider string
+		gotFeatures                                                     []string
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT component_definition_id, current_component_key_id,
+		       trust_source, trust_attestation_provider, granted_features
+		FROM client_components WHERE client_component_id = $1
+	`, componentID).Scan(&gotDefinitionID, &gotComponentKeyID, &gotTrustSource,
+		&gotProvider, &gotFeatures); err != nil {
+		t.Fatalf("read migrated root component: %v", err)
+	}
+	if gotDefinitionID != "legacy-ios-root" || gotComponentKeyID != componentKeyID ||
+		gotTrustSource != "direct_attested" || gotProvider != "app_attest" ||
+		!reflect.DeepEqual(gotFeatures, []string{"assistant"}) {
+		t.Fatalf("migrated component = definition %q key %q trust %q/%q features %v",
+			gotDefinitionID, gotComponentKeyID, gotTrustSource, gotProvider, gotFeatures)
+	}
+
+	var gotComponentSession string
+	if err := pool.QueryRow(ctx, `
+		SELECT component_session_family_id FROM component_session_families
+		WHERE client_component_id = $1 AND status = 'active'
+	`, componentID).Scan(&gotComponentSession); err != nil {
+		t.Fatalf("read migrated component session family: %v", err)
+	}
+	if gotComponentSession != componentSession {
+		t.Fatalf("component session family = %q, want %q", gotComponentSession, componentSession)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT component_refresh_token_id, status, token_hash
+		FROM component_refresh_tokens
+		WHERE component_session_family_id = $1
+		ORDER BY issued_at, component_refresh_token_id
+	`, componentSession)
+	if err != nil {
+		t.Fatalf("read migrated component refresh tokens: %v", err)
+	}
+	defer rows.Close()
+	type migratedRefresh struct {
+		id     string
+		status string
+		hash   []byte
+	}
+	var migrated []migratedRefresh
+	for rows.Next() {
+		var row migratedRefresh
+		if err := rows.Scan(&row.id, &row.status, &row.hash); err != nil {
+			t.Fatalf("scan migrated component refresh token: %v", err)
+		}
+		migrated = append(migrated, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate migrated component refresh tokens: %v", err)
+	}
+	if len(migrated) != 2 || migrated[0].id != olderComponentRef ||
+		migrated[0].status != "revoked" || !bytes.Equal(migrated[0].hash, olderRefreshHash) ||
+		migrated[1].id != newerComponentRef || migrated[1].status != "active" ||
+		!bytes.Equal(migrated[1].hash, newerRefreshHash) {
+		t.Fatalf("migrated refresh chains = %#v", migrated)
+	}
+
+	var legacyActiveCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM refresh_tokens
+		WHERE installation_id = $1 AND status = 'active'
+	`, installationID).Scan(&legacyActiveCount); err != nil {
+		t.Fatalf("count retained legacy refresh tokens: %v", err)
+	}
+	if legacyActiveCount != 2 {
+		t.Fatalf("retained legacy active refresh tokens = %d, want 2", legacyActiveCount)
+	}
+
+	var componentColumnsNull bool
+	if err := pool.QueryRow(ctx, `
+		SELECT installation_family_id IS NULL
+		   AND client_component_id IS NULL
+		   AND component_session_family_id IS NULL
+		FROM session_grants WHERE session_grant_id = $1
+	`, sessionGrantID).Scan(&componentColumnsNull); err != nil {
+		t.Fatalf("read retained legacy session grant: %v", err)
+	}
+	if !componentColumnsNull {
+		t.Fatal("migration rewrote an already-issued legacy access grant")
+	}
+
+	var (
+		attestationFamily, attestationComponent, attestationTrust string
+		requestFamily, requestComponent, requestDefinition        string
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT installation_family_id, client_component_id, trust_source
+		FROM attestation_events WHERE attestation_event_id = $1
+	`, attestationID).Scan(&attestationFamily, &attestationComponent, &attestationTrust); err != nil {
+		t.Fatalf("read migrated attestation provenance: %v", err)
+	}
+	if attestationFamily != familyID || attestationComponent != componentID ||
+		attestationTrust != "direct_attested" {
+		t.Fatalf("attestation provenance = (%q, %q, %q)",
+			attestationFamily, attestationComponent, attestationTrust)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT installation_family_id, client_component_id, component_definition_id
+		FROM logical_requests WHERE logical_request_id = $1
+	`, logicalRequestID).Scan(&requestFamily, &requestComponent, &requestDefinition); err != nil {
+		t.Fatalf("read migrated request provenance: %v", err)
+	}
+	if requestFamily != familyID || requestComponent != componentID ||
+		requestDefinition != "legacy-ios-root" {
+		t.Fatalf("request provenance = (%q, %q, %q)",
+			requestFamily, requestComponent, requestDefinition)
 	}
 }
 
@@ -880,6 +1174,10 @@ func applyMigrationsThrough(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		{version: 14, name: "000014_admin_read_path_indexes.sql"},
 		{version: 15, name: "000015_identity_jwks_cache.sql"},
 		{version: 16, name: "000016_embeddings_zero_output_preflight.sql"},
+		{version: 17, name: "000017_usage_analytics_dimensions.sql"},
+		{version: 18, name: "000018_quota_scope_request_measurements.sql"},
+		{version: 19, name: "000019_scheduled_self_tests.sql"},
+		{version: 20, name: "000020_client_diagnostics_refresh_index.sql"},
 	} {
 		if migrationFile.version > maximumVersion {
 			break

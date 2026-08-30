@@ -1232,8 +1232,19 @@ func TestHandlerRejectsCanonicalPathAndDeclarationFailuresBeforeAuthentication(t
 		{name: "opaque feature mismatch", edit: func(request *http.Request) { request.URL.Path = "/proxy/weather/v2/current" }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "unknown path", edit: func(request *http.Request) { request.URL.Path = "/v1/unknown" }, code: "resource_not_found", status: http.StatusNotFound},
 		{name: "duplicate protocol", edit: func(request *http.Request) { request.Header.Add("X-Latchway-Protocol-Version", "1") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
+		{name: "unsupported protocol", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Protocol-Version", "3") }, code: "protocol_version_unsupported", status: http.StatusUpgradeRequired},
 		{name: "case duplicate SDK", edit: func(request *http.Request) { request.Header["x-latchway-sdk"] = []string{"ios"} }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "missing SDK version", edit: func(request *http.Request) { request.Header.Del("X-Latchway-SDK-Version") }, code: "request_invalid", status: http.StatusBadRequest},
+		{name: "framework without version", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Framework", "swift-openai") }, code: "request_invalid", status: http.StatusBadRequest},
+		{name: "framework version without framework", edit: func(request *http.Request) { request.Header.Set("X-Latchway-Framework-Version", "4.6.0") }, code: "request_invalid", status: http.StatusBadRequest},
+		{name: "framework belongs to another SDK", edit: func(request *http.Request) {
+			request.Header.Set("X-Latchway-Framework", "vercel-ai-sdk")
+			request.Header.Set("X-Latchway-Framework-Version", "5.0.0")
+		}, code: "framework_integration_unsupported", status: http.StatusBadRequest},
+		{name: "framework version is not semantic", edit: func(request *http.Request) {
+			request.Header.Set("X-Latchway-Framework", "swift-openai")
+			request.Header.Set("X-Latchway-Framework-Version", "04.6.0")
+		}, code: "framework_version_unsupported", status: http.StatusBadRequest},
 		{name: "missing feature", edit: func(request *http.Request) { request.Header.Del("X-Latchway-Feature") }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "duplicate authorization", edit: func(request *http.Request) { request.Header.Add("Authorization", "DPoP "+strings.Repeat("b", 64)) }, code: "request_invalid", status: http.StatusBadRequest},
 		{name: "missing proof", edit: func(request *http.Request) { request.Header.Del("DPoP") }, code: "dpop_missing", status: http.StatusUnauthorized},
@@ -1253,6 +1264,66 @@ func TestHandlerRejectsCanonicalPathAndDeclarationFailuresBeforeAuthentication(t
 				t.Fatalf("invalid request reached trusted dependencies: verify/session/reserve/target=%d/%d/%d/%d", fixture.verifier.calls, fixture.sessions.calls, fixture.quotas.reserveCalls, fixture.targets.calls)
 			}
 		})
+	}
+}
+
+func TestParseDeclarationAcceptsCurrentAndLegacyWireVersions(t *testing.T) {
+	t.Parallel()
+	fixture := newHandlerFixture(t)
+	for _, version := range []string{"1", "2"} {
+		request := fixture.request(t)
+		request.Header.Set("X-Latchway-Protocol-Version", version)
+		if _, violation := parseDeclaration(request); violation != nil {
+			t.Errorf("wire protocol %s rejected: %+v", version, violation)
+		}
+	}
+}
+
+func TestHandlerPersistsFrameworkAndSealedComponentAttribution(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.authorization.InstallationFamilyID = id.Must(id.InstallationFamily)
+	fixture.authorization.InstallationFamilyStatus = "active"
+	fixture.authorization.ComponentID = id.Must(id.ClientComponent)
+	fixture.authorization.ComponentDefinitionID = "ios-widget"
+	fixture.authorization.ComponentKind = "widget"
+	fixture.authorization.TrustSource = "delegated_from_attested_root"
+	fixture.authorization.GrantedFeatures = []string{"assistant"}
+	fixture.decision.Scopes = policy.QuotaScopeFacts{
+		InstallationFamilyID:  fixture.authorization.InstallationFamilyID,
+		ClientComponentID:     fixture.authorization.ComponentID,
+		ComponentDefinitionID: fixture.authorization.ComponentDefinitionID,
+		ComponentKind:         fixture.authorization.ComponentKind,
+		TrustSource:           fixture.authorization.TrustSource,
+	}
+	request := fixture.request(t)
+	request.Header.Set("X-Latchway-Framework", "swift-openai")
+	request.Header.Set("X-Latchway-Framework-Version", "4.6.0")
+	response := httptest.NewRecorder()
+
+	fixture.handler(t).ServeHTTP(response, request)
+
+	input := fixture.quotas.reserveInput
+	if response.Code != http.StatusOK || input.Framework != "swift-openai" || input.FrameworkVersion != "4.6.0" ||
+		input.InstallationFamilyID != fixture.authorization.InstallationFamilyID ||
+		input.ClientComponentID != fixture.authorization.ComponentID ||
+		input.ComponentDefinitionID != "ios-widget" || input.ComponentKind != "widget" ||
+		input.TrustSource != "delegated_from_attested_root" {
+		t.Fatalf("status=%d quota attribution=%+v body=%s", response.Code, input, response.Body.String())
+	}
+}
+
+func TestHandlerRejectsUngrantComponentFeatureBeforePolicyQuotaAndUpstream(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.authorization.ComponentID = id.Must(id.ClientComponent)
+	fixture.authorization.GrantedFeatures = []string{"weekly_summary"}
+	response := httptest.NewRecorder()
+
+	fixture.handler(t).ServeHTTP(response, fixture.request(t))
+
+	assertProblemCode(t, response, "component_feature_not_granted", http.StatusForbidden)
+	if fixture.snapshots.calls != 0 || fixture.policies.calls != 0 || fixture.quotas.reserveCalls != 0 || fixture.targets.calls != 0 {
+		t.Fatalf("ungranted feature reached snapshot/policy/quota/upstream=%d/%d/%d/%d",
+			fixture.snapshots.calls, fixture.policies.calls, fixture.quotas.reserveCalls, fixture.targets.calls)
 	}
 }
 
@@ -4019,6 +4090,7 @@ func (fake *fakePolicyEngine) ResolvePlan(
 	return policy.DecisionPlan{
 		Feature:   decision.Feature,
 		LimitPlan: decision.LimitPlan,
+		Scopes:    decision.Scopes,
 		Candidates: []policy.RouteDecision{{
 			Route: decision.Route, Model: decision.Model, Upstream: decision.Upstream,
 		}},

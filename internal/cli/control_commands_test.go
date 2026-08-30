@@ -254,7 +254,7 @@ func TestVerifyScheduleManagesExactDurableBindingsWithoutCredentialMaterial(t *t
 
 func TestControlPlaneConsumerCommandsDoNotImportDatabaseStores(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"configuration_commands.go", "control_client.go", "operational_commands.go", "route_commands.go"} {
+	for _, name := range []string{"configuration_commands.go", "control_client.go", "family_commands.go", "operational_commands.go", "route_commands.go"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -262,6 +262,116 @@ func TestControlPlaneConsumerCommandsDoNotImportDatabaseStores(t *testing.T) {
 		if bytes.Contains(source, []byte("internal/database")) || bytes.Contains(source, []byte("pgx")) || bytes.Contains(source, []byte("DATABASE_URL")) {
 			t.Fatalf("%s bypasses the canonical Admin API", name)
 		}
+	}
+}
+
+func TestFamilyAndComponentCommandsUseCanonicalAPIWithoutCredentialMaterial(t *testing.T) {
+	token := strings.Repeat("family-control-token-", 2)
+	t.Setenv("TEST_LATCHWAY_FAMILY_TOKEN", token)
+	const (
+		familyID     = "fam_00000000000000000000000000"
+		componentID  = "cmp_00000000000000000000000000"
+		componentKey = "cky_00000000000000000000000000"
+		sessionID    = "csf_00000000000000000000000000"
+		userID       = "usr_00000000000000000000000000"
+	)
+	component := `{
+		"id":"` + componentID + `","installation_family_id":"` + familyID + `",
+		"user_id":"` + userID + `","environment_id":"` + controlTestEnvironment + `",
+		"definition_id":"ios-main","kind":"main_app","platform":"ios","is_root":true,
+		"status":"active","component_key_id":"` + componentKey + `",
+		"dpop_jkt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","key_storage_claim":"secure_enclave",
+		"trust_source":"direct_attested","attestation_provider":"app_attest",
+		"granted_features":["assistant"],"session_family_id":"` + sessionID + `","session_status":"active",
+		"session_failure_count":0,"refresh_reuse_count":0,"request_count":1,
+		"usage":{"logical_requests":1,"input_tokens":10,"output_tokens":20,"total_tokens":30,"cost_nano_usd":40},
+		"created_at":"2026-08-30T00:00:00Z","updated_at":"2026-08-30T00:00:00Z","last_seen_at":"2026-08-30T00:00:00Z"
+	}`
+	family := `{
+		"id":"` + familyID + `","user_id":"` + userID + `",
+		"environment_id":"` + controlTestEnvironment + `","platform":"ios","status":"active",
+		"root_component_id":"` + componentID + `","root_trust_source":"direct_attested",
+		"component_count":1,"request_count":1,
+		"usage":{"logical_requests":1,"input_tokens":10,"output_tokens":20,"total_tokens":30,"cost_nano_usd":40},
+		"created_at":"2026-08-30T00:00:00Z","updated_at":"2026-08-30T00:00:00Z","last_seen_at":"2026-08-30T00:00:00Z"
+	}`
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.Header.Get("Authorization") != "Bearer "+token ||
+			request.Header.Get("Cookie") != "" || request.Header.Get("Origin") != "" {
+			t.Fatal("family command did not use only the scoped bearer")
+		}
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/installation-families":
+			if request.URL.Query().Get("environment_id") != controlTestEnvironment ||
+				request.URL.Query().Get("user_id") != userID {
+				t.Fatalf("family list query=%s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{"items":[`+family+`],"page":{"has_more":false}}`, nil), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/installation-families/"+familyID:
+			return controlHTTPResponse(request, http.StatusOK, strings.TrimSuffix(family, "}")+`,"components":[`+component+`]}`, nil), nil
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/installation-families/"+familyID+"/require-renewal":
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["reason"] != "operator-renewal" {
+				t.Fatalf("family renewal body=%#v err=%v", body, err)
+			}
+			return controlHTTPResponse(request, http.StatusOK,
+				strings.TrimSuffix(family, "}")+`,"root_trust_expires_at":"2026-08-30T01:00:00Z"}`, nil), nil
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/installation-families/"+familyID+"/revoke":
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["reason"] != "operator-family" {
+				t.Fatalf("family revoke body=%#v err=%v", body, err)
+			}
+			return controlHTTPResponse(request, http.StatusOK, strings.Replace(family, `"status":"active"`, `"status":"revoked"`, 1), nil), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/client-components":
+			if request.URL.Query().Get("installation_family_id") != familyID {
+				t.Fatalf("component list query=%s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{"items":[`+component+`],"page":{"has_more":false}}`, nil), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/admin/v1/client-components/"+componentID:
+			return controlHTTPResponse(request, http.StatusOK, component, nil), nil
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/client-components/"+componentID+"/require-reattestation":
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["reason"] != "operator-reattestation" {
+				t.Fatalf("component re-attestation body=%#v err=%v", body, err)
+			}
+			return controlHTTPResponse(request, http.StatusOK,
+				strings.TrimSuffix(component, "}")+`,"trust_expires_at":"2026-08-30T01:00:00Z"}`, nil), nil
+		case request.Method == http.MethodPost && request.URL.Path == "/admin/v1/client-components/"+componentID+"/revoke":
+			var body map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["reason"] != "component-compromised" {
+				t.Fatalf("component revoke body=%#v err=%v", body, err)
+			}
+			return controlHTTPResponse(request, http.StatusOK, strings.Replace(component, `"status":"active"`, `"status":"revoked"`, 1), nil), nil
+		default:
+			t.Fatalf("unexpected family command request %s %s", request.Method, request.URL.String())
+			return nil, nil
+		}
+	})}
+	var output bytes.Buffer
+	opts := &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}
+	common := []string{"--server", "http://127.0.0.1:8080", "--output", "json"}
+	commands := [][]string{
+		{"installation-families", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "list", "--environment", controlTestEnvironment, "--user", userID},
+		{"installation-families", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "inspect", familyID},
+		{"installation-families", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "require-renewal", familyID, "--reason", "operator-renewal"},
+		{"installation-families", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "revoke", familyID, "--reason", "operator-family"},
+		{"components", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "list", "--environment", controlTestEnvironment, "--family", familyID},
+		{"components", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "inspect", componentID},
+		{"components", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "require-reattestation", componentID, "--reason", "operator-reattestation"},
+		{"components", "--api-token-env", "TEST_LATCHWAY_FAMILY_TOKEN", "revoke", componentID, "--reason", "component-compromised"},
+	}
+	for _, command := range commands {
+		args := append(append([]string{}, common...), command...)
+		if err := executeWithOptions(context.Background(), args, opts); err != nil {
+			t.Fatalf("family command %s: %v", strings.Join(command, " "), err)
+		}
+	}
+	if calls != len(commands) || strings.Contains(output.String(), token) ||
+		!strings.Contains(output.String(), componentID) ||
+		!strings.Contains(output.String(), `"status": "revoked"`) {
+		t.Fatalf("family calls=%d output=%q", calls, output.String())
 	}
 }
 

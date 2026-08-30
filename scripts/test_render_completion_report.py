@@ -122,10 +122,170 @@ class RenderCompletionReportTests(unittest.TestCase):
         race_result_bytes = (
             json.dumps(self.race_result, indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
-        self.security = {
+        reviewer = {
+            "identity": "urn:security-reviewer:example-audit-firm",
+            "organization": "Example Audit Firm",
+            "github_login": "example-auditor",
+            "independent_from": "Latchway",
+            "control": "separately_controlled",
+        }
+        producer = {
+            "repository": "ExternalSecurity/latchway-review",
+            "workflow_path": ".github/workflows/independent-security-review.yml",
+            "run_id": 81234,
+            "run_attempt": 2,
+            "source_commit": "9" * 40,
+        }
+        findings = {
+            "total": {
+                "critical": 0,
+                "high": 1,
+                "medium": 2,
+                "low": 3,
+                "informational": 4,
+            },
+            "unresolved": {
+                "critical": 0,
+                "high": 0,
+                "medium": 1,
+                "low": 2,
+                "informational": 4,
+            },
+        }
+        review_results: list[dict[str, object]] = []
+        self.review_files: dict[str, bytes] = {}
+        for identifier in sorted(MODULE.REQUIRED_INDEPENDENT_REVIEWS):
+            accepted_risks = sorted(
+                [
+                    {
+                        "id": f"{identifier}.{severity}-{index + 1}",
+                        "severity": severity,
+                        "summary": f"Retained {severity} fixture risk {index + 1}",
+                        "acceptance_rationale": (
+                            "The independent reviewer documented this bounded residual "
+                            "risk for explicit release review."
+                        ),
+                    }
+                    for severity in ("medium", "low", "informational")
+                    for index in range(findings["unresolved"][severity])
+                ],
+                key=lambda risk: risk["id"],
+            )
+            receipt = {
+                "schema_version": 1,
+                "kind": "latchway_independent_security_review_result",
+                "id": identifier,
+                "status": "passed",
+                "candidate_commit": COMMIT,
+                "reviewer": reviewer,
+                "started_at": "2026-08-29T01:00:10Z",
+                "finished_at": "2026-08-29T01:00:20Z",
+                "findings": findings,
+                "accepted_risks": accepted_risks,
+            }
+            payload = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
+            relative = f"independent-review/reviews/{identifier}.json"
+            self.review_files[relative] = payload
+            review_results.append(
+                {
+                    "id": identifier,
+                    "status": "passed",
+                    "started_at": receipt["started_at"],
+                    "finished_at": receipt["finished_at"],
+                    "findings": findings,
+                    "accepted_risks": accepted_risks,
+                    "artifact": {
+                        "path": f"reviews/{identifier}.json",
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                    },
+                }
+            )
+        review_report = {
             "schema_version": 1,
+            "kind": "latchway_independent_security_review",
+            "status": "passed",
+            "review_window": {
+                "started_at": "2026-08-29T01:00:05Z",
+                "finished_at": "2026-08-29T01:00:30Z",
+                "maximum_age_seconds": 604800,
+            },
+            "candidate": {
+                "commit": COMMIT,
+                "intended_tag": TAG,
+                "version": "1.0.0",
+                "contract": {
+                    "version": "0.5.1",
+                    "bundle_file_name": "latchway-contract-0.5.1.tar.gz",
+                    "bundle_sha256": HASH,
+                },
+                "image": self.candidate["image"],
+            },
+            "reviewer": reviewer,
+            "producer": producer,
+            "reviews": review_results,
+        }
+        review_report_payload = (
+            json.dumps(review_report, indent=2, sort_keys=True) + "\n"
+        ).encode()
+        review_report_hash = hashlib.sha256(review_report_payload).hexdigest()
+        self.review_files[
+            "independent-review/independent-security-review.json"
+        ] = review_report_payload
+        fixed_review_documents = {
+            "independent-review/independent-security-review.attestation.sigstore.json": {
+                "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json"
+            },
+            "independent-review/producer-verification.json": {
+                "schema_version": 1,
+                "kind": "latchway_independent_security_review_producer_verification",
+                "repository": producer["repository"],
+                "workflow_path": producer["workflow_path"],
+                "run_id": producer["run_id"],
+                "run_attempt": producer["run_attempt"],
+                "event": "workflow_dispatch",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": producer["source_commit"],
+                "head_branch": "main",
+            },
+            "independent-review/attestation-verification.json": {
+                "schema_version": 1,
+                "kind": "latchway_independent_security_review_attestation_verification",
+                "repository": producer["repository"],
+                "signer_workflow": f"{producer['repository']}/{producer['workflow_path']}",
+                "source_digest": producer["source_commit"],
+                "source_ref": "refs/heads/main",
+                "subject_sha256": review_report_hash,
+                "hosted_runner": True,
+                "verified": True,
+            },
+        }
+        for relative, document in fixed_review_documents.items():
+            self.review_files[relative] = (
+                json.dumps(document, indent=2, sort_keys=True) + "\n"
+            ).encode()
+        self.promotion_files = {
+            "promotion-conformance/latchway-cross-repository.json": (
+                json.dumps(
+                    {"kind": "latchway_cross_repository_conformance_evidence"},
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode(),
+            "promotion-conformance/latchway-cross-repository.attestation.sigstore.json": b'{"bundle":"promotion"}\n',
+            "promotion-conformance/producer-verification.json": b'{"verified":"producer"}\n',
+            "promotion-conformance/attestation-verification.json": b'{"verified":"attestation"}\n',
+        }
+        promotion_report_hash = hashlib.sha256(
+            self.promotion_files[
+                "promotion-conformance/latchway-cross-repository.json"
+            ]
+        ).hexdigest()
+        self.security = {
+            "schema_version": 2,
             "kind": "latchway_candidate_security_evidence",
             "automated_gate": "passed",
+            "independent_review_gate": "passed",
             "candidate": {
                 "commit": COMMIT,
                 "intended_tag": TAG,
@@ -135,6 +295,7 @@ class RenderCompletionReportTests(unittest.TestCase):
                 "image": {
                     "repository": "ghcr.io/latchway/latchway",
                     "index_digest": f"sha256:{HASH}",
+                    "platforms": self.candidate["image"]["platforms"],
                 },
             },
             "evidence_window": {
@@ -153,6 +314,19 @@ class RenderCompletionReportTests(unittest.TestCase):
                 }
                 for identifier in sorted(MODULE.REQUIRED_SECURITY_CHECKS)
             ],
+            "review_authority": {
+                "reviewer": reviewer,
+                "producer": producer,
+                "report_sha256": review_report_hash,
+            },
+            "promotion_conformance": {
+                "scope": "promotion",
+                "run_id": 71234,
+                "run_attempt": 3,
+                "report_sha256": promotion_report_hash,
+                "repositories": self.repositories,
+            },
+            "independent_reviews": review_results,
             "raw_evidence": [
                 {
                     "path": "raw/source-race.log",
@@ -162,6 +336,14 @@ class RenderCompletionReportTests(unittest.TestCase):
                     "path": "raw/source-race.result.json",
                     "sha256": hashlib.sha256(race_result_bytes).hexdigest(),
                 },
+            ],
+            "review_evidence": [
+                {"path": path, "sha256": hashlib.sha256(payload).hexdigest()}
+                for path, payload in sorted(self.review_files.items())
+            ],
+            "promotion_evidence": [
+                {"path": path, "sha256": hashlib.sha256(payload).hexdigest()}
+                for path, payload in sorted(self.promotion_files.items())
             ],
         }
         domains = [
@@ -355,6 +537,14 @@ class RenderCompletionReportTests(unittest.TestCase):
         self.write_json(
             security_root / "raw/source-race.result.json", self.race_result
         )
+        for relative, payload in self.review_files.items():
+            destination = security_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(payload)
+        for relative, payload in self.promotion_files.items():
+            destination = security_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(payload)
 
         coordinates = {
             item["id"]: {
@@ -559,6 +749,11 @@ class RenderCompletionReportTests(unittest.TestCase):
             "## Operational proof",
             "## Remaining work",
             "exact redacted security inputs",
+            "Independent security review gate",
+            "Independently accepted lower-severity risks",
+            "independent_p0_p2_review",
+            "Acceptance rationale",
+            "all `8` independent security reviews passed",
             "exact physical-device receipt files",
             "evidence/v1.0.0",
             "does not claim that evidence release already exists",
@@ -591,6 +786,30 @@ class RenderCompletionReportTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.ReportError, "security_checks_incomplete"):
             self.render()
 
+        self.rewrite("security", self.security)
+        security = copy.deepcopy(self.security)
+        security["independent_reviews"] = security["independent_reviews"][:-1]
+        self.rewrite("security", security)
+        with self.assertRaisesRegex(MODULE.ReportError, "security_reviews_incomplete"):
+            self.render()
+
+        self.rewrite("security", self.security)
+        security = copy.deepcopy(self.security)
+        security["independent_reviews"][0]["findings"]["total"]["high"] = 2
+        security["independent_reviews"][0]["findings"]["unresolved"]["high"] = 1
+        self.rewrite("security", security)
+        with self.assertRaisesRegex(MODULE.ReportError, "findings_unresolved"):
+            self.render()
+
+    def test_rejects_incomplete_accepted_risk_documentation(self) -> None:
+        security = copy.deepcopy(self.security)
+        security["independent_reviews"][0]["accepted_risks"] = security[
+            "independent_reviews"
+        ][0]["accepted_risks"][:-1]
+        self.rewrite("security", security)
+        with self.assertRaisesRegex(MODULE.ReportError, "accepted_risks_incomplete"):
+            self.render()
+
     def test_rejects_unclassified_or_unfinished_remaining_work(self) -> None:
         path = self.repository / "docs/release/final-report-metadata.json"
         metadata = json.loads(path.read_text(encoding="utf-8"))
@@ -615,6 +834,16 @@ class RenderCompletionReportTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.ReportError,
             "durable_(?:aggregate|domain)|physical_receipts",
+        ):
+            self.render()
+
+    def test_rejects_tampered_durable_independent_review(self) -> None:
+        review = self.durable_evidence_root / (
+            "security/independent-review/reviews/ssrf_review.json"
+        )
+        review.write_text('{"substituted":true}\n', encoding="utf-8")
+        with self.assertRaisesRegex(
+            MODULE.ReportError, "durable_security_review_invalid"
         ):
             self.render()
 

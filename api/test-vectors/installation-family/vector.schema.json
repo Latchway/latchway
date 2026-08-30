@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/test-vectors/1.0.0/installation-family-v2-vector-set.schema.json",
+  "title": "Latchway installation-family and client-component wire 2 vector set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "contract_version",
+    "wire_protocol_version",
+    "family",
+    "root_component",
+    "root_session_claims",
+    "provisioned_components",
+    "revocations"
+  ],
+  "properties": {
+    "format_version": { "type": "integer", "const": 1 },
+    "contract_version": { "type": "string", "const": "1.0.0" },
+    "wire_protocol_version": { "type": "integer", "const": 2 },
+    "family": { "$ref": "#/$defs/Family" },
+    "root_component": { "$ref": "#/$defs/Component" },
+    "root_session_claims": { "$ref": "#/$defs/SessionClaims" },
+    "provisioned_components": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/ProvisionedComponent" }
+    },
+    "revocations": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/Revocation" }
+    }
+  },
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+    },
+    "FamilyID": {
+      "type": "string",
+      "pattern": "^fam_[A-Za-z0-9_-]{16,128}$"
+    },
+    "ComponentID": {
+      "type": "string",
+      "pattern": "^cmp_[A-Za-z0-9_-]{16,128}$"
+    },
+    "DelegationID": {
+      "type": "string",
+      "pattern": "^dlg_[A-Za-z0-9_-]{16,128}$"
+    },
+    "JKT": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "Features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/Identifier" }
+    },
+    "Family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/FamilyID" },
+        "status": { "enum": ["active", "revoked"] }
+      }
+    },
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "definition_id",
+        "kind",
+        "platform",
+        "is_root",
+        "status",
+        "dpop_jkt",
+        "granted_features"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/ComponentID" },
+        "definition_id": { "$ref": "#/$defs/Identifier" },
+        "kind": {
+          "enum": [
+            "main_app",
+            "widget",
+            "share_extension",
+            "app_intent_extension",
+            "notification_service_extension",
+            "action_extension",
+            "sso_extension",
+            "watch_extension",
+            "android_app",
+            "wear_app",
+            "browser",
+            "node_process"
+          ]
+        },
+        "platform": {
+          "enum": ["ios", "android", "web", "react_native_ios", "react_native_android", "node"]
+        },
+        "is_root": { "type": "boolean" },
+        "status": { "enum": ["active", "revoked"] },
+        "dpop_jkt": { "$ref": "#/$defs/JKT" },
+        "granted_features": { "$ref": "#/$defs/Features" }
+      }
+    },
+    "Trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "level", "source", "verified_at", "expires_at"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "level": {
+          "enum": ["identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"]
+        },
+        "source": {
+          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "identity_only", "web_risk_verified", "debug"]
+        },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "parent_component_id": { "$ref": "#/$defs/ComponentID" },
+        "parent_attestation_provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "delegation_id": { "$ref": "#/$defs/DelegationID" }
+      }
+    },
+    "PublicP256JWK": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kty", "crv", "x", "y"],
+      "properties": {
+        "kty": { "const": "EC" },
+        "crv": { "const": "P-256" },
+        "x": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "y": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+      }
+    },
+    "SessionClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installation_family_id",
+        "client_component_id",
+        "component_definition_id",
+        "component_kind",
+        "component_is_root",
+        "granted_features",
+        "trust_source"
+      ],
+      "properties": {
+        "installation_family_id": { "$ref": "#/$defs/FamilyID" },
+        "client_component_id": { "$ref": "#/$defs/ComponentID" },
+        "component_definition_id": { "$ref": "#/$defs/Identifier" },
+        "component_kind": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "component_is_root": { "type": "boolean" },
+        "granted_features": { "$ref": "#/$defs/Features" },
+        "trust_source": {
+          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "identity_only", "web_risk_verified", "debug"]
+        },
+        "parent_component_id": { "$ref": "#/$defs/ComponentID" },
+        "delegation_id": { "$ref": "#/$defs/DelegationID" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "component_is_root": { "const": false } },
+            "required": ["component_is_root"]
+          },
+          "then": { "required": ["parent_component_id", "delegation_id"] },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["parent_component_id"] },
+                { "required": ["delegation_id"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ProvisionedComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "request", "response", "session_exchange", "expected_session_claims"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["component_definition_id", "public_jwk", "requested_features", "client_metadata"],
+          "properties": {
+            "component_definition_id": { "$ref": "#/$defs/Identifier" },
+            "public_jwk": { "$ref": "#/$defs/PublicP256JWK" },
+            "requested_features": { "$ref": "#/$defs/Features" },
+            "client_metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["app_version", "sdk_version"],
+              "properties": {
+                "app_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "sdk_version": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+                }
+              }
+            }
+          }
+        },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["component_id", "installation_family_id", "trust", "granted_features", "refresh_grant", "refresh_grant_expires_at"],
+          "properties": {
+            "component_id": { "$ref": "#/$defs/ComponentID" },
+            "installation_family_id": { "$ref": "#/$defs/FamilyID" },
+            "trust": { "$ref": "#/$defs/Trust" },
+            "granted_features": { "$ref": "#/$defs/Features" },
+            "refresh_grant": { "type": "string", "minLength": 32, "maxLength": 2048 },
+            "refresh_grant_expires_at": { "type": "string", "format": "date-time" }
+          }
+        },
+        "session_exchange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request", "response"],
+          "properties": {
+            "request": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["component_id", "refresh_grant"],
+              "properties": {
+                "component_id": { "$ref": "#/$defs/ComponentID" },
+                "refresh_grant": { "type": "string", "minLength": 32, "maxLength": 2048 }
+              }
+            },
+            "response": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["access_token", "expires_in", "refresh_token", "refresh_expires_at"],
+              "properties": {
+                "access_token": { "type": "string", "minLength": 64, "maxLength": 16384 },
+                "expires_in": { "type": "integer", "minimum": 60, "maximum": 3600 },
+                "refresh_token": { "type": "string", "minLength": 32, "maxLength": 2048 },
+                "refresh_expires_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        },
+        "expected_session_claims": { "$ref": "#/$defs/SessionClaims" }
+      }
+    },
+    "ComponentState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_id", "status"],
+      "properties": {
+        "component_id": { "$ref": "#/$defs/ComponentID" },
+        "status": { "enum": ["active", "revoked"] }
+      }
+    },
+    "Revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "target_id", "expected_family_status", "expected_components"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "scope": { "enum": ["component", "family"] },
+        "target_id": {
+          "type": "string",
+          "pattern": "^(?:cmp|fam)_[A-Za-z0-9_-]{16,128}$"
+        },
+        "expected_family_status": { "enum": ["active", "revoked"] },
+        "expected_components": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/ComponentState" }
+        }
+      }
+    }
+  }
+}

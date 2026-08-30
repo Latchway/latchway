@@ -1,0 +1,42 @@
+---
+title: "AI framework integrations"
+description: "Classify framework extension points and determine whether an integration can preserve feature binding, DPoP, streaming, and cancellation."
+---
+
+<Warning>
+  These pre-release pages define acceptance contracts. No first-party named
+  framework adapter is released or supported until its package, exact version
+  range, compatibility entry, generated example, and conformance evidence are
+  published together.
+</Warning>
+
+Keep your framework. Replace or extend its network transport. Bind that
+transport to a Latchway feature.
+
+```mermaid
+flowchart LR
+    application["Application"] --> framework["Existing AI framework"]
+    framework --> transport["Latchway authenticated transport"]
+    transport --> gateway["Latchway gateway"]
+    gateway --> upstream["Server-selected upstream"]
+```
+
+Latchway owns identity input, trust verification, component identity, session
+lifecycle, DPoP, feature context, authorization, quotas, routing, metering, and
+safe observability. It does not own chats, prompts, agents, tools, memory,
+structured-output APIs, RAG, or framework session state.
+
+## Integration classes
+
+| Class | Extension point | Decision |
+| --- | --- | --- |
+| A: transport-injectable | Custom fetch, URLSession, HTTP client, OkHttp interceptor, middleware, or call factory | Preferred when request-time signing, redirect checks, streaming, and cancellation survive. |
+| B: provider-extensible | A model or provider protocol | Implement the framework's protocol and use an existing Latchway transport underneath. |
+| C: static configuration only | Base URL, static API key, or static headers | Insufficient for full DPoP unless the framework gains a safe request-time hook. |
+
+## Support rule
+
+“Supported” means a generated compatibility row names the framework version,
+adapter version, Latchway SDK version, server range, contract, protocol,
+platform, security level, and passing conformance evidence. A README example or
+successful one-off request is not support evidence.

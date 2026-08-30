@@ -303,9 +303,9 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Application slug").fill("mobile-app");
   await page.getByLabel("Firebase project ID").fill("example-mobile");
   await page.getByLabel("App ID prefix").fill("TEAM1234");
-  await page.getByLabel("Bundle ID").fill("com.example.mobile");
+  await page.getByLabel("Bundle ID", { exact: true }).fill("com.example.mobile");
   await page.getByLabel("Allowed bundle version").fill("2.3.4");
-  await page.getByLabel("Package name").fill("com.example.mobile");
+  await page.getByLabel("Package name").fill("com.example.mobile.android");
   await page.getByLabel("Cloud project number").fill("123456789");
   await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
     "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
@@ -325,11 +325,9 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     };
   };
   expect(Object.keys(generated.spec.attestationPolicies[0]?.platforms ?? {}).sort()).toEqual([
-    "android", "ios", "react_native_android", "react_native_ios"
+    "react_native_android", "react_native_ios"
   ]);
   expect(generated.spec.attestationPolicies[0]?.platforms).toMatchObject({
-    ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
-    android: { minimumTrustLevel: "device_verified" },
     react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
     react_native_android: { minimumTrustLevel: "device_verified" }
   });
@@ -350,7 +348,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     expect.objectContaining({ metric: "input_tokens", algorithm: "per_request", hard: true })
   ]));
   const snippets = await page.locator("pre").allTextContents();
-  expect(snippets).toHaveLength(3);
+  expect(snippets).toHaveLength(1);
   expect(snippets.every((snippet) => snippet.includes(ids.application))).toBe(true);
   expect(snippets[0]).toContain("baseURL: gatewayURL");
   expect(snippets[0]).toContain('identityProvider: "firebase"');

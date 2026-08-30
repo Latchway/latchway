@@ -120,7 +120,7 @@ Each JSON document has the exact following top-level shape:
   "finished_at": "2026-08-29T00:10:00Z",
   "core_commit": "<40 lowercase hexadecimal characters>",
   "core_release": "v1.0.0",
-  "contract_version": "0.5.1",
+  "contract_version": "1.0.0",
   "bundle_sha256": "<64 lowercase hexadecimal characters>",
   "oci_image_digest": "ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>",
   "repositories": {
@@ -141,9 +141,8 @@ Each JSON document has the exact following top-level shape:
 ```
 
 Repository tags and versions need not all be equal; they must equal the exact
-coordinates derived from the five local candidates. The repository coordinates
-in the example use `1.0.0`; the separately versioned frozen contract is
-`0.5.1`.
+coordinates derived from the five local candidates. The repository and draft
+contract coordinates in this version-1 example use `1.0.0`.
 
 The lock's `core_commit` is the contract-source checkpoint, not a
 self-referential release-metadata commit. This permits the core completion
@@ -261,19 +260,25 @@ workflow. Supply `scope` plus immutable `core_ref`, `javascript_ref`, `ios_ref`,
 require `core_release_tag`, `candidate_oci_image_digest`, and the exact
 `external_evidence_run_id` plus `external_evidence_run_attempt` of the protected
 aggregate producer. The artifact name is derived from that run identity; it is
-not an operator input. The workflow checks out exactly those refs, runs this
-command, and retains JSON/JUnit even when the verdict fails. It attests the
-exact source, promotion, or release JSON report with GitHub OIDC. Consumers of
+not an operator input. The protected `private-sibling-read` authority job
+resolves those refs, fetches Git objects without creating a worktree, and seals
+credential-free source archives. A separate job runs this command with no
+repository credential or OIDC permission. A fresh no-checkout job in the
+protected `release-evidence-signing` environment validates the fixed report
+coordinates before attesting the exact source, promotion, or release JSON
+report with GitHub OIDC. Consumers of
 source-scope evidence must verify the attestation against this exact workflow,
 `refs/heads/main`, and the candidate source digest; the source report itself
 neither needs nor claims an already-created tag. The workflow has no package,
 registry, release, or deployment-environment mutation permission.
 
-When sibling repositories are private, configure the repository secret
-`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` as a fine-grained credential with
-Contents: read access only to the four SDK repositories. The checkout steps use
-that credential only for sibling source and do not persist it. Public sibling
-repositories require no secret and fall back to the job token.
+Configure `LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` in the protected
+`private-sibling-read` environment as a fine-grained credential with Contents:
+read access only to the four SDK repositories. The authority job fails closed
+when that credential is absent, never checks out or executes repository code,
+and does not pass the credential to the conformance or attestation jobs.
+Configure required reviewers on `release-evidence-signing`; it contains no
+repository or provider secret.
 
 The workflow does not dispatch SDK updates or publish releases. Those remain
 separate, explicitly authorized operations after a passing evidence report.

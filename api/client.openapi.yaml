@@ -2,10 +2,12 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Latchway Client API
-  version: 0.5.1
+  version: 1.0.0
   summary: DPoP-bound client sessions and AI-compatible proxy routes.
   description: |
-    Normative draft for wire protocol version 1. Identity, attestation and DPoP
+    Normative draft for current wire protocol version 2. Legacy wire protocol
+    version 1 remains accepted for compatible installation/session clients.
+    Identity, attestation and DPoP
     establish a short-lived installation session. Protected AI requests name an
     application feature; clients cannot select trusted users, routes, prices or
     upstream credentials. Browser requests carry one exact canonical HTTPS
@@ -21,6 +23,7 @@ tags:
   - name: Discovery
   - name: Sessions
   - name: Installations
+  - name: Components
   - name: Features
   - name: Diagnostics
   - name: AI proxy
@@ -70,6 +73,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -107,6 +112,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -145,6 +152,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -169,6 +178,108 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /client/v1/installation-families/current/components:
+    post:
+      tags: [Components]
+      operationId: provisionComponent
+      summary: Create or replace a configured delegated client component.
+      description: |
+        The authenticated root component registers only a public P-256 key.
+        The returned opaque refresh grant is stored by the server only as a
+        hash and is bound to that component key, feature scope and delegation.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProvisionComponentRequest' }
+      responses:
+        '201':
+          description: Component key, delegation and one-time provisioning grant created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProvisionComponentResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /client/v1/component-sessions:
+    post:
+      tags: [Components]
+      operationId: createComponentSession
+      summary: Consume a component provisioning grant and create its independent session family.
+      security:
+        - DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComponentSessionRequest' }
+      responses:
+        '201':
+          description: Initial independently rotating component session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentSessionResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /client/v1/installation-families/current/components/{component_id}:
+    delete:
+      tags: [Components]
+      operationId: revokeComponent
+      summary: Revoke one delegated component without revoking its siblings.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ComponentIDPath'
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '204': { description: The component and only its descendant credentials are revoked. }
+        default: { $ref: '#/components/responses/Problem' }
+  /client/v1/installation-families/current:
+    delete:
+      tags: [Components]
+      operationId: revokeCurrentInstallationFamily
+      summary: Revoke the current Installation Family and every component session beneath it.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '204': { description: The family and all component sessions are revoked. }
+        default: { $ref: '#/components/responses/Problem' }
   /client/v1/installations/current:
     delete:
       tags: [Installations]
@@ -181,6 +292,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       responses:
@@ -203,6 +316,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       responses:
@@ -230,6 +345,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       responses:
@@ -254,6 +371,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -276,6 +395,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -298,6 +419,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -320,6 +443,8 @@ paths:
         - $ref: '#/components/parameters/ProtocolVersion'
         - $ref: '#/components/parameters/SDK'
         - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
         - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/BrowserOrigin'
       requestBody:
@@ -337,6 +462,8 @@ paths:
       - $ref: '#/components/parameters/ProtocolVersion'
       - $ref: '#/components/parameters/SDK'
       - $ref: '#/components/parameters/SDKVersion'
+      - $ref: '#/components/parameters/Framework'
+      - $ref: '#/components/parameters/FrameworkVersion'
       - $ref: '#/components/parameters/RequestID'
       - $ref: '#/components/parameters/BrowserOrigin'
     get:
@@ -413,7 +540,14 @@ components:
       name: X-Latchway-Protocol-Version
       in: header
       required: true
-      schema: { type: integer, const: 1 }
+      description: Wire protocol 2 is current; canonical version 1 remains accepted for legacy clients.
+      schema: { type: integer, enum: [1, 2], default: 2 }
+    CurrentProtocolVersion:
+      name: X-Latchway-Protocol-Version
+      in: header
+      required: true
+      description: Installation Family and Client Component operations require current wire protocol 2.
+      schema: { type: integer, const: 2 }
     SDK:
       name: X-Latchway-SDK
       in: header
@@ -428,6 +562,23 @@ components:
       schema:
         type: string
         pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
+    Framework:
+      name: X-Latchway-Framework
+      in: header
+      required: false
+      description: Must be supplied together with X-Latchway-Framework-Version.
+      schema:
+        type: string
+        enum: [android-okhttp, foundation-models, langchain-js, macpaw-openai, openai-js, react-native-fetch, swift-openai, vercel-ai-sdk]
+    FrameworkVersion:
+      name: X-Latchway-Framework-Version
+      in: header
+      required: false
+      description: Must be supplied together with X-Latchway-Framework as canonical SemVer 2.0.0.
+      schema:
+        type: string
+        maxLength: 128
+        pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
     RequestID:
       name: X-Latchway-Request-ID
       in: header
@@ -462,6 +613,11 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/FeatureID' }
+    ComponentIDPath:
+      name: component_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ClientComponentID' }
     RemainingPath:
       name: remainingPath
       in: path
@@ -549,6 +705,15 @@ components:
       allOf:
         - $ref: '#/components/schemas/Identifier'
       description: Stable application-owned feature identifier, not a provider model.
+    InstallationFamilyID:
+      type: string
+      pattern: '^fam_[A-Za-z0-9_-]{16,128}$'
+    ClientComponentID:
+      type: string
+      pattern: '^cmp_[A-Za-z0-9_-]{16,128}$'
+    ComponentDelegationID:
+      type: string
+      pattern: '^dlg_[A-Za-z0-9_-]{16,128}$'
     Base64URL:
       type: string
       minLength: 1
@@ -634,6 +799,73 @@ components:
       required: [refresh_token]
       properties:
         refresh_token: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+    PublicP256JWK:
+      type: object
+      additionalProperties: false
+      required: [kty, crv, x, y]
+      properties:
+        kty: { type: string, const: EC }
+        crv: { type: string, const: P-256 }
+        x: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        y: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+    ProvisionComponentRequest:
+      type: object
+      additionalProperties: false
+      required: [component_definition_id, public_jwk, requested_features, client_metadata]
+      properties:
+        component_definition_id: { $ref: '#/components/schemas/Identifier' }
+        public_jwk: { $ref: '#/components/schemas/PublicP256JWK' }
+        requested_features:
+          type: array
+          minItems: 1
+          maxItems: 256
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/FeatureID' }
+        client_metadata:
+          type: object
+          additionalProperties: false
+          required: [app_version, sdk_version]
+          properties:
+            app_version: { type: string, minLength: 1, maxLength: 128 }
+            sdk_version: { type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$' }
+    ProvisionComponentResponse:
+      type: object
+      additionalProperties: false
+      required: [component_id, installation_family_id, trust, granted_features, refresh_grant, refresh_grant_expires_at]
+      properties:
+        component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        installation_family_id: { $ref: '#/components/schemas/InstallationFamilyID' }
+        trust:
+          type: object
+          additionalProperties: false
+          required: [source, expires_at]
+          properties:
+            source: { type: string, enum: [delegated_from_attested_root, delegated_identity_only] }
+            expires_at: { type: string, format: date-time }
+        granted_features:
+          type: array
+          minItems: 1
+          maxItems: 256
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/FeatureID' }
+        refresh_grant: { type: string, minLength: 32, maxLength: 2048, x-sensitive: true }
+        refresh_grant_expires_at: { type: string, format: date-time }
+    ComponentSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [component_id, refresh_grant]
+      properties:
+        component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        refresh_grant: { type: string, minLength: 32, maxLength: 2048, writeOnly: true }
+    ComponentSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, expires_in, refresh_token, refresh_expires_at]
+      properties:
+        access_token: { type: string, minLength: 64, maxLength: 16384, x-sensitive: true }
+        expires_in: { type: integer, minimum: 60, maximum: 3600 }
+        refresh_token: { type: string, minLength: 32, maxLength: 2048, x-sensitive: true }
+        refresh_expires_at: { type: string, format: date-time }
     SessionGrant:
       type: object
       additionalProperties: false
@@ -648,6 +880,37 @@ components:
           $ref: '#/components/schemas/InstallationSummary'
         trust:
           $ref: '#/components/schemas/TrustSummary'
+        installation_family:
+          $ref: '#/components/schemas/InstallationFamilySummary'
+        component:
+          $ref: '#/components/schemas/ClientComponentSummary'
+    InstallationFamilySummary:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id: { $ref: '#/components/schemas/InstallationFamilyID' }
+        status: { type: string, enum: [active, revoked] }
+    ClientComponentSummary:
+      type: object
+      additionalProperties: false
+      required: [id, definition_id, kind, platform, is_root, status, dpop_jkt, granted_features]
+      properties:
+        id: { $ref: '#/components/schemas/ClientComponentID' }
+        definition_id: { $ref: '#/components/schemas/Identifier' }
+        kind:
+          type: string
+          enum: [main_app, widget, share_extension, app_intent_extension, notification_service_extension, action_extension, sso_extension, watch_extension, android_app, wear_app, browser, node_process]
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        is_root: { type: boolean }
+        status: { type: string, enum: [active, revoked] }
+        dpop_jkt: { $ref: '#/components/schemas/Base64URL' }
+        granted_features:
+          type: array
+          minItems: 1
+          maxItems: 256
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/FeatureID' }
     InstallationSummary:
       type: object
       additionalProperties: false
@@ -668,6 +931,12 @@ components:
           enum: [none, identity_only, web_risk_verified, app_verified, device_verified, strong_device_verified, debug]
         verified_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+        source:
+          type: string
+          enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, identity_only, web_risk_verified, debug]
+        parent_component_id: { $ref: '#/components/schemas/ClientComponentID' }
+        parent_attestation_provider: { type: string }
+        delegation_id: { $ref: '#/components/schemas/ComponentDelegationID' }
     QuotaSnapshot:
       type: object
       additionalProperties: false
@@ -696,8 +965,8 @@ components:
       properties:
         request_id: { type: string }
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.1 }
-        protocol_version: { type: integer, const: 1 }
+        contract_version: { type: string, const: 1.0.0 }
+        protocol_version: { type: integer, const: 2 }
         installation: { $ref: '#/components/schemas/InstallationSummary' }
         session:
           type: object
@@ -710,15 +979,20 @@ components:
     DiscoveryDocument:
       type: object
       additionalProperties: false
-      required: [server_version, contract_version, supported_protocol_versions, session_endpoint, dpop_algorithms, maximum_clock_skew_seconds]
+      required: [server_version, contract_version, current_protocol_version, supported_protocol_versions, session_endpoint, dpop_algorithms, maximum_clock_skew_seconds]
       properties:
         server_version: { type: string }
-        contract_version: { type: string, const: 0.5.1 }
+        contract_version: { type: string, const: 1.0.0 }
+        current_protocol_version: { type: integer, const: 2 }
         supported_protocol_versions:
           type: array
-          minItems: 1
+          minItems: 2
+          maxItems: 2
           uniqueItems: true
-          items: { type: integer, minimum: 1 }
+          prefixItems:
+            - { const: 1 }
+            - { const: 2 }
+          items: false
         session_endpoint: { type: string, format: uri-reference, const: /client/v1/sessions }
         dpop_algorithms:
           type: array
@@ -781,6 +1055,23 @@ components:
             - session_revoked
             - refresh_token_reused
             - installation_revoked
+            - installation_family_revoked
+            - installation_family_not_found
+            - component_definition_not_found
+            - component_not_configured
+            - component_not_provisioned
+            - component_revoked
+            - component_key_invalid
+            - component_key_replaced
+            - component_delegation_expired
+            - component_feature_not_granted
+            - component_parent_trust_expired
+            - component_direct_attestation_required
+            - containing_app_setup_required
+            - framework_integration_unsupported
+            - framework_version_unsupported
+            - transport_destination_not_allowed
+            - transport_request_not_replayable
             - feature_not_found
             - feature_not_allowed
             - model_not_allowed

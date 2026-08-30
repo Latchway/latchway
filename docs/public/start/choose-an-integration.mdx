@@ -1,0 +1,27 @@
+---
+title: "Choose your integration"
+description: "Select a current SDK path or identify a planned framework adapter without mistaking design targets for released support."
+---
+
+Start with a supported platform SDK. Add a framework adapter only when its
+compatibility entry names the exact framework, adapter, Latchway SDK, contract,
+and protocol versions you use.
+
+| Application surface | Starting point | Framework path |
+| --- | --- | --- |
+| React Native | [React Native SDK](/mobile/react-native) | Native-backed fetch; named adapters are planned |
+| Native iOS | [Native iOS SDK](/mobile/ios) | Feature-bound URLSession; named adapters are planned |
+| Native Android | [Native Android SDK](/mobile/android) | OkHttp transport; ecosystem evidence is planned |
+| Web | [Security boundary](/concepts/security-boundary) | Feature-bound fetch with web-level trust only |
+| Server or diagnostic client | [Client API](/reference/client-api) | Raw HTTP requires complete DPoP handling |
+
+<Warning>
+  The current source candidate does not publish first-party framework-adapter
+  packages or Installation Family support. The integration pages define the
+  acceptance contract and remain unsupported until the compatibility matrix and
+  conformance results say otherwise.
+</Warning>
+
+Never place an upstream provider API key in application code. A framework that
+accepts only a base URL, static API key, or static headers cannot preserve
+request-specific DPoP on its own.

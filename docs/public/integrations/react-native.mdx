@@ -1,0 +1,116 @@
+---
+title: "React Native framework integration"
+description: "Evaluate the native-backed fetch target for JavaScript AI frameworks without moving keys or session credentials into JavaScript."
+---
+
+<Warning>
+  The React Native source candidate exposes a native-backed fetch-shaped API,
+  but named framework compatibility remains pre-release and Installation Family
+  component support has not passed release conformance.
+</Warning>
+
+## 1. What this integration does
+
+The transport gives JavaScript safe response data and stream events while the
+iOS or Android bridge owns key storage, refresh state, DPoP signing, attestation,
+authenticated dispatch, and origin checks.
+
+## 2. Supported framework versions
+
+React Native `0.82.0` has an `experimental` native-backed-fetch row based on
+bounded local tests. It is not a published supported integration, and the
+named JavaScript framework rows do not automatically apply to React Native.
+
+## 3. Supported Latchway versions
+
+The source candidate targets draft contract `1.0.0` and current protocol `2`;
+protocol `1` remains accepted for compatible legacy routes. Installation
+Family and Client Component operations are included in the draft wire-2
+contract.
+
+## 4. Security level
+
+| Capability | Target and current status |
+| --- | --- |
+| Full DPoP preserved | Native-backed source target; release evidence pending |
+| Private key remains native | Required and source-targeted; release evidence pending |
+| Streaming | Native bridge target; framework-specific evidence pending |
+| Cancellation | Required; framework-specific evidence pending |
+| App extensions | Component APIs are in the draft contract; platform-specific evidence remains pending |
+| Structured output | Framework-specific evidence pending |
+| Tool calls | Framework-specific evidence pending |
+| Protocol | Draft contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
+
+## 5. Install packages
+
+`@latchway/react-native` version `1.0.0` is not published. Use only the pinned
+source candidate and example for evaluation.
+
+## 6. Create the Latchway client
+
+Follow [React Native](/mobile/react-native). Native modules must receive the
+platform configuration and identity callback without returning reusable
+credentials to JavaScript.
+
+## 7. Bind a feature
+
+The target `fetchFor` surface binds one feature. Its signature remains a planned
+framework-compatibility API rather than a released contract.
+
+## 8. Create the framework client
+
+Pass the native-backed fetch only through a framework's supported request-time
+transport seam. A static API key or static header path is insufficient.
+
+## 9. Send a non-streaming request
+
+The bridge returns safe status, headers, and bytes while native code owns
+authorization. Body-bearing requests are not automatically replayed.
+
+## 10. Send a streaming request
+
+The bridge must preserve incremental events and backpressure without exposing
+session material or buffering the complete response.
+
+## 11. Use tools
+
+Tools remain framework concepts. JavaScript executes them; Latchway only
+transports permitted protocol content.
+
+## 12. Use structured output
+
+Support is framework- and runtime-specific and requires an explicit conformance
+row.
+
+## 13. Handle cancellation
+
+Abort must cancel native dispatch. It must not race into an automatic replay.
+
+## 14. Handle quota failures
+
+Surface the canonical problem and safe request ID across the native bridge.
+
+## 15. Handle session renewal
+
+Native modules single-flight refresh and generate a fresh proof for a permitted
+pre-dispatch retry. JavaScript never reads the refresh credential.
+
+## 16. Known limitations
+
+Browser-only streams, uploads, or framework hooks may not exist in React
+Native. Do not infer runtime support from a browser test.
+
+## 17. Verify the integration
+
+Test raw fetch and each named framework separately on both iOS and Android,
+including streaming, cancellation, refresh, quotas, and credential isolation.
+
+## 18. Troubleshooting
+
+Check native diagnostics, runtime support, and exact dependency versions. Do not
+log bridge payloads that can contain application request bodies.
+
+## 19. Compatibility matrix
+
+No supported named-framework row is published. See
+[Compatibility](/reference/compatibility).

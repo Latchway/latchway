@@ -5,11 +5,22 @@ The ordinary pull-request, protected-branch, and weekly jobs in
 release evidence. A historical note that a reviewer found no P0-P2 issue is
 also not evidence for a later commit.
 
-The same workflow has a separate, manually dispatched candidate job. It runs
-only from `refs/heads/main`, checks out the exact dispatch commit, requires the
-dispatch SHA and clean checkout `HEAD` to equal that commit, and uses the
-protected `security-evidence` environment. Configure that environment with
-required reviewers before using the job for a release.
+The same workflow has manually dispatched candidate scan, authentication,
+sealing, and attestation jobs. The scan job runs the fixed current-candidate
+checks and uploads only raw evidence. A fresh protected runner authenticates
+and snapshots the candidate, promotion conformance, and independent review
+without checking out or executing candidate code. A second fresh runner has no
+external-review credential or OIDC permission; it validates and seals the exact
+snapshot against a clean candidate checkout. A final no-checkout runner alone
+receives OIDC permission and attests only the fixed summary coordinates before
+publishing the release evidence artifact. The jobs run only from
+`refs/heads/main` and require the dispatch SHA and clean checkout `HEAD` to equal
+the exact commit. The authentication job uses the protected
+`security-evidence` environment. Configure that environment with required
+reviewers before using the workflow for a release. Configure the final
+no-checkout attestation job on the separately protected
+`release-evidence-signing` environment as well; that environment contains no
+review or provider credential.
 
 ## Candidate identity
 
@@ -18,6 +29,10 @@ The dispatch accepts only:
 - the exact 40-character candidate commit;
 - its intended semantic tag; and
 - the numeric successful release-candidate workflow run ID and exact run
+  attempt;
+- the numeric successful promotion-scope cross-repository run ID and exact run
+  attempt; and
+- the numeric successful independent-review workflow run ID and exact run
   attempt.
 
 The candidate artifact name is derived from the commit, run ID, and run
@@ -35,6 +50,8 @@ hash. The resulting summary binds:
 - intended tag and version;
 - released contract version, bundle name, and bundle SHA-256;
 - OCI index digest and distinct `linux/amd64` and `linux/arm64` child digests;
+- the SHA-256 of the attested promotion report and exact core, JavaScript, iOS,
+  Android, and React Native commit/version/tag coordinates;
 - both platform vulnerability reports; and
 - both platform license reports.
 
@@ -86,6 +103,18 @@ security-final/
 ├── latchway-candidate.json
 ├── security-summary.json
 ├── security-summary.attestation.sigstore.json
+├── independent-review/
+│   ├── independent-security-review.json
+│   ├── independent-security-review.attestation.sigstore.json
+│   ├── producer-verification.json
+│   ├── attestation-verification.json
+│   └── reviews/
+│       └── <eight-fixed-review-id>.json
+├── promotion-conformance/
+│   ├── latchway-cross-repository.json
+│   ├── latchway-cross-repository.attestation.sigstore.json
+│   ├── producer-verification.json
+│   └── attestation-verification.json
 └── raw/
     ├── scan-window.json
     ├── source-go-vulnerability.binary
@@ -106,11 +135,32 @@ no source snippets, scanner matches, test logs, absolute paths, environment
 values, provider payloads, credentials, or user-authored claims. Rebuilding the
 summary from identical inputs produces identical bytes.
 
-## External review status
+## Independent review gate
 
-This automated gate does not manufacture an independent security assessment.
-The summary explicitly records the following as `unavailable` with reason
-`no_candidate_bound_protected_external_result`:
+The candidate workflow cannot manufacture or waive an independent assessment.
+It requires the exact run ID and run attempt of an allowlisted workflow in a
+separately controlled, non-Latchway GitHub repository. The protected
+`security-evidence` environment supplies these values:
+
+- `INDEPENDENT_SECURITY_REVIEW_REPOSITORY`;
+- `INDEPENDENT_SECURITY_REVIEW_WORKFLOW`;
+- `INDEPENDENT_SECURITY_REVIEWER_IDENTITY`;
+- `INDEPENDENT_SECURITY_REVIEWER_ORGANIZATION`;
+- `INDEPENDENT_SECURITY_REVIEWER_LOGIN`; and
+- the `INDEPENDENT_SECURITY_REVIEW_TOKEN` secret, with read access only to the
+  review workflow run, artifact, and attestation.
+
+Absent settings, credentials, or artifacts fail the candidate security job.
+The repository owner and reviewer organization must not be `Latchway`. The
+workflow requires both the actor and triggering actor to equal the allowlisted
+reviewer login, authenticates the exact successful hosted-run and attempt,
+verifies the review report's Sigstore bundle against the allowlisted external
+workflow and its exact source commit, and retains normalized run and
+attestation verification records.
+
+The report follows
+[`independent-security-review.schema.json`](independent-security-review.schema.json)
+and must contain exactly these eight review IDs:
 
 - independent P0-P2 review;
 - SSRF and cryptography review;
@@ -118,10 +168,26 @@ The summary explicitly records the following as `unavailable` with reason
 - quota-race and Admin-auth review; and
 - browser-XSS review.
 
-Therefore `automated_gate: passed` means only that the fixed candidate-current
-automation passed. It is not a statement that those external observations ran,
-that the candidate has no lower-severity risk, or that the entire v1 security
-review is complete.
+Every review has an exact candidate commit, tag, version, contract bundle,
+image index, `linux/amd64` and `linux/arm64` digest, promotion-report SHA-256,
+and five-repository coordinate binding. The overall and per-review UTC windows
+must start after both candidate creation and promotion evidence completion,
+remain no more than seven days old, and span no more than seven days. Finding
+totals and unresolved counts are retained for `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, and
+`INFORMATIONAL`; unresolved `CRITICAL` or `HIGH` findings fail closed. Every
+unresolved `MEDIUM`, `LOW`, or `INFORMATIONAL` finding must have one
+accepted-risk record with a review-scoped stable ID, severity, bounded summary,
+and explicit acceptance rationale. The array must be sorted by ID and its
+severity counts must exactly equal the unresolved finding counts; omitted or
+generic count-only risk documentation fails closed.
+
+The validator accepts no partial review set, extra JSON fields, duplicate keys,
+non-finite values, secret-shaped keys or values, symlinks, unexpected files, or
+files larger than four MiB. Each fixed per-review receipt, the report, Sigstore
+bundle, and both normalized verification documents are SHA-256 bound into the
+version 2 security summary. Sealing copies the exact validated bytes and
+promotion recomputes every binding. Lower-severity findings and their accepted
+risk rationales remain visible and are not reclassified as absent.
 
 ## Promotion gate
 
@@ -136,12 +202,17 @@ promotion:
 3. verifies the summary attestation against the exact security workflow,
    source digest, signer digest, ref, repository, and hosted runner; and
 4. reruns `security-evidence.py --verify` against the immutable candidate,
-   retained raw directory, and clean candidate checkout.
+   retained raw directory, retained independent-review tree, retained promotion
+   conformance tree, and clean candidate checkout. The promotion workflow also
+   requires the security-bound report hash and all five coordinates to equal
+   its own attested promotion report before mutation.
 
 Stale or altered evidence cannot be reused for a later candidate.
-The immutable release publishes the redacted summary and its Sigstore bundle;
-the raw scanner and command evidence remains in the protected workflow
-artifact and is not added to the public release.
+The immutable product release publishes the redacted summary and its Sigstore
+bundle. The scanner inputs, independent review material, and
+promotion-conformance binding remain in the protected workflow artifact;
+finalization copies all three into the deterministic durable evidence archive
+before rendering the completion report.
 
 ## Local validator tests
 

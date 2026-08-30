@@ -1,0 +1,86 @@
+---
+title: "Upgrades and rollback"
+description: "Apply forward-only migrations, roll the application safely, and distinguish app rollback from schema recovery."
+---
+
+Latchway migrations are transactional, advisory-lock protected, and
+forward-only. Application rollback is safe only when the previous binary
+supports the current schema; otherwise recover the pre-upgrade database backup.
+
+## Preflight
+
+Record current image digest, binary/contract version, schema, active
+configuration revision, SDK versions, and worker heartbeat. Verify the new
+digest's signature, provenance, SBOM, vulnerability, and license results.
+
+Complete a fresh backup and recent isolated restore drill. Ensure PostgreSQL
+connections and capacity can carry the overlap of old and new replicas.
+
+<Warning>
+  No stable version 1 image, signature, or provenance has been published yet.
+  Verification commands become usable only after the release workflow publishes
+  those exact assets.
+</Warning>
+
+## Roll forward
+
+1. Deploy the new image as a migration job without application traffic.
+2. Run `latchway migrate status`, exactly one `latchway migrate up`, then status
+   and doctor again.
+3. Roll worker replicas first when release notes require new maintenance logic;
+   otherwise preserve one compatible heartbeat throughout.
+4. Send a small percentage of API traffic to the new digest.
+5. Verify session refresh, JSON, streaming, quotas, settlement, fallback,
+   metrics, logs, and traces before increasing traffic.
+6. Drain old replicas for at least `LATCHWAY_SHUTDOWN_TIMEOUT`—30 seconds by
+   default—and retain the previous digest through the observation window.
+
+Do not combine schema migration, public-origin change, master-key change,
+emergency signing rotation, and a large upstream configuration rewrite in one
+rollout.
+
+## Application rollback
+
+Route traffic back to the previous digest when readiness, latency, error rate,
+or correctness regresses. Confirm that binary's declared schema range includes
+the current database before starting it. Preserve failed replica telemetry and
+let workers reclaim reservations; never edit quota tables manually.
+
+## Schema recovery
+
+There are no down migrations. To undo schema state:
+
+1. remove application traffic;
+2. restore the pre-upgrade backup or PITR point into a new database;
+3. start the matching previous image with the matching master key;
+4. run the complete restore verification;
+5. switch traffic to the recovered environment.
+
+Deleting migration-ledger rows or hand-editing production tables is unsupported
+and can break quota, audit, signing, replay, or recovery guarantees.
+
+## PostgreSQL major upgrades
+
+Treat a PostgreSQL major-version change as a database migration, not as an
+application image update. PostgreSQL 18's official image stores versioned
+clusters beneath `/var/lib/postgresql`; the checked-in release Compose template
+therefore mounts that directory. A volume created with the older
+`/var/lib/postgresql/data` layout must not simply be attached to PostgreSQL 18.
+
+Before changing the pinned PostgreSQL digest, create and verify an independent
+backup, use a supported major-upgrade path such as logical dump/restore or
+`pg_upgrade`, restore into an isolated volume, and run the complete Latchway
+migration, doctor, readiness, quota, and streaming checks. Keep the old database
+and matching application digest recoverable until the observation window ends.
+
+## Release proof
+
+The release gate runs an authenticated distinct-ancestor candidate, the current
+candidate, and then the prior application again against one isolated database.
+The prior binary must report the current schema as supported and become ready
+after rollback. A database restore proves schema recovery, not application
+rollback compatibility.
+
+The current version 1 evidence includes a supplemental local drill, not a
+protected released-image receipt. Repeat the drill against the exact candidate
+before promotion.

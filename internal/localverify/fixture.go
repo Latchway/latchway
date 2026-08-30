@@ -28,6 +28,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latchway/latchway/internal/adminauth"
+	"github.com/latchway/latchway/internal/buildinfo"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/dataplane"
@@ -492,7 +493,7 @@ func protectedHeaders(request *http.Request, proof string) {
 	request.Header.Set("Forwarded", "host=attacker.invalid;proto=http")
 	request.Header.Set("X-Forwarded-Host", "attacker.invalid")
 	request.Header.Set("X-Forwarded-Proto", "http")
-	request.Header.Set("X-Latchway-Protocol-Version", "1")
+	request.Header.Set("X-Latchway-Protocol-Version", buildinfo.ProtocolVersion)
 	request.Header.Set("X-Latchway-SDK", "react-native")
 	request.Header.Set("X-Latchway-SDK-Version", "1.0.0")
 	request.Header.Set("DPoP", proof)
