@@ -265,14 +265,46 @@ func (target *Target) outboundRequest(
 		return nil, nil, err
 	}
 
-	roundTripContext, cancelRoundTrip := context.WithCancel(ctx)
-	cancelOnce := sync.OnceFunc(cancelRoundTrip)
+	preparedContext := prepared.request.Context()
+	valueContext := dispatchValueContext{Context: ctx, prepared: preparedContext}
+	var roundTripContext context.Context
+	var cancelRoundTrip context.CancelFunc
+	if deadline, ok := preparedContext.Deadline(); ok {
+		roundTripContext, cancelRoundTrip = context.WithDeadline(valueContext, deadline)
+	} else {
+		roundTripContext, cancelRoundTrip = context.WithCancel(valueContext)
+	}
+	stopPreparedCancellation := context.AfterFunc(preparedContext, cancelRoundTrip)
+	cancelOnce := sync.OnceFunc(func() {
+		stopPreparedCancellation()
+		cancelRoundTrip()
+	})
+	if preparedContext.Err() != nil {
+		cancelRoundTrip()
+	}
 	outbound := prepared.request.Clone(roundTripContext)
 	if err := target.validatePreparedRequest(PreparedRequest{target: target, request: outbound, state: prepared.state}); err != nil {
 		cancelOnce()
 		return nil, nil, err
 	}
 	return outbound, cancelOnce, nil
+}
+
+// dispatchValueContext keeps values attached while a request is prepared (for
+// example, an adapter's private response protocol mode) while retaining the
+// dispatch operation as the authoritative cancellation and value fallback.
+// Cancellation and deadlines from the prepared context are joined explicitly
+// in outboundRequest.
+type dispatchValueContext struct {
+	context.Context
+	prepared context.Context
+}
+
+func (ctx dispatchValueContext) Value(key any) any {
+	if value := ctx.prepared.Value(key); value != nil {
+		return value
+	}
+	return ctx.Context.Value(key)
 }
 
 func (target *Target) roundTrip(

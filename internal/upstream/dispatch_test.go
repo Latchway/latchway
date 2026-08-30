@@ -77,6 +77,77 @@ func TestWithBearerDispatchRetainsCredentialUntilExactBodyClose(t *testing.T) {
 	}
 }
 
+func TestDispatchJoinsPreparedAndOperationContexts(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const (
+		preparedKey  contextKey = "prepared"
+		operationKey contextKey = "operation"
+	)
+	preparedParent, cancelPrepared := context.WithCancel(context.WithValue(context.Background(), preparedKey, "adapter-mode"))
+	operationContext := context.WithValue(context.Background(), operationKey, "dispatch-trace")
+	var outbound *http.Request
+	target := testDispatchTarget(t, roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		outbound = request
+		if got := request.Context().Value(preparedKey); got != "adapter-mode" {
+			t.Fatalf("prepared request context value = %#v", got)
+		}
+		if got := request.Context().Value(operationKey); got != "dispatch-trace" {
+			t.Fatalf("operation context value = %#v", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("{}")),
+		}, nil
+	}))
+	prepared := testPreparedRequest(t, preparedParent, target)
+	response, err := target.Dispatch(operationContext, prepared)
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	defer response.Close()
+	if outbound == nil || response.Request == nil {
+		t.Fatal("dispatch returned an invalid request")
+	}
+	if got := response.Request.Context().Value(preparedKey); got != "adapter-mode" {
+		t.Fatalf("response prepared request context value = %#v", got)
+	}
+	if got := response.Request.Context().Value(operationKey); got != "dispatch-trace" {
+		t.Fatalf("response operation context value = %#v", got)
+	}
+	cancelPrepared()
+	select {
+	case <-outbound.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("prepared request cancellation did not cancel the RoundTrip context")
+	}
+}
+
+func TestDispatchUsesEarliestPreparedContextDeadline(t *testing.T) {
+	t.Parallel()
+
+	preparedDeadline := time.Now().Add(time.Minute)
+	preparedContext, cancelPrepared := context.WithDeadline(context.Background(), preparedDeadline)
+	defer cancelPrepared()
+	operationContext, cancelOperation := context.WithDeadline(context.Background(), preparedDeadline.Add(time.Minute))
+	defer cancelOperation()
+	target := testDispatchTarget(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("transport must not run")
+	}))
+	prepared := testPreparedRequest(t, preparedContext, target)
+	outbound, cancelRoundTrip, err := target.outboundRequest(operationContext, prepared)
+	if err != nil {
+		t.Fatalf("outboundRequest() error = %v", err)
+	}
+	defer cancelRoundTrip()
+	deadline, ok := outbound.Context().Deadline()
+	if !ok || !deadline.Equal(preparedDeadline) {
+		t.Fatalf("RoundTrip deadline = %v, %t, want prepared deadline %v", deadline, ok, preparedDeadline)
+	}
+}
+
 func TestWithHeaderDispatchRetainsCredentialUntilExactBodyClose(t *testing.T) {
 	t.Parallel()
 
