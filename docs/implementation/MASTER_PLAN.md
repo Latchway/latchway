@@ -2,8 +2,8 @@
 
 This is the canonical merged implementation plan as of 2026-08-30. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
-and Mintlify addendum. The version 1 source candidate is implemented; release
-promotion remains blocked on synchronized repository commits and protected
+and Mintlify addendum. The version 1 source candidate is implemented and
+locally source-converged; release promotion remains blocked on protected
 external evidence.
 
 ## Architectural truth
@@ -30,8 +30,8 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract freeze | Pending final atomic cross-repository convergence |
-| Bundle SHA-256 | Pending deterministic regeneration after convergence |
+| Contract freeze | Core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Bundle SHA-256 | `36aa3c4786e60f2cdbbc3d0cd2f65bffe894a099479517b2e1faa01361c74b00` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Database | Schema `23` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
@@ -77,7 +77,7 @@ checkpoint. It is not rewritten by this plan.
 Physical Apple entitlement, sibling-denial, background execution, and App
 Attest evidence remain external gates, not missing source.
 
-### Phase 2: Contract and schema — source complete; final coordinate converging
+### Phase 2: Contract and schema — source complete and frozen
 
 - [x] Define Installation Family, Client Component, Component Definition,
   delegation, component sessions/refresh/revocation, claims, policy/quota
@@ -91,7 +91,7 @@ Attest evidence remain external gates, not missing source.
   families deterministic.
 - [x] Make cross-repository conformance reject fixture, lock, coordinate, or
   post-freeze `api/**` drift.
-- [ ] Regenerate the final draft bundle after contract convergence and bind its
+- [x] Regenerate the final draft bundle after contract convergence and bind its
   exact checksum and core commit into every SDK lock.
 
 ### Phase 3: Server runtime — source complete
@@ -117,14 +117,14 @@ eligibility. The explicit step-up endpoint nevertheless requires valid direct
 evidence and fails closed on component, bundle, key, DPoP, provider, family, or
 parent mismatch.
 
-### Phase 4: SDK transport primitives — converging
+### Phase 4: SDK transport primitives — source complete and converged
 
 - [x] Implement feature-bound Swift, Kotlin, JavaScript, and React Native
   transports with wire-2 metadata, origin restrictions, cancellation,
   streaming, refresh single-flight, and replay-safe retry.
 - [x] Keep native keys, refresh tokens, and device proofs outside the React
   Native JavaScript bridge.
-- [ ] Finish the atomic cross-repository commit/lock convergence and run the
+- [x] Finish the atomic cross-repository commit/lock convergence and run the
   common source gate from clean worktrees.
 
 ### Phase 5: iOS Installation Family SDK — source complete, external proof open

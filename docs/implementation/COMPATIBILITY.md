@@ -20,9 +20,10 @@ packages, live providers, physical devices, or production support.
 The released `0.5.1` bundle and SDK locks remain byte-frozen historical
 coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
-historical coordinate. The component-attestation additions invalidate earlier
-intermediate draft hashes. SDK locks move together only after the final draft
-checkpoint is committed and synchronized across repositories.
+historical coordinate. The component-attestation additions invalidated earlier
+intermediate draft hashes. The current SDK locks now converge on core checkpoint
+`a62b0f6aa2328604101c1073c56f5ecb3bed3618` and bundle SHA-256
+`36aa3c4786e60f2cdbbc3d0cd2f65bffe894a099479517b2e1faa01361c74b00`.
 
 ## Framework registry
 
@@ -71,26 +72,24 @@ consume generated registry output rather than maintain a second table.
 The registry and its strict schema are deterministic members of the draft
 `1.0.0` contract bundle under `compatibility/`. Contract validation checks the
 schema, semantic policy, generated Markdown, archive closure, and checksums.
-The remaining cross-repository step is to regenerate the final bundle, then
-synchronize its exact contract checkpoint, bundle hash, wire-2 constants,
-component-attestation schema/vector, and other generated fixtures into every
-SDK lock.
+The final bundle, exact contract checkpoint, bundle hash, wire-2 constants,
+component-attestation vector, and other generated fixtures are synchronized
+across all four SDK locks. The clean local source-conformance gate passes.
 
-## Current SDK baseline
+## Current SDK source checkpoints
 
-These coordinates record prior repository-local validation of the legacy wire-1
-SDKs. They are not framework or Installation Family support claims.
+These coordinates record the source-converged version 1 implementations. They
+are not package-publication or production-support claims.
 
-| SDK | Legacy source checkpoint | Legacy minimum runtime | Merged status |
+| SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `5765a905086bbd39cdfb3d4b5c571a5df0066787` | Node 24.19 or standards-based browser WebCrypto/fetch | Version 1 transport, component sessions, adapters, and composite-trust decoding implemented; final lock convergence pending |
-| Swift `Latchway` | `73677929adfc4703e014927e11c28192426d4660` | iOS 15+, macOS 12+ supported surfaces | Version 1 extension/component transport and Action/SSO direct App Attest step-up implemented; physical proof and final lock pending |
-| Android `dev.latchway:latchway-*` | `f9132d307cdc1b0bc971caeff07d9ab00254a015` | Android API 23+, Java 17 | Version 1 component/OkHttp transport and composite-trust decoding implemented; direct component step-up unsupported by design; final lock pending |
-| React Native `@latchway/react-native` | `fddd9db30e9678d5edd597784c05f1a10d8584e5` | RN 0.82.x, iOS 15+, Android API 24+ | Version 1 native-backed transport plus iOS extension-process Action/SSO direct step-up implemented; physical proof and final lock pending |
+| JavaScript `@latchway/client` | `87a46eab3853633e23a65525e451f1bdaf3ee0c3` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, and composite-trust decoding implemented and locked |
+| Swift `Latchway` | `4cafe61faabfb4b8273af8833592c69ff2db7cfa` | iOS 15+, macOS 12+ supported surfaces | Extension/component transport and Action/SSO direct App Attest step-up implemented and locked; physical proof pending |
+| Android `dev.latchway:latchway-*` | `46cb6597430bc0f3c401757770420102894a5378` | Android API 23+, Java 17 | Component/OkHttp transport and composite-trust decoding implemented and locked; direct component step-up unsupported by design |
+| React Native `@latchway/react-native` | `74d5c25d122f629862a8d4bd21b8ea9f0bce433f` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport and iOS extension-process Action/SSO direct step-up implemented and source-pinned; physical proof pending |
 
-Every legacy SDK lock points to core contract checkpoint
-`2f5e5e67c824e270431f1232cc6dc2824848e380` and the legacy `0.5.1` bundle.
-Those locks must change together only after Phase 2.
+The historical wire-1 locks remain recoverable from their immutable repository
+history. Current locks all point to the draft version 1 checkpoint named above.
 
 ## Header compatibility
 

@@ -3,10 +3,9 @@
 Status date: 2026-08-30
 
 Latchway version 1 is implemented as a locally validated source candidate. It
-is not yet a released or production-proven version: the final contract bundle,
-SDK locks, and repository commits are still converging, and protected hardware,
-live-provider, cloud, resilience, supply-chain, publication, and
-post-publication domains remain open.
+is locally source-converged but not yet released or production-proven.
+Protected hardware, live-provider, cloud, resilience, supply-chain,
+publication, and post-publication domains remain open.
 
 ## Candidate snapshot
 
@@ -14,34 +13,33 @@ post-publication domains remain open.
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
 | Contract | `1.0.0` draft, `released_at: null` |
-| Contract freeze | Pending final atomic cross-repository convergence |
-| Bundle SHA-256 | Pending deterministic regeneration after contract convergence |
+| Contract freeze | Core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Bundle SHA-256 | `36aa3c4786e60f2cdbbc3d0cd2f65bffe894a099479517b2e1faa01361c74b00` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Schema `23` |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | Release state | `unreleased`; no tag or package publication authorized |
 
 The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate draft
-bundle hashes are not release coordinates; the final draft hash must be
-regenerated reproducibly and copied into every SDK lock after the component
-attestation contract stops changing.
+bundle hashes are not release coordinates. All four current SDK locks name the
+checkpoint and reproducible draft bundle above.
 
 ## Workstream status
 
 | Workstream | Local source status | Remaining boundary |
 | --- | --- | --- |
-| Family/component contract and migrations | Implemented through schema 23 | Final bundle and cross-repository lock convergence |
+| Family/component contract and migrations | Implemented through schema 23; bundle and locks converged | Protected exact-candidate evidence |
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including component App Attest step-up | Exact-candidate rerun and protected observations |
 | Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete | Bounded live-provider runs |
 | Weighted/sticky routing, fallback, retry, accounting | Complete | Exact-image load/failure evidence |
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete | Deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source, including composite delegated/direct trust | Physical App Attest/Play Integrity/App Check/Turnstile evidence |
-| Swift, Android, JavaScript SDKs | Implemented; lock synchronization running | Clean cross-repository source gate and publication |
-| React Native SDK | Implemented; final native/source pins running | Physical iOS/Android proof and publication |
+| Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
+| React Native SDK | Implemented and pinned to the exact three native/source commits | Physical iOS/Android proof and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
-| Mintlify public docs | Canonical 59-page source passes locally | Mirror synchronization, merge, production deploy validation |
+| Mintlify public docs | Canonical source and generated mirror converge and pass locally | Merge and production deploy validation |
 
 ## Local source evidence
 
@@ -59,10 +57,13 @@ attestation contract stops changing.
   and Vale MDX prose validation.
 
 These are source-development results, not protected release receipts. The final
-clean-tree Go/race, SDK, contract, dashboard, documentation, workflow, and
-cross-repository gates must be rerun after the atomic convergence commits.
-Repository-specific SDK test counts and final commit coordinates are recorded
-only after that convergence finishes.
+clean-tree cross-repository source gate passed for core
+`a62b0f6aa2328604101c1073c56f5ecb3bed3618`, JavaScript
+`87a46eab3853633e23a65525e451f1bdaf3ee0c3`, iOS
+`4cafe61faabfb4b8273af8833592c69ff2db7cfa`, Android
+`46cb6597430bc0f3c401757770420102894a5378`, and React Native
+`74d5c25d122f629862a8d4bd21b8ea9f0bce433f`. It does not substitute for any
+protected external domain.
 
 ## Direct component attestation boundary
 
@@ -111,9 +112,9 @@ convergence:
 6. signed tags/releases, OCI and package publication, production Mintlify
    deployment, and clean post-publication consumers.
 
-A real device is connected to the development host, but no protected,
-candidate-bound physical-device receipt has yet been captured and accepted by
-the release finalizer. Device visibility alone cannot prove signing,
+Physical devices are registered with Xcode but currently reported offline, and
+no protected, candidate-bound physical-device receipt has been captured and
+accepted by the release finalizer. Device registration alone cannot prove signing,
 entitlements, App Attest, Play Integrity, component isolation, or lifecycle
 behavior. Play Integrity additionally requires a Play-distributed signed
 application.
