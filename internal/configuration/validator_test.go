@@ -1760,6 +1760,68 @@ func TestValidatorRequiresUnambiguousPlatformAttestationAndSupportsDebugNode(t *
 	}
 }
 
+func TestValidatorRequiresComponentOnlyPreferredDirectAttestationPolicy(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	spec := objectValue(document, "spec")
+	policies := objectArray(spec, "attestationPolicies")
+	directPolicy := map[string]any{
+		"id": "ios-action-direct", "maxAge": "10m",
+		"platforms": map[string]any{"ios": map[string]any{
+			"provider": "app_attest", "mode": "preferred", "minimumTrustLevel": "app_verified",
+			"appAttest": map[string]any{
+				"appIdPrefix": "TEAM1234", "bundleId": "com.example.habits.action",
+				"environment": "production", "allowedValidationCategories": []any{json.Number("1")},
+				"allowedBundleVersions": []any{"1.0"},
+			},
+		}},
+	}
+	spec["attestationPolicies"] = []any{policies[0], directPolicy}
+	spec["componentDefinitions"] = []any{
+		map[string]any{
+			"id": "ios-main", "platform": "ios", "kind": "main_app",
+			"identifiers": map[string]any{"bundleIdentifiers": []any{"com.example.habits"}},
+			"familyRole":  "root", "attestation": map[string]any{
+				"strategy": "direct", "provider": "app_attest",
+			},
+			"allowedFeatures": []any{"assistant"},
+		},
+		map[string]any{
+			"id": "ios-action", "platform": "ios", "kind": "action_extension",
+			"identifiers": map[string]any{"bundleIdentifiers": []any{"com.example.habits.action"}},
+			"familyRole":  "delegated", "delegation": map[string]any{
+				"allowedParents": []any{"ios-main"}, "maximumLifetime": "7d",
+			},
+			"attestation": map[string]any{
+				"strategy": "delegated", "directStepUp": true,
+				"directAttestationPolicy": "ios-action-direct",
+			},
+			"allowedFeatures": []any{"assistant"},
+		},
+	}
+	encoded, _ := json.Marshal(document)
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || len(compiled) == 0 {
+		t.Fatalf("component-only preferred direct policy was rejected: %+v", report.Issues)
+	}
+
+	required := deepClone(document).(map[string]any)
+	requiredPolicies := objectArray(objectValue(required, "spec"), "attestationPolicies")
+	objectValue(objectValue(requiredPolicies[1], "platforms"), "ios")["mode"] = "required"
+	encoded, _ = json.Marshal(required)
+	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil ||
+		!hasIssue(report.Issues, "component_direct_attestation_policy_mismatch") ||
+		!hasIssue(report.Issues, "attestation_required_policy_ambiguous") {
+		t.Fatalf("initial-session-eligible component policy was accepted: %+v", report.Issues)
+	}
+}
+
 func TestValidatorRejectsUnverifiableEnabledAttestationApplicationConstraints(t *testing.T) {
 	t.Parallel()
 

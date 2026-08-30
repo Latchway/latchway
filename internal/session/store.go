@@ -546,6 +546,8 @@ func legacyRootComponentDefinitionID(platform string) string {
 		return "legacy-react-native-ios-root"
 	case "react_native_android":
 		return "legacy-react-native-android-root"
+	case "watchos":
+		return "legacy-watchos-root"
 	default:
 		return ""
 	}

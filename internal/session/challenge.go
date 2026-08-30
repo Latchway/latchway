@@ -100,7 +100,7 @@ func validateChallengeIdentity(input ChallengeInput) error {
 	return nil
 }
 
-var platformPattern = regexp.MustCompile(`^(ios|android|web|react_native_ios|react_native_android|node)$`)
+var platformPattern = regexp.MustCompile(`^(ios|android|web|react_native_ios|react_native_android|watchos|node)$`)
 var configurationIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 var secretReferencePattern = regexp.MustCompile(`^secret/[a-z][a-z0-9_-]{0,62}$`)
 

@@ -201,7 +201,7 @@ func readSimulationClaims(path string) (map[string]any, error) {
 
 func validSimulationPlatform(value string) bool {
 	switch value {
-	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node":
 		return true
 	default:
 		return false

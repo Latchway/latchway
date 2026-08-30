@@ -10,7 +10,7 @@ packages, live providers, physical devices, or production support.
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `draft`, `released_at: null` |
 | Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
-| Database | Historical schema `20` | Schema `22`, including family/component and component-scoped quota state |
+| Database | Historical schema `20` | Schema `23`, including family/component state, component-scoped quota state, and direct component-attestation linkage |
 | Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
 | Sessions | One installation key/session family | Independent component keys/session families |
 | Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
@@ -20,8 +20,9 @@ packages, live providers, physical devices, or production support.
 The released `0.5.1` bundle and SDK locks remain byte-frozen historical
 coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
-historical coordinate. SDK locks move only after the exact draft checkpoint is
-committed and synchronized across repositories.
+historical coordinate. The component-attestation additions invalidate earlier
+intermediate draft hashes. SDK locks move together only after the final draft
+checkpoint is committed and synchronized across repositories.
 
 ## Framework registry
 
@@ -70,8 +71,9 @@ consume generated registry output rather than maintain a second table.
 The registry and its strict schema are deterministic members of the draft
 `1.0.0` contract bundle under `compatibility/`. Contract validation checks the
 schema, semantic policy, generated Markdown, archive closure, and checksums.
-The remaining cross-repository step is to synchronize the exact contract
-checkpoint, bundle hash, wire-2 constants, and generated fixtures into every
+The remaining cross-repository step is to regenerate the final bundle, then
+synchronize its exact contract checkpoint, bundle hash, wire-2 constants,
+component-attestation schema/vector, and other generated fixtures into every
 SDK lock.
 
 ## Current SDK baseline
@@ -81,10 +83,10 @@ SDKs. They are not framework or Installation Family support claims.
 
 | SDK | Legacy source checkpoint | Legacy minimum runtime | Merged status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `5765a905086bbd39cdfb3d4b5c571a5df0066787` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport foundation; component sessions/framework adapters pending |
-| Swift `Latchway` | `73677929adfc4703e014927e11c28192426d4660` | iOS 15+, macOS 12+ supported surfaces | Root installation foundation; app-extension component model pending |
-| Android `dev.latchway:latchway-*` | `f9132d307cdc1b0bc971caeff07d9ab00254a015` | Android API 23+, Java 17 | OkHttp foundation; new headers/component contract/framework matrices pending |
-| React Native `@latchway/react-native` | `fddd9db30e9678d5edd597784c05f1a10d8584e5` | RN 0.82.x, iOS 15+, Android API 24+ | Native bridge foundation; component isolation/native-backed framework fetch pending |
+| JavaScript `@latchway/client` | `5765a905086bbd39cdfb3d4b5c571a5df0066787` | Node 24.19 or standards-based browser WebCrypto/fetch | Version 1 transport, component sessions, adapters, and composite-trust decoding implemented; final lock convergence pending |
+| Swift `Latchway` | `73677929adfc4703e014927e11c28192426d4660` | iOS 15+, macOS 12+ supported surfaces | Version 1 extension/component transport and Action/SSO direct App Attest step-up implemented; physical proof and final lock pending |
+| Android `dev.latchway:latchway-*` | `f9132d307cdc1b0bc971caeff07d9ab00254a015` | Android API 23+, Java 17 | Version 1 component/OkHttp transport and composite-trust decoding implemented; direct component step-up unsupported by design; final lock pending |
+| React Native `@latchway/react-native` | `fddd9db30e9678d5edd597784c05f1a10d8584e5` | RN 0.82.x, iOS 15+, Android API 24+ | Version 1 native-backed transport plus iOS extension-process Action/SSO direct step-up implemented; physical proof and final lock pending |
 
 Every legacy SDK lock points to core contract checkpoint
 `2f5e5e67c824e270431f1232cc6dc2824848e380` and the legacy `0.5.1` bundle.
@@ -107,6 +109,29 @@ declare the paired `X-Latchway-Framework` and
 `X-Latchway-Framework-Version` headers. Installation Family and Client
 Component operations require wire 2. Discovery and diagnostics always
 advertise current wire 2 while discovery reports the supported range `[1, 2]`.
+
+## Direct component-attestation compatibility
+
+Wire 2 includes component-attestation binding version 2 and separate
+component challenge/exchange operations. Successful proof augments a delegated
+component to `delegated_direct_attested`; it does not erase its parent or
+delegation identifiers. Access tokens bind the attestation provider for
+component-aware sessions, while retained legacy tokens intentionally have no
+provider claim.
+
+The server source permits App Attest step-up only for configured delegated
+Action, SSO, and watch component kinds on Apple platforms with an exact bundle
+identifier and a component-only `preferred` policy. The current Swift and
+React Native iOS client surfaces implement Action/SSO extension-process proof;
+they do not claim watch client support. The containing React Native process
+cannot attest an extension bundle on the extension's behalf. JavaScript and
+Android decode the composite trust source for contract compatibility, but
+Android direct component step-up remains unsupported in version 1.
+
+These statements describe source and wire compatibility only. Physical App
+Attest/Play Integrity, entitlement isolation, lifecycle, live-provider,
+exact-image, and clean published-consumer observations remain required before
+any tuple can become `supported`.
 
 ## Support evidence policy
 

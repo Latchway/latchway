@@ -134,7 +134,7 @@ func TestAppAttestKeyLinksInSessionTransactionAndRevokesPostgreSQL(t *testing.T)
 	coordinator := &clientCoordinator{
 		pool: pool, configuration: configurationStore, sessions: failingStore,
 		challenges: challengeStore, appAttestKeys: keyStore, now: nowClock(now),
-		attestationCache: make(map[string]*preparedAttestationVerifier),
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}
 	if _, err := coordinator.ExchangeSession(ctx, exchangeInput); err == nil {
 		t.Fatal("late coordinator exchange unexpectedly succeeded")
@@ -243,7 +243,21 @@ func appAttestAssertionPayload(
 	counter uint32,
 ) map[string]any {
 	t.Helper()
-	rpIDHash := sha256.Sum256([]byte("TEAM1234.com.example.challenge"))
+	return appAttestAssertionPayloadForAppID(
+		t, privateKey, keyID, binding, counter, "TEAM1234.com.example.challenge",
+	)
+}
+
+func appAttestAssertionPayloadForAppID(
+	t *testing.T,
+	privateKey *ecdsa.PrivateKey,
+	keyID [sha256.Size]byte,
+	binding attestation.Binding,
+	counter uint32,
+	appID string,
+) map[string]any {
+	t.Helper()
+	rpIDHash := sha256.Sum256([]byte(appID))
 	authenticatorData := make([]byte, 37)
 	copy(authenticatorData, rpIDHash[:])
 	binary.BigEndian.PutUint32(authenticatorData[33:37], counter)

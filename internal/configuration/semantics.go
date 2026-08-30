@@ -66,7 +66,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 
 	issues = append(issues, validator.identityIssues(identities)...)
 	issues = append(issues, attestationSemanticIssues(attestations, environment.EnvironmentKind)...)
-	issues = append(issues, componentDefinitionSemanticIssues(components, features)...)
+	issues = append(issues, componentDefinitionSemanticIssues(components, features, attestations)...)
 	issues = append(issues, upstreamSemanticIssues(upstreams, environment.EnvironmentKind)...)
 	issues = append(issues, inputAccountingProfileSemanticIssues(inputAccounting)...)
 	issues = append(issues, modelSemanticIssues(models, upstreams, pricing, inputAccounting)...)
@@ -84,6 +84,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 func componentDefinitionSemanticIssues(
 	definitions map[string]map[string]any,
 	features map[string]map[string]any,
+	attestations map[string]map[string]any,
 ) []Issue {
 	issues := make([]Issue, 0)
 	identifierOwners := make(map[string]string)
@@ -134,13 +135,35 @@ func componentDefinitionSemanticIssues(
 		strategy := stringValue(attestation, "strategy")
 		provider := stringValue(attestation, "provider")
 		directStepUp, _ := attestation["directStepUp"].(bool)
+		directPolicyID := stringValue(attestation, "directAttestationPolicy")
 		if !runtimeComponentAttestation(platform, kind, role, ComponentAttestationPolicy{
 			Strategy: strategy, Provider: provider, DirectStepUp: directStepUp,
+			DirectAttestationPolicy: directPolicyID,
 		}) {
 			issues = append(issues, errorIssue(
 				"component_attestation_unsupported", base+"/attestation",
 				"The component platform and kind do not support the configured trust-establishment strategy.",
 			))
+		}
+		if directStepUp {
+			directPolicy, exists := attestations[directPolicyID]
+			selection := objectValue(objectValue(directPolicy, "platforms"), platform)
+			typedSelection, selectionOK := decodePlatformAttestation(selection)
+			bundles := stringArray(identifiers, "bundleIdentifiers")
+			if !exists {
+				issues = append(issues, errorIssue(
+					"component_direct_attestation_policy_not_found", base+"/attestation/directAttestationPolicy",
+					"Direct component attestation must reference a configured attestation policy.",
+				))
+			} else if !selectionOK || typedSelection.Provider != "app_attest" ||
+				typedSelection.Mode != "preferred" || typedSelection.MinimumTrustLevel != "app_verified" ||
+				typedSelection.AppAttest == nil ||
+				len(bundles) != 1 || typedSelection.AppAttest.BundleID != bundles[0] {
+				issues = append(issues, errorIssue(
+					"component_direct_attestation_policy_mismatch", base+"/attestation/directAttestationPolicy",
+					"The referenced App Attest policy must enable this component platform and exact bundle identifier.",
+				))
+			}
 		}
 
 		delegation := objectValue(definition, "delegation")
@@ -493,7 +516,7 @@ func decodePlatformAttestation(selection map[string]any) (PlatformAttestation, b
 
 func providerAllowedOnPlatform(provider, platform string) bool {
 	switch platform {
-	case "ios", "react_native_ios":
+	case "ios", "react_native_ios", "watchos":
 		return provider == "app_attest" || provider == "firebase_app_check" || provider == "debug"
 	case "android", "react_native_android":
 		return provider == "play_integrity" || provider == "firebase_app_check" || provider == "debug"

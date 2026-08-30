@@ -302,6 +302,7 @@
             "web": { "$ref": "#/$defs/PlatformAttestation" },
             "react_native_ios": { "$ref": "#/$defs/PlatformAttestation" },
             "react_native_android": { "$ref": "#/$defs/PlatformAttestation" },
+            "watchos": { "$ref": "#/$defs/PlatformAttestation" },
             "node": { "$ref": "#/$defs/PlatformAttestation" }
           }
         }
@@ -458,7 +459,15 @@
         "provider": {
           "enum": ["app_attest", "play_integrity", "firebase_app_check", "turnstile", "debug"]
         },
-        "directStepUp": { "type": "boolean", "default": false }
+        "directStepUp": {
+          "description": "Allow an eligible Apple delegated component to add direct App Attest evidence for its own component key after provisioning. The component attestation exchange still requires that evidence even though the referenced policy is configured in preferred mode.",
+          "type": "boolean",
+          "default": false
+        },
+        "directAttestationPolicy": {
+          "description": "Component-only App Attest policy used by direct step-up. It must use preferred mode, require at least app_verified trust and pin the exact component bundle identifier; it is never an alternative initial-session policy.",
+          "$ref": "#/$defs/Identifier"
+        }
       },
       "allOf": [
         {
@@ -474,6 +483,14 @@
             "required": ["strategy"]
           },
           "then": { "not": { "required": ["provider"] } }
+        },
+        {
+          "if": {
+            "properties": { "directStepUp": { "const": true } },
+            "required": ["directStepUp"]
+          },
+          "then": { "required": ["directAttestationPolicy"] },
+          "else": { "not": { "required": ["directAttestationPolicy"] } }
         }
       ]
     },

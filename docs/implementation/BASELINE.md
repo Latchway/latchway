@@ -71,3 +71,10 @@ Local core tools observed: Go 1.24.1, Node 22.18.0, pnpm 10.1.0, Docker 29.7.2, 
 - No existing product work was deleted or replaced.
 - This baseline captures branches, remotes, commits, tags, worktrees, licenses, CI, package identities, placeholders, and architectural choices.
 - The clean-tree portion of the gate is not satisfied while this uncommitted Phase 0/1 foundation is under construction. It must be rechecked after review and commit.
+
+## Later status
+
+This section above is an immutable historical observation, not the current
+project state. The version 1 source implementation was constructed later; its
+final clean-tree convergence and protected release gates remain open. See
+[`STATUS.md`](STATUS.md) for the current candidate boundary.

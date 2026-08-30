@@ -12,11 +12,13 @@
     "dev": "mint dev --no-open",
     "validate": "mint validate",
     "check:structure": "python3 scripts/check-structure.py",
+    "check:prose": "vale --minAlertLevel=error .",
     "check:links": "mint broken-links --check-anchors --check-redirects --check-snippets",
     "check:a11y": "mint a11y",
-    "check": "pnpm check:structure && pnpm validate && pnpm check:links && pnpm check:a11y"
+    "check": "pnpm check:structure && pnpm check:prose && pnpm validate && pnpm check:links && pnpm check:a11y"
   },
   "devDependencies": {
+    "mdx2vast": "0.5.0",
     "mint": "4.2.850"
   }
 }

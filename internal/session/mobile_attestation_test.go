@@ -32,7 +32,7 @@ func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.
 	secretStore := &ephemeralSecretStore{material: []byte("turnstile-secret-material")}
 	coordinator := &clientCoordinator{
 		now: nowClock(now), appAttestKeys: store, secrets: secretStore,
-		attestationCache: make(map[string]*preparedAttestationVerifier),
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}
 	environment := clientEnvironment{
 		OrganizationID: "org_00000000000000000000000000",
@@ -93,6 +93,52 @@ func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.
 	}
 }
 
+func TestCoordinatorMobileVerifierCacheBindsExactComponentSelectionAndWatchOS(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	coordinator := &clientCoordinator{
+		now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{},
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
+	}
+	environment := clientEnvironment{
+		OrganizationID: "org_00000000000000000000000000",
+		ApplicationID:  "app_00000000000000000000000000",
+		EnvironmentID:  "env_00000000000000000000000000",
+		Slug:           "production", Kind: "production",
+	}
+	snapshot := configuration.ActiveSnapshot{RevisionID: "rev_00000000000000000000000000"}
+	policy := configuration.AttestationPolicy{ID: "component", MaxAge: 10 * time.Minute}
+
+	widgetSelection := validAppAttestSelection()
+	widgetSelection.AppAttest.BundleID = "com.example.habits.widget"
+	widgetVerifier, err := coordinator.mobileAttestationVerifier(
+		environment, snapshot, policy, widgetSelection, "ios",
+	)
+	if err != nil || widgetVerifier == nil || widgetVerifier.ID() != "app_attest" {
+		t.Fatalf("widget verifier = %#v, err = %v", widgetVerifier, err)
+	}
+
+	watchSelection := validAppAttestSelection()
+	watchSelection.AppAttest.BundleID = "com.example.habits.watchkitapp"
+	watchVerifier, err := coordinator.mobileAttestationVerifier(
+		environment, snapshot, policy, watchSelection, "watchos",
+	)
+	if err != nil || watchVerifier == nil || watchVerifier.ID() != "app_attest" {
+		t.Fatalf("watchOS verifier = %#v, err = %v", watchVerifier, err)
+	}
+	if watchVerifier == widgetVerifier || len(coordinator.attestationCache) != 2 {
+		t.Fatalf("exact component selections shared verifier: widget=%p watch=%p cache=%d", widgetVerifier, watchVerifier, len(coordinator.attestationCache))
+	}
+
+	again, err := coordinator.mobileAttestationVerifier(
+		environment, snapshot, policy, watchSelection, "watchos",
+	)
+	if err != nil || again != watchVerifier || len(coordinator.attestationCache) != 2 {
+		t.Fatalf("exact watchOS selection was not cached: again=%p first=%p err=%v cache=%d", again, watchVerifier, err, len(coordinator.attestationCache))
+	}
+}
+
 func TestCoordinatorMobileVerifierFailsClosedOnMismatchAndProductionRisk(t *testing.T) {
 	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	environment := clientEnvironment{
@@ -112,19 +158,19 @@ func TestCoordinatorMobileVerifierFailsClosedOnMismatchAndProductionRisk(t *test
 		{
 			name: "typed nil App Attest store",
 			coordinator: &clientCoordinator{now: nowClock(now), appAttestKeys: typedNilStore,
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validAppAttestSelection(), platform: "ios",
 		},
 		{
 			name: "App Attest Android mismatch",
 			coordinator: &clientCoordinator{now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{},
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validAppAttestSelection(), platform: "android",
 		},
 		{
 			name: "development Apple trust in production",
 			coordinator: &clientCoordinator{now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{},
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: func() configuration.PlatformAttestation {
 				selection := validAppAttestSelection()
 				selection.AppAttest.Environment = "development"
@@ -134,7 +180,7 @@ func TestCoordinatorMobileVerifierFailsClosedOnMismatchAndProductionRisk(t *test
 		{
 			name: "Play testing response in production",
 			coordinator: &clientCoordinator{now: nowClock(now),
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: func() configuration.PlatformAttestation {
 				selection := validPlayIntegritySelection("metadata")
 				selection.PlayIntegrity.AllowTestingResponses = true
@@ -144,25 +190,25 @@ func TestCoordinatorMobileVerifierFailsClosedOnMismatchAndProductionRisk(t *test
 		{
 			name: "Play iOS mismatch",
 			coordinator: &clientCoordinator{now: nowClock(now),
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validPlayIntegritySelection("metadata"), platform: "ios",
 		},
 		{
 			name: "Firebase native web trust mismatch",
 			coordinator: &clientCoordinator{now: nowClock(now),
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validFirebaseAppCheckSelection("web_risk_verified"), platform: "ios",
 		},
 		{
 			name: "Firebase web native trust mismatch",
 			coordinator: &clientCoordinator{now: nowClock(now),
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validFirebaseAppCheckSelection("app_verified"), platform: "web",
 		},
 		{
 			name: "Turnstile native mismatch",
 			coordinator: &clientCoordinator{now: nowClock(now), secrets: &ephemeralSecretStore{material: []byte("secret")},
-				attestationCache: make(map[string]*preparedAttestationVerifier)},
+				attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier)},
 			selection: validTurnstileSelection(), platform: "ios",
 		},
 	}
@@ -238,7 +284,7 @@ func TestCoordinatorVerifiesPlayIntegrityWithFixedGoogleClients(t *testing.T) {
 	})
 	coordinator := &clientCoordinator{
 		now: nowClock(now), attestationTransport: transport,
-		attestationCache: make(map[string]*preparedAttestationVerifier),
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}
 	evidence, err := attestation.NewEvidence("play_integrity", map[string]any{
 		"integrity_token": "opaque-integrity-token-1234",

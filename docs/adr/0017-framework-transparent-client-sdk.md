@@ -49,5 +49,7 @@ semantics.
 
 ## Status
 
-Accepted as the target architecture on 2026-08-30. Framework adapters and
-their common conformance evidence remain pending.
+Accepted on 2026-08-30 and implemented for the exact experimental entries in
+the framework registry. Local adapter, streaming, cancellation, package, and
+consumer gates pass at the pinned versions; hosted common conformance and
+physical native evidence remain release gates.

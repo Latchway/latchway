@@ -10,7 +10,7 @@ description: "Define a low-maintenance ChatOpenAI transport adapter while keepin
 
 ## 1. What this integration does
 
-The target Class A helper passes a guarded custom fetch and Latchway base URL
+The source Class A helper passes a guarded custom fetch and Latchway base URL
 through `ChatOpenAI` client configuration. It does not implement chains, agents,
 graphs, memory, retrievers, or tool execution.
 
@@ -29,14 +29,14 @@ protocol `2`, but a contract coordinate does not establish framework support.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Required; not yet evidenced |
-| Private key remains native | Required on native-backed runtimes; not yet evidenced |
-| Streaming | Required; not yet evidenced |
-| Cancellation | Required; not yet evidenced |
-| App extensions | Requires future Installation Family support |
-| Structured output | Required; not yet evidenced |
-| Tool calls | Protocol content supported only after conformance |
-| Protocol | Planned through a supported OpenAI-compatible Latchway route |
+| Full DPoP preserved | Passes local chat and embeddings adapter tests through the guarded Latchway transport |
+| Private key remains native | Not applicable to the JavaScript adapter; native hosts must provide a native-backed transport |
+| Streaming | Conditional; hosted common conformance remains pending |
+| Cancellation | Local abort propagation passes |
+| App extensions | Not provided by this JavaScript integration |
+| Structured output | Conditional; not release-evidenced |
+| Tool calls | Conditional; not release-evidenced |
+| Protocol | Draft wire 2 supports Chat Completions and embeddings for the tested seam |
 
 ## 5. Install packages
 
@@ -55,13 +55,14 @@ field to select a physical model.
 
 ## 8. Create the framework client
 
-The final helper will configure `ChatOpenAI` through supported client options.
-Its signature remains intentionally undocumented until package release.
+The source helper configures `ChatOpenAI` through supported client options. Its
+signature remains intentionally undocumented until package release.
 
 ## 9. Send a non-streaming request
 
-`invoke` and `batch` are required conformance cases. LangChain message types
-remain unchanged.
+The local chat adapter exercises the non-streaming request path while preserving
+LangChain message types. Hosted `invoke` and `batch` evidence remains a release
+gate.
 
 ## 10. Send a streaming request
 

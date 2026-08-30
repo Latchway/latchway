@@ -1,6 +1,6 @@
 ---
 title: "React Native framework integration"
-description: "Evaluate the native-backed fetch target for JavaScript AI frameworks without moving keys or session credentials into JavaScript."
+description: "Evaluate the experimental native-backed fetch for JavaScript AI frameworks without moving keys or session credentials into JavaScript."
 ---
 
 <Warning>
@@ -32,11 +32,11 @@ contract.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Native-backed source target; release evidence pending |
-| Private key remains native | Required and source-targeted; release evidence pending |
-| Streaming | Native bridge target; framework-specific evidence pending |
-| Cancellation | Required; framework-specific evidence pending |
-| App extensions | Component APIs are in the draft contract; platform-specific evidence remains pending |
+| Full DPoP preserved | Partial experimental evidence; native dispatch and proof isolation pass local gates |
+| Private key remains native | Partial experimental evidence; JavaScript bridge credential scans and native tests pass |
+| Streaming | Native pull streaming passes local React Native 0.82.0 gates |
+| Cancellation | Native cancellation passes local gates |
+| App extensions | Not provided by the React Native framework-fetch integration |
 | Structured output | Framework-specific evidence pending |
 | Tool calls | Framework-specific evidence pending |
 | Protocol | Draft contract `1.0.0`, current wire protocol `2`; legacy wire `1` remains accepted where compatible |
@@ -54,8 +54,8 @@ credentials to JavaScript.
 
 ## 7. Bind a feature
 
-The target `fetchFor` surface binds one feature. Its signature remains a planned
-framework-compatibility API rather than a released contract.
+The source `fetchFor` surface binds one feature. Its signature remains
+pre-release rather than a published contract.
 
 ## 8. Create the framework client
 
@@ -65,12 +65,14 @@ transport seam. A static API key or static header path is insufficient.
 ## 9. Send a non-streaming request
 
 The bridge returns safe status, headers, and bytes while native code owns
-authorization. Body-bearing requests are not automatically replayed.
+authorization. A request body already buffered within the 8 MiB bridge limit
+may receive one exact pre-dispatch retry; a streaming or otherwise
+non-replayable body is never retried.
 
 ## 10. Send a streaming request
 
-The bridge must preserve incremental events and backpressure without exposing
-session material or buffering the complete response.
+The local bridge gates preserve incremental pull events and cancellation
+without exposing session material or buffering the complete response.
 
 ## 11. Use tools
 
@@ -84,7 +86,8 @@ row.
 
 ## 13. Handle cancellation
 
-Abort must cancel native dispatch. It must not race into an automatic replay.
+Abort cancellation reaches native dispatch in local tests and does not authorize
+an automatic replay.
 
 ## 14. Handle quota failures
 

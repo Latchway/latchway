@@ -1,6 +1,6 @@
 ---
 title: "Choose your integration"
-description: "Select a current SDK path or identify a planned framework adapter without mistaking design targets for released support."
+description: "Select a source SDK or experimental framework adapter without mistaking local evidence for released support."
 ---
 
 Start with a supported platform SDK. Add a framework adapter only when its
@@ -9,17 +9,17 @@ and protocol versions you use.
 
 | Application surface | Starting point | Framework path |
 | --- | --- | --- |
-| React Native | [React Native SDK](/mobile/react-native) | Native-backed fetch; named adapters are planned |
-| Native iOS | [Native iOS SDK](/mobile/ios) | Feature-bound URLSession; named adapters are planned |
-| Native Android | [Native Android SDK](/mobile/android) | OkHttp transport; ecosystem evidence is planned |
-| Web | [Security boundary](/concepts/security-boundary) | Feature-bound fetch with web-level trust only |
+| React Native | [React Native SDK](/mobile/react-native) | Experimental native-backed fetch at React Native 0.82.0 |
+| Native iOS | [Native iOS SDK](/mobile/ios) | Experimental SwiftOpenAI seam; Foundation Models remains planned |
+| Native Android | [Native Android SDK](/mobile/android) | Experimental OkHttp 5.3.0 and minimum 4.9.2 seam |
+| Web | [Security boundary](/concepts/security-boundary) | Experimental OpenAI, Vercel AI SDK, and LangChain adapters with web-level trust |
 | Server or diagnostic client | [Client API](/reference/client-api) | Raw HTTP requires complete DPoP handling |
 
 <Warning>
-  The current source candidate does not publish first-party framework-adapter
-  packages or Installation Family support. The integration pages define the
-  acceptance contract and remain unsupported until the compatibility matrix and
-  conformance results say otherwise.
+  The source candidate implements first-party framework adapters and
+  Installation Family APIs, but none is published as a version 1 package or
+  represented as supported. Follow the exact experimental/planned/unsupported
+  state and limitations in the generated compatibility matrix.
 </Warning>
 
 Never place an upstream provider API key in application code. A framework that

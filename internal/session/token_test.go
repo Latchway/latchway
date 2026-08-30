@@ -167,6 +167,31 @@ func TestAccessIssueIdentityProviderMatchesLockedIdentifierBounds(t *testing.T) 
 	}
 }
 
+func TestAccessIssueAcceptsDelegatedDirectAttestedTrust(t *testing.T) {
+	t.Parallel()
+
+	input := AccessIssueInput{
+		OrganizationID: mustTokenID(t, id.Organization), ApplicationID: mustTokenID(t, id.Application),
+		EnvironmentID: mustTokenID(t, id.Environment), ApplicationUserID: mustTokenID(t, id.ApplicationUser),
+		InstallationID: mustTokenID(t, id.Installation), InstallationFamilyID: mustTokenID(t, id.InstallationFamily),
+		ComponentID: mustTokenID(t, id.ClientComponent), ComponentDefinitionID: "ios-action-extension",
+		ComponentKind: "action_extension", TrustSource: "delegated_direct_attested",
+		AttestationProvider: "app_attest", ParentComponentID: mustTokenID(t, id.ClientComponent),
+		ParentAttestationProvider: "app_attest", DelegationID: mustTokenID(t, id.ComponentDelegation),
+		Features: []string{"assistant"}, SessionGrantID: mustTokenID(t, id.SessionGrant),
+		IdentityProvider: "firebase", TrustLevel: "app_verified",
+		PolicyRevisionID: mustTokenID(t, id.ConfigRevision),
+		DPoPJKT:          base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	}
+	if err := input.validate(); err != nil {
+		t.Fatalf("delegated direct-attestation token input rejected: %v", err)
+	}
+	input.TrustSource = "delegated_unverified"
+	if err := input.validate(); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("unknown trust source error = %v, want ErrTokenInvalid", err)
+	}
+}
+
 func TestPreparedAccessIssuerFormattingIsRedacted(t *testing.T) {
 	t.Parallel()
 

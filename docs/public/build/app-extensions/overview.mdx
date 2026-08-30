@@ -1,12 +1,14 @@
 ---
 title: "iOS app extensions"
-description: "Plan a containing app and extension as separate Client Components with independent keys, sessions, scopes, and diagnostics."
+description: "Use a containing app and extension as separate Client Components with independent keys, sessions, scopes, and diagnostics."
 ---
 
 <Warning>
-  App-extension provisioning is a pre-release target. No released Latchway SDK
-  currently implements the Installation Family or delegated-component APIs
-  described here.
+  App-extension provisioning is source-implemented but pre-release. The Swift
+  and React Native products, delegated-component APIs, and Action/SSO direct
+  App Attest step-up have local package, consumer, and unsigned host/extension
+  evidence. Candidate-bound physical Keychain isolation and App Attest,
+  signing, and publication evidence remain required.
 </Warning>
 
 Treat every independently executing extension as its own Client Component. The
@@ -20,13 +22,14 @@ Application User
 └── Installation Family
     ├── Containing app (root, directly attested)
     ├── Widget extension (delegated component)
-    └── Share extension (delegated component)
+    ├── Share extension (delegated component)
+    └── Action or SSO extension (delegated, then composite direct/delegated)
 ```
 
 ## Required setup contract
 
-An eventual tested guide must name all of the following before support can be
-claimed:
+The source setup and its release evidence must cover all of the following before
+support can be claimed:
 
 1. **Xcode target structure** and every target's deployment constraints.
 2. **Bundle identifiers** and the exact server Component Definitions they map to.
@@ -38,7 +41,11 @@ claimed:
 8. **Sign-out behavior** that invalidates prior family credentials.
 9. The **expected dashboard result** for the root and delegated components.
 10. Safe **diagnostics** for entitlement, definition, expiry, and revocation failures.
+11. For Action or SSO step-up, **component-owned App Attest** that binds the
+    extension bundle, component key, DPoP key, definition, and installation
+    family without reusing the containing app's assertion.
 
 Read [WidgetKit setup](/build/app-extensions/widgetkit) or [Share extension
 setup](/build/app-extensions/share-extension) for the surface-specific
-acceptance checklist.
+acceptance checklist. See [Step up to direct attestation](/build/app-extensions/direct-attestation-step-up)
+for the Action/SSO trust transition and its release-evidence boundary.

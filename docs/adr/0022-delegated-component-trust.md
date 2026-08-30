@@ -15,8 +15,11 @@ configured features and lifetime, binds the child component key, parent
 component and attestation, and records issue, verification, expiry, and
 consumption. Provenance is explicit: `direct_attested`,
 `delegated_from_attested_root`, `delegated_identity_only`, `identity_only`,
-`web_risk_verified`, or `debug`. Effective trust is the minimum allowed by
-root trust, delegation, current evidence, policy, and family state.
+`web_risk_verified`, or `debug`. When an eligible delegated Apple component
+later supplies its own valid App Attest evidence, the composite source becomes
+`delegated_direct_attested`; the parent and delegation identifiers remain
+present. Effective trust is the minimum allowed by root trust, delegation,
+component evidence, policy, and family state.
 
 ## Alternatives
 
@@ -28,8 +31,10 @@ root trust, delegation, current evidence, policy, and family state.
 ## Security implications
 
 Delegations are feature-scoped, time-bounded, non-replayable, key-bound, and
-invalid after parent trust, component, or family revocation. Direct attestation
-requirements cannot be satisfied by delegation.
+invalid after parent trust, component, or family revocation. Delegation alone
+cannot satisfy a direct-attestation requirement. Direct step-up uses a separate
+one-use challenge, binds the component's own App Attest key and DPoP key, and
+rotates only that component's session after successful verification.
 
 ## Developer-experience implications
 
@@ -50,5 +55,8 @@ component as directly attested.
 
 ## Status
 
-Accepted on 2026-08-30. Delegation contracts, persistence, policy context, and
-security tests remain unimplemented.
+Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database
+schema 23, the server policy/session runtime, Admin trust views, and SDK source.
+The direct-step-up extension preserves delegation ancestry under
+`delegated_direct_attested`. Final cross-repository coordinate convergence and
+protected physical App Attest, isolation, and exact-image evidence remain open.

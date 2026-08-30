@@ -47,5 +47,7 @@ and missing-alt checks are required.
 
 ## Status
 
-Accepted on 2026-08-30. The design tokens, canonical SVGs, and Mintlify visual
-components remain pending.
+Accepted on 2026-08-30 and implemented with the checked-in color tokens,
+Mintlify primitives, four canonical Mermaid diagrams, consistent trust labels,
+and automated navigation/accessibility validation. Production rendering remains
+subject to the Mintlify deployment check.

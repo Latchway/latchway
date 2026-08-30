@@ -134,7 +134,7 @@ func (input AccessIssueInput) validate() error {
 }
 
 var trustLevelPattern = regexp.MustCompile(`^(none|identity_only|web_risk_verified|app_verified|device_verified|strong_device_verified|debug)$`)
-var trustSourcePattern = regexp.MustCompile(`^(direct_attested|delegated_from_attested_root|delegated_identity_only|identity_only|web_risk_verified|debug)$`)
+var trustSourcePattern = regexp.MustCompile(`^(direct_attested|delegated_from_attested_root|delegated_identity_only|delegated_direct_attested|identity_only|web_risk_verified|debug)$`)
 var componentKindPattern = regexp.MustCompile(`^(main_app|widget|share_extension|app_intent_extension|notification_service_extension|action_extension|sso_extension|watch_extension|android_app|wear_app|browser|node_process)$`)
 
 func sessionIdentifierList(values []string) bool {

@@ -676,6 +676,20 @@ def main() -> None:
     validate_openapi(admin_path, admin, contract_version)
     validate_problem_operation_id_contract(client_path, client)
     validate_problem_operation_id_contract(admin_path, admin)
+    expected_challenge_nonce = {
+        "type": "string",
+        "minLength": 43,
+        "maxLength": 86,
+        "pattern": "^[A-Za-z0-9_-]{43,86}$",
+    }
+    for challenge_name in ("SessionChallenge", "ComponentAttestationChallenge"):
+        challenge_nonce = client["components"]["schemas"][challenge_name]["properties"][
+            "challenge_nonce"
+        ]
+        if any(challenge_nonce.get(key) != value for key, value in expected_challenge_nonce.items()):
+            raise ValueError(
+                f"{challenge_name}.challenge_nonce must bound canonical unpadded base64url to 32..64 decoded bytes"
+            )
     validate_admin_user_override_contract(admin_path, admin)
     validate_admin_administrator_contract(admin_path, admin)
     validate_admin_secret_contract(admin_path, admin)
@@ -756,6 +770,30 @@ def main() -> None:
         raise ValueError("attestation vector schema failed:\n" + "\n".join(errors))
     validate_attestation_vectors(attestation_vectors)
 
+    component_attestation_schema_path = API / "component-attestation-binding.schema.json"
+    component_attestation_schema = load_document(component_attestation_schema_path)
+    if component_attestation_schema.get("$id") != (
+        "https://latchway.dev/schemas/protocol/1.0.0/component-attestation-binding-v2.schema.json"
+    ):
+        raise ValueError("component-attestation-binding schema identity differs from the contract coordinate")
+    walk_refs(component_attestation_schema_path, component_attestation_schema)
+    component_vector_schema_path = API / "test-vectors/component-attestation-binding/vector.schema.json"
+    component_vector_schema = load_document(component_vector_schema_path)
+    if component_vector_schema.get("$id") != (
+        "https://latchway.dev/schemas/test-vectors/1.0.0/component-attestation-binding-vector-set.schema.json"
+    ):
+        raise ValueError("component attestation vector schema identity differs from the contract coordinate")
+    component_vectors = load_document(API / "test-vectors/component-attestation-binding/v2.json")
+    errors = schema_errors(
+        component_vector_schema_path,
+        component_vector_schema,
+        component_vectors,
+        "component_attestation_vectors",
+    )
+    if errors:
+        raise ValueError("component attestation vector schema failed:\n" + "\n".join(errors))
+    validate_attestation_vectors(component_vectors)
+
     dpop_vector_schema_path = API / "test-vectors/dpop/vector.schema.json"
     dpop_vector_schema = load_document(dpop_vector_schema_path)
     if dpop_vector_schema.get("$id") != (
@@ -804,6 +842,7 @@ def main() -> None:
         "admin.openapi.yaml",
         "config.schema.json",
         "attestation-binding.schema.json",
+        "component-attestation-binding.schema.json",
         "release-evidence.schema.json",
         "error-codes.yaml",
         "protocol-version.json",
@@ -814,7 +853,7 @@ def main() -> None:
     if required != actual:
         raise ValueError(f"bundle manifest entries differ from builder: {sorted(required ^ actual)}")
     validate_framework_compatibility(check_generated=True)
-    print("contract validation passed: OpenAPI structure/refs, registries, schemas/examples, release evidence, attestation hashes, DPoP signatures/semantics, family/component wire-2 semantics, generated framework compatibility")
+    print("contract validation passed: OpenAPI structure/refs, registries, schemas/examples, release evidence, root/component attestation hashes, DPoP signatures/semantics, family/component wire-2 semantics, generated framework compatibility")
 
 
 if __name__ == "__main__":

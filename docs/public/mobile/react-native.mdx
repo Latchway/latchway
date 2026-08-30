@@ -66,10 +66,11 @@ installation state remains available to later instances. `refresh()` rotates
 session credentials explicitly; `revokeCurrentInstallation()` destroys the
 server installation and local secure state.
 
-Requests with bodies are never cloned or automatically replayed. Bodyless
-requests receive at most one pre-dispatch retry for an exact canonical
-`session_expired` or `dpop_nonce_required` response. Redirects and cross-origin
-authorization are rejected.
+JavaScript never clones or replays a request. Native may retry at most once for
+an exact canonical pre-dispatch `session_expired` or `dpop_nonce_required`
+response when the body was already buffered within the 8 MiB bridge limit.
+Streaming or otherwise non-replayable request bodies are never retried.
+Redirects and cross-origin authorization are rejected.
 
 The client also exposes `quota(feature)`, `refresh()`,
 `revokeCurrentInstallation()`, and `dispose()`. `diagnostics()` combines the

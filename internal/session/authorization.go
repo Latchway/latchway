@@ -263,6 +263,8 @@ func authorizationMatchesPrincipal(authorization Authorization, principal Access
 		authorization.ComponentKind != principal.ComponentKind ||
 		authorization.ComponentIsRoot != principal.ComponentIsRoot ||
 		authorization.TrustSource != principal.TrustSource ||
+		(authorization.ComponentID != "" &&
+			authorization.AttestationProvider != principal.AttestationProvider) ||
 		authorization.ParentComponentID != principal.ParentComponentID ||
 		authorization.ParentAttestationProvider != principal.ParentAttestationProvider ||
 		authorization.DelegationID != principal.DelegationID ||
@@ -347,7 +349,13 @@ func authorizationStateError(state authorizationState, now time.Time, allowRevok
 		}
 		return ErrSessionInvalid
 	}
-	if state.grantRevoked || state.installationTrust != state.TrustLevel || state.userStatus != "active" || state.applicationStatus != "active" || state.environmentStatus != "active" || state.organizationStatus != "active" {
+	// A non-root component is anchored to the installation for ownership and
+	// revocation, but its independently verified trust may intentionally differ
+	// from the root installation's trust. Legacy and root grants still have to
+	// match the durable installation trust exactly.
+	installationTrustMismatch := (state.ComponentID == "" || state.ComponentIsRoot) &&
+		state.installationTrust != state.TrustLevel
+	if state.grantRevoked || installationTrustMismatch || state.userStatus != "active" || state.applicationStatus != "active" || state.environmentStatus != "active" || state.organizationStatus != "active" {
 		return ErrSessionRevoked
 	}
 	if !state.AccessExpiresAt.After(now) || !state.IdentityExpiresAt.After(now) {
@@ -703,7 +711,15 @@ func revokeCurrentInstallation(ctx context.Context, tx pgx.Tx, state authorizati
 		SET status = 'revoked', revoked_at = GREATEST(created_at, $2),
 		    updated_at = GREATEST(updated_at, created_at, $2)
 		WHERE organization_id = $3 AND application_id = $4 AND environment_id = $5
-		  AND installation_id = $1 AND status <> 'revoked'
+		  AND (
+		      installation_id = $1
+		      OR installation_family_id IN (
+		          SELECT installation_family_id
+		          FROM installation_families
+		          WHERE root_installation_id = $1
+		      )
+		  )
+		  AND status <> 'revoked'
 	`, state.InstallationID, now, state.OrganizationID, state.ApplicationID, state.EnvironmentID); err != nil {
 		return fmt.Errorf("revoke installation attestation keys: %w", err)
 	}

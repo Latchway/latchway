@@ -21,6 +21,24 @@ import (
 	"github.com/latchway/latchway/internal/identity"
 )
 
+func TestClientSDKMatchesInstallationIncludesWatchOS(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		sdk, platform string
+		want          bool
+	}{
+		{sdk: "ios", platform: "ios", want: true},
+		{sdk: "ios", platform: "watchos", want: true},
+		{sdk: "react-native", platform: "watchos", want: false},
+		{sdk: "android", platform: "watchos", want: false},
+	} {
+		if got := clientSDKMatchesInstallation(test.sdk, test.platform); got != test.want {
+			t.Errorf("clientSDKMatchesInstallation(%q, %q) = %t, want %t", test.sdk, test.platform, got, test.want)
+		}
+	}
+}
+
 func TestCoordinatorBuildsStaticSecretVerifierWithAllConfiguredControls(t *testing.T) {
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -193,6 +211,34 @@ func TestCoordinatorPrevalidatesExchangeDPoPBindingsAndCurrentSkew(t *testing.T)
 	}
 	if _, err := prevalidateExchangeDPoP(futureInput, jkt, now, 30*time.Second); err != nil {
 		t.Fatalf("future proof within current skew error = %v", err)
+	}
+}
+
+func TestCoordinatorPrevalidatesAuthorizedDPoPAccessHash(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	target := mustCoordinatorURL(t, "https://gateway.example.test/client/v1/installation-families/current/components/cmp_01K3NQ7M8P9RSTVWXYZABCDE12/attestation-exchanges")
+	privateKey, _, jkt := newChallengeKey(t)
+	accessToken := "fixture.access.token"
+	proof := signedSessionAccessDPoP(
+		t, privateKey, http.MethodPost, target, now, accessToken,
+		"coordinator-component-attestation-exchange",
+	)
+	metadata := clientapi.RequestMetadata{
+		HTTPMethod: http.MethodPost, TargetURL: *target,
+		DPoPProof: clientapi.NewSensitiveString(proof.value),
+	}
+	if _, err := prevalidateAccessDPoPMetadata(metadata, jkt, accessToken, now, 0); err != nil {
+		t.Fatalf("valid authorized proof error = %v", err)
+	}
+	if _, err := prevalidateAccessDPoPMetadata(metadata, jkt, "different.access.token", now, 0); !dpop.IsCode(err, "dpop_invalid") {
+		t.Fatalf("wrong access-token hash error = %v", err)
+	}
+	proofWithoutAccessHash := signedSessionDPoP(
+		t, privateKey, http.MethodPost, target, now, "coordinator-component-missing-ath",
+	)
+	metadata.DPoPProof = clientapi.NewSensitiveString(proofWithoutAccessHash.value)
+	if _, err := prevalidateAccessDPoPMetadata(metadata, jkt, accessToken, now, 0); !dpop.IsCode(err, "dpop_invalid") {
+		t.Fatalf("missing access-token hash error = %v", err)
 	}
 }
 

@@ -51,6 +51,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Expose the pinned MDX parser
+        run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Lint public prose
+        uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3
+        with:
+          fail_on_error: true
+          files: .
+          filter_mode: nofilter
+          sync: false
+          version: 3.17.0
+          workdir: docs/public
+
       - name: Validate public documentation
         env:
           DO_NOT_TRACK: "1"

@@ -1,248 +1,223 @@
 # Latchway version 1 master plan
 
 This is the canonical merged implementation plan as of 2026-08-30. It combines
-the original A-to-Z plan with the framework integration, Installation Family,
-and Mintlify addendum. The addendum supersedes legacy assumptions where they
-conflict; passing work from the original plan remains reusable evidence but is
-not proof that the superseding version 1 architecture is complete.
+the original A-to-Z plan with the framework-integration, Installation Family,
+and Mintlify addendum. The version 1 source candidate is implemented; release
+promotion remains blocked on synchronized repository commits and protected
+external evidence.
 
-## Current architectural truth
-
-The version 1 target is:
+## Architectural truth
 
 ```text
 Application User
 └── Installation Family (fam_...)
     ├── Root Client Component (cmp_...)
-    │   ├── independent P-256 key
-    │   ├── direct trust evidence
-    │   └── independent session family
-    └── Delegated or directly attested Client Component (cmp_...)
-        ├── independent P-256 key
-        ├── explicit trust provenance and feature grants
-        └── independent session family
+    │   ├── independent P-256 key and session family
+    │   └── direct trust evidence and explicit feature grants
+    └── Delegated or composite-trust Client Component (cmp_...)
+        ├── independent P-256 key and session family
+        └── bounded delegation plus optional component-owned direct evidence
 ```
 
 Latchway supplies authenticated, attested HTTP transport and thin framework
 adapters. It does not own chat, prompt, tool, agent, message, or model
-abstractions. Public documentation is a tested product surface built with
-Mintlify from the core monorepo.
+abstractions. Public documentation is a tested product surface whose canonical
+source lives in the core monorepo; `latchway-docs` is its generated deployment
+mirror.
 
-The last committed executable baseline implements the legacy `Application User
-→ Installation → Session` model. The current uncommitted working tree contains
-initial component-definition, ID, migration, token, and root-session work, but
-not a complete or releasable family/component implementation. Contract `0.5.1`,
-wire protocol `1`, database schema `20`, its SDK locks, and prior load/release
-evidence describe the legacy baseline. Current contract-schema edits invalidate
-that freeze in the working tree until a deliberate prerelease coordinate and
-regenerated SDK locks replace it. Neither state is completion evidence for this
-plan.
+## Candidate coordinates
+
+| Field | Version 1 source coordinate |
+| --- | --- |
+| Contract | `1.0.0`, status `draft`, `released_at: null` |
+| Contract freeze | Pending final atomic cross-repository convergence |
+| Bundle SHA-256 | Pending deterministic regeneration after convergence |
+| Wire protocol | Current `2`; supported discovery range `[1, 2]` |
+| Database | Schema `23` |
+| Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
+| Release state | `unreleased` |
+
+The historical `0.5.1`/wire-1 bundle remains immutable at its historical
+checkpoint. It is not rewritten by this plan.
 
 ## Status vocabulary
 
-- **Complete** means source and required local tests satisfy the merged target.
-- **Partial** means reusable legacy work exists but the merged target is open.
-- **Not started** means the required target source is absent.
-- **External required** is reserved for hardware, credentials, hosted services,
-  or protected exact-candidate observations that cannot be produced in source.
-- **Historical evidence** remains auditable but cannot close a changed gate.
+- **Source complete** means the required implementation and local deterministic
+  gates pass for the named source.
+- **Converging** means implemented repositories are being bound to the same
+  immutable coordinates.
+- **External required** means hardware, protected credentials, hosted services,
+  registries, or publication are genuinely required.
+- **Released** is reserved for protected promotion after every applicable
+  external domain binds to one candidate.
 
-## Original-plan baseline retained
+## Execution status
 
-| Original phases | Reusable result | Merged-plan classification |
-| --- | --- | --- |
-| 0–6 | Repository foundation, contracts, PostgreSQL domain, configuration, identity, attestation, DPoP, and legacy sessions | Historical legacy baseline; family/component contract and runtime supersede installation-only assumptions |
-| 7–9 | Data plane, reserve-execute-settle quotas, structured protocols, protected opaque HTTP, deterministic routing, retry, and accounting | Reusable, but request attribution, policy context, quota scopes, refresh, and revocation must become component-aware |
-| 10–13 | Swift, Android, JavaScript, and React Native SDK foundations | Reusable transport/package work; framework seams, component sessions, and physical extension isolation remain open |
-| 14–18 | Admin API/CLI/dashboard, operations, deployment, conformance, security, load, and release-evidence machinery | Reusable machinery; family/component/operator surfaces and new security gates are missing |
-| 19 | Markdown documentation and release automation | Historical baseline only; Mintlify site/content gates and the merged Definition of Done are open |
+### Phase 0: Reconcile architecture and completion policy — source complete
 
-ADR numbers 0017–0028 are reserved for the addendum decisions. The six legacy
-decisions formerly using 0017–0022 are preserved as ADRs 0029–0034. ADR 0032
-records current legacy refresh behavior and is superseded by ADR 0024 for the
-Installation Family target.
+- [x] Reconcile the master, status, compatibility, and completion ledgers.
+- [x] Preserve legacy ADRs without number collisions and record ADRs 0017–0034.
+- [x] Replace installation-only active architecture with family/component
+  terminology and fail-closed release-domain validation.
+- [x] Establish the strict framework compatibility registry, schema, generator,
+  and adversarial validation.
 
-## Merged execution plan
+### Phase 1: Capability decisions — source complete
 
-### Phase 0: Reconcile the plan — in progress
+- [x] Exercise request-time seams for OpenAI JavaScript, Vercel AI SDK,
+  LangChain JavaScript, SwiftOpenAI, Apple Foundation Models, MacPaw/OpenAI,
+  OkHttp, and React Native native-backed fetch.
+- [x] Implement only seams that preserve per-request asynchronous DPoP,
+  streaming, cancellation, origin restriction, and placeholder removal.
+- [x] Record Foundation Models as planned when runtime execution is unavailable
+  and MacPaw/OpenAI 0.5.1 as unsupported when no safe seam exists.
+- [x] Implement Swift component-specific Keychain access groups and containing-
+  app preparation APIs with unsigned host/extension consumer evidence.
 
-- [x] Replace source-complete claims in the canonical master, status,
-  compatibility, and completion ledgers.
-- [x] Record the framework-transparent transport and documentation-as-product
-  principles.
-- [x] Add ADRs 0017–0028 with collision-safe preservation of old decisions.
-- [x] Establish `compatibility/frameworks.yaml`, its strict schema, offline
-  validator, deterministic generated table, and focused tests.
-- [ ] Audit every active architecture, threat-model, guide, and reference page;
-  replace installation-only diagrams and shared-extension credential advice or
-  label it explicitly legacy.
-- [ ] Update the active terminology and Definition-of-Done validators so no
-  release path can classify missing addendum source as external-only.
+Physical Apple entitlement, sibling-denial, background execution, and App
+Attest evidence remain external gates, not missing source.
 
-Gate: no active planning document contradicts the merged target, and release
-validation fails closed while any source phase below is incomplete.
+### Phase 2: Contract and schema — source complete; final coordinate converging
 
-### Phase 1: Capability spikes — not started
+- [x] Define Installation Family, Client Component, Component Definition,
+  delegation, component sessions/refresh/revocation, claims, policy/quota
+  dimensions, framework metadata, errors, and vectors.
+- [x] Define component App Attest step-up challenge/exchange operations,
+  component binding version 2, and composite `delegated_direct_attested`
+  provenance without relabeling delegated ancestry.
+- [x] Update Client/Admin OpenAPI, configuration JSON Schema, error registry,
+  examples, compatibility registry, and deterministic bundle inputs.
+- [x] Keep draft contract `1.0.0`, wire 2, and all four canonical fixture
+  families deterministic.
+- [x] Make cross-repository conformance reject fixture, lock, coordinate, or
+  post-freeze `api/**` drift.
+- [ ] Regenerate the final draft bundle after contract convergence and bind its
+  exact checksum and core commit into every SDK lock.
 
-- [ ] Verify request-time integration seams for OpenAI JavaScript, Vercel AI
-  SDK, LangChain JavaScript, Apple Foundation Models, MacPaw/OpenAI, Android
-  OkHttp reuse, and React Native native-backed fetch.
-- [ ] Prove containing-app-created component keys, component-specific Keychain
-  access groups, extension retrieval, sibling isolation, background execution,
-  and component refresh races.
-- [ ] Store decisions and reproducible spike evidence under
-  `engineering/spikes/`.
+### Phase 3: Server runtime — source complete
 
-Gate: every Tier 1 framework has a proven safe extension point; physical iOS
-key provisioning works or a documented fail-closed fallback is chosen.
-
-### Phase 2: Contract and schema — in progress
-
-- [ ] Define Installation Family, Client Component, Component Definition,
-  provisioning, component-session, revocation, claims, errors, policy context,
-  quota dimensions, framework headers, and test vectors.
-- [ ] Update Client/Admin OpenAPI, canonical configuration JSON Schema, error
-  registry, examples, and compatibility manifest bundle entry.
-- [ ] Select and publish a new prerelease contract coordinate, regenerate the
-  deterministic bundle, and update every SDK lock atomically.
-
-An uncommitted Component Definition configuration draft exists. It has already
-changed the contract archive inputs without changing the `0.5.1` coordinate,
-so the working-tree bundle and old SDK locks are deliberately invalid until the
-remaining contract is designed and the prerelease bump is performed.
-
-Gate: all SDKs validate or generate the new wire types and every example and
-vector passes. Historical contract `0.5.1` remains byte-frozen at its normative
-checkpoint; the current working tree is not a valid `0.5.1` source.
-
-### Phase 3: Server runtime model — in progress
-
-- [ ] Add families, definitions, components, keys, delegations, component
-  session/refresh families, and encrypted rotation-result persistence.
-- [ ] Migrate each legacy installation to one family and root component without
-  losing keys, sessions, requests, usage, or audit history.
-- [ ] Implement provenance/effective trust, bounded delegation, independent
+- [x] Implement families, definitions, components, keys, delegations,
+  independent session/refresh families, and encrypted rotation-result storage.
+- [x] Migrate legacy installations transactionally to a family/root component
+  while preserving request, usage, session, key, and audit attribution.
+- [x] Implement bounded provenance/effective trust, independent and cascading
   revocation, key replacement, and 30-second exact-tuple refresh idempotency.
-- [ ] Make policy, quotas, request attribution, telemetry, retention, and audit
-  component-aware.
-- [ ] Pass the complete component security, replay, race, migration, and
-  PostgreSQL multi-replica suites.
+- [x] Implement schema-23 component-owned App Attest step-up with one-use
+  challenges, binding-version-2 verification, retry-safe assertion handling,
+  component-only session rotation, provider binding, key cleanup on
+  replacement/revocation, and preserved delegation ancestry.
+- [x] Make policy, production input/total quotas, requests, usage, telemetry,
+  retention, and audit component-aware.
+- [x] Pass complete unit, PostgreSQL integration, migration, race, replay,
+  multi-replica, and browser-backed first-run tests locally.
 
-The working tree contains initial family/component IDs, schema-21 migration,
-configuration snapshot/validation, token claims, and root-session persistence.
-This is partial implementation only: provisioning/delegation APIs, complete
-refresh, policy/quota/request/audit integration, migration proof, Admin
-surfaces, and the security suite remain blocked.
+The direct-step-up configuration deliberately references a component-only App
+Attest policy in `preferred` mode so it cannot satisfy initial delegated-session
+eligibility. The explicit step-up endpoint nevertheless requires valid direct
+evidence and fails closed on component, bundle, key, DPoP, provider, family, or
+parent mismatch.
 
-Gate: debug clients can create a root family, delegate two isolated components,
-use independent sessions, attribute usage, and revoke component/family scopes
-correctly.
+### Phase 4: SDK transport primitives — converging
 
-### Phase 4: SDK transport primitives — partial legacy foundation
+- [x] Implement feature-bound Swift, Kotlin, JavaScript, and React Native
+  transports with wire-2 metadata, origin restrictions, cancellation,
+  streaming, refresh single-flight, and replay-safe retry.
+- [x] Keep native keys, refresh tokens, and device proofs outside the React
+  Native JavaScript bridge.
+- [ ] Finish the atomic cross-repository commit/lock convergence and run the
+  common source gate from clean worktrees.
 
-- [ ] Provide feature-bound Swift, Kotlin, JavaScript, and React Native
-  transports with framework metadata, origin restrictions, placeholder removal,
-  cancellation, streaming, and replay-safe retry.
-- [ ] Ensure private keys and refresh tokens remain in platform storage and do
-  not cross the React Native JavaScript bridge.
-- [ ] Run raw HTTP conformance on every supported platform against the new
-  contract.
+### Phase 5: iOS Installation Family SDK — source complete, external proof open
 
-Gate: the common raw transport suite passes for the same prerelease bundle.
+- [x] Implement `LatchwayAppExtensions`, component preparation, component-local
+  Keychain storage, session restore/sign-out, diagnostics, and host/widget/share
+  consumer projects.
+- [x] Implement Action/SSO extension-process App Attest step-up in Swift and
+  React Native iOS without passing a root credential or native proof through
+  the React Native JavaScript bridge.
+- [x] Pass Swift package, CocoaPods, Tuist, unsigned extension-host, adapter,
+  conformance, and reproducibility gates locally.
+- [ ] Capture protected physical containing-app/widget/share isolation,
+  Action/SSO component identity and sibling denial, no-host/background/
+  termination/no-user-presence behavior, signing, and App Attest evidence for
+  the exact candidate.
 
-### Phase 5: iOS Installation Family SDK — not started
+The server contract can represent an eligible watch component, but the current
+Swift package does not claim a watch direct-step-up client API. Android direct
+component step-up is intentionally unsupported in version 1; Play Integrity
+continues to apply to supported Android application trust surfaces.
 
-- [ ] Build `LatchwayAppExtensions`, component preparation, Keychain isolation,
-  component-session restore, sign-out, diagnostics, widget/share examples, and
-  direct-attestation step-up where supported.
-- [ ] Pass physical main-app, widget, and share-extension flows with independent
-  keys and session families.
+### Phase 6: Framework adapters — source complete at experimental scope
 
-Gate: a physical device proves the intended access and sibling denial for the
-same component configuration.
+- [x] Implement and locally test OpenAI JavaScript 7.8.0, Vercel AI SDK 7.0.85,
+  LangChain OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React
+  Native 0.82.0 integration seams.
+- [x] Generate capability and limitation claims from the canonical registry.
+- [x] Keep unexecuted Foundation Models support planned and the unsafe MacPaw
+  seam unsupported.
+- [ ] Run hosted common conformance and physical native proof before elevating
+  any experimental entry to supported.
 
-### Phase 6: Framework adapters — not started
+### Phase 7: Admin and operator experience — source complete
 
-Implement and conformance-test in order: OpenAI JavaScript, Vercel AI SDK,
-LangChain JavaScript, Apple Foundation Models, MacPaw/OpenAI, Android ecosystem
-examples, and React Native compatibility. Static-header examples cannot satisfy
-this phase.
+- [x] Implement family/component list/detail, trust graph, provenance, feature
+  grants, session/refresh failures, requests, usage, cost, quotas, and audit.
+- [x] Implement scoped revoke, re-attest, renew, and component replacement in
+  the canonical Admin API, CLI, dashboard, roles, and audit events.
+- [x] Implement the configuration wizard and generated framework compatibility
+  reference.
+- [x] Pass dashboard lint, typecheck, unit tests, deterministic builds,
+  Playwright, and a real PostgreSQL-backed first-run browser test.
 
-Gate: each supported entry has pinned minimum/latest versions and passes the
-common authentication, request, framework, and security suites.
+### Phase 8: Public documentation — source complete locally
 
-### Phase 7: Admin experience — not started
+- [x] Separate canonical public MDX from maintainer plans and make the external
+  docs repository a generated, ownership-checked mirror.
+- [x] Generate API/compatibility references and validate snippets, navigation,
+  Mermaid, redirects, links/anchors, accessibility, AI-readable outputs, and
+  mirror drift.
+- [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
+  verifiable-language rules.
+- [x] Pass the local 59-page Mintlify validation suite.
+- [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
+  and validate the production URL after the branch merges.
 
-- [ ] Add family list/detail, component hierarchy and trust graph, provenance,
-  feature grants, session failures, refresh reuse, usage, cost, and limits.
-- [ ] Add component/family revoke, re-attest, renew, and replacement actions to
-  the canonical Admin API, CLI, dashboard, roles, and audit event set.
-- [ ] Expose framework metadata and a generated compatibility reference.
+### Phase 9: Operations, supply chain, and final convergence — source complete;
+external execution open
 
-Gate: an operator can identify the component and framework for a request,
-understand its trust, usage, and failure state, and revoke the correct scope.
-
-### Phase 8: Mintlify foundation — in progress
-
-- [ ] Separate public content from maintainer planning and create split
-  `docs.json` navigation, MDX foundations, OpenAPI reference generation, and
-  dependency-free visual components.
-- [ ] Add tested snippet extraction, compatibility generation, Vale, link,
-  accessibility, redirect, alt-text, AI-output, and Mintlify validation.
-- [ ] Add canonical visual language, Assistant instructions, agent instructions,
-  `llms.txt`, and the versioned documentation bundle contract.
-
-An uncommitted `docs/public` foundation now contains Mintlify configuration,
-navigation, audience pages, planned integration/family content, assistant/agent
-resources, and structure checks. It remains partial until installation,
-Mintlify validation, links, accessibility, generated registry/API/snippets,
-visual assets, public/internal separation, and CI evidence all pass.
-
-Gate: the Mintlify preview and every offline documentation quality check pass.
-
-### Phase 9: Public content and final convergence — in progress
-
-- [ ] Publish start, concepts, SDK quickstarts, framework integrations,
-  Installation Families/extensions, operator/security/reference/contributor
-  guides, troubleshooting, glossary, and release notes.
-- [ ] Compile every quickstart and generated snippet and verify all claims
-  against implementation and compatibility evidence.
-- [ ] Run exact-candidate all-SDK/framework/device/provider/cloud/resilience/
-  supply-chain/publication gates only after source phases are complete.
-
-Initial public pages exist but are prerelease design content, not verified
-support documentation. Compilation, generated-source ownership, implementation
-accuracy, navigation completeness, and production deployment remain open.
-
-Gate: a new developer can deploy Latchway and complete an authenticated,
-attested, quota-enforced request through a supported SDK/framework, while an
-operator can diagnose and revoke the exact family/component.
+- [x] Implement telemetry, reconciliation/retention jobs, key rotation,
+  backup/restore, upgrade/rollback, multi-replica, load/failure, and cloud
+  deployment gates.
+- [x] Implement multi-architecture image, vulnerability/license scan, SPDX
+  SBOM, signing, provenance, exact-candidate receipt, and protected promotion
+  workflows.
+- [x] Validate the final source, release workflows, Cloudflare dry-run,
+  Compose/Cloud Run/AWS definitions, security scanners, and deterministic builds
+  locally.
+- [ ] Build and observe one final immutable multi-architecture image in the
+  protected registry and run all external domains against its exact digests.
+- [ ] Publish signed tags, GitHub releases, OCI image, packages, and docs only
+  after the release finalizer accepts every domain.
 
 ## Version 1 Definition of Done
 
-Version 1 is incomplete until all of the following are true for one immutable
-candidate:
+Source implementation is complete when the clean cross-repository source gate
+passes on synchronized commits. Version 1 is released only when the same
+candidate also has protected evidence for:
 
-- the Installation Family is the runtime parent; every component has an
-  independent key/session family, explicit trust provenance, bounded feature
-  delegation, component-aware policy/quota/audit, and proven revocation;
-- all required refresh, cross-family, sibling-isolation, delegation, key,
-  replacement, policy, quota, audit, and physical extension tests pass;
-- every claimed framework integration has a safe request-time seam, pinned
-  minimum/latest versions, common conformance, generated compatibility, and
-  accurate limitations;
-- the Mintlify site builds from core, generated references/snippets do not
-  drift, public/internal content is separated, and accessibility, links, prose,
-  diagrams, redirects, and AI-readable outputs pass;
-- live providers, physical App Attest/Play Integrity and extension flows, cloud
-  deployments, protected load/resilience, independent security review,
-  per-architecture scans/SBOM/signing/provenance, tags, registries, and clean
-  post-publication consumers all bind to that same candidate.
+1. physical App Attest, Play Integrity, App Check/Turnstile where configured,
+   app-extension/component isolation, and Action/SSO direct step-up lifecycle;
+2. live providers and every advertised protocol/framework/version bound;
+3. every claimed cloud, multi-replica, load, failure, backup/restore, upgrade,
+   rollback, key-rotation, and worker-recovery path;
+4. per-architecture scans, license policy, SBOMs, signatures, provenance, and
+   independent security review;
+5. tags, releases, registries, package publication, clean public consumers,
+   production Mintlify deployment, and post-publication conformance.
 
 ## Promotion rule
 
-Source work is never reclassified as external evidence. Historical legacy
-receipts remain useful regression evidence but cannot authorize `v1.0.0` under
-the merged target. Promotion stays blocked until Phases 0–9 and every applicable
-external gate close without skips, stale receipts, coordinate drift, or
-fabricated support claims.
+No source edit, local test, manually written receipt, prior-candidate result, or
+version string may substitute for protected exact-candidate evidence. The draft
+coordinate stays unreleased and no `v1.0.0` tag or public package is authorized
+until the finalizer closes every applicable domain without skips or drift.

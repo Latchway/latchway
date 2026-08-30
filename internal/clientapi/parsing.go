@@ -234,7 +234,7 @@ func parseChallengeRequest(r *http.Request, declaration clientDeclaration) (Chal
 		return ChallengeInput{}, invalidAt("body.identity_token", "identity_token must satisfy the protocol length limits.")
 	}
 	platform, ok := object["platform"].(string)
-	if !ok || !validPlatform(platform) {
+	if !ok || !validInitialSessionPlatform(platform) {
 		return ChallengeInput{}, invalidAt("body.platform", "platform must be a supported Latchway platform.")
 	}
 	sdkVersion, ok := boundedString(object["sdk_version"], 1, 128)
@@ -298,6 +298,29 @@ func parseExchangeRequest(r *http.Request) (ExchangeInput, *requestViolation) {
 		ChallengeID: challengeID, Attestation: attestation,
 		Installation: InstallationMetadata{AppVersion: appVersion, OSVersion: osVersion, DeviceModel: deviceModel},
 	}, nil
+}
+
+func parseComponentAttestationExchangeRequest(r *http.Request) (ExchangeComponentAttestationInput, *requestViolation) {
+	object, violation := decodeRequestObject(r, maximumExchangeBodyBytes)
+	if violation != nil {
+		return ExchangeComponentAttestationInput{}, violation
+	}
+	if !hasExactFields(object, []string{"challenge_id", "attestation"}, nil) {
+		return ExchangeComponentAttestationInput{}, invalidAt("body", "The component attestation exchange object has missing or unsupported fields.")
+	}
+	challengeID, ok := object["challenge_id"].(string)
+	if !ok || !challengeIDPattern.MatchString(challengeID) {
+		return ExchangeComponentAttestationInput{}, invalidAt("body.challenge_id", "challenge_id is invalid.")
+	}
+	attestationValue, ok := object["attestation"].(map[string]any)
+	if !ok {
+		return ExchangeComponentAttestationInput{}, invalidAt("body.attestation", "attestation must be an object.")
+	}
+	attestation, violation := parseAttestation(attestationValue, "body.attestation")
+	if violation != nil {
+		return ExchangeComponentAttestationInput{}, violation
+	}
+	return ExchangeComponentAttestationInput{ChallengeID: challengeID, Attestation: attestation}, nil
 }
 
 func parseRefreshRequest(r *http.Request) (RefreshInput, *requestViolation) {
@@ -472,17 +495,24 @@ func validSDK(value string) bool {
 
 func validPlatform(value string) bool {
 	switch value {
-	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node":
 		return true
 	default:
 		return false
 	}
 }
 
+// validInitialSessionPlatform is narrower than the component/output
+// vocabulary. A watchOS extension joins an existing installation family and
+// can step up directly, but it cannot create a version-1 root installation.
+func validInitialSessionPlatform(value string) bool {
+	return value != "watchos" && validPlatform(value)
+}
+
 func platformCompatible(sdk, platform string) bool {
 	switch sdk {
 	case "ios":
-		return platform == "ios"
+		return platform == "ios" || platform == "watchos"
 	case "android":
 		return platform == "android"
 	case "javascript":

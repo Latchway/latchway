@@ -1246,6 +1246,21 @@ func TestNewAppAttestVerifierRejectsUnsafeConfiguration(t *testing.T) {
 	}
 }
 
+func TestAppAttestPlatformVocabularyIncludesWatchOS(t *testing.T) {
+	t.Parallel()
+
+	for _, platform := range []string{"ios", "react_native_ios", "watchos"} {
+		if !validAppAttestPlatform(platform) {
+			t.Errorf("App Attest platform %q was rejected", platform)
+		}
+	}
+	for _, platform := range []string{"", "android", "react_native_android", "web", "node"} {
+		if validAppAttestPlatform(platform) {
+			t.Errorf("non-App-Attest platform %q was accepted", platform)
+		}
+	}
+}
+
 type appAttestFailingStore struct{ err error }
 
 func (store appAttestFailingStore) TransactAppAttestKey(

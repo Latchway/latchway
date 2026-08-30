@@ -228,6 +228,24 @@ func TestAllSDKPlatformPairsAreEnforced(t *testing.T) {
 	}
 }
 
+func TestInitialSessionChallengeRejectsWatchOSComponentPlatform(t *testing.T) {
+	t.Parallel()
+
+	if !validPlatform("watchos") || !platformCompatible("ios", "watchos") {
+		t.Fatal("watchOS must remain valid for iOS component-session output")
+	}
+	coordinator := &fakeCoordinator{challengeResult: validChallengeResult()}
+	handler := newTestHandler(t, coordinator, &fakeJWKSProvider{result: validJWKS()}, "https://gateway.example.test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, validClientRequest(
+		http.MethodPost, challengePath, validChallengeBody("watchos"), "ios", "1.2.3",
+	))
+	assertProblem(t, response, "request_invalid", http.StatusBadRequest)
+	if len(coordinator.challengeInputs) != 0 {
+		t.Fatal("watchOS root challenge reached the coordinator")
+	}
+}
+
 func TestDPoPBoundIsInclusiveAndProofRemainsOpaque(t *testing.T) {
 	t.Parallel()
 

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/test-vectors/1.0.0/component-attestation-binding-vector-set.schema.json",
+  "title": "Latchway component-attestation-binding vector set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "contract_version", "binding_version", "canonicalization", "hash", "vectors"],
+  "properties": {
+    "format_version": { "type": "integer", "const": 1 },
+    "contract_version": { "type": "string", "const": "1.0.0" },
+    "binding_version": { "type": "integer", "const": 2 },
+    "canonicalization": { "type": "string", "const": "RFC 8785 JCS" },
+    "hash": { "type": "string", "const": "SHA-256" },
+    "vectors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "input", "canonical_json", "utf8_hex", "sha256_hex", "sha256_base64url"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+          "input": { "$ref": "../../component-attestation-binding.schema.json" },
+          "canonical_json": { "type": "string", "minLength": 2 },
+          "utf8_hex": { "type": "string", "pattern": "^(?:[0-9a-f]{2})+$" },
+          "sha256_hex": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "sha256_base64url": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+        }
+      }
+    }
+  }
+}

@@ -17,6 +17,18 @@ destination, credential, physical model, price, timeout, and retry policy.
 | Anthropic Messages | `POST /v1/messages` | Anthropic-compatible |
 | Restricted opaque HTTP | `/proxy/{feature}/{path...}` | Explicitly configured generic HTTP |
 
+“Compatible” identifies the protocol family, not an unrestricted provider
+pass-through. Version 1 exposes a closed, locally verifiable subset so unknown
+provider fields cannot silently widen the trust or accounting boundary.
+Responses accepts local text/message input, local function and custom tools,
+tool results, bounded generation controls, and supported structured-text
+formats. Latchway forces `store: false` and rejects hosted state, remote tools,
+file references, media, uploads, background execution, and other provider-side
+resources. Embeddings accepts bounded strings, string batches, and token-ID
+arrays plus `float` or `base64` encoding and bounded dimensions; it rejects
+caller identity fields and unknown controls. Unsupported shapes fail before
+quota reservation or upstream dispatch.
+
 Direct providers, OpenRouter, Bifrost, LiteLLM, Cloudflare AI Gateway, and
 internal compatible proxies are modeled as upstreams and physical models. They
 do not require provider-specific client credentials or client-side routing.

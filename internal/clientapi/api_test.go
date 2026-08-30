@@ -29,20 +29,26 @@ const (
 var testInstant = time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
 
 type fakeCoordinator struct {
-	challengeResult   ChallengeResult
-	challengeErr      error
-	exchangeResult    GrantResult
-	exchangeErr       error
-	refreshResult     GrantResult
-	refreshErr        error
-	diagnosticsResult DiagnosticsResult
-	diagnosticsErr    error
-	revokeErr         error
-	challengeInputs   []ChallengeInput
-	exchangeInputs    []ExchangeInput
-	refreshInputs     []RefreshInput
-	diagnosticsInputs []DiagnosticsInput
-	revokeInputs      []RevokeInstallationInput
+	challengeResult          ChallengeResult
+	challengeErr             error
+	exchangeResult           GrantResult
+	exchangeErr              error
+	refreshResult            GrantResult
+	refreshErr               error
+	diagnosticsResult        DiagnosticsResult
+	diagnosticsErr           error
+	revokeErr                error
+	challengeInputs          []ChallengeInput
+	exchangeInputs           []ExchangeInput
+	refreshInputs            []RefreshInput
+	componentChallengeResult ChallengeResult
+	componentChallengeErr    error
+	componentExchangeResult  GrantResult
+	componentExchangeErr     error
+	componentChallengeInputs []CreateComponentAttestationChallengeInput
+	componentExchangeInputs  []ExchangeComponentAttestationInput
+	diagnosticsInputs        []DiagnosticsInput
+	revokeInputs             []RevokeInstallationInput
 }
 
 func (fake *fakeCoordinator) CreateChallenge(_ context.Context, input ChallengeInput) (ChallengeResult, error) {
@@ -66,6 +72,16 @@ func (fake *fakeCoordinator) ProvisionComponent(_ context.Context, _ ProvisionCo
 
 func (fake *fakeCoordinator) CreateComponentSession(_ context.Context, _ CreateComponentSessionInput) (GrantResult, error) {
 	return fake.refreshResult, fake.refreshErr
+}
+
+func (fake *fakeCoordinator) CreateComponentAttestationChallenge(_ context.Context, input CreateComponentAttestationChallengeInput) (ChallengeResult, error) {
+	fake.componentChallengeInputs = append(fake.componentChallengeInputs, input)
+	return fake.componentChallengeResult, fake.componentChallengeErr
+}
+
+func (fake *fakeCoordinator) ExchangeComponentAttestation(_ context.Context, input ExchangeComponentAttestationInput) (GrantResult, error) {
+	fake.componentExchangeInputs = append(fake.componentExchangeInputs, input)
+	return fake.componentExchangeResult, fake.componentExchangeErr
 }
 
 func (fake *fakeCoordinator) RevokeComponent(_ context.Context, _ RevokeComponentInput) error {

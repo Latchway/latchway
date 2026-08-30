@@ -72,6 +72,7 @@ class SyntheticWorkspace:
                     "admin.openapi.yaml",
                     "config.schema.json",
                     "attestation-binding.schema.json",
+                    "component-attestation-binding.schema.json",
                     "release-evidence.schema.json",
                     "error-codes.yaml",
                     "protocol-version.json",
@@ -95,6 +96,12 @@ class SyntheticWorkspace:
                 ],
                 "release_domains": list(EXTERNAL_CLAIMS),
             },
+            "component_attestation_binding": {
+                "version": 2,
+                "purpose": "component_attestation_step_up",
+                "canonicalization": "RFC 8785 JCS",
+                "hash": "SHA-256",
+            },
             "sdk_kinds": ["ios", "android", "javascript", "react-native"],
             "released_at": self.timestamp(self.released_at),
         }
@@ -104,11 +111,14 @@ class SyntheticWorkspace:
             "api/client.openapi.yaml": "openapi: 3.1.0\ninfo: {title: client, version: 1.0.0}\n",
             "api/config.schema.json": '{"$schema":"https://json-schema.org/draft/2020-12/schema"}\n',
             "api/attestation-binding.schema.json": '{"$schema":"https://json-schema.org/draft/2020-12/schema"}\n',
+            "api/component-attestation-binding.schema.json": '{"$schema":"https://json-schema.org/draft/2020-12/schema"}\n',
             "api/error-codes.yaml": "errors: []\n",
             "api/test-vectors/dpop/v1.json": '{"schema_version":1,"vectors":[]}\n',
             "api/test-vectors/dpop/vector.schema.json": '{"type":"object"}\n',
             "api/test-vectors/attestation-binding/v1.json": '{"schema_version":1,"vectors":[]}\n',
             "api/test-vectors/attestation-binding/vector.schema.json": '{"type":"object"}\n',
+            "api/test-vectors/component-attestation-binding/v2.json": '{"schema_version":1,"vectors":[]}\n',
+            "api/test-vectors/component-attestation-binding/vector.schema.json": '{"type":"object"}\n',
             "api/test-vectors/installation-family/v2.json": '{"schema_version":1,"vectors":[]}\n',
             "api/test-vectors/installation-family/vector.schema.json": '{"type":"object"}\n',
             "compatibility/frameworks.schema.json": '{"type":"object"}\n',
@@ -159,6 +169,9 @@ class SyntheticWorkspace:
         self.fixture_sha256 = {
             "attestation-binding-v1.json": self.sha256(
                 root / "api/test-vectors/attestation-binding/v1.json"
+            ),
+            "component-attestation-binding-v2.json": self.sha256(
+                root / "api/test-vectors/component-attestation-binding/v2.json"
             ),
             "dpop-v1.json": self.sha256(root / "api/test-vectors/dpop/v1.json"),
             "installation-family-v2.json": self.sha256(
@@ -384,6 +397,10 @@ class SyntheticWorkspace:
         shutil.copyfile(
             core / "test-vectors/attestation-binding/v1.json",
             destination / "attestation-binding-v1.json",
+        )
+        shutil.copyfile(
+            core / "test-vectors/component-attestation-binding/v2.json",
+            destination / "component-attestation-binding-v2.json",
         )
         shutil.copyfile(
             core / "test-vectors/dpop/v1.json", destination / "dpop-v1.json"

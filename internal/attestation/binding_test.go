@@ -10,7 +10,20 @@ import (
 )
 
 func TestBindingMatchesNormativeVectors(t *testing.T) {
-	contents, err := os.ReadFile(filepath.Join("..", "..", "api", "test-vectors", "attestation-binding", "v1.json"))
+	files := []string{
+		filepath.Join("attestation-binding", "v1.json"),
+		filepath.Join("component-attestation-binding", "v2.json"),
+	}
+	for _, file := range files {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			testBindingVectorFile(t, file)
+		})
+	}
+}
+
+func testBindingVectorFile(t *testing.T, file string) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "api", "test-vectors", file))
 	if err != nil {
 		t.Fatalf("read attestation-binding vectors: %v", err)
 	}
@@ -59,7 +72,7 @@ func TestBindingRejectsNonCanonicalOrOutOfRangeFields(t *testing.T) {
 		name   string
 		mutate func(*Binding)
 	}{
-		{name: "version", mutate: func(value *Binding) { value.Version = 2 }},
+		{name: "version", mutate: func(value *Binding) { value.Version = 3 }},
 		{name: "challenge ID", mutate: func(value *Binding) { value.ChallengeID = "chl_short" }},
 		{name: "padded nonce", mutate: func(value *Binding) { value.ChallengeNonce += "=" }},
 		{name: "short nonce", mutate: func(value *Binding) { value.ChallengeNonce = "AA" }},
@@ -76,6 +89,30 @@ func TestBindingRejectsNonCanonicalOrOutOfRangeFields(t *testing.T) {
 			test.mutate(&binding)
 			if _, err := binding.CanonicalJSON(); err == nil {
 				t.Fatal("invalid binding was canonicalized")
+			}
+		})
+	}
+}
+
+func TestComponentBindingRejectsMissingOrCrossScopedMembers(t *testing.T) {
+	valid := testComponentBinding()
+	tests := []struct {
+		name   string
+		mutate func(*Binding)
+	}{
+		{name: "purpose", mutate: func(value *Binding) { value.Purpose = "root_session" }},
+		{name: "family", mutate: func(value *Binding) { value.InstallationFamilyID = "" }},
+		{name: "component", mutate: func(value *Binding) { value.ClientComponentID = "cmp_short" }},
+		{name: "definition", mutate: func(value *Binding) { value.ComponentDefinitionID = "Action" }},
+		{name: "component key", mutate: func(value *Binding) { value.ComponentKeyID = "cky_short" }},
+		{name: "unsupported platform", mutate: func(value *Binding) { value.Platform = "android" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			binding := valid
+			test.mutate(&binding)
+			if _, err := binding.CanonicalJSON(); err == nil {
+				t.Fatal("invalid component binding was canonicalized")
 			}
 		})
 	}
@@ -107,5 +144,21 @@ func testBinding() Binding {
 		PrincipalID: "usr_01J00000000000000000000000",
 		DPoPJKT:     "bX0yCl562RPdpf8cJHVLBeUXu6PWExYJ0w-Bydre3q8",
 		Platform:    "ios", IssuedAt: 1787820000,
+	}
+}
+
+func testComponentBinding() Binding {
+	return Binding{
+		Version: 2, Purpose: "component_attestation_step_up",
+		ChallengeID:    "chl_01J00000000000000000000003",
+		ChallengeNonce: "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+		ApplicationID:  "app_habitify", Environment: "production",
+		PrincipalID:           "usr_01J00000000000000000000000",
+		InstallationFamilyID:  "fam_01J00000000000000000000000",
+		ClientComponentID:     "cmp_01J00000000000000000000003",
+		ComponentDefinitionID: "action_extension",
+		ComponentKeyID:        "cky_01J00000000000000000000003",
+		DPoPJKT:               "bX0yCl562RPdpf8cJHVLBeUXu6PWExYJ0w-Bydre3q8",
+		Platform:              "ios", IssuedAt: 1787820003,
 	}
 }

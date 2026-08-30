@@ -1,6 +1,6 @@
 ---
 name: latchway
-description: Deploy, configure, integrate, verify, or troubleshoot Latchway, including its identity and attestation boundary, feature routing, DPoP sessions, platform SDKs, planned Installation Families and Client Components, and AI framework adapters. Use when a task asks how to run Latchway, add an application or provider, protect an AI feature, integrate iOS, Android, React Native, web, or an AI framework, interpret a Latchway error, or review Latchway security and version compatibility.
+description: Deploy, configure, integrate, verify, or troubleshoot Latchway, including its identity and attestation boundary, feature routing, DPoP sessions, platform SDKs, Installation Families and Client Components, and AI framework adapters. Use when a task asks how to run Latchway, add an application or provider, protect an AI feature, integrate iOS, Android, React Native, web, or an AI framework, interpret a Latchway error, or review Latchway security and version compatibility.
 ---
 
 # Latchway

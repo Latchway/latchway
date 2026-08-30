@@ -10,9 +10,9 @@ description: "Define the planned provider-protocol adapter that keeps Apple fram
 
 ## 1. What this integration does
 
-The target Class B adapter implements Apple Foundation Models provider
-interfaces and uses an existing Latchway transport. It does not introduce a
-parallel chat, prompt, tool, transcript, or model framework.
+The source Class B adapter implements the Apple Foundation Models custom
+executor interfaces and uses an existing Latchway transport. It does not
+introduce a parallel chat, prompt, tool, transcript, or model framework.
 
 ## 2. Supported framework versions
 
@@ -27,14 +27,14 @@ None published for this adapter. The current contract does not claim support.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Required through the Swift transport; not yet evidenced |
-| Private key remains native | Required; not yet evidenced |
-| Streaming | Target capability; not yet evidenced |
-| Cancellation | Required; not yet evidenced |
-| App extensions | Target only after Installation Family support |
+| Full DPoP preserved | Implemented through the Swift transport; OS 27 runtime evidence remains pending |
+| Private key remains native | Implemented through Swift platform storage; physical proof remains pending |
+| Streaming | Compiles in the OS 27 executor; runtime evidence remains pending |
+| Cancellation | Compiles in the OS 27 executor; runtime evidence remains pending |
+| App extensions | Conditional source integration; physical extension proof remains pending |
 | Structured output | Advertise only when translation is reliable |
 | Tool calls | Advertise only when translation is reliable |
-| Protocol | Prefer OpenAI Responses through a future compatible contract |
+| Protocol | Draft contract `1.0.0` OpenAI Responses over current wire 2 |
 
 ## 5. Install packages
 
@@ -48,13 +48,14 @@ and feature-capable authenticated transport.
 
 ## 7. Bind a feature
 
-The planned configuration binds the adapter to a Latchway feature and declared
+The source configuration binds the adapter to a Latchway feature and declared
 capabilities. It never exposes the physical model.
 
 ## 8. Create the framework client
 
-The final adapter will implement the supported Apple provider interfaces. Type
-names are not stable enough for runnable examples in this foundation.
+The source adapter implements the OS 27 custom executor interfaces. Type names
+remain pre-release and runtime execution was skipped on the older validation
+host, so this page does not advertise a runnable supported example.
 
 ## 9. Send a non-streaming request
 

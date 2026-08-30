@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from typing import Mapping
 import unittest
 from unittest import mock
 import zipfile
@@ -842,12 +843,93 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         by_id["streamed_request"].update(
             http_status=200, request_id="request-stream-1234"
         )
+        if "component_sibling_denied" in by_id:
+            by_id["component_sibling_denied"].update(
+                http_status=401,
+                error_code="component_key_invalid",
+                request_id="request-sibling-1234",
+            )
         if javascript:
             by_id["streamed_request"]["byte_count"] = 128
             by_id["quota"].update(
                 feature="chat", limit_count=1, metrics=["requests"]
             )
         return tests
+
+    def ios_component_case(
+        self, expected_pins: Mapping[str, str], run_id: str
+    ) -> dict:
+        values = {
+            "host": ("main_app", "c", "0", "4"),
+            "widget": ("widget", "d", "1", "5"),
+            "share": ("share_extension", "e", "2", "6"),
+            "action": ("action_extension", "f", "3", "7"),
+        }
+        identities = [
+            {
+                "role": role,
+                "kind": kind,
+                "definition_id": expected_pins[f"{role}_definition_id"],
+                "bundle_identifier": expected_pins[f"{role}_bundle_identifier"],
+                "binary_sha256": expected_pins[f"{role}_binary_sha256"],
+                "principal_id_sha256": principal * 64,
+                "dpop_key_id_sha256": key * 64,
+                "session_id_sha256": session * 64,
+            }
+            for role, (kind, principal, key, session) in values.items()
+        ]
+        component_ids = {
+            "component_candidate_identities",
+            "action_direct_attestation_step_up",
+            "component_key_isolation",
+            "component_session_isolation",
+            "component_sibling_denied",
+            "component_no_host_process",
+            "component_background_execution",
+            "component_host_termination",
+            "component_no_user_presence",
+        }
+        tests = [
+            item for item in self.concrete_tests("ios") if item["id"] in component_ids
+        ]
+        return {
+            "schema_version": "latchway.ios-component-observation.v1",
+            "platform": "ios_app_attest",
+            "run_id": run_id,
+            "started_at": "2026-08-29T10:01:00Z",
+            "completed_at": "2026-08-29T10:04:00Z",
+            "runtime": {
+                "identities": identities,
+                "direct_step_up": {
+                    "role": "action",
+                    "definition_id": expected_pins["action_definition_id"],
+                    "component_id_sha256": "f" * 64,
+                    "dpop_key_id_sha256": "3" * 64,
+                    "session_before_sha256": "a" * 64,
+                    "session_after_sha256": "7" * 64,
+                    "app_attest_key_id_sha256": "8" * 64,
+                    "trust_source_before": "delegated_from_attested_root",
+                    "trust_source_after": "delegated_direct_attested",
+                    "binding_version": 2,
+                    "request_hash_bound": True,
+                },
+                "sibling_denial": {
+                    "requesting_role": "action",
+                    "credential_role": "share",
+                    "credential_session_id_sha256": "6" * 64,
+                    "http_status": 401,
+                    "error_code": "component_key_invalid",
+                    "request_id": "request-sibling-1234",
+                },
+                "lifecycle": {
+                    "host_process_running_during_step_up": False,
+                    "background_execution_observed": True,
+                    "host_termination_observed": True,
+                    "user_presence_prompt_observed": False,
+                },
+            },
+            "tests": tests,
+        }
 
     def physical_case(self, receipt_id: str) -> tuple[dict, dict]:
         observer = self.bare_observer("live_sdk_conformance")
@@ -882,6 +964,21 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         }
         if receipt_id.startswith("react_native_"):
             expected_pins.update(native_sdk_version="1.0.0", native_evidence_sha256="7" * 64)
+        if receipt_id == "ios":
+            expected_pins.update(
+                host_bundle_identifier="dev.latchway.conformance",
+                widget_bundle_identifier="dev.latchway.conformance.widget",
+                share_bundle_identifier="dev.latchway.conformance.share",
+                action_bundle_identifier="dev.latchway.conformance.action",
+                host_definition_id="host_app",
+                widget_definition_id="home_widget",
+                share_definition_id="share_sheet",
+                action_definition_id="background_action",
+                host_binary_sha256="9" * 64,
+                widget_binary_sha256="a" * 64,
+                share_binary_sha256="b" * 64,
+                action_binary_sha256="c" * 64,
+            )
         profile = {
             "platform": policy["platform"],
             "repository": policy["repository"],
@@ -909,6 +1006,17 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "provider": {"environment": "production", "request_hash_bound": True},
             "tests": self.concrete_tests(receipt_id),
         }
+        if receipt_id == "ios":
+            component = self.ios_component_case(
+                expected_pins, evidence["run"]["id"]
+            )
+            component_payload = json.dumps(component).encode()
+            evidence["component_runtime"] = component["runtime"]
+            evidence["artifacts"] = {
+                "component_observation_sha256": hashlib.sha256(
+                    component_payload
+                ).hexdigest()
+            }
         return profile, evidence
 
     def receipt_directory(self, receipt_id: str) -> Path:
@@ -2663,10 +2771,14 @@ class ReleaseDomainObserverTests(unittest.TestCase):
         observer = self.bare_observer("live_sdk_conformance")
         policy = MODULE.LIVE_SDK_RECEIPTS["ios"]
         profile, evidence = self.physical_case("ios")
+        component = self.ios_component_case(
+            profile["expected_pins"], evidence["run"]["id"]
+        )
         receipt = {
             "payloads": {
                 policy["profile"]: json.dumps(profile).encode(),
                 policy["evidence"]: json.dumps(evidence).encode(),
+                policy["component_observation"]: json.dumps(component).encode(),
             },
             "initial_hashes": {"SHA256SUMS": "8" * 64},
         }
@@ -2753,6 +2865,93 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 ):
                     observer._validate_physical_receipt(
                         changed,
+                        policy=policy,
+                        gateway="https://gateway.example.test",
+                        run_id=12345,
+                        run_attempt=2,
+                        artifact_name="app-attest-physical-12345-2",
+                        workflow_started=self.workflow_started,
+                        workflow_finished=self.workflow_finished,
+                    )
+
+    def test_ios_component_observer_rejects_identity_step_up_isolation_and_lifecycle_tampering(self) -> None:
+        observer = self.bare_observer("live_sdk_conformance")
+        policy = MODULE.LIVE_SDK_RECEIPTS["ios"]
+        mutations = (
+            (
+                "live_sdk_component_runtime_invalid",
+                lambda runtime: runtime["identities"][3].__setitem__(
+                    "bundle_identifier", "dev.latchway.conformance.other"
+                ),
+            ),
+            (
+                "live_sdk_component_runtime_invalid",
+                lambda runtime: runtime["identities"][3].__setitem__(
+                    "dpop_key_id_sha256",
+                    runtime["identities"][0]["dpop_key_id_sha256"],
+                ),
+            ),
+            (
+                "live_sdk_component_step_up_invalid",
+                lambda runtime: runtime["direct_step_up"].__setitem__(
+                    "trust_source_after", "delegated_from_attested_root"
+                ),
+            ),
+            (
+                "live_sdk_component_sibling_denial_invalid",
+                lambda runtime: runtime["sibling_denial"].__setitem__(
+                    "credential_session_id_sha256",
+                    runtime["identities"][3]["session_id_sha256"],
+                ),
+            ),
+            (
+                "live_sdk_component_lifecycle_invalid",
+                lambda runtime: runtime["lifecycle"].__setitem__(
+                    "host_process_running_during_step_up", True
+                ),
+            ),
+            (
+                "live_sdk_component_lifecycle_invalid",
+                lambda runtime: runtime["lifecycle"].__setitem__(
+                    "background_execution_observed", False
+                ),
+            ),
+            (
+                "live_sdk_component_lifecycle_invalid",
+                lambda runtime: runtime["lifecycle"].__setitem__(
+                    "host_termination_observed", False
+                ),
+            ),
+            (
+                "live_sdk_component_lifecycle_invalid",
+                lambda runtime: runtime["lifecycle"].__setitem__(
+                    "user_presence_prompt_observed", True
+                ),
+            ),
+        )
+        for expected_error, mutate in mutations:
+            with self.subTest(expected_error=expected_error):
+                profile, evidence = self.physical_case("ios")
+                component = self.ios_component_case(
+                    profile["expected_pins"], evidence["run"]["id"]
+                )
+                mutate(component["runtime"])
+                evidence["component_runtime"] = copy.deepcopy(component["runtime"])
+                component_payload = json.dumps(component).encode()
+                evidence["artifacts"]["component_observation_sha256"] = hashlib.sha256(
+                    component_payload
+                ).hexdigest()
+                receipt = {
+                    "payloads": {
+                        policy["profile"]: json.dumps(profile).encode(),
+                        policy["evidence"]: json.dumps(evidence).encode(),
+                        policy["component_observation"]: component_payload,
+                    },
+                    "initial_hashes": {"SHA256SUMS": "8" * 64},
+                }
+                with self.assertRaisesRegex(MODULE.ObservationError, expected_error):
+                    observer._validate_physical_receipt(
+                        receipt,
                         policy=policy,
                         gateway="https://gateway.example.test",
                         run_id=12345,

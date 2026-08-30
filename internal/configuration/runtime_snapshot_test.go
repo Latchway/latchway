@@ -8,6 +8,28 @@ import (
 	"github.com/latchway/latchway/internal/jsonsafe"
 )
 
+func TestRuntimeAttestationPolicyAcceptsAllSevenClientPlatforms(t *testing.T) {
+	t.Parallel()
+
+	platforms := make(map[string]PlatformAttestation, 7)
+	for _, platform := range []string{
+		"ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node",
+	} {
+		platforms[platform] = PlatformAttestation{
+			Provider: "debug", Mode: "disabled", MinimumTrustLevel: "none",
+		}
+	}
+	policy, err := runtimeAttestationPolicy(compiledAttestationPolicy{
+		ID: "all-platforms", MaxAge: "10m", Platforms: platforms,
+	})
+	if err != nil {
+		t.Fatalf("seven-platform attestation policy rejected: %v", err)
+	}
+	if len(policy.Platforms) != 7 {
+		t.Fatalf("compiled platform count = %d, want 7", len(policy.Platforms))
+	}
+}
+
 func TestCompiledLimitRefillRateRequiresCanonicalExactNumber(t *testing.T) {
 	t.Parallel()
 

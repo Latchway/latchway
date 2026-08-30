@@ -18,13 +18,19 @@ Requirements:
 
 - Node.js 20.17 or newer
 - pnpm 10.15.0
+- Vale 3.17.0 (the checked-in `mise.toml` installs the exact toolchain)
 
 Install the pinned Mintlify CLI and validate the site:
 
 ```sh
+mise install
 pnpm install --frozen-lockfile
 pnpm check
 ```
+
+The package install supplies the pinned `mdx2vast` parser that Vale uses for
+MDX. The prose gate applies the repository-owned terminology and verifiable-
+language rules before Mintlify validation.
 
 Start a local preview at `http://localhost:3000`:
 
@@ -63,8 +69,10 @@ That mode refuses to mutate a mismatched mirror.
 Mintlify deployment is GitHub-App driven from the generated
 `Latchway/latchway-docs` `main` branch. The mirror workflow validates
 configuration, internal links, anchors, redirects, snippets, accessibility, and
-byte-for-byte source synchronization before changes merge. It does not deploy
-and needs no secret.
+the fail-closed hashes in the checked-in source manifest before changes merge.
+The core-side synchronizer performs the byte-for-byte canonical-source
+comparison before updating that manifest. Neither validation path deploys or
+requires a cross-repository credential.
 
 ## Content policy
 

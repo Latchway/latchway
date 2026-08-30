@@ -46,5 +46,7 @@ unreferenced generated output.
 
 ## Status
 
-Accepted on 2026-08-30. Bundle formats, extraction tooling, and compiled public
-quickstarts remain Phase 8 and Phase 9 work.
+Accepted on 2026-08-30 and implemented through repository-owned documentation
+bundles, fixture synchronization, clean package consumers, snippet/link drift
+validation, and cross-repository source conformance. Published-package
+quickstarts remain a post-publication verification gate.

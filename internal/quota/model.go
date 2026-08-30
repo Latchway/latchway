@@ -92,7 +92,7 @@ var (
 		"opaque_http",
 	}
 	allowedPlatformValues = []string{
-		"ios", "android", "web", "react_native_ios", "react_native_android", "node",
+		"ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node",
 	}
 )
 

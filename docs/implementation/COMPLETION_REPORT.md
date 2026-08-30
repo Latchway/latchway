@@ -1,134 +1,124 @@
 # Version 1 completion gap ledger
 
-Status: **incomplete; the merged version 1 target is not source-complete and no
-final completion report exists**.
+Status: **the version 1 source implementation is present and locally
+exercised, but the candidate is not yet source-converged, released, or
+production-proven**.
 
-This file replaces the prior source-complete claim. It records reusable legacy
-evidence, completed Phase 0 reconciliation artifacts, missing source gates, and
-future external gates. The immutable post-publication report may be rendered
-only for one candidate that satisfies the merged master plan.
+This checked-in file is a source-status ledger. It is not the immutable
+candidate-bound completion report produced by the protected release workflow.
+It must not claim tags, registry digests, package publication, production
+deployments, or protected evidence that does not exist.
 
-## Completion summary
+## Current source coordinate
 
-| Workstream | Implemented now | Required before completion | Classification |
-| --- | --- | --- | --- |
-| Legacy gateway | Identity/attestation verifiers, DPoP, installation sessions, configuration, routing, protocols, quotas, Admin, CLI/dashboard, operations/deployment/release machinery | Preserve as regression foundation while migrating affected semantics | Reusable historical source |
-| Framework transport | Raw SDK/HTTP foundations; Android OkHttp groundwork | Safe framework seams, feature-bound transports, framework headers, adapters, common conformance, min/latest/scheduled CI | Missing source |
-| Installation Family | Architecture/ADRs plus uncommitted component config, IDs, schema-21 tables, token claims, and root-session scaffolding | Complete contracts, migration proof, provenance/delegation, component sessions/refresh/revocation, policy/quota/audit attribution, SDKs and security tests | Partial source |
-| Admin/operator | Flat legacy installation/request views | Family/component API, CLI, dashboard, trust graph, actions, usage/failures, framework metadata | Missing source |
-| Compatibility | Canonical planning registry, strict schema/validator, and generated public table | Version pins, conformance evidence, contract-bundle inclusion, and release notes | Partial source |
-| Public documentation | Existing maintainer Markdown plus an uncommitted Mintlify site/config/navigation and initial audience content | Complete public/internal split, generated API/registry/snippets, content/diagrams, install/build, accessibility/links/prose/AI outputs | Partial source |
-| Release evidence | Historical local legacy receipts | New exact-candidate device/provider/cloud/resilience/security/supply-chain/publication evidence | External after source |
+| Field | Current source truth |
+| --- | --- |
+| Contract | Draft `1.0.0`; `released_at: null` |
+| Wire | Current `2`; discovery range `[1, 2]` |
+| Database | Schema `23` |
+| Contract bundle | Deterministic inputs implemented; final checksum pending atomic convergence |
+| SDK locks | Final component-attestation schema/vector and bundle coordinate still converging |
+| Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 
-## Phase 0 reconciliation evidence
+Historical contract `0.5.1`, wire 1, schema 20, and their SDK locks remain
+immutable legacy coordinates. They are regression evidence only and cannot
+authorize version 1.
 
-Completed in the current working tree:
+## Source implementation summary
 
-- the master, status, compatibility, and completion ledgers no longer classify
-  the addendum as externally blocked or claim source completion;
-- ADRs 0017–0028 exist with Context, Decision, Alternatives, Security
-  implications, Developer-experience implications, Migration implications,
-  Documentation implications, and Status;
-- the legacy ADR collision is preserved as 0029–0034, with links updated and
-  legacy refresh ADR 0032 explicitly superseded by target ADR 0024;
-- `compatibility/frameworks.yaml`, its closed JSON Schema, duplicate-safe
-  semantic validator, deterministic generator, and adversarial unit tests exist;
-- contract validation checks registry and generated-table drift offline.
+| Workstream | Implemented in local source | Remaining before release |
+| --- | --- | --- |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 23 | Freeze final bundle and synchronize every SDK lock/commit |
+| Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, direct component App Attest step-up, composite provenance, scoped revocation | Protected physical trust and lifecycle observations |
+| Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting | Exact-image live-provider and load/failure evidence |
+| Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
+| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, and composite-trust decoding | Final locks, clean cross-repository gate, physical platform proof, publication |
+| Frameworks | Six exact, locally tested integrations recorded as `experimental`; unsupported/planned seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
+| Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
+| Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
+| Documentation | Canonical Mintlify source, generated API/compatibility content, tested snippets, validation, and deployment mirror workflow | Final mirror convergence, merge, production deployment, and post-deploy validation |
 
-Concurrent Phase 2/3 work has begun in the same working tree. It changes a
-legacy bundle input before the required prerelease coordinate exists. Therefore
-the historical `0.5.1` digest/checkpoint and every old SDK lock are invalid for
-this tree; no new bundle digest is a supported coordinate yet.
+## Schema-23 direct component App Attest step-up
 
-Still open in Phase 0:
+An eligible delegated Apple component can request a one-use version-2
+attestation binding, submit its own App Attest assertion, and rotate only its
+own DPoP-bound component session. Successful verification produces composite
+`delegated_direct_attested` trust while retaining the parent component,
+delegation, component definition, family, provider, bundle, component key, and
+JWK-thumbprint bindings. Component/family/install revocation and component
+replacement revoke linked App Attest state.
 
-- audit and reconcile all remaining active architecture diagrams, terminology,
-  extension credential advice, reference pages, and completion validators;
-- ensure release machinery fails closed for every new source domain without
-  changing the frozen legacy contract prematurely.
+The referenced component-only App Attest policy must be configured in
+`preferred` mode, require at least `app_verified`, and pin the exact component
+bundle. This prevents that policy from qualifying the initial delegated
+session; the explicit step-up exchange still requires direct proof. Wrong DPoP,
+provider, bundle, key, family, parent, expired/revoked state, and challenge
+replay fail closed. Retry recovery is limited to the exact assertion after a
+transactional session failure, preserving App Attest counter semantics.
 
-## Legacy evidence retained without overclaiming
+The Swift and React Native iOS source surfaces implement Action/SSO proof from
+the extension process. A containing application cannot attest the extension
+bundle for it, and no root credential or proof crosses the React Native
+JavaScript bridge. The server contract can model an eligible watch component,
+but the current Swift package does not claim watch direct-step-up support.
+Android direct component step-up is intentionally unsupported in version 1.
 
-| Evidence | Historical coordinate | What it proves | What it does not prove |
-| --- | --- | --- | --- |
-| Contract | Core `2f5e5e67c824e270431f1232cc6dc2824848e380`, contract `0.5.1`, wire `1` | Deterministic legacy contracts and SDK locks | Family/component/framework contract |
-| Database/runtime | Schema `20` and current legacy Go tests | Installation-based behavior remains internally consistent | Family migration, component isolation, idempotent refresh |
-| Core load | `73743b1633e4521aeda7ba1228cd18b78ef3a185`; corrected targets recorded by ADR 0034 | Historical local gateway/load behavior | Current addendum source or exact release image |
-| JavaScript SDK | `5765a905086bbd39cdfb3d4b5c571a5df0066787` | Legacy package/transport tests | Framework adapter or component session support |
-| Swift SDK | `73677929adfc4703e014927e11c28192426d4660` | Legacy package/App Attest source tests | Extension component Keychain isolation or physical proof |
-| Android SDK | `f9132d307cdc1b0bc971caeff07d9ab00254a015` | Legacy package/OkHttp source tests | Framework minimum/latest matrix or component contract |
-| React Native SDK | `fddd9db30e9678d5edd597784c05f1a10d8584e5` | Legacy native bridge/package tests | Native-backed framework fetch or component isolation |
+## Local evidence boundary
 
-Historical scan, SBOM, Compose, recovery, failure, and load receipts remain
-valid for their named sources. Any changed candidate must reproduce applicable
-evidence; none closes an addendum source gate.
+Development runs cover PostgreSQL migrations and verticals, authorization,
+replay, refresh/revocation, component attestation, policy/quota behavior,
+protocol/routing behavior, SDK unit and native consumer builds, dashboard and
+browser flows, deterministic contract/docs builds, workflow validation, and
+static/dry-run deployment and supply-chain checks.
 
-## Required source completion evidence
+Those results establish implementation confidence; they are not release
+receipts. Before a candidate can enter protected validation, the final
+convergence run must:
 
-### Installation Family and runtime
-
-- [ ] Complete the partial `fam_`/`cmp_` configuration, persistence, and claim
-  work; version APIs, errors, headers, policy fields, quota dimensions, and test
-  vectors under a deliberate prerelease coordinate with regenerated SDK locks.
-- [ ] Prove legacy rows migrate transactionally to one family/root component with
-  preserved keys, sessions, requests, usage, and audit history.
-- [ ] Every component has an independent key and session/refresh family.
-- [ ] Delegation is configured, feature-scoped, key/parent/evidence-bound,
-  single-use, time-bounded, and records explicit provenance/effective trust.
-- [ ] Component replacement/revoke and family revoke have correct independent
-  and cascading semantics.
-- [ ] Refresh duplicates are exact-tuple idempotent for 30 seconds with encrypted
-  response storage; mismatches and late reuse fail closed and audit correctly.
-- [ ] Component-aware policy, quota, request, usage, telemetry, retention, and
-  audit behavior passes normal, PostgreSQL, race, replay, migration, and the
-  complete named security suite.
-
-### SDK and frameworks
-
-- [ ] Raw feature-bound component transports pass on Swift, Kotlin, JavaScript,
-  and React Native without leaking keys/tokens or attaching credentials to
-  another host.
-- [ ] Tier 1 capability spikes identify safe request-time asynchronous seams.
-- [ ] Supported adapters preserve request bodies, model/limit rewrite,
-  streaming, cancellation, tools, structured output, errors, request IDs,
-  refresh, fresh proofs, and safe retries.
-- [ ] Registry minimum/latest and scheduled compatibility jobs pass; failed
-  newest probes open issues and never automatically widen support.
-- [ ] All SDK locks bind the same new prerelease contract and manifest.
-
-### Admin and public documentation
-
-- [ ] Canonical Admin API, CLI, and dashboard identify families/components,
-  trust chains, feature grants, sessions/failures/reuse, usage/cost/limits,
-  framework metadata, and correctly scoped actions/audit events.
-- [ ] Mintlify builds from core with public/internal separation, generated
-  OpenAPI and registry pages, tested SDK snippets, canonical diagrams,
-  troubleshooting, glossary, release notes, `llms.txt`, and agent/assistant
-  instructions.
-- [ ] Documentation validation, links, accessibility, prose, alt text, redirects,
-  snippet drift/compilation, references, and unsupported-claim checks pass.
+- regenerate the contract bundle twice with identical bytes and record its
+  final checksum;
+- synchronize the schema-23 contract, component-attestation schema/vector,
+  protocol coordinate, and bundle lock across all SDK repositories;
+- run every clean-tree core, SDK, dashboard, documentation, workflow, and
+  cross-repository conformance gate on the exact commits; and
+- record the six private implementation branches without creating a public tag
+  or package release.
 
 ## External-required completion evidence
 
-After source completion, one immutable candidate still requires:
+One immutable candidate still requires all of the following:
 
-1. physical iOS root/widget/share component provisioning, independent Keychain
-   access, sibling denial, background execution, refresh races, and App Attest;
-2. Play-distributed Play Integrity and physical React Native platform flows;
-3. all SDKs and supported framework version bounds against the exact image;
-4. live provider streaming/non-streaming, usage, error, clamp, and cancellation;
-5. exact-image Compose and every claimed cloud platform;
-6. protected load, multi-replica, destructive failure, backup/restore, upgrade,
-   rollback, and worker recovery;
-7. candidate-bound independent security review, per-architecture vulnerability
-   and license scans, SBOM, signatures, and provenance;
-8. annotated tags, GitHub releases, OCI/npm/Swift/CocoaPods/Maven publication,
-   byte verification, and clean public consumers;
-9. final Mintlify production deploy and link/accessibility/AI-output validation.
+1. protected physical iOS containing-app/widget/share isolation and Action/SSO
+   direct App Attest step-up, with candidate-bound identities, independent
+   keys/sessions, sibling denial, no-host, background, termination, and
+   no-user-presence behavior, including React Native iOS extension processes;
+2. Play-distributed Play Integrity and physical React Native Android flows,
+   plus configured App Check and Turnstile observations;
+3. all SDKs and every advertised framework/version bound against the exact
+   release image;
+4. bounded live-provider streaming/non-streaming, usage, error, clamp,
+   cancellation, fallback, and retry behavior;
+5. every claimed cloud deployment and protected multi-replica, load,
+   destructive failure, backup/restore, upgrade/rollback, key-rotation, and
+   worker-recovery drill;
+6. per-architecture vulnerability and license scans, SBOMs, signatures,
+   provenance, and candidate-bound independent security review;
+7. signed tags and releases, OCI/npm/Swift/CocoaPods/Maven publication, byte
+   verification, and clean post-publication consumers; and
+8. production Mintlify deployment followed by link, accessibility, redirect,
+   and AI-readable-output validation.
+
+A connected device is useful execution capacity, not proof by itself. No
+physical result closes a gate until the protected collector and finalizer bind
+it to the exact repository, contract, application identity, signing,
+entitlement, package, and image coordinates. Play Integrity additionally
+requires a Play-distributed signed application.
 
 ## Completion decision
 
-No current commit is eligible for merged version 1 completion or promotion.
-The protected finalizer must remain blocked until every source checkbox and
-external gate above binds to one immutable candidate and all repository,
-contract, package, image, documentation, and registry coordinates agree.
+The locally implemented histories may be reviewed, committed, and pushed to
+private implementation branches. They are not ready for a version 1 tag,
+production promotion, package/container publication, or a production-readiness
+claim. Only the protected finalizer may produce the immutable completion report
+after every required domain closes without skips, stale evidence, or coordinate
+drift.

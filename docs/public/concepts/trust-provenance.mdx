@@ -12,6 +12,7 @@ description: "Distinguish direct platform attestation from root-authorized deleg
 | --- | --- | --- |
 | Direct | Platform attestation verified for the component key | The verifier accepted evidence about that application instance under current policy. |
 | Delegated | An attested root component authorized a bounded component key | The trusted root authorized that component key for the declared definition and lifetime. |
+| Composite delegated + direct | The root authorized the component key and the component later supplied independently verified platform evidence | Both relationships passed under current policy; parent and delegation ancestry remain part of the provenance. |
 | Debug | Repository-signed development evidence | The request is suitable only for an explicitly enabled debug environment. |
 | Web | Configured web risk signal | The signal met web policy; it is not hardware-backed native attestation. |
 
@@ -35,5 +36,6 @@ authenticate the human or establish platform trust by itself.
 
 Trust expires when its bounded lifetime ends or when the root, delegation,
 component, family, application, environment, or user relationship becomes
-invalid. Direct attestation step-up replaces the provenance only after the
-delegated component independently completes a supported verification flow.
+invalid. Direct attestation step-up augments the provenance only after the
+component independently completes a supported verification flow. It preserves
+the parent and delegation references.

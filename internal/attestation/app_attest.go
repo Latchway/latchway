@@ -672,7 +672,7 @@ func validAppAttestStoredExtensions(key AppAttestStoredKey) bool {
 }
 
 func validAppAttestPlatform(platform string) bool {
-	return platform == "ios" || platform == "react_native_ios"
+	return platform == "ios" || platform == "react_native_ios" || platform == "watchos"
 }
 
 func parseAppAttestPublicKey(encoded []byte) (*ecdsa.PublicKey, error) {

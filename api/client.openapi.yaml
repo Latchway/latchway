@@ -241,6 +241,87 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /client/v1/installation-families/current/components/{component_id}/attestation-challenges:
+    post:
+      tags: [Components]
+      operationId: createComponentAttestationChallenge
+      summary: Create a one-use direct App Attest challenge for the current delegated component.
+      description: |
+        Available only to configured Action, SSO and watchOS components whose
+        exact bundle identifier has a referenced App Attest policy. The
+        version-2 binding includes the installation family, component
+        definition, current component key and DPoP thumbprint. The current
+        component access session authorizes this bodyless operation.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ComponentIDPath'
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '201':
+          description: One-use component-scoped App Attest challenge.
+          headers:
+            X-Latchway-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentAttestationChallenge' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /client/v1/installation-families/current/components/{component_id}/attestation-exchanges:
+    post:
+      tags: [Components]
+      operationId: exchangeComponentAttestation
+      summary: Verify direct component evidence and rotate that component's session family.
+      description: |
+        The path component, access-token principal, one-use challenge,
+        component key and App Attest assertion must all describe the same
+        durable component. Success preserves parent/delegation provenance,
+        adds direct evidence and revokes the component's delegated-only
+        sessions without affecting its parent or siblings.
+      security:
+        - DPoPAccessToken: []
+          DPoPProof: []
+      parameters:
+        - $ref: '#/components/parameters/ComponentIDPath'
+        - $ref: '#/components/parameters/CurrentProtocolVersion'
+        - $ref: '#/components/parameters/SDK'
+        - $ref: '#/components/parameters/SDKVersion'
+        - $ref: '#/components/parameters/Framework'
+        - $ref: '#/components/parameters/FrameworkVersion'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/BrowserOrigin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComponentAttestationExchangeRequest' }
+      responses:
+        '201':
+          description: Rotated DPoP-bound component session with direct-attestation provenance.
+          headers:
+            X-Latchway-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionGrant' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /client/v1/installation-families/current/components/{component_id}:
     delete:
       tags: [Components]
@@ -741,7 +822,12 @@ components:
       required: [challenge_id, challenge_nonce, binding_version, issued_at, expires_at, attestation]
       properties:
         challenge_id: { type: string, pattern: '^chl_[A-Za-z0-9_-]{16,128}$' }
-        challenge_nonce: { $ref: '#/components/schemas/Base64URL' }
+        challenge_nonce:
+          type: string
+          minLength: 43
+          maxLength: 86
+          pattern: '^[A-Za-z0-9_-]{43,86}$'
+          description: Canonical unpadded base64url that decodes to 32 through 64 bytes; non-canonical encodings are rejected.
         binding_version: { type: integer, const: 1 }
         issued_at: { type: integer, minimum: 0, description: Unix seconds used in the canonical binding. }
         expires_at: { type: string, format: date-time }
@@ -764,6 +850,44 @@ components:
               type: object
               description: Safe public provider parameters; never secrets or expected verdict internals.
               additionalProperties: true
+    ComponentAttestationChallenge:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, challenge_nonce, binding_version, issued_at, expires_at, attestation]
+      properties:
+        challenge_id: { type: string, pattern: '^chl_[A-Za-z0-9_-]{16,128}$' }
+        challenge_nonce:
+          type: string
+          minLength: 43
+          maxLength: 86
+          pattern: '^[A-Za-z0-9_-]{43,86}$'
+          description: Canonical unpadded base64url that decodes to 32 through 64 bytes; non-canonical encodings are rejected.
+        binding_version: { type: integer, const: 2 }
+        issued_at: { type: integer, minimum: 0, maximum: 253402300799 }
+        expires_at: { type: string, format: date-time }
+        attestation:
+          type: object
+          additionalProperties: false
+          required: [provider, mode, client_data_hash]
+          properties:
+            provider: { type: string, const: app_attest }
+            mode: { type: string, const: required }
+            client_data_hash:
+              type: string
+              minLength: 43
+              maxLength: 43
+              pattern: '^[A-Za-z0-9_-]{43}$'
+            provider_options:
+              type: object
+              additionalProperties: true
+              description: Safe App Attest public parameters for the configured component bundle.
+    ComponentAttestationExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, attestation]
+      properties:
+        challenge_id: { type: string, pattern: '^chl_[A-Za-z0-9_-]{16,128}$' }
+        attestation: { $ref: '#/components/schemas/AttestationEvidence' }
     SessionExchangeRequest:
       type: object
       additionalProperties: false
@@ -901,7 +1025,7 @@ components:
         kind:
           type: string
           enum: [main_app, widget, share_extension, app_intent_extension, notification_service_extension, action_extension, sso_extension, watch_extension, android_app, wear_app, browser, node_process]
-        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, watchos, node] }
         is_root: { type: boolean }
         status: { type: string, enum: [active, revoked] }
         dpop_jkt: { $ref: '#/components/schemas/Base64URL' }
@@ -917,7 +1041,7 @@ components:
       required: [id, platform, dpop_jkt, status]
       properties:
         id: { type: string, pattern: '^ins_[A-Za-z0-9_-]{16,128}$' }
-        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        platform: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, watchos, node] }
         dpop_jkt: { $ref: '#/components/schemas/Base64URL' }
         status: { type: string, enum: [active, revoked] }
     TrustSummary:
@@ -933,7 +1057,7 @@ components:
         expires_at: { type: string, format: date-time }
         source:
           type: string
-          enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, identity_only, web_risk_verified, debug]
+          enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, delegated_direct_attested, identity_only, web_risk_verified, debug]
         parent_component_id: { $ref: '#/components/schemas/ClientComponentID' }
         parent_attestation_provider: { type: string }
         delegation_id: { $ref: '#/components/schemas/ComponentDelegationID' }

@@ -679,10 +679,14 @@ func (store *Store) currentComponentRefreshPolicyError(
 	}
 	if !delegationExpiresAt.After(now) ||
 		(parentTrustExpiresAt != nil && !parentTrustExpiresAt.After(now)) ||
-		(parentTrustSource != "direct_attested" && binding.TrustSource == "delegated_from_attested_root") {
+		(parentTrustSource != "direct_attested" && componentTrustRequiresAttestedParent(binding.TrustSource)) {
 		return ErrAttestationRefreshNeeded
 	}
 	return nil
+}
+
+func componentTrustRequiresAttestedParent(trustSource string) bool {
+	return trustSource == "delegated_from_attested_root" || trustSource == "delegated_direct_attested"
 }
 
 func (store *Store) storeComponentRotationResult(

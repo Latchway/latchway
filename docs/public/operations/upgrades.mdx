@@ -65,7 +65,7 @@ Treat a PostgreSQL major-version change as a database migration, not as an
 application image update. PostgreSQL 18's official image stores versioned
 clusters beneath `/var/lib/postgresql`; the checked-in release Compose template
 therefore mounts that directory. A volume created with the older
-`/var/lib/postgresql/data` layout must not simply be attached to PostgreSQL 18.
+`/var/lib/postgresql/data` layout must not be attached directly to PostgreSQL 18.
 
 Before changing the pinned PostgreSQL digest, create and verify an independent
 backup, use a supported major-upgrade path such as logical dump/restore or

@@ -63,7 +63,7 @@ type clientCoordinator struct {
 	identityMu       sync.Mutex
 	identityCache    map[string]identity.IdentityVerifier
 	attestationMu    sync.Mutex
-	attestationCache map[string]*preparedAttestationVerifier
+	attestationCache map[attestationVerifierCacheKey]*preparedAttestationVerifier
 }
 
 // NewClientCoordinator constructs the fail-closed implementation used by the
@@ -89,7 +89,7 @@ func NewClientCoordinator(config ClientCoordinatorConfig) (clientapi.Coordinator
 		attestationTransport: config.AttestationTransport,
 		appAttestKeys:        config.AppAttestKeys, telemetry: config.Telemetry, now: config.Now,
 		identityCache:    make(map[string]identity.IdentityVerifier),
-		attestationCache: make(map[string]*preparedAttestationVerifier),
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
 	}, nil
 }
 
@@ -274,6 +274,23 @@ func (coordinator *clientCoordinator) recordAttestationResult(
 	})
 }
 
+func (coordinator *clientCoordinator) recordComponentAttestationResult(
+	ctx context.Context,
+	challenge ComponentAttestationChallenge,
+	outcome string,
+	level string,
+) {
+	if coordinator == nil || coordinator.telemetry == nil {
+		return
+	}
+	coordinator.telemetry.RecordAttestationResult(ctx, telemetry.Labels{
+		Application: challenge.Binding.ApplicationID,
+		Environment: challenge.EnvironmentID,
+		Platform:    challenge.Binding.Platform, AttestationLevel: level,
+		Outcome: outcome,
+	})
+}
+
 func attestationTelemetryOutcome(err error) string {
 	switch {
 	case errors.Is(err, attestation.ErrConfiguration),
@@ -361,6 +378,155 @@ func (coordinator *clientCoordinator) CreateComponentSession(ctx context.Context
 	return clientGrant(issued)
 }
 
+func (coordinator *clientCoordinator) CreateComponentAttestationChallenge(
+	ctx context.Context,
+	input clientapi.CreateComponentAttestationChallengeInput,
+) (clientapi.ChallengeResult, error) {
+	access, principal, proof, err := coordinator.verifiedAccessRequest(ctx, input.AccessToken, input.Metadata)
+	if err != nil {
+		return clientapi.ChallengeResult{}, err
+	}
+	if principal.ComponentIsRoot || principal.ComponentID != input.ComponentID {
+		return clientapi.ChallengeResult{}, clientFailure("component_not_provisioned")
+	}
+	environment, err := coordinator.resolveEnvironmentByID(
+		ctx, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
+	)
+	if err != nil {
+		return clientapi.ChallengeResult{}, clientFailure("session_revoked")
+	}
+	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
+		OrganizationID: environment.OrganizationID, ApplicationID: environment.ApplicationID,
+		EnvironmentID: environment.EnvironmentID,
+	})
+	if err != nil || snapshot.RevisionID != principal.PolicyRevisionID {
+		return clientapi.ChallengeResult{}, clientFailure("component_not_configured")
+	}
+	definition, policy, selection, err := componentStepUpSelection(snapshot, principal.ComponentDefinitionID)
+	if err != nil {
+		return clientapi.ChallengeResult{}, clientFailure(mapSessionError(err))
+	}
+	if err := coordinator.preflightAttestationVerifier(
+		ctx, environment, snapshot, policy, selection, definition.Platform,
+	); err != nil {
+		return clientapi.ChallengeResult{}, clientFailure("server_not_ready")
+	}
+	challenge, err := coordinator.sessions.CreateComponentAttestationChallenge(ctx, ComponentAttestationChallengeInput{
+		Access: AccessRequestInput{
+			AccessToken: access, Principal: principal, DPoPProof: proof,
+			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+			Origin: input.Metadata.Origin,
+		},
+		ComponentID: input.ComponentID,
+	})
+	if err != nil {
+		return clientapi.ChallengeResult{}, clientFailure(mapSessionError(err))
+	}
+	clientDataHash, err := challenge.Binding.HashBase64URL()
+	if err != nil {
+		return clientapi.ChallengeResult{}, clientFailure("internal_error")
+	}
+	return clientapi.ChallengeResult{
+		ChallengeID: challenge.ID, ChallengeNonce: challenge.Nonce,
+		BindingVersion: challenge.Binding.Version, IssuedAt: challenge.Binding.IssuedAt,
+		ExpiresAt: challenge.ExpiresAt,
+		Attestation: clientapi.AttestationRequirement{
+			Provider: challenge.Attestation.Provider, Mode: challenge.Attestation.Mode,
+			ClientDataHash: clientDataHash, ProviderOptions: attestationProviderOptions(selection),
+		},
+	}, nil
+}
+
+func (coordinator *clientCoordinator) ExchangeComponentAttestation(
+	ctx context.Context,
+	input clientapi.ExchangeComponentAttestationInput,
+) (clientapi.GrantResult, error) {
+	access, principal, proof, err := coordinator.verifiedAccessRequest(ctx, input.AccessToken, input.Metadata)
+	if err != nil {
+		return clientapi.GrantResult{}, err
+	}
+	if principal.ComponentIsRoot || principal.ComponentID != input.ComponentID {
+		return clientapi.GrantResult{}, clientFailure("component_not_provisioned")
+	}
+	challenge, err := coordinator.sessions.GetComponentAttestationChallenge(ctx, input.ChallengeID)
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure(mapExchangeChallengeError(err))
+	}
+	if challenge.Binding.ClientComponentID != principal.ComponentID ||
+		challenge.Binding.ComponentDefinitionID != principal.ComponentDefinitionID ||
+		challenge.Binding.InstallationFamilyID != principal.InstallationFamilyID ||
+		challenge.Binding.DPoPJKT != principal.DPoPJKT ||
+		challenge.Binding.PrincipalID != principal.ApplicationUserID ||
+		challenge.Binding.ApplicationID != principal.ApplicationID ||
+		challenge.OrganizationID != principal.OrganizationID ||
+		challenge.EnvironmentID != principal.EnvironmentID {
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
+	if input.Attestation.Provider != challenge.Attestation.Provider {
+		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
+	environment, err := coordinator.resolveEnvironmentByID(
+		ctx, principal.OrganizationID, principal.ApplicationID, principal.EnvironmentID,
+	)
+	if err != nil || environment.Slug != challenge.Binding.Environment {
+		return clientapi.GrantResult{}, clientFailure("conflict")
+	}
+	snapshot, err := coordinator.configuration.ActiveSnapshot(ctx, configuration.TenantScope{
+		OrganizationID: environment.OrganizationID, ApplicationID: environment.ApplicationID,
+		EnvironmentID: environment.EnvironmentID,
+	})
+	if err != nil || snapshot.RevisionID != challenge.ConfigurationRevisionID ||
+		snapshot.RevisionID != principal.PolicyRevisionID {
+		return clientapi.GrantResult{}, clientFailure("conflict")
+	}
+	_, policy, selection, err := componentStepUpSelection(snapshot, principal.ComponentDefinitionID)
+	if err != nil || policy.ID != challenge.Attestation.ID ||
+		selection.Provider != challenge.Attestation.Provider {
+		return clientapi.GrantResult{}, clientFailure("conflict")
+	}
+	if _, err := prevalidateAccessDPoPMetadata(
+		input.Metadata, challenge.Binding.DPoPJKT, access.value, coordinator.now().UTC(),
+		snapshot.SessionPolicy().MaximumClockSkew,
+	); err != nil {
+		return clientapi.GrantResult{}, clientFailure(mapDPoPError(err))
+	}
+	if !platformOriginAllowed(selection, challenge.Binding.Platform, input.Metadata.Origin) {
+		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
+	payload, err := input.Attestation.Payload.Object()
+	if err != nil {
+		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
+	evidence, err := attestation.NewEvidence(input.Attestation.Provider, payload)
+	if err != nil {
+		coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeRejected, "none")
+		return clientapi.GrantResult{}, clientFailure("attestation_invalid")
+	}
+	verified, err := coordinator.verifyAttestationEvidence(
+		ctx, environment, snapshot, policy, selection, evidence, challenge.Binding,
+	)
+	if err != nil {
+		coordinator.recordComponentAttestationResult(ctx, challenge, attestationTelemetryOutcome(err), "none")
+		return clientapi.GrantResult{}, clientFailure(mapAttestationError(err))
+	}
+	coordinator.recordComponentAttestationResult(ctx, challenge, telemetry.AttestationOutcomeSucceeded, verified.TrustLevel)
+	issued, err := coordinator.sessions.ExchangeComponentAttestation(ctx, ComponentAttestationExchangeInput{
+		Access: AccessRequestInput{
+			AccessToken: access, Principal: principal, DPoPProof: proof,
+			HTTPMethod: input.Metadata.HTTPMethod, RequestURI: &input.Metadata.TargetURL,
+			Origin: input.Metadata.Origin,
+		},
+		ComponentID: input.ComponentID, Challenge: challenge, Attestation: verified,
+	})
+	if err != nil {
+		return clientapi.GrantResult{}, clientFailure(mapSessionError(err))
+	}
+	return clientGrant(issued)
+}
+
 func (coordinator *clientCoordinator) verifiedAccessRequest(ctx context.Context, raw clientapi.SensitiveString, metadata clientapi.RequestMetadata) (AccessToken, AccessPrincipal, DPoPProof, error) {
 	access, err := NewAccessToken(raw.Reveal())
 	if err != nil {
@@ -422,7 +588,7 @@ func (coordinator *clientCoordinator) Diagnostics(ctx context.Context, input cli
 func clientSDKMatchesInstallation(sdk, platform string) bool {
 	switch sdk {
 	case "ios":
-		return platform == "ios"
+		return platform == "ios" || platform == "watchos"
 	case "android":
 		return platform == "android"
 	case "javascript":
@@ -535,6 +701,57 @@ func (coordinator *clientCoordinator) resolveEnvironment(ctx context.Context, ap
 	return result, nil
 }
 
+func (coordinator *clientCoordinator) resolveEnvironmentByID(
+	ctx context.Context,
+	organizationID string,
+	applicationID string,
+	environmentID string,
+) (clientEnvironment, error) {
+	if id.Validate(organizationID, id.Organization) != nil ||
+		id.Validate(applicationID, id.Application) != nil ||
+		id.Validate(environmentID, id.Environment) != nil {
+		return clientEnvironment{}, ErrSessionScope
+	}
+	var result clientEnvironment
+	err := coordinator.pool.QueryRow(ctx, `
+		SELECT organization.organization_id,
+		       application.application_id,
+		       environment.environment_id,
+		       environment.slug,
+		       environment.kind
+		FROM organizations AS organization
+		JOIN applications AS application
+		  ON application.organization_id = organization.organization_id
+		JOIN environments AS environment
+		  ON environment.organization_id = application.organization_id
+		 AND environment.application_id = application.application_id
+		WHERE organization.organization_id = $1
+		  AND application.application_id = $2
+		  AND environment.environment_id = $3
+		  AND organization.status = 'active'
+		  AND application.status = 'active'
+		  AND environment.status = 'active'
+		  AND organization.disabled_at IS NULL
+		  AND application.disabled_at IS NULL
+		  AND environment.disabled_at IS NULL
+	`, organizationID, applicationID, environmentID).Scan(
+		&result.OrganizationID, &result.ApplicationID, &result.EnvironmentID,
+		&result.Slug, &result.Kind,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientEnvironment{}, ErrSessionScope
+	}
+	if err != nil {
+		return clientEnvironment{}, fmt.Errorf("resolve client environment by ID: %w", err)
+	}
+	if result.OrganizationID != organizationID || result.ApplicationID != applicationID ||
+		result.EnvironmentID != environmentID || !sessionIdentifierPattern.MatchString(result.Slug) ||
+		(result.Kind != "development" && result.Kind != "staging" && result.Kind != "production") {
+		return clientEnvironment{}, ErrSessionScope
+	}
+	return result, nil
+}
+
 func (coordinator *clientCoordinator) identityVerifier(environment clientEnvironment, snapshot configuration.ActiveSnapshot, provider configuration.IdentityProvider) (identity.IdentityVerifier, error) {
 	if err := validateIdentityKeySources(provider); err != nil {
 		return nil, identity.ErrConfiguration
@@ -620,12 +837,37 @@ func populatedIdentitySourceCount(values ...string) int {
 // attestation secret is opened. Store.Exchange intentionally validates the
 // proof again immediately before replay and durable session writes.
 func prevalidateExchangeDPoP(input clientapi.ExchangeInput, expectedJKT string, now time.Time, clockSkew time.Duration) (DPoPProof, error) {
-	proof, err := NewDPoPProof(input.Metadata.DPoPProof.Reveal())
+	return prevalidateDPoPMetadata(input.Metadata, expectedJKT, now, clockSkew)
+}
+
+func prevalidateAccessDPoPMetadata(
+	metadata clientapi.RequestMetadata,
+	expectedJKT string,
+	accessToken string,
+	now time.Time,
+	clockSkew time.Duration,
+) (DPoPProof, error) {
+	proof, err := NewDPoPProof(metadata.DPoPProof.Reveal())
 	if err != nil {
 		return DPoPProof{}, err
 	}
 	if _, err := dpop.Validate(proof.value, dpop.Options{
-		Method: input.Metadata.HTTPMethod, URI: &input.Metadata.TargetURL,
+		Method: metadata.HTTPMethod, URI: &metadata.TargetURL,
+		AccessToken: accessToken, ExpectedJKT: expectedJKT, Now: now,
+		ClockSkew: clockSkew, ClockSkewSet: true, RequireAccessHash: true,
+	}); err != nil {
+		return DPoPProof{}, err
+	}
+	return proof, nil
+}
+
+func prevalidateDPoPMetadata(metadata clientapi.RequestMetadata, expectedJKT string, now time.Time, clockSkew time.Duration) (DPoPProof, error) {
+	proof, err := NewDPoPProof(metadata.DPoPProof.Reveal())
+	if err != nil {
+		return DPoPProof{}, err
+	}
+	if _, err := dpop.Validate(proof.value, dpop.Options{
+		Method: metadata.HTTPMethod, URI: &metadata.TargetURL,
 		ExpectedJKT: expectedJKT, Now: now,
 		ClockSkew: clockSkew, ClockSkewSet: true,
 	}); err != nil {

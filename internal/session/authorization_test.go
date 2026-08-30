@@ -113,6 +113,67 @@ func TestAuthorizationValidatedSnapshotFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAuthorizationStateAllowsIndependentNonRootComponentTrust(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	state := activeAuthorizationState(now)
+	state.ComponentID = "cmp_00000000000000000000000000"
+	state.ComponentIsRoot = false
+	state.TrustLevel = "app_verified"
+	state.installationTrust = "debug"
+	state.familyStatus = "active"
+	state.componentStatus = "active"
+	state.componentKeyStatus = "active"
+	state.componentSessionStatus = "active"
+	if err := authorizationStateError(state, now, false); err != nil {
+		t.Fatalf("independent component trust error = %v", err)
+	}
+
+	state.ComponentIsRoot = true
+	if err := authorizationStateError(state, now, false); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("root trust mismatch error = %v, want session revoked", err)
+	}
+	state.ComponentID = ""
+	state.ComponentIsRoot = false
+	if err := authorizationStateError(state, now, false); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("legacy trust mismatch error = %v, want session revoked", err)
+	}
+}
+
+func TestAuthorizationMatchesPrincipalBindsAttestationProvider(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	authorization := testAuthorization(now, map[string]any{"plan": "premium"})
+	authorization.ComponentID = "cmp_00000000000000000000000000"
+	principal := AccessPrincipal{
+		InstallationFamilyID:      authorization.InstallationFamilyID,
+		ComponentID:               authorization.ComponentID,
+		ComponentDefinitionID:     authorization.ComponentDefinitionID,
+		ComponentKind:             authorization.ComponentKind,
+		ComponentIsRoot:           authorization.ComponentIsRoot,
+		TrustSource:               authorization.TrustSource,
+		AttestationProvider:       authorization.AttestationProvider,
+		ParentComponentID:         authorization.ParentComponentID,
+		ParentAttestationProvider: authorization.ParentAttestationProvider,
+		DelegationID:              authorization.DelegationID,
+		Features:                  append([]string(nil), authorization.GrantedFeatures...),
+	}
+	if !authorizationMatchesPrincipal(authorization, principal) {
+		t.Fatal("matching attestation provider was rejected")
+	}
+	principal.AttestationProvider = "play_integrity"
+	if authorizationMatchesPrincipal(authorization, principal) {
+		t.Fatal("mismatched attestation provider was accepted")
+	}
+}
+
+func activeAuthorizationState(now time.Time) authorizationState {
+	return authorizationState{
+		Authorization:      testAuthorization(now, map[string]any{"plan": "premium"}),
+		installationStatus: "active", installationTrust: "device_verified",
+		userStatus: "active", applicationStatus: "active", environmentStatus: "active",
+		organizationStatus: "active",
+	}
+}
+
 func testAuthorization(now time.Time, claims map[string]any) Authorization {
 	return Authorization{
 		OrganizationID: "org_00000000000000000000000000", ApplicationID: "app_00000000000000000000000000",

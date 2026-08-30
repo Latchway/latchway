@@ -215,6 +215,7 @@ LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
         "observation": "sdk.ios.release-image",
         "profile": "app-attest-profile.json",
         "evidence": "app-attest-evidence.json",
+        "component_observation": "component-observation.json",
         "mapped_error_type": "swift_latchway_problem",
         "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
         | {
@@ -223,6 +224,15 @@ LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
             "app_attest_registration",
             "session_created",
             "app_attest_assertion",
+            "component_candidate_identities",
+            "action_direct_attestation_step_up",
+            "component_key_isolation",
+            "component_session_isolation",
+            "component_sibling_denied",
+            "component_no_host_process",
+            "component_background_execution",
+            "component_host_termination",
+            "component_no_user_presence",
         },
         "manifest": frozenset(
             {
@@ -231,6 +241,7 @@ LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
                 "app-attest-observation.json",
                 "app-attest-profile.json",
                 "app-attest-validation.json",
+                "component-observation.json",
                 "gateway-client-policy.json",
                 "gateway-deployment-public-key.pem",
                 "gateway-deployment-statement.json",
@@ -4939,6 +4950,11 @@ class Observer:
                 "--summary",
                 str(summary_path),
             )
+            if "component_observation" in policy:
+                command += (
+                    "--component-observation",
+                    str(receipt["root"] / policy["component_observation"]),
+                )
             self._execute_command(
                 command, cwd=repository, timeout=120
             )
@@ -5128,6 +5144,20 @@ class Observer:
             or nested(evidence, "provider", "request_hash_bound") is not True
         ):
             raise ObservationError("live_sdk_evidence_identity_invalid")
+        component_name = policy.get("component_observation")
+        if component_name is not None:
+            component_observation = load_output(
+                receipt["payloads"][component_name],
+                "live_sdk_component_observation_invalid",
+            )
+            self._validate_ios_component_observation(
+                component_observation,
+                evidence=evidence,
+                expected_pins=expected_pins,
+                raw_sha256=hashlib.sha256(
+                    receipt["payloads"][component_name]
+                ).hexdigest(),
+            )
         self._validate_concrete_tests(
             evidence.get("tests"),
             expected=set(policy["tests"]),
@@ -5146,6 +5176,181 @@ class Observer:
             receipt_hashes=receipt["initial_hashes"],
         )
         return profile, evidence, summary, evidence_started, evidence_generated
+
+    @staticmethod
+    def _validate_ios_component_observation(
+        value: Any,
+        *,
+        evidence: Mapping[str, Any],
+        expected_pins: Mapping[str, Any],
+        raw_sha256: str,
+    ) -> None:
+        required = {
+            "schema_version", "platform", "run_id", "started_at", "completed_at",
+            "runtime", "tests",
+        }
+        if not isinstance(value, dict) or set(value) != required:
+            raise ObservationError("live_sdk_component_observation_invalid")
+        try:
+            started = EVIDENCE.parse_time(
+                value["started_at"], "live_sdk_component_observation_invalid"
+            )
+            completed = EVIDENCE.parse_time(
+                value["completed_at"], "live_sdk_component_observation_invalid"
+            )
+            run_started = EVIDENCE.parse_time(
+                nested(evidence, "run", "started_at"),
+                "live_sdk_component_observation_invalid",
+            )
+            run_completed = EVIDENCE.parse_time(
+                nested(evidence, "run", "completed_at"),
+                "live_sdk_component_observation_invalid",
+            )
+        except EVIDENCE.EvidenceError:
+            raise ObservationError("live_sdk_component_observation_invalid") from None
+        runtime = value["runtime"]
+        tests = value["tests"]
+        evidence_tests = [
+            item for item in evidence.get("tests", [])
+            if isinstance(item, dict)
+            and item.get("id") in {
+                "component_candidate_identities",
+                "action_direct_attestation_step_up",
+                "component_key_isolation",
+                "component_session_isolation",
+                "component_sibling_denied",
+                "component_no_host_process",
+                "component_background_execution",
+                "component_host_termination",
+                "component_no_user_presence",
+            }
+        ]
+        if (
+            value["schema_version"] != "latchway.ios-component-observation.v1"
+            or value["platform"] != "ios_app_attest"
+            or value["run_id"] != nested(evidence, "run", "id")
+            or started < run_started
+            or completed < started
+            or completed > run_completed
+            or completed - started > EVIDENCE.timedelta(hours=2)
+            or runtime != evidence.get("component_runtime")
+            or tests != evidence_tests
+            or nested(evidence, "artifacts", "component_observation_sha256")
+            != raw_sha256
+        ):
+            raise ObservationError("live_sdk_component_observation_invalid")
+
+        if not isinstance(runtime, dict) or set(runtime) != {
+            "identities", "direct_step_up", "sibling_denial", "lifecycle",
+        }:
+            raise ObservationError("live_sdk_component_runtime_invalid")
+        identities = runtime["identities"]
+        identity_fields = {
+            "role", "kind", "definition_id", "bundle_identifier", "binary_sha256",
+            "principal_id_sha256", "dpop_key_id_sha256", "session_id_sha256",
+        }
+        if not isinstance(identities, list) or len(identities) != 4:
+            raise ObservationError("live_sdk_component_runtime_invalid")
+        by_role: dict[str, Mapping[str, Any]] = {}
+        for identity in identities:
+            if (
+                not isinstance(identity, dict)
+                or set(identity) != identity_fields
+                or not isinstance(identity.get("role"), str)
+                or identity["role"] in by_role
+            ):
+                raise ObservationError("live_sdk_component_runtime_invalid")
+            by_role[identity["role"]] = identity
+        role_policy = {
+            "host": ("main_app", "host_bundle_identifier", "host_definition_id", "host_binary_sha256"),
+            "widget": ("widget", "widget_bundle_identifier", "widget_definition_id", "widget_binary_sha256"),
+            "share": ("share_extension", "share_bundle_identifier", "share_definition_id", "share_binary_sha256"),
+            "action": ("action_extension", "action_bundle_identifier", "action_definition_id", "action_binary_sha256"),
+        }
+        if set(by_role) != set(role_policy):
+            raise ObservationError("live_sdk_component_runtime_invalid")
+        for role, (kind, bundle_pin, definition_pin, binary_pin) in role_policy.items():
+            identity = by_role[role]
+            if (
+                identity["kind"] != kind
+                or identity["bundle_identifier"] != expected_pins.get(bundle_pin)
+                or identity["definition_id"] != expected_pins.get(definition_pin)
+                or identity["binary_sha256"] != expected_pins.get(binary_pin)
+                or any(
+                    EVIDENCE.SHA256.fullmatch(str(identity[field])) is None
+                    for field in (
+                        "binary_sha256", "principal_id_sha256",
+                        "dpop_key_id_sha256", "session_id_sha256",
+                    )
+                )
+            ):
+                raise ObservationError("live_sdk_component_runtime_invalid")
+        for field in ("principal_id_sha256", "dpop_key_id_sha256", "session_id_sha256"):
+            if len({identity[field] for identity in identities}) != 4:
+                raise ObservationError("live_sdk_component_runtime_invalid")
+
+        action = by_role["action"]
+        step_up = runtime["direct_step_up"]
+        step_fields = {
+            "role", "definition_id", "component_id_sha256", "dpop_key_id_sha256",
+            "session_before_sha256", "session_after_sha256",
+            "app_attest_key_id_sha256", "trust_source_before", "trust_source_after",
+            "binding_version", "request_hash_bound",
+        }
+        if (
+            not isinstance(step_up, dict)
+            or set(step_up) != step_fields
+            or step_up["role"] != "action"
+            or step_up["definition_id"] != action["definition_id"]
+            or step_up["component_id_sha256"] != action["principal_id_sha256"]
+            or step_up["dpop_key_id_sha256"] != action["dpop_key_id_sha256"]
+            or step_up["session_after_sha256"] != action["session_id_sha256"]
+            or step_up["session_before_sha256"] == step_up["session_after_sha256"]
+            or step_up["trust_source_before"]
+            not in {"delegated_from_attested_root", "delegated_identity_only"}
+            or step_up["trust_source_after"] != "delegated_direct_attested"
+            or step_up["binding_version"] != 2
+            or step_up["request_hash_bound"] is not True
+            or EVIDENCE.SHA256.fullmatch(str(step_up["app_attest_key_id_sha256"])) is None
+            or step_up["app_attest_key_id_sha256"]
+            in {identity["dpop_key_id_sha256"] for identity in identities}
+        ):
+            raise ObservationError("live_sdk_component_step_up_invalid")
+
+        denial = runtime["sibling_denial"]
+        denial_fields = {
+            "requesting_role", "credential_role", "credential_session_id_sha256",
+            "http_status", "error_code", "request_id",
+        }
+        if not isinstance(denial, dict) or set(denial) != denial_fields:
+            raise ObservationError("live_sdk_component_sibling_denial_invalid")
+        sibling = by_role.get(str(denial.get("credential_role")), {})
+        request_id = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+        if (
+            denial["requesting_role"] != "action"
+            or denial["credential_role"] not in {"widget", "share"}
+            or denial["credential_session_id_sha256"] != sibling.get("session_id_sha256")
+            or denial["credential_session_id_sha256"] == action["session_id_sha256"]
+            or denial["http_status"] != 401
+            or denial["error_code"] != "component_key_invalid"
+            or request_id.fullmatch(str(denial["request_id"])) is None
+        ):
+            raise ObservationError("live_sdk_component_sibling_denial_invalid")
+        denial_test = next(
+            (item for item in tests if item.get("id") == "component_sibling_denied"),
+            {},
+        )
+        if any(denial_test.get(field) != denial[field] for field in (
+            "http_status", "error_code", "request_id",
+        )):
+            raise ObservationError("live_sdk_component_sibling_denial_invalid")
+        if runtime["lifecycle"] != {
+            "host_process_running_during_step_up": False,
+            "background_execution_observed": True,
+            "host_termination_observed": True,
+            "user_presence_prompt_observed": False,
+        }:
+            raise ObservationError("live_sdk_component_lifecycle_invalid")
 
     @staticmethod
     def _validate_concrete_tests(
@@ -5177,6 +5382,11 @@ class Observer:
             "installation_revocation": (403, "installation_revoked"),
             "protocol_version_rejection": (426, "protocol_version_unsupported"),
         }
+        if "component_sibling_denied" in expected:
+            negative["component_sibling_denied"] = (
+                401,
+                "component_key_invalid",
+            )
         for identifier, (status, code) in negative.items():
             test = tests.get(identifier, {})
             if (
@@ -5432,6 +5642,15 @@ class Observer:
                 "streamed_request",
                 "quota",
                 "protocol_version_rejection",
+                "component_candidate_identities",
+                "action_direct_attestation_step_up",
+                "component_key_isolation",
+                "component_session_isolation",
+                "component_sibling_denied",
+                "component_no_host_process",
+                "component_background_execution",
+                "component_host_termination",
+                "component_no_user_presence",
             }
         )
 

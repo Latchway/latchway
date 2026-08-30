@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -138,10 +139,15 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct session store: %v", err)
 	}
+	appAttestKeys, err := attestation.NewPostgreSQLAppAttestKeyStore(pool)
+	if err != nil {
+		t.Fatalf("construct App Attest key store: %v", err)
+	}
 	coordinator, err := NewClientCoordinator(ClientCoordinatorConfig{
 		Pool: pool, Configuration: configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier,
-		Secrets: secretStore, Telemetry: metrics, Now: func() time.Time { return now },
+		Secrets: secretStore, AppAttestKeys: appAttestKeys,
+		Telemetry: metrics, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("construct client coordinator: %v", err)
@@ -482,6 +488,311 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatalf("component diagnostics crossed the principal boundary: %#v", componentDiagnostics)
 	}
 
+	// A directly attestable Action extension begins as an independently
+	// delegated component, then rotates only its own component-session family
+	// after proving App Attest evidence for its exact bundle and DPoP key.
+	actionPrivateKey, actionPublicJWK, actionJKT := newChallengeKey(t)
+	actionProvisionProof := signedSessionAccessDPoP(
+		t, dpopPrivateKey, http.MethodPost, provisionComponentTarget, now,
+		refreshed.AccessToken, "client-http-provision-action",
+	)
+	var provisionedAction clientHTTPProvisionComponentDocument
+	clientHTTPPostJSONAuthorized(
+		t, handler, "/client/v1/installation-families/current/components",
+		refreshed.AccessToken, actionProvisionProof,
+		map[string]any{
+			"component_definition_id": "ios-action",
+			"public_jwk":              actionPublicJWK,
+			"requested_features":      []any{"assistant"},
+			"client_metadata": map[string]any{
+				"app_version": "1.0.0", "sdk_version": "1.2.3",
+			},
+		},
+		http.StatusCreated,
+		&provisionedAction,
+	)
+	if provisionedAction.Trust.Source != "delegated_identity_only" ||
+		provisionedAction.InstallationFamilyID != provisionedComponent.InstallationFamilyID {
+		t.Fatalf("Action provisioning crossed the delegated family boundary: %#v", provisionedAction)
+	}
+	actionSessionProof := signedSessionDPoP(
+		t, actionPrivateKey, http.MethodPost, componentSessionTarget, now,
+		"client-http-create-action-session",
+	)
+	var actionSession clientHTTPComponentSessionDocument
+	clientHTTPPostJSON(
+		t, handler, "/client/v1/component-sessions", actionSessionProof,
+		map[string]any{
+			"component_id":  provisionedAction.ComponentID,
+			"refresh_grant": provisionedAction.RefreshGrant,
+		},
+		http.StatusCreated,
+		&actionSession,
+	)
+	actionAccess, err := NewAccessToken(actionSession.AccessToken)
+	if err != nil {
+		t.Fatalf("parse delegated Action access token: %v", err)
+	}
+	actionPrincipal, err := accessVerifier.Verify(ctx, actionAccess)
+	if err != nil {
+		t.Fatalf("verify delegated Action access token: %v", err)
+	}
+	if actionPrincipal.ComponentID != provisionedAction.ComponentID ||
+		actionPrincipal.ComponentDefinitionID != "ios-action" ||
+		actionPrincipal.ComponentKind != "action_extension" || actionPrincipal.ComponentIsRoot ||
+		actionPrincipal.DPoPJKT != actionJKT ||
+		actionPrincipal.TrustSource != "delegated_identity_only" {
+		t.Fatalf("delegated Action token omitted its component boundary: %#v", actionPrincipal)
+	}
+
+	// The root fixture intentionally uses debug evidence. Elevate this one
+	// delegated grant to the direct policy's minimum solely to exercise the
+	// production component step-up transaction without weakening its runtime
+	// trust floor.
+	elevatedActionAccess, err := accessIssuer.IssueFor(ctx, AccessIssueInput{
+		OrganizationID: actionPrincipal.OrganizationID, ApplicationID: actionPrincipal.ApplicationID,
+		EnvironmentID: actionPrincipal.EnvironmentID, ApplicationUserID: actionPrincipal.ApplicationUserID,
+		InstallationID: actionPrincipal.InstallationID, InstallationFamilyID: actionPrincipal.InstallationFamilyID,
+		ComponentID: actionPrincipal.ComponentID, ComponentDefinitionID: actionPrincipal.ComponentDefinitionID,
+		ComponentKind: actionPrincipal.ComponentKind, ComponentIsRoot: false,
+		TrustSource: "delegated_identity_only", AttestationProvider: "app_attest",
+		ParentComponentID:         actionPrincipal.ParentComponentID,
+		ParentAttestationProvider: actionPrincipal.ParentAttestationProvider,
+		DelegationID:              actionPrincipal.DelegationID,
+		Features:                  append([]string(nil), actionPrincipal.Features...),
+		SessionGrantID:            actionPrincipal.SessionGrantID, IdentityProvider: actionPrincipal.IdentityProvider,
+		TrustLevel: "app_verified", PolicyRevisionID: actionPrincipal.PolicyRevisionID,
+		DPoPJKT: actionPrincipal.DPoPJKT,
+	}, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("issue elevated Action fixture access: %v", err)
+	}
+	elevatedActionToken := elevatedActionAccess.Token.Reveal()
+	if command, err := pool.Exec(ctx, `
+		UPDATE session_grants
+		SET access_token_jti_hash = $2, trust_level = 'app_verified',
+		    attestation_provider = 'app_attest', attested_at = $3,
+		    attestation_expires_at = $4, expires_at = $5
+		WHERE session_grant_id = $1 AND revoked_at IS NULL
+	`, actionPrincipal.SessionGrantID, elevatedActionAccess.JTIHash[:], now,
+		now.Add(10*time.Minute), elevatedActionAccess.ExpiresAt); err != nil {
+		t.Fatalf("elevate Action fixture grant: %v", err)
+	} else if command.RowsAffected() != 1 {
+		t.Fatalf("elevate Action fixture grant rows = %d", command.RowsAffected())
+	}
+
+	actionChallengePath := "/client/v1/installation-families/current/components/" +
+		provisionedAction.ComponentID + "/attestation-challenges"
+	actionChallengeTarget := clientHTTPURL(t, actionChallengePath)
+	actionChallengeProof := signedSessionAccessDPoP(
+		t, actionPrivateKey, http.MethodPost, actionChallengeTarget, now,
+		elevatedActionToken, "client-http-action-attestation-challenge",
+	)
+	var actionChallengeDocument clientHTTPChallengeDocument
+	clientHTTPPostBodylessAuthorized(
+		t, handler, actionChallengePath, elevatedActionToken, actionChallengeProof,
+		http.StatusCreated, &actionChallengeDocument,
+	)
+	if actionChallengeDocument.BindingVersion != 2 ||
+		actionChallengeDocument.Attestation.Provider != "app_attest" ||
+		actionChallengeDocument.Attestation.Mode != "required" {
+		t.Fatalf("Action challenge did not select binding v2 App Attest: %#v", actionChallengeDocument)
+	}
+	actionChallenge, err := sessionStore.GetComponentAttestationChallenge(ctx, actionChallengeDocument.ChallengeID)
+	if err != nil {
+		t.Fatalf("load authoritative Action challenge: %v", err)
+	}
+	if actionChallenge.Binding.ClientComponentID != provisionedAction.ComponentID ||
+		actionChallenge.Binding.ComponentDefinitionID != "ios-action" ||
+		actionChallenge.Binding.DPoPJKT != actionJKT ||
+		actionChallenge.Binding.Platform != "ios" {
+		t.Fatalf("Action challenge crossed its signed scope: %#v", actionChallenge.Binding)
+	}
+
+	actionAppAttestPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate Action App Attest fixture key: %v", err)
+	}
+	actionAppAttestPublicKey, err := actionAppAttestPrivateKey.PublicKey.Bytes()
+	if err != nil || len(actionAppAttestPublicKey) != 65 || actionAppAttestPublicKey[0] != 4 {
+		t.Fatalf("encode Action App Attest fixture key: bytes=%d err=%v", len(actionAppAttestPublicKey), err)
+	}
+	actionAppAttestKeyID := sha256.Sum256(actionAppAttestPublicKey)
+	actionAppIDHash := sha256.Sum256([]byte("TEAM1234.com.example.latchway.action"))
+	if err := appAttestKeys.TransactAppAttestKey(ctx, actionAppAttestKeyID, func(
+		_ attestation.AppAttestStoredKey,
+		exists bool,
+	) (attestation.AppAttestStoredKey, error) {
+		if exists {
+			return attestation.AppAttestStoredKey{}, errors.New("unexpected existing Action App Attest key")
+		}
+		return attestation.AppAttestStoredKey{
+			PublicKeyX963: actionAppAttestPublicKey, AppIDHash: actionAppIDHash,
+			AttestationEnvironment: attestation.AppAttestDevelopment,
+			ApplicationID:          actionChallenge.Binding.ApplicationID,
+			EnvironmentID:          actionChallenge.Binding.Environment,
+			Platform:               actionChallenge.Binding.Platform,
+			PrincipalID:            actionChallenge.Binding.PrincipalID,
+			DPoPJKT:                actionChallenge.Binding.DPoPJKT,
+			AttestedAt:             now,
+		}, nil
+	}); err != nil {
+		t.Fatalf("persist unlinked Action App Attest key: %v", err)
+	}
+	actionAssertionPayload := appAttestAssertionPayloadForAppID(
+		t, actionAppAttestPrivateKey, actionAppAttestKeyID,
+		actionChallenge.Binding, 1, "TEAM1234.com.example.latchway.action",
+	)
+	actionExchangeBody := map[string]any{
+		"challenge_id": actionChallenge.ID,
+		"attestation": map[string]any{
+			"provider": "app_attest", "evidence": actionAssertionPayload,
+		},
+	}
+	actionExchangePath := "/client/v1/installation-families/current/components/" +
+		provisionedAction.ComponentID + "/attestation-exchanges"
+	actionExchangeTarget := clientHTTPURL(t, actionExchangePath)
+	wrongActionKey, _, _ := newChallengeKey(t)
+	wrongActionProof := signedSessionAccessDPoP(
+		t, wrongActionKey, http.MethodPost, actionExchangeTarget, now,
+		elevatedActionToken, "client-http-action-attestation-wrong-dpop",
+	)
+	wrongActionResponse := clientHTTPPostJSONAuthorizedResponse(
+		t, handler, actionExchangePath, elevatedActionToken, wrongActionProof, actionExchangeBody,
+	)
+	assertClientHTTPProblem(t, wrongActionResponse, http.StatusUnauthorized, "dpop_invalid")
+	assertAppAttestKeyLink(t, ctx, pool, actionAppAttestKeyID, "", "active", false, 0, false)
+
+	var parentTrustSource string
+	var parentTrustVerifiedAt, parentTrustExpiresAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT trust_source, trust_verified_at, trust_expires_at
+		FROM client_components
+		WHERE client_component_id = $1
+	`, actionPrincipal.ParentComponentID).Scan(
+		&parentTrustSource, &parentTrustVerifiedAt, &parentTrustExpiresAt,
+	); err != nil {
+		t.Fatalf("load Action parent trust expiry: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE client_components
+		SET trust_source = 'direct_attested',
+		    trust_verified_at = $2, trust_expires_at = $3
+		WHERE client_component_id = $1
+	`, actionPrincipal.ParentComponentID, now.Add(-time.Second), now); err != nil {
+		t.Fatalf("expire Action parent trust fixture: %v", err)
+	}
+	expiredParentProof := signedSessionAccessDPoP(
+		t, actionPrivateKey, http.MethodPost, actionExchangeTarget, now,
+		elevatedActionToken, "client-http-action-attestation-expired-parent",
+	)
+	expiredParentResponse := clientHTTPPostJSONAuthorizedResponse(
+		t, handler, actionExchangePath, elevatedActionToken, expiredParentProof, actionExchangeBody,
+	)
+	assertClientHTTPProblem(
+		t, expiredParentResponse, http.StatusUnauthorized, "component_parent_trust_expired",
+	)
+	assertAppAttestKeyLink(t, ctx, pool, actionAppAttestKeyID, "", "active", false, 1, true)
+	if _, err := sessionStore.GetComponentAttestationChallenge(ctx, actionChallenge.ID); err != nil {
+		t.Fatalf("parent-trust rollback consumed Action challenge: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE client_components
+		SET trust_verified_at = $2, trust_expires_at = $3
+		WHERE client_component_id = $1
+	`, actionPrincipal.ParentComponentID, parentTrustVerifiedAt, parentTrustExpiresAt); err != nil {
+		t.Fatalf("restore Action parent trust fixture: %v", err)
+	}
+
+	retryActionProof := signedSessionAccessDPoP(
+		t, actionPrivateKey, http.MethodPost, actionExchangeTarget, now,
+		elevatedActionToken, "client-http-action-attestation-exact-retry",
+	)
+	var directActionGrant clientHTTPGrantDocument
+	clientHTTPPostJSONAuthorized(
+		t, handler, actionExchangePath, elevatedActionToken, retryActionProof,
+		actionExchangeBody, http.StatusCreated, &directActionGrant,
+	)
+	if _, err := pool.Exec(ctx, `
+		UPDATE client_components
+		SET trust_source = $2
+		WHERE client_component_id = $1
+	`, actionPrincipal.ParentComponentID, parentTrustSource); err != nil {
+		t.Fatalf("restore Action parent trust source fixture: %v", err)
+	}
+	if directActionGrant.Component == nil ||
+		directActionGrant.Component.ID != provisionedAction.ComponentID ||
+		directActionGrant.Component.DefinitionID != "ios-action" ||
+		directActionGrant.Component.DPoPJKT != actionJKT ||
+		directActionGrant.Trust.Source != "delegated_direct_attested" ||
+		directActionGrant.Trust.Provider != "app_attest" ||
+		directActionGrant.Trust.Level != "app_verified" ||
+		directActionGrant.Trust.ParentComponentID != actionPrincipal.ParentComponentID ||
+		directActionGrant.Trust.ParentAttestationProvider != actionPrincipal.ParentAttestationProvider ||
+		directActionGrant.Trust.DelegationID != actionPrincipal.DelegationID {
+		t.Fatalf("direct Action exchange omitted composite trust provenance: %#v", directActionGrant)
+	}
+	directActionAccess, err := NewAccessToken(directActionGrant.AccessToken)
+	if err != nil {
+		t.Fatalf("parse direct Action access token: %v", err)
+	}
+	directActionPrincipal, err := accessVerifier.Verify(ctx, directActionAccess)
+	if err != nil {
+		t.Fatalf("verify direct Action access token: %v", err)
+	}
+	if directActionPrincipal.TrustSource != "delegated_direct_attested" ||
+		directActionPrincipal.AttestationProvider != "app_attest" ||
+		directActionPrincipal.ParentComponentID != actionPrincipal.ParentComponentID ||
+		directActionPrincipal.DelegationID != actionPrincipal.DelegationID {
+		t.Fatalf("direct Action token lost composite provenance: %#v", directActionPrincipal)
+	}
+	var directActionComponentKeyID string
+	if err := pool.QueryRow(ctx, `
+		SELECT current_component_key_id
+		FROM client_components
+		WHERE client_component_id = $1
+	`, provisionedAction.ComponentID).Scan(&directActionComponentKeyID); err != nil {
+		t.Fatalf("load directly attested Action component key: %v", err)
+	}
+	assertAppAttestComponentKeyLink(
+		t, ctx, pool, actionAppAttestKeyID, provisionedAction.InstallationFamilyID,
+		provisionedAction.ComponentID, directActionComponentKeyID, "active", 1,
+	)
+
+	oldActionDiagnosticsProof := signedSessionAccessDPoP(
+		t, actionPrivateKey, http.MethodGet, componentDiagnosticsTarget, now,
+		elevatedActionToken, "client-http-action-old-session-after-step-up",
+	)
+	oldActionDiagnosticsResponse := clientHTTPGetDiagnostics(
+		t, handler, elevatedActionToken, oldActionDiagnosticsProof, "ios",
+	)
+	assertClientHTTPProblem(t, oldActionDiagnosticsResponse, http.StatusUnauthorized, "session_revoked")
+	replayActionProof := signedSessionAccessDPoP(
+		t, actionPrivateKey, http.MethodPost, actionExchangeTarget, now,
+		directActionGrant.AccessToken, "client-http-action-attestation-replay",
+	)
+	replayActionResponse := clientHTTPPostJSONAuthorizedResponse(
+		t, handler, actionExchangePath, directActionGrant.AccessToken,
+		replayActionProof, actionExchangeBody,
+	)
+	assertClientHTTPProblem(t, replayActionResponse, http.StatusConflict, "conflict")
+	assertAppAttestComponentKeyLink(
+		t, ctx, pool, actionAppAttestKeyID, provisionedAction.InstallationFamilyID,
+		provisionedAction.ComponentID, directActionComponentKeyID, "active", 1,
+	)
+
+	siblingDiagnosticsProof := signedSessionAccessDPoP(
+		t, childPrivateKey, http.MethodGet, componentDiagnosticsTarget, now,
+		refreshedComponent.AccessToken, "client-http-widget-after-action-step-up",
+	)
+	siblingDiagnosticsResponse := clientHTTPGetDiagnostics(
+		t, handler, refreshedComponent.AccessToken, siblingDiagnosticsProof, "ios",
+	)
+	if siblingDiagnosticsResponse.Code != http.StatusOK {
+		t.Fatalf("Action step-up affected widget sibling: status=%d body=%s",
+			siblingDiagnosticsResponse.Code, siblingDiagnosticsResponse.Body.String())
+	}
+
 	componentRevokePath := "/client/v1/installation-families/current/components/" + provisionedComponent.ComponentID
 	componentRevokeTarget := clientHTTPURL(t, componentRevokePath)
 	componentRevokeProof := signedSessionAccessDPoP(
@@ -564,20 +875,20 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		now, unknownKeyToken, "client-http-revoke-unknown-access-kid")
 	unknownKeyResponse := clientHTTPDeleteInstallation(t, handler, unknownKeyToken, unknownKeyProof)
 	assertClientHTTPProblem(t, unknownKeyResponse, http.StatusUnauthorized, "session_expired")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
 
 	wrongRevokeKey, _, _ := newChallengeKey(t)
 	wrongKeyProof := signedSessionAccessDPoP(t, wrongRevokeKey, http.MethodDelete, revokeTarget,
 		now, refreshed.AccessToken, "client-http-revoke-wrong-key")
 	wrongKeyResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongKeyProof)
 	assertClientHTTPProblem(t, wrongKeyResponse, http.StatusUnauthorized, "dpop_invalid")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
 
 	wrongAccessHashProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
 		now, exchanged.AccessToken, "client-http-revoke-wrong-ath")
 	wrongAccessHashResponse := clientHTTPDeleteInstallation(t, handler, refreshed.AccessToken, wrongAccessHashProof)
 	assertClientHTTPProblem(t, wrongAccessHashResponse, http.StatusUnauthorized, "dpop_invalid")
-	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 2, 1)
+	assertClientHTTPInstallationLive(t, ctx, pool, refreshed.Installation.ID, 3, 2)
 
 	familyRevokePath := "/client/v1/installation-families/current"
 	familyRevokeTarget := clientHTTPURL(t, familyRevokePath)
@@ -589,6 +900,10 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t, handler, familyRevokePath, refreshed.AccessToken, familyRevokeProof,
 	)
 	assertClientHTTPNoContent(t, familyRevokeResponse)
+	assertAppAttestComponentKeyLink(
+		t, ctx, pool, actionAppAttestKeyID, provisionedAction.InstallationFamilyID,
+		provisionedAction.ComponentID, directActionComponentKeyID, "revoked", 1,
+	)
 
 	revokeProof := signedSessionAccessDPoP(t, dpopPrivateKey, http.MethodDelete, revokeTarget,
 		now, refreshed.AccessToken, "client-http-revoke")
@@ -653,8 +968,8 @@ func TestClientHTTPVerticalSlicePostgreSQL(t *testing.T) {
 		t.Fatalf("inspect component refresh rotation state: %v", err)
 	}
 	if activeRefresh != 0 || rotatedRefresh != 0 || revokedRefresh != 0 ||
-		activeComponentRefresh != 0 || rotatedComponentRefresh != 3 || revokedComponentRefresh != 2 ||
-		grantCount != 4 || revokedGrants != 4 {
+		activeComponentRefresh != 0 || rotatedComponentRefresh != 4 || revokedComponentRefresh != 4 ||
+		grantCount != 6 || revokedGrants != 6 {
 		t.Fatalf("persisted revoked session state = legacy(active:%d rotated:%d revoked:%d) component(active:%d rotated:%d revoked:%d) grants:%d revoked_grants:%d",
 			activeRefresh, rotatedRefresh, revokedRefresh,
 			activeComponentRefresh, rotatedComponentRefresh, revokedComponentRefresh,
@@ -954,10 +1269,23 @@ func activateClientHTTPConfigurationWithAttestation(
 				"staticPublicKeySecretRef": "secret/identity-public-key",
 				"subjectClaim":             "sub", "clockSkewSeconds": 0,
 			}},
-			"attestationPolicies": []any{map[string]any{
-				"id": "native", "maxAge": "10m",
-				"platforms": map[string]any{"ios": selection},
-			}},
+			"attestationPolicies": []any{
+				map[string]any{
+					"id": "native", "maxAge": "10m",
+					"platforms": map[string]any{"ios": selection},
+				},
+				map[string]any{
+					"id": "ios-action-direct", "maxAge": "10m",
+					"platforms": map[string]any{"ios": map[string]any{
+						"provider": "app_attest", "mode": "preferred", "minimumTrustLevel": "app_verified",
+						"appAttest": map[string]any{
+							"appIdPrefix": "TEAM1234", "bundleId": "com.example.latchway.action",
+							"environment": "development", "allowedValidationCategories": []any{1},
+							"allowedBundleVersions": []any{"1.0"},
+						},
+					}},
+				},
+			},
 			"componentDefinitions": []any{
 				map[string]any{
 					"id": "ios-main", "platform": "ios", "kind": "main_app",
@@ -974,6 +1302,19 @@ func activateClientHTTPConfigurationWithAttestation(
 						"allowedParents": []any{"ios-main"}, "maximumLifetime": "7d",
 					},
 					"attestation":     map[string]any{"strategy": "delegated"},
+					"allowedFeatures": []any{"assistant"},
+				},
+				map[string]any{
+					"id": "ios-action", "platform": "ios", "kind": "action_extension",
+					"identifiers": map[string]any{"bundleIdentifiers": []any{"com.example.latchway.action"}},
+					"familyRole":  "delegated",
+					"delegation": map[string]any{
+						"allowedParents": []any{"ios-main"}, "maximumLifetime": "7d",
+					},
+					"attestation": map[string]any{
+						"strategy": "delegated", "directStepUp": true,
+						"directAttestationPolicy": "ios-action-direct",
+					},
 					"allowedFeatures": []any{"assistant"},
 				},
 			},
@@ -1099,16 +1440,7 @@ func clientHTTPPostJSONAuthorized(
 	output any,
 ) {
 	t.Helper()
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("encode authorized client HTTP request: %v", err)
-	}
-	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
-	request.Header.Set("Authorization", "DPoP "+accessToken)
-	request.Header.Set("Content-Type", "application/json")
-	setClientHTTPProtectedHeaders(request, proof)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
+	response := clientHTTPPostJSONAuthorizedResponse(t, handler, path, accessToken, proof, body)
 	if response.Code != wantStatus {
 		var failure struct {
 			Code string `json:"code"`
@@ -1124,6 +1456,61 @@ func clientHTTPPostJSONAuthorized(
 	}
 	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
 		t.Fatalf("decode authorized client HTTP %s response: %v", path, err)
+	}
+}
+
+func clientHTTPPostJSONAuthorizedResponse(
+	t *testing.T,
+	handler http.Handler,
+	path string,
+	accessToken string,
+	proof DPoPProof,
+	body any,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode authorized client HTTP request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	request.Header.Set("Content-Type", "application/json")
+	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func clientHTTPPostBodylessAuthorized(
+	t *testing.T,
+	handler http.Handler,
+	path string,
+	accessToken string,
+	proof DPoPProof,
+	wantStatus int,
+	output any,
+) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, nil)
+	request.Header.Set("Authorization", "DPoP "+accessToken)
+	setClientHTTPProtectedHeaders(request, proof)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != wantStatus {
+		var failure struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &failure)
+		t.Fatalf("bodyless authorized client HTTP %s status = %d, problem code = %q, body=%s",
+			path, response.Code, failure.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" ||
+		response.Header().Get("Content-Type") != "application/json" ||
+		response.Header().Get("X-Latchway-Request-ID") == "" {
+		t.Fatalf("bodyless authorized client HTTP %s omitted required success headers", path)
+	}
+	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
+		t.Fatalf("decode bodyless authorized client HTTP %s response: %v", path, err)
 	}
 }
 
@@ -1213,6 +1600,43 @@ func assertClientHTTPInstallationLive(t *testing.T, ctx context.Context, pool *p
 	if status != "active" || liveGrants != wantLiveGrants || activeRefresh != wantActiveRefresh {
 		t.Fatalf("client HTTP installation status=%q live_grants=%d active_refresh=%d wants=active/%d/%d",
 			status, liveGrants, activeRefresh, wantLiveGrants, wantActiveRefresh)
+	}
+}
+
+func assertAppAttestComponentKeyLink(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	keyID [sha256.Size]byte,
+	wantFamilyID string,
+	wantComponentID string,
+	wantComponentKeyID string,
+	wantStatus string,
+	wantCounter int64,
+) {
+	t.Helper()
+	var installationID *string
+	var familyID, componentID, componentKeyID *string
+	var status string
+	var linkedAt *time.Time
+	var counter int64
+	if err := pool.QueryRow(ctx, `
+		SELECT installation_id, installation_family_id, client_component_id,
+		       component_key_id, status, linked_at, sign_count
+		FROM attestation_keys
+		WHERE provider = 'app_attest' AND provider_key_hash = $1
+	`, keyID[:]).Scan(
+		&installationID, &familyID, &componentID, &componentKeyID,
+		&status, &linkedAt, &counter,
+	); err != nil {
+		t.Fatalf("load component App Attest key link: %v", err)
+	}
+	if installationID != nil || familyID == nil || componentID == nil || componentKeyID == nil ||
+		*familyID != wantFamilyID || *componentID != wantComponentID ||
+		*componentKeyID != wantComponentKeyID || status != wantStatus || linkedAt == nil ||
+		counter != wantCounter {
+		t.Fatalf("component App Attest link installation=%v family=%v component=%v key=%v status=%q linked_at=%v counter=%d",
+			installationID, familyID, componentID, componentKeyID, status, linkedAt, counter)
 	}
 }
 

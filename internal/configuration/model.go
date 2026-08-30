@@ -295,9 +295,10 @@ func (policy ComponentDelegationPolicy) clone() ComponentDelegationPolicy {
 // strategy. DirectStepUp augments delegated trust; it never relabels the
 // delegation itself as directly attested.
 type ComponentAttestationPolicy struct {
-	Strategy     string `json:"strategy"`
-	Provider     string `json:"provider,omitempty"`
-	DirectStepUp bool   `json:"directStepUp"`
+	Strategy                string `json:"strategy"`
+	Provider                string `json:"provider,omitempty"`
+	DirectStepUp            bool   `json:"directStepUp"`
+	DirectAttestationPolicy string `json:"directAttestationPolicy,omitempty"`
 }
 
 // ComponentDefinition is the immutable runtime view of one administratively

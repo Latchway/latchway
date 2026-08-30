@@ -2,119 +2,126 @@
 
 Status date: 2026-08-30
 
-Latchway is **not source-complete for the merged version 1 plan**. The last
-committed server, schema, contracts, SDK locks, Admin surfaces, and release
-machinery form a locally validated legacy-installation baseline. The current
-working tree combines Phase 0 reconciliation with partial Phase 2/3 family
-configuration, migration, ID, token, and root-session work. Framework support,
-the complete runtime/Admin surface, and Mintlify public documentation remain
-source work.
+Latchway version 1 is implemented as a locally validated source candidate. It
+is not yet a released or production-proven version: the final contract bundle,
+SDK locks, and repository commits are still converging, and protected hardware,
+live-provider, cloud, resilience, supply-chain, publication, and
+post-publication domains remain open.
 
-## Current execution snapshot
+## Candidate snapshot
 
 | Field | Current value |
 | --- | --- |
-| Current phase | Merged Phase 0, plan reconciliation |
-| Base core commit at reconciliation start | `c54159b227dab758404e154db593a1b866b2ebdb`; Phase 0 edits are an uncommitted working tree until reviewed |
-| Current objective | Finish active-document reconciliation while completing the partial family/docs source safely; then run bounded framework/iOS capability spikes before selecting new protocol coordinates |
-| Legacy contract | Contract `0.5.1`, status `released`, wire protocol `1`, normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Legacy database | Last committed schema `20`; the working tree contains an uncommitted schema-21 family/component migration that is not completion evidence |
-| Target contract | New prerelease coordinate not yet selected; Phase 2 must update OpenAPI/schema/errors/vectors/bundle and every SDK lock together |
-| Framework compatibility | Canonical planning registry exists; all seven Tier 1 entries are `planned`, with no minimum/latest support claim |
-| Contract compatibility | Current configuration-schema edits change the `0.5.1` bundle inputs without a coordinate/lock update; the working tree is intentionally incompatible until Phase 2 selects a prerelease coordinate and regenerates every lock |
-| Release state | Blocked by invalid contract coordinates and missing source phases before external exact-candidate evidence is relevant |
+| Core branch | `codex/v1-implementation` |
+| Contract | `1.0.0` draft, `released_at: null` |
+| Contract freeze | Pending final atomic cross-repository convergence |
+| Bundle SHA-256 | Pending deterministic regeneration after contract convergence |
+| Wire | Current `2`; discovery supports `[1, 2]` |
+| Database | Schema `23` |
+| Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
+| Release state | `unreleased`; no tag or package publication authorized |
 
-`contract_status: released` describes the historical legacy bundle at its
-normative checkpoint. The current working tree no longer reproduces that
-contract because addendum schema work has begun. It must not emit or publish a
-new archive under `0.5.1`, and old SDK locks cannot validate it. This is not a
-claim that the merged product is released.
+The historical `0.5.1`/wire-1 coordinate remains unchanged. Intermediate draft
+bundle hashes are not release coordinates; the final draft hash must be
+regenerated reproducibly and copied into every SDK lock after the component
+attestation contract stops changing.
 
-## Phase status
+## Workstream status
 
-| Merged phase | Status | Open gate |
+| Workstream | Local source status | Remaining boundary |
 | --- | --- | --- |
-| 0. Reconcile plan | In progress | Four canonical ledgers, ADRs, numbering, and registry are reconciled; remaining active diagrams, terminology, extension advice, and fail-closed completion validation require audit |
-| 1. Capability spikes | Not started | Framework request-time seams and physical iOS component-key/access-group strategy |
-| 2. Contract and schema | In progress | Component Definition config draft exists; APIs/errors/policy/quota/framework fields/vectors, prerelease bump, valid bundle, and SDK locks remain open |
-| 3. Server runtime | In progress | Initial IDs, schema-21 tables, config snapshots, token/root-session persistence exist; migration proof, provisioning/delegation, refresh, revocation, attribution, audit, and security suite remain open |
-| 4. SDK transports | Partial legacy foundation | Feature-bound component-aware transports and new raw conformance |
-| 5. iOS family SDK | Not started | `LatchwayAppExtensions`, isolated storage, examples, diagnostics, physical proof |
-| 6. Framework adapters | Not started | Adapter implementations, minimum/latest/scheduled CI, common conformance |
-| 7. Admin experience | Not started | Family/component Admin API, CLI, dashboard, trust graph/actions, framework metadata |
-| 8. Mintlify foundation | In progress | Uncommitted site/config/navigation/content exist; generated references/snippets, install/build/lint/link/a11y evidence, visual system, and CI remain open |
-| 9. Public content/convergence | In progress | Initial prerelease audience pages exist; implementation accuracy, generated ownership, complete content, production deploy, and exact-candidate release evidence remain open |
+| Family/component contract and migrations | Implemented through schema 23 | Final bundle and cross-repository lock convergence |
+| Server trust/session/revocation/policy/quota runtime | Complete in source, including component App Attest step-up | Exact-candidate rerun and protected observations |
+| Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete | Bounded live-provider runs |
+| Weighted/sticky routing, fallback, retry, accounting | Complete | Exact-image load/failure evidence |
+| Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete | Deployment operator acceptance |
+| Native/Web trust verifiers and component proof | Complete in source, including composite delegated/direct trust | Physical App Attest/Play Integrity/App Check/Turnstile evidence |
+| Swift, Android, JavaScript SDKs | Implemented; lock synchronization running | Clean cross-repository source gate and publication |
+| React Native SDK | Implemented; final native/source pins running | Physical iOS/Android proof and publication |
+| Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
+| Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests | Protected exact-image drills |
+| Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
+| Mintlify public docs | Canonical 59-page source passes locally | Mirror synchronization, merge, production deploy validation |
 
-## Implemented legacy baseline
+## Local source evidence
 
-- Generic identity providers, native/web attestation verifiers, RFC 9449 DPoP,
-  legacy installation challenge/exchange/refresh, signing keys, replay, and
-  installation revocation.
-- Canonical configuration revisions, legacy CEL policy, feature-first routing,
-  protected upstreams, structured protocols, restricted opaque HTTP,
-  deterministic retry/fallback, and reserve-execute-settle quotas.
-- Canonical Admin API, CLI, and embedded dashboard for legacy users,
-  installations, requests, usage, audit, configuration, secrets, simulation,
-  health, and self-tests.
-- PostgreSQL schema 20, deployment assets, observability/jobs, all-SDK package
-  foundations, legacy conformance fixtures, and release-evidence machinery.
+- PostgreSQL-backed unit, integration, migration, authorization, replay,
+  refresh, revocation, and direct-component-attestation vertical tests.
+- Contract/schema/error/vector determinism and the complete Python release,
+  workflow, evidence, and validation suites.
+- Dashboard lint, TypeScript checking, unit tests, deterministic builds,
+  Playwright, and a real PostgreSQL-backed first-run browser flow.
+- Cloudflare unit/build checks and deployment dry-run; Compose, Cloud Run, and
+  AWS Terraform static validation.
+- Actionlint across all workflows, deterministic contract regeneration, and a
+  binary `govulncheck` result with no called vulnerabilities.
+- Mintlify structure, build, links/anchors/redirects/snippets, accessibility,
+  and Vale MDX prose validation.
 
-This baseline remains testable and reusable. Partial working-tree family/
-component scaffolding does not yet implement the full delegation, independent
-component lifecycle, idempotent refresh results, component policy/quota
-dimensions, framework headers, Admin surface, or Mintlify target.
+These are source-development results, not protected release receipts. The final
+clean-tree Go/race, SDK, contract, dashboard, documentation, workflow, and
+cross-repository gates must be rerun after the atomic convergence commits.
+Repository-specific SDK test counts and final commit coordinates are recorded
+only after that convergence finishes.
 
-## Phase 0 changes in the current working tree
+## Direct component attestation boundary
 
-- Canonical ledgers now distinguish legacy implementation, pending source, and
-  truly external gates.
-- ADRs 0017–0028 record framework transport, Installation Family/component,
-  refresh, Apple storage, Mintlify, snippet, visual, and registry decisions with
-  all required sections.
-- Former ADRs 0017–0022 are preserved as 0029–0034; legacy refresh ADR 0032 is
-  explicitly superseded by target ADR 0024.
-- `compatibility/frameworks.yaml` is validated by a strict JSON Schema and
-  semantic validator; its public compatibility page is generated deterministically.
-- The registry was intentionally not added to the contract-bundle source list.
-  Concurrent component configuration-schema edits have nevertheless invalidated
-  the old `0.5.1` archive digest and SDK locks in this working tree. No bundle
-  from this tree is eligible until the Phase 2 prerelease bump and synchronized
-  locks.
+Schema 23 and wire 2 add component-owned App Attest challenge/exchange routes
+and binding version 2. An eligible delegated Apple component can prove its own
+bundle and component key, rotate only its own DPoP-bound session, and retain
+the delegation ancestry under the composite trust source
+`delegated_direct_attested`. The configured component policy remains
+`preferred` so it cannot qualify an initial delegated session; the explicit
+step-up exchange itself requires valid App Attest evidence.
 
-## Missing source gates
+The Swift and React Native iOS sources expose this direct step-up for Action and
+SSO extensions running in their own extension process. A containing React
+Native application cannot attest an extension bundle on its behalf. The server
+contract also models eligible watch components, but the current Swift package
+does not claim a watch direct-step-up SDK surface. Android component direct
+step-up is intentionally unsupported; Android continues to use delegated
+component trust and can decode the composite trust source returned for other
+platforms.
 
-The following are repository work and cannot be labeled external blockers:
+## Framework claim boundary
 
-1. Remaining Phase 0 active-document and completion-validator reconciliation.
-2. Framework and iOS capability spike projects and decisions.
-3. Complete the partial family/component contract work with APIs, errors,
-   claims, policy, quota, headers, vectors, and a protocol-coordinate update.
-4. Complete and prove the partial database/runtime implementation, including
-   legacy migration, provisioning/delegation, encrypted 30-second refresh
-   rotation results, and the complete security/race suite.
-5. Component-aware SDKs, framework adapters, conformance/version CI, Admin API,
-   CLI, dashboard, audit, usage, and compatibility UI/reference.
-6. Complete and validate the partial Mintlify foundation, generated/tested
-   snippets and API/compatibility references, canonical diagrams, public
-   content, and documentation quality gates.
+The canonical registry currently records six exact locally tested integrations
+as `experimental`: OpenAI JavaScript 7.8.0, Vercel AI SDK 7.0.85, LangChain
+OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React Native 0.82.0.
+Foundation Models remains `planned` because its runtime suite could not execute
+on the available host OS. MacPaw/OpenAI 0.5.1 remains `unsupported`. No
+framework is represented as released support.
 
 ## External-required gates
 
-These gates remain external only after their source preconditions exist:
+These are the only remaining non-repository domains after clean source
+convergence:
 
-- physical iOS containing-app/component Keychain provisioning, widget/share
-  execution, sibling denial, background refresh, and App Attest;
-- Play-distributed Play Integrity and physical React Native iOS/Android flows;
-- exact-image live provider and all-SDK/framework conformance;
-- claimed-cloud smokes and protected multi-replica/load/destructive resilience;
-- candidate-bound independent security reviews, scans, SBOMs, signatures, and
-  provenance;
-- public tags/releases/OCI/npm/Swift/CocoaPods/Maven publication and clean
-  consumer verification.
+1. protected physical iOS containing-app/widget/share isolation and Action/SSO
+   direct App Attest step-up, including component-owned identity/key/session,
+   sibling denial, no-host, background, termination, and no-user-presence
+   behavior, plus React Native iOS extension-process flows;
+2. Play-distributed Play Integrity and React Native Android flows on physical
+   devices, plus configured App Check/Turnstile observations;
+3. exact-image live provider, all-SDK, and hosted framework conformance;
+4. every claimed cloud plus protected multi-replica, load, destructive failure,
+   backup/restore, upgrade/rollback, key-rotation, and worker recovery drill;
+5. per-architecture vulnerability/license scans, SBOM, signature, provenance,
+   and independent security review;
+6. signed tags/releases, OCI and package publication, production Mintlify
+   deployment, and clean post-publication consumers.
 
-## Next executable work
+A real device is connected to the development host, but no protected,
+candidate-bound physical-device receipt has yet been captured and accepted by
+the release finalizer. Device visibility alone cannot prove signing,
+entitlements, App Attest, Play Integrity, component isolation, or lifecycle
+behavior. Play Integrity additionally requires a Play-distributed signed
+application.
 
-Complete the remaining active-document terminology/diagram audit without
-changing the frozen contract, then perform the bounded Phase 1 framework and
-physical iOS spikes. Only their recorded results may shape the Phase 2
-prerelease contract and component provisioning design.
+## Release decision
+
+The source candidate may be reviewed and pushed to private implementation
+branches. It must not be tagged, promoted, advertised as production-ready, or
+published until the protected finalizer binds every required receipt to one
+immutable set of core, SDK, image, contract, package, and documentation
+coordinates.

@@ -50,7 +50,7 @@ label legacy installation behavior during migration.
 
 ## Status
 
-Accepted as the target runtime model on 2026-08-30. The uncommitted working
-tree contains initial schema, ID, claim, and root-session scaffolding, while the
-complete API, migration proof, delegation, revocation, attribution, and
-security model remain pending.
+Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database
+schema 23, the server runtime, Admin surfaces, and the SDK source candidate.
+Final bundle/lock convergence plus protected physical-device and release
+evidence remain required before the model is represented as released support.

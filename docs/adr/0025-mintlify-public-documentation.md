@@ -49,7 +49,9 @@ Phase 8 gate, not evidence that the content is complete.
 
 ## Status
 
-Accepted on 2026-08-30. An uncommitted public site/config/navigation and initial
-content now exist; installation, full Mintlify/link/accessibility/prose/snippet
-validation, generated references, content convergence, CI, and production
-deployment remain open source/evidence gates.
+Accepted on 2026-08-30. The canonical, committed public source lives under
+`docs/public`; the standalone `latchway-docs` repository is a generated
+deployment mirror. Navigation, generated compatibility and API references,
+snippets, redirects, links, accessibility, AI-readable outputs, and Mintlify
+builds are locally validated. Production deployment and exact-release content
+remain promotion gates.

@@ -122,7 +122,7 @@
           "enum": ["identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"]
         },
         "source": {
-          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "identity_only", "web_risk_verified", "debug"]
+          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "delegated_direct_attested", "identity_only", "web_risk_verified", "debug"]
         },
         "verified_at": { "type": "string", "format": "date-time" },
         "expires_at": { "type": "string", "format": "date-time" },
@@ -162,7 +162,7 @@
         "component_is_root": { "type": "boolean" },
         "granted_features": { "$ref": "#/$defs/Features" },
         "trust_source": {
-          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "identity_only", "web_risk_verified", "debug"]
+          "enum": ["direct_attested", "delegated_from_attested_root", "delegated_identity_only", "delegated_direct_attested", "identity_only", "web_risk_verified", "debug"]
         },
         "parent_component_id": { "$ref": "#/$defs/ComponentID" },
         "delegation_id": { "$ref": "#/$defs/DelegationID" }

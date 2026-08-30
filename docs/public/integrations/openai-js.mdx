@@ -29,14 +29,14 @@ protocol `2`, but a contract coordinate does not establish framework support.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Required; not yet evidenced |
-| Private key remains native | Required on native-backed runtimes; not yet evidenced |
-| Streaming | Required; not yet evidenced |
-| Cancellation | Required; not yet evidenced |
-| App extensions | Requires Installation Family SDK support; unavailable |
-| Structured output | Must pass conformance; not yet evidenced |
-| Tool calls | Must pass conformance; not yet evidenced |
-| Protocol | Target is OpenAI Responses and Chat Completions through a future compatible contract |
+| Full DPoP preserved | Passes local adapter tests through the guarded Latchway transport |
+| Private key remains native | Not applicable to the JavaScript adapter; a native host must supply a native-backed Latchway transport |
+| Streaming | Responses and Chat Completions streaming pass local OpenAI `7.8.0` tests |
+| Cancellation | Abort propagation passes local adapter tests |
+| App extensions | Not provided by this JavaScript integration |
+| Structured output | Conditional; transported as protocol content but not release-evidenced |
+| Tool calls | Conditional; transported as protocol content but not release-evidenced |
+| Protocol | Draft wire 2 supports OpenAI Responses, Chat Completions, and conditional embeddings/media surfaces |
 
 ## 5. Install packages
 
@@ -50,13 +50,14 @@ No adapter should receive reusable credentials from it.
 
 ## 7. Bind a feature
 
-The planned helper accepts a feature ID such as `habit-assistant`. It must not
+The source helper accepts a feature ID such as `habit-assistant`. It must not
 expose the physical model or upstream selection.
 
 ## 8. Create the framework client
 
-The planned helper creates the OpenAI client with a guarded custom fetch. Its
-signature is not stable enough to document as runnable code.
+The source helper creates the OpenAI client with a guarded custom fetch. Its
+signature remains pre-release, so this page does not present it as a stable
+published API.
 
 ## 9. Send a non-streaming request
 

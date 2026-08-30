@@ -31,6 +31,8 @@ const (
 	componentSessionPath      = "/client/v1/component-sessions"
 	revokeFamilyPath          = "/client/v1/installation-families/current"
 	revokeComponentPrefix     = "/client/v1/installation-families/current/components/"
+	componentChallengeSuffix  = "/attestation-challenges"
+	componentExchangeSuffix   = "/attestation-exchanges"
 	diagnosticsPath           = "/client/v1/diagnostics"
 	featureQuotaPrefix        = "/client/v1/features/"
 	featureQuotaSuffix        = "/quota"
@@ -155,6 +157,19 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.getFeatureQuota(w, r, correlationID, logicalID, feature)
 		return
 	}
+	if componentID, operation, ok := componentAttestationOperationFromPath(path); ok {
+		if r.Method != http.MethodPost {
+			api.methodNotAllowed(w, correlationID)
+			return
+		}
+		switch operation {
+		case componentChallengeSuffix:
+			api.createComponentAttestationChallenge(w, r, correlationID, logicalID.String(), componentID, path)
+		case componentExchangeSuffix:
+			api.exchangeComponentAttestation(w, r, correlationID, logicalID.String(), componentID, path)
+		}
+		return
+	}
 	if componentID, ok := componentFromRevokePath(path); ok {
 		if r.Method != http.MethodDelete {
 			api.methodNotAllowed(w, correlationID)
@@ -239,6 +254,22 @@ func componentFromRevokePath(path string) (string, bool) {
 		return "", false
 	}
 	return componentID, true
+}
+
+func componentAttestationOperationFromPath(path string) (string, string, bool) {
+	if !strings.HasPrefix(path, revokeComponentPrefix) {
+		return "", "", false
+	}
+	remainder := strings.TrimPrefix(path, revokeComponentPrefix)
+	componentID, suffix, found := strings.Cut(remainder, "/")
+	if !found || !clientComponentPattern.MatchString(componentID) {
+		return "", "", false
+	}
+	suffix = "/" + suffix
+	if suffix != componentChallengeSuffix && suffix != componentExchangeSuffix {
+		return "", "", false
+	}
+	return componentID, suffix, true
 }
 
 func featureFromQuotaPath(path string) (string, bool) {
@@ -409,6 +440,87 @@ func (api *API) createComponentSession(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	document, err := componentSessionDocumentFor(result, declaration.sdk)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
+}
+
+func (api *API) createComponentAttestationChallenge(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID, componentID, path string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := ensureBodyless(r); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	result, err := api.coordinator.CreateComponentAttestationChallenge(r.Context(), CreateComponentAttestationChallengeInput{
+		Metadata:    api.metadataForPath(r, logicalRequestID, declaration, http.MethodPost, path, proof),
+		AccessToken: accessToken, ComponentID: componentID,
+	})
+	if err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	document, err := challengeDocumentFor(result)
+	if err != nil {
+		api.internal(w, requestID)
+		return
+	}
+	api.writeSuccess(w, requestID, http.StatusCreated, "no-store", document)
+}
+
+func (api *API) exchangeComponentAttestation(w http.ResponseWriter, r *http.Request, requestID, logicalRequestID, componentID, path string) {
+	declaration, violation := parseClientDeclaration(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	if violation := requireCurrentProtocol(declaration); violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	accessToken, violation := parseDPoPAuthorization(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	proof, violation := parseDPoPHeader(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input, violation := parseComponentAttestationExchangeRequest(r)
+	if violation != nil {
+		api.writeViolation(w, requestID, violation)
+		return
+	}
+	input.Metadata = api.metadataForPath(r, logicalRequestID, declaration, http.MethodPost, path, proof)
+	input.AccessToken = accessToken
+	input.ComponentID = componentID
+	result, err := api.coordinator.ExchangeComponentAttestation(r.Context(), input)
+	if err != nil {
+		api.writeDependencyFailure(w, requestID, err)
+		return
+	}
+	document, err := grantDocumentFor(result, declaration.sdk, true)
 	if err != nil {
 		api.internal(w, requestID)
 		return
@@ -677,7 +789,9 @@ func (api *API) preflight(w http.ResponseWriter, r *http.Request, requestID, ori
 	case diagnosticsPath, jwksPath, discoveryPath:
 		expectedMethod = http.MethodGet
 	default:
-		if _, ok := componentFromRevokePath(path); ok {
+		if _, _, ok := componentAttestationOperationFromPath(path); ok {
+			expectedMethod = http.MethodPost
+		} else if _, ok := componentFromRevokePath(path); ok {
 			expectedMethod = http.MethodDelete
 		} else if _, ok := featureFromQuotaPath(path); ok {
 			expectedMethod = http.MethodGet
@@ -1081,7 +1195,7 @@ type challengeAttestationDocument struct {
 }
 
 func challengeDocumentFor(result ChallengeResult) (challengeDocument, error) {
-	if !challengeIDPattern.MatchString(result.ChallengeID) || len(result.ChallengeNonce) > 512 || !validCanonicalBase64URL(result.ChallengeNonce, -1) || result.BindingVersion != 1 || result.IssuedAt < 0 || result.IssuedAt > 253402300799 || result.ExpiresAt.IsZero() || !result.ExpiresAt.After(time.Unix(result.IssuedAt, 0)) {
+	if !challengeIDPattern.MatchString(result.ChallengeID) || len(result.ChallengeNonce) > 512 || !validCanonicalBase64URL(result.ChallengeNonce, -1) || (result.BindingVersion != 1 && result.BindingVersion != 2) || result.IssuedAt < 0 || result.IssuedAt > 253402300799 || result.ExpiresAt.IsZero() || !result.ExpiresAt.After(time.Unix(result.IssuedAt, 0)) {
 		return challengeDocument{}, errors.New("invalid challenge result")
 	}
 	attestation := result.Attestation
@@ -1302,7 +1416,7 @@ func validComponentKind(value string) bool {
 
 func validTrustSource(value string) bool {
 	switch value {
-	case "direct_attested", "delegated_from_attested_root", "delegated_identity_only",
+	case "direct_attested", "delegated_from_attested_root", "delegated_identity_only", "delegated_direct_attested",
 		"identity_only", "web_risk_verified", "debug":
 		return true
 	default:

@@ -48,7 +48,8 @@ forbidden.
 
 ## Status
 
-Accepted on 2026-08-30. Initial component-session persistence exists in the
-uncommitted working tree; complete contracts, provisioning, refresh,
-replacement, revocation, migration, and adversarial proof remain Phase 2 and
-Phase 3 work.
+Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database
+schema 23, the server runtime, and native SDK source. Local PostgreSQL,
+concurrency, replay, migration, replacement, revocation, and direct-component
+session-rotation tests pass. Final clean-coordinate convergence, protected
+physical-device proof, and exact-image evidence remain release gates.

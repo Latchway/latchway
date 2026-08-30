@@ -51,6 +51,7 @@ SDK_FIXTURES = {
 }
 FIXTURE_MEMBERS = {
     "attestation-binding-v1.json": "test-vectors/attestation-binding/v1.json",
+    "component-attestation-binding-v2.json": "test-vectors/component-attestation-binding/v2.json",
     "dpop-v1.json": "test-vectors/dpop/v1.json",
     "installation-family-v2.json": "test-vectors/installation-family/v2.json",
     "protocol-version.json": "protocol-version.json",
@@ -58,6 +59,7 @@ FIXTURE_MEMBERS = {
 FIXED_CONTRACT_FILES = (
     "admin.openapi.yaml",
     "attestation-binding.schema.json",
+    "component-attestation-binding.schema.json",
     "client.openapi.yaml",
     "config.schema.json",
     "error-codes.yaml",

@@ -192,6 +192,27 @@ type CreateComponentSessionInput struct {
 	RefreshGrant SensitiveString
 }
 
+// CreateComponentAttestationChallengeInput authorizes a delegated component
+// with its current DPoP-bound access session before issuing a one-use direct
+// attestation challenge scoped to that exact component and key.
+type CreateComponentAttestationChallengeInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
+	ComponentID string
+}
+
+// ExchangeComponentAttestationInput carries only the one-use challenge and
+// provider evidence needed to step an already-authorized delegated component
+// up to direct attestation. Component scope remains server-owned through the
+// path and access-token principal.
+type ExchangeComponentAttestationInput struct {
+	Metadata    RequestMetadata
+	AccessToken SensitiveString
+	ComponentID string
+	ChallengeID string
+	Attestation AttestationEvidence
+}
+
 type RevokeComponentInput struct {
 	Metadata    RequestMetadata
 	AccessToken SensitiveString
@@ -342,6 +363,8 @@ type Coordinator interface {
 	RefreshSession(context.Context, RefreshInput) (GrantResult, error)
 	ProvisionComponent(context.Context, ProvisionComponentInput) (ProvisionComponentResult, error)
 	CreateComponentSession(context.Context, CreateComponentSessionInput) (GrantResult, error)
+	CreateComponentAttestationChallenge(context.Context, CreateComponentAttestationChallengeInput) (ChallengeResult, error)
+	ExchangeComponentAttestation(context.Context, ExchangeComponentAttestationInput) (GrantResult, error)
 	RevokeComponent(context.Context, RevokeComponentInput) error
 	RevokeCurrentFamily(context.Context, RevokeFamilyInput) error
 	Diagnostics(context.Context, DiagnosticsInput) (DiagnosticsResult, error)

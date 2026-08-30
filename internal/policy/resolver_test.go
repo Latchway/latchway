@@ -15,6 +15,46 @@ import (
 
 var policyTestNow = time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 
+func TestRuntimeAttestationPolicyAcceptsWatchOSWithinSevenPlatformBound(t *testing.T) {
+	t.Parallel()
+
+	platforms := make(map[string]configuration.PlatformAttestation, 7)
+	for _, platform := range []string{
+		"ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node",
+	} {
+		platforms[platform] = configuration.PlatformAttestation{
+			Provider: "debug", Mode: "disabled", MinimumTrustLevel: "none",
+		}
+	}
+	platforms["watchos"] = configuration.PlatformAttestation{
+		Provider: "app_attest", Mode: "required", MinimumTrustLevel: "app_verified",
+	}
+	if !validRuntimeAttestationPolicy(configuration.AttestationPolicy{
+		ID: "all-platforms", MaxAge: 10 * time.Minute, Platforms: platforms,
+	}) {
+		t.Fatal("seven-platform runtime policy with watchOS App Attest was rejected")
+	}
+}
+
+func TestBoundedActivationMarksDelegatedDirectAttestationAsCompositeTrust(t *testing.T) {
+	t.Parallel()
+
+	input := policyInput("premium")
+	input.authorization.trustSource = "delegated_direct_attested"
+	activation, err := boundedActivation(input)
+	if err != nil {
+		t.Fatalf("construct activation: %v", err)
+	}
+	client, ok := activation["client"].(map[string]any)
+	if !ok {
+		t.Fatalf("client activation = %#v", activation["client"])
+	}
+	trust, ok := client["trust"].(map[string]any)
+	if !ok || trust["source"] != "delegated_direct_attested" || trust["delegated"] != true || trust["direct_attestation"] != true {
+		t.Fatalf("composite trust activation = %#v", client["trust"])
+	}
+}
+
 func TestResolverSelectsAccessPlanAndPriorityRoute(t *testing.T) {
 	t.Parallel()
 

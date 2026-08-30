@@ -1,0 +1,9 @@
+extends: substitution
+message: "Use the canonical Latchway term '%s'."
+level: error
+ignorecase: false
+scope: text
+swap:
+  '\bAppAttest\b': App Attest
+  '\bGoogle Integrity\b': Play Integrity
+  '\bsub-app\b': Client Component

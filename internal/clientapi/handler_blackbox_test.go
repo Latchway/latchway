@@ -51,6 +51,14 @@ func (fake *blackBoxCoordinator) CreateComponentSession(_ context.Context, _ cli
 	return blackBoxGrant(), nil
 }
 
+func (fake *blackBoxCoordinator) CreateComponentAttestationChallenge(_ context.Context, _ clientapi.CreateComponentAttestationChallengeInput) (clientapi.ChallengeResult, error) {
+	return clientapi.ChallengeResult{}, nil
+}
+
+func (fake *blackBoxCoordinator) ExchangeComponentAttestation(_ context.Context, _ clientapi.ExchangeComponentAttestationInput) (clientapi.GrantResult, error) {
+	return blackBoxGrant(), nil
+}
+
 func (fake *blackBoxCoordinator) RevokeComponent(_ context.Context, _ clientapi.RevokeComponentInput) error {
 	return nil
 }

@@ -50,7 +50,9 @@ Breaking framework changes are recorded beside the affected registry evidence.
 
 ## Status
 
-Accepted on 2026-08-30. The canonical planning registry, closed schema,
-semantic validation, adversarial tests, and generated public planning page
-exist in Phase 0. Framework conformance, minimum/latest and scheduled CI,
-support claims, and prerelease contract-bundle inclusion remain pending.
+Accepted on 2026-08-30 and implemented in draft contract `1.0.0`. The closed
+registry and schema are deterministic bundle members; semantic, adversarial,
+generated-page, version-bound adapter, and workflow gates pass locally. Six
+entries remain experimental, Foundation Models remains planned, and
+MacPaw/OpenAI 0.5.1 remains unsupported until new evidence changes those exact
+registry rows.

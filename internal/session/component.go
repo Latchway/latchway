@@ -261,6 +261,14 @@ func (store *Store) ProvisionComponent(ctx context.Context, input ComponentProvi
 				return err
 			}
 			if _, err := tx.Exec(ctx, `
+					UPDATE attestation_keys
+					SET status = 'revoked', revoked_at = GREATEST(created_at, $2),
+					    updated_at = GREATEST(updated_at, created_at, $2)
+					WHERE client_component_id = $1 AND status <> 'revoked'
+				`, componentID, now); err != nil {
+				return fmt.Errorf("revoke re-provisioned component attestation keys: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
 				UPDATE component_delegations
 				SET revoked_at = COALESCE(revoked_at, $2)
 				WHERE child_component_id = $1 AND revoked_at IS NULL
@@ -826,6 +834,14 @@ func (store *Store) RevokeComponent(ctx context.Context, access AccessRequestInp
 		}
 		if status == "active" {
 			if _, err := tx.Exec(ctx, `
+					UPDATE attestation_keys
+					SET status = 'revoked', revoked_at = GREATEST(created_at, $2),
+					    updated_at = GREATEST(updated_at, created_at, $2)
+					WHERE client_component_id = $1 AND status <> 'revoked'
+				`, componentID, now); err != nil {
+				return fmt.Errorf("revoke component attestation keys: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
 				UPDATE component_refresh_tokens
 				SET status = 'revoked', revoked_at = COALESCE(revoked_at, GREATEST(issued_at, $2))
 				WHERE client_component_id = $1 AND status IN ('staged', 'active')
@@ -896,6 +912,14 @@ func (store *Store) RevokeCurrentFamily(ctx context.Context, access AccessReques
 			return ErrInstallationFamilyRevoked
 		}
 		if state.familyStatus == "active" {
+			if _, err := tx.Exec(ctx, `
+					UPDATE attestation_keys
+					SET status = 'revoked', revoked_at = GREATEST(created_at, $2),
+					    updated_at = GREATEST(updated_at, created_at, $2)
+					WHERE installation_family_id = $1 AND status <> 'revoked'
+				`, state.InstallationFamilyID, now); err != nil {
+				return fmt.Errorf("revoke family component attestation keys: %w", err)
+			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE component_refresh_tokens
 				SET status = 'revoked', revoked_at = COALESCE(revoked_at, GREATEST(issued_at, $2))

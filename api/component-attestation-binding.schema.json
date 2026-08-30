@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/protocol/1.0.0/component-attestation-binding-v2.schema.json",
+  "title": "Latchway component attestation binding version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "purpose",
+    "challenge_id",
+    "challenge_nonce",
+    "application_id",
+    "environment",
+    "principal_id",
+    "installation_family_id",
+    "client_component_id",
+    "component_definition_id",
+    "component_key_id",
+    "dpop_jkt",
+    "platform",
+    "issued_at"
+  ],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "purpose": { "type": "string", "const": "component_attestation_step_up" },
+    "challenge_id": { "type": "string", "pattern": "^chl_[A-Za-z0-9_-]{16,128}$" },
+    "challenge_nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43,86}$" },
+    "application_id": { "type": "string", "pattern": "^app_[A-Za-z0-9_-]{1,128}$" },
+    "environment": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+    "principal_id": { "type": "string", "pattern": "^usr_[A-Za-z0-9_-]{16,128}$" },
+    "installation_family_id": { "type": "string", "pattern": "^fam_[A-Za-z0-9_-]{16,128}$" },
+    "client_component_id": { "type": "string", "pattern": "^cmp_[A-Za-z0-9_-]{16,128}$" },
+    "component_definition_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" },
+    "component_key_id": { "type": "string", "pattern": "^cky_[A-Za-z0-9_-]{16,128}$" },
+    "dpop_jkt": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+    "platform": { "type": "string", "enum": ["ios", "react_native_ios", "watchos"] },
+    "issued_at": { "type": "integer", "minimum": 0, "maximum": 253402300799 }
+  }
+}

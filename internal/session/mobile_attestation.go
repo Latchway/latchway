@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,24 @@ import (
 )
 
 const maximumCachedAttestationVerifiers = 256
+
+// attestationVerifierCacheKey retains the exact immutable tenant, policy, and
+// provider selection that a verifier was built from. A typed tuple avoids the
+// delimiter collisions possible with a concatenated string, while the
+// canonical struct encoding prevents two component-specific App Attest
+// selections from sharing a verifier merely because their provider matches.
+type attestationVerifierCacheKey struct {
+	OrganizationID  string
+	ApplicationID   string
+	EnvironmentID   string
+	EnvironmentSlug string
+	EnvironmentKind string
+	RevisionID      string
+	PolicyID        string
+	PolicyMaxAge    time.Duration
+	Platform        string
+	Selection       string
+}
 
 type preparedAttestationVerifier struct {
 	attestation.Verifier
@@ -82,7 +101,17 @@ func (coordinator *clientCoordinator) mobileAttestationVerifier(
 		coordinator.attestationCache == nil || id.Validate(snapshot.RevisionID, id.ConfigRevision) != nil {
 		return nil, attestation.ErrConfiguration
 	}
-	cacheKey := snapshot.RevisionID + "\x00" + policy.ID + "\x00" + platform + "\x00" + selection.Provider
+	encodedSelection, err := json.Marshal(selection)
+	if err != nil {
+		return nil, attestation.ErrConfiguration
+	}
+	cacheKey := attestationVerifierCacheKey{
+		OrganizationID: environment.OrganizationID, ApplicationID: environment.ApplicationID,
+		EnvironmentID: environment.EnvironmentID, EnvironmentSlug: environment.Slug,
+		EnvironmentKind: environment.Kind, RevisionID: snapshot.RevisionID,
+		PolicyID: policy.ID, PolicyMaxAge: policy.MaxAge, Platform: platform,
+		Selection: string(encodedSelection),
+	}
 	coordinator.attestationMu.Lock()
 	defer coordinator.attestationMu.Unlock()
 	if verifier := coordinator.attestationCache[cacheKey]; verifier != nil {
@@ -120,7 +149,7 @@ func (coordinator *clientCoordinator) buildMobileAttestationVerifier(
 	case "app_attest":
 		configuration := selection.AppAttest
 		if configuration == nil || selection.PlayIntegrity != nil || selection.SecretRef != "" ||
-			(platform != "ios" && platform != "react_native_ios") ||
+			(platform != "ios" && platform != "react_native_ios" && platform != "watchos") ||
 			selection.MinimumTrustLevel != "app_verified" ||
 			nilCoordinatorDependency(coordinator.appAttestKeys) ||
 			(environment.Kind == "production" && configuration.Environment != "production") {

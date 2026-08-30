@@ -177,7 +177,7 @@ describe("canonical Admin API browser client", () => {
     const child = {
       ...root, component_key_id: "cky_1123456789abcdef", definition_id: "ios-widget", dpop_jkt: "B".repeat(43),
       id: "cmp_1123456789abcdef", is_root: false, key_storage_claim: "keychain", kind: "widget", session_failure_count: 2,
-      parent_component_id: root.id, trust_source: "delegated_from_attested_root",
+      parent_component_id: root.id, trust_source: "delegated_direct_attested",
       delegation: {
         attestation_expires_at: "2026-08-30T00:00:00Z", attestation_provider: "app_attest",
         configuration_revision_id: "rev_0123456789abcdef", created_at: "2026-08-29T00:00:00Z",
@@ -193,6 +193,7 @@ describe("canonical Admin API browser client", () => {
     };
 
     expect(ClientComponentSchema.parse(child).delegation?.parent_component_id).toBe(root.id);
+    expect(ClientComponentSchema.parse(child).trust_source).toBe("delegated_direct_attested");
     expect(ClientComponentSchema.parse(child).session_failure_count).toBe(2);
     expect(InstallationFamilySchema.parse(family).components).toHaveLength(2);
     expect(() => ClientComponentSchema.parse({ ...child, refresh_grant: "must-not-render" })).toThrow();

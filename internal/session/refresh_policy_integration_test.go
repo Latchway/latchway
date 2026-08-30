@@ -56,6 +56,21 @@ type refreshPolicyCounts struct {
 	replays int
 }
 
+func TestComponentTrustRequiresAttestedParentIncludesDirectStepUp(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{"delegated_from_attested_root", "delegated_direct_attested"} {
+		if !componentTrustRequiresAttestedParent(source) {
+			t.Errorf("trust source %q did not retain its attested-parent dependency", source)
+		}
+	}
+	for _, source := range []string{"delegated_identity_only", "direct_attested", "identity_only", "debug", ""} {
+		if componentTrustRequiresAttestedParent(source) {
+			t.Errorf("trust source %q unexpectedly requires an attested parent", source)
+		}
+	}
+}
+
 func TestRefreshUsesCurrentActivePolicyPostgreSQL(t *testing.T) {
 	pool, ctx := isolatedSessionPool(t)
 	issuedAt := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)

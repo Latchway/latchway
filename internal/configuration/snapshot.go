@@ -270,12 +270,20 @@ func runtimeComponentIdentifiers(platform string, identifiers ComponentIdentifie
 
 func runtimeComponentAttestation(platform, kind, role string, policy ComponentAttestationPolicy) bool {
 	if role == "delegated" {
-		return policy.Strategy == "delegated" && policy.Provider == ""
+		if policy.Strategy != "delegated" || policy.Provider != "" {
+			return false
+		}
+		if !policy.DirectStepUp {
+			return policy.DirectAttestationPolicy == ""
+		}
+		return runtimeIdentifierPattern.MatchString(policy.DirectAttestationPolicy) &&
+			componentDirectAppAttestSupported(platform, kind)
 	}
 	if policy.Strategy == "identity_only" {
-		return policy.Provider == "" && !policy.DirectStepUp
+		return policy.Provider == "" && !policy.DirectStepUp && policy.DirectAttestationPolicy == ""
 	}
-	if policy.Strategy != "direct" || policy.Provider == "" || policy.DirectStepUp {
+	if policy.Strategy != "direct" || policy.Provider == "" || policy.DirectStepUp ||
+		policy.DirectAttestationPolicy != "" {
 		return false
 	}
 	switch policy.Provider {
@@ -294,8 +302,13 @@ func runtimeComponentAttestation(platform, kind, role string, policy ComponentAt
 	}
 }
 
+func componentDirectAppAttestSupported(platform, kind string) bool {
+	return (platform == "ios" || platform == "react_native_ios" || platform == "watchos") &&
+		(kind == "action_extension" || kind == "sso_extension" || kind == "watch_extension")
+}
+
 func runtimeAttestationPolicy(raw compiledAttestationPolicy) (AttestationPolicy, error) {
-	if !runtimeIdentifierPattern.MatchString(raw.ID) || raw.MaxAge == "" || len(raw.Platforms) == 0 || len(raw.Platforms) > 6 {
+	if !runtimeIdentifierPattern.MatchString(raw.ID) || raw.MaxAge == "" || len(raw.Platforms) == 0 || len(raw.Platforms) > 7 {
 		return AttestationPolicy{}, ErrInvalid
 	}
 	maxAge, err := parseConfigDuration(raw.MaxAge)
@@ -341,7 +354,7 @@ func runtimeAttestationAllowedOrigins(platform string, selection PlatformAttesta
 
 func runtimeAttestationPlatform(platform string) bool {
 	switch platform {
-	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node":
 		return true
 	default:
 		return false

@@ -1945,7 +1945,7 @@ components:
       enum: [main_app, widget, share_extension, app_intent_extension, notification_service_extension, action_extension, sso_extension, watch_extension, android_app, wear_app, browser, node_process]
     ComponentTrustSource:
       type: string
-      enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, identity_only, web_risk_verified, debug]
+      enum: [direct_attested, delegated_from_attested_root, delegated_identity_only, delegated_direct_attested, identity_only, web_risk_verified, debug]
     AttestationProvider:
       type: string
       enum: [app_attest, play_integrity, firebase_app_check, turnstile, debug]

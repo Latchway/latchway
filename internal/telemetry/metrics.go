@@ -545,7 +545,7 @@ func safeMetricLabel(_ string, value string) string {
 
 func safeAttestationPlatform(platform string) string {
 	switch platform {
-	case "ios", "android", "web", "react_native_ios", "react_native_android", "node":
+	case "ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node":
 		return platform
 	default:
 		return "invalid"

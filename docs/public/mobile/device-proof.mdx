@@ -30,6 +30,14 @@ observe Secure Enclave-backed installation material, real App Attest
 registration/assertion, the expected normalized trust, a DPoP-authorized
 request, and terminal revocation behavior.
 
+If the candidate claims Action/SSO direct component step-up, the protected run
+must also pin and independently observe the signed containing app, Widget,
+Share, and Action binaries; separate component key and session identifiers;
+the version-2 component binding and `delegated_direct_attested` transition; a
+concrete sibling-denial response; and no-host, background, termination, and
+no-user-presence behavior. The containing app's assertion cannot substitute
+for evidence created by the extension process.
+
 ## Android and React Native Android
 
 Prepare all of the following:
@@ -72,7 +80,7 @@ substitute.
 
 ## Runner custody
 
-Use an ephemeral or just-in-time physical-device runner dedicated to one
+Use an ephemeral or on-demand physical-device runner dedicated to one
 candidate evidence run. It must not retain an organization token, package or
 registry credential, cloud OIDC authority, signing export, provisioning file,
 attestation object, or device proof after the run. Candidate checkout and test

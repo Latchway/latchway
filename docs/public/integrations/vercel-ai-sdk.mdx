@@ -10,7 +10,7 @@ description: "Evaluate the experimental feature-bound provider seam for Vercel A
 
 ## 1. What this integration does
 
-The target Class A or B adapter supplies a Latchway provider, or an
+The source Class A adapter supplies a Latchway provider through an
 OpenAI-compatible provider with guarded custom fetch, while keeping Vercel AI
 SDK messages, tools, output types, middleware, and telemetry semantics intact.
 
@@ -29,14 +29,14 @@ protocol `2`, but a contract coordinate does not imply framework support.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Required; not yet evidenced |
-| Private key remains native | Required on native-backed runtimes; not yet evidenced |
-| Streaming | Required for `streamText`; not yet evidenced |
-| Cancellation | Required; not yet evidenced |
-| App extensions | Requires future Installation Family support |
-| Structured output | Required when translation is exact; not yet evidenced |
-| Tool calls | Required; not yet evidenced |
-| Protocol | Planned through a supported Latchway AI protocol |
+| Full DPoP preserved | Passes local adapter tests through the guarded Latchway transport |
+| Private key remains native | Not applicable to the JavaScript adapter; native hosts must provide a native-backed transport |
+| Streaming | `streamText`-compatible response streaming passes local AI SDK `7.0.85` tests |
+| Cancellation | Abort propagation passes local adapter tests |
+| App extensions | Not provided by this JavaScript integration |
+| Structured output | Conditional; not release-evidenced |
+| Tool calls | Conditional; not release-evidenced |
+| Protocol | Draft wire 2 covers Responses, Chat Completions, embeddings, and conditional images |
 
 ## 5. Install packages
 
@@ -55,13 +55,15 @@ expose a provider or physical model selector.
 
 ## 8. Create the framework client
 
-The final adapter will choose the custom-provider or custom-fetch seam after
-conformance proves middleware, telemetry, retry, and metadata behavior.
+The source adapter uses the custom-provider and guarded-custom-fetch seams.
+Those types remain pre-release until hosted conformance and package publication
+close.
 
 ## 9. Send a non-streaming request
 
-`generateText` is a required conformance case. No runnable helper is published
-until its exact types and versions are locked.
+Local adapter tests cover the provider's non-streaming request path. No runnable
+package example is advertised until its exact types and publication integrity
+are locked.
 
 ## 10. Send a streaming request
 

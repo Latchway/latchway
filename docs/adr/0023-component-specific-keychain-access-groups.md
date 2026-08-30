@@ -49,6 +49,10 @@ including real team or bundle identifiers.
 
 ## Status
 
-Accepted as the target Apple storage model on 2026-08-30. The required physical
-iOS spike and component SDK implementation are external and source gates,
-respectively, and both remain open.
+Accepted on 2026-08-30 and implemented in the Swift and React Native iOS source
+candidate, including component-specific storage, containing-app preparation,
+extension diagnostics, and Action/SSO extension-process App Attest step-up.
+Unsigned host/extension consumers and local source tests do not prove real
+entitlements: candidate-bound physical sibling denial, no-host/background/
+termination/no-user-presence behavior, signing, and App Attest remain release
+gates.

@@ -131,14 +131,19 @@ type AttestationEvent struct {
 	EnvironmentID      string  `db:"environment_id" json:"environment_id"`
 	InstallationID     *string `db:"installation_id" json:"installation_id"`
 	// Immutable audit correlation ID. Challenges may be removed after their retention window.
-	SessionChallengeID *string            `db:"session_challenge_id" json:"session_challenge_id"`
-	Provider           string             `db:"provider" json:"provider"`
-	Outcome            string             `db:"outcome" json:"outcome"`
-	TrustLevel         *string            `db:"trust_level" json:"trust_level"`
-	EvidenceHash       []byte             `db:"evidence_hash" json:"evidence_hash"`
-	NormalizedSignals  []byte             `db:"normalized_signals" json:"normalized_signals"`
-	FailureCode        *string            `db:"failure_code" json:"failure_code"`
-	OccurredAt         pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	SessionChallengeID    *string            `db:"session_challenge_id" json:"session_challenge_id"`
+	Provider              string             `db:"provider" json:"provider"`
+	Outcome               string             `db:"outcome" json:"outcome"`
+	TrustLevel            *string            `db:"trust_level" json:"trust_level"`
+	EvidenceHash          []byte             `db:"evidence_hash" json:"evidence_hash"`
+	NormalizedSignals     []byte             `db:"normalized_signals" json:"normalized_signals"`
+	FailureCode           *string            `db:"failure_code" json:"failure_code"`
+	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	InstallationFamilyID  *string            `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID     *string            `db:"client_component_id" json:"client_component_id"`
+	TrustSource           *string            `db:"trust_source" json:"trust_source"`
+	ParentComponentID     *string            `db:"parent_component_id" json:"parent_component_id"`
+	ComponentDelegationID *string            `db:"component_delegation_id" json:"component_delegation_id"`
 }
 
 type AttestationKey struct {
@@ -169,6 +174,9 @@ type AttestationKey struct {
 	AttestedAtUnixSeconds *int64             `db:"attested_at_unix_seconds" json:"attested_at_unix_seconds"`
 	AttestedAtNanosecond  *int32             `db:"attested_at_nanosecond" json:"attested_at_nanosecond"`
 	LinkedAt              pgtype.Timestamptz `db:"linked_at" json:"linked_at"`
+	InstallationFamilyID  *string            `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID     *string            `db:"client_component_id" json:"client_component_id"`
+	ComponentKeyID        *string            `db:"component_key_id" json:"component_key_id"`
 }
 
 type AuditEvent struct {
@@ -192,6 +200,149 @@ type AuditEventChange struct {
 	FieldName      string `db:"field_name" json:"field_name"`
 	Operation      string `db:"operation" json:"operation"`
 	Classification string `db:"classification" json:"classification"`
+}
+
+type ClientComponent struct {
+	ClientComponentID             string             `db:"client_component_id" json:"client_component_id"`
+	OrganizationID                string             `db:"organization_id" json:"organization_id"`
+	ApplicationID                 string             `db:"application_id" json:"application_id"`
+	EnvironmentID                 string             `db:"environment_id" json:"environment_id"`
+	ApplicationUserID             string             `db:"application_user_id" json:"application_user_id"`
+	InstallationFamilyID          string             `db:"installation_family_id" json:"installation_family_id"`
+	ComponentDefinitionID         string             `db:"component_definition_id" json:"component_definition_id"`
+	ComponentKind                 string             `db:"component_kind" json:"component_kind"`
+	Platform                      string             `db:"platform" json:"platform"`
+	IsRoot                        bool               `db:"is_root" json:"is_root"`
+	Status                        string             `db:"status" json:"status"`
+	CurrentComponentKeyID         *string            `db:"current_component_key_id" json:"current_component_key_id"`
+	TrustSource                   string             `db:"trust_source" json:"trust_source"`
+	TrustAttestationProvider      *string            `db:"trust_attestation_provider" json:"trust_attestation_provider"`
+	TrustParentComponentID        *string            `db:"trust_parent_component_id" json:"trust_parent_component_id"`
+	TrustParentAttestationEventID *string            `db:"trust_parent_attestation_event_id" json:"trust_parent_attestation_event_id"`
+	TrustDelegationID             *string            `db:"trust_delegation_id" json:"trust_delegation_id"`
+	TrustVerifiedAt               pgtype.Timestamptz `db:"trust_verified_at" json:"trust_verified_at"`
+	TrustExpiresAt                pgtype.Timestamptz `db:"trust_expires_at" json:"trust_expires_at"`
+	TrustSignals                  []byte             `db:"trust_signals" json:"trust_signals"`
+	GrantedFeatures               []byte             `db:"granted_features" json:"granted_features"`
+	KeyStorageClaim               string             `db:"key_storage_claim" json:"key_storage_claim"`
+	AppVersion                    *string            `db:"app_version" json:"app_version"`
+	SdkVersion                    *string            `db:"sdk_version" json:"sdk_version"`
+	CreatedAt                     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	LastSeenAt                    pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
+	RevokedAt                     pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	RevocationReason              *string            `db:"revocation_reason" json:"revocation_reason"`
+}
+
+type ComponentAttestationChallenge struct {
+	ComponentAttestationChallengeID   string             `db:"component_attestation_challenge_id" json:"component_attestation_challenge_id"`
+	OrganizationID                    string             `db:"organization_id" json:"organization_id"`
+	ApplicationID                     string             `db:"application_id" json:"application_id"`
+	EnvironmentID                     string             `db:"environment_id" json:"environment_id"`
+	ApplicationUserID                 string             `db:"application_user_id" json:"application_user_id"`
+	InstallationFamilyID              string             `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID                 string             `db:"client_component_id" json:"client_component_id"`
+	ComponentKeyID                    string             `db:"component_key_id" json:"component_key_id"`
+	ConfigRevisionID                  string             `db:"config_revision_id" json:"config_revision_id"`
+	Platform                          string             `db:"platform" json:"platform"`
+	DpopJkt                           string             `db:"dpop_jkt" json:"dpop_jkt"`
+	NonceHash                         []byte             `db:"nonce_hash" json:"nonce_hash"`
+	BindingHash                       []byte             `db:"binding_hash" json:"binding_hash"`
+	ChallengeNonce                    string             `db:"challenge_nonce" json:"challenge_nonce"`
+	AttestationPolicyID               string             `db:"attestation_policy_id" json:"attestation_policy_id"`
+	AttestationProvider               string             `db:"attestation_provider" json:"attestation_provider"`
+	AttestationMode                   string             `db:"attestation_mode" json:"attestation_mode"`
+	AttestationMinimumTrustLevel      string             `db:"attestation_minimum_trust_level" json:"attestation_minimum_trust_level"`
+	AttestationMaximumAgeMilliseconds int64              `db:"attestation_maximum_age_milliseconds" json:"attestation_maximum_age_milliseconds"`
+	CreatedAt                         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt                         pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	ConsumedAt                        pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+}
+
+type ComponentDefinition struct {
+	EnvironmentID         string             `db:"environment_id" json:"environment_id"`
+	ConfigRevisionID      string             `db:"config_revision_id" json:"config_revision_id"`
+	ComponentDefinitionID string             `db:"component_definition_id" json:"component_definition_id"`
+	Platform              string             `db:"platform" json:"platform"`
+	ComponentKind         string             `db:"component_kind" json:"component_kind"`
+	FamilyRole            string             `db:"family_role" json:"family_role"`
+	Definition            []byte             `db:"definition" json:"definition"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type ComponentDelegation struct {
+	ComponentDelegationID    string             `db:"component_delegation_id" json:"component_delegation_id"`
+	OrganizationID           string             `db:"organization_id" json:"organization_id"`
+	ApplicationID            string             `db:"application_id" json:"application_id"`
+	EnvironmentID            string             `db:"environment_id" json:"environment_id"`
+	InstallationFamilyID     string             `db:"installation_family_id" json:"installation_family_id"`
+	ParentComponentID        string             `db:"parent_component_id" json:"parent_component_id"`
+	ChildComponentID         string             `db:"child_component_id" json:"child_component_id"`
+	ChildComponentKeyID      string             `db:"child_component_key_id" json:"child_component_key_id"`
+	ParentSessionGrantID     string             `db:"parent_session_grant_id" json:"parent_session_grant_id"`
+	FeatureScopes            []byte             `db:"feature_scopes" json:"feature_scopes"`
+	ConfigurationRevisionID  string             `db:"configuration_revision_id" json:"configuration_revision_id"`
+	ParentAttestationEventID *string            `db:"parent_attestation_event_id" json:"parent_attestation_event_id"`
+	IdentityProviderKey      string             `db:"identity_provider_key" json:"identity_provider_key"`
+	TrustLevel               string             `db:"trust_level" json:"trust_level"`
+	IdentityVerifiedAt       pgtype.Timestamptz `db:"identity_verified_at" json:"identity_verified_at"`
+	IdentityExpiresAt        pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
+	AttestedAt               pgtype.Timestamptz `db:"attested_at" json:"attested_at"`
+	AttestationProvider      string             `db:"attestation_provider" json:"attestation_provider"`
+	AttestationExpiresAt     pgtype.Timestamptz `db:"attestation_expires_at" json:"attestation_expires_at"`
+	NonceHash                []byte             `db:"nonce_hash" json:"nonce_hash"`
+	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt                pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	ConsumedAt               pgtype.Timestamptz `db:"consumed_at" json:"consumed_at"`
+	RevokedAt                pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+}
+
+type ComponentKey struct {
+	ComponentKeyID       string             `db:"component_key_id" json:"component_key_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	EnvironmentID        string             `db:"environment_id" json:"environment_id"`
+	InstallationFamilyID string             `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID    string             `db:"client_component_id" json:"client_component_id"`
+	DpopJkt              string             `db:"dpop_jkt" json:"dpop_jkt"`
+	PublicJwk            []byte             `db:"public_jwk" json:"public_jwk"`
+	Status               string             `db:"status" json:"status"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ReplacedAt           pgtype.Timestamptz `db:"replaced_at" json:"replaced_at"`
+	RevokedAt            pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+}
+
+type ComponentRefreshToken struct {
+	ComponentRefreshTokenID          string             `db:"component_refresh_token_id" json:"component_refresh_token_id"`
+	ComponentSessionFamilyID         string             `db:"component_session_family_id" json:"component_session_family_id"`
+	ClientComponentID                string             `db:"client_component_id" json:"client_component_id"`
+	ComponentKeyID                   string             `db:"component_key_id" json:"component_key_id"`
+	SessionGrantID                   *string            `db:"session_grant_id" json:"session_grant_id"`
+	GrantKind                        string             `db:"grant_kind" json:"grant_kind"`
+	ParentComponentRefreshTokenID    *string            `db:"parent_component_refresh_token_id" json:"parent_component_refresh_token_id"`
+	RotatedToComponentRefreshTokenID *string            `db:"rotated_to_component_refresh_token_id" json:"rotated_to_component_refresh_token_id"`
+	TokenHash                        []byte             `db:"token_hash" json:"token_hash"`
+	Status                           string             `db:"status" json:"status"`
+	IssuedAt                         pgtype.Timestamptz `db:"issued_at" json:"issued_at"`
+	ExpiresAt                        pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	UsedAt                           pgtype.Timestamptz `db:"used_at" json:"used_at"`
+	RevokedAt                        pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+}
+
+type ComponentSessionFamily struct {
+	ComponentSessionFamilyID string             `db:"component_session_family_id" json:"component_session_family_id"`
+	OrganizationID           string             `db:"organization_id" json:"organization_id"`
+	ApplicationID            string             `db:"application_id" json:"application_id"`
+	EnvironmentID            string             `db:"environment_id" json:"environment_id"`
+	ApplicationUserID        string             `db:"application_user_id" json:"application_user_id"`
+	InstallationFamilyID     string             `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID        string             `db:"client_component_id" json:"client_component_id"`
+	ComponentKeyID           string             `db:"component_key_id" json:"component_key_id"`
+	Status                   string             `db:"status" json:"status"`
+	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	RevokedAt                pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	RevocationReason         *string            `db:"revocation_reason" json:"revocation_reason"`
 }
 
 type ConcurrencyLease struct {
@@ -334,6 +485,23 @@ type Installation struct {
 	RevokeReason      *string            `db:"revoke_reason" json:"revoke_reason"`
 }
 
+type InstallationFamily struct {
+	InstallationFamilyID string             `db:"installation_family_id" json:"installation_family_id"`
+	OrganizationID       string             `db:"organization_id" json:"organization_id"`
+	ApplicationID        string             `db:"application_id" json:"application_id"`
+	EnvironmentID        string             `db:"environment_id" json:"environment_id"`
+	ApplicationUserID    string             `db:"application_user_id" json:"application_user_id"`
+	Platform             string             `db:"platform" json:"platform"`
+	Status               string             `db:"status" json:"status"`
+	RootComponentID      *string            `db:"root_component_id" json:"root_component_id"`
+	RootInstallationID   string             `db:"root_installation_id" json:"root_installation_id"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	LastSeenAt           pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
+	RevokedAt            pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
+	RevocationReason     *string            `db:"revocation_reason" json:"revocation_reason"`
+}
+
 type Job struct {
 	JobID              string             `db:"job_id" json:"job_id"`
 	OrganizationID     *string            `db:"organization_id" json:"organization_id"`
@@ -374,6 +542,13 @@ type LogicalRequest struct {
 	// Unpadded base64url SHA-256 of the canonical server-trusted request and resolved quota/routing decision. NULL is reserved for rows created before schema version 9 and cannot authorize a replay.
 	TrustedDecisionFingerprint *string `db:"trusted_decision_fingerprint" json:"trusted_decision_fingerprint"`
 	SelectedLimitPlanKey       string  `db:"selected_limit_plan_key" json:"selected_limit_plan_key"`
+	InstallationFamilyID       *string `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID          *string `db:"client_component_id" json:"client_component_id"`
+	ComponentDefinitionID      *string `db:"component_definition_id" json:"component_definition_id"`
+	ComponentKind              *string `db:"component_kind" json:"component_kind"`
+	TrustSource                *string `db:"trust_source" json:"trust_source"`
+	Framework                  *string `db:"framework" json:"framework"`
+	FrameworkVersion           *string `db:"framework_version" json:"framework_version"`
 }
 
 type Organization struct {
@@ -411,7 +586,7 @@ type QuotaBucket struct {
 	LimitPlanKey string `db:"limit_plan_key" json:"limit_plan_key"`
 	// Unpadded base64url SHA-256 of the canonical rule identity; mutable maximum and capacity values are excluded so policy changes do not reset usage.
 	RuleKey string `db:"rule_key" json:"rule_key"`
-	// Canonical configuration dimension names, including at most one normalized_claim:<name> selector; raw normalized claim values are never stored.
+	// Canonical configuration dimension names, including sealed installation-family/component/trust provenance and at most one normalized_claim:<name> selector; raw normalized claim values are never stored.
 	ScopeDimensions []string `db:"scope_dimensions" json:"scope_dimensions"`
 }
 
@@ -443,6 +618,21 @@ type QuotaReservationEntry struct {
 	InitialReservedUnits int64 `db:"initial_reserved_units" json:"initial_reserved_units"`
 	// Contiguous upstream attempt that first materialized this reservation entry; schema-11 and initial schema-12 entries are attempt 1.
 	OriginAttemptNumber int32 `db:"origin_attempt_number" json:"origin_attempt_number"`
+}
+
+type RefreshRotationResult struct {
+	RefreshRotationResultID    string             `db:"refresh_rotation_result_id" json:"refresh_rotation_result_id"`
+	OldRefreshTokenHash        []byte             `db:"old_refresh_token_hash" json:"old_refresh_token_hash"`
+	ClientComponentID          string             `db:"client_component_id" json:"client_component_id"`
+	ComponentKeyID             string             `db:"component_key_id" json:"component_key_id"`
+	DpopJkt                    string             `db:"dpop_jkt" json:"dpop_jkt"`
+	RotationResponseCiphertext []byte             `db:"rotation_response_ciphertext" json:"rotation_response_ciphertext"`
+	RotationResponseNonce      []byte             `db:"rotation_response_nonce" json:"rotation_response_nonce"`
+	EncryptionFormatVersion    int16              `db:"encryption_format_version" json:"encryption_format_version"`
+	EncryptionAlgorithm        string             `db:"encryption_algorithm" json:"encryption_algorithm"`
+	MasterKeyIdentifier        string             `db:"master_key_identifier" json:"master_key_identifier"`
+	CreatedAt                  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ExpiresAt                  pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
 }
 
 type RefreshToken struct {
@@ -598,9 +788,16 @@ type SessionGrant struct {
 	// Configured identity provider used for this grant; never a raw external subject or credential.
 	IdentityProviderKey *string `db:"identity_provider_key" json:"identity_provider_key"`
 	// Expiry of the external identity proof used for this grant; no raw identity credential is stored.
-	IdentityExpiresAt    pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
-	AttestationProvider  *string            `db:"attestation_provider" json:"attestation_provider"`
-	AttestationExpiresAt pgtype.Timestamptz `db:"attestation_expires_at" json:"attestation_expires_at"`
+	IdentityExpiresAt        pgtype.Timestamptz `db:"identity_expires_at" json:"identity_expires_at"`
+	AttestationProvider      *string            `db:"attestation_provider" json:"attestation_provider"`
+	AttestationExpiresAt     pgtype.Timestamptz `db:"attestation_expires_at" json:"attestation_expires_at"`
+	InstallationFamilyID     *string            `db:"installation_family_id" json:"installation_family_id"`
+	ClientComponentID        *string            `db:"client_component_id" json:"client_component_id"`
+	ComponentDefinitionID    *string            `db:"component_definition_id" json:"component_definition_id"`
+	ComponentKind            *string            `db:"component_kind" json:"component_kind"`
+	ComponentIsRoot          *bool              `db:"component_is_root" json:"component_is_root"`
+	TrustSource              *string            `db:"trust_source" json:"trust_source"`
+	ComponentSessionFamilyID *string            `db:"component_session_family_id" json:"component_session_family_id"`
 }
 
 type UpstreamAttempt struct {

@@ -1,0 +1,15 @@
+extends: existence
+message: "Replace '%s' with precise, verifiable language."
+level: error
+scope: text
+ignorecase: true
+tokens:
+  - '\bsimply\b'
+  - '\bjust\b'
+  - '\bobviously\b'
+  - '\bseamlessly\b'
+  - '\bfully secure\b'
+  - '\bunhackable\b'
+  - '\bmilitary[- ]grade\b'
+  - '\bmagic\b'
+  - '\beffortless\b'

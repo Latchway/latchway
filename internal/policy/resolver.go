@@ -821,7 +821,7 @@ func enforceFeatureAttestation(snapshot Snapshot, feature configuration.Feature,
 
 func validRuntimeAttestationPolicy(policy configuration.AttestationPolicy) bool {
 	if !policyIdentifierPattern.MatchString(policy.ID) || policy.MaxAge < time.Minute ||
-		policy.MaxAge > 30*24*time.Hour || len(policy.Platforms) == 0 || len(policy.Platforms) > 6 {
+		policy.MaxAge > 30*24*time.Hour || len(policy.Platforms) == 0 || len(policy.Platforms) > 7 {
 		return false
 	}
 	for platform, selection := range policy.Platforms {
@@ -865,12 +865,12 @@ func validAttestationProvider(provider string) bool {
 }
 
 func validPlatform(platform string) bool {
-	return slices.Contains([]string{"ios", "android", "web", "react_native_ios", "react_native_android", "node"}, platform)
+	return slices.Contains([]string{"ios", "android", "web", "react_native_ios", "react_native_android", "watchos", "node"}, platform)
 }
 
 func providerAllowedOnPlatform(provider, platform string) bool {
 	switch platform {
-	case "ios", "react_native_ios":
+	case "ios", "react_native_ios", "watchos":
 		return provider == "app_attest" || provider == "firebase_app_check" || provider == "debug"
 	case "android", "react_native_android":
 		return provider == "play_integrity" || provider == "firebase_app_check" || provider == "debug"
@@ -1132,9 +1132,10 @@ func boundedActivation(input Input) (map[string]any, error) {
 			"source":               input.authorization.trustSource,
 			"attestation_provider": input.authorization.attestationProvider,
 			"delegated":            strings.HasPrefix(input.authorization.trustSource, "delegated_"),
-			"direct_attestation":   input.authorization.trustSource == "direct_attested",
-			"verified_at":          input.authorization.attestedAt,
-			"expires_at":           input.authorization.attestationExpiresAt,
+			"direct_attestation": input.authorization.trustSource == "direct_attested" ||
+				input.authorization.trustSource == "delegated_direct_attested",
+			"verified_at": input.authorization.attestedAt,
+			"expires_at":  input.authorization.attestationExpiresAt,
 		},
 	}
 	installation := map[string]any{
