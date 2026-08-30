@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -219,8 +220,9 @@ func (verifier *FirebaseAppCheckVerifier) Verify(
 	}
 	expectedIssuer := firebaseAppCheckIssuerPrefix + verifier.projectNumber
 	expectedAudience := "projects/" + verifier.projectNumber
-	if principal.Issuer != expectedIssuer || len(principal.Audience) != 1 ||
-		principal.Audience[0] != expectedAudience {
+	// Firebase may include additional intended recipients. Require membership in
+	// the configured project audience instead of requiring a single-entry list.
+	if principal.Issuer != expectedIssuer || !slices.Contains(principal.Audience, expectedAudience) {
 		return Result{}, invalid("firebase app check token scope")
 	}
 	if _, allowed := verifier.allowedAppIDs[principal.Subject]; !allowed {

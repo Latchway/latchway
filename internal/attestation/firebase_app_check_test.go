@@ -34,7 +34,7 @@ func (roundTrip webAttestationRoundTripper) RoundTrip(request *http.Request) (*h
 	return roundTrip(request)
 }
 
-func TestFirebaseAppCheckVerifierAcceptsExactOfficialJWT(t *testing.T) {
+func TestFirebaseAppCheckVerifierAcceptsOfficialJWTWithAdditionalAudience(t *testing.T) {
 	key := mustAppCheckRSAKey(t)
 	var requests atomic.Int64
 	transport := webAttestationRoundTripper(func(request *http.Request) (*http.Response, error) {
@@ -53,9 +53,9 @@ func TestFirebaseAppCheckVerifierAcceptsExactOfficialJWT(t *testing.T) {
 		Transport: transport, Now: func() time.Time { return appCheckTestNow },
 	})
 	binding := appCheckBinding("react_native_ios", appCheckTestNow)
-	token := signAppCheckToken(t, key, "app-check-key", "JWT", appCheckClaims(
-		appCheckTestAppID, appCheckTestProject, appCheckTestNow,
-	))
+	claims := appCheckClaims(appCheckTestAppID, appCheckTestProject, appCheckTestNow)
+	claims["aud"] = []string{"firebase-app-check", "projects/" + appCheckTestProject}
+	token := signAppCheckToken(t, key, "app-check-key", "JWT", claims)
 	evidence := mustWebEvidence(t, firebaseAppCheckProvider, token)
 
 	result, err := verifier.Verify(context.Background(), evidence, binding)
@@ -114,7 +114,6 @@ func TestFirebaseAppCheckVerifierRejectsHeaderClaimsAndScope(t *testing.T) {
 		{name: "lowercase typ", typ: "jwt", claims: validClaims, binding: appCheckBinding("ios", appCheckTestNow)},
 		{name: "wrong issuer", typ: "JWT", claims: withAppCheckClaim(validClaims, "iss", firebaseAppCheckIssuerPrefix+"999999999999"), binding: appCheckBinding("ios", appCheckTestNow)},
 		{name: "wrong audience", typ: "JWT", claims: withAppCheckClaim(validClaims, "aud", []string{"projects/999999999999"}), binding: appCheckBinding("ios", appCheckTestNow)},
-		{name: "ambiguous audience", typ: "JWT", claims: withAppCheckClaim(validClaims, "aud", []string{"projects/" + appCheckTestProject, "other"}), binding: appCheckBinding("ios", appCheckTestNow)},
 		{name: "wrong subject", typ: "JWT", claims: withAppCheckClaim(validClaims, "sub", "1:123456789012:ios:not-allowed"), binding: appCheckBinding("ios", appCheckTestNow)},
 		{name: "expired", typ: "JWT", claims: withAppCheckClaim(validClaims, "exp", appCheckTestNow.Add(-time.Minute).Unix()), binding: appCheckBinding("ios", appCheckTestNow)},
 		{name: "future issued at", typ: "JWT", claims: withAppCheckClaim(validClaims, "iat", appCheckTestNow.Add(2*time.Minute).Unix()), binding: appCheckBinding("ios", appCheckTestNow)},
