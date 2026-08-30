@@ -23,14 +23,24 @@ Link `Latchway` and `LatchwayAppAttest` to the application target.
 import Latchway
 import LatchwayAppAttest
 
+// Use the fully resolved private app-ID group that appears first in the
+// application's signed keychain-access-groups entitlement.
+let rootKeychainAccessGroup = "ABCDE12345.com.example.myapp"
+let extensionSharedKeychainAccessGroups = [
+    "ABCDE12345.com.example.myapp.intent",
+]
 let appAttest = LatchwayAppAttestProvider(
     applicationID: "app_01J00000000000000000000000",
-    environment: "production"
+    environment: "production",
+    rootKeychainAccessGroup: rootKeychainAccessGroup,
+    legacySharedKeychainAccessGroups: extensionSharedKeychainAccessGroups
 )
 let configuration = LatchwayConfiguration(
     baseURL: URL(string: "https://gateway.example.com")!,
     applicationID: "app_01J00000000000000000000000",
     environment: "production",
+    rootKeychainAccessGroup: rootKeychainAccessGroup,
+    legacySharedKeychainAccessGroups: extensionSharedKeychainAccessGroups,
     identityProvider: "firebase",
     appVersion: "1.2.3",
     softwareKeyFallbackPolicy: .disallow,
@@ -61,6 +71,16 @@ The SDK signs RFC 9449 DPoP proofs, stores refresh state in a
 non-synchronizable this-device-only Keychain item, and coordinates refresh
 through an actor single flight. It strips or rejects caller-supplied provider
 credentials and signs only the configured gateway origin.
+
+`rootKeychainAccessGroup` is required. Pass the fully resolved private app-ID
+group that appears first in the root application's signed entitlement; never
+pass `$(AppIdentifierPrefix)` at runtime. If the root target also carries
+extension-shared groups, pass every one as
+`legacySharedKeychainAccessGroups` to both `LatchwayConfiguration` and
+`LatchwayAppAttestProvider`. The SDK proves the signed default group with a
+disposable sentinel and scans the explicit shared groups only at known root
+record coordinates. Stale shared-first root state fails closed with
+`rootKeychainMigrationRequired` and requires an explicit migration.
 
 Production App Attest requires a production entitlement, matching server
 application policy, an Apple-signed application, and a supported physical

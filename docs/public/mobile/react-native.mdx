@@ -50,6 +50,11 @@ const latchway = createLatchwayClient({
   android: {
     playIntegrityCloudProjectNumber: applicationConfiguration.googleCloudProjectNumber,
   },
+  apple: {
+    rootKeychainAccessGroup: applicationConfiguration.rootKeychainAccessGroup,
+    legacySharedKeychainAccessGroups:
+      applicationConfiguration.extensionSharedKeychainAccessGroups,
+  },
 });
 
 const response = await latchway.fetch("/v1/chat/completions", {
@@ -96,9 +101,15 @@ fresh proof replay key, and rejects an SDK kind that does not match the stored
 ## Native host setup
 
 On iOS, install JavaScript dependencies, run CocoaPods from the host app, and
-enable App Attest for the exact application identifier. The bridge constructs
-the native App Attest provider and keeps Keychain, Secure Enclave, session, and
-attested-key state in the iOS SDK.
+enable App Attest for the exact application identifier. Configure
+`apple.rootKeychainAccessGroup` with the fully resolved private app-ID group
+that appears first in the root application's signed entitlement. List every
+explicit extension-shared group in
+`apple.legacySharedKeychainAccessGroups`; never pass an unresolved
+`$(AppIdentifierPrefix)` expression. The bridge passes the same groups to the
+native App Attest provider and root client, keeping Keychain, Secure Enclave,
+session, and attested-key state inside the iOS SDK. A stale root record in an
+explicit shared group fails closed and requires an explicit migration.
 
 On Android, compile against API 37 for the source candidate, configure the
 numeric Play cloud project in `android.playIntegrityCloudProjectNumber`, and
