@@ -16,13 +16,13 @@ promoted.
 | --- | --- |
 | Current phase | Phase 19 canonical prior-candidate checkpoint prepared; protected RC run and stable descendant pending |
 | Current objective | Land the coherent `1.0.0-rc.1` checkpoint alone on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
-| Last passing commit in each repository | Core RC implementation/release-tooling checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `afab50dcdb577be8a9ca6e94c054a7717a857f6d`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` |
+| Last passing commit in each repository | Core locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135` (exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `afab50dcdb577be8a9ca6e94c054a7717a857f6d`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Database schema version | `19` |
-| Last full test time | `2026-08-29T22:42:36Z`, successful RC source/release validation (all Go tests, vet, 196 Python tests, console build, frozen API) plus synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
+| Database schema version | `20` |
+| Last full test time | `2026-08-30T00:11:34Z`, successful full Go suite against PostgreSQL 18 plus vet, client-diagnostics lifecycle, schema-20 migration, contract, workflow, formatting, and synchronized SDK package checks; the last complete non-root local v1 load remains the `2026-08-29T11:18:10Z` run at `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Passing test commands | The repository commands recorded immediately below pass at the named source commits; the complete local load command also passes at the source/load checkpoint |
 | Open blockers | Local implementation/load/deployment/recovery blockers: none. Release blockers: protected `main` has not retained the required canonical RC candidate run or its stable descendant run, and exact-image live SDK/provider/device/cloud/destructive-resilience/signing/publication evidence remains unavailable |
-| External credentials still required | Protected GitHub repository settings, runners, and registry publication/signing identities; Apple Distribution signing and production App Attest configuration (a physical iPhone is connected); a physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
+| External credentials still required | Protected GitHub repository settings, runners, and registry publication/signing identities; Apple Distribution signing and production App Attest configuration (a physical iPhone has been connected but must be unlocked, trusted, and visible to CoreDevice during the protected run); a physical Android device plus Play Console, Google Cloud, Play Integrity, and a Play-distributed build; OpenRouter credentials; and credentials for every claimed cloud deployment |
 | Next executable task | Advance protected `main` only to the signed `1.0.0-rc.1` checkpoint and wait for its `release.yml` run to pass; only then advance to the signed stable descendant and begin exact-candidate source and release evidence |
 
 Passing repository commands at the recorded heads include:
@@ -66,11 +66,11 @@ mise exec -- pnpm pack:check
 | Contract release time | `2026-08-29T07:14:27Z` |
 | Wire protocol | `1` |
 | Normative core checkpoint | `2f5e5e67c824e270431f1232cc6dc2824848e380` |
-| Passing RC implementation and release-tooling checkpoint | `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c` (`1.0.0-rc.1`); exact protected candidate pending |
+| Passing RC implementation and release-tooling checkpoint | `ca26b74b6588b9c81935c5e50843a0be98fbd135` (`1.0.0-rc.1`); exact protected candidate pending |
 | Passing local source/load checkpoint | `73743b1633e4521aeda7ba1228cd18b78ef3a185` |
 | Contract archive | `latchway-contract-0.5.1.tar.gz` |
 | Contract archive SHA-256 | `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754` |
-| Database schema | `19` |
+| Database schema | `20` |
 | Declared compatible server range | `1.0.0` through `1.0.x` |
 
 The archive was reproduced byte-for-byte in two independent local output
@@ -125,7 +125,8 @@ tests or deterministic fixtures:
 - Generic JWT/OIDC and Firebase, Supabase, Clerk, static asymmetric, and
   explicitly enabled symmetric identity verification; pseudonymous external
   subjects; RFC 9449 P-256 DPoP sessions; rotating refresh families; replay and
-  revocation controls; and gateway signing-key rotation.
+  revocation controls; protected redacted client diagnostics; and gateway
+  signing-key rotation.
 - Server and SDK implementations for Apple App Attest and Google Play
   Integrity, plus Firebase App Check and Cloudflare Turnstile risk signals.
   Debug attestation is development-only and fails closed in production unless
@@ -134,7 +135,7 @@ tests or deterministic fixtures:
   worker heartbeats, retention and reconciliation jobs, scheduled self-tests,
   JWKS refresh, signing-key rotation, and multi-role `all`, `api`, and `worker`
   operation.
-- PostgreSQL migrations through schema 19; Compose and cloud deployment assets
+- PostgreSQL migrations through schema 20; Compose and cloud deployment assets
   for Cloud Run, AWS, Fly.io, and Cloudflare Containers; backup, restore,
   upgrade, rollback, load, failure-injection, and multi-replica evidence
   producers; and release workflows for deterministic artifacts, scans, SBOMs,
@@ -152,15 +153,15 @@ candidate but are not immutable protected-run release evidence.
 | Area | Local result |
 | --- | --- |
 | Runtime image | Exact core checkout `73743b1633e4521aeda7ba1228cd18b78ef3a185` built and ran as version `1.0.0`, configured user `65532:65532` |
-| Container smoke | Fresh schema-19 migration, health, readiness, doctor, read-only root filesystem, dropped capabilities, SIGTERM restart, and isolated cleanup passed; receipt SHA-256 `1db12c4f130547a75d7599b13c93ee81f714355a6aa9a366e6365e9263a9e162` |
+| Container smoke | At exact historical checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`, fresh schema-19 migration, health, readiness, doctor, read-only root filesystem, dropped capabilities, SIGTERM restart, and isolated cleanup passed; schema-20 migration tests pass at the current source, while an exact-current-image smoke remains protected release evidence; receipt SHA-256 `1db12c4f130547a75d7599b13c93ee81f714355a6aa9a366e6365e9263a9e162` |
 | Multi-architecture build | Exact local OCI layout at `73743b1633e4521aeda7ba1228cd18b78ef3a185` contains `linux/amd64` and `linux/arm64`; archive SHA-256 `35dab580a652d7c930975b52ca5a97379606a3fec54b68046eddffeb0ac0f031`, index `sha256:09bb1ae785197251342fc88bc370d7d7f2a0e13bd8df948418c7803d9dc9587b` |
 | Failure matrix | At exact core checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`, nine automated semantic groups passed; six destructive or protected-infrastructure scenarios were correctly classified `external_required` |
 | Local recovery drill | Backup, fresh restore with identical state fingerprint, current upgrade, and distinct-ancestor application rollback passed; receipt SHA-256 `40b43fecde7f111575ba9b1d8a23bb49860ef9048b3acdabf80d111a732b99c3` |
 | Go vulnerability scan | Exact-source `CGO_ENABLED=0`, `-trimpath` binary scan with pinned `govulncheck v1.1.4` reported zero called-symbol findings; result SHA-256 `172a57db4d2b0d373e3d2dbdac765ec52d2e2c0e5301731ec10422bbdde1e6b6` |
 | Container/source vulnerability and license scans | Pinned Trivy `0.74.0` reported zero blocked `HIGH` or `CRITICAL` findings for both architectures and source policy/license gates |
 | Local SBOM/provenance | Each platform has a subject-bound embedded SPDX statement and SLSA predicate; standalone SPDX 2.3 files contain 52 packages with amd64 SHA-256 `61346f0a2aaca142e040d34613077418c352707615b6317f259cc94c8eee565a` and arm64 SHA-256 `113bde74dd53a7cb213748a7ba9c5b2414bd2786c2a8513b149992916a9bd7da` |
-| JavaScript package | Reproducible tarball SHA-256 `902877f7a57377eb737ce725d77abda6e7d59dab6823df77af9764ae9c2dfb7f` |
-| React Native package | Reproducible exact-native-pin tarball SHA-256 `cd7c63d5047e2ab3ce413365fd81b08996a6c31643512f7568942d5a49db461b` |
+| JavaScript package | Reproducible tarball at `afab50dcdb577be8a9ca6e94c054a7717a857f6d`, SHA-256 `dd1e797bcf14523d996ed4b510deab2ce27e2259de94cf435fe049d78faa422e` |
+| React Native package | Reproducible exact-native-pin tarball at `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c`, SHA-256 `32c22817a73b44b42f31ef14c6b7bebfce5bca98f89ca2794019c33a40439037` |
 | Mobile source/package evidence | Swift, Android, React Native, New Architecture examples, clean consumers, fail-closed simulator/emulator paths, and exact source pins passed; local prepublication receipt SHA-256 `763c94234e7585bd18799276b681ec9484ae0f8cd434e0143582894fdf9c9c33` explicitly retains `release_eligible: false` until physical proofs exist |
 | Historical local v1 load suite | Complete at core `1f6f45b17961f8788cf8d9d71b846e88fd82c751`; idle memory, 100 RPS, 500 concurrent SSE streams, and zero-overspend contention pass, but the original initial overhead gate fails at P50/P95 with `13.077/16.728/23.605 ms` against `<5/<15/<30 ms`; that historical report correctly retains `load_targets_passed: false` |
 | Corrected-target non-root local v1 load suite | Passed at clean source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`: `complete_suite: true`, `load_targets_passed: true`, overhead `10.908333/15.156082/18.917875 ms` against strict `<15/<20/<30 ms`, 6,000/6,000 non-streaming requests with exact terminal quota, 500 SSE streams for 60 seconds with `70.875 MiB` growth and no premature completion, and exact 64 accepted/64 denied/0 unexpected contention |
@@ -194,9 +195,12 @@ counted as a pass.
 
 ## External-required release gates
 
-No connected physical Apple or Android device, valid GitHub/registry
-publication session, production provider credentials, or claimed cloud account
-was available for this source pass. The following gates therefore remain open:
+No physical Apple or Android device was visible to the release tooling during
+this source pass, and no protected registry-publication identity, production
+provider credentials, or claimed cloud account was available. A GitHub CLI
+session and an iPhone have since been available, but neither substitutes for a
+protected publication run or production device evidence. The following gates
+therefore remain open:
 
 1. Run every SDK against the exact immutable release image, including DPoP,
    error mapping, refresh, revocation, streaming, quota snapshots, and protocol

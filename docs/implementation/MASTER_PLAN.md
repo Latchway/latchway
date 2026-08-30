@@ -12,7 +12,7 @@ registries that were not observed for the exact immutable candidate.
 | 0 | Repository audit | Complete across all five repositories | Baseline and source histories recorded |
 | 1 | Governance, contracts, threat model, ADRs | Complete; contract `0.5.1`, wire `1`, checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Deterministic frozen bundle and SDK locks pass locally; public bundle asset pending |
 | 2 | Go/PostgreSQL/CLI/dashboard/image foundation | Complete; single binary and embedded dashboard support `all`, `api`, and `worker` | Local non-root image and PostgreSQL smoke pass; exact public digest pending |
-| 3 | Database and administrative bootstrap | Complete through schema 19 | Local normal, race, authorization, and migration tests pass |
+| 3 | Database and administrative bootstrap | Complete through schema 20 | Local normal, race, authorization, bounded diagnostics-index, and migration tests pass |
 | 4 | Immutable configuration store | Complete, including validation, plan, ETags, activation, rollback, cache, and reconciliation | Local concurrency and rollback gates pass |
 | 5 | Identity verification | Complete for generic OIDC/JWT, Firebase, Supabase, Clerk, static asymmetric, and explicitly enabled symmetric JWT | Local mock/fixture and adversarial gates pass; production issuer/provider observations remain release inputs |
 | 6 | RFC 9449 DPoP and sessions | Complete for challenge/exchange, refresh rotation, replay, revocation, signing keys, and JWKS | Local normal/race/fuzz/conformance gates pass |

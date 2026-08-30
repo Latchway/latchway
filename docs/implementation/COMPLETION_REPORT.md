@@ -11,14 +11,14 @@ after every release domain has authenticated evidence for one exact candidate.
 
 | Artifact | Candidate coordinate | Current evidence |
 | --- | --- | --- |
-| Core | Intended `v1.0.0`; passing RC implementation/release-tooling checkpoint `4a89b9a88c3dd6cde1c97e945fdbf37b8865e56c`; exact protected RC candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged; coherent `1.0.0-rc.1` source is prepared; non-root corrected-target load, local multi-architecture supply-chain, Compose, failure-matrix, and recovery drills passed; protected RC/stable candidate runs, exact-image evidence, public annotated product tag, and GitHub release are not claimed |
+| Core | Intended `v1.0.0`; locally passing RC implementation/release-tooling checkpoint `ca26b74b6588b9c81935c5e50843a0be98fbd135`; exact protected RC candidate pending; passing local source/load checkpoint `73743b1633e4521aeda7ba1228cd18b78ef3a185`; normative contract checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` | Contract frozen and unchanged; coherent `1.0.0-rc.1` source including protected client diagnostics is prepared; non-root corrected-target load, local multi-architecture supply-chain, Compose, failure-matrix, and recovery drills passed at their named checkpoints; protected RC/stable candidate runs, exact-image evidence, public annotated product tag, and GitHub release are not claimed |
 | JavaScript | `@latchway/client@1.0.0`; source `afab50dcdb577be8a9ca6e94c054a7717a857f6d` | Local reproducible package/consumer and release-workflow gates pass; npm publication not claimed |
 | Swift/iOS | `Latchway` / `Latchway/AppAttest` `1.0.0`; source `f7e3e3585c233ddff88bebb4f39402cd6398a1f2` | Local Swift Package, consumer, CocoaPods, fixture, unsupported-device fail-closed, and release-workflow gates pass; public tag/package and physical proof not claimed |
 | Android | `dev.latchway:latchway-*` `1.0.0`; source `a41c0a5fd648365258695b2fe0abda44b618b9d6` | Local Gradle, stable API 37.0 installer, Maven-layout, consumer, explicit emulator-rejection, and release-workflow gates pass; Maven Central and Play-distributed proof not claimed |
 | React Native | `@latchway/react-native@1.0.0`; source `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` | Local JavaScript, synchronized exact native pins, bridge, New Architecture examples, package, and evidence-export gates pass; npm and physical-device proof not claimed |
 | Contract bundle | `latchway-contract-0.5.1.tar.gz` | Two local builds are byte-identical at SHA-256 `52ebacd1e38c522b89bb14a1f34782176be32cdf91d22b7ab962003dbca2d754`; no public release asset claimed |
 | OCI image | Intended `ghcr.io/latchway/latchway:v1.0.0` | Supplemental local multi-architecture index `sha256:09bb1ae785197251342fc88bc370d7d7f2a0e13bd8df948418c7803d9dc9587b`; no registry `RepoDigest` claimed |
-| Database | Schema `19` | Migration sources and local migration/runtime tests present; exact cloud/released-image migration receipts pending |
+| Database | Schema `20` | Migration sources, bounded diagnostics index, and local migration/runtime tests present; exact cloud/released-image migration receipts pending |
 
 Contract `0.5.1` is marked `released` at `2026-08-29T07:14:27Z`
 with wire protocol `1`. That state freezes normative source; it does not assert
@@ -56,14 +56,15 @@ and new affected evidence.
 | JavaScript | 36 Vitest and 12 Node tests plus lint, typecheck, build, examples, exports, contract, package closure, clean consumer, and reproducibility; current tarball SHA-256 `dd1e797bcf14523d996ed4b510deab2ce27e2259de94cf435fe049d78faa422e` |
 | Swift/iOS | 65 Swift tests, release build, consumer, CocoaPods lint, contract archive, fixture, unsupported-device fail-closed, and device-evidence schema tests pass |
 | Android | 670 Gradle tasks for test/assemble/lint, release/adversarial and device-evidence suites, local Maven publication, and offline consumers pass at the synchronized source |
-| React Native | 33 Vitest, 21 Node, and the device-finalization/export/gateway suites plus lint, typecheck, codegen, build, New Architecture examples, native consumers, podspec, package closure, and reproducibility; current tarball SHA-256 `726bdfb5c2cef0e036e3d0857980d3aae7902c85d1d12aab46d15d4dcf6e7305` |
+| React Native | 33 Vitest, 21 Node, and the device-finalization/export/gateway suites plus lint, typecheck, codegen, build, New Architecture examples, native consumers, podspec, package closure, and reproducibility; current tarball at `4a7e6cebf1c4bae7672dfe21ddc01f554e3fa80c` has SHA-256 `32c22817a73b44b42f31ef14c6b7bebfce5bca98f89ca2794019c33a40439037` |
 
 Repository-local results demonstrate source and package integrity. They do not
 replace the protected all-SDK suite against the exact released image.
 
 ### Supplemental runtime, security, and failure evidence
 
-- A local production image started with PostgreSQL, migrated to schema 19,
+- A local production image at the named historical checkpoint started with
+  PostgreSQL, migrated to schema 19,
   passed health/readiness/doctor/version, ran as `65532:65532` with a read-only
   root filesystem and dropped capabilities, and stopped gracefully.
 - The exact local candidate OCI layout contained both `linux/amd64` and
@@ -176,7 +177,7 @@ source commits shown under Release artifacts.
 | Operation | Source/local evidence | Release evidence required |
 | --- | --- | --- |
 | Clean Compose startup | Local production image/PostgreSQL smoke passed | Protected exact-image Compose receipt |
-| Fresh migration | Local schema-19 migration passed | Exact-image cloud/platform migration receipts |
+| Fresh migration | Historical local schema-19 image migration passed; additive schema-20 migration and integration tests pass at current source | Exact-current-image cloud/platform migration receipts |
 | Configuration activation/rollback | Canonical Admin API and local concurrency/browser tests pass | Exact-candidate deployment observation under load |
 | Backup/restore | Isolated backup into a fresh database restored an identical state fingerprint and passed doctor/health/readiness | Protected exact-image backup/restore drill receipt |
 | Upgrade/application rollback | Current schema upgrade and distinct-ancestor application rollback passed locally | Released previous/current digest- and attestation-bound drill |
@@ -201,10 +202,11 @@ The following are unfinished release evidence, not post-1.0 enhancements:
 - annotated tags, GitHub releases, OCI/npm/Swift/CocoaPods/Maven publication,
   raw-asset verification, and clean post-publication consumers.
 
-No valid GitHub/registry publication session, production cloud/provider
-credential set, or connected physical device was available during this source
-pass. These gates cannot be truthfully converted into passing evidence by local
-fixtures or source inspection.
+No protected registry-publication identity, production cloud/provider
+credential set, or device visible to the release tooling was available during
+this source pass. GitHub CLI access and an intermittently connected iPhone are
+now available, but these gates still cannot be truthfully converted into
+passing evidence by local fixtures or source inspection.
 
 When every item above passes for the same immutable candidate, the finalizer
 will produce the authoritative completion report. Until then, this ledger must
