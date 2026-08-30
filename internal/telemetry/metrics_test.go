@@ -29,7 +29,7 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	finish("succeeded", 250*time.Millisecond)
 	registry.RecordUpstreamAttempt(ctx, Labels{Route: "primary", Upstream: "openai", ModelAlias: "fast"}, RouteAttemptObservation{
 		Condition: RouteAttemptConditionNone, Outcome: "succeeded",
-		CircuitState: CircuitObservationNotConfigured,
+		CircuitState: CircuitObservationClosed,
 	}, 12, 8, 900, 50*time.Millisecond)
 	registry.RecordQuotaDenial(ctx, Labels{Feature: "assistant", Outcome: "denied"}, false)
 	registry.RecordWorkerJob(ctx, "enforce_retention", "succeeded", 20*time.Millisecond)
@@ -60,13 +60,44 @@ func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 			t.Fatalf("metrics output contains forbidden label %q:\n%s", forbidden, text)
 		}
 	}
-	for _, expected := range []string{`condition="none"`, `outcome="succeeded"`, `circuit_state="not_configured"`} {
+	for _, expected := range []string{`condition="none"`, `outcome="succeeded"`, `circuit_state="closed"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("route-attempt metric missing closed observation %q:\n%s", expected, text)
 		}
 	}
 	if !strings.Contains(text, `job="release_expired_concurrency_leases"`) {
 		t.Fatalf("worker metric omitted the closed concurrency job label:\n%s", text)
+	}
+}
+
+func TestRegistryRouteAttemptObservationVocabularyIncludesCircuitLifecycle(t *testing.T) {
+	t.Parallel()
+
+	registry, err := NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	for _, state := range []string{
+		CircuitObservationStale,
+		CircuitObservationClosed,
+		CircuitObservationOpen,
+		CircuitObservationHalfOpen,
+	} {
+		registry.RecordUpstreamAttempt(context.Background(), Labels{Route: state}, RouteAttemptObservation{
+			Condition:    RouteAttemptConditionFirstByteTimeout,
+			Outcome:      "timed_out",
+			CircuitState: state,
+		}, -1, -1, -1, -1)
+	}
+
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
+	text := recorder.Body.String()
+	for _, state := range []string{"stale", "closed", "open", "half_open"} {
+		if !strings.Contains(text, `circuit_state="`+state+`",condition="first_byte_timeout"`) {
+			t.Fatalf("route-attempt metric missing circuit state %q:\n%s", state, text)
+		}
 	}
 }
 

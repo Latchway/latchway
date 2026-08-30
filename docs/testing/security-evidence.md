@@ -17,10 +17,12 @@ The dispatch accepts only:
 
 - the exact 40-character candidate commit;
 - its intended semantic tag; and
-- the numeric successful release-candidate workflow run ID.
+- the numeric successful release-candidate workflow run ID and exact run
+  attempt.
 
-The artifact name is derived from the commit. It is not supplied by the
-operator. The job queries the Actions API and requires a completed successful
+The candidate artifact name is derived from the commit, run ID, and run
+attempt. It is not supplied by the operator. The job queries the Actions API
+and requires that exact attempt to be a completed successful
 `workflow_dispatch` run of `.github/workflows/release.yml` on `main` at that
 commit. It then verifies the retained candidate-manifest Sigstore bundle with
 the exact repository, workflow, source digest, signer digest, protected-main
@@ -123,12 +125,14 @@ review is complete.
 
 ## Promotion gate
 
-Promotion requires the successful security workflow run ID. Before any OCI
-tag, Git tag, release, or SDK dispatch is created, promotion:
+Promotion requires the successful security workflow run ID and exact run
+attempt. Before any OCI tag, Git tag, release, or SDK dispatch is created,
+promotion:
 
-1. requires that run to be a successful dispatch of `security.yml` on main at
-   the candidate commit;
-2. downloads only `latchway-security-<candidate-commit>`;
+1. requires that exact attempt to be a successful dispatch of `security.yml`
+   on main at the candidate commit;
+2. downloads only
+   `latchway-security-<candidate-commit>-<security-run-id>-<security-run-attempt>`;
 3. verifies the summary attestation against the exact security workflow,
    source digest, signer digest, ref, repository, and hosted runner; and
 4. reruns `security-evidence.py --verify` against the immutable candidate,

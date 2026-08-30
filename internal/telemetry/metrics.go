@@ -37,6 +37,7 @@ const (
 	RouteAttemptConditionNone                 = "none"
 	RouteAttemptConditionConnectError         = "connect_error"
 	RouteAttemptConditionTimeoutBeforeHeaders = "timeout_before_headers"
+	RouteAttemptConditionFirstByteTimeout     = "first_byte_timeout"
 	RouteAttemptConditionStatus408            = "status_408"
 	RouteAttemptConditionStatus429            = "status_429"
 	RouteAttemptConditionStatus500            = "status_500"
@@ -44,10 +45,12 @@ const (
 	RouteAttemptConditionStatus503            = "status_503"
 	RouteAttemptConditionStatus504            = "status_504"
 
-	// CircuitObservationNotConfigured is an explicit observation, not a
-	// breaker state. This release does not suppress or admit a route based on
-	// inferred circuit behavior.
-	CircuitObservationNotConfigured = "not_configured"
+	// Circuit observations describe bounded, per-process attempt history. They
+	// are telemetry states, not admission-affecting breaker decisions.
+	CircuitObservationStale    = "stale"
+	CircuitObservationClosed   = "closed"
+	CircuitObservationOpen     = "open"
+	CircuitObservationHalfOpen = "half_open"
 )
 
 var telemetryLabelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
@@ -370,6 +373,7 @@ func safeRouteAttemptCondition(condition string) string {
 	case RouteAttemptConditionNone,
 		RouteAttemptConditionConnectError,
 		RouteAttemptConditionTimeoutBeforeHeaders,
+		RouteAttemptConditionFirstByteTimeout,
 		RouteAttemptConditionStatus408,
 		RouteAttemptConditionStatus429,
 		RouteAttemptConditionStatus500,
@@ -392,10 +396,15 @@ func safeRouteAttemptOutcome(outcome string) string {
 }
 
 func safeCircuitObservationState(state string) string {
-	if state == CircuitObservationNotConfigured {
+	switch state {
+	case CircuitObservationStale,
+		CircuitObservationClosed,
+		CircuitObservationOpen,
+		CircuitObservationHalfOpen:
 		return state
+	default:
+		return "invalid"
 	}
-	return "invalid"
 }
 
 func (registry *Registry) RecordQuotaDenial(ctx context.Context, labels Labels, concurrency bool) {

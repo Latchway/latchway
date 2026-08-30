@@ -4,6 +4,21 @@ All notable project changes will be documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Add bounded per-process `stale`, `closed`, `open`, and `half_open` circuit
+  observations for upstream-attempt telemetry without changing deterministic
+  route selection or dispatch admission.
+- Add a real OTLP/HTTP export and shutdown-flush regression and run the
+  credential-free release/evidence tooling in ordinary pull-request CI.
+
+### Fixed
+
+- Make the embedded console's browser proof fail closed if any same-origin
+  mutation leaves the canonical Admin API.
+- Expire stale circuit failure history before recording a new outcome so old
+  failures cannot reopen an observation window.
+
 ## [1.0.0-rc.1] - 2026-08-30
 
 ### Changed

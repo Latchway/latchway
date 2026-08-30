@@ -27,7 +27,7 @@ registries that were not observed for the exact immutable candidate.
 | 15 | Observability and operational jobs | Complete logging, OpenTelemetry, analytics, reconciliation, retention, scheduled self-tests, key rotation, JWKS refresh, and heartbeats | Local redaction/job/race gates pass; protected multi-replica/worker recovery evidence pending |
 | 16 | Deployment assets | Complete for Compose, Cloud Run, AWS, Fly.io, and Cloudflare Containers, with migration/secret/health/backup/restore/upgrade guidance | Local image/Compose smoke passes; exact-image cloud smokes pending |
 | 17 | Cross-repository conformance | Complete tooling, shared vectors, contract locks, release-image suites, and compatibility manifest | Source/fixture/package gates pass; protected live exact-image and public-bundle scopes pending |
-| 18 | Hardening | Complete source fuzz/race/adversarial/review, load/failure producers, scanners, SBOM/signing/provenance automation, and release validation | Supplemental local image scan/SBOM/failure results pass; protected exact-image load, destructive failure, per-arch scans, signing, and provenance pending |
+| 18 | Hardening | Complete automated source fuzz/race/adversarial gates, review/evidence tooling, load/failure producers, scanners, SBOM/signing/provenance automation, and release validation; source self-review is not an independent security assessment | Supplemental local image scan/SBOM/failure results pass; candidate-bound independent P0-P2 and specialist reviews, protected exact-image load, destructive failure, per-arch scans, signing, and provenance remain pending |
 | 19 | Documentation and version 1 release | Documentation and fail-closed promotion/finalization machinery complete in source | Final report, tags, GitHub releases, packages, image, and post-publication verification pending |
 
 ## Remaining execution sequence
@@ -40,7 +40,8 @@ immutable candidate:
 2. Run live all-SDK conformance, OpenRouter canaries, physical App Attest/Play
    Integrity tests, cloud smoke tests, and operational resilience drills against
    those exact artifacts.
-3. Run per-architecture vulnerability/license scans, SBOM validation, signing,
+3. Run candidate-bound independent P0-P2 and specialist security reviews,
+   per-architecture vulnerability/license scans, SBOM validation, signing,
    provenance verification, load, failure injection, backup/restore, and
    previous-candidate upgrade/rollback.
 4. Aggregate only authenticated, candidate-bound, unexpired evidence. Any

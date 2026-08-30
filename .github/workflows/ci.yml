@@ -23,6 +23,15 @@ jobs:
         run: python3 scripts/validate-contracts.py
       - name: Validate CI workflow invariants
         run: python3 -m unittest scripts/test_ci_workflow.py
+      - name: Validate fixed release and evidence tooling offline
+        run: |
+          python3 -m unittest \
+            scripts/test_release_candidate.py \
+            scripts/test_release_preflight.py \
+            scripts/test_release_workflows.py \
+            scripts/test_cross_repo_conformance.py \
+            scripts/test_release_domain_evidence.py \
+            scripts/test_release_domain_observer.py
       - name: Prove deterministic contract bundle
         run: |
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a

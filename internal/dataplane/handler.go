@@ -97,6 +97,9 @@ type Config struct {
 	Targets   TargetFactory
 	Relayer   ResponseRelayer
 	Telemetry *telemetry.Registry
+	// CircuitObservations configures a bounded, per-process telemetry state
+	// cache. It never changes route selection or dispatch admission.
+	CircuitObservations policy.CircuitObservationConfig
 
 	PublicOrigin             string
 	MaximumRequestBodyBytes  int64
@@ -119,6 +122,7 @@ type Handler struct {
 	targets       TargetFactory
 	relayer       ResponseRelayer
 	telemetry     *telemetry.Registry
+	circuits      *policy.CircuitObservations
 
 	maximumResponseBody int64
 	clientWriteTimeout  time.Duration
@@ -194,11 +198,16 @@ func New(config Config) (*Handler, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	circuits, err := policy.NewCircuitObservations(config.CircuitObservations)
+	if err != nil {
+		return nil, errInvalidConfiguration
+	}
 	return &Handler{
 		accessTokens: config.AccessTokens, sessions: config.Sessions,
 		configuration: config.Configuration, policies: config.Policies,
 		quotas: config.Quotas, secrets: config.Secrets, endpoints: endpoints,
 		targets: config.Targets, relayer: config.Relayer, telemetry: config.Telemetry,
+		circuits:            circuits,
 		maximumResponseBody: config.MaximumResponseBodyBytes,
 		clientWriteTimeout:  config.ClientWriteTimeout, persistenceTimeout: config.PersistenceTimeout,
 		now: config.Now, retrySleep: sleepForRetry, ownedTargets: ownedTargets,
@@ -601,6 +610,7 @@ type executionResult struct {
 	relay         upstream.RelayOutcome
 	startedAt     time.Time
 	firstByteAt   time.Time
+	circuitState  string
 	err           error
 	beginInvoked  bool
 	dispatchOwner bool
@@ -919,10 +929,11 @@ func (handler *Handler) executeAttempt(
 		}
 		return consume(response)
 	}
+	circuitKey := attemptCircuitObservationKey(authorization, decision)
 	authentication := decision.Upstream.Authentication
 	switch authentication.Type {
 	case "none":
-		return handler.dispatchAttempt(executionContext, writer, endpoint.adapter, decision, begin, dispatch)
+		return handler.dispatchAttempt(executionContext, writer, endpoint.adapter, decision, circuitKey, begin, dispatch)
 	case "bearer", "header", "basic":
 		var result executionResult
 		callbackCalled := false
@@ -949,7 +960,7 @@ func (handler *Handler) executeAttempt(
 				}
 			}
 			result = handler.dispatchAttempt(
-				executionContext, writer, endpoint.adapter, decision, begin, credentialDispatch,
+				executionContext, writer, endpoint.adapter, decision, circuitKey, begin, credentialDispatch,
 			)
 			// Never return a transport or observer error through the secret
 			// boundary; Store.Use intentionally collapses callback errors.
@@ -985,7 +996,7 @@ func (handler *Handler) executeAttempt(
 					)
 				}
 				result = handler.dispatchAttempt(
-					executionContext, writer, endpoint.adapter, decision, begin, credentialDispatch,
+					executionContext, writer, endpoint.adapter, decision, circuitKey, begin, credentialDispatch,
 				)
 			},
 		)
@@ -1194,6 +1205,7 @@ func (handler *Handler) dispatchAttempt(
 	writer http.ResponseWriter,
 	adapter protocol.Adapter,
 	decision policy.Decision,
+	circuitKey policy.CircuitObservationKey,
 	begin beginExecutionAttempt,
 	dispatch func(func() error, func(*upstream.DispatchedResponse) error) error,
 ) executionResult {
@@ -1215,6 +1227,10 @@ func (handler *Handler) dispatchAttempt(
 		if !owner {
 			result.err = errDispatchNotOwned
 			return result.err
+		}
+		result.circuitState = policy.CircuitObservationStale
+		if handler.circuits != nil {
+			result.circuitState = string(handler.circuits.State(circuitKey, handler.now().UTC()))
 		}
 		return nil
 	}
@@ -2152,6 +2168,19 @@ func attemptTelemetryLabels(decision policy.Decision) telemetry.Labels {
 	}
 }
 
+func attemptCircuitObservationKey(
+	authorization session.Authorization,
+	decision policy.Decision,
+) policy.CircuitObservationKey {
+	return policy.CircuitObservationKey{
+		EnvironmentID: authorization.EnvironmentID,
+		RevisionID:    authorization.PolicyRevisionID,
+		RouteID:       decision.Route.ID,
+		UpstreamID:    decision.Upstream.ID,
+		ModelID:       decision.Model.ID,
+	}
+}
+
 func (handler *Handler) recordAttempt(
 	ctx context.Context,
 	authorization session.Authorization,
@@ -2160,7 +2189,20 @@ func (handler *Handler) recordAttempt(
 	outcome quota.Outcome,
 	condition string,
 ) {
-	if handler == nil || handler.telemetry == nil || !result.beginInvoked || !result.dispatchOwner {
+	if handler == nil || !result.beginInvoked || !result.dispatchOwner {
+		return
+	}
+	if handler.circuits != nil {
+		key := attemptCircuitObservationKey(authorization, decision)
+		observedAt := handler.now().UTC()
+		switch {
+		case outcome.Status == quota.AttemptSucceeded:
+			handler.circuits.RecordSuccess(key, observedAt)
+		case condition != "":
+			handler.circuits.RecordRetryableFailure(key, observedAt)
+		}
+	}
+	if handler.telemetry == nil {
 		return
 	}
 	labels := attemptTelemetryLabels(decision)
@@ -2182,9 +2224,12 @@ func (handler *Handler) recordAttempt(
 	if condition == "" {
 		condition = telemetry.RouteAttemptConditionNone
 	}
+	if result.circuitState == "" {
+		result.circuitState = telemetry.CircuitObservationStale
+	}
 	handler.telemetry.RecordUpstreamAttempt(ctx, labels, telemetry.RouteAttemptObservation{
 		Condition: condition, Outcome: outcome.Status,
-		CircuitState: telemetry.CircuitObservationNotConfigured,
+		CircuitState: result.circuitState,
 	}, inputTokens, outputTokens, costNanoUSD, firstToken)
 }
 

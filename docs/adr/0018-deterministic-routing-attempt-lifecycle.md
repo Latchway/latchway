@@ -99,8 +99,12 @@ another attempt.
 
 Backoff is bounded, context-cancellable, and uses deterministic request-derived
 jitter so tests are reproducible and replicas do not require shared timer
-state. Circuit observations influence candidate availability but never create
-an unconfigured route; the planner still records why a candidate was skipped.
+state. Each process also derives bounded `stale`, `closed`, `open`, and
+`half_open` observations from dispatched attempt outcomes for telemetry. These
+observations do not reorder candidates, suppress or admit a dispatch, reserve a
+probe, or otherwise affect the deterministic plan in version 1. An
+admission-affecting breaker would require an explicit configuration and
+replica-consistency contract rather than being inferred from local telemetry.
 
 ## Alternatives
 
@@ -123,6 +127,10 @@ immutable preparation/rendering before heterogeneous-model fallback is safe.
 The request explorer and usage views can distinguish one logical request from
 all physical attempts and their individual usage confidence.
 
+Circuit observations are process-local and can differ briefly between
+replicas. They describe the state seen when an attempt acquired dispatch
+ownership; they are not evidence that a route was blocked.
+
 Fallback can legitimately stop because a second conservative reservation is
 denied. Ambiguous post-dispatch failures may charge a failed attempt and a
 successful fallback; this reflects potential infrastructure cost rather than
@@ -135,8 +143,9 @@ credential reuse, attempt-number substitution, unreserved retry cost, and
 random replica-dependent routing. Protected destinations and header filtering
 are re-applied for every attempt. Provider payloads never control retry class,
 route identity, accounting bounds, or circuit keys. Bounded attempts, body
-sizes, response cleanup, backoff, and circuit state prevent retry amplification
-and memory growth.
+sizes, response cleanup, and backoff prevent retry amplification. Circuit
+observation keys, cache size, failure counters, and time windows are separately
+bounded to prevent telemetry state from causing unbounded memory growth.
 
 ## Migration implications
 
@@ -157,7 +166,9 @@ Accepted on 2026-08-28 and implemented and locally validated for contract
 `0.5.1` and wire protocol `1` on 2026-08-29. Priority, deterministic weighted
 and sticky selection, bounded same-route retry, configured fallback,
 per-attempt accounting, immutable request rendering, and response-commitment
-guards are executable only through the closed policies described above. Their
+guards are executable only through the closed policies described above. The
+per-process circuit observation lifecycle is telemetry-only and does not alter
+those routing decisions. Their
 normal, adversarial, PostgreSQL, race, and conformance tests pass, and the
 complete corrected-target local load suite passed at source checkpoint
 `00197f916cd50803093a5e73bbac725e97c394e3`. Live-provider and

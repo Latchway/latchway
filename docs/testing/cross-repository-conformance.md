@@ -120,7 +120,7 @@ Each JSON document has the exact following top-level shape:
   "finished_at": "2026-08-29T00:10:00Z",
   "core_commit": "<40 lowercase hexadecimal characters>",
   "core_release": "v1.0.0",
-  "contract_version": "1.0.0",
+  "contract_version": "0.5.1",
   "bundle_sha256": "<64 lowercase hexadecimal characters>",
   "oci_image_digest": "ghcr.io/latchway/latchway@sha256:<64 lowercase hexadecimal characters>",
   "repositories": {
@@ -141,8 +141,9 @@ Each JSON document has the exact following top-level shape:
 ```
 
 Repository tags and versions need not all be equal; they must equal the exact
-coordinates derived from the five local candidates. The example uses 1.0.0 for
-readability.
+coordinates derived from the five local candidates. The repository coordinates
+in the example use `1.0.0`; the separately versioned frozen contract is
+`0.5.1`.
 
 The lock's `core_commit` is the contract-source checkpoint, not a
 self-referential release-metadata commit. This permits the core completion
@@ -255,16 +256,18 @@ atomically written with mode `0600`.
 ## GitHub workflow
 
 `.github/workflows/cross-repository-conformance.yml` is a read-only manual
-workflow. Supply immutable commit or tag refs for all five repositories. In
-release scope, also supply the core tag and, when available, a run ID and
-artifact name containing the external evidence directory. The workflow checks
-out exactly those refs, runs this command, and retains JSON/JUnit even when the
-verdict fails. It attests the exact source, promotion, or release JSON report
-with GitHub OIDC. Consumers of source-scope evidence must verify the attestation
-against this exact workflow, `refs/heads/main`, and the candidate source digest;
-the source report itself neither needs nor claims an already-created tag. The
-workflow has no package, registry, release, or deployment-environment mutation
-permission.
+workflow. Supply `scope` plus immutable `core_ref`, `javascript_ref`, `ios_ref`,
+`android_ref`, and `react_native_ref` values. Promotion and release scopes also
+require `core_release_tag`, `candidate_oci_image_digest`, and the exact
+`external_evidence_run_id` plus `external_evidence_run_attempt` of the protected
+aggregate producer. The artifact name is derived from that run identity; it is
+not an operator input. The workflow checks out exactly those refs, runs this
+command, and retains JSON/JUnit even when the verdict fails. It attests the
+exact source, promotion, or release JSON report with GitHub OIDC. Consumers of
+source-scope evidence must verify the attestation against this exact workflow,
+`refs/heads/main`, and the candidate source digest; the source report itself
+neither needs nor claims an already-created tag. The workflow has no package,
+registry, release, or deployment-environment mutation permission.
 
 When sibling repositories are private, configure the repository secret
 `LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` as a fine-grained credential with

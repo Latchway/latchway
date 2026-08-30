@@ -114,7 +114,7 @@ func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
 	registry.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := metrics.Body.String()
 	for _, expected := range []string{
-		`latchway_upstream_attempts_total{application="` + fixture.authorization.ApplicationID + `",attestation_level="device_verified",circuit_state="not_configured",condition="none",environment="` + fixture.authorization.EnvironmentID + `",feature="assistant",model_alias="provider_model",outcome="succeeded",plan="starter",platform="ios",route="primary",upstream="provider"} 1`,
+		`latchway_upstream_attempts_total{application="` + fixture.authorization.ApplicationID + `",attestation_level="device_verified",circuit_state="stale",condition="none",environment="` + fixture.authorization.EnvironmentID + `",feature="assistant",model_alias="provider_model",outcome="succeeded",plan="starter",platform="ios",route="primary",upstream="provider"} 1`,
 		`latchway_input_tokens_total`, `latchway_output_tokens_total`,
 		`latchway_reservations_active`, `latchway_time_to_first_token_seconds`,
 	} {
@@ -127,6 +127,72 @@ func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
 			t.Fatalf("metrics leaked high-cardinality value %q:\n%s", forbidden, body)
 		}
 	}
+}
+
+func TestHandlerCircuitObservationsNeverSuppressDeterministicDispatch(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	registry, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Shutdown(context.Background()) })
+	fixture.telemetry = registry
+	fixture.circuitObservations = policy.CircuitObservationConfig{
+		MaximumEntries: 4, FailureThreshold: 3,
+		OpenInterval: 10 * time.Second, StaleAfter: time.Minute,
+	}
+	fixture.target.dispatchErr = errors.New("private dial failure")
+	handler := fixture.handler(t)
+
+	for attempt := 0; attempt < 4; attempt++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, fixture.request(t))
+		assertProblemCode(t, response, "upstream_unavailable", http.StatusServiceUnavailable)
+	}
+	fixture.now = fixture.now.Add(11 * time.Second)
+	fixture.target.dispatchErr = nil
+	fixture.target.response = testDispatchedResponse()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+	if response.Code != http.StatusOK {
+		t.Fatalf("half-open observation dispatch status = %d body=%s", response.Code, response.Body.String())
+	}
+	fixture.target.response = testDispatchedResponse()
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+	if response.Code != http.StatusOK {
+		t.Fatalf("closed observation dispatch status = %d body=%s", response.Code, response.Body.String())
+	}
+	if fixture.target.roundTripCalls != 6 || fixture.targets.calls != 6 {
+		t.Fatalf("circuit observations changed dispatch admission: round trips=%d targets=%d",
+			fixture.target.roundTripCalls, fixture.targets.calls)
+	}
+
+	key := attemptCircuitObservationKey(fixture.authorization, fixture.decision)
+	if state := handler.circuits.State(key, fixture.now); state != policy.CircuitObservationState(policy.CircuitObservationClosed) {
+		t.Fatalf("final circuit observation = %q", state)
+	}
+	metrics := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	assertAttemptSeries := func(state, condition, outcome, count string) {
+		t.Helper()
+		for _, line := range strings.Split(metrics.Body.String(), "\n") {
+			if strings.HasPrefix(line, "latchway_upstream_attempts_total{") &&
+				strings.Contains(line, `circuit_state="`+state+`"`) &&
+				strings.Contains(line, `condition="`+condition+`"`) &&
+				strings.Contains(line, `outcome="`+outcome+`"`) &&
+				strings.HasSuffix(line, "} "+count) {
+				return
+			}
+		}
+		t.Fatalf("missing attempt series state=%s condition=%s outcome=%s count=%s:\n%s",
+			state, condition, outcome, count, metrics.Body.String())
+	}
+	assertAttemptSeries("stale", "connect_error", "failed", "1")
+	assertAttemptSeries("closed", "connect_error", "failed", "2")
+	assertAttemptSeries("open", "connect_error", "failed", "1")
+	assertAttemptSeries("half_open", "none", "succeeded", "1")
+	assertAttemptSeries("closed", "none", "succeeded", "1")
 }
 
 func TestDataPlaneCORSPreflightAndOriginPropagationAreBounded(t *testing.T) {
@@ -3097,7 +3163,7 @@ func TestHandlerFallsBackWithFreshTargetRequestAndPerAttemptAccounting(t *testin
 	primaryObserved, secondaryObserved := false, false
 	for _, line := range strings.Split(metrics.Body.String(), "\n") {
 		if !strings.HasPrefix(line, "latchway_upstream_attempts_total{") ||
-			!strings.Contains(line, `circuit_state="not_configured"`) {
+			!strings.Contains(line, `circuit_state="stale"`) {
 			continue
 		}
 		if strings.Contains(line, `route="primary"`) && strings.Contains(line, `condition="connect_error"`) &&
@@ -3712,20 +3778,21 @@ func TestPolicyEngineRejectsUnsealedAuthorizationBeforeCELResolution(t *testing.
 }
 
 type handlerFixture struct {
-	now           time.Time
-	authorization session.Authorization
-	snapshot      configuration.ActiveSnapshot
-	decision      policy.Decision
-	verifier      *fakeAccessVerifier
-	sessions      *fakeSessionAuthorizer
-	snapshots     *fakeSnapshotLoader
-	policies      *fakePolicyEngine
-	quotas        *fakeQuotaStore
-	secret        *fakeSecretStore
-	target        *fakeDispatchTarget
-	targets       *fakeTargetFactory
-	relayer       *fakeRelayer
-	telemetry     *telemetry.Registry
+	now                 time.Time
+	authorization       session.Authorization
+	snapshot            configuration.ActiveSnapshot
+	decision            policy.Decision
+	verifier            *fakeAccessVerifier
+	sessions            *fakeSessionAuthorizer
+	snapshots           *fakeSnapshotLoader
+	policies            *fakePolicyEngine
+	quotas              *fakeQuotaStore
+	secret              *fakeSecretStore
+	target              *fakeDispatchTarget
+	targets             *fakeTargetFactory
+	relayer             *fakeRelayer
+	telemetry           *telemetry.Registry
+	circuitObservations policy.CircuitObservationConfig
 }
 
 func newHandlerFixture(t *testing.T) *handlerFixture {
@@ -3769,7 +3836,8 @@ func (fixture *handlerFixture) handler(t *testing.T) *Handler {
 		Configuration: fixture.snapshots, Policies: fixture.policies,
 		Quotas: fixture.quotas, Secrets: fixture.secret, Targets: fixture.targets,
 		Relayer: fixture.relayer, Telemetry: fixture.telemetry, PublicOrigin: "https://gateway.example",
-		Now: func() time.Time { return fixture.now },
+		CircuitObservations: fixture.circuitObservations,
+		Now:                 func() time.Time { return fixture.now },
 	})
 	if err != nil {
 		t.Fatalf("construct handler: %v", err)

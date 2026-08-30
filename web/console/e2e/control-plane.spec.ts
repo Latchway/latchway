@@ -24,6 +24,19 @@ const csrf = "csrf_0123456789abcdefghijklmnopqrstuvwxyz";
 const instant = "2026-08-29T00:00:00Z";
 const oneTimeAPIToken = "one-time-browser-token-material-1234567890";
 
+type ObservedMutation = { path: string; csrf: string | null };
+
+function nonAdminMutations(mutations: ObservedMutation[]): ObservedMutation[] {
+  return mutations.filter(({ path }) => !path.startsWith("/admin/v1/"));
+}
+
+function expectOnlyAdminMutations(mutations: ObservedMutation[]): void {
+  expect(
+    nonAdminMutations(mutations),
+    "the console sent a same-origin mutation outside the canonical Admin API"
+  ).toEqual([]);
+}
+
 function json(route: Route, status: number, body: unknown, headers: Record<string, string> = {}) {
   return route.fulfill({
     body: JSON.stringify(body),
@@ -42,7 +55,7 @@ function problem(route: Route, code: string, status: number, detail: string) {
 
 async function installAdminFixture(page: Page) {
   let authenticated = false;
-  const mutations: Array<{ path: string; csrf: string | null }> = [];
+  const mutations: ObservedMutation[] = [];
   const administratorBodies: Array<Record<string, unknown>> = [];
   const apiTokenBodies: Array<Record<string, unknown>> = [];
   const applicationBodies: Array<Record<string, unknown>> = [];
@@ -90,10 +103,17 @@ async function installAdminFixture(page: Page) {
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const pageURL = page.url();
+    const isSameOrigin = pageURL !== "about:blank" && new URL(pageURL).origin === url.origin;
+    if (isSameOrigin && request.method() !== "GET") {
+      mutations.push({ path: url.pathname, csrf: request.headers()["x-csrf-token"] ?? null });
+      if (!url.pathname.startsWith("/admin/v1/")) {
+        return problem(route, "method_not_allowed", 405, "Console mutations must use the Admin API.");
+      }
+    }
     if (url.pathname === "/healthz") return route.fulfill({ body: "ok", status: 200 });
     if (url.pathname === "/readyz") return json(route, 200, { checks: { database: true }, status: "ready" });
     if (!url.pathname.startsWith("/admin/v1/")) return route.continue();
-    if (request.method() !== "GET") mutations.push({ path: url.pathname, csrf: request.headers()["x-csrf-token"] ?? null });
     if (url.pathname === "/admin/v1/auth/session") return authenticated ? json(route, 200, session) : problem(route, "authentication_required", 401, "Sign in.");
     if (url.pathname === "/admin/v1/auth/login") { authenticated = true; return json(route, 200, session, { "X-CSRF-Token": csrf }); }
     if (url.pathname === "/admin/v1/auth/logout") { authenticated = false; return route.fulfill({ status: 204 }); }
@@ -256,6 +276,20 @@ async function installAdminFixture(page: Page) {
   return { administratorBodies, apiTokenBodies, applicationBodies, configurationETags, configurationPatchBodies, environmentBodies, mutations, overrideBodies, revisionBodies, rollbackBodies, secretBodies, selfTestBodies, selfTestScheduleAuthorizations, selfTestScheduleBodies };
 }
 
+test("mutation proof records and rejects a same-origin non-Admin write", async ({ page }) => {
+  const fixture = await installAdminFixture(page);
+  await page.goto("/");
+
+  const status = await page.evaluate(async () => {
+    const response = await fetch("/v1/responses", { method: "POST" });
+    return response.status;
+  });
+
+  expect(status).toBe(405);
+  expect(fixture.mutations).toEqual([{ csrf: null, path: "/v1/responses" }]);
+  expect(nonAdminMutations(fixture.mutations)).toEqual(fixture.mutations);
+});
+
 test("first run, Admin-only mutation path, user block, and logout", async ({ page }) => {
   const fixture = await installAdminFixture(page);
   await page.goto("/");
@@ -354,11 +388,12 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await expect(page.getByRole("button", { name: "Unblock" })).toBeVisible();
 
   expect(fixture.mutations.length).toBeGreaterThanOrEqual(9);
-  expect(fixture.mutations.every(({ path, csrf: token }) => path.startsWith("/admin/v1/") && (path === "/admin/v1/auth/login" || token === csrf))).toBe(true);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in before opening this control-plane view." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  expectOnlyAdminMutations(fixture.mutations);
+  expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
 
 test("owner completes resource, secret, override, and exact-ETag rollback workflows", async ({ page }) => {
@@ -440,6 +475,7 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
   expect(fixture.rollbackBodies).toEqual([{ etag: '"active-revision-etag"', revision_id: ids.revision }]);
 
+  expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
 
@@ -509,6 +545,7 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await page.getByRole("button", { name: "Simulate route" }).click();
   await expect(page.getByRole("heading", { name: "Allowed" })).toBeVisible();
 
+  expectOnlyAdminMutations(fixture.mutations);
   expect(fixture.mutations.every(({ path, csrf: token }) => path === "/admin/v1/auth/login" || token === csrf)).toBe(true);
 });
 
@@ -538,6 +575,7 @@ test("credential-aware self-test sends configured identifiers and a numeric cost
     upstream: "openrouter"
   }]);
   expect(JSON.stringify(fixture.selfTestBodies)).not.toContain("api_key");
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("self-test schedules bind durable token metadata and support list, detail, and disable", async ({ page }) => {
@@ -573,6 +611,7 @@ test("self-test schedules bind durable token metadata and support list, detail, 
   }]);
   expect(fixture.selfTestScheduleAuthorizations).toEqual([{ authorization: `Bearer ${oneTimeAPIToken}`, cookie: undefined, csrf: undefined }]);
   expect(JSON.stringify(fixture.selfTestScheduleBodies)).not.toContain(oneTimeAPIToken);
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("owner manages administrators without persisting password material", async ({ page }) => {
@@ -601,6 +640,7 @@ test("owner manages administrators without persisting password material", async 
     { action: "disable" }
   ]);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+  expectOnlyAdminMutations(fixture.mutations);
 });
 
 test("owner stores a one-time API token explicitly and can revoke its metadata", async ({ page }) => {
@@ -634,4 +674,5 @@ test("owner stores a one-time API token explicitly and can revoke its metadata",
     { action: "revoke", token_id: ids.apiToken }
   ]);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+  expectOnlyAdminMutations(fixture.mutations);
 });

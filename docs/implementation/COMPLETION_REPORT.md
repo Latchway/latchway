@@ -33,6 +33,11 @@ rewrite those historical coordinates. The exact candidate is established only
 by the protected-main dispatch. Any later code change requires a new candidate
 and new affected evidence.
 
+This source contains a repository-local reviewed code-bearing descendant for
+the final audit fixes. It is not promoted into the exact-coordinate tables
+until hosted checks pass; a ledger-only descendant will then record its commit
+and run identities.
+
 ## Test evidence
 
 ### Core and control plane

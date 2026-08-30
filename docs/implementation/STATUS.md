@@ -14,7 +14,7 @@ promoted.
 
 | Required field | Current value |
 | --- | --- |
-| Current phase | Phase 19 current RC source checkpoint is hosted-green on its review branch; protected-main candidate retention and the stable descendant remain pending |
+| Current phase | Phase 19 has a repository-local reviewed code-bearing RC descendant awaiting hosted CI; the last hosted-green checkpoint remains the exact commit named below, and protected-main candidate retention plus the stable descendant remain pending |
 | Current objective | Enable the required private-repository protection, land the current documentation-only descendant of the coherent `1.0.0-rc.1` source checkpoint on protected `main`, retain its successful candidate run, then land and revalidate the `1.0.0` descendant before external evidence, promotion, and publication |
 | Last passing commit in each repository | Core hosted-green RC source/release-tooling checkpoint `3c2da120a729f05ac5d8ddf799acb21eb013e833` (CI run `33287170804`; exact protected candidate pending; the complete local load remains bound to `73743b1633e4521aeda7ba1228cd18b78ef3a185`); JavaScript `17ebfb3fb3bc800fa46cdb36b32be3498aeb89b8`; Swift/iOS `f7e3e3585c233ddff88bebb4f39402cd6398a1f2`; Android `a41c0a5fd648365258695b2fe0abda44b618b9d6`; React Native `3e80e47302773d209b98f51b4bedd412213e1605` |
 | Protocol contract version | Contract `0.5.1`, wire protocol `1`, frozen normative checkpoint `2f5e5e67c824e270431f1232cc6dc2824848e380` |
@@ -114,7 +114,8 @@ tests or deterministic fixtures:
   restricted opaque HTTP; non-streaming and SSE relay; server-owned model
   rewrite; protocol capabilities; priority, weighted, deterministic sticky,
   fallback, and retry plans; attempt accounting; timeout policy; circuit-state
-  observations; header filtering; and SSRF protection.
+  observations (bounded and per-process, without route admission effects);
+  header filtering; and SSRF protection.
 - The canonical Admin API, CLI, and embedded dashboard, including one-time
   owner bootstrap, administrator and API-token lifecycle, applications and
   environments, write-only secrets, immutable configuration revisions,

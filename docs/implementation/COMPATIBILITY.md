@@ -37,6 +37,9 @@ a support claim.
 Documentation-only descendants may follow the candidate without changing that
 implementation claim; a later code change must become a new candidate and
 rerun the affected evidence.
+This source contains such a repository-local reviewed code-bearing descendant;
+until its hosted checks pass and a ledger-only descendant records its exact
+commit, the table above deliberately retains the last hosted-green checkpoint.
 
 The operational-resilience gate also requires one non-public canonical
 `v1.0.0-rc.1` source checkpoint and candidate run before the final `v1.0.0`

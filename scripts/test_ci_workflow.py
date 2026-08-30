@@ -23,6 +23,29 @@ def load_workflow(path: Path) -> dict:
 
 
 class CIWorkflowTests(unittest.TestCase):
+    def test_pull_requests_run_offline_release_and_domain_regressions(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "ci.yml")
+        triggers = workflow.get("on", workflow.get(True, {}))
+        self.assertIn("pull_request", triggers)
+        step = next(
+            step
+            for step in workflow["jobs"]["contracts"]["steps"]
+            if step.get("name") == "Validate fixed release and evidence tooling offline"
+        )
+        self.assertNotIn("if", step)
+        command = step["run"]
+        for test_path in (
+            "scripts/test_release_candidate.py",
+            "scripts/test_release_preflight.py",
+            "scripts/test_release_workflows.py",
+            "scripts/test_cross_repo_conformance.py",
+            "scripts/test_release_domain_evidence.py",
+            "scripts/test_release_domain_observer.py",
+        ):
+            self.assertIn(test_path, command)
+        self.assertNotIn("secrets.", command)
+        self.assertNotIn("gh api", command)
+
     def test_pnpm_exists_before_setup_node_reads_its_cache(self) -> None:
         cached_setup_nodes = 0
         for path in sorted(WORKFLOWS.glob("*.yml")):

@@ -83,6 +83,7 @@ gh workflow run deployment-evidence.yml --ref main \
   -f candidate_commit='<40 lowercase hex>' \
   -f intended_tag=v1.0.0 \
   -f candidate_run_id='<release-candidate workflow run ID>' \
+  -f candidate_run_attempt='<release-candidate workflow run attempt>' \
   -f image='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>' \
   -f endpoint='https://ai.example.com' \
   -f gcp_project='<project-id>' \
@@ -148,7 +149,7 @@ python3 scripts/deployment-evidence.py finalize \
   --trusted-root trusted_root.jsonl \
   --core-commit '<40 lowercase hex>' \
   --core-release v1.0.0 \
-  --contract-version 1.0.0 \
+  --contract-version 0.5.1 \
   --bundle-sha256 '<64 lowercase hex>' \
   --image 'ghcr.io/latchway/latchway@sha256:<64 lowercase hex>'
 ```
