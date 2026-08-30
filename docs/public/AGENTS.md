@@ -1,7 +1,9 @@
 # Public documentation instructions
 
-This directory is the canonical source for Latchway's public Mintlify site. The
-standalone `latchway-docs` repository is a generated deployment mirror.
+The core repository directory `latchway/docs/public` is the canonical source
+for Latchway's public Mintlify site. When this file appears in the standalone
+`latchway-docs` repository, that repository is a generated deployment mirror,
+not a second authoring source.
 
 - Keep implementation plans, evidence ledgers, internal ADRs, and maintainer
   notes outside this directory.
@@ -16,5 +18,6 @@ standalone `latchway-docs` repository is a generated deployment mirror.
   delegated component directly attested.
 - Use generated OpenAPI, compatibility, and SDK-bundle outputs when available.
   Do not hand-edit generated support claims or snippets.
-- Run `pnpm check` before synchronization. Use
-  `scripts/sync-public-docs.py`; do not edit mirror-owned content directly.
+- Run `pnpm check` in the canonical directory before synchronization. From the
+  core `latchway` repository, use `scripts/sync-public-docs.py`; do not edit
+  mirror-owned content directly.

@@ -47,6 +47,13 @@ the exact injection seam, state unsupported behavior, and link to raw transport
 and security guarantees. Documentation must not imply that Latchway owns AI
 semantics.
 
+## Consequences
+
+Latchway can add framework integrations without creating a second AI API, but
+each adapter inherits the maintenance burden of its framework's transport seam.
+Support is therefore version-bounded and evidence-backed; raw authenticated
+HTTP remains the stable fallback when a safe adapter cannot be maintained.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented for the exact experimental entries in

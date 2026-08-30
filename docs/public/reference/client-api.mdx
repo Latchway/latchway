@@ -29,8 +29,8 @@ discovery.
 | `POST /client/v1/sessions/refresh` | Rotate refresh state and issue a new short-lived access token |
 | `POST /client/v1/installation-families/current/components` | Provision a configured delegated component key from the authenticated root |
 | `POST /client/v1/component-sessions` | Consume a component provisioning grant and create its independent session family |
-| `POST /client/v1/installation-families/current/components/{component_id}/attestation-challenges` | Create a one-use version-2 direct App Attest challenge for an eligible current component |
-| `POST /client/v1/installation-families/current/components/{component_id}/attestation-exchanges` | Verify component-owned App Attest evidence and rotate that component into composite direct/delegated trust |
+| `POST /client/v1/installation-families/current/components/{component_id}/attestation-challenges` | Create a one-use version-2 direct App Attest challenge for a policy-eligible component on a platform that can produce component-owned evidence |
+| `POST /client/v1/installation-families/current/components/{component_id}/attestation-exchanges` | Verify component-owned App Attest evidence and rotate that component into composite direct/delegated trust when the platform supports it |
 | `DELETE /client/v1/installation-families/current/components/{component_id}` | Revoke one component without revoking siblings |
 | `DELETE /client/v1/installation-families/current` | Revoke the family and every component session beneath it |
 | `DELETE /client/v1/installations/current` | Revoke the current installation, sessions, and refresh family |
@@ -42,12 +42,19 @@ refresh proofs are bound to the exact public method and URL; a protected proof
 also binds the access token. Proof IDs are single-use across replicas.
 
 The two component-attestation routes require the current component access
-token and an `ath`-bound DPoP proof. They are limited to configured Apple
-Action, SSO, and watchOS components with an exact component App Attest policy.
-The version-2 binding covers the family, component, definition, component key,
-DPoP thumbprint, platform, and step-up purpose. A successful exchange preserves
+token and an `ath`-bound DPoP proof. Server policy limits them to configured
+Apple component types with an exact component App Attest policy. The version-2
+binding covers the family, component, definition, component key, DPoP
+thumbprint, platform, and step-up purpose. A successful exchange preserves
 parent/delegation ancestry, records `delegated_direct_attested`, revokes the
 old component session family, and leaves the parent and siblings unchanged.
+
+These routes are a wire capability, not an iOS Action/SSO support claim. Apple
+rejects App Attest key generation in iOS app extensions. Latchway version 1
+therefore treats iOS Widget, Share, Action, and SSO extensions as delegated-only,
+and the containing app must never submit its own assertion as extension
+evidence. Apple documents an extension exception for eligible watchOS apps,
+but the current Swift SDK does not claim a watchOS direct-step-up surface.
 
 ## Diagnostics
 

@@ -48,6 +48,14 @@ All active architecture diagrams, API concepts, quickstarts, Admin references,
 and troubleshooting guides must use the family/component hierarchy and clearly
 label legacy installation behavior during migration.
 
+## Consequences
+
+Policy, sessions, quota, audit, and revocation now carry both family and
+component identity. The additional records and configuration make migrations
+and operator views more complex, while allowing sibling isolation, targeted
+revocation, and family-wide lifecycle operations that the legacy model could
+not express.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database

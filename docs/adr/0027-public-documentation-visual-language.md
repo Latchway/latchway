@@ -45,6 +45,12 @@ protected requests, quota lifecycle, routing, family hierarchy, delegation,
 revocation, framework transport, and PostgreSQL-only deployment. Accessibility
 and missing-alt checks are required.
 
+## Consequences
+
+Diagrams use a smaller set of reusable forms and require accessible text and a
+named source owner. Authors give up some page-specific styling freedom, while
+readers gain consistent trust-boundary and lifecycle meaning across the site.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented with the checked-in color tokens,

@@ -47,6 +47,13 @@ Compatibility pages must distinguish supported, experimental, planned,
 conditional, and unsupported behavior and explain the missing request-time
 capability. Marketing language cannot override registry evidence.
 
+## Consequences
+
+Some popular frameworks remain experimental or unsupported even when a basic
+demo can send a request. This narrows the advertised compatibility surface, but
+ensures every supported entry preserves token rotation, fresh DPoP, destination
+checks, streaming, cancellation, and failure semantics.
+
 ## Status
 
 Accepted on 2026-08-30. No framework is considered supported until the

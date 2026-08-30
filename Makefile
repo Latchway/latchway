@@ -6,7 +6,7 @@ PNPM ?= pnpm
 SQLC_IMAGE ?= sqlc/sqlc:1.31.1
 FUZZ_TIME ?= 3s
 FUZZ_PARALLEL ?= 2
-VERSION ?= 1.0.0
+VERSION ?= 1.0.0-rc.1
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X github.com/latchway/latchway/internal/buildinfo.Version=$(VERSION) -X github.com/latchway/latchway/internal/buildinfo.Commit=$(COMMIT) -X github.com/latchway/latchway/internal/buildinfo.Date=$(BUILD_DATE)
@@ -47,6 +47,9 @@ fuzz-smoke:
 	$(GO) test ./internal/dpop -run '^$$' -fuzz '^FuzzNormalizeHTU$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/session -run '^$$' -fuzz '^FuzzPreflightAccessToken$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/clientapi -run '^$$' -fuzz '^FuzzProtectedCredentialHeaders$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/limitscope -run '^$$' -fuzz '^FuzzClaimDigestRejectsUnboundedOrNonCanonicalScalars$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/pricing -run '^$$' -fuzz '^FuzzParseUSDDecimalNanoUSD$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/quota -run '^$$' -fuzz '^FuzzTokenBucketReservationArithmetic$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzActiveSnapshotCompilation$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzCompiledInputAccountingProfile$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzParseJSONRefillRateCanonicalRoundTrip$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
@@ -56,11 +59,14 @@ fuzz-smoke:
 	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzUsageObservers$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaichat -run '^$$' -fuzz '^FuzzSSEChunkPartitionInvariant$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openairesponses -run '^$$' -fuzz '^FuzzInspectAndRewrite$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./adapters/protocol/openairesponses -run '^$$' -fuzz '^FuzzTrustedInputPreflight$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openairesponses -run '^$$' -fuzz '^FuzzUsageObservers$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openairesponses -run '^$$' -fuzz '^FuzzSSEChunkPartitionInvariant$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaiembeddings -run '^$$' -fuzz '^FuzzInspectAndRewrite$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./adapters/protocol/openaiembeddings -run '^$$' -fuzz '^FuzzTrustedInputPreflight$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/openaiembeddings -run '^$$' -fuzz '^FuzzUsageObserver$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/anthropicmessages -run '^$$' -fuzz '^FuzzInspectAndApplyFeature$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./adapters/protocol/anthropicmessages -run '^$$' -fuzz '^FuzzTrustedInputPreflight$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/anthropicmessages -run '^$$' -fuzz '^FuzzJSONObserver$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/anthropicmessages -run '^$$' -fuzz '^FuzzSSEObserver$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./adapters/protocol/opaquehttp -run '^$$' -fuzz '^FuzzInspectAndApplyFeature$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)

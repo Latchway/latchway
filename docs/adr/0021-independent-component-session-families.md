@@ -46,6 +46,13 @@ Platform guides must show component/session ownership, sign-out semantics,
 replacement behavior, and why copying the root credential into an extension is
 forbidden.
 
+## Consequences
+
+Every executable surface must bootstrap, store, refresh, revoke, and erase its
+own session material. This costs additional keys and session rows, but a leaked
+component credential cannot authenticate as a sibling and concurrent component
+refreshes no longer share one rotation chain.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database

@@ -53,10 +53,22 @@ Guides and Admin views must distinguish direct evidence from delegated
 provenance, show the trust chain and expiry, and avoid describing a delegated
 component as directly attested.
 
+## Consequences
+
+Delegated components can operate without fabricated direct-attestation claims,
+but policy must account for provenance, parent state, expiry, and the weakest
+trust input. Platforms that cannot produce component-owned evidence remain
+delegated-only; an optional direct step-up strengthens only the eligible child
+that supplied it.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented in draft contract `1.0.0`, database
 schema 23, the server policy/session runtime, Admin trust views, and SDK source.
-The direct-step-up extension preserves delegation ancestry under
-`delegated_direct_attested`. Final cross-repository coordinate convergence and
-protected physical App Attest, isolation, and exact-image evidence remain open.
+The generic direct-step-up protocol preserves delegation ancestry under
+`delegated_direct_attested` when a supported platform can produce the required
+component-owned evidence. Apple rejects App Attest key generation in iOS app
+extensions, so iOS Widget, Share, Action, and SSO clients remain delegated-only;
+the containing app must not attest for them. Final cross-repository coordinate
+convergence and protected root-app App Attest, isolation, and exact-image
+evidence remain open.

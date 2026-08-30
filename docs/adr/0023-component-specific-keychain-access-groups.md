@@ -47,12 +47,21 @@ iOS guides must provide exact entitlement examples, containing-app setup,
 widget/share flows, sign-out behavior, limitations, and recovery steps without
 including real team or bundle identifiers.
 
+## Consequences
+
+Apple projects need a distinct entitlement and provisioning contract for every
+component that reads a Latchway key. Setup is less convenient than one shared
+group, but sibling denial becomes enforceable and a compromised extension
+cannot retrieve the root or another extension's credential.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented in the Swift and React Native iOS source
 candidate, including component-specific storage, containing-app preparation,
-extension diagnostics, and Action/SSO extension-process App Attest step-up.
-Unsigned host/extension consumers and local source tests do not prove real
-entitlements: candidate-bound physical sibling denial, no-host/background/
-termination/no-user-presence behavior, signing, and App Attest remain release
-gates.
+extension diagnostics, and delegated-only Widget/Share/Action/SSO sessions.
+Apple rejects App Attest key generation in iOS app extensions; only the root
+application performs App Attest, and it never relabels that evidence as an
+extension proof. Unsigned host/extension consumers and local source tests do
+not prove real entitlements: candidate-bound physical sibling denial,
+no-host/background/termination/no-user-presence behavior, signing, and root-app
+App Attest remain release gates.

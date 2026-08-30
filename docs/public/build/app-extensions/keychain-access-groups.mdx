@@ -4,13 +4,43 @@ description: "Separate component private material while using narrowly scoped Ke
 ---
 
 <Warning>
-  This pre-release page does not define exact access-group identifiers or Swift
-  APIs. Do not invent entitlements from this design page.
+  These identifiers and APIs describe the pre-release source candidate. No
+  released SDK package or protected physical-device proof exists yet; bind the
+  final values to the exact signed profiles instead of copying placeholders.
 </Warning>
 
 Give each Client Component an independent key record and refresh chain. A
 shared Keychain access group must not become a bucket through which the
 containing app and extensions reuse one private key or rotating refresh token.
+
+For one extension component, add the same component-specific group to the
+containing app and that extension target:
+
+```xml
+<key>keychain-access-groups</key>
+<array>
+  <string>$(AppIdentifierPrefix)com.example.myapp.intent</string>
+</array>
+```
+
+Use `$(AppIdentifierPrefix)` only in the signed entitlement. At runtime, pass
+the fully resolved value returned by your Apple signing coordinate, such as
+`ABCDE12345.com.example.myapp.intent`:
+
+```swift
+let intentComponent = LatchwayComponentConfiguration.appIntent(
+    definitionID: "assistant_intent",
+    keychainAccessGroup: "ABCDE12345.com.example.myapp.intent",
+    requestedFeatures: ["assistant"]
+)
+```
+
+The containing app needs the group so it can create and provision that
+component's key. The extension uses the same group to open only its own key and
+session. Give every sibling extension a different group, include only its own
+group in that sibling, and keep the containing app's root App Attest entitlement
+out of all extension targets. Passing the unresolved build-setting expression
+to the runtime fails closed.
 
 Use an App Group only for non-secret provisioning data that the final SDK
 explicitly documents. Server challenges, public-key identifiers, bounded
@@ -21,6 +51,8 @@ attestation objects, and upstream credentials are not.
 ## Verification checklist
 
 - Confirm every target has the intended application identifier and entitlement.
+- Confirm the containing app and intended extension resolve the same component
+  group, while every sibling resolves a distinct group.
 - Confirm a component cannot read another component's private-key record.
 - Confirm a cross-application or cross-environment envelope fails closed.
 - Confirm sign-out clears or invalidates all prior-user provisioning state.

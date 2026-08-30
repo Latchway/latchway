@@ -47,6 +47,13 @@ Mintlify configuration, public navigation, `llms.txt`, assistant instructions,
 redirects, and generated API pages become reviewed source. A preview build is a
 Phase 8 gate, not evidence that the content is complete.
 
+## Consequences
+
+Public documentation is reviewed and tested with the product rather than
+published as an independent prose artifact. The core repository remains the
+source of truth and the deployment repository is generated, so releases must
+validate and synchronize both coordinates before deployment.
+
 ## Status
 
 Accepted on 2026-08-30. The canonical, committed public source lives under

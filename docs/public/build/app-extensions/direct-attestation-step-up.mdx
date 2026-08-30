@@ -1,36 +1,39 @@
 ---
-title: "Step up to direct attestation"
-description: "Plan the transition from delegated trust to direct component evidence without reusing the root key or session."
+title: "Direct component attestation boundary"
+description: "Understand the dormant wire capability, platform limitation, and rule against relabeling root evidence as component proof."
 ---
 
 <Warning>
-  Direct-attestation step-up for Client Components is source-implemented but
-  pre-release. The Swift and React Native iOS source candidates expose the
-  Action/SSO flow; no release may claim physical proof until the exact signed
-  candidate completes the protected device workflow.
+  This generic direct-component protocol is a pre-release target contract, not
+  a supported version 1 client capability.
+  Apple rejects App Attest key generation in iOS app extensions. The Swift and
+  React Native iOS version 1 clients therefore do not expose Action/SSO direct
+  step-up. Widget, Share, Action, and SSO extensions remain delegated-only.
 </Warning>
 
-An eligible component can add independently verified platform evidence only by
-completing the attestation flow for its own component key when that platform
-and component type support it. A root assertion cannot be relabeled as
-component attestation.
+The draft wire contract contains generic component challenge and exchange
+routes. They are reserved for a platform and component type that can actually
+produce independently verified evidence for its own component key. A root
+assertion cannot be relabeled as component attestation.
 
 Step-up preserves the component identity while recording composite
 `delegated_direct_attested` provenance. It does not copy the root key, adopt
 the root refresh chain, or erase the parent and delegation references that
 show how the component began with delegated trust.
 
-The component uses its existing DPoP-bound access token to create a one-use
-version-2 challenge, asks App Attest for an assertion from the extension's own
-bundle and key, and exchanges it for a rotated component session family. The
-challenge binds the installation family, component, Component Definition,
-component key, DPoP thumbprint, platform, and step-up purpose.
+At the protocol level, a capable component would use its existing DPoP-bound
+access token to create a one-use version-2 challenge, produce App Attest
+evidence from its own bundle and key, and exchange it for a rotated component
+session family. The challenge binds the installation family, component,
+Component Definition, component key, DPoP thumbprint, platform, and step-up
+purpose.
 
-This API is intentionally extension-process-only. A containing React Native
-application cannot prove an extension bundle on the extension's behalf. The
-React Native component client is limited to an iOS extension process and uses
-the `react_native_ios` runtime; the native Swift client uses `ios`. Android
-component clients report direct attestation as unsupported in version 1.
+No current version 1 SDK claims a usable producer for this transition. Apple
+documents an extension exception for eligible watchOS apps, but the current
+Swift SDK has no watchOS direct-step-up surface. A containing Swift or React
+Native application cannot prove an iOS extension bundle on the extension's
+behalf. Android component clients also report direct attestation as
+unsupported.
 
 The referenced component App Attest policy is configured as `preferred` so it
 cannot become an ambiguous initial-session alternative. Once the component
@@ -38,7 +41,7 @@ calls the step-up challenge/exchange endpoints, direct evidence is mandatory
 and any missing, mismatched, expired, replayed, or invalid assertion fails
 closed.
 
-## Acceptance conditions
+## Conditions for any future supported producer
 
 - The platform verifier binds evidence to the component's application identity and key.
 - Policy permits direct evidence for the component type.
@@ -47,8 +50,7 @@ closed.
 - Root or family revocation continues to apply under documented policy.
 - A failed or replayed exchange cannot affect the parent or sibling components.
 
-The protected physical-device run must separately observe the signed host,
-Widget, Share, and Action identities; independent component key and session
-identifiers; the version-2 binding and trust transition; concrete sibling
-denial; and no-host, background, termination, and no-user-presence behavior.
-Repository fixtures and caller-supplied success flags do not satisfy this gate.
+Until a concrete SDK/platform producer satisfies those conditions and protected
+physical evidence exists, `delegated_direct_attested` remains a compatible
+server/wire state rather than a supported iOS extension capability. Repository
+fixtures and caller-supplied success flags do not satisfy this gate.

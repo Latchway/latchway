@@ -133,6 +133,17 @@ class SyntheticWorkspace:
                 "FROM scratch\n"
                 f"ARG VERSION={self.version}\n"
             ),
+            "Makefile": f"VERSION ?= {self.version}\n",
+            "compose.yaml": (
+                "name: latchway\n\n"
+                "services:\n"
+                "  latchway:\n"
+                "    build:\n"
+                "      context: .\n"
+                "      args:\n"
+                f"        VERSION: {self.version}\n"
+                "    restart: unless-stopped\n"
+            ),
             "CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-08-29\n\n- Release.\n",
         }.items():
             self.write(root / relative, contents)
@@ -623,10 +634,26 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        makefile = core / "Makefile"
+        makefile.write_text(
+            makefile.read_text(encoding="utf-8").replace(
+                "VERSION ?= 1.0.0", "VERSION ?= 1.0.0-rc.1"
+            ),
+            encoding="utf-8",
+        )
+        compose = core / "compose.yaml"
+        compose.write_text(
+            compose.read_text(encoding="utf-8").replace(
+                "VERSION: 1.0.0", "VERSION: 1.0.0-rc.1"
+            ),
+            encoding="utf-8",
+        )
         SyntheticWorkspace.git(
             core,
             "add",
             "Dockerfile",
+            "Makefile",
+            "compose.yaml",
             "internal/buildinfo/buildinfo.go",
             "web/console/package.json",
         )
@@ -669,6 +696,108 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             if check["id"] == "source.core_contract"
         )
         self.assertEqual(core_contract["reason"], "core_docker_version_mismatch")
+
+    def test_source_scope_rejects_drifted_makefile_version_default(self) -> None:
+        core = self.workspace.repositories["core"]
+        makefile = core / "Makefile"
+        makefile.write_text(
+            makefile.read_text(encoding="utf-8").replace(
+                "VERSION ?= 1.0.0", "VERSION ?= 1.0.1", 1
+            ),
+            encoding="utf-8",
+        )
+        SyntheticWorkspace.git(core, "add", "Makefile")
+        SyntheticWorkspace.git(core, "commit", "-m", "test: drift make version")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-make-version-drift")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(core_contract["reason"], "core_makefile_version_mismatch")
+
+    def test_source_scope_rejects_second_effective_makefile_version_assignment(
+        self,
+    ) -> None:
+        core = self.workspace.repositories["core"]
+        makefile = core / "Makefile"
+        makefile.write_text(
+            makefile.read_text(encoding="utf-8")
+            + "override VERSION := 9.9.9\n",
+            encoding="utf-8",
+        )
+        SyntheticWorkspace.git(core, "add", "Makefile")
+        SyntheticWorkspace.git(
+            core, "commit", "-m", "test: override image version"
+        )
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-make-version-override")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(core_contract["reason"], "core_makefile_version_ambiguous")
+
+    def test_source_scope_rejects_makefile_includes_that_can_override_version(
+        self,
+    ) -> None:
+        core = self.workspace.repositories["core"]
+        makefile = core / "Makefile"
+        makefile.write_text(
+            makefile.read_text(encoding="utf-8") + "include release.mk\n",
+            encoding="utf-8",
+        )
+        (core / "release.mk").write_text("VERSION := 9.9.9\n", encoding="utf-8")
+        SyntheticWorkspace.git(core, "add", "Makefile", "release.mk")
+        SyntheticWorkspace.git(
+            core, "commit", "-m", "test: include image version override"
+        )
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-make-version-include")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(core_contract["reason"], "core_makefile_include_forbidden")
+
+    def test_source_scope_rejects_drifted_compose_version_default(self) -> None:
+        core = self.workspace.repositories["core"]
+        compose = core / "compose.yaml"
+        compose.write_text(
+            compose.read_text(encoding="utf-8").replace(
+                "VERSION: 1.0.0", "VERSION: 1.0.1", 1
+            ),
+            encoding="utf-8",
+        )
+        SyntheticWorkspace.git(core, "add", "compose.yaml")
+        SyntheticWorkspace.git(core, "commit", "-m", "test: drift compose version")
+        self.workspace.commits["core"] = SyntheticWorkspace.git(
+            core, "rev-parse", "HEAD"
+        )
+
+        result, report, _, _ = self.run_gate("source-compose-version-drift")
+        self.assertEqual(result.returncode, 1)
+        core_contract = next(
+            check
+            for check in report["checks"]
+            if check["id"] == "source.core_contract"
+        )
+        self.assertEqual(core_contract["reason"], "core_compose_version_mismatch")
 
     def test_source_scope_rejects_missing_docker_version_default(self) -> None:
         core = self.workspace.repositories["core"]

@@ -48,6 +48,13 @@ Public compatibility pages and release-note compatibility sections consume
 generated output. Hand-maintained duplicate framework tables are prohibited.
 Breaking framework changes are recorded beside the affected registry evidence.
 
+## Consequences
+
+A framework support claim is a generated release artifact backed by an exact
+registry row and conformance evidence. Updating support takes more than widening
+a dependency constraint, but docs, SDK locks, tests, and release notes cannot
+quietly advertise different compatibility states.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented in draft contract `1.0.0`. The closed

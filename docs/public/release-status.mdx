@@ -19,8 +19,9 @@ coordinates are release intent until protected promotion completes.
 | Protocol contract | Pinned and checked across repositories |
 | Public tags and immutable GitHub releases | Not yet promoted |
 | npm, Swift/CocoaPods, and Maven publication | Not yet published |
-| Production App Attest and Play Integrity | Requires protected physical-device evidence |
-| Live upstream-provider evidence | Requires protected credentials and bounded runs |
+| Production App Attest and Play Integrity | Requires protected physical-device evidence; Android is deferred until a device is available |
+| Firebase Web App Check | Authenticated project/configuration and server-verifier checks pass; a browser-minted token exchange remains open |
+| Live upstream-provider evidence | Bounded OpenRouter protocol, streaming, usage, cost, routing, and error checks pass against the current source gateway; immutable-image rerun remains required |
 | Cloud deployment and resilience evidence | Requires configured provider accounts |
 | Image signing, provenance, and post-publication checks | Required before support claim |
 | Independent security review | Workflow and schema implemented; protected reviewer receipt still required |
@@ -53,11 +54,13 @@ image.
 
 ## What must remain gated
 
-Do not advertise production App Attest or Play Integrity, live provider
-compatibility, cloud support, multi-replica resilience, signed packages, or
-public availability until the matching external domain has an authenticated
-receipt for the exact candidate. Missing credentials, devices, provider
-accounts, or registry access produce an open gate, never a synthetic pass.
+Do not advertise production App Attest or Play Integrity, immutable-image live
+provider compatibility, cloud support, multi-replica resilience, signed
+packages, or released package/image availability until the matching external
+domain has an
+authenticated receipt for the exact candidate. Missing credentials, devices,
+provider accounts, or registry access produce an open gate, never a synthetic
+pass.
 
 <Info>
   Until promotion completes, evaluate Latchway from repository-local tested

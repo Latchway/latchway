@@ -24,6 +24,13 @@ normative contract checkpoint and compatible gateway version range. It does
 not pin the current gateway implementation commit. Its local native overrides
 are development-only and must not appear in a published package.
 
+<Warning>
+  The example's App Intents extension is currently a signing, provisioning,
+  and Keychain-entitlement fixture. It deliberately fails closed instead of
+  sending a delegated Latchway request, so including or launching that target
+  is not delegated-component execution evidence.
+</Warning>
+
 ## Create a client
 
 ```typescript

@@ -47,8 +47,17 @@ Quickstarts must show where the feature is bound, which destinations are
 eligible, how retries obtain fresh proofs, and how unavailable or revoked
 features surface to the framework.
 
+## Consequences
+
+Applications configure one transport for each feature and cannot redirect its
+authorization to an arbitrary route at call time. SDKs must reacquire component
+authorization for every final request attempt, which adds implementation work
+but keeps retries, redirects, and framework adapters inside the same boundary.
+
 ## Status
 
-Accepted as the target architecture on 2026-08-30. The current SDKs implement
-legacy installation-bound authorization; component-aware transport remains
-pending.
+Accepted on 2026-08-30 and implemented in the draft `1.0.0` contract, server,
+and SDK source candidates. Feature binding, component sessions, request-time
+DPoP, destination validation, redirect rejection, retry reauthorization,
+streaming, and cancellation pass local conformance gates. Protected native
+device and released-package evidence remain promotion gates.

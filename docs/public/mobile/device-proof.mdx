@@ -30,13 +30,15 @@ observe Secure Enclave-backed installation material, real App Attest
 registration/assertion, the expected normalized trust, a DPoP-authorized
 request, and terminal revocation behavior.
 
-If the candidate claims Action/SSO direct component step-up, the protected run
-must also pin and independently observe the signed containing app, Widget,
-Share, and Action binaries; separate component key and session identifiers;
-the version-2 component binding and `delegated_direct_attested` transition; a
-concrete sibling-denial response; and no-host, background, termination, and
-no-user-presence behavior. The containing app's assertion cannot substitute
-for evidence created by the extension process.
+The protected run must also pin and independently observe the signed containing
+app and every included Widget, Share, Action, App Intents, or other extension
+binary; separate component key and session identifiers; a concrete
+sibling-denial response; and no-host, background, termination, and
+no-user-presence behavior. These iOS extensions remain delegated-only. Apple
+rejects App Attest key generation in iOS app extensions, and the containing
+app's assertion cannot substitute for or be relabeled as extension evidence.
+Being signed and embedded proves target inclusion only; it does not prove the
+extension executed a delegated request.
 
 ## Android and React Native Android
 

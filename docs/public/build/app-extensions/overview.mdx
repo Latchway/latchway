@@ -5,10 +5,10 @@ description: "Use a containing app and extension as separate Client Components w
 
 <Warning>
   App-extension provisioning is source-implemented but pre-release. The Swift
-  and React Native products, delegated-component APIs, and Action/SSO direct
-  App Attest step-up have local package, consumer, and unsigned host/extension
-  evidence. Candidate-bound physical Keychain isolation and App Attest,
-  signing, and publication evidence remain required.
+  and React Native products and delegated-component APIs have local package,
+  consumer, and unsigned host/extension evidence. Candidate-bound physical
+  Keychain isolation, root-app App Attest, signing, and publication evidence
+  remain required.
 </Warning>
 
 Treat every independently executing extension as its own Client Component. The
@@ -23,7 +23,7 @@ Application User
     ├── Containing app (root, directly attested)
     ├── Widget extension (delegated component)
     ├── Share extension (delegated component)
-    └── Action or SSO extension (delegated, then composite direct/delegated)
+    └── Action or SSO extension (delegated-only on iOS)
 ```
 
 ## Required setup contract
@@ -41,11 +41,11 @@ support can be claimed:
 8. **Sign-out behavior** that invalidates prior family credentials.
 9. The **expected dashboard result** for the root and delegated components.
 10. Safe **diagnostics** for entitlement, definition, expiry, and revocation failures.
-11. For Action or SSO step-up, **component-owned App Attest** that binds the
-    extension bundle, component key, DPoP key, definition, and installation
-    family without reusing the containing app's assertion.
+11. For Action or SSO, explicit **delegated-only provenance**. Apple rejects
+    App Attest key generation in iOS app extensions, and the containing app's
+    assertion must never be relabeled as extension evidence.
 
 Read [WidgetKit setup](/build/app-extensions/widgetkit) or [Share extension
 setup](/build/app-extensions/share-extension) for the surface-specific
-acceptance checklist. See [Step up to direct attestation](/build/app-extensions/direct-attestation-step-up)
-for the Action/SSO trust transition and its release-evidence boundary.
+acceptance checklist. See [Direct component attestation boundary](/build/app-extensions/direct-attestation-step-up)
+for the dormant wire capability and platform limitation.

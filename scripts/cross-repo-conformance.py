@@ -534,6 +534,82 @@ class Evaluator:
         if any(value != core_version for value in docker_version_declarations):
             raise VerificationError("core_docker_version_mismatch")
 
+        makefile = read_text(core / "Makefile")
+        make_version_assignments = tuple(
+            match.group(0)
+            for match in re.finditer(
+                r"^[ ]*(?:(?:override|export|private)[ ]+)*VERSION[ ]*(?:::?=|:::=|\?=|\+=|!=|=)[^\r\n]*$",
+                makefile,
+                flags=re.MULTILINE,
+            )
+        )
+        if len(make_version_assignments) != 1:
+            raise VerificationError("core_makefile_version_ambiguous")
+        if re.search(
+            r"^[ ]*(?:-?include|sinclude)(?:[ ]|$)",
+            makefile,
+            flags=re.MULTILINE,
+        ):
+            raise VerificationError("core_makefile_include_forbidden")
+        if re.search(
+            r"^[ ]*(?:override[ ]+)?undefine[ ]+VERSION(?:[ ]|$)|\$[({]eval\b[^\r\n]*\bVERSION\b",
+            makefile,
+            flags=re.MULTILINE,
+        ):
+            raise VerificationError("core_makefile_version_indirect")
+        make_version = require_match(
+            makefile,
+            r"^[ \t]*VERSION[ \t]*\?=[ \t]*([^\s#]+)[ \t]*(?:#.*)?$",
+            "core_makefile_version",
+        )
+        if make_version != core_version:
+            raise VerificationError("core_makefile_version_mismatch")
+
+        compose_lines = read_text(core / "compose.yaml").splitlines()
+        try:
+            service_start = compose_lines.index("  latchway:")
+        except ValueError as error:
+            raise VerificationError("core_compose_latchway_service_missing") from error
+        service_end = len(compose_lines)
+        for index in range(service_start + 1, len(compose_lines)):
+            if re.fullmatch(r"  [A-Za-z0-9_.-]+:", compose_lines[index]):
+                service_end = index
+                break
+        service_lines = compose_lines[service_start + 1 : service_end]
+        try:
+            build_start = service_lines.index("    build:")
+        except ValueError as error:
+            raise VerificationError("core_compose_build_missing") from error
+        build_end = len(service_lines)
+        for index in range(build_start + 1, len(service_lines)):
+            if re.fullmatch(r"    [A-Za-z0-9_.-]+:.*", service_lines[index]):
+                build_end = index
+                break
+        build_lines = service_lines[build_start + 1 : build_end]
+        try:
+            args_start = build_lines.index("      args:")
+        except ValueError as error:
+            raise VerificationError("core_compose_build_args_missing") from error
+        args_end = len(build_lines)
+        for index in range(args_start + 1, len(build_lines)):
+            if re.fullmatch(r"      [A-Za-z0-9_.-]+:.*", build_lines[index]):
+                args_end = index
+                break
+        version_lines = [
+            line
+            for line in build_lines[args_start + 1 : args_end]
+            if re.fullmatch(r"        VERSION:[ \t]*[^\s#]+[ \t]*(?:#.*)?", line)
+        ]
+        if len(version_lines) != 1:
+            raise VerificationError("core_compose_version_default_missing")
+        compose_version = require_match(
+            version_lines[0],
+            r"^        VERSION:[ \t]*([^\s#]+)",
+            "core_compose_version",
+        )
+        if compose_version != core_version:
+            raise VerificationError("core_compose_version_mismatch")
+
         self.state["manifest"] = manifest
         self.state["contract_version"] = contract_version
         self.state["wire_protocol"] = wire
@@ -547,6 +623,8 @@ class Evaluator:
             "contract_status": status_value,
             "core_version": core_version,
             "docker_version_default_count": len(docker_version_declarations),
+            "makefile_version": make_version,
+            "compose_version": compose_version,
         }
 
     def _contract_bundle(self) -> Mapping[str, Any]:

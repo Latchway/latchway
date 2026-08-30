@@ -44,6 +44,13 @@ Generated pages identify supported package versions and source links. Docs CI
 checks extraction drift, compilation, bundle integrity, missing sources, and
 unreferenced generated output.
 
+## Consequences
+
+Executable examples cannot be edited only in MDX; their owning SDK source and
+tests must change first. This adds bundle and synchronization work to releases,
+but makes a displayed snippet traceable to a tested source coordinate and
+prevents silent API or security drift.
+
 ## Status
 
 Accepted on 2026-08-30 and implemented through repository-owned documentation

@@ -48,7 +48,16 @@ Security and SDK guides must explain the narrow grace semantics, distinguish an
 idempotent duplicate from suspicious reuse, and document audit/recovery behavior
 without exposing token material.
 
+## Consequences
+
+An exact duplicate refresh can recover from a short client or network race
+without advancing the chain twice. The server must retain a small encrypted
+result cache and distinguish the permitted tuple from every other reuse;
+mismatches and late replays remain security events rather than retries.
+
 ## Status
 
-Accepted as the target refresh design on 2026-08-30. The current runtime still
-implements ADR 0032 and therefore does not satisfy this decision.
+Accepted on 2026-08-30 and implemented for component session families in the
+draft `1.0.0` contract and server runtime. Exact-tuple duplicate, mismatch,
+expiry, transaction-race, replay, revocation, and multi-replica tests pass
+locally. Exact-image and operational failure evidence remain promotion gates.

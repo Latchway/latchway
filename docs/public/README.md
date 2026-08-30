@@ -16,7 +16,7 @@ tracked on the site and in the core repository's evidence ledger.
 
 Requirements:
 
-- Node.js 20.17 or newer
+- Node.js 24.19.0 (the repository and CI pin this exact release)
 - pnpm 10.15.0
 - Vale 3.17.0 (the checked-in `mise.toml` installs the exact toolchain)
 
