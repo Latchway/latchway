@@ -28,6 +28,10 @@ import (
 
 var appAttestPostgreSQLSchemaPattern = regexp.MustCompile(`\Alatchway_app_attest_[0-9]+\z`)
 
+// intentionallyNilAppAttestPostgreSQLContext preserves fail-closed coverage
+// without encouraging nil contexts in production call sites.
+func intentionallyNilAppAttestPostgreSQLContext() context.Context { return nil }
+
 func TestPostgreSQLAppAttestKeyStoreRoundTripsExactStateAndCopies(t *testing.T) {
 	fixture := newPostgreSQLAppAttestFixture(t)
 	originalPublicKey := append([]byte(nil), fixture.state.PublicKeyX963...)
@@ -578,7 +582,11 @@ func TestPostgreSQLAppAttestKeyStoreFailsClosedOnCorruptOrRevokedRows(t *testing
 				if err != nil {
 					t.Fatalf("generate corruption key: %v", err)
 				}
-				return []any{fixture.keyID[:], elliptic.Marshal(elliptic.P256(), otherKey.X, otherKey.Y)}
+				encoded, err := otherKey.PublicKey.Bytes()
+				if err != nil || len(encoded) != 65 || encoded[0] != 4 {
+					t.Fatalf("encode corruption key: bytes=%d err=%v", len(encoded), err)
+				}
+				return []any{fixture.keyID[:], encoded}
 			},
 		},
 		{
@@ -651,7 +659,7 @@ func TestPostgreSQLAppAttestKeyStoreRejectsInvalidConstructionAndOutput(t *testi
 		t.Fatalf("nil pool constructor error = %v", err)
 	}
 	fixture := newPostgreSQLAppAttestFixture(t)
-	if err := fixture.store.TransactAppAttestKey(nil, fixture.keyID, func(
+	if err := fixture.store.TransactAppAttestKey(intentionallyNilAppAttestPostgreSQLContext(), fixture.keyID, func(
 		AppAttestStoredKey,
 		bool,
 	) (AppAttestStoredKey, error) {
@@ -759,7 +767,7 @@ func TestPostgreSQLAppAttestCleanupIsBoundedAndSkipsLockedRows(t *testing.T) {
 		before time.Time
 		limit  int
 	}{
-		{ctx: nil, before: cleanupNow, limit: 1},
+		{ctx: intentionallyNilAppAttestPostgreSQLContext(), before: cleanupNow, limit: 1},
 		{ctx: fixture.ctx, before: time.Time{}, limit: 1},
 		{ctx: fixture.ctx, before: time.Date(1, 1, 1, 0, 0, 0, 0, time.FixedZone("+14", 14*60*60)), limit: 1},
 		{ctx: fixture.ctx, before: cleanupNow.Add(time.Hour), limit: 1},
@@ -825,7 +833,10 @@ func newPostgreSQLAppAttestFixture(t *testing.T) postgreSQLAppAttestFixture {
 	if err != nil {
 		t.Fatalf("generate App Attest persistence key: %v", err)
 	}
-	publicKey := elliptic.Marshal(elliptic.P256(), privateKey.X, privateKey.Y)
+	publicKey, err := privateKey.PublicKey.Bytes()
+	if err != nil || len(publicKey) != 65 || publicKey[0] != 4 {
+		t.Fatalf("encode App Attest persistence key: bytes=%d err=%v", len(publicKey), err)
+	}
 	fixture.keyID = sha256.Sum256(publicKey)
 	fixture.state = AppAttestStoredKey{
 		PublicKeyX963:          append([]byte(nil), publicKey...),
@@ -902,7 +913,10 @@ func insertPostgreSQLAppAttestCleanupKey(
 	if err != nil {
 		t.Fatalf("generate cleanup App Attest key: %v", err)
 	}
-	publicKey := elliptic.Marshal(elliptic.P256(), privateKey.X, privateKey.Y)
+	publicKey, err := privateKey.PublicKey.Bytes()
+	if err != nil || len(publicKey) != 65 || publicKey[0] != 4 {
+		t.Fatalf("encode cleanup App Attest key: bytes=%d err=%v", len(publicKey), err)
+	}
 	keyID := sha256.Sum256(publicKey)
 	attestationKeyID := mustAppAttestPostgreSQLID(t, id.AttestationKey)
 	dpopJKT := appAttestPostgreSQLThumbprint(base64.RawURLEncoding.EncodeToString(keyID[:]))

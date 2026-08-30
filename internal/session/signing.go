@@ -6,13 +6,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 	"time"
 
@@ -369,7 +369,10 @@ func (manager *SigningKeyManager) create(ctx context.Context, tx pgx.Tx, now tim
 	if err != nil {
 		return signingKey{}, fmt.Errorf("generate gateway signing-key ID: %w", err)
 	}
-	publicJWK := publicJWKFromKey(keyID, &privateKey.PublicKey)
+	publicJWK, err := publicJWKFromKey(keyID, &privateKey.PublicKey)
+	if err != nil {
+		return signingKey{}, errors.New("encode gateway public key")
+	}
 	encodedPublic, err := json.Marshal(publicJWK)
 	if err != nil {
 		return signingKey{}, errors.New("encode gateway public key")
@@ -417,7 +420,15 @@ func (manager *SigningKeyManager) decrypt(record signingRecord) (signingKey, err
 	}
 	privateKey, ok := parsed.(*ecdsa.PrivateKey)
 	publicKey, publicErr := jwk.publicKey()
-	if !ok || publicErr != nil || privateKey.Curve == nil || privateKey.Curve.Params().Name != elliptic.P256().Params().Name || privateKey.PublicKey.X.Cmp(publicKey.X) != 0 || privateKey.PublicKey.Y.Cmp(publicKey.Y) != 0 {
+	if !ok || publicErr != nil || privateKey.Curve != elliptic.P256() {
+		return signingKey{}, ErrSigningKeyUnavailable
+	}
+	privateScalar, privateErr := privateKey.Bytes()
+	if privateErr != nil {
+		return signingKey{}, ErrSigningKeyUnavailable
+	}
+	clear(privateScalar)
+	if !privateKey.PublicKey.Equal(publicKey) {
 		return signingKey{}, ErrSigningKeyUnavailable
 	}
 	return signingKey{material: &signingKeyMaterial{kid: record.kid, private: privateKey, notBefore: record.notBefore.UTC(), notAfter: record.notAfter.UTC()}}, nil
@@ -430,11 +441,18 @@ func signingAssociatedData(keyID string) secrets.AssociatedData {
 	}
 }
 
-func publicJWKFromKey(kid string, key *ecdsa.PublicKey) PublicSigningJWK {
-	return PublicSigningJWK{
-		Kty: "EC", Crv: "P-256", X: base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-		Y: base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))), Kid: kid, Use: "sig", Alg: "ES256",
+func publicJWKFromKey(kid string, key *ecdsa.PublicKey) (PublicSigningJWK, error) {
+	if key == nil || key.Curve != elliptic.P256() {
+		return PublicSigningJWK{}, ErrSigningKeyUnavailable
 	}
+	encoded, err := key.Bytes()
+	if err != nil || len(encoded) != 65 || encoded[0] != 4 {
+		return PublicSigningJWK{}, ErrSigningKeyUnavailable
+	}
+	return PublicSigningJWK{
+		Kty: "EC", Crv: "P-256", X: base64.RawURLEncoding.EncodeToString(encoded[1:33]),
+		Y: base64.RawURLEncoding.EncodeToString(encoded[33:]), Kid: kid, Use: "sig", Alg: "ES256",
+	}, nil
 }
 
 func decodePublicSigningJWK(encoded []byte) (PublicSigningJWK, error) {
@@ -465,11 +483,20 @@ func (jwk PublicSigningJWK) publicKey() (*ecdsa.PublicKey, error) {
 	if errX != nil || errY != nil || len(x) != 32 || len(y) != 32 || base64.RawURLEncoding.EncodeToString(x) != jwk.X || base64.RawURLEncoding.EncodeToString(y) != jwk.Y {
 		return nil, ErrSigningKeyUnavailable
 	}
-	key := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-	if key.X.Sign() <= 0 || key.Y.Sign() <= 0 || !key.Curve.IsOnCurve(key.X, key.Y) {
+	var zeroCoordinate [32]byte
+	if subtle.ConstantTimeCompare(x, zeroCoordinate[:]) == 1 ||
+		subtle.ConstantTimeCompare(y, zeroCoordinate[:]) == 1 {
 		return nil, ErrSigningKeyUnavailable
 	}
-	return key, nil
+	encoded := make([]byte, 1+len(x)+len(y))
+	encoded[0] = 4
+	copy(encoded[1:], x)
+	copy(encoded[1+len(x):], y)
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
+		return nil, ErrSigningKeyUnavailable
+	}
+	return publicKey, nil
 }
 
 func textMember(object map[string]any, name string) string {

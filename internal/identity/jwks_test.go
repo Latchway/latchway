@@ -218,7 +218,7 @@ func TestRemoteKeySourceParsesES256AndFirebaseCertificateMap(t *testing.T) {
 		t.Fatalf("generate ECDSA key: %v", err)
 	}
 	ecHandler := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, jwksJSON(t, ecJWK("ec-1", "ES256", &ecKey.PublicKey)), nil), nil
+		return jsonResponse(http.StatusOK, jwksJSON(t, ecJWK(t, "ec-1", "ES256", &ecKey.PublicKey)), nil), nil
 	})
 	ecSource := mustRemoteKeys(t, RemoteKeySourceConfig{
 		URL: "https://keys.example.test/jwks", Format: RemoteKeyFormatJWKS,
@@ -328,10 +328,15 @@ func rsaJWK(kid, algorithm string, key *rsa.PublicKey) map[string]any {
 	}
 }
 
-func ecJWK(kid, algorithm string, key *ecdsa.PublicKey) map[string]any {
-	coordinateSize := (key.Curve.Params().BitSize + 7) / 8
-	x := key.X.FillBytes(make([]byte, coordinateSize))
-	y := key.Y.FillBytes(make([]byte, coordinateSize))
+func ecJWK(t *testing.T, kid, algorithm string, key *ecdsa.PublicKey) map[string]any {
+	t.Helper()
+	encoded, err := key.Bytes()
+	if err != nil || (len(encoded) != 65 && len(encoded) != 97) || encoded[0] != 4 {
+		t.Fatalf("encode EC JWK fixture: bytes=%d err=%v", len(encoded), err)
+	}
+	coordinateSize := (len(encoded) - 1) / 2
+	x := encoded[1 : 1+coordinateSize]
+	y := encoded[1+coordinateSize:]
 	curve := "P-256"
 	if coordinateSize == 48 {
 		curve = "P-384"

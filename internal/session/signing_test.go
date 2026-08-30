@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,7 +18,16 @@ func TestSigningKeyFormattingIsAlwaysRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate signing key: %v", err)
 	}
-	publicJWK := publicJWKFromKey("gsk_formatting-test", &privateKey.PublicKey)
+	publicJWK, err := publicJWKFromKey("gsk_formatting-test", &privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("encode public signing JWK: %v", err)
+	}
+	privateScalar, err := privateKey.Bytes()
+	if err != nil {
+		t.Fatalf("encode private signing key: %v", err)
+	}
+	defer clear(privateScalar)
+	encodedPrivateScalar := base64.RawURLEncoding.EncodeToString(privateScalar)
 	key := signingKey{material: &signingKeyMaterial{
 		kid:       "gsk_formatting-test",
 		private:   privateKey,
@@ -46,7 +56,7 @@ func TestSigningKeyFormattingIsAlwaysRedacted(t *testing.T) {
 		"value":   fmt.Sprintf("%p", key),
 		"pointer": fmt.Sprintf("%p", &key),
 	} {
-		for _, sensitive := range []string{key.material.kid, publicJWK.X, publicJWK.Y, key.material.private.D.String()} {
+		for _, sensitive := range []string{key.material.kid, publicJWK.X, publicJWK.Y, encodedPrivateScalar} {
 			if sensitive != "" && strings.Contains(formatted, sensitive) {
 				t.Fatalf("%%p %s formatting exposed signing-key material: %q", label, formatted)
 			}

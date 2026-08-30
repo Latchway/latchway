@@ -64,8 +64,9 @@ func FuzzParsePublicJWK(f *testing.F) {
 		if err != nil || publicKey == nil {
 			t.Fatalf("accepted JWK did not produce a public key: key=%#v err=%v", publicKey, err)
 		}
-		if publicKey.Curve.Params().Name != curve.Params().Name || !publicKey.Curve.IsOnCurve(publicKey.X, publicKey.Y) {
-			t.Fatalf("accepted JWK did not produce a P-256 public key: key=%#v err=%v", publicKey, err)
+		encodedPublicKey, encodeErr := publicKey.Bytes()
+		if publicKey.Curve != curve || encodeErr != nil || len(encodedPublicKey) != 65 || encodedPublicKey[0] != 4 {
+			t.Fatalf("accepted JWK did not produce a P-256 public key: key=%#v err=%v", publicKey, encodeErr)
 		}
 		thumbprint, err := jwk.Thumbprint()
 		if err != nil {

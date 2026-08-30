@@ -82,7 +82,10 @@ func validateAsymmetricKey(key any) error {
 			return fmt.Errorf("%w: unsafe RSA public key", ErrConfiguration)
 		}
 	case *ecdsa.PublicKey:
-		if typed == nil || typed.Curve == nil || typed.X == nil || typed.Y == nil || !typed.Curve.IsOnCurve(typed.X, typed.Y) {
+		if typed == nil {
+			return fmt.Errorf("%w: unsafe ECDSA public key", ErrConfiguration)
+		}
+		if _, err := typed.Bytes(); err != nil {
 			return fmt.Errorf("%w: unsafe ECDSA public key", ErrConfiguration)
 		}
 		bits := typed.Curve.Params().BitSize

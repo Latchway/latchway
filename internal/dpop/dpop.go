@@ -73,13 +73,20 @@ func (j PublicJWK) PublicKey() (*ecdsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	x := new(big.Int).SetBytes(xBytes)
-	y := new(big.Int).SetBytes(yBytes)
-	curve := elliptic.P256()
-	if x.Sign() == 0 || y.Sign() == 0 || !curve.IsOnCurve(x, y) {
+	var zeroCoordinate [32]byte
+	if subtle.ConstantTimeCompare(xBytes, zeroCoordinate[:]) == 1 ||
+		subtle.ConstantTimeCompare(yBytes, zeroCoordinate[:]) == 1 {
 		return nil, validationError("dpop_invalid")
 	}
-	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+	encoded := make([]byte, 1+len(xBytes)+len(yBytes))
+	encoded[0] = 4
+	copy(encoded[1:], xBytes)
+	copy(encoded[1+len(xBytes):], yBytes)
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
+		return nil, validationError("dpop_invalid")
+	}
+	return publicKey, nil
 }
 
 // Options supplies the request-bound values required by RFC 9449.

@@ -337,8 +337,8 @@ func (verifier *AccessTokenVerifier) Verify(ctx context.Context, token AccessTok
 		InstallationID: claims.InstallationID, SessionGrantID: claims.SessionGrantID,
 		IdentityProvider: claims.IdentityProvider, TrustLevel: claims.AttestationLevel,
 		PolicyRevisionID: claims.PolicyRevision, DPoPJKT: claims.Confirmation.JKT,
-		JTIHash: sha256.Sum256([]byte(claims.ID)), IssuedAt: claims.IssuedAt.Time.UTC(),
-		ExpiresAt: claims.ExpiresAt.Time.UTC(), tokenHash: sha256.Sum256([]byte(token.value)),
+		JTIHash: sha256.Sum256([]byte(claims.ID)), IssuedAt: claims.IssuedAt.UTC(),
+		ExpiresAt: claims.ExpiresAt.UTC(), tokenHash: sha256.Sum256([]byte(token.value)),
 	}
 	principal.seal = accessPrincipalSeal(principal)
 	return principal, nil
@@ -374,7 +374,12 @@ func validateAccessClaims(claims accessTokenClaims, maximumLifetime time.Duratio
 		IdentityProvider: claims.IdentityProvider, TrustLevel: claims.AttestationLevel,
 		PolicyRevisionID: claims.PolicyRevision, DPoPJKT: claims.Confirmation.JKT,
 	}
-	if input.validate() != nil || claims.IssuedAt == nil || claims.ExpiresAt == nil || claims.ID == "" || len(claims.ID) > 128 || strings.ContainsAny(claims.ID, "\r\n\x00") || !claims.ExpiresAt.Time.After(claims.IssuedAt.Time) || claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time) > maximumLifetime {
+	if input.validate() != nil || claims.IssuedAt == nil || claims.ExpiresAt == nil || claims.ID == "" || len(claims.ID) > 128 || strings.ContainsAny(claims.ID, "\r\n\x00") {
+		return ErrTokenInvalid
+	}
+	issuedAt := claims.IssuedAt.UTC()
+	expiresAt := claims.ExpiresAt.UTC()
+	if !expiresAt.After(issuedAt) || expiresAt.Sub(issuedAt) > maximumLifetime {
 		return ErrTokenInvalid
 	}
 	return nil

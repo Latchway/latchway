@@ -56,7 +56,10 @@ func TestAppAttestKeyLinksInSessionTransactionAndRevokesPostgreSQL(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	publicKey := elliptic.Marshal(elliptic.P256(), appPrivateKey.X, appPrivateKey.Y)
+	publicKey, err := appPrivateKey.PublicKey.Bytes()
+	if err != nil || len(publicKey) != 65 || publicKey[0] != 4 {
+		t.Fatalf("encode App Attest lifecycle key: bytes=%d err=%v", len(publicKey), err)
+	}
 	keyID := sha256.Sum256(publicKey)
 	appIDHash := sha256.Sum256([]byte("TEAM1234.com.example.challenge"))
 	keyStore, err := attestation.NewPostgreSQLAppAttestKeyStore(pool)

@@ -580,9 +580,9 @@ func (client *apiClient) call(request *http.Request, expected int, output any) (
 	if err != nil {
 		return nil, errors.New("call isolated gateway API")
 	}
-	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maximumAPIResponseBytes+1))
-	if err != nil || len(body) > maximumAPIResponseBytes {
+	closeErr := response.Body.Close()
+	if err != nil || closeErr != nil || len(body) > maximumAPIResponseBytes {
 		return nil, errors.New("gateway API response exceeded its evidence bound")
 	}
 	if response.StatusCode != expected {
@@ -926,14 +926,26 @@ func newDPoPKey() (*ecdsa.PrivateKey, privateJWK, string, error) {
 	if err != nil {
 		return nil, privateJWK{}, "", errors.New("generate DPoP key")
 	}
-	value := privateJWK{
-		Kty: "EC",
-		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(private.X.FillBytes(make([]byte, 32))),
-		Y:   base64.RawURLEncoding.EncodeToString(private.Y.FillBytes(make([]byte, 32))),
-		D:   base64.RawURLEncoding.EncodeToString(private.D.FillBytes(make([]byte, 32))),
+	public, err := dpopPublicJWK(private)
+	if err != nil {
+		return nil, privateJWK{}, "", err
 	}
-	thumbprint, err := (dpop.PublicJWK{Kty: value.Kty, Crv: value.Crv, X: value.X, Y: value.Y}).Thumbprint()
+	privateScalar, err := private.Bytes()
+	if err != nil {
+		return nil, privateJWK{}, "", errors.New("encode DPoP private key")
+	}
+	defer clear(privateScalar)
+	if len(privateScalar) != 32 {
+		return nil, privateJWK{}, "", errors.New("encode DPoP private key")
+	}
+	value := privateJWK{
+		Kty: public.Kty,
+		Crv: public.Crv,
+		X:   public.X,
+		Y:   public.Y,
+		D:   base64.RawURLEncoding.EncodeToString(privateScalar),
+	}
+	thumbprint, err := public.Thumbprint()
 	if err != nil {
 		return nil, privateJWK{}, "", errors.New("compute DPoP thumbprint")
 	}
@@ -941,14 +953,14 @@ func newDPoPKey() (*ecdsa.PrivateKey, privateJWK, string, error) {
 }
 
 func signDPoP(private *ecdsa.PrivateKey, method string, target *url.URL, now time.Time, accessToken string) (string, error) {
+	public, err := dpopPublicJWK(private)
+	if err != nil {
+		return "", err
+	}
 	header, err := json.Marshal(map[string]any{
 		"typ": "dpop+jwt",
 		"alg": "ES256",
-		"jwk": dpop.PublicJWK{
-			Kty: "EC", Crv: "P-256",
-			X: base64.RawURLEncoding.EncodeToString(private.X.FillBytes(make([]byte, 32))),
-			Y: base64.RawURLEncoding.EncodeToString(private.Y.FillBytes(make([]byte, 32))),
-		},
+		"jwk": public,
 	})
 	if err != nil {
 		return "", errors.New("encode DPoP header")
@@ -983,6 +995,21 @@ func signDPoP(private *ecdsa.PrivateKey, method string, target *url.URL, now tim
 	}
 	signature := append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
 	return headerSegment + "." + claimsSegment + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func dpopPublicJWK(private *ecdsa.PrivateKey) (dpop.PublicJWK, error) {
+	if private == nil || private.Curve != elliptic.P256() {
+		return dpop.PublicJWK{}, errors.New("encode DPoP public key")
+	}
+	encoded, err := private.PublicKey.Bytes()
+	if err != nil || len(encoded) != 65 || encoded[0] != 4 {
+		return dpop.PublicJWK{}, errors.New("encode DPoP public key")
+	}
+	return dpop.PublicJWK{
+		Kty: "EC", Crv: "P-256",
+		X: base64.RawURLEncoding.EncodeToString(encoded[1:33]),
+		Y: base64.RawURLEncoding.EncodeToString(encoded[33:]),
+	}, nil
 }
 
 func encodeBody(value any) ([]byte, error) {

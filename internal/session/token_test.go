@@ -192,13 +192,19 @@ func TestPreparedAccessIssuerFormattingIsRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare access-token issuer: %v", err)
 	}
+	privateScalar, err := privateKey.Bytes()
+	if err != nil {
+		t.Fatalf("encode private signing key: %v", err)
+	}
+	defer clear(privateScalar)
+	encodedPrivateScalar := base64.RawURLEncoding.EncodeToString(privateScalar)
 	for _, format := range []string{"%#v", "%+v", "%v", "%s", "%q", "%x"} {
 		if got := fmt.Sprintf(format, prepared); got != "[REDACTED]" {
 			t.Fatalf("prepared issuer format %q = %q", format, got)
 		}
 	}
 	formattedPointer := fmt.Sprintf("%p", prepared)
-	for _, sensitive := range []string{keys.key.KeyID(), privateKey.D.String()} {
+	for _, sensitive := range []string{keys.key.KeyID(), encodedPrivateScalar} {
 		if strings.Contains(formattedPointer, sensitive) {
 			t.Fatalf("prepared issuer pointer formatting exposed signing material: %q", formattedPointer)
 		}
