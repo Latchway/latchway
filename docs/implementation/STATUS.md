@@ -33,7 +33,7 @@ remain open.
 | Swift `latchway-ios-sdk` | `a0d0a118f897e594f8808067ce1a01fa571fdde2` |
 | Android `latchway-android` | `659b9c8728a3766bd1ed383e840515c4227305ae` |
 | React Native `latchway-react-native-sdk` | `791ca99920923c1535555b38e2b2aca6a56d8d77` |
-| Mintlify mirror `latchway-docs` | `6ae7aba53d2508ffa8c1d8fa534bd9af446e16e9` |
+| Mintlify mirror `latchway-docs` | `60a35472bb8dd3a2a0d4537841cfaa864b39fba1` |
 
 ### Passing test commands
 
