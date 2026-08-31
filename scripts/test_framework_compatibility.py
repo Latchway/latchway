@@ -97,6 +97,50 @@ class FrameworkCompatibilityTests(unittest.TestCase):
             "X-Latchway-Framework-Version",
         )
 
+    def test_react_native_physical_evidence_coordinates_are_exact(self) -> None:
+        item = next(
+            candidate
+            for candidate in self.registry["frameworks"]
+            if candidate["id"] == "react-native-fetch"
+        )
+        exact_commit = "6de46e1c7264e1d45cdd31174e4ea040a8c24acf"
+        registry_claim = " ".join(item["limitations"])
+        for value in (
+            "iPadOS 26.5",
+            "Debug configuration",
+            "Apple Development",
+            exact_commit,
+        ):
+            self.assertIn(value, registry_claim)
+        self.assertNotIn("iOS 27", registry_claim)
+        self.assertNotIn("Release-configuration", registry_claim)
+
+        public_pages = (
+            "clients/react-native/quickstart.mdx",
+            "integrations/react-native.mdx",
+            "mobile/device-proof.mdx",
+            "mobile/ios.mdx",
+            "mobile/react-native.mdx",
+            "release-status.mdx",
+        )
+        for relative in public_pages:
+            text = (
+                compatibility.ROOT / "docs/public" / relative
+            ).read_text(encoding="utf-8")
+            with self.subTest(page=relative):
+                self.assertIn("iPadOS 26.5", text)
+                self.assertIn("Debug", text)
+                self.assertIn("Apple Development", text)
+                self.assertIn(exact_commit, text)
+                for stale_claim in (
+                    "real iOS 27",
+                    "physical iOS 27",
+                    "iOS 27 device",
+                    "Release configuration",
+                    "Release-configuration",
+                ):
+                    self.assertNotIn(stale_claim, text)
+
     def test_schema_closes_root_framework_capability_and_security_objects(self) -> None:
         schema = json.loads(compatibility.DEFAULT_SCHEMA.read_text(encoding="utf-8"))
         framework = schema["$defs"]["framework"]

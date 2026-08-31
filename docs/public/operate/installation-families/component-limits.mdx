@@ -16,12 +16,314 @@ owner: "core-operations"
   synchronized packages and exact-candidate deployment evidence are published.
 </Warning>
 
-Component policy can only narrow the permissions available to its Installation
-Family and application user. A widget might receive a lower request rate and a
-smaller feature set than the containing app. Delegated trust can be prohibited
-for a sensitive feature even when the root may use it.
+## Outcome
 
-Quota usage must attribute the exact component and also roll up to applicable
-family, user, application, and organization limits. The server reserves before
-upstream dispatch and settles from authoritative metering; the client cannot
-declare its own usage or price.
+Give an iOS widget a smaller daily request budget and one concurrent stream
+without changing the containing app's plan. Validate, activate, and verify the
+policy from server-owned component and request records.
+
+Component policy can only narrow permissions already available to the
+Installation Family and application user. A component definition, delegated
+grant, or CEL expression cannot create access to an unconfigured feature.
+
+## Before you start
+
+Prepare:
+
+- a non-production environment with a working root application session;
+- the exact root and widget bundle identifiers;
+- an existing feature such as `habit-assistant` and its valid route;
+- an authenticated operator CLI with configuration and request-read access;
+- an active configuration revision ID for optimistic concurrency; and
+- the bounded [test upstream](/reference/cli#verification) or another owned
+  endpoint that requires no provider credential.
+
+Never develop a quota experiment in production. Use small limits in staging,
+retain request IDs, and restore the reviewed prior revision after the test.
+
+## 1. Pull the complete active document
+
+Configuration replacement is whole-document and ETag-protected. Start from the
+redaction-safe active document instead of assembling a partial configuration:
+
+```bash
+latchway --output json config pull --environment env_... > active.json
+cp active.json candidate.json
+```
+
+Record the active `rev_...` coordinate reported by the CLI or Console. Secret
+references remain references; do not copy secret values into `candidate.json`.
+
+## 2. Define the root and delegated widget
+
+Merge these entries into `spec.componentDefinitions`. Replace the example
+bundle identifiers, but keep the parent reference and feature IDs consistent:
+
+```json
+[
+  {
+    "id": "ios-main",
+    "platform": "ios",
+    "kind": "main_app",
+    "identifiers": {
+      "bundleIdentifiers": ["com.example.habits"]
+    },
+    "familyRole": "root",
+    "attestation": {
+      "strategy": "direct",
+      "provider": "app_attest"
+    },
+    "allowedFeatures": ["habit-assistant"]
+  },
+  {
+    "id": "ios-widget",
+    "platform": "ios",
+    "kind": "widget",
+    "identifiers": {
+      "bundleIdentifiers": ["com.example.habits.widget"]
+    },
+    "familyRole": "delegated",
+    "delegation": {
+      "allowedParents": ["ios-main"],
+      "maximumLifetime": "7d",
+      "allowChildDelegation": false
+    },
+    "attestation": {
+      "strategy": "delegated"
+    },
+    "allowedFeatures": ["habit-assistant"]
+  }
+]
+```
+
+`allowedParents` names a component-definition ID, not a runtime `cmp_...` ID.
+The widget receives an independent key, component ID, session family, and
+bounded feature grant. It does not inherit the root key or refresh credential.
+
+## 3. Add component-aware limit plans
+
+Merge both entries into `spec.limitPlans`; do not replace unrelated plans. The
+standard plan gives the root a family-scoped daily budget. The widget plan uses
+the exact component as a quota dimension and adds a one-stream concurrency
+limit:
+
+```json
+[
+  {
+    "id": "assistant-standard",
+    "limits": [
+      {
+        "metric": "logical_requests",
+        "algorithm": "calendar",
+        "scope": ["user", "installation_family", "feature"],
+        "window": "1d",
+        "timezone": "UTC",
+        "maximum": 500,
+        "hard": true
+      }
+    ]
+  },
+  {
+    "id": "assistant-widget",
+    "limits": [
+      {
+        "metric": "logical_requests",
+        "algorithm": "calendar",
+        "scope": [
+          "user",
+          "installation_family",
+          "client_component",
+          "feature"
+        ],
+        "window": "1d",
+        "timezone": "UTC",
+        "maximum": 50,
+        "hard": true
+      },
+      {
+        "metric": "concurrent_streams",
+        "algorithm": "concurrency",
+        "scope": ["installation_family", "client_component", "feature"],
+        "maximum": 1,
+        "hard": true
+      }
+    ]
+  }
+]
+```
+
+The server reserves every hard limit before upstream dispatch and settles it
+from authoritative usage. The client cannot submit a price, usage result,
+component ID, or scope value.
+
+### Choose scope deliberately
+
+| Dimension | Bucket meaning |
+| --- | --- |
+| `installation_family` | One value for the sealed family in the authenticated session |
+| `client_component` | One value for the exact durable root or delegated component |
+| `component_definition` | One value for the configured definition such as `ios-widget` |
+| `component_kind` | One value for a kind such as `widget` across matching components in the other dimensions |
+| `trust_source` | One value for the normalized server-owned trust provenance |
+
+The listed dimensions form one composite bucket; they do not create a separate
+bucket for every prefix. The selected limit-plan ID is also part of quota
+identity. Consequently, `assistant-standard` and `assistant-widget` do not
+share a family bucket even when both rules include `installation_family`.
+
+If every component must share one family cap, select the same plan for all of
+them and include both a family-scoped rule and any component-scoped rule in that
+plan. Such a component rule has the same maximum for every matching component;
+use distinct plans only when the different maximum is more important than a
+shared cross-plan bucket.
+
+## 4. Select the plan with CEL
+
+On the existing `habit-assistant` feature, replace only the `access` and
+`limitPlan` objects with the following focused fragment. Keep its protocol,
+attestation policy, output policy, and routes unchanged:
+
+```json
+{
+  "access": {
+    "expression": "principal.authenticated && client.family.status == 'active' && client.component.definition_id in ['ios-main', 'ios-widget'] && (client.component.is_root || (client.component.kind == 'widget' && client.trust.delegated))"
+  },
+  "limitPlan": {
+    "expression": "client.component.kind == 'widget' ? 'assistant-widget' : 'assistant-standard'"
+  }
+}
+```
+
+The CEL activation is built from the sealed session and durable component, not
+from application headers. Missing fields, unknown values, type errors, cost
+exhaustion, or an absent selected plan fail closed.
+
+For a sensitive root-only feature, use a separate feature policy instead of a
+client flag:
+
+```json
+{
+  "access": {
+    "expression": "principal.authenticated && client.component.is_root && !client.trust.delegated && client.trust.direct_attestation"
+  }
+}
+```
+
+See the exact variables and resource bounds in
+[CEL policy context](/reference/cel-policy-context).
+
+## 5. Dry-run and activate
+
+First run the complete candidate through schema, reference, CEL, capability,
+route, and executable-limit validation:
+
+```bash
+latchway config apply \
+  --environment env_... \
+  --base-revision rev_... \
+  --file candidate.json \
+  --dry-run
+```
+
+Resolve every issue by its safe code and JSON Pointer. Common failures include
+an unknown parent definition, an unknown feature in `allowedFeatures`, a
+delegation lifetime longer than policy permits, a CEL string that selects an
+unknown plan, and algorithm fields that do not match the metric.
+
+After review, activate against the same base revision:
+
+```bash
+latchway config apply \
+  --environment env_... \
+  --base-revision rev_... \
+  --file candidate.json
+```
+
+A stale base fails instead of overwriting a newer revision. If the workflow
+creates a draft separately, run `latchway config validate rev_...` and
+`latchway config plan rev_...` before activation.
+
+## 6. Verify component identity before quota
+
+Provision the widget from the containing app, then inspect server-owned state:
+
+```bash
+latchway installation-families inspect fam_...
+latchway components list --environment env_... --family fam_...
+latchway --output json components inspect cmp_...
+```
+
+Confirm the widget has definition `ios-widget`, kind `widget`, delegated trust,
+the expected parent, an independent component key, and only
+`habit-assistant`. Stop if the root and widget resolve to the same component ID
+or key thumbprint.
+
+## 7. Verify plan selection and daily denial
+
+For a bounded staging test, temporarily reduce the widget maximum from `50` to
+`2`, activate that reviewed revision, and send three non-streaming widget
+requests with distinct client request hints. Send one root request as a control.
+
+Expected results:
+
+1. the first two widget requests reach the bounded upstream;
+2. the third widget request returns HTTP `429` with `quota_exceeded` and a safe
+   request ID;
+3. the root request selects `assistant-standard` and remains independent; and
+4. no denied request creates an upstream attempt.
+
+Inspect every request and the aggregate view:
+
+```bash
+latchway requests inspect req_...
+latchway usage summary --environment env_...
+latchway usage timeseries --environment env_... --interval hour
+```
+
+Confirm the selected plan, family ID, component ID, component definition, kind,
+trust source, feature, reservation outcome, attempt count, and settlement. Do
+not use `routes simulate` as component proof: the current simulator accepts
+platform, trust level, and normalized claims, but it does not construct a real
+Installation Family or Client Component session and does not reserve quota.
+
+## 8. Verify concurrent streams and cancellation
+
+Start one widget stream and hold it open at the bounded upstream. While it is
+active, start a second widget stream for the same feature. The second request
+must return HTTP `429` with `concurrency_exceeded`. Cancel or finish the first
+stream, then confirm a new stream can reserve the released slot.
+
+Inspect all three request IDs. The denied request must have no upstream
+attempt; the cancelled request must release its concurrency reservation; the
+final request must not reuse a DPoP proof or logical request ID.
+
+## 9. Roll back and retain evidence
+
+Reactivate the reviewed prior revision after the staging test:
+
+```bash
+latchway config rollback rev_... --environment env_...
+```
+
+Retain only revision IDs, request IDs, safe problem codes, component IDs, plan
+IDs, timestamps, and redaction-safe screenshots or JSON. Do not retain tokens,
+DPoP proofs, private keys, attestation objects, identity claims, prompt bodies,
+provider credentials, or secret values.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `component_feature_not_granted` | Both the definition's `allowedFeatures` and the feature access CEL must permit the component |
+| `feature_not_allowed` | Inspect the sealed definition, kind, family status, and trust source used by CEL |
+| `configuration_invalid` during apply | Follow the validation issue's JSON Pointer; a fragment is not a complete `EnvironmentConfig` |
+| Widget selects the standard plan | Confirm `client.component.kind` is the server-recorded `widget`, not an application header |
+| Root usage appears in the widget bucket | Confirm the root and widget have different component IDs and that the feature selects different plans |
+| Second stream reaches upstream | Confirm the rule uses `concurrent_streams`, `algorithm: concurrency`, explicit scope, and `maximum: 1` |
+| Family totals do not combine across plans | Expected: limit-plan ID participates in bucket identity; use one selected plan for a shared family cap |
+
+The canonical field and algorithm bounds are generated in
+[Configuration schema](/reference/config-schema). For scoped revocation or
+renewal after a component compromise, use
+[Revoke components and families](/operate/installation-families/revocation);
+quota denial is not a revocation mechanism.

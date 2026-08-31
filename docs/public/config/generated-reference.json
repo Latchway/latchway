@@ -7,8 +7,12 @@
       "sha256": "0f78830f6bb93bfcb4c9b9c5a19f2eb7f0c3fc45aadcb33e1461f47ee69d6727"
     },
     {
+      "path": "reference/client-api.mdx",
+      "sha256": "f5f86c95c3ed6856da8d39fda4ef9245c11618520aa780dfc643d805a88e4b51"
+    },
+    {
       "path": "reference/compatibility.mdx",
-      "sha256": "6e5c761b40676f745677c7ee4239eeb92c6c09f6c9fa32f2fba4d62aeda38d73"
+      "sha256": "1b3dbcd1fce4fe43b93cc814711b9fc4be1814d38bcc74704dae5c321ca8e3ae"
     },
     {
       "path": "reference/config-schema.mdx",
@@ -25,6 +29,10 @@
       "sha256": "16ef99251467fa50fc8fab33afe3792177a9e196014bfff8b702aa1e1e1d0eb6"
     },
     {
+      "path": "api/client.openapi.yaml",
+      "sha256": "ef102daf073d55f9ff40780e675f96395ce1e8b99c5b39fcf694d92b037a798a"
+    },
+    {
       "path": "api/config.schema.json",
       "sha256": "1106e273939652f839edf12b056e884561f9706587a049ec6d7adfee78ec13d2"
     },
@@ -38,7 +46,7 @@
     },
     {
       "path": "compatibility/frameworks.yaml",
-      "sha256": "9f51e26506e6b0a1251b5081650f501b5ff7f0ca5e743eb1f5a3fc43b08c9196"
+      "sha256": "2d347eb2072a4ae9c64e6d29e34f613932ecdec77288c7ea9e123e5ad7d6d588"
     }
   ]
 }

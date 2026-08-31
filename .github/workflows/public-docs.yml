@@ -5,6 +5,7 @@ on:
     paths:
       - "docs/public/**"
       - "api/admin.openapi.yaml"
+      - "api/client.openapi.yaml"
       - "api/error-codes.yaml"
       - "api/config.schema.json"
       - "compatibility/**"
@@ -25,6 +26,7 @@ on:
     paths:
       - "docs/public/**"
       - "api/admin.openapi.yaml"
+      - "api/client.openapi.yaml"
       - "api/error-codes.yaml"
       - "api/config.schema.json"
       - "compatibility/**"

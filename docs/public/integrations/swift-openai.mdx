@@ -1,0 +1,200 @@
+---
+title: "SwiftOpenAI integration"
+description: "Use the exact SwiftOpenAI 4.6.0 asynchronous HTTP seam while Latchway retains native DPoP, session, destination, and retry ownership."
+icon: "plug"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "framework-integrations"
+---
+
+import SwiftOpenAISource from "/snippets/generated/ios/frameworks/swift-openai.swift.mdx";
+
+<Warning>
+  `LatchwaySwiftOpenAI` is an unpublished source candidate. SwiftOpenAI `4.6.0`
+  has an exact experimental compatibility row; it is not a supported release
+  range. Latchway contract `1.0.0` remains pre-release.
+</Warning>
+
+## 1. What this integration does
+
+`LatchwaySwiftOpenAIHTTPClient` implements SwiftOpenAI's asynchronous
+`HTTPClient` seam for buffered and line-stream requests. Application code keeps
+SwiftOpenAI request and response types while the native Latchway transport owns
+the gateway origin, feature, session, fresh proof, and retry boundary.
+
+## 2. Supported framework versions
+
+SwiftOpenAI `4.6.0` is the only locally tested version. Do not infer a range
+from that exact tuple or from source compatibility with another tag.
+
+## 3. Supported Latchway versions
+
+The local tuple uses Latchway Swift SDK source `1.0.0`, server contract `1.0.0`,
+and current wire protocol `2`. No published Latchway or SwiftOpenAI adapter
+tuple exists yet.
+
+## 4. Security level
+
+| Capability | Exact-tuple assessment |
+| --- | --- |
+| Full DPoP | Preserved through the feature-bound native transport in local adapter tests |
+| Private key remains native | Partial release evidence; the adapter never receives key material, but physical-device proof remains pending |
+| Streaming | Buffered and line-stream HTTP pass at SwiftOpenAI `4.6.0` with bounded backpressure |
+| Cancellation | Transport propagation is implemented; physical cancellation proof remains pending |
+| App extensions | Conditional through an already provisioned `LatchwayExtensionClient`; physical extension proof remains pending |
+| Structured output | Conditional on the selected protocol and an explicit conformance case |
+| Tool calls | Conditional on the selected protocol and an explicit conformance case |
+| Protocol | OpenAI Responses and Chat Completions use draft contract `1.0.0` over current wire `2` |
+
+## 5. Install packages
+
+For source evaluation, add the authorized `latchway-ios-sdk` checkout as a
+local Swift package and link `Latchway`, the required identity or attestation
+products, and `LatchwaySwiftOpenAI`. That package pins SwiftOpenAI exactly:
+
+```swift
+.package(path: "../latchway-ios-sdk")
+```
+
+Do not replace the local checkout with a registry coordinate or loosen
+SwiftOpenAI from exact `4.6.0` while claiming the generated compatibility row.
+
+## 6. Create the Latchway client
+
+Create the native client with the identity, App Attest, Keychain, and gateway
+configuration in the [iOS quickstart](/clients/ios/quickstart). The resulting
+`latchwayClient` owns all renewable credentials and key operations.
+
+## 7. Bind a feature
+
+Bind one stable application feature when creating the adapter. The physical
+provider and model remain server-owned:
+
+```swift
+let httpClient = LatchwaySwiftOpenAIHTTPClient(
+    client: latchwayClient,
+    feature: "habit-assistant"
+)
+```
+
+For an extension, pass its already provisioned `LatchwayExtensionClient` to
+the corresponding initializer. Do not pass the containing app's root client.
+
+## 8. Create the framework client
+
+Create the service through the adapter factory, not through a separate default
+SwiftOpenAI transport:
+
+```swift
+import LatchwaySwiftOpenAI
+import SwiftOpenAI
+
+let service = try httpClient.makeService()
+```
+
+The factory supplies only the literal non-secret placeholder
+`latchway-managed`. Latchway removes that value and adds fresh authorization at
+dispatch. The generated source below is pinned to the bundled SDK commit.
+
+<SwiftOpenAISource />
+
+## 9. Send a non-streaming request
+
+Continue using SwiftOpenAI's native service. The framework's model-shaped
+field does not select the trusted physical model; active server configuration
+does:
+
+```swift
+let response = try await service.responseCreate(.init(
+    input: .string("Suggest one small habit"),
+    model: .gpt4o
+))
+```
+
+Preserve the safe Latchway request ID when reporting a failure.
+
+## 10. Send a streaming request
+
+Use SwiftOpenAI's HTTP streaming surface:
+
+```swift
+let events = try await service.responseCreateStream(.init(
+    input: .string("Suggest one small habit"),
+    model: .gpt4o
+))
+
+for try await event in events {
+    // Render each native SwiftOpenAI event incrementally.
+}
+```
+
+The adapter converts URLSession bytes to SwiftOpenAI's native line stream with
+an oldest-preserving one-element buffer. It does not buffer the completion.
+
+## 11. Use tools
+
+Tool definitions and calls remain SwiftOpenAI values. Latchway transports only
+the bounded protocol subset and does not execute a tool. Treat Tool calls as
+conditional until the exact application shape passes conformance.
+
+## 12. Use structured output
+
+Structured output remains conditional on both the configured protocol and the
+exact SwiftOpenAI request shape. The server may reject unsupported hosted state,
+remote tools, files, or media rather than approximate them.
+
+## 13. Handle cancellation
+
+Cancel the task consuming the SwiftOpenAI stream. Downstream termination
+cancels the adapter producer and native URLSession task; Cancellation must not
+start a hidden framework retry.
+
+## 14. Handle quota failures
+
+Treat HTTP `429` and the canonical Latchway problem as a policy denial. Retain
+the request ID and follow [Errors](/reference/errors); do not turn quota into an
+API-key refresh or unbounded retry loop.
+
+## 15. Handle session renewal
+
+The native transport owns single-flight renewal and at most one exact safe
+pre-dispatch follow-up. Framework code must never cache an access token or DPoP
+proof, and every permitted attempt receives a fresh proof.
+
+## 16. Known limitations
+
+SwiftOpenAI `4.6.0` WebSocket Realtime bypasses the injectable `HTTPClient`
+through `URLSession.shared`, so Realtime is unsupported. Embeddings, audio,
+images, tools, structured output, App extensions, and physical cancellation
+remain conditional. Hosted gateway, live-provider, and exact release-image
+proof also remain open.
+
+## 17. Verify the integration
+
+From the authorized iOS SDK checkout, run:
+
+```bash
+swift test --filter LatchwaySwiftOpenAITests
+```
+
+Then use the final signed application against the bounded test upstream or an
+owned gateway. Confirm one request ID, feature `habit-assistant`, framework
+`swift-openai` version `4.6.0`, protocol, component trust, usage, incremental
+delivery, and cancellation. The local test alone is not physical or hosted
+evidence.
+
+## 18. Troubleshooting
+
+If requests bypass Latchway, confirm the service came from `makeService()` and
+that the gateway base path is correct. If Realtime works through a different
+socket, stop: that path is outside the adapter. Preserve only redaction-safe
+request IDs and diagnostics.
+
+## 19. Compatibility matrix
+
+The generated row is `experimental` for exact SwiftOpenAI `4.6.0`. See
+[Compatibility](/reference/compatibility) before making a capability or
+support claim.

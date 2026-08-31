@@ -168,8 +168,9 @@ to apply to supported Android application trust surfaces.
   LangChain OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React
   Native 0.82.0 integration seams.
 - [x] Generate capability and limitation claims from the canonical registry.
-- [x] Keep unexecuted Foundation Models support planned and the unsafe MacPaw
-  seam unsupported.
+- [x] Implement the narrow Foundation Models 27 source adapter and pass its
+  nine iOS 27.0 simulator cases while keeping physical framework and delegated
+  extension evidence open; keep the unsafe MacPaw seam unsupported.
 - [ ] Run hosted common conformance and physical native proof before elevating
   any experimental entry to supported.
 
@@ -193,7 +194,7 @@ to apply to supported Android application trust surfaces.
   mirror drift.
 - [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
   verifiable-language rules.
-- [x] Pass the local 59-page Mintlify validation suite.
+- [x] Pass the local 127-page Mintlify validation suite.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
   and validate the production URL after the branch merges.
 

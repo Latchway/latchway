@@ -12,6 +12,7 @@ from scripts import public_reference as reference
 class PublicReferenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.admin = reference.load_admin_contract()
+        self.client = reference.load_client_contract()
         self.errors = reference.load_error_registry()
         self.config = reference.load_config_schema()
 
@@ -21,6 +22,7 @@ class PublicReferenceTests(unittest.TestCase):
             set(rendered),
             {
                 reference.ADMIN_OUTPUT,
+                reference.CLIENT_OUTPUT,
                 reference.ERROR_OUTPUT,
                 reference.CONFIG_OUTPUT,
                 reference.COMPATIBILITY_OUTPUT,
@@ -37,6 +39,7 @@ class PublicReferenceTests(unittest.TestCase):
             [entry["path"] for entry in manifest["sources"]],
             [
                 "api/admin.openapi.yaml",
+                "api/client.openapi.yaml",
                 "api/config.schema.json",
                 "api/error-codes.yaml",
                 "compatibility/frameworks.schema.json",
@@ -47,6 +50,7 @@ class PublicReferenceTests(unittest.TestCase):
             [entry["path"] for entry in manifest["outputs"]],
             [
                 "reference/admin-api.mdx",
+                "reference/client-api.mdx",
                 "reference/compatibility.mdx",
                 "reference/config-schema.mdx",
                 "reference/errors.mdx",
@@ -57,6 +61,10 @@ class PublicReferenceTests(unittest.TestCase):
         self.assertEqual(
             reference.render_admin_reference(self.admin),
             reference.render_admin_reference(self.admin),
+        )
+        self.assertEqual(
+            reference.render_client_reference(self.client),
+            reference.render_client_reference(self.client),
         )
         self.assertEqual(
             reference.render_error_reference(self.errors),
@@ -91,6 +99,33 @@ class PublicReferenceTests(unittest.TestCase):
             self.assertIn(f"`{exact_path}`", rendered)
         self.assertIn("intentionally embeds no interactive API", rendered)
         self.assertIn("without changing siblings or revoking already-issued access", rendered)
+
+    def test_client_reference_contains_every_operation_once(self) -> None:
+        rendered = reference.render_client_reference(self.client)
+        operations = []
+        for path_item in self.client["paths"].values():
+            for method in reference.HTTP_METHODS:
+                operation = path_item.get(method)
+                if isinstance(operation, dict):
+                    operations.append(operation["operationId"])
+        self.assertEqual(len(operations), 23)
+        for operation_id in operations:
+            self.assertEqual(rendered.count(f"`{operation_id}`"), 1, operation_id)
+        for exact_path in (
+            "/.well-known/latchway",
+            "/client/v1/session-challenges",
+            "/client/v1/installation-families/current/components",
+            "/client/v1/diagnostics",
+            "/v1/responses",
+            "/v1/chat/completions",
+            "/v1/embeddings",
+            "/v1/messages",
+            "/proxy/{feature}/{remainingPath}",
+        ):
+            self.assertIn(f"`{exact_path}`", rendered)
+        self.assertIn("Canonical source: api/client.openapi.yaml", rendered)
+        self.assertIn("intentionally embeds no interactive API", rendered)
+        self.assertIn("`DPoPAccessToken` + `DPoPProof`", rendered)
 
     def test_error_reference_contains_every_stable_code_once(self) -> None:
         rendered = reference.render_error_reference(self.errors)

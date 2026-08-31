@@ -1,0 +1,226 @@
+---
+title: "Koog Android integration"
+description: "Use Koog 1.1.1 through its preconfigured OkHttp seam with an absolute Latchway Chat Completions path and the exact tested dependency tuple."
+icon: "plug"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "framework-integrations"
+---
+
+import KoogSource from "/snippets/generated/android/frameworks/koog.kt.mdx";
+
+<Warning>
+  Koog `1.1.1` has an exact experimental local-evidence row. Latchway Android
+  `1.0.0` is unpublished, and no Koog support range exists. Keep every version
+  below pinned while evaluating this pre-release tuple.
+</Warning>
+
+## 1. What this integration does
+
+Koog reuses the production Latchway OkHttp interceptor, origin guard, and
+authenticator through its public preconfigured-client seam. Koog keeps its
+prompt, tool, schema, streaming, and response types; no framework-specific
+Latchway module or provider credential is introduced.
+
+## 2. Supported framework versions
+
+Koog `1.1.1` is the only tested framework version. Full conformance requires
+OkHttp and `okhttp-sse` `5.3.0`; OkHttp `4.9.2` passes four non-streaming cases
+but cannot satisfy Koog's linked SSE method.
+
+## 3. Supported Latchway versions
+
+The local tuple uses Latchway Android source `1.0.0`, server contract `1.0.0`,
+and current wire protocol `2`. Those coordinates do not establish a published
+adapter release.
+
+## 4. Security level
+
+| Capability | Exact-tuple assessment |
+| --- | --- |
+| Full DPoP | Preserved through the production OkHttp hooks in local Koog tests |
+| Private key remains native | Partial release evidence; Android Keystore is the target, but physical Play-distributed proof remains pending |
+| Streaming | Incremental SSE and final usage pass only with OkHttp and `okhttp-sse` `5.3.0` |
+| Cancellation | Cancelling Koog's Flow cancels the underlying OkHttp event source locally |
+| App extensions | Not an Android capability; delegated component surfaces remain separate and pre-release |
+| Structured output | JSON schema passes at exact Koog `1.1.1` |
+| Tool calls | Tool descriptors pass at exact Koog `1.1.1` |
+| Protocol | OpenAI Chat Completions uses draft contract `1.0.0` over current wire `2` |
+
+## 5. Install packages
+
+Use the authorized Android included build for the unpublished Latchway source,
+then pin the complete Koog runtime graph:
+
+```kotlin
+dependencies {
+    implementation(platform("dev.latchway:latchway-bom:1.0.0"))
+    implementation("dev.latchway:latchway-okhttp")
+
+    implementation("ai.koog:prompt-executor-openai-client:1.1.1")
+    implementation("ai.koog:http-client-okhttp:1.1.1")
+    implementation("ai.koog:utils-jvm:1.1.1")
+    implementation("io.github.oshai:kotlin-logging:8.0.01")
+    implementation("com.squareup.okhttp3:okhttp:5.3.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.3.0")
+}
+```
+
+Do not allow a transitive dependency to replace either OkHttp artifact or to
+select Koog's Android `utils` variant for this JVM-backed wrapper.
+
+## 6. Create the Latchway client
+
+Create `latchway` with the identity, Play Integrity, Android Keystore, and
+gateway setup in the [Android quickstart](/clients/android/quickstart). Use a
+real Play-distributed application when collecting physical integrity evidence.
+
+## 7. Bind a feature
+
+Set `defaultFeature = "habit-assistant"` in the `LatchwayConfiguration` used by
+this dedicated Koog client. Koog `1.1.1` does not expose an OkHttp request
+builder for applying `latchwayFeature(...)`, so do not share this client across
+features. The feature, not Koog's model-shaped value, selects server policy.
+
+## 8. Create the framework client
+
+Install all three Latchway hooks on the exact OkHttp instance Koog uses. Its
+preconfigured helper has no base-URL argument, so supply an absolute Chat
+Completions path through the public primary constructor:
+
+```kotlin
+import ai.koog.http.client.okhttp.fromOkHttpClient
+import ai.koog.prompt.dsl.prompt
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+import kotlinx.coroutines.flow.collect
+import okhttp3.OkHttpClient
+
+fun latchwayHttpBuilder() = OkHttpClient.Builder()
+    .addInterceptor(latchway.interceptor())
+    .addNetworkInterceptor(latchway.originGuard())
+    .authenticator(latchway.authenticator())
+
+val koogHttp = ai.koog.http.client.KoogHttpClient.fromOkHttpClient(
+    clientName = "LatchwayKoog",
+    logger = io.github.oshai.kotlinlogging.KotlinLogging.logger { },
+    okHttpClient = latchwayHttpBuilder().build(),
+)
+
+val koog = ai.koog.prompt.executor.clients.openai.OpenAILLMClient(
+    settings = ai.koog.prompt.executor.clients.openai.OpenAIClientSettings(
+        baseUrl = "https://gateway.example.com/",
+        chatCompletionsPath =
+            "https://gateway.example.com/v1/chat/completions",
+    ),
+    httpClient = koogHttp,
+)
+```
+
+The generated source-backed test below proves the exact tool and structured
+output request shape without duplicating framework code in this page.
+
+<KoogSource />
+
+## 9. Send a non-streaming request
+
+Use Koog's native execution surface:
+
+```kotlin
+val answer = koog.execute(
+    prompt("habit-request") { user("Suggest one small habit") },
+    OpenAIModels.Chat.GPT4o,
+    emptyList(),
+)
+```
+
+The model-shaped value satisfies Koog's request type; active Latchway
+configuration selects the trusted physical model and upstream.
+
+## 10. Send a streaming request
+
+Collect Koog's Flow incrementally and retain its owning coroutine for
+cancellation:
+
+```kotlin
+koog.executeStreaming(
+    prompt("habit-stream") { user("Suggest one small habit") },
+    OpenAIModels.Chat.GPT4o,
+    emptyList(),
+).collect { frame ->
+    // Render each StreamFrame as it arrives.
+}
+```
+
+This path requires the exact OkHttp `5.3.0` SSE tuple.
+
+## 11. Use tools
+
+Pass Koog `ToolDescriptor` values to `execute`. Tool calls remain framework and
+application concepts; Latchway validates and transports the bounded protocol
+content but never executes a tool.
+
+## 12. Use structured output
+
+Koog `OpenAIChatParams` with `LLMParams.Schema.JSON.Basic` passes the exact
+local fixture. Keep the schema bounded and treat unknown or unsupported fields
+as errors rather than silently weakening Structured output.
+
+## 13. Handle cancellation
+
+Cancel the coroutine collecting the Flow. Local conformance proves that
+Cancellation reaches Koog's OkHttp event source. Do not add a framework retry
+after a partial stream or an uncertain dispatch.
+
+## 14. Handle quota failures
+
+Koog retains the canonical request ID and problem body in
+`LLMClientException` text but does not expose a typed Latchway error. Use direct
+OkHttp handling when exact problem metadata is required, and never log the
+entire exception if it could contain request content.
+
+## 15. Handle session renewal
+
+The Latchway authenticator owns the single bounded, request-correlated
+pre-dispatch follow-up for an exact session or nonce problem. Disable any
+application retry around `execute` or `executeStreaming`; a fresh framework
+call is a new logical request.
+
+## 16. Known limitations
+
+Responses, embeddings, audio, and images are not supported by this exact row.
+Koog `1.1.1` requires the explicit `utils-jvm` and Kotlin Logging dependencies,
+an absolute Chat Completions path, and OkHttp `5.3.0` for full streaming.
+Hosted gateway, live-provider, physical Play-distributed key, exact-image, and
+versions outside the pinned tuple remain release gates.
+
+## 17. Verify the integration
+
+From the authorized Android SDK checkout, run the exact conformance class with
+the repository's pinned toolchain:
+
+```bash
+./gradlew :latchway-okhttp:testDebugUnitTest \
+  --tests '*KoogFrameworkConformanceTest' \
+  --no-daemon
+```
+
+Then verify the final application against an owned gateway or bounded test
+upstream. Correlate one request ID and confirm feature `habit-assistant`,
+framework `android-okhttp`, protocol, component trust, tool/schema payload,
+incremental usage, and cancellation.
+
+## 18. Troubleshooting
+
+An SSE linkage error usually means Koog resolved OkHttp `4.9.2` or mismatched
+`okhttp-sse`. A missing `SuitableForIO` implementation indicates the wrong Koog
+`utils` variant. A request without Latchway authorization means Koog received a
+different OkHttp instance or the dedicated client has no default feature.
+
+## 19. Compatibility matrix
+
+The generated row is `experimental` for exact Koog `1.1.1` with OkHttp and
+`okhttp-sse` `5.3.0`. See [Compatibility](/reference/compatibility) before
+making a support claim.

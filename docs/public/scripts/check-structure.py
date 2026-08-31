@@ -107,6 +107,10 @@ COMPONENT_USES = {
     "SetupPath": "index",
     "TrustPath": "concepts/client-components",
 }
+FRAMEWORK_SNIPPETS = {
+    "integrations/koog-android": "/snippets/generated/android/frameworks/koog.kt.mdx",
+    "integrations/swift-openai": "/snippets/generated/ios/frameworks/swift-openai.swift.mdx",
+}
 REQUIRED_PAGES = {
     "clients/choose-an-sdk",
     "clients/authentication-providers",
@@ -128,8 +132,10 @@ REQUIRED_PAGES = {
     "integrations/vercel-ai-sdk",
     "integrations/langchain-js",
     "integrations/foundation-models",
+    "integrations/swift-openai",
     "integrations/macpaw-openai",
     "integrations/okhttp",
+    "integrations/koog-android",
     "integrations/react-native",
     "operate/installation-families/overview",
     "operate/installation-families/component-limits",
@@ -154,8 +160,10 @@ INTEGRATION_PAGES = {
     "integrations/vercel-ai-sdk",
     "integrations/langchain-js",
     "integrations/foundation-models",
+    "integrations/swift-openai",
     "integrations/macpaw-openai",
     "integrations/okhttp",
+    "integrations/koog-android",
     "integrations/react-native",
 }
 INTEGRATION_SECTIONS = [
@@ -462,6 +470,11 @@ def main() -> int:
     choose_page = files_by_route.get("start/choose-an-integration")
     if choose_page is not None and "Foundation Models remains planned" in choose_page.read_text(encoding="utf-8"):
         errors.append("integration chooser still calls the experimental Foundation Models source seam planned")
+
+    for route, snippet in FRAMEWORK_SNIPPETS.items():
+        page = files_by_route.get(route)
+        if page is not None and snippet not in page.read_text(encoding="utf-8"):
+            errors.append(f"framework guide is not source-provenanced: {route} must import {snippet}")
 
     origins_page = files_by_route.get("clients/web/origins-and-cors")
     if origins_page is not None:

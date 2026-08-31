@@ -33,28 +33,55 @@ class CIWorkflowTests(unittest.TestCase):
                 r"^docker\.io/library/postgres@sha256:[0-9a-f]{64}$",
             )
 
-    def test_pull_requests_run_offline_release_and_domain_regressions(self) -> None:
+    def test_pull_requests_run_discovered_script_regressions_offline(self) -> None:
         workflow = load_workflow(WORKFLOWS / "ci.yml")
         triggers = workflow.get("on", workflow.get(True, {}))
         self.assertIn("pull_request", triggers)
+        steps = workflow["jobs"]["contracts"]["steps"]
         step = next(
             step
-            for step in workflow["jobs"]["contracts"]["steps"]
-            if step.get("name") == "Validate fixed release and evidence tooling offline"
+            for step in steps
+            if step.get("name") == "Validate repository script tooling offline"
         )
         self.assertNotIn("if", step)
         command = step["run"]
-        for test_path in (
-            "scripts/test_release_candidate.py",
-            "scripts/test_release_preflight.py",
-            "scripts/test_release_workflows.py",
-            "scripts/test_cross_repo_conformance.py",
-            "scripts/test_release_domain_evidence.py",
-            "scripts/test_release_domain_observer.py",
-        ):
-            self.assertIn(test_path, command)
+        self.assertEqual(command, "make test-scripts")
         self.assertNotIn("secrets.", command)
         self.assertNotIn("gh api", command)
+
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("test-scripts:", makefile)
+        self.assertIn(
+            "$(PYTHON) -m unittest discover -s scripts -p 'test_*.py'",
+            makefile,
+        )
+
+    def test_contracts_job_installs_and_runs_pinned_actionlint(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "ci.yml")
+        steps = workflow["jobs"]["contracts"]["steps"]
+        install_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Install pinned actionlint"
+        )
+        validate_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Validate GitHub workflows"
+        )
+        self.assertLess(install_index, validate_index)
+        self.assertEqual(
+            steps[install_index]["run"],
+            "python3 scripts/install-actionlint.py",
+        )
+        self.assertEqual(steps[validate_index]["run"], "make check-workflows")
+
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("check-workflows:", makefile)
+        self.assertIn(
+            "$(ACTIONLINT) -shellcheck= -pyflakes= -oneline .github/workflows/*.yml",
+            makefile,
+        )
 
     def test_pnpm_exists_before_setup_node_reads_its_cache(self) -> None:
         cached_setup_nodes = 0

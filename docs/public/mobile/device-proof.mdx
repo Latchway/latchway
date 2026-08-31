@@ -24,13 +24,13 @@ development behavior only.
 
 ## Current development-signed iOS observation
 
-A real physical device running iOS 27 exercised the React Native example in
-Release configuration with automatic Apple Development signing and bundle
-`dev.latchway`. The gateway accepted Apple production App Attest trust at
-validation category `3` and bundle version `1`. Registration and a subsequent
-assertion reused the same App Attest key through a temporary ngrok tunnel, the
-current source gateway, and Firebase identity. The server persisted the
-assertion counter and hash.
+A real iPad running iPadOS 26.5 exercised React Native commit
+`6de46e1c7264e1d45cdd31174e4ea040a8c24acf` in Debug configuration with
+automatic Apple Development signing and bundle `dev.latchway`. The gateway
+accepted Apple production App Attest trust at validation category `3` and
+bundle version `1`. Registration and a subsequent assertion reused the same
+App Attest key through a temporary ngrok tunnel, the current source gateway,
+and Firebase identity. The server persisted the assertion counter and hash.
 
 The same run passed Secure Enclave DPoP, upstream non-streaming and streaming
 requests, quota, a typed `403 component_feature_not_granted` response, native

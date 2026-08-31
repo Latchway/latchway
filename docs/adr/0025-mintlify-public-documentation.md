@@ -58,8 +58,8 @@ validate and synchronize both coordinates before deployment.
 
 Accepted on 2026-08-30. The canonical, committed public source lives under
 `docs/public`; the standalone `latchway-docs` repository is a generated
-deployment mirror. Navigation, generated compatibility, Admin API, error, and
-configuration references, redirects, links, accessibility, AI-readable
-outputs, and Mintlify source validation are locally checked. SDK documentation-
-bundle consumption, executable-snippet drift checks, production deployment,
-and exact-release content remain open gates.
+deployment mirror. Navigation, generated compatibility, Client API, Admin API,
+error, and configuration references, SDK documentation-bundle consumption,
+executable-snippet drift checks, redirects, links, accessibility, AI-readable
+outputs, and Mintlify source validation are locally checked. Production
+deployment and exact-release content remain open gates.

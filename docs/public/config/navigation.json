@@ -137,8 +137,10 @@
             "integrations/vercel-ai-sdk",
             "integrations/langchain-js",
             "integrations/foundation-models",
+            "integrations/swift-openai",
             "integrations/macpaw-openai",
             "integrations/okhttp",
+            "integrations/koog-android",
             "integrations/react-native"
           ]
         },

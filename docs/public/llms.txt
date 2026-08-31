@@ -46,6 +46,8 @@ Client journeys:
 
 Integrations and reference:
 - /integrations/overview
+- /integrations/swift-openai
+- /integrations/koog-android
 - /reference/client-api
 - /reference/admin-api
 - /reference/compatibility

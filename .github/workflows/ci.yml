@@ -19,19 +19,14 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Install pinned actionlint
+        run: python3 scripts/install-actionlint.py
+      - name: Validate GitHub workflows
+        run: make check-workflows
       - name: Validate normative contracts
         run: python3 scripts/validate-contracts.py
-      - name: Validate CI workflow invariants
-        run: python3 -m unittest scripts/test_ci_workflow.py
-      - name: Validate fixed release and evidence tooling offline
-        run: |
-          python3 -m unittest \
-            scripts/test_release_candidate.py \
-            scripts/test_release_preflight.py \
-            scripts/test_release_workflows.py \
-            scripts/test_cross_repo_conformance.py \
-            scripts/test_release_domain_evidence.py \
-            scripts/test_release_domain_observer.py
+      - name: Validate repository script tooling offline
+        run: make test-scripts
       - name: Prove deterministic contract bundle
         run: |
           python3 scripts/build-contract-bundle.py --output-directory /tmp/contract-a

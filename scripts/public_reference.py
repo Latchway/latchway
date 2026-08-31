@@ -20,9 +20,11 @@ except ModuleNotFoundError:  # Direct execution adds scripts/, not its parent.
 
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN_SOURCE = ROOT / "api/admin.openapi.yaml"
+CLIENT_SOURCE = ROOT / "api/client.openapi.yaml"
 ERROR_SOURCE = ROOT / "api/error-codes.yaml"
 CONFIG_SOURCE = ROOT / "api/config.schema.json"
 ADMIN_OUTPUT = ROOT / "docs/public/reference/admin-api.mdx"
+CLIENT_OUTPUT = ROOT / "docs/public/reference/client-api.mdx"
 ERROR_OUTPUT = ROOT / "docs/public/reference/errors.mdx"
 CONFIG_OUTPUT = ROOT / "docs/public/reference/config-schema.mdx"
 COMPATIBILITY_OUTPUT = ROOT / "docs/public/reference/compatibility.mdx"
@@ -278,12 +280,15 @@ def _operation_security(
         return "Unauthenticated"
     if not isinstance(security, list):
         raise ReferenceError("operation security must be an array")
-    schemes: list[str] = []
+    alternatives: list[str] = []
     for alternative in security:
         if not isinstance(alternative, dict):
             raise ReferenceError("security alternative must be an object")
-        schemes.extend(str(name) for name in alternative)
-    return " or ".join(f"`{name}`" for name in dict.fromkeys(schemes))
+        if not alternative:
+            alternatives.append("Unauthenticated")
+            continue
+        alternatives.append(" + ".join(f"`{name}`" for name in alternative))
+    return " or ".join(dict.fromkeys(alternatives))
 
 
 def _operation_details(operation: Mapping[str, Any], location: str) -> str:
@@ -292,6 +297,192 @@ def _operation_details(operation: Mapping[str, Any], location: str) -> str:
     if description is None:
         return summary
     return f"{summary} {_text(description, f'{location}.description')}"
+
+
+def load_client_contract(path: Path = CLIENT_SOURCE) -> Mapping[str, Any]:
+    document = _load_yaml(path)
+    if document.get("openapi") != "3.1.0":
+        raise ReferenceError("Client API must use OpenAPI 3.1.0")
+    info = document.get("info")
+    if not isinstance(info, dict):
+        raise ReferenceError("Client API info is missing")
+    _text(info.get("title"), "client.info.title")
+    _text(info.get("version"), "client.info.version")
+    _text(info.get("summary"), "client.info.summary")
+    _text(info.get("description"), "client.info.description")
+    tags = document.get("tags")
+    paths = document.get("paths")
+    if not isinstance(tags, list) or not isinstance(paths, dict) or not paths:
+        raise ReferenceError("Client API tags or paths are missing")
+    tag_names = [
+        _text(tag.get("name"), "client.tags.name")
+        for tag in tags
+        if isinstance(tag, dict)
+    ]
+    if len(tag_names) != len(tags) or len(tag_names) != len(set(tag_names)):
+        raise ReferenceError("Client API tags must be unique objects")
+    operation_ids: set[str] = set()
+    operation_count = 0
+    allowed_prefixes = ("/.well-known/", "/client/v1/", "/v1/", "/proxy/")
+    for route, path_item in paths.items():
+        if (
+            not isinstance(route, str)
+            or not route.startswith(allowed_prefixes)
+            or not isinstance(path_item, dict)
+        ):
+            raise ReferenceError(f"invalid Client API path item: {route}")
+        for method in HTTP_METHODS:
+            operation = path_item.get(method)
+            if operation is None:
+                continue
+            if not isinstance(operation, dict):
+                raise ReferenceError(f"{method.upper()} {route} must be an object")
+            operation_id = _text(
+                operation.get("operationId"),
+                f"{method.upper()} {route}.operationId",
+            )
+            _text(operation.get("summary"), f"{method.upper()} {route}.summary")
+            operation_tags = operation.get("tags")
+            if (
+                not isinstance(operation_tags, list)
+                or len(operation_tags) != 1
+                or operation_tags[0] not in tag_names
+            ):
+                raise ReferenceError(f"{method.upper()} {route} must use one declared tag")
+            if operation_id in operation_ids:
+                raise ReferenceError(f"duplicate Client API operationId: {operation_id}")
+            operation_ids.add(operation_id)
+            _operation_parameters(document, path_item, operation)
+            _operation_request(document, operation)
+            _operation_responses(document, operation)
+            _operation_security(document, operation)
+            operation_count += 1
+    if operation_count == 0:
+        raise ReferenceError("Client API has no operations")
+    return document
+
+
+def render_client_reference(document: Mapping[str, Any]) -> str:
+    info = document["info"]
+    tag_names = [tag["name"] for tag in document["tags"]]
+    operations_by_tag: dict[
+        str,
+        list[tuple[str, str, Mapping[str, Any], Mapping[str, Any]]],
+    ] = {name: [] for name in tag_names}
+    for route, path_item in document["paths"].items():
+        for method in HTTP_METHODS:
+            operation = path_item.get(method)
+            if isinstance(operation, dict):
+                operations_by_tag[operation["tags"][0]].append(
+                    (method, route, path_item, operation)
+                )
+    operation_count = sum(len(values) for values in operations_by_tag.values())
+    lines = [
+        "---",
+        'title: "Client API"',
+        'description: "Inspect every generated Latchway discovery, session, component, quota, diagnostics, AI, and restricted HTTP client operation."',
+        'icon: "book-key"',
+        'audience: "reference"',
+        'pageType: "reference"',
+        'serverVersion: "1.0.0"',
+        'sdkVersion: "1.0.0"',
+        'lastVerified: "2026-08-31"',
+        'owner: "core-api"',
+        "---",
+        "",
+        "{/* Generated by scripts/public_reference.py. Do not edit. */}",
+        f"{{/* Canonical source: api/client.openapi.yaml; OpenAPI {document['openapi']}; contract {info['version']}. */}}",
+        "",
+        "<Warning>",
+        "  This reference describes the version 1 source candidate. It is not a",
+        "  publication claim. The page intentionally embeds no interactive API",
+        "  playground: client applications should use a platform Latchway SDK.",
+        "</Warning>",
+        "",
+        _text(info.get("summary"), "client.info.summary"),
+        "",
+        _text(info.get("description"), "client.info.description"),
+        "",
+        "The SDK owns platform attestation, secure key storage, RFC 9449 DPoP,",
+        "origin enforcement, renewal, bounded parsing, redaction, and safe replay.",
+        "The operation index is a wire reference, not a replacement SDK recipe.",
+        "",
+        "## Authentication schemes",
+        "",
+        "| Scheme | Type | Location | Credential |",
+        "| --- | --- | --- | --- |",
+    ]
+    security_schemes = document.get("components", {}).get("securitySchemes", {})
+    if not isinstance(security_schemes, dict) or not security_schemes:
+        raise ReferenceError("Client API security schemes are missing")
+    for name, scheme in security_schemes.items():
+        if not isinstance(scheme, dict):
+            raise ReferenceError(f"Client API security scheme {name} must be an object")
+        kind = _text(scheme.get("type"), f"securitySchemes.{name}.type")
+        location = str(scheme.get("in", "Authorization header"))
+        credential = (
+            scheme.get("name")
+            or scheme.get("bearerFormat")
+            or scheme.get("scheme")
+            or "documented scheme"
+        )
+        lines.append(
+            "| "
+            + " | ".join(
+                _cell(value)
+                for value in (f"`{name}`", kind, location, f"`{credential}`")
+            )
+            + " |"
+        )
+    lines.extend(
+        [
+            "",
+            "A plus sign in the operation table means that the same request requires",
+            "both schemes. Discovery operations explicitly declare an unauthenticated",
+            "alternative. Every non-success response resolves to the canonical RFC 9457",
+            "problem contract in [Errors](/reference/errors).",
+            "",
+            "## Operation index",
+            "",
+            f"The normative OpenAPI document currently declares {operation_count} operations.",
+            "Each row below is generated; a source change without this page changing fails CI.",
+            "",
+        ]
+    )
+    for tag in tag_names:
+        lines.extend(
+            [
+                f"### {tag}",
+                "",
+                "| Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for method, route, path_item, operation in operations_by_tag[tag]:
+            values = (
+                f"`{method.upper()}`",
+                f"`{route}`",
+                f"`{operation['operationId']}`",
+                _operation_security(document, operation),
+                _operation_parameters(document, path_item, operation),
+                _operation_request(document, operation),
+                _operation_responses(document, operation),
+                _operation_details(operation, f"{method.upper()} {route}"),
+            )
+            lines.append("| " + " | ".join(_cell(value) for value in values) + " |")
+        lines.append("")
+    lines.extend(
+        [
+            "## SDK and correlation boundary",
+            "",
+            "Start with the [SDK chooser](/clients/choose-an-sdk). Preserve the safe",
+            "request ID when diagnosing a failure, follow the generated",
+            "[error registry](/reference/errors), and never export a session credential,",
+            "DPoP private key, proof, or raw attestation object into application logs.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def load_admin_contract(path: Path = ADMIN_SOURCE) -> Mapping[str, Any]:
@@ -740,12 +931,14 @@ def render_all() -> Mapping[Path, str]:
     )
     documents = {
         ADMIN_OUTPUT: render_admin_reference(load_admin_contract()),
+        CLIENT_OUTPUT: render_client_reference(load_client_contract()),
         ERROR_OUTPUT: render_error_reference(load_error_registry()),
         CONFIG_OUTPUT: render_config_reference(load_config_schema()),
         COMPATIBILITY_OUTPUT: framework_compatibility.render_markdown(registry),
     }
     sources = (
         ADMIN_SOURCE,
+        CLIENT_SOURCE,
         ERROR_SOURCE,
         CONFIG_SOURCE,
         framework_compatibility.DEFAULT_REGISTRY,
@@ -803,7 +996,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     actions.add_argument("--write-generated", action="store_true")
     actions.add_argument(
         "--print-generated",
-        choices=("admin", "errors", "config", "compatibility"),
+        choices=("admin", "client", "errors", "config", "compatibility"),
         metavar="DOCUMENT",
     )
     args = parser.parse_args(argv)
@@ -817,6 +1010,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.print_generated:
         selected = {
             "admin": ADMIN_OUTPUT,
+            "client": CLIENT_OUTPUT,
             "errors": ERROR_OUTPUT,
             "config": CONFIG_OUTPUT,
             "compatibility": COMPATIBILITY_OUTPUT,
@@ -825,7 +1019,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     print(
         "public references valid: "
-        f"{len(load_admin_contract()['paths'])} paths, "
+        f"{len(load_client_contract()['paths'])} client paths, "
+        f"{len(load_admin_contract()['paths'])} admin paths, "
         f"{len(load_error_registry()['codes'])} errors, "
         f"{len(load_config_schema()['$defs'])} config definitions, "
         f"{len(framework_compatibility.load_registry(framework_compatibility.DEFAULT_REGISTRY, framework_compatibility.DEFAULT_SCHEMA)['frameworks'])} compatibility entries"

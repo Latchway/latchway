@@ -47,9 +47,10 @@ python3 scripts/check-structure.py
 python3 scripts/check_metadata.py
 ```
 
-The generated gate derives the Admin API, stable errors, configuration schema,
-framework compatibility pages, and release-bound SDK examples and catalogs
-from the canonical core contracts and locked SDK documentation bundles.
+The generated gate derives the Client and Admin APIs, stable errors,
+configuration schema, framework compatibility pages, and release-bound SDK
+examples and catalogs from the canonical core contracts and locked SDK
+documentation bundles.
 Editing a generated page or snippet without its normative source fails the
 drift check. Update SDK material only with the commands documented on
 [SDK documentation bundles](/reference/sdk-bundles).

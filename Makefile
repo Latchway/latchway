@@ -3,6 +3,8 @@ SHELL := /bin/sh
 GO ?= go
 GOFMT ?= $(shell $(GO) env GOROOT)/bin/gofmt
 PNPM ?= pnpm
+PYTHON ?= python3
+ACTIONLINT ?= actionlint
 SQLC_IMAGE ?= sqlc/sqlc:1.31.1
 FUZZ_TIME ?= 3s
 FUZZ_PARALLEL ?= 2
@@ -11,7 +13,7 @@ COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X github.com/latchway/latchway/internal/buildinfo.Version=$(VERSION) -X github.com/latchway/latchway/internal/buildinfo.Commit=$(COMMIT) -X github.com/latchway/latchway/internal/buildinfo.Date=$(BUILD_DATE)
 
-.PHONY: all build build-go build-web check check-generated clean compose-up compose-down fmt fuzz-smoke generate test test-race vet
+.PHONY: all build build-go build-web check check-generated check-workflows clean compose-up compose-down fmt fuzz-smoke generate test test-race test-scripts vet
 
 all: check build
 
@@ -25,9 +27,12 @@ build-web:
 	cd web/console && $(PNPM) install --frozen-lockfile
 	cd web/console && $(PNPM) build
 
-check: fmt check-generated vet test
+check: fmt check-generated check-workflows vet test test-scripts
 	cd web/console && $(PNPM) install --frozen-lockfile
 	cd web/console && $(PNPM) check
+
+check-workflows:
+	$(ACTIONLINT) -shellcheck= -pyflakes= -oneline .github/workflows/*.yml
 
 fmt:
 	@files="$$(git ls-files -z -- '*.go' | xargs -0 $(GOFMT) -l)" || exit $$?; \
@@ -87,6 +92,9 @@ test:
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race ./...
+
+test-scripts:
+	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py'
 
 compose-up:
 	docker compose up -d --build
