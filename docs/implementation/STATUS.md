@@ -18,7 +18,7 @@ remain open.
 | Last passing commit in each repository | Exact coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | Database schema version | `23` |
-| Last full test time | `2026-08-31` — canonical public docs, generated compatibility data, synchronized mirror docs, and documentation conformance passed after recording the physical iOS observation; the prior full source gate remains recorded below |
+| Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the recorded coordinates; the synchronized Mintlify mirror passed its separate full documentation gate |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical Android/Play proof, delegated-extension runtime proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
 | External credentials still required | Known missing: Apple release-distribution signing and protected collector/finalizer authority. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
@@ -28,12 +28,12 @@ remain open.
 
 | Repository | Passing source coordinate |
 | --- | --- |
-| Core `latchway` | `a9d8bd4b758427c7f8e046efc76e10f7c899f405` |
-| JavaScript `latchway-js` | `87a46eab3853633e23a65525e451f1bdaf3ee0c3` |
-| Swift `latchway-ios-sdk` | `94deb8cf33371a6943809dc12e19c936aba516ce` |
-| Android `latchway-android` | `61d3292dd04c1d303bba6b3c4bf2f2de917efdbe` |
-| React Native `latchway-react-native-sdk` | `4b28c9e0e56462ae3e15dd897bdffd0f79025cbb` |
-| Mintlify mirror `latchway-docs` | `b4f72208c7f50fb715a512d4b81bea16fb88345e` |
+| Core `latchway` | `4f2a7b04e826906ce999c6152a33a4f1155cbd24` |
+| JavaScript `latchway-js` | `8e36364419783b07acdd8fae82e457885f1c5447` |
+| Swift `latchway-ios-sdk` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` |
+| Android `latchway-android` | `c05a74e735da3589f907eb0a788a2970245c0cc8` |
+| React Native `latchway-react-native-sdk` | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` |
+| Mintlify mirror `latchway-docs` | `0233d6fde2bd9ede53dcbe3860f055a14fe55786` |
 
 ### Passing test commands
 
@@ -146,11 +146,11 @@ checkpoint and reproducible draft bundle above.
 
 These are source-development results, not protected release receipts. The
 clean-tree cross-repository source gate passed for core
-`a9d8bd4b758427c7f8e046efc76e10f7c899f405`, JavaScript
-`87a46eab3853633e23a65525e451f1bdaf3ee0c3`, iOS
-`94deb8cf33371a6943809dc12e19c936aba516ce`, Android
-`61d3292dd04c1d303bba6b3c4bf2f2de917efdbe`, and React Native
-`4b28c9e0e56462ae3e15dd897bdffd0f79025cbb`. The synchronized documentation
+`4f2a7b04e826906ce999c6152a33a4f1155cbd24`, JavaScript
+`8e36364419783b07acdd8fae82e457885f1c5447`, iOS
+`0074f532d639b83c27966f8c75ffe37ed8df6cc8`, Android
+`c05a74e735da3589f907eb0a788a2970245c0cc8`, and React Native
+`11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`. The synchronized documentation
 mirror passed its separate gate. These results do not substitute for any
 protected external domain.
 
