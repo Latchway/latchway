@@ -32,7 +32,7 @@ remain open.
 | JavaScript `latchway-js` | `3d1d372a550c38e74c073207e334805e03a09208` |
 | Swift `latchway-ios-sdk` | `a0d0a118f897e594f8808067ce1a01fa571fdde2` |
 | Android `latchway-android` | `659b9c8728a3766bd1ed383e840515c4227305ae` |
-| React Native `latchway-react-native-sdk` | `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` |
+| React Native `latchway-react-native-sdk` | `791ca99920923c1535555b38e2b2aca6a56d8d77` |
 | Mintlify mirror `latchway-docs` | `6ae7aba53d2508ffa8c1d8fa534bd9af446e16e9` |
 
 ### Passing test commands
@@ -110,7 +110,7 @@ checkpoint and reproducible draft bundle above.
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete; the current worktree adds the exact `latchway test-upstream serve` fixture command and separate first-byte/first-token request timestamps | Deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a development-signed physical React Native iOS run passed production App Attest registration and same-key assertion, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical Play Integrity, delegated-extension runtime, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
-| React Native SDK | Implemented and pinned to the exact three native/source commits; the exact committed source passed a physical iPadOS 26.5 Debug development run | Protected Apple distribution candidate, physical Android proof, extension runtime proof, and publication |
+| React Native SDK | Implemented and pinned to the exact three native/source commits; commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a physical iPadOS 26.5 Debug development run, and the current source checkpoint differs only by the case-correct documentation-bundle path required on Linux | Protected Apple distribution candidate, physical Android proof, extension runtime proof, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware and leaves lifecycle-only, opaque, and historical attempts without an inferred token timestamp | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
@@ -161,8 +161,11 @@ clean-tree cross-repository source gate passed for core
 `3d1d372a550c38e74c073207e334805e03a09208`, iOS
 `a0d0a118f897e594f8808067ce1a01fa571fdde2`, Android
 `659b9c8728a3766bd1ed383e840515c4227305ae`, and React Native
-`6de46e1c7264e1d45cdd31174e4ea040a8c24acf`. All four clean SDK documentation
-bundles record those exact commits and `source_tree_clean: true`. The
+`791ca99920923c1535555b38e2b2aca6a56d8d77`. The physical iPad observation
+remains bound to its recorded predecessor `6de46e1c7264e1d45cdd31174e4ea040a8c24acf`;
+the intervening change only corrects documentation source-path casing for
+case-sensitive hosts. All four clean SDK documentation bundles record the
+current source coordinates and `source_tree_clean: true`. The
 synchronized documentation mirror passes its separate gate. These results do
 not substitute for any protected external domain.
 

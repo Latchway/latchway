@@ -4,7 +4,7 @@
     {
       "name": "@latchway/react-native",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
         "file": "package.json",
         "region": {
           "end_line": 16,
@@ -20,8 +20,8 @@
     {
       "name": "React Native minimum",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 16,
           "start_line": 1
@@ -36,8 +36,8 @@
     {
       "name": "React Native latest",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 16,
           "start_line": 1
@@ -52,7 +52,7 @@
     {
       "name": "iOS",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
         "file": "LatchwayReactNative.podspec",
         "region": {
           "end_line": 21,
@@ -68,7 +68,7 @@
     {
       "name": "Android API",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
         "file": "android/build.gradle.kts",
         "region": {
           "end_line": 32,
@@ -84,8 +84,8 @@
     {
       "name": "OpenAI JavaScript",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 20,
           "start_line": 12
@@ -100,8 +100,8 @@
     {
       "name": "Vercel AI SDK",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 20,
           "start_line": 12
@@ -116,8 +116,8 @@
     {
       "name": "LangChain JavaScript",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 20,
           "start_line": 12
@@ -132,8 +132,8 @@
     {
       "name": "Vercel AI Anthropic",
       "source": {
-        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
-        "file": "conformance/framework/react-native-fetch.json",
+        "commit": "791ca99920923c1535555b38e2b2aca6a56d8d77",
+        "file": "Conformance/framework/react-native-fetch.json",
         "region": {
           "end_line": 20,
           "start_line": 17
