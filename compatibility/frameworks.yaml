@@ -198,7 +198,7 @@ frameworks:
     limitations:
       - React Native 0.82.0 New Architecture local gates pass. A real iPad running iPadOS 26.5 built commit 6de46e1c7264e1d45cdd31174e4ea040a8c24acf in Debug configuration with automatic Apple Development signing.
       - That development run proved production App Attest registration and same-key assertion, Secure Enclave DPoP, gateway traffic, quota, typed component denial, bridge behavior, and cleanup.
-      - Android, delegated-extension runtime, and protected Apple distribution-derived exact-candidate evidence remain pending.
+      - Android physical-device evidence, delegated-extension Release-candidate evidence, and protected Apple distribution-derived evidence remain pending.
   - id: swift-openai
     name: SwiftOpenAI
     tier: tier_1
