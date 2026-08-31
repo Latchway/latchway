@@ -18,7 +18,7 @@ remain open.
 | Last passing commit in each repository | Exact coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `1fa6b2bf67906390e7af9be81fc946dedae71741` |
 | Database schema version | `24` at the recorded passing source coordinate |
-| Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the source-converged tuple; the later JavaScript documentation-source checkpoint passed its full repository gate and deterministic bundle gate; the synchronized Mintlify mirror passed its separate full documentation gate |
+| Last full test time | `2026-08-31` — all five code worktrees passed their full local matrices; the four clean SDK documentation bundles were imported at the exact recorded commits; canonical and mirrored Mintlify suites passed; final clean cross-repository source conformance passes on this tuple |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical Android/Play proof, delegated-extension runtime proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
 | External credentials still required | Known missing: Apple release-distribution signing and protected collector/finalizer authority. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
@@ -33,7 +33,7 @@ remain open.
 | Swift `latchway-ios-sdk` | `a0d0a118f897e594f8808067ce1a01fa571fdde2` |
 | Android `latchway-android` | `659b9c8728a3766bd1ed383e840515c4227305ae` |
 | React Native `latchway-react-native-sdk` | `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` |
-| Mintlify mirror `latchway-docs` | Synchronized branch commit recorded after the canonical docs commit |
+| Mintlify mirror `latchway-docs` | `6ae7aba53d2508ffa8c1d8fa534bd9af446e16e9` |
 
 ### Passing test commands
 
