@@ -38,6 +38,7 @@ func TestHandlerSuccessUsesCanonicalAuthorizationPolicyQuotaAndDispatch(t *testi
 	fixture := newHandlerFixture(t)
 	fixture.relayer.outcome = upstream.RelayOutcome{StatusCode: http.StatusOK, BodyBytes: 11, ClientStarted: true}
 	fixture.relayer.body = `{"ok":true}`
+	fixture.relayer.firstToken = true
 	handler := fixture.handler(t)
 
 	response := httptest.NewRecorder()
@@ -104,6 +105,7 @@ func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
 		Usage: protocol.Usage{InputTokens: 3, OutputTokens: 4, TotalTokens: 7, Known: true, Provenance: quota.ProviderReportedProvenance},
 	}
 	fixture.relayer.body = `{"ok":true}`
+	fixture.relayer.firstToken = true
 	handler := fixture.handler(t)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, fixture.request(t))
@@ -126,6 +128,10 @@ func TestHandlerEmitsBoundedAttemptUsageAndReservationMetrics(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("metrics leaked high-cardinality value %q:\n%s", forbidden, body)
 		}
+	}
+	if fixture.quotas.markTokenCalls != 1 || fixture.quotas.markTokenTimeout <= 0 {
+		t.Fatalf("first-token persistence calls/deadline = %d/%s",
+			fixture.quotas.markTokenCalls, fixture.quotas.markTokenTimeout)
 	}
 }
 
@@ -313,6 +319,8 @@ func TestHandlerExecutesEveryStructuredProtocolWithExactProviderMapping(t *testi
 func TestHandlerExecutesRestrictedOpaqueHTTPWithExactFeatureAndRouteBounds(t *testing.T) {
 	fixture := newHandlerFixture(t)
 	configureOpaqueDecision(&fixture.decision, []string{http.MethodPost})
+	fixture.decision.Feature.OpaqueHTTP.PathPrefixes = nil
+	fixture.decision.Feature.OpaqueHTTP.PathTemplates = []string{"/v2/{resource_id}"}
 	fixture.decision.Feature.OpaqueHTTP.AllowedRequestHeaders = []string{"Content-Type", "X-Trace"}
 	fixture.decision.Feature.OpaqueHTTP.MaximumBodyBytes = 16
 	fixture.decision.Route.MaximumResponseBytes = 7
@@ -1093,6 +1101,29 @@ func TestHandlerBoundsFirstBytePersistenceBeforeStartingClientResponse(t *testin
 		fixture.quotas.settleOutcome.FailureCode != "quota_state_unavailable" {
 		t.Fatalf("first-byte timeout release/settlement = %d/%#v",
 			fixture.quotas.releaseCalls, fixture.quotas.settleOutcome)
+	}
+}
+
+func TestHandlerDoesNotTruncateResponseWhenFirstTokenTelemetryPersistenceFails(t *testing.T) {
+	fixture := newHandlerFixture(t)
+	fixture.quotas.markTokenErr = quota.ErrDependency
+	fixture.relayer.outcome = upstream.RelayOutcome{
+		StatusCode: http.StatusOK, BodyBytes: 2, ClientStarted: true,
+	}
+	fixture.relayer.body = `{}`
+	fixture.relayer.firstToken = true
+	handler := fixture.handler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, fixture.request(t))
+
+	if response.Code != http.StatusOK || response.Body.String() != `{}` {
+		t.Fatalf("response status/body = %d/%q", response.Code, response.Body.String())
+	}
+	if fixture.quotas.markTokenCalls != 1 || fixture.quotas.settleCalls != 1 ||
+		fixture.quotas.settleOutcome.Status != quota.AttemptSucceeded {
+		t.Fatalf("first-token persistence/settlement = %d/%d/%#v",
+			fixture.quotas.markTokenCalls, fixture.quotas.settleCalls, fixture.quotas.settleOutcome)
 	}
 }
 
@@ -4117,6 +4148,9 @@ type fakeQuotaStore struct {
 	markErr            error
 	markBlock          bool
 	markTimeout        time.Duration
+	markTokenCalls     int
+	markTokenErr       error
+	markTokenTimeout   time.Duration
 	settleCalls        int
 	settleOutcome      quota.Outcome
 	settleErr          error
@@ -4177,6 +4211,14 @@ func (fake *fakeQuotaStore) MarkFirstByte(ctx context.Context, _ quota.Attempt) 
 		return ctx.Err()
 	}
 	return fake.markErr
+}
+
+func (fake *fakeQuotaStore) MarkFirstToken(ctx context.Context, _ quota.Attempt) error {
+	fake.markTokenCalls++
+	if deadline, ok := ctx.Deadline(); ok {
+		fake.markTokenTimeout = time.Until(deadline)
+	}
+	return fake.markTokenErr
 }
 
 func (fake *fakeQuotaStore) Settle(_ context.Context, _ quota.Attempt, outcome quota.Outcome) error {
@@ -4465,6 +4507,7 @@ type fakeRelayer struct {
 	errs         []error
 	body         string
 	bodies       []string
+	firstToken   bool
 	secret       *fakeSecretStore
 	insideSecret bool
 	configs      []upstream.ResponseRelayConfig
@@ -4520,6 +4563,9 @@ func (fake *fakeRelayer) Relay(
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(outcome.StatusCode)
 		_, _ = writer.Write([]byte(body))
+	}
+	if config.OnFirstToken != nil && fake.firstToken {
+		config.OnFirstToken(ctx)
 	}
 	return outcome, relayErr
 }

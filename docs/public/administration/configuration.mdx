@@ -81,6 +81,30 @@ full configuration editor, CLI, or Admin API. The isolated `verify local`
 command owns the supported turnkey debug path; the production wizard does not
 offer a debug switch.
 
+### Opaque HTTP path templates
+
+New opaque features use exact-depth provider-relative templates:
+
+```json
+{
+  "opaqueHttp": {
+    "allowedMethods": ["GET", "POST"],
+    "pathTemplates": [
+      "/v1/health",
+      "/v1/accounts/{account_id}/status"
+    ],
+    "maxBodyBytes": 1048576,
+    "allowedRequestHeaders": ["Content-Type", "X-Trace"]
+  }
+}
+```
+
+A capture matches one complete canonical segment and never changes the
+configured upstream authority. Templates must not overlap and cannot contain
+catch-alls, partial captures, traversal, encoded separators, queries, or
+absolute destinations. Existing `pathPrefixes` configurations retain their v1
+segment-bound behavior, but a policy cannot combine prefixes and templates.
+
 ## CLI workflow
 
 Pull the redaction-safe active document and use it as a reviewed starting point:

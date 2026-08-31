@@ -945,8 +945,9 @@ func slicesContainsString(values []string, target string) bool {
 }
 
 type jsonObserver struct {
-	buffer   bytes.Buffer
-	overflow bool
+	buffer     bytes.Buffer
+	overflow   bool
+	firstToken bool
 }
 
 func (o *jsonObserver) Observe(chunk []byte) error {
@@ -970,8 +971,14 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 	if err != nil {
 		return protocol.Usage{}, upstreamMalformed("upstream returned malformed JSON")
 	}
-	return usageFromValue(value)
+	usage, err := usageFromValue(value)
+	if err == nil && chatValueContainsToken(value) {
+		o.firstToken = true
+	}
+	return usage, err
 }
+
+func (o *jsonObserver) FirstTokenObserved() bool { return o.firstToken }
 
 type sseObserver struct {
 	pending    []byte
@@ -981,6 +988,7 @@ type sseObserver struct {
 	usage      protocol.Usage
 	found      bool
 	done       bool
+	firstToken bool
 	events     int
 }
 
@@ -1026,6 +1034,8 @@ func (o *sseObserver) Finalize() (protocol.Usage, error) {
 	}
 	return o.usage, nil
 }
+
+func (o *sseObserver) FirstTokenObserved() bool { return o.firstToken }
 
 func (o *sseObserver) drainEvents(eof bool) error {
 	eventStart := 0
@@ -1109,11 +1119,79 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	if err != nil {
 		return err
 	}
+	if chatValueContainsToken(value) {
+		o.firstToken = true
+	}
 	if usage.Known {
 		o.usage = usage
 		o.found = true
 	}
 	return nil
+}
+
+func chatValueContainsToken(value any) bool {
+	root, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	choices, ok := root["choices"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawChoice := range choices {
+		choice, ok := rawChoice.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"delta", "message"} {
+			content, ok := choice[field].(map[string]any)
+			if ok && chatContentContainsToken(content) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func chatContentContainsToken(content map[string]any) bool {
+	for _, field := range []string{"content", "refusal"} {
+		if text, ok := content[field].(string); ok && text != "" {
+			return true
+		}
+	}
+	if function, ok := content["function_call"].(map[string]any); ok && objectContainsNonemptyString(function) {
+		return true
+	}
+	if audio, ok := content["audio"].(map[string]any); ok {
+		for _, field := range []string{"data", "transcript"} {
+			if value, ok := audio[field].(string); ok && value != "" {
+				return true
+			}
+		}
+	}
+	if calls, ok := content["tool_calls"].([]any); ok {
+		for _, rawCall := range calls {
+			call, ok := rawCall.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, field := range []string{"function", "custom"} {
+				if tool, ok := call[field].(map[string]any); ok && objectContainsNonemptyString(tool) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func objectContainsNonemptyString(object map[string]any) bool {
+	for _, value := range object {
+		if text, ok := value.(string); ok && text != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func sseEventData(event []byte) ([]byte, bool) {

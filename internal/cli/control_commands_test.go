@@ -422,7 +422,7 @@ func TestRequestsInspectJSONIncludesSanitizedAttemptLifecycle(t *testing.T) {
 			"attempts":[{
 				"id":"atm_00000000000000000000000000","attempt_number":1,"route":"primary",
 				"upstream":"openrouter","model":"openai/gpt","started_at":"2026-08-29T00:00:00Z",
-				"first_byte_at":"2026-08-29T00:00:01Z","completed_at":"2026-08-29T00:00:02Z",
+				"first_byte_at":"2026-08-29T00:00:01Z","first_token_at":"2026-08-29T00:00:01.500Z","completed_at":"2026-08-29T00:00:02Z",
 				"status":"failed","http_status":502,"failure_code":"protocol_error",
 				"usage_provenance":"unknown","cost_provenance":"unknown"
 			}]
@@ -438,6 +438,7 @@ func TestRequestsInspectJSONIncludesSanitizedAttemptLifecycle(t *testing.T) {
 	}
 	for _, field := range []string{
 		`"attempt_number": 1`, `"route": "primary"`, `"first_byte_at": "2026-08-29T00:00:01Z"`,
+		`"first_token_at": "2026-08-29T00:00:01.500Z"`,
 		`"http_status": 502`, `"failure_code": "protocol_error"`,
 	} {
 		if !strings.Contains(output.String(), field) {
@@ -460,7 +461,8 @@ func TestRequestDocumentValidationRejectsRawFailureAndCorruptOrdering(t *testing
 			ID: "atm_00000000000000000000000000", AttemptNumber: 1,
 			Route: "primary", Upstream: "openrouter", Model: "openai/gpt",
 			StartedAt: "2026-08-29T00:00:00Z", FirstByteAt: "2026-08-29T00:00:01Z",
-			CompletedAt: "2026-08-29T00:00:02Z", Status: "failed", HTTPStatus: 502,
+			FirstTokenAt: "2026-08-29T00:00:01.500Z",
+			CompletedAt:  "2026-08-29T00:00:02Z", Status: "failed", HTTPStatus: 502,
 			FailureCode: "protocol_error", UsageProvenance: "unknown", CostProvenance: "unknown",
 		}},
 	}
@@ -474,6 +476,9 @@ func TestRequestDocumentValidationRejectsRawFailureAndCorruptOrdering(t *testing
 		"attempt gap": func(value *logicalRequestCLI) { value.Attempts[0].AttemptNumber = 2 },
 		"timestamp inversion": func(value *logicalRequestCLI) {
 			value.Attempts[0].FirstByteAt = "2026-08-29T00:00:02.500Z"
+		},
+		"first token before first byte": func(value *logicalRequestCLI) {
+			value.Attempts[0].FirstTokenAt = "2026-08-29T00:00:00.500Z"
 		},
 		"success with failure": func(value *logicalRequestCLI) { value.Attempts[0].Status = "succeeded" },
 	} {

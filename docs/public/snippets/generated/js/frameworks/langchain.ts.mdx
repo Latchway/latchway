@@ -1,0 +1,109 @@
+<Info>
+  Generated from working-tree source `packages/langchain/src/index.ts:L1-L103` for release candidate `v1.0.0` and recorded commit `8e36364419783b07acdd8fae82e457885f1c5447`. The dirty bundle does not claim that this region is already at that commit. Bundle SHA-256: `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c`.
+</Info>
+
+```typescript
+import {
+  ChatOpenAI,
+  type ChatOpenAIFields,
+  OpenAIEmbeddings,
+  type OpenAIEmbeddingsParams,
+} from "@langchain/openai";
+import langchainOpenAIPackage from "@langchain/openai/package.json" with { type: "json" };
+
+const frameworkVersion = langchainOpenAIPackage.version;
+const placeholder = "latchway-managed-not-a-provider-secret";
+
+export interface AuthenticatedTransport {
+  readonly gatewayURL: string;
+  fetchFor(
+    feature: string,
+    framework: Readonly<{ id: "langchain-js"; version: string }>,
+  ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export type LatchwayChatOpenAIOptions = Omit<
+  ChatOpenAIFields,
+  "apiKey" | "configuration" | "model" | "modelName" | "openAIApiKey"
+>;
+
+export interface CreateLatchwayChatOpenAIOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  chatOptions?: LatchwayChatOpenAIOptions;
+}
+
+export type LatchwayEmbeddingsOptions = Omit<
+  Partial<OpenAIEmbeddingsParams>,
+  "model" | "modelName"
+>;
+
+export interface CreateLatchwayEmbeddingsOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  embeddingsOptions?: LatchwayEmbeddingsOptions;
+}
+
+export function createLatchwayChatOpenAI(options: CreateLatchwayChatOpenAIOptions): ChatOpenAI {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "langchain-js",
+    version: frameworkVersion,
+  });
+  return new ChatOpenAI({
+    ...options.chatOptions,
+    apiKey: placeholder,
+    model: "latchway",
+    configuration: {
+      baseURL: `${options.latchway.gatewayURL}/v1`,
+      fetch: withProviderRequestID(authenticatedFetch),
+    },
+  });
+}
+
+export function createLatchwayEmbeddings(options: CreateLatchwayEmbeddingsOptions): OpenAIEmbeddings {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "langchain-js",
+    version: frameworkVersion,
+  });
+  return new OpenAIEmbeddings({
+    ...options.embeddingsOptions,
+    apiKey: placeholder,
+    encodingFormat: "float",
+    model: "latchway",
+    configuration: {
+      baseURL: `${options.latchway.gatewayURL}/v1`,
+      fetch: withProviderRequestID(authenticatedFetch),
+    },
+  });
+}
+
+export const LANGCHAIN_OPENAI_VERSION = frameworkVersion;
+
+function withProviderRequestID(
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async (input, init) => aliasRequestID(await fetch(input, init));
+}
+
+function aliasRequestID(response: Response): Response {
+  const requestID = response.headers.get("X-Latchway-Request-ID");
+  if (requestID === null || response.headers.has("X-Request-ID")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestID);
+  const aliased = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  preserveResponseLocation(aliased, response);
+  return aliased;
+}
+
+function preserveResponseLocation(target: Response, source: Response): void {
+  Object.defineProperties(target, {
+    redirected: { value: source.redirected },
+    type: { value: source.type },
+    url: { value: source.url },
+  });
+}
+```

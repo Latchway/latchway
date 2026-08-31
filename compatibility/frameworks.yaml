@@ -9,7 +9,7 @@ frameworks:
     latchway_package: dev.latchway:latchway-okhttp
     support: experimental
     tested:
-      minimum: 5.3.0
+      minimum: 4.9.2
       latest: 5.3.0
     capabilities:
       responses: true
@@ -27,7 +27,7 @@ frameworks:
       dpop: full
       native_key_isolation: partial
     limitations:
-      - Local source, route, replay, streaming, cancellation, and OkHttp 5.3.0 tests pass; hosted gateway conformance and physical Play-distributed key proof remain release gates.
+      - Local source, route, replay, streaming, and cancellation tests pass on 4.9.2 and 5.3.0; hosted gateway conformance and physical Play-distributed key proof remain release gates.
   - id: foundation-models
     name: Apple Foundation Models
     tier: tier_1
@@ -35,27 +35,56 @@ frameworks:
     package: FoundationModels
     integration: language_model_executor
     latchway_package: LatchwayFoundationModels
-    support: planned
+    support: experimental
     tested:
-      minimum: null
-      latest: null
+      minimum: 27.0.0
+      latest: 27.0.0
     capabilities:
-      responses: false
+      responses: true
       chat_completions: false
-      text: planned
-      streaming: planned
-      tools: conditional
-      structured_output: planned
+      text: true
+      streaming: true
+      tools: false
+      structured_output: false
       embeddings: false
       audio: false
       images: false
-      cancellation: planned
+      cancellation: true
       app_extensions: conditional
     security:
-      dpop: not_tested
-      native_key_isolation: not_tested
+      dpop: partial
+      native_key_isolation: partial
     limitations:
-      - The OS 27 custom executor compiles, but its runtime tests were skipped on an older host OS; gateway and physical-device execution remain pending.
+      - Nine iOS 27.0 simulator tests pass text, transcript, incremental usage, cancellation, quota/unavailable mapping, refresh, and explicit tools/schema rejection; physical framework execution and delegated-extension runtime remain pending.
+  - id: koog-android
+    name: Koog OpenAI client
+    tier: tier_1
+    ecosystem: android
+    package: ai.koog:prompt-executor-openai-client
+    integration: preconfigured_okhttp_absolute_path
+    latchway_package: dev.latchway:latchway-okhttp
+    support: experimental
+    tested:
+      minimum: 1.1.1
+      latest: 1.1.1
+    capabilities:
+      responses: false
+      chat_completions: true
+      text: true
+      streaming: true
+      tools: true
+      structured_output: true
+      embeddings: false
+      audio: false
+      images: false
+      cancellation: true
+      app_extensions: false
+    security:
+      dpop: full
+      native_key_isolation: partial
+    limitations:
+      - Full local Koog 1.1.1 conformance passes only with OkHttp/okhttp-sse 5.3.0, explicit utils-jvm 1.1.1, Kotlin Logging 8.0.01, and an absolute chat path; 4.9.2 passes the four non-streaming cases but is incompatible with Koog SSE.
+      - Hosted gateway, live-provider, physical Play-distributed key, exact-image, and versions beyond the exact tested tuple remain release gates.
   - id: langchain-js
     name: LangChain JavaScript
     tier: tier_1
@@ -111,7 +140,7 @@ frameworks:
       dpop: not_applicable
       native_key_isolation: not_applicable
     limitations:
-      - MacPaw/OpenAI 0.5.1 exposes only synchronous request middleware and no public streaming transport injection, so a safe transparent Latchway adapter cannot be shipped.
+      - Published MacPaw/OpenAI 0.5.1 lacks async request middleware and public streaming injection, so no adapter ships; a repository patch adding ordered async interception passes all 217 upstream tests but has not been accepted or released upstream.
   - id: openai-js
     name: OpenAI JavaScript SDK
     tier: tier_1

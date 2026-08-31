@@ -39,7 +39,16 @@ REQUIRED_PAGES = {
     "operate/installation-families/revocation",
     "operate/installation-families/troubleshooting",
     "security/delegated-components",
+    "reference/admin-api",
+    "reference/errors",
+    "reference/config-schema",
+    "reference/cel-policy-context",
     "reference/compatibility",
+    "reference/sdk-bundles",
+    "reference/sdk-bundles/android",
+    "reference/sdk-bundles/ios",
+    "reference/sdk-bundles/js",
+    "reference/sdk-bundles/react-native",
     "community/agent-resources",
 }
 INTEGRATION_PAGES = {
@@ -261,6 +270,7 @@ def main() -> int:
         path.relative_to(root).with_suffix("").as_posix(): path
         for path in root.rglob("*.mdx")
         if not any(part.startswith(".") for part in path.relative_to(root).parts)
+        and path.relative_to(root).parts[0] != "snippets"
     }
     for route in sorted(nav_set - files_by_route.keys()):
         errors.append(f"navigation references a missing page: {route}")

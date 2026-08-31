@@ -48,13 +48,16 @@ var (
 // The exact RoundTrip cancellation capability is carried by DispatchedResponse
 // and cannot be substituted with a handler-wide context cancel function.
 // OnFirstByte, when set, runs exactly once immediately before the response is
-// committed for a non-empty body.
+// committed for a non-empty body. OnFirstToken runs at most once after the
+// protocol observer has accepted client-visible bytes and reported generated
+// content; it is intentionally separate from the transport boundary.
 type ResponseRelayConfig struct {
 	FirstByteTimeout   time.Duration
 	IdleTimeout        time.Duration
 	ClientWriteTimeout time.Duration
 	MaxBodyBytes       int64
 	OnFirstByte        func(context.Context) error
+	OnFirstToken       func(context.Context)
 }
 
 // RelayOutcome describes bytes accepted by the client writer and normalized
@@ -138,6 +141,20 @@ func RelayResponse(
 
 	buffer := make([]byte, relayBufferBytes)
 	firstBytePending := true
+	firstTokenPending := true
+	observeFirstToken := func() {
+		if !firstTokenPending {
+			return
+		}
+		firstTokenObserver, ok := observer.(protocol.FirstTokenObserver)
+		if !ok || !firstTokenObserver.FirstTokenObserved() {
+			return
+		}
+		firstTokenPending = false
+		if config.OnFirstToken != nil {
+			config.OnFirstToken(ctx)
+		}
+	}
 
 	for {
 		readTimeout := config.IdleTimeout
@@ -201,6 +218,7 @@ func RelayResponse(
 				if err := observer.Observe(buffer[:written]); err != nil {
 					return outcome, fmt.Errorf("observe relayed response body: %w", err)
 				}
+				observeFirstToken()
 			}
 			if writeErr != nil {
 				return outcome, fmt.Errorf("write relayed response body: %w", writeErr)
@@ -228,6 +246,7 @@ func RelayResponse(
 			if err != nil {
 				return outcome, fmt.Errorf("finalize relayed response observation: %w", err)
 			}
+			observeFirstToken()
 			usage, err = normalizedUsage(usage)
 			if err != nil {
 				return outcome, err

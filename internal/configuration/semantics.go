@@ -814,7 +814,7 @@ func limitSemanticIssues(plans map[string]map[string]any) []Issue {
 				issues = append(issues, errorIssue(
 					"limit_capability_unsupported",
 					path,
-					"This release can activate only hard logical_requests calendar limits, hard input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/input_tokens/output_tokens/total_tokens token_bucket limits, hard input_tokens/output_tokens/total_tokens per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a bounded minute/hour/day/week/month window, a valid server-configured IANA timezone, and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
+					"This release can activate only hard logical_requests calendar limits, hard input_tokens/output_tokens/total_tokens calendar limits, hard cost_nano_usd calendar limits, hard logical_requests/input_tokens/output_tokens/total_tokens token_bucket limits, hard input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request limits, or hard concurrent_requests/concurrent_streams concurrency limits; input_tokens and total_tokens additionally require trusted input accounting on every reachable route, request_bytes/image_units/tool_calls additionally require exact request measurement on every reachable route, token_bucket limits require capacity from 1 through 9223372 and refillPerSecond from 0.000001 through 1000000 exactly representable with at most six decimal places, calendar limits require a bounded minute/hour/day/week/month window, a valid server-configured IANA timezone, and positive maximum, per_request limits require a positive perRequestMaximum, concurrency limits require a positive maximum, and every executable limit requires an explicit nonempty scope.",
 				))
 				continue
 			}
@@ -1001,8 +1001,16 @@ func routeTimeoutSemanticIssues(overrides, inherited map[string]any, base string
 
 func opaqueHTTPPolicySemanticIssues(policy map[string]any, base string) []Issue {
 	issues := make([]Issue, 0)
+	prefixes := stringArray(policy, "pathPrefixes")
+	templates := stringArray(policy, "pathTemplates")
+	if len(prefixes) > 0 && len(templates) > 0 {
+		issues = append(issues, errorIssue(
+			"opaque_http_path_policy_conflict", base,
+			"Opaque HTTP pathTemplates and compatibility-only pathPrefixes cannot be configured together.",
+		))
+	}
 	seenPrefixes := make(map[string]struct{})
-	for index, prefix := range stringArray(policy, "pathPrefixes") {
+	for index, prefix := range prefixes {
 		path := fmt.Sprintf("%s/pathPrefixes/%d", base, index)
 		if !runtimeCanonicalUpstreamPath(prefix) {
 			issues = append(issues, errorIssue(
@@ -1017,6 +1025,25 @@ func opaqueHTTPPolicySemanticIssues(policy map[string]any, base string) []Issue 
 			))
 		}
 		seenPrefixes[prefix] = struct{}{}
+	}
+	for index, template := range templates {
+		path := fmt.Sprintf("%s/pathTemplates/%d", base, index)
+		if !protocol.ValidOpaqueHTTPPathTemplate(template) {
+			issues = append(issues, errorIssue(
+				"opaque_http_path_template_invalid", path,
+				"Opaque HTTP path templates must be canonical exact-depth provider-relative paths; captures must be unique whole segments such as {resource_id}, and catch-alls, escaping, queries, fragments, and traversal are forbidden.",
+			))
+			continue
+		}
+		for previous := 0; previous < index; previous++ {
+			if protocol.OpaqueHTTPPathTemplatesOverlap(templates[previous], template) {
+				issues = append(issues, errorIssue(
+					"opaque_http_path_template_ambiguous", path,
+					"Opaque HTTP path templates must be pairwise disjoint so one provider path cannot match multiple literal or captured templates.",
+				))
+				break
+			}
+		}
 	}
 	seenHeaders := make(map[string]struct{})
 	for index, header := range stringArray(policy, "allowedRequestHeaders") {

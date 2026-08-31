@@ -1,0 +1,339 @@
+---
+title: "JavaScript SDK source bundle"
+description: "Generated, version-bound examples and compatibility metadata for JavaScript SDK 1.0.0."
+---
+
+<Warning>
+  This page proves the checked-in source bundle and its provenance. It does not claim
+  that the package or protected external release evidence has been published.
+</Warning>
+
+## Bundle identity
+
+| Field | Value |
+| --- | --- |
+| Package | `@latchway/client` |
+| Release | `v1.0.0` |
+| Commit | `8e36364419783b07acdd8fae82e457885f1c5447` |
+| Source tree clean | `no` |
+| Bundle SHA-256 | `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c` |
+
+## Supported versions
+
+| Dependency or platform | Tested version | Source |
+| --- | --- | --- |
+| @latchway/client | `1.0.0` | `package.json:L1-L13` |
+| Node.js | `24.19.0` | `package.json:L10-L14` |
+| openai minimum | `7.8.0` | `conformance/framework-versions.json:L5-L11` |
+| openai latest | `7.8.0` | `conformance/framework-versions.json:L12-L18` |
+| ai minimum | `7.0.85` | `conformance/framework-versions.json:L5-L11` |
+| ai latest | `7.0.85` | `conformance/framework-versions.json:L12-L18` |
+| @ai-sdk/openai minimum | `4.0.52` | `conformance/framework-versions.json:L5-L11` |
+| @ai-sdk/openai latest | `4.0.52` | `conformance/framework-versions.json:L12-L18` |
+| @langchain/openai minimum | `1.5.10` | `conformance/framework-versions.json:L5-L11` |
+| @langchain/openai latest | `1.5.10` | `conformance/framework-versions.json:L12-L18` |
+
+## Version-bound examples
+
+### `frameworks/langchain.ts`
+
+Working-tree source: `packages/langchain/src/index.ts:L1-L103`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import {
+  ChatOpenAI,
+  type ChatOpenAIFields,
+  OpenAIEmbeddings,
+  type OpenAIEmbeddingsParams,
+} from "@langchain/openai";
+import langchainOpenAIPackage from "@langchain/openai/package.json" with { type: "json" };
+
+const frameworkVersion = langchainOpenAIPackage.version;
+const placeholder = "latchway-managed-not-a-provider-secret";
+
+export interface AuthenticatedTransport {
+  readonly gatewayURL: string;
+  fetchFor(
+    feature: string,
+    framework: Readonly<{ id: "langchain-js"; version: string }>,
+  ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export type LatchwayChatOpenAIOptions = Omit<
+  ChatOpenAIFields,
+  "apiKey" | "configuration" | "model" | "modelName" | "openAIApiKey"
+>;
+
+export interface CreateLatchwayChatOpenAIOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  chatOptions?: LatchwayChatOpenAIOptions;
+}
+
+export type LatchwayEmbeddingsOptions = Omit<
+  Partial<OpenAIEmbeddingsParams>,
+  "model" | "modelName"
+>;
+
+export interface CreateLatchwayEmbeddingsOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  embeddingsOptions?: LatchwayEmbeddingsOptions;
+}
+
+export function createLatchwayChatOpenAI(options: CreateLatchwayChatOpenAIOptions): ChatOpenAI {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "langchain-js",
+    version: frameworkVersion,
+  });
+  return new ChatOpenAI({
+    ...options.chatOptions,
+    apiKey: placeholder,
+    model: "latchway",
+    configuration: {
+      baseURL: `${options.latchway.gatewayURL}/v1`,
+      fetch: withProviderRequestID(authenticatedFetch),
+    },
+  });
+}
+
+export function createLatchwayEmbeddings(options: CreateLatchwayEmbeddingsOptions): OpenAIEmbeddings {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "langchain-js",
+    version: frameworkVersion,
+  });
+  return new OpenAIEmbeddings({
+    ...options.embeddingsOptions,
+    apiKey: placeholder,
+    encodingFormat: "float",
+    model: "latchway",
+    configuration: {
+      baseURL: `${options.latchway.gatewayURL}/v1`,
+      fetch: withProviderRequestID(authenticatedFetch),
+    },
+  });
+}
+
+export const LANGCHAIN_OPENAI_VERSION = frameworkVersion;
+
+function withProviderRequestID(
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async (input, init) => aliasRequestID(await fetch(input, init));
+}
+
+function aliasRequestID(response: Response): Response {
+  const requestID = response.headers.get("X-Latchway-Request-ID");
+  if (requestID === null || response.headers.has("X-Request-ID")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestID);
+  const aliased = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  preserveResponseLocation(aliased, response);
+  return aliased;
+}
+
+function preserveResponseLocation(target: Response, source: Response): void {
+  Object.defineProperties(target, {
+    redirected: { value: source.redirected },
+    type: { value: source.type },
+    url: { value: source.url },
+  });
+}
+```
+
+### `frameworks/openai.ts`
+
+Working-tree source: `packages/openai/src/index.ts:L1-L71`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import OpenAI, { type ClientOptions } from "openai";
+import { VERSION as OPENAI_VERSION } from "openai/version";
+
+const placeholder = "latchway-managed-not-a-provider-secret";
+
+export interface AuthenticatedTransport {
+  readonly gatewayURL: string;
+  fetchFor(
+    feature: string,
+    framework: Readonly<{ id: "openai-js"; version: string }>,
+  ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export type LatchwayOpenAIClientOptions = Pick<
+  ClientOptions,
+  "fetchOptions" | "logLevel" | "logger" | "maxRetries" | "timeout"
+>;
+
+export interface LatchwayOpenAIOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  clientOptions?: LatchwayOpenAIClientOptions;
+}
+
+/**
+ * Creates the official OpenAI client with a feature-bound Latchway fetch.
+ * The placeholder satisfies the framework constructor and is removed by the
+ * authenticated transport before any network dispatch.
+ */
+export function createLatchwayOpenAI(options: LatchwayOpenAIOptions): OpenAI {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "openai-js",
+    version: OPENAI_VERSION,
+  });
+  return new OpenAI({
+    ...options.clientOptions,
+    apiKey: placeholder,
+    baseURL: `${options.latchway.gatewayURL}/v1`,
+    dangerouslyAllowBrowser: true,
+    fetch: withProviderRequestID(authenticatedFetch),
+  });
+}
+
+export { OPENAI_VERSION };
+
+/** Mirrors Latchway's correlation ID into the conventional OpenAI header. */
+function withProviderRequestID(fetch: NonNullable<ClientOptions["fetch"]>): NonNullable<ClientOptions["fetch"]> {
+  return async (input, init) => aliasRequestID(await fetch(input, init));
+}
+
+function aliasRequestID(response: Response): Response {
+  const requestID = response.headers.get("X-Latchway-Request-ID");
+  if (requestID === null || response.headers.has("X-Request-ID")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestID);
+  const aliased = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  preserveResponseLocation(aliased, response);
+  return aliased;
+}
+
+function preserveResponseLocation(target: Response, source: Response): void {
+  Object.defineProperties(target, {
+    redirected: { value: source.redirected },
+    type: { value: source.type },
+    url: { value: source.url },
+  });
+}
+```
+
+### `frameworks/vercel-ai.ts`
+
+Working-tree source: `packages/vercel-ai/src/index.ts:L1-L78`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
+import aiPackage from "ai/package.json" with { type: "json" };
+
+const frameworkVersion = aiPackage.version;
+const placeholder = "latchway-managed-not-a-provider-secret";
+
+export interface AuthenticatedTransport {
+  readonly gatewayURL: string;
+  fetchFor(
+    feature: string,
+    framework: Readonly<{ id: "vercel-ai-sdk"; version: string }>,
+  ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export interface LatchwayVercelAIOptions {
+  client: AuthenticatedTransport;
+}
+
+export interface LatchwayVercelAIProvider {
+  (feature: string): ReturnType<OpenAIProvider["responses"]>;
+  languageModel(feature: string): ReturnType<OpenAIProvider["responses"]>;
+  responses(feature: string): ReturnType<OpenAIProvider["responses"]>;
+  chat(feature: string): ReturnType<OpenAIProvider["chat"]>;
+  embedding(feature: string): ReturnType<OpenAIProvider["embedding"]>;
+  embeddingModel(feature: string): ReturnType<OpenAIProvider["embedding"]>;
+}
+
+/** Creates feature-only AI SDK models; callers never select a physical model. */
+export function createLatchwayProvider(options: LatchwayVercelAIOptions): LatchwayVercelAIProvider {
+  const providerFor = (feature: string): OpenAIProvider => createOpenAI({
+    name: "latchway",
+    baseURL: `${options.client.gatewayURL}/v1`,
+    apiKey: placeholder,
+    fetch: withProviderRequestID(options.client.fetchFor(feature, {
+      id: "vercel-ai-sdk",
+      version: frameworkVersion,
+    })),
+  });
+  const responses = (feature: string) => providerFor(feature).responses("latchway");
+  const provider = Object.assign(responses, {
+    languageModel: responses,
+    responses,
+    chat: (feature: string) => providerFor(feature).chat("latchway"),
+    embedding: (feature: string) => providerFor(feature).embedding("latchway"),
+    embeddingModel: (feature: string) => providerFor(feature).embedding("latchway"),
+  });
+  return provider;
+}
+
+export const VERCEL_AI_SDK_VERSION = frameworkVersion;
+
+function withProviderRequestID(
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async (input, init) => aliasRequestID(await fetch(input, init));
+}
+
+function aliasRequestID(response: Response): Response {
+  const requestID = response.headers.get("X-Latchway-Request-ID");
+  if (requestID === null || response.headers.has("X-Request-ID")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestID);
+  const aliased = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  preserveResponseLocation(aliased, response);
+  return aliased;
+}
+
+function preserveResponseLocation(target: Response, source: Response): void {
+  Object.defineProperties(target, {
+    redirected: { value: source.redirected },
+    type: { value: source.type },
+    url: { value: source.url },
+  });
+}
+```
+
+### `quickstart/firebase-app-check.ts`
+
+Working-tree source: `examples/firebase/client.ts:L1-L23`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import { createLatchwayClient } from "@latchway/client";
+import {
+  createFirebaseAppCheckProvider,
+  createFirebaseIdentityTokenProvider,
+  type FirebaseAppCheckToken,
+} from "@latchway/client/firebase";
+
+export interface FirebaseDependencies {
+  getIDToken(): Promise<string>;
+  getAppCheckToken(forceRefresh: boolean): Promise<FirebaseAppCheckToken>;
+}
+
+export function createFirebaseClient(dependencies: FirebaseDependencies) {
+  return createLatchwayClient({
+    baseURL: "https://ai.example.com",
+    applicationID: "app_01J00000000000000000000000",
+    environment: "production",
+    identityProvider: "firebase",
+    identityTokenProvider: createFirebaseIdentityTokenProvider(dependencies.getIDToken),
+    attestationProviders: [createFirebaseAppCheckProvider(dependencies.getAppCheckToken)],
+    installation: { appVersion: "1.0.0" },
+  });
+}
+```

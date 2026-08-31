@@ -31,8 +31,12 @@ The selected feature owns a closed request policy:
 
 - `allowedMethods` is a nonempty subset of `GET`, `POST`, `PUT`, `PATCH`, and
   `DELETE`;
-- `pathPrefixes` contains canonical provider-relative paths, matched on a path
-  segment boundary;
+- `pathTemplates` contains canonical exact-depth provider-relative templates;
+  a capture such as `{resource_id}` occupies exactly one segment, capture names
+  are unique within a template, and the configured set must be pairwise
+  disjoint;
+- compatibility-only `pathPrefixes` retains the v1 segment-bound behavior when
+  `pathTemplates` is absent; the two modes cannot be combined;
 - `maxBodyBytes` bounds the buffered request body, including chunked input;
 - `allowedRequestHeaders` is the only client-header forwarding allowlist.
 
@@ -89,26 +93,36 @@ Unknown usage conservatively retains applicable post-dispatch reservations.
 ## Security implications
 
 Exact feature equality prevents a path/header confused deputy. Segment-bound
-path matching prevents `/safe` from authorizing `/safeevil`. Protected target
-resolution and generic-upstream validation prevent destination escape. The
-positive route response cap limits untrusted output, and the explicit SSE gate
-prevents an administrator from accidentally activating an unbounded long-lived
-stream. Unsafe replay is off unless every executed route opts in.
+legacy matching prevents `/safe` from authorizing `/safeevil`. Exact-depth
+templates reject traversal, encoded separators, partial or repeated captures,
+catch-alls, and pairwise overlap; one request can therefore match at most one
+template without declaration-order behavior. Captures are not substitutions.
+Protected target resolution and generic-upstream validation prevent destination
+escape. The positive route response cap limits untrusted output, and the
+explicit SSE gate prevents an administrator from accidentally activating an
+unbounded long-lived stream. Unsafe replay is off unless every executed route
+opts in.
 
 ## Migration implications
 
-Existing generic-upstream configurations must add an explicit `opaqueHttp`
-feature policy and route response bound before they can serve `/proxy/`
-traffic. Routes that previously assumed query forwarding, arbitrary headers,
-or retry of mutating methods must be rewritten to use canonical provider paths,
-positive header allowlists, and an explicit unsafe-replay decision. Structured
-OpenAI and Anthropic routes are unaffected.
+Existing generic-upstream configurations with `pathPrefixes` remain valid and
+retain byte-for-byte segment-bound behavior: a prefix matches itself and its
+descendants, `/safe` does not match `/safeevil`, a trailing slash matches only
+its slash-bearing spelling and descendants rather than `/safe`, and the legacy
+root prefix `/` continues to match every canonical non-root provider path. This
+compatibility mode is not silently translated to
+templates. New configurations should use `pathTemplates`; switching modes is
+an explicit revision, and the fields cannot coexist. Routes that assumed query
+forwarding, arbitrary headers, or retry of mutating methods must still use
+canonical provider paths, positive header allowlists, and an explicit
+unsafe-replay decision. Structured OpenAI and Anthropic routes are unaffected.
 
 ## Status
 
 Accepted and implemented for draft contract `0.5.0` and wire protocol `1` on
-2026-08-29. This local implementation decision is not release, publication, or
-live-provider evidence.
+2026-08-29. Exact-depth templates and the explicit v1 prefix compatibility mode
+were implemented on 2026-08-31. This local implementation decision is not
+release, publication, or live-provider evidence.
 
 The decision was renumbered from ADR 0019 to ADR 0031 on 2026-08-30. Its
 implementation and historical evidence remain unchanged.

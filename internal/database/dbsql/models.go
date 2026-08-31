@@ -843,6 +843,8 @@ type UpstreamAttempt struct {
 	MeasuredImageUnits *int64 `db:"measured_image_units" json:"measured_image_units"`
 	// Exact structured historical tool-call count, or NULL when the selected protocol cannot prove it.
 	MeasuredToolCalls *int64 `db:"measured_tool_calls" json:"measured_tool_calls"`
+	// First protocol-validated generated content observed in the relayed response; NULL for lifecycle-only, opaque, and historical attempts.
+	FirstTokenAt pgtype.Timestamptz `db:"first_token_at" json:"first_token_at"`
 }
 
 // Per-dispatch token and cost allocations and their conservative settlement under one logical quota reservation.

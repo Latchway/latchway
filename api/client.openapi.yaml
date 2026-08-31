@@ -554,8 +554,10 @@ paths:
       description: &OpaqueHTTPDescription |
         The path `feature` must exactly equal `X-Latchway-Feature`.
         `remainingPath` is interpreted only beneath the feature's configured
-        path prefixes. Absolute URLs and client-selected upstream authorities
-        are never interpreted as destinations; query strings are rejected.
+        exact-depth path templates or compatibility-only path prefixes.
+        Template captures match one canonical segment and never select or
+        rewrite a destination. Absolute URLs and client-selected upstream
+        authorities are never interpreted as destinations; query strings are rejected.
         Deployments may use a router catch-all for additional segments. Request
         headers are forwarded only from the configured allowlist, and each
         route owns an explicit response byte bound and streaming policy.
@@ -650,7 +652,7 @@ components:
       description: Must be supplied together with X-Latchway-Framework-Version.
       schema:
         type: string
-        enum: [android-okhttp, foundation-models, langchain-js, macpaw-openai, openai-js, react-native-fetch, swift-openai, vercel-ai-sdk]
+        enum: [android-okhttp, foundation-models, koog-android, langchain-js, macpaw-openai, openai-js, react-native-fetch, swift-openai, vercel-ai-sdk]
     FrameworkVersion:
       name: X-Latchway-Framework-Version
       in: header
@@ -703,11 +705,12 @@ components:
       name: remainingPath
       in: path
       required: true
+      description: Canonical unescaped provider-relative path matched only against the selected feature's exact-depth template or legacy segment-bound prefix policy.
       schema:
         type: string
         minLength: 1
         maxLength: 2048
-        pattern: '^(?!.*(?:^|/)\.\.(?:/|$))(?!https?:).+$'
+        pattern: '^(?!.*(?:^|/)\.{1,2}(?:/|$))(?!https?:)(?!.*//)(?!.*[\\%?#])[!-~]+$'
   headers:
     RequestID:
       description: Server-selected correlation identifier.

@@ -78,6 +78,7 @@ type upstreamAttemptCLI struct {
 	Model           string          `json:"model"`
 	StartedAt       string          `json:"started_at"`
 	FirstByteAt     string          `json:"first_byte_at,omitempty"`
+	FirstTokenAt    string          `json:"first_token_at,omitempty"`
 	CompletedAt     string          `json:"completed_at,omitempty"`
 	Status          string          `json:"status"`
 	HTTPStatus      int             `json:"http_status,omitempty"`
@@ -970,7 +971,7 @@ func validUpstreamAttemptCLI(attempt upstreamAttemptCLI, expectedNumber int32) b
 	if err != nil {
 		return false
 	}
-	var firstByteAt, completedAt *time.Time
+	var firstByteAt, firstTokenAt, completedAt *time.Time
 	if attempt.FirstByteAt != "" {
 		value, parseErr := time.Parse(time.RFC3339Nano, attempt.FirstByteAt)
 		if parseErr != nil || value.Before(startedAt) {
@@ -978,9 +979,17 @@ func validUpstreamAttemptCLI(attempt upstreamAttemptCLI, expectedNumber int32) b
 		}
 		firstByteAt = &value
 	}
+	if attempt.FirstTokenAt != "" {
+		value, parseErr := time.Parse(time.RFC3339Nano, attempt.FirstTokenAt)
+		if parseErr != nil || firstByteAt == nil || value.Before(*firstByteAt) {
+			return false
+		}
+		firstTokenAt = &value
+	}
 	if attempt.CompletedAt != "" {
 		value, parseErr := time.Parse(time.RFC3339Nano, attempt.CompletedAt)
-		if parseErr != nil || value.Before(startedAt) || firstByteAt != nil && firstByteAt.After(value) {
+		if parseErr != nil || value.Before(startedAt) || firstByteAt != nil && firstByteAt.After(value) ||
+			firstTokenAt != nil && firstTokenAt.After(value) {
 			return false
 		}
 		completedAt = &value
@@ -1051,14 +1060,15 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 		attempts = append(attempts, []string{
 			strconv.Itoa(int(attempt.AttemptNumber)), attempt.ID, attempt.Route,
 			attempt.Upstream, attempt.Model, attempt.Status, formatControlTime(attempt.StartedAt),
-			formatControlTime(attempt.FirstByteAt), formatControlTime(attempt.CompletedAt),
+			formatControlTime(attempt.FirstByteAt), formatControlTime(attempt.FirstTokenAt),
+			formatControlTime(attempt.CompletedAt),
 			httpStatus, failureCode,
 			attempt.UsageProvenance, attempt.CostProvenance, attempt.CostSource,
 		})
 	}
 	return printControlTable(opts, []string{
 		"#", "ATTEMPT", "ROUTE", "UPSTREAM", "MODEL", "STATUS", "STARTED", "FIRST BYTE",
-		"COMPLETED", "HTTP", "FAILURE", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
+		"FIRST TOKEN", "COMPLETED", "HTTP", "FAILURE", "USAGE SOURCE", "COST PROVENANCE", "COST SOURCE",
 	}, attempts)
 }
 

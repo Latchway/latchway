@@ -1,0 +1,85 @@
+{
+  "examples": [
+    {
+      "kind": "quickstart",
+      "name": "Firebase App Check quickstart",
+      "source": {
+        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "file": "examples/firebase/client.ts",
+        "region": {
+          "end_line": 23,
+          "start_line": 1
+        },
+        "region_sha256": "a83eee7e14ccc32f946b46eee6f158f4a581d0fc3ac7658843bd1c8a284fdd59",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "a83eee7e14ccc32f946b46eee6f158f4a581d0fc3ac7658843bd1c8a284fdd59"
+      }
+    },
+    {
+      "kind": "quickstart",
+      "name": "Turnstile browser quickstart",
+      "source": {
+        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "file": "examples/vanilla/client.ts",
+        "region": {
+          "end_line": 23,
+          "start_line": 1
+        },
+        "region_sha256": "78dc9c5d9dd6cdc50a24b1b74940fb4f6a3e4230a542ee35672db5af0d471540",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "2c7901028587d037d6bb82be977a59e0ac93425f9f61bfbc4cb0e9b7e2c40e0e"
+      }
+    },
+    {
+      "kind": "framework",
+      "name": "OpenAI framework adapter",
+      "source": {
+        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "file": "packages/openai/src/index.ts",
+        "region": {
+          "end_line": 71,
+          "start_line": 1
+        },
+        "region_sha256": "1b5a119e20ab8af68343c0db78ff557c59b5a5df5d80decee9da47238fa4f24c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "1b5a119e20ab8af68343c0db78ff557c59b5a5df5d80decee9da47238fa4f24c"
+      }
+    },
+    {
+      "kind": "framework",
+      "name": "Vercel AI framework adapter",
+      "source": {
+        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "file": "packages/vercel-ai/src/index.ts",
+        "region": {
+          "end_line": 78,
+          "start_line": 1
+        },
+        "region_sha256": "53737067ecfc3b77d51fc5ce719a4e449773f174471f760dafe1ff1d07fc2ff7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "53737067ecfc3b77d51fc5ce719a4e449773f174471f760dafe1ff1d07fc2ff7"
+      }
+    },
+    {
+      "kind": "framework",
+      "name": "LangChain framework adapter",
+      "source": {
+        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "file": "packages/langchain/src/index.ts",
+        "region": {
+          "end_line": 103,
+          "start_line": 1
+        },
+        "region_sha256": "6f1596c2f371971615a845869f9fa6e61e8cb5b130825c9c1c64388ed62f5742",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "6f1596c2f371971615a845869f9fa6e61e8cb5b130825c9c1c64388ed62f5742"
+      }
+    }
+  ],
+  "schema_version": 1
+}

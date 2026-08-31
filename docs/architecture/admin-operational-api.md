@@ -43,12 +43,14 @@ the immutable usage ledger; multi-attempt usage is summed while the logical
 request record remains single-counted. The request explorer returns metadata
 and contiguous physical attempts ordered by `attempt_number` (1–32). Each
 attempt includes its canonical route and upstream, physical model,
-start/optional-first-byte/optional-completion times, optional upstream HTTP
-status, public lifecycle status, normalized usage, and separate token-usage and
-cost provenance. The read path rejects gaps, noncanonical route keys,
+start/optional-first-byte/optional-first-token/optional-completion times,
+optional upstream HTTP status, public lifecycle status, normalized usage, and
+separate token-usage and cost provenance. The read path rejects gaps,
 impossible lifecycle combinations, and timestamps outside
-`started_at <= first_byte_at <= completed_at`; it does not partially return a
-corrupt request.
+`started_at <= first_byte_at <= first_token_at <= completed_at` when a token was
+observed. `first_token_at` remains absent for lifecycle-only, opaque, and
+historical attempts; it is never inferred from `first_byte_at`. The API does
+not partially return a corrupt request.
 
 Attempt failures use the closed public vocabulary `canceled`, `gateway_error`,
 `protocol_error`, `timeout`, `unavailable`, `upstream_rejected`, and `unknown`.

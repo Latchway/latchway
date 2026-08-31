@@ -100,6 +100,7 @@ type upstreamAttemptDocument struct {
 	Model           string       `json:"model"`
 	StartedAt       time.Time    `json:"started_at"`
 	FirstByteAt     *time.Time   `json:"first_byte_at,omitempty"`
+	FirstTokenAt    *time.Time   `json:"first_token_at,omitempty"`
 	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
 	Status          string       `json:"status"`
 	HTTPStatus      *int32       `json:"http_status,omitempty"`
@@ -1026,9 +1027,12 @@ func validateUpstreamAttempt(
 		return errOperationalCorrupt
 	}
 	if attempt.FirstByteAt != nil && attempt.FirstByteAt.Before(attempt.StartedAt) ||
+		attempt.FirstTokenAt != nil && (attempt.FirstByteAt == nil || attempt.FirstTokenAt.Before(*attempt.FirstByteAt)) ||
 		attempt.CompletedAt != nil && attempt.CompletedAt.Before(attempt.StartedAt) ||
 		attempt.FirstByteAt != nil && attempt.CompletedAt != nil &&
 			attempt.FirstByteAt.After(*attempt.CompletedAt) ||
+		attempt.FirstTokenAt != nil && attempt.CompletedAt != nil &&
+			attempt.FirstTokenAt.After(*attempt.CompletedAt) ||
 		attempt.HTTPStatus != nil && (*attempt.HTTPStatus < 100 || *attempt.HTTPStatus > 599) {
 		return errOperationalCorrupt
 	}
@@ -1068,7 +1072,7 @@ func (store *operationalStore) populateRequestDetails(
 	}
 	attemptRows, err := store.pool.Query(ctx, `
 		SELECT logical_request_id, upstream_attempt_id, attempt_number, route_key,
-		       upstream_key, COALESCE(physical_model, ''), started_at, first_byte_at,
+		       upstream_key, COALESCE(physical_model, ''), started_at, first_byte_at, first_token_at,
 		       completed_at, status, http_status, failure_code,
 		       cost_confidence, pricing_source
 		FROM upstream_attempts
@@ -1085,7 +1089,7 @@ func (store *operationalStore) populateRequestDetails(
 		var attempt upstreamAttemptDocument
 		if err := attemptRows.Scan(
 			&requestID, &attempt.ID, &attempt.AttemptNumber, &attempt.Route,
-			&attempt.Upstream, &attempt.Model, &attempt.StartedAt, &attempt.FirstByteAt,
+			&attempt.Upstream, &attempt.Model, &attempt.StartedAt, &attempt.FirstByteAt, &attempt.FirstTokenAt,
 			&attempt.CompletedAt, &status, &attempt.HTTPStatus, &failureCode,
 			&costConfidence, &pricingSource,
 		); err != nil {

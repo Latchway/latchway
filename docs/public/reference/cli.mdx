@@ -4,8 +4,9 @@ description: "Operate the gateway and canonical Admin API without placing creden
 ---
 
 The `latchway` binary contains server, migration, diagnostics, and Admin API
-commands. Except for `serve`, `migrate`, `doctor`, and the isolated
-`verify local` gate, control-plane commands use HTTP and do not open PostgreSQL.
+commands. Except for `serve`, `test-upstream serve`, `migrate`, `doctor`, and
+the isolated `verify local` gate, control-plane commands use HTTP and do not
+open PostgreSQL.
 
 ## Connection and authentication
 
@@ -38,6 +39,7 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway serve --role all` | Run API and worker roles together |
 | `latchway serve --role api` | Run client/Admin API and console only |
 | `latchway serve --role worker` | Run PostgreSQL-backed maintenance work |
+| `latchway test-upstream serve` | Run the deterministic loopback-only upstream fixture |
 | `latchway migrate up` | Apply embedded forward-only migrations |
 | `latchway migrate status` | Compare current and available schema |
 | `latchway doctor` | Run local deployment diagnostics |
@@ -117,6 +119,20 @@ latchway installations list --environment env_...
 latchway installations inspect ins_...
 latchway installations revoke ins_... --reason 'operator-approved response'
 
+latchway installation-families list --environment env_...
+latchway installation-families inspect fam_...
+latchway installation-families require-renewal fam_... \
+  --reason 'root trust review'
+latchway installation-families revoke fam_... \
+  --reason 'family credential compromise'
+
+latchway components list --environment env_... --family fam_...
+latchway components inspect cmp_...
+latchway components require-reattestation cmp_... \
+  --reason 'component trust review'
+latchway components revoke cmp_... \
+  --reason 'component credential compromise'
+
 latchway requests list --environment env_...
 latchway requests inspect req_...
 latchway usage summary --environment env_...
@@ -127,7 +143,29 @@ latchway audit --organization org_...
 List commands print opaque cursors for the next bounded page. Do not decode or
 modify them.
 
+Family renewal expires root trust and refresh credentials before future
+refresh or provisioning; it does not revoke already-issued access grants before
+their existing expiry. Component re-attestation applies to that component
+subtree. Component revocation does not revoke a sibling, while family
+revocation terminates every component credential in the family. Administrative
+reasons are optional, redaction-safe, single-line values of at most 100
+characters.
+
 ## Verification
+
+Run the bounded mock upstream when testing protocol handling, streaming,
+timeouts, retries, or fallback without a provider credential:
+
+```bash
+latchway test-upstream serve \
+  --listen 127.0.0.1:19090 \
+  --scenario stream
+```
+
+The fixture accepts the Chat, Responses, Embeddings, and Anthropic protocol
+paths. It binds only to an explicit loopback address. Per-request scenario
+selection remains disabled unless `--allow-scenario-header` is set; use that
+flag only in an isolated test process.
 
 Run the destructive local vertical only against a database role allowed to
 create and drop short-lived schemas:

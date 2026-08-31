@@ -146,11 +146,13 @@ type FeatureDecision struct {
 // OpaqueHTTPDecision is the complete server-owned boundary applied to one
 // generic HTTP attempt. ProviderPath is always relative to the selected
 // protected target; it can never carry an authority, query, or fragment.
+// Exactly one of PathTemplates or compatibility-only PathPrefixes is set.
 type OpaqueHTTPDecision struct {
 	FeatureID             string
 	ProviderPath          string
 	AllowedMethods        []string
 	PathPrefixes          []string
+	PathTemplates         []string
 	MaximumBodyBytes      int64
 	AllowedRequestHeaders []string
 	MaximumResponseBytes  int64
@@ -182,6 +184,15 @@ type Usage struct {
 type ResponseObserver interface {
 	Observe(chunk []byte) error
 	Finalize() (Usage, error)
+}
+
+// FirstTokenObserver is the optional response-observer capability used for
+// time-to-first-token telemetry. It becomes true only after protocol parsing
+// has observed generated content. Transport lifecycle bytes, usage summaries,
+// and other SSE metadata do not satisfy this capability.
+type FirstTokenObserver interface {
+	ResponseObserver
+	FirstTokenObserved() bool
 }
 
 // Capabilities describe safe enforcement features.

@@ -1,0 +1,305 @@
+---
+title: "Android SDK source bundle"
+description: "Generated, version-bound examples and compatibility metadata for Android SDK 1.0.0."
+---
+
+<Warning>
+  This page proves the checked-in source bundle and its provenance. It does not claim
+  that the package or protected external release evidence has been published.
+</Warning>
+
+## Bundle identity
+
+| Field | Value |
+| --- | --- |
+| Package | `dev.latchway` |
+| Release | `v1.0.0` |
+| Commit | `c05a74e735da3589f907eb0a788a2970245c0cc8` |
+| Source tree clean | `no` |
+| Bundle SHA-256 | `bde9d735ce8de0522560a8756159a8fcbdff80029afdefa391f06753d6c2c2b1` |
+
+## Supported versions
+
+| Dependency or platform | Tested version | Source |
+| --- | --- | --- |
+| dev.latchway | `1.0.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L1-L10` |
+| Android API | `23` | `README.md:L27-L29` |
+| OkHttp minimum | `4.9.2` | `README.md:L27-L31` |
+| OkHttp latest | `5.3.0` | `gradle/libs.versions.toml:L1-L15` |
+| Retrofit minimum | `2.11.0` | `README.md:L32-L35` |
+| Retrofit latest | `3.0.0` | `gradle/libs.versions.toml:L1-L15` |
+| OpenAI Kotlin minimum | `4.0.1` | `README.md:L32-L35` |
+| OpenAI Kotlin latest | `4.1.0` | `gradle/libs.versions.toml:L1-L15` |
+| LangChain4j | `1.19.0` | `gradle/libs.versions.toml:L1-L15` |
+| Koog | `1.1.1` | `gradle/libs.versions.toml:L1-L15` |
+
+## Version-bound examples
+
+### `frameworks/koog.kt`
+
+Working-tree source: `latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt:L42-L88`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+    @Test
+    fun koogPreservesChatToolsAndStructuredOutputThroughLatchwayOkHttp() = runBlocking {
+        val server = LoopbackHttpServer()
+        server.enqueue(
+            LoopbackResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody(CHAT_COMPLETION),
+        )
+        server.start()
+        val harness = FrameworkConformanceHarness(server)
+        val fixture = koog(server, harness)
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("x-latchway-fixture", "structured-output")
+        }
+        val request = prompt(
+            id = "koog-structured-fixture",
+            params = OpenAIChatParams(
+                schema = LLMParams.Schema.JSON.Basic("fixture_answer", schema),
+            ),
+        ) {
+            user("Say fixture")
+        }
+        val tools = listOf(
+            ToolDescriptor(
+                name = "fixture_lookup",
+                description = "Return deterministic fixture data",
+            ),
+        )
+
+        try {
+            val answer = fixture.client.execute(request, OpenAIModels.Chat.GPT4o, tools)
+            val recorded = server.takeDataRequest()
+            val body = JSONObject(recorded.body.readUtf8())
+
+            assertEquals("fixture accepted", answer.textContent())
+            assertEquals("POST /v1/chat/completions HTTP/1.1", recorded.requestLine)
+            assertFrameworkAuthorization(recorded)
+            assertEquals("fixture_lookup", body.getJSONArray("tools").getJSONObject(0)
+                .getJSONObject("function").getString("name"))
+            assertTrue(body.getJSONObject("response_format").toString().contains("structured-output"))
+            assertFalse(body.toString().contains(PROVIDER_PLACEHOLDER))
+        } finally {
+            close(fixture, harness, server)
+        }
+    }
+```
+
+### `frameworks/langchain4j.kt`
+
+Working-tree source: `latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt:L21-L56`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+class LangChain4jFrameworkConformanceTest {
+    @Test
+    fun langChain4jUsesItsOkHttpSpiWithTheLatchwayHooks() {
+        val server = LoopbackHttpServer()
+        server.enqueue(
+            LoopbackResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody(CHAT_COMPLETION),
+        )
+        server.start()
+        val harness = FrameworkConformanceHarness(server)
+        val resources = ClientResources()
+        val model = OpenAiChatModel.builder()
+            .baseUrl(server.url("/v1").toString())
+            .apiKey(PROVIDER_PLACEHOLDER)
+            .modelName("framework-fixture")
+            .maxRetries(0)
+            .httpClientBuilder(resources.langChainBuilder(harness))
+            .build()
+
+        try {
+            val answer = model.chat("Say fixture")
+            val recorded = server.takeDataRequest()
+
+            assertEquals("fixture accepted", answer)
+            assertEquals(2, server.controlRequestCount)
+            assertEquals("POST /v1/chat/completions HTTP/1.1", recorded.requestLine)
+            assertFrameworkAuthorization(recorded)
+            assertTrue(recorded.body.readUtf8().contains("framework-fixture"))
+        } finally {
+            resources.close()
+            harness.close()
+            server.shutdown()
+        }
+    }
+```
+
+### `frameworks/openai-kotlin.kt`
+
+Working-tree source: `latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt:L28-L56`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+class OpenAiKotlinFrameworkConformanceTest {
+    @Test
+    fun aallamOpenAiKotlinUsesThePreconfiguredLatchwayOkHttpEngine() = runBlocking {
+        val server = LoopbackHttpServer()
+        server.enqueue(
+            LoopbackResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody(CHAT_COMPLETION),
+        )
+        server.start()
+        val harness = FrameworkConformanceHarness(server)
+        val http = harness.okHttpBuilder().build()
+        val openAI = openAI(server, http)
+
+        try {
+            val completion = openAI.chatCompletion(request())
+            val recorded = server.takeDataRequest()
+
+            assertEquals("chatcmpl_latchway", completion.id)
+            assertEquals(2, server.controlRequestCount)
+            assertTrue(completion.choices.isNotEmpty())
+            assertEquals("POST /v1/chat/completions HTTP/1.1", recorded.requestLine)
+            assertFrameworkAuthorization(recorded)
+            assertTrue(recorded.body.readUtf8().contains("framework-fixture"))
+        } finally {
+            close(openAI, http, harness, server)
+        }
+    }
+```
+
+### `frameworks/retrofit.kt`
+
+Working-tree source: `latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt:L28-L74`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+class RetrofitFrameworkConformanceTest {
+    @Test
+    fun retrofitUsesTheProductionHooksAndReplacesItsPlaceholderAuthorization() {
+        val server = LoopbackHttpServer()
+        server.enqueue(
+            LoopbackResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody("{\"id\":\"resp_retrofit\",\"status\":\"completed\"}"),
+        )
+        server.start()
+        val harness = FrameworkConformanceHarness(server)
+        val http = harness.okHttpBuilder().build()
+
+        try {
+            val response = retrofit(server, http).response(
+                authorization = "Bearer $PROVIDER_PLACEHOLDER",
+                body = "{\"model\":\"feature-selected-server-side\"}"
+                    .toRequestBody(JSON),
+            ).execute()
+            val request = server.takeDataRequest()
+
+            assertTrue(response.isSuccessful)
+            assertEquals(2, server.controlRequestCount)
+            assertFrameworkAuthorization(request)
+            assertEquals("POST /v1/responses HTTP/1.1", request.requestLine)
+            assertTrue(request.body.readUtf8().contains("feature-selected-server-side"))
+        } finally {
+            close(http, harness, server)
+        }
+    }
+
+    @Test
+    fun retrofitStreamingIsIncrementalAndCallCancellationReachesOkHttp() {
+        val server = LoopbackHttpServer()
+        server.enqueue(
+            LoopbackResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "text/event-stream")
+                .setChunkedBody(
+                    chunks = listOf("data: first\n", "data: second\n"),
+                    delay = 2,
+                    unit = TimeUnit.SECONDS,
+                ),
+        )
+        server.start()
+        val canceled = CountDownLatch(1)
+```
+
+### `quickstart/basic-client.kt`
+
+Working-tree source: `sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt:L1-L39`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+package dev.latchway.sample.basic
+
+import android.app.Activity
+import android.os.Bundle
+import android.widget.TextView
+import dev.latchway.core.AttestationProvider
+import dev.latchway.core.IdentityTokenProvider
+import dev.latchway.okhttp.LatchwayClient
+import dev.latchway.okhttp.LatchwayConfiguration
+import okhttp3.HttpUrl
+
+public class MainActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(TextView(this).apply {
+            textSize = 18f
+            setPadding(48, 48, 48, 48)
+            text = "Latchway basic sample\n\nUse BasicLatchwayFactory with your app's existing " +
+                "identity-token provider and the attestation adapter required by your server policy. " +
+                "No credentials or synthetic attestation are bundled in this sample."
+        })
+    }
+}
+
+public object BasicLatchwayFactory {
+    public fun create(
+        activity: Activity,
+        gateway: HttpUrl,
+        applicationId: String,
+        environment: String,
+        identityTokenProvider: IdentityTokenProvider,
+        attestationProvider: AttestationProvider,
+    ): LatchwayClient = LatchwayClient(
+        configuration = LatchwayConfiguration(gateway, applicationId, environment),
+        identityTokenProvider = identityTokenProvider,
+        attestationProvider = attestationProvider,
+        context = activity,
+    )
+}
+```
+
+### `quickstart/firebase-auth.kt`
+
+Working-tree source: `sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt:L1-L29`. The bundle records candidate commit `c05a74e735da3589f907eb0a788a2970245c0cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```kotlin
+package dev.latchway.sample.firebase
+
+import android.app.Activity
+import android.os.Bundle
+import android.widget.TextView
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import dev.latchway.firebaseauth.FirebaseIdentityTokenProvider
+
+public class MainActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val state = when {
+            FirebaseApp.getApps(this).isEmpty() ->
+                "Firebase is not configured. Add this sample to your Firebase Android app before running it."
+            FirebaseAuth.getInstance().currentUser == null ->
+                "Firebase is configured. Sign in through your application's normal authentication flow first."
+            else -> {
+                FirebaseIdentityTokenProvider()
+                "Firebase user is ready. Pass FirebaseIdentityTokenProvider to LatchwayClient with your gateway configuration."
+            }
+        }
+        setContentView(TextView(this).apply {
+            textSize = 18f
+            setPadding(48, 48, 48, 48)
+            text = "Latchway Firebase sample\n\n$state"
+        })
+    }
+}
+```

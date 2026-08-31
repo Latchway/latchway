@@ -490,6 +490,7 @@ type compiledFeature struct {
 	OpaqueHTTP *struct {
 		AllowedMethods        []string `json:"allowedMethods"`
 		PathPrefixes          []string `json:"pathPrefixes"`
+		PathTemplates         []string `json:"pathTemplates"`
 		MaximumBodyBytes      int64    `json:"maxBodyBytes"`
 		AllowedRequestHeaders []string `json:"allowedRequestHeaders"`
 	} `json:"opaqueHttp"`
@@ -1152,6 +1153,7 @@ func (snapshot ActiveSnapshot) runtimeFeature(raw compiledFeature) (Feature, err
 		opaque := OpaqueHTTPPolicy{
 			AllowedMethods:        append([]string(nil), raw.OpaqueHTTP.AllowedMethods...),
 			PathPrefixes:          append([]string(nil), raw.OpaqueHTTP.PathPrefixes...),
+			PathTemplates:         append([]string(nil), raw.OpaqueHTTP.PathTemplates...),
 			MaximumBodyBytes:      raw.OpaqueHTTP.MaximumBodyBytes,
 			AllowedRequestHeaders: append([]string(nil), raw.OpaqueHTTP.AllowedRequestHeaders...),
 		}
@@ -1213,7 +1215,8 @@ func protocolRequiresOutputPolicy(protocol string) bool {
 
 func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
 	if len(policy.AllowedMethods) == 0 || len(policy.AllowedMethods) > 5 ||
-		len(policy.PathPrefixes) == 0 || len(policy.PathPrefixes) > 32 ||
+		(len(policy.PathPrefixes) == 0) == (len(policy.PathTemplates) == 0) ||
+		len(policy.PathPrefixes) > protocol.MaximumOpaqueHTTPPathRules ||
 		policy.MaximumBodyBytes < 0 || policy.MaximumBodyBytes > 100<<20 ||
 		len(policy.AllowedRequestHeaders) > 32 {
 		return false
@@ -1237,6 +1240,9 @@ func runtimeOpaquePolicyValid(policy OpaqueHTTPPolicy) bool {
 			return false
 		}
 		seenPrefixes[prefix] = struct{}{}
+	}
+	if len(policy.PathTemplates) > 0 && !protocol.ValidOpaqueHTTPPathTemplates(policy.PathTemplates) {
+		return false
 	}
 	seenHeaders := make(map[string]struct{}, len(policy.AllowedRequestHeaders))
 	for _, header := range policy.AllowedRequestHeaders {

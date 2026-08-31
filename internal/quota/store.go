@@ -1870,6 +1870,38 @@ func (store *Store) MarkFirstByte(ctx context.Context, attempt Attempt) error {
 	return store.markFirstByteSlow(ctx, attempt)
 }
 
+// MarkFirstToken records the first protocol-validated generated-content
+// boundary. Unlike MarkFirstByte it does not mutate the logical-request state:
+// the client-visible streaming transition remains a transport/accounting
+// concern, while this nullable timestamp is telemetry only.
+func (store *Store) MarkFirstToken(ctx context.Context, attempt Attempt) error {
+	if store == nil || store.pool == nil || ctx == nil || attempt.validate() != nil {
+		return ErrInvalidInput
+	}
+	var firstTokenAt time.Time
+	err := store.pool.QueryRow(ctx, `
+		UPDATE upstream_attempts
+		SET first_token_at = GREATEST(started_at, first_byte_at, statement_timestamp())
+		WHERE organization_id = $1 AND application_id = $2 AND environment_id = $3
+		  AND logical_request_id = $4 AND upstream_attempt_id = $5 AND attempt_number = $6
+		  AND status = 'started' AND completed_at IS NULL
+		  AND first_byte_at IS NOT NULL AND first_token_at IS NULL
+		RETURNING first_token_at
+	`, attempt.reservation.organizationID, attempt.reservation.applicationID,
+		attempt.reservation.environmentID, attempt.reservation.logicalRequestID,
+		attempt.attemptID, attempt.number).Scan(&firstTokenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrInvalidState
+	}
+	if err != nil {
+		return mapWriteError("record first token", err)
+	}
+	if firstTokenAt.IsZero() {
+		return ErrInvalidState
+	}
+	return nil
+}
+
 const markInitialAttemptFirstByteSQL = `
 	UPDATE upstream_attempts
 	SET first_byte_at = GREATEST(started_at, statement_timestamp())

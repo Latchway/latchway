@@ -53,7 +53,7 @@ readers gain consistent trust-boundary and lifecycle meaning across the site.
 
 ## Status
 
-Accepted on 2026-08-30 and implemented with the checked-in color tokens,
-Mintlify primitives, four canonical Mermaid diagrams, consistent trust labels,
-and automated navigation/accessibility validation. Production rendering remains
-subject to the Mintlify deployment check.
+Accepted on 2026-08-30 and partially implemented with Mintlify primitives,
+twelve canonical accessible Mermaid diagrams, consistent trust labels, and
+automated navigation/accessibility validation. The reserved hand-authored SVG
+assets and production rendering evidence remain open documentation gates.

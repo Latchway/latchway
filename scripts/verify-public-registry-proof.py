@@ -126,7 +126,7 @@ def expected_npm_release_assets(package: str, version: str) -> tuple[set[str], s
     if package == "@latchway/client":
         tarball = f"latchway-client-{version}.tgz"
         return {
-            tarball, "SHA256SUMS", "build-reproducibility.json", "contract-evidence.json",
+            tarball, f"docs-bundle-{version}.tar.gz", "SHA256SUMS", "build-reproducibility.json", "contract-evidence.json",
             "package-evidence.json", "post-publish-evidence.json", "publish-input-evidence.json",
             "release-candidate-evidence.json", "tag-evidence.json", "npm-registry-version.json",
             "npm-registry-view.json", "npm-attestations.json", "npm-audit-signatures.json",
@@ -135,7 +135,7 @@ def expected_npm_release_assets(package: str, version: str) -> tuple[set[str], s
     if package == "@latchway/react-native":
         tarball = f"latchway-react-native-{version}.tgz"
         return {
-            tarball, f"{tarball}.sha256", "package-evidence.json", "build-reproducibility.json",
+            tarball, f"{tarball}.sha256", f"docs-bundle-{version}.tar.gz", "package-evidence.json", "build-reproducibility.json",
             "published-dependency-evidence.json", "npm-registry-version.json",
             "npm-registry-view.json", "npm-attestations.json", "npm-audit-signatures.json",
             "npm-registry-evidence-manifest.json", "post-publish-evidence.json",
@@ -200,12 +200,13 @@ def validate_rn_published_dependencies(
             exact_names = {
                 archive, f"{archive}.sha256", "cocoapods-published-podspec.json",
                 "cocoapods-reviewed-podspec.json", "cocoapods-release-evidence.json",
-                "cocoapods-release-evidence.SHA256SUMS",
+                "cocoapods-release-evidence.SHA256SUMS", f"docs-bundle-{version}.tar.gz",
             }
         else:
             exact_names = {
                 f"latchway-android-{version}-maven-repository.zip",
                 f"latchway-android-{version}-central-portal.zip",
+                f"docs-bundle-{version}.tar.gz",
                 "SHA256SUMS", "github-release-tag-binding.json",
                 "latchway-maven-signing-public-key.asc",
                 "maven-central-upload-intent.json", "maven-central-deployment.json",
@@ -617,6 +618,7 @@ def validate_npm(value: dict[str, Any], package: str, coordinate: dict[str, Any]
     attestations = value.get("release_asset_attestation_verifications")
     expected_asset_names = {
         str(evidence.get("tarball")),
+        f"docs-bundle-{coordinate.get('version')}.tar.gz",
         "package-evidence.json",
         "build-reproducibility.json",
     }
@@ -891,6 +893,7 @@ def validate_maven(
     expected_assets = {
         archive_name,
         portal_name,
+        f"docs-bundle-{version}.tar.gz",
         "SHA256SUMS",
         "github-release-tag-binding.json",
         "latchway-maven-signing-public-key.asc",
@@ -1154,6 +1157,7 @@ def validate(root: Path, candidate_commit: str, release_tag: str) -> dict[str, A
     ios_assets = {
         ios_archive,
         f"{ios_archive}.sha256",
+        f"docs-bundle-{ios_version}.tar.gz",
         "cocoapods-published-podspec.json",
         "cocoapods-reviewed-podspec.json",
         "cocoapods-release-evidence.json",

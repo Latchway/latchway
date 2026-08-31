@@ -1,0 +1,204 @@
+---
+title: "React Native SDK source bundle"
+description: "Generated, version-bound examples and compatibility metadata for React Native SDK 1.0.0."
+---
+
+<Warning>
+  This page proves the checked-in source bundle and its provenance. It does not claim
+  that the package or protected external release evidence has been published.
+</Warning>
+
+## Bundle identity
+
+| Field | Value |
+| --- | --- |
+| Package | `@latchway/react-native` |
+| Release | `v1.0.0` |
+| Commit | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` |
+| Source tree clean | `no` |
+| Bundle SHA-256 | `c1845f786be8b6ddcbaf3def8061099ef8a24cdb7bb2c7a4866a0bc73b405413` |
+
+## Supported versions
+
+| Dependency or platform | Tested version | Source |
+| --- | --- | --- |
+| @latchway/react-native | `1.0.0` | `package.json:L1-L16` |
+| React Native minimum | `0.82.0` | `conformance/framework/react-native-fetch.json:L1-L16` |
+| React Native latest | `0.82.0` | `conformance/framework/react-native-fetch.json:L1-L16` |
+| iOS | `15.0` | `LatchwayReactNative.podspec:L5-L21` |
+| Android API | `24` | `android/build.gradle.kts:L24-L32` |
+| OpenAI JavaScript | `7.8.0` | `conformance/framework/react-native-fetch.json:L12-L20` |
+| Vercel AI SDK | `7.0.85` | `conformance/framework/react-native-fetch.json:L12-L20` |
+| LangChain JavaScript | `1.5.10` | `conformance/framework/react-native-fetch.json:L12-L20` |
+| Vercel AI Anthropic | `4.0.46` | `conformance/framework/react-native-fetch.json:L17-L20` |
+
+## Version-bound examples
+
+### `frameworks/react-native-consumers.ts`
+
+Working-tree source: `example/src/framework-consumers.ts:L31-L126`. The bundle records candidate commit `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+export function createFrameworkConsumers(
+  client: LatchwayClient,
+  feature: string,
+): ReactNativeFrameworkConsumers {
+  const featureFetch = client.fetchFor(feature);
+  const baseURL = `${client.gatewayURL}/v1`;
+  return {
+    anthropic: createAnthropic({
+      apiKey: managedPlaceholder,
+      baseURL,
+      fetch: featureFetch,
+      name: "latchway-anthropic",
+    }),
+    openai: new OpenAI({
+      apiKey: managedPlaceholder,
+      baseURL,
+      dangerouslyAllowBrowser: true,
+      fetch: featureFetch,
+      maxRetries: 0,
+    }),
+    vercelAI: createOpenAI({
+      apiKey: managedPlaceholder,
+      baseURL,
+      fetch: featureFetch,
+      name: "latchway",
+    }),
+    langChainChat: new ChatOpenAI({
+      apiKey: managedPlaceholder,
+      configuration: { baseURL, fetch: featureFetch },
+      maxRetries: 0,
+      model: "latchway",
+    }),
+    langChainEmbeddings: new OpenAIEmbeddings({
+      apiKey: managedPlaceholder,
+      configuration: { baseURL, fetch: featureFetch },
+      encodingFormat: "float",
+      maxRetries: 0,
+      model: "latchway",
+    }),
+  };
+}
+
+/** Runs one bounded request through every React Native-compatible pathway. */
+export async function runFrameworkConsumerSmoke(
+  consumers: ReactNativeFrameworkConsumers,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<FrameworkSmokeResult> {
+  const requestOptions = signal === undefined ? {} : { signal };
+  const openai = await consumers.openai.responses.create({
+    model: "latchway",
+    input: prompt,
+  }, requestOptions);
+  const vercel = await generateText({
+    model: consumers.vercelAI.responses("latchway"),
+    prompt,
+    ...(signal === undefined ? {} : { abortSignal: signal }),
+  });
+  const langChain = await consumers.langChainChat.invoke(prompt, requestOptions);
+  const embedding = await consumers.langChainEmbeddings.embedQuery(prompt);
+  const anthropic = await generateText({
+    maxOutputTokens: 64,
+    model: consumers.anthropic.messages("latchway"),
+    prompt,
+    ...(signal === undefined ? {} : { abortSignal: signal }),
+  });
+  return {
+    anthropic: anthropic.text,
+    openaiResponses: openai.output_text,
+    vercelAI: vercel.text,
+    langChain: typeof langChain.content === "string"
+      ? langChain.content
+      : JSON.stringify(langChain.content),
+    embeddingDimensions: embedding.length,
+  };
+}
+
+/** Pulls an actual OpenAI SDK SSE stream; abort propagates into native. */
+export async function streamOpenAIChat(
+  consumers: ReactNativeFrameworkConsumers,
+  prompt: string,
+  update: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const stream = await consumers.openai.chat.completions.create({
+    model: "latchway",
+    messages: [{ role: "user", content: prompt }],
+    stream: true,
+    stream_options: { include_usage: true },
+  }, signal === undefined ? {} : { signal });
+  let output = "";
+  for await (const chunk of stream) {
+    output += chunk.choices[0]?.delta.content ?? "";
+    update(output);
+  }
+}
+```
+
+### `quickstart/create-client.tsx`
+
+Working-tree source: `example/src/App.tsx:L50-L74`. The bundle records candidate commit `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`, but does not claim that this dirty source region is already present at that commit.
+
+```tsx
+function makeClient(): LatchwayClient {
+  return createLatchwayClient({
+    baseURL: deployment.baseURL,
+    applicationID: deployment.applicationID,
+    environment: deployment.environment,
+    identityProvider: "firebase",
+    getIdentityToken: physicalConformanceEnabled()
+      ? physicalIdentityToken
+      : async () => {
+        await ensureFirebaseApp();
+        const user = firebaseAuth().currentUser;
+        if (user === null) throw new Error("Sign in with Firebase before calling Latchway.");
+        return user.getIdToken();
+      },
+    ...(deployment.googleCloudProjectNumber === undefined ? {} : {
+      android: { playIntegrityCloudProjectNumber: deployment.googleCloudProjectNumber },
+    }),
+    ...(deployment.rootKeychainAccessGroup === undefined ? {} : {
+      apple: {
+        rootKeychainAccessGroup: deployment.rootKeychainAccessGroup,
+        legacySharedKeychainAccessGroups: deployment.legacySharedKeychainAccessGroups,
+      },
+    }),
+  });
+}
+```
+
+### `quickstart/streaming-fetch.tsx`
+
+Working-tree source: `example/src/App.tsx:L87-L113`. The bundle records candidate commit `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`, but does not claim that this dirty source region is already present at that commit.
+
+```tsx
+  const send = async (): Promise<void> => {
+    setBusy(true);
+    setOutput("");
+    try {
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        latchwayFeature: deployment.feature,
+        headers: {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: deployment.model,
+          messages: [{ role: "user", content: input }],
+          stream: true,
+        }),
+      });
+      if (!response.ok) throw new Error(`Gateway returned HTTP ${response.status}.`);
+      setStatus("Streaming response");
+      await consumeStream(response, setOutput);
+      setStatus(`Completed · request ${response.headers.get("X-Latchway-Request-ID") ?? "not supplied"}`);
+    } catch (error) {
+      setStatus(safeError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+```

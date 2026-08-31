@@ -31,15 +31,16 @@ class FrameworkCompatibilityTests(unittest.TestCase):
 
     def test_repository_registry_and_generated_table_are_current(self) -> None:
         validated = compatibility.validate_repository(check_generated=True)
-        self.assertEqual(len(validated["frameworks"]), 8)
+        self.assertEqual(len(validated["frameworks"]), 9)
         support = {item["id"]: item["support"] for item in validated["frameworks"]}
-        self.assertEqual(support["foundation-models"], "planned")
         self.assertEqual(support["macpaw-openai"], "unsupported")
         self.assertTrue(
             all(
                 support[identifier] == "experimental"
                 for identifier in (
                     "android-okhttp",
+                    "foundation-models",
+                    "koog-android",
                     "langchain-js",
                     "openai-js",
                     "react-native-fetch",
@@ -53,6 +54,7 @@ class FrameworkCompatibilityTests(unittest.TestCase):
             [
                 "android-okhttp",
                 "foundation-models",
+                "koog-android",
                 "langchain-js",
                 "macpaw-openai",
                 "openai-js",
@@ -136,21 +138,15 @@ class FrameworkCompatibilityTests(unittest.TestCase):
 
     def test_support_claim_requires_pinned_versions(self) -> None:
         value = deepcopy(self.registry)
-        item = next(
-            candidate
-            for candidate in value["frameworks"]
-            if candidate["support"] == "planned"
-        )
+        item = value["frameworks"][0]
         item["support"] = "supported"
+        item["tested"] = {"minimum": None, "latest": None}
         self.assert_registry_error(value, "must be a pinned version")
 
     def test_planned_entry_cannot_publish_tested_range(self) -> None:
         value = deepcopy(self.registry)
-        item = next(
-            candidate
-            for candidate in value["frameworks"]
-            if candidate["support"] == "planned"
-        )
+        item = value["frameworks"][0]
+        item["support"] = "planned"
         item["tested"] = {"minimum": "1.0.0", "latest": "1.1.0"}
         self.assert_registry_error(value, "forbidden while support is planned")
 
@@ -175,14 +171,9 @@ class FrameworkCompatibilityTests(unittest.TestCase):
 
     def test_supported_claim_cannot_leave_capability_planned(self) -> None:
         value = deepcopy(self.registry)
-        item = next(
-            candidate
-            for candidate in value["frameworks"]
-            if candidate["support"] == "planned"
-        )
+        item = value["frameworks"][0]
         item["support"] = "supported"
-        item["tested"] = {"minimum": "27.0.0", "latest": "27.0.0"}
-        item["security"] = {"dpop": "full", "native_key_isolation": "full"}
+        item["capabilities"]["streaming"] = "planned"
         self.assert_registry_error(value, "cannot remain planned")
 
     def test_invalid_capability_state_is_rejected(self) -> None:

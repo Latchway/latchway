@@ -115,6 +115,13 @@ configured protocol, replaces trusted fields such as physical model and output
 bound, and never accepts a client-selected destination, credential, price,
 plan, user, or usage value.
 
+Opaque paths must match one configured exact-depth `pathTemplates` entry. A
+whole-segment capture such as `{resource_id}` matches one canonical segment and
+is never substituted into a destination. Catch-alls, overlapping templates,
+traversal, encoded separators, queries, fragments, and absolute destinations
+fail closed. Existing revisions using `pathPrefixes` retain their segment-bound
+v1 behavior; prefix and template modes cannot be combined.
+
 The OpenAI and Anthropic labels describe bounded compatibility subsets, not
 arbitrary provider payload forwarding. In particular, Responses is limited to
 locally represented text/messages, supported local tools and tool results, and

@@ -1,0 +1,36 @@
+---
+title: "SDK documentation bundles"
+description: "Trace generated SDK examples and API catalogs to versioned source bundles and exact provenance."
+---
+
+SDK quickstarts and framework examples are imported only through
+`scripts/docs-sync-sdk`. Every generated source file identifies the SDK repository,
+release, commit, file, and exact line region. CI verifies the archive, manifest,
+checksums, lock, provenance, and generated output before documentation can merge.
+
+<Warning>
+  A checked-in source bundle is not evidence that its registry package or GitHub
+  release is public. See [Release status](/release-status) for protected external gates.
+</Warning>
+
+| SDK | Package | Release | Source tree clean | Commit | Bundle SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| [android](/reference/sdk-bundles/android) | `dev.latchway` | `v1.0.0` | `no` | `c05a74e735da3589f907eb0a788a2970245c0cc8` | `bde9d735ce8de0522560a8756159a8fcbdff80029afdefa391f06753d6c2c2b1` |
+| [ios](/reference/sdk-bundles/ios) | `Latchway` | `v1.0.0` | `no` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` | `c8303f1eb5d5f4b15f7a55ea7a6613148b63156850ea55fd08e1a41b8be6e018` |
+| [js](/reference/sdk-bundles/js) | `@latchway/client` | `v1.0.0` | `no` | `8e36364419783b07acdd8fae82e457885f1c5447` | `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c` |
+| [react-native](/reference/sdk-bundles/react-native) | `@latchway/react-native` | `v1.0.0` | `no` | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` | `c1845f786be8b6ddcbaf3def8061099ef8a24cdb7bb2c7a4866a0bc73b405413` |
+
+## Update a bundle
+
+Run the source repository's bundle producer, then import the exact coordinate:
+
+```shell
+scripts/docs-sync-sdk ios 1.0.0
+scripts/docs-sync-sdk android 1.0.0
+scripts/docs-sync-sdk js 1.0.0
+scripts/docs-sync-sdk react-native 1.0.0
+```
+
+The command rejects archive traversal, links, non-canonical metadata, unknown files,
+checksum or manifest drift, source hash drift, and a commit that differs from the
+checked-out SDK repository. `scripts/docs-sync-sdk --check` is read-only.

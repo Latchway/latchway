@@ -52,6 +52,32 @@ ranges unless an operator has explicitly allow-listed exact private CIDRs,
 rejects redirects, strips client credentials, and applies route request/body
 bounds before dispatch.
 
+### Restrict opaque provider paths
+
+New opaque HTTP features use exact-depth templates rather than a suffix
+wildcard. A capture occupies one complete canonical path segment:
+
+```json
+{
+  "opaqueHttp": {
+    "allowedMethods": ["GET", "POST"],
+    "pathTemplates": [
+      "/v1/health",
+      "/v1/accounts/{account_id}/status"
+    ],
+    "maxBodyBytes": 1048576,
+    "allowedRequestHeaders": ["Content-Type", "X-Trace"]
+  }
+}
+```
+
+`/v1/accounts/acct_123/status` matches the second template;
+`/v1/accounts/acct_123/status/history` does not. Captures never rewrite the
+configured upstream authority. Duplicate or overlapping templates, catch-alls,
+partial captures, traversal, encoded separators, queries, fragments, and
+absolute destinations fail validation. Existing `pathPrefixes` revisions keep
+their segment-bound v1 behavior but cannot also declare `pathTemplates`.
+
 ## Trusted token and cost enforcement
 
 For Responses, Chat, Embeddings, and Anthropic text-only shapes, a model can

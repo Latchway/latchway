@@ -222,7 +222,8 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		requestDocument.Attempts[0].FailureCode == nil || *requestDocument.Attempts[0].FailureCode != "timeout" ||
 		requestDocument.Attempts[0].FirstByteAt != nil ||
 		requestDocument.Attempts[1].AttemptNumber != 2 || requestDocument.Attempts[1].Route != "fallback" ||
-		requestDocument.Attempts[1].FirstByteAt == nil || requestDocument.Attempts[1].FailureCode != nil {
+		requestDocument.Attempts[1].FirstByteAt == nil || requestDocument.Attempts[1].FirstTokenAt == nil ||
+		requestDocument.Attempts[1].FailureCode != nil {
 		t.Fatalf("request attempt detail/order = %#v", requestDocument.Attempts)
 	}
 	if bytes.Contains(requestGet.Body.Bytes(), []byte(`upstream_timeout`)) {
@@ -243,6 +244,13 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(summary.Body.Bytes(), []byte(`"provenance":"upstream_reported"`)) ||
 		!bytes.Contains(summary.Body.Bytes(), []byte(`"cost_source":"openrouter_usage_cost"`)) {
 		t.Fatalf("usage summary status/body=%d %s", summary.Code, summary.Body.String())
+	}
+	var summaryDocument usageSummaryDocument
+	decodeResponse(t, summary, &summaryDocument)
+	if summaryDocument.Analytics.TimeToFirstToken != (usageDistribution{
+		Samples: 1, P50MS: 40_000, P95MS: 40_000, P99MS: 40_000,
+	}) {
+		t.Fatalf("time-to-first-token distribution = %#v", summaryDocument.Analytics.TimeToFirstToken)
 	}
 	invalidBreakdown := performGET(handler, "/admin/v1/usage/summary"+usageQuery+"&breakdown_limit=201", cookie)
 	if invalidBreakdown.Code != http.StatusBadRequest {
@@ -615,8 +623,8 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		}
 	}
 	assertCorruptAttempt("timestamp order",
-		`UPDATE upstream_attempts SET first_byte_at = completed_at + interval '1 second' WHERE upstream_attempt_id = $1`,
-		`UPDATE upstream_attempts SET first_byte_at = completed_at - interval '30 seconds' WHERE upstream_attempt_id = $1`)
+		`UPDATE upstream_attempts SET first_token_at = NULL, first_byte_at = completed_at + interval '1 second' WHERE upstream_attempt_id = $1`,
+		`UPDATE upstream_attempts SET first_byte_at = completed_at - interval '30 seconds', first_token_at = completed_at - interval '20 seconds' WHERE upstream_attempt_id = $1`)
 	assertCorruptAttempt("attempt-number gap",
 		`UPDATE upstream_attempts SET attempt_number = 3 WHERE upstream_attempt_id = $1`,
 		`UPDATE upstream_attempts SET attempt_number = 2 WHERE upstream_attempt_id = $1`)
@@ -947,12 +955,13 @@ func seedOperationalFixture(
 		    logical_request_id, attempt_number, route_key, upstream_key, physical_model,
 		    model_key, attempt_decision_binding_version, attempt_decision_sha256,
 		    input_accounting_binding_version,
-		    status, started_at, first_byte_at, completed_at, http_status
+		    status, started_at, first_byte_at, first_token_at, completed_at, http_status
 		) VALUES ($1, $2, $3, $4, $5, 2, 'fallback', 'anthropic', 'claude-test',
 		          'assistant_fallback', 1, decode(repeat('42', 32), 'hex'), 1,
-		          'succeeded', $6, $7, $8, 200)
+		          'succeeded', $6, $7, $8, $9, 200)
 	`, fixture.secondAttemptID, organizationID, applicationID, environmentID, fixture.requestID,
-		fixture.recordedAt.Add(-39*time.Second), fixture.recordedAt.Add(-30*time.Second), fixture.recordedAt); err != nil {
+		fixture.recordedAt.Add(-39*time.Second), fixture.recordedAt.Add(-30*time.Second),
+		fixture.recordedAt.Add(-20*time.Second), fixture.recordedAt); err != nil {
 		t.Fatal(err)
 	}
 	usage := []struct {

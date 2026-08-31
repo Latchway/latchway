@@ -1164,9 +1164,10 @@ func (observer discardObserver) Finalize() (protocol.Usage, error) {
 }
 
 type jsonObserver struct {
-	ctx      context.Context
-	buffer   bytes.Buffer
-	overflow bool
+	ctx        context.Context
+	buffer     bytes.Buffer
+	overflow   bool
+	firstToken bool
 }
 
 func (observer *jsonObserver) Observe(chunk []byte) error {
@@ -1204,8 +1205,14 @@ func (observer *jsonObserver) Finalize() (protocol.Usage, error) {
 	if !present {
 		return protocol.Usage{}, upstreamMalformed("upstream message is missing usage")
 	}
-	return normalizedUsageFromValue(usage, true, true)
+	normalized, err := normalizedUsageFromValue(usage, true, true)
+	if err == nil && anthropicMessageContainsToken(root) {
+		observer.firstToken = true
+	}
+	return normalized, err
 }
+
+func (observer *jsonObserver) FirstTokenObserved() bool { return observer.firstToken }
 
 type sseObserver struct {
 	ctx context.Context
@@ -1219,6 +1226,7 @@ type sseObserver struct {
 	startSeen        bool
 	messageDeltaSeen bool
 	done             bool
+	firstToken       bool
 	inputTokens      int64
 	outputTokens     int64
 	usage            protocol.Usage
@@ -1269,6 +1277,8 @@ func (observer *sseObserver) Finalize() (protocol.Usage, error) {
 	}
 	return observer.usage, nil
 }
+
+func (observer *sseObserver) FirstTokenObserved() bool { return observer.firstToken }
 
 func (observer *sseObserver) drainEvents(eof bool) error {
 	eventStart := 0
@@ -1388,6 +1398,10 @@ func (observer *sseObserver) observeEvent(event []byte) error {
 		observer.inputTokens = usage.InputTokens
 		observer.outputTokens = usage.OutputTokens
 		observer.startSeen = true
+	case "content_block_delta":
+		if delta, ok := root["delta"].(map[string]any); ok && anthropicDeltaContainsToken(delta) {
+			observer.firstToken = true
+		}
 	case "message_delta":
 		if observer.messageDeltaSeen && observer.done {
 			return upstreamMalformed("message_delta appears after message_stop")
@@ -1430,6 +1444,37 @@ func (observer *sseObserver) observeEvent(event []byte) error {
 		observer.done = true
 	}
 	return observer.ctx.Err()
+}
+
+func anthropicDeltaContainsToken(delta map[string]any) bool {
+	for _, field := range []string{"text", "partial_json", "thinking"} {
+		if value, ok := delta[field].(string); ok && value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func anthropicMessageContainsToken(root map[string]any) bool {
+	content, ok := root["content"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawBlock := range content {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"text", "thinking"} {
+			if value, ok := block[field].(string); ok && value != "" {
+				return true
+			}
+		}
+		if input, ok := block["input"].(map[string]any); ok && len(input) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func sseEventFields(event []byte) (string, []byte, bool, error) {

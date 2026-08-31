@@ -1,0 +1,29 @@
+<Info>
+  Generated from working-tree source `examples/firebase/client.ts:L1-L23` for release candidate `v1.0.0` and recorded commit `8e36364419783b07acdd8fae82e457885f1c5447`. The dirty bundle does not claim that this region is already at that commit. Bundle SHA-256: `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c`.
+</Info>
+
+```typescript
+import { createLatchwayClient } from "@latchway/client";
+import {
+  createFirebaseAppCheckProvider,
+  createFirebaseIdentityTokenProvider,
+  type FirebaseAppCheckToken,
+} from "@latchway/client/firebase";
+
+export interface FirebaseDependencies {
+  getIDToken(): Promise<string>;
+  getAppCheckToken(forceRefresh: boolean): Promise<FirebaseAppCheckToken>;
+}
+
+export function createFirebaseClient(dependencies: FirebaseDependencies) {
+  return createLatchwayClient({
+    baseURL: "https://ai.example.com",
+    applicationID: "app_01J00000000000000000000000",
+    environment: "production",
+    identityProvider: "firebase",
+    identityTokenProvider: createFirebaseIdentityTokenProvider(dependencies.getIDToken),
+    attestationProviders: [createFirebaseAppCheckProvider(dependencies.getAppCheckToken)],
+    installation: { appVersion: "1.0.0" },
+  });
+}
+```

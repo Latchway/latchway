@@ -1,0 +1,33 @@
+<Info>
+  Generated from working-tree source `example/src/App.tsx:L87-L113` for release candidate `v1.0.0` and recorded commit `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`. The dirty bundle does not claim that this region is already at that commit. Bundle SHA-256: `c1845f786be8b6ddcbaf3def8061099ef8a24cdb7bb2c7a4866a0bc73b405413`.
+</Info>
+
+```tsx
+  const send = async (): Promise<void> => {
+    setBusy(true);
+    setOutput("");
+    try {
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        latchwayFeature: deployment.feature,
+        headers: {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: deployment.model,
+          messages: [{ role: "user", content: input }],
+          stream: true,
+        }),
+      });
+      if (!response.ok) throw new Error(`Gateway returned HTTP ${response.status}.`);
+      setStatus("Streaming response");
+      await consumeStream(response, setOutput);
+      setStatus(`Completed · request ${response.headers.get("X-Latchway-Request-ID") ?? "not supplied"}`);
+    } catch (error) {
+      setStatus(safeError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+```

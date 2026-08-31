@@ -363,7 +363,7 @@ const insertInitialAttemptUsageSQL = `
 const completeInitialAttemptSQL = `
 	UPDATE upstream_attempts
 	SET status = 'succeeded',
-	    completed_at = GREATEST(started_at, first_byte_at, $4),
+	    completed_at = GREATEST(started_at, first_byte_at, COALESCE(first_token_at, first_byte_at), $4),
 	    http_status = $5,
 	    failure_code = NULL,
 	    billed_cost_nano_usd = NULL,

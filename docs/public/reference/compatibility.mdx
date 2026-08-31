@@ -20,8 +20,9 @@ evidence defined by ADR 0028. Do not edit this page by hand.
 
 | Framework | Ecosystem | Framework package | Integration | Latchway package | Support | Tested range | DPoP | Native key isolation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Android OkHttp ecosystem | Android | `com.squareup.okhttp3:okhttp` | `interceptor_authenticator` | `dev.latchway:latchway-okhttp` | Experimental | 5.3.0–5.3.0 | Full | Partial |
-| Apple Foundation Models | Apple | `FoundationModels` | `language_model_executor` | `LatchwayFoundationModels` | Planned | Not yet tested | Not Tested | Not Tested |
+| Android OkHttp ecosystem | Android | `com.squareup.okhttp3:okhttp` | `interceptor_authenticator` | `dev.latchway:latchway-okhttp` | Experimental | 4.9.2–5.3.0 | Full | Partial |
+| Apple Foundation Models | Apple | `FoundationModels` | `language_model_executor` | `LatchwayFoundationModels` | Experimental | 27.0.0–27.0.0 | Partial | Partial |
+| Koog OpenAI client | Android | `ai.koog:prompt-executor-openai-client` | `preconfigured_okhttp_absolute_path` | `dev.latchway:latchway-okhttp` | Experimental | 1.1.1–1.1.1 | Full | Partial |
 | LangChain JavaScript | Javascript | `@langchain/openai` | `underlying_client` | `@latchway/langchain` | Experimental | 1.5.10–1.5.10 | Full | Not Applicable |
 | MacPaw OpenAI | Apple | `MacPaw/OpenAI` | `async_request_interceptor` | `LatchwayOpenAI` | Unsupported | 0.5.1–0.5.1 | Not Applicable | Not Applicable |
 | OpenAI JavaScript SDK | Javascript | `openai` | `custom_fetch` | `@latchway/openai` | Experimental | 7.8.0–7.8.0 | Full | Not Applicable |
@@ -34,7 +35,8 @@ evidence defined by ADR 0028. Do not edit this page by hand.
 | Framework | Responses | Chat completions | Text | Streaming | Tools | Structured output | Embeddings | Audio | Images | Cancellation | App extensions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Android OkHttp ecosystem | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | Conditional | Conditional | Yes | No |
-| Apple Foundation Models | No | No | Planned | Planned | Conditional | Planned | No | No | No | Planned | Conditional |
+| Apple Foundation Models | Yes | No | Yes | Yes | No | No | No | No | No | Yes | Conditional |
+| Koog OpenAI client | No | Yes | Yes | Yes | Yes | Yes | No | No | No | Yes | No |
 | LangChain JavaScript | No | Yes | Yes | Yes | Conditional | Conditional | Yes | No | No | Yes | No |
 | MacPaw OpenAI | No | No | No | No | No | No | No | No | No | No | No |
 | OpenAI JavaScript SDK | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | Conditional | Conditional | Yes | No |
@@ -44,10 +46,11 @@ evidence defined by ADR 0028. Do not edit this page by hand.
 
 ## Current limitations
 
-- **Android OkHttp ecosystem (`android-okhttp`):** Local source, route, replay, streaming, cancellation, and OkHttp 5.3.0 tests pass; hosted gateway conformance and physical Play-distributed key proof remain release gates.
-- **Apple Foundation Models (`foundation-models`):** The OS 27 custom executor compiles, but its runtime tests were skipped on an older host OS; gateway and physical-device execution remain pending.
+- **Android OkHttp ecosystem (`android-okhttp`):** Local source, route, replay, streaming, and cancellation tests pass on 4.9.2 and 5.3.0; hosted gateway conformance and physical Play-distributed key proof remain release gates.
+- **Apple Foundation Models (`foundation-models`):** Nine iOS 27.0 simulator tests pass text, transcript, incremental usage, cancellation, quota/unavailable mapping, refresh, and explicit tools/schema rejection; physical framework execution and delegated-extension runtime remain pending.
+- **Koog OpenAI client (`koog-android`):** Full local Koog 1.1.1 conformance passes only with OkHttp/okhttp-sse 5.3.0, explicit utils-jvm 1.1.1, Kotlin Logging 8.0.01, and an absolute chat path; 4.9.2 passes the four non-streaming cases but is incompatible with Koog SSE. Hosted gateway, live-provider, physical Play-distributed key, exact-image, and versions beyond the exact tested tuple remain release gates.
 - **LangChain JavaScript (`langchain-js`):** Local @langchain/openai 1.5.10 case-ID tests pass Chat, embeddings, streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; hosted/exact-image, live-provider, and revocation evidence remain release gates.
-- **MacPaw OpenAI (`macpaw-openai`):** MacPaw/OpenAI 0.5.1 exposes only synchronous request middleware and no public streaming transport injection, so a safe transparent Latchway adapter cannot be shipped.
+- **MacPaw OpenAI (`macpaw-openai`):** Published MacPaw/OpenAI 0.5.1 lacks async request middleware and public streaming injection, so no adapter ships; a repository patch adding ordered async interception passes all 217 upstream tests but has not been accepted or released upstream.
 - **OpenAI JavaScript SDK (`openai-js`):** Local OpenAI 7.8.0 case-ID tests pass Responses, Chat, embeddings, Responses/Chat streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; media, hosted/exact-image, live-provider, and revocation evidence remain release gates.
 - **React Native framework fetch (`react-native-fetch`):** React Native 0.82.0 New Architecture local gates pass. A real iOS 27 Release-configuration app signed for Apple Development proved production App Attest registration and same-key assertion, Secure Enclave DPoP, gateway traffic, quota, typed component denial, bridge behavior, and cleanup. Android, delegated-extension runtime, and protected Apple distribution-derived exact-candidate evidence remain pending.
 - **SwiftOpenAI (`swift-openai`):** Buffered and line-stream HTTP pass exact SwiftOpenAI 4.6.0 tests; WebSocket Realtime bypasses the injectable HTTP client and is unsupported, while physical cancellation proof is pending.

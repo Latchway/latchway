@@ -1296,6 +1296,7 @@ func cloneFeature(feature configuration.Feature) configuration.Feature {
 		opaque := *feature.OpaqueHTTP
 		opaque.AllowedMethods = append([]string(nil), opaque.AllowedMethods...)
 		opaque.PathPrefixes = append([]string(nil), opaque.PathPrefixes...)
+		opaque.PathTemplates = append([]string(nil), opaque.PathTemplates...)
 		opaque.AllowedRequestHeaders = append([]string(nil), opaque.AllowedRequestHeaders...)
 		feature.OpaqueHTTP = &opaque
 	}

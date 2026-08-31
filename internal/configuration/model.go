@@ -632,9 +632,12 @@ func (route Route) clone() Route {
 }
 
 // OpaqueHTTPPolicy is the explicit request boundary for generic HTTP routes.
+// PathTemplates is the preferred exact-depth mode. PathPrefixes remains the
+// segment-bound v1 compatibility mode; a valid policy sets exactly one.
 type OpaqueHTTPPolicy struct {
 	AllowedMethods        []string
 	PathPrefixes          []string
+	PathTemplates         []string
 	MaximumBodyBytes      int64
 	AllowedRequestHeaders []string
 }
@@ -642,6 +645,7 @@ type OpaqueHTTPPolicy struct {
 func (policy OpaqueHTTPPolicy) clone() OpaqueHTTPPolicy {
 	policy.AllowedMethods = append([]string(nil), policy.AllowedMethods...)
 	policy.PathPrefixes = append([]string(nil), policy.PathPrefixes...)
+	policy.PathTemplates = append([]string(nil), policy.PathTemplates...)
 	policy.AllowedRequestHeaders = append([]string(nil), policy.AllowedRequestHeaders...)
 	return policy
 }

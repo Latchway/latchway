@@ -1,0 +1,121 @@
+---
+title: "CEL policy context"
+description: "Write bounded claim mappings, access rules, limit-plan selection, and route predicates against the exact server-owned CEL activation."
+---
+
+Latchway compiles CEL only from an immutable configuration revision. Application
+requests cannot supply an expression, variable name, physical model, route, or
+limit plan. The version 1 source candidate has two deliberately separate CEL
+environments.
+
+## Identity claim mapping
+
+`spec.identityProviders[].claimMappings` maps a normalized claim name to an
+expression. This environment exposes only the verified identity token as the
+dynamic `claims` variable.
+
+```json
+{
+  "requiredClaims": ["subscription_tier"],
+  "claimMappings": {
+    "plan": "claims.subscription_tier",
+    "is_staff": "claims.roles.exists(role, role == 'staff')"
+  }
+}
+```
+
+There can be at most 32 mappings. A direct projection such as
+`claims.subscription_tier` is omitted when that path is missing; use
+`requiredClaims` when absence must reject authentication. Results are bounded
+JSON-safe scalars or flat scalar lists. Objects, nested lists, non-finite
+numbers, and oversized results fail closed.
+
+## Feature policy expressions
+
+| Configuration location | Required result | Purpose |
+| --- | --- | --- |
+| `spec.features[].access.expression` | Boolean | Allow or deny the feature after authentication and attestation checks |
+| `spec.features[].limitPlan.expression` | String | Select a configured logical limit-plan ID unless an operator override applies |
+| `spec.features[].routes[].when` | Boolean | Include a server-owned route in deterministic weighted ordering |
+
+All three use the same activation:
+
+| Variable | Available fields |
+| --- | --- |
+| `principal` | `user_id`, `authenticated`, and bounded normalized `claims` |
+| `client.family` | `id`, `status` |
+| `client.component` | `id`, `definition_id`, `kind`, `is_root`, `platform` |
+| `client.trust` | `source`, `attestation_provider`, `delegated`, `direct_attestation`, `verified_at`, `expires_at` |
+| `installation` | `platform`, `trust_level` |
+| `request` | `streaming` |
+| `environment` | `kind` (`development`, `staging`, or `production`) |
+
+For example:
+
+```json
+{
+  "access": {
+    "expression": "principal.authenticated && principal.claims.plan == 'premium'"
+  },
+  "limitPlan": {
+    "expression": "principal.claims.plan == 'premium' ? 'premium' : 'free'"
+  },
+  "routes": [
+    {
+      "id": "extension-route",
+      "when": "client.component.kind == 'widget' && client.trust.delegated",
+      "model": "assistant_default",
+      "priority": 10,
+      "weight": 1,
+      "stickyBy": "component"
+    }
+  ]
+}
+```
+
+<Warning>
+  Feature policy does not expose request headers, a client-selected model,
+  route, plan, application version, or the client's input-token estimate.
+  Trusted input accounting and quota reservation run outside CEL. Do not use
+  a claim mapping to treat unverified client input as an authorization fact.
+</Warning>
+
+## Evaluation order
+
+The server loads one immutable revision, validates the sealed session and
+attestation freshness, builds the bounded activation, evaluates feature access,
+selects a logical limit plan, and then evaluates route predicates. Matching
+routes still resolve to server-configured upstreams and physical models; the
+client never chooses those credentials or destinations.
+
+An operator override can replace the selected limit-plan ID, but it does not
+change access policy, attestation, route predicates, or the CEL activation.
+
+## Resource bounds
+
+Expressions are limited to 4,096 characters, 64 parser recursion levels, 32
+nesting levels, 1,000 expression nodes, and a 1,000-unit regular-expression
+program. Runtime cost is capped at 10,000 units. The feature activation is also
+bounded to 32 levels, 4,096 values, and 128 KiB. Compile errors, wrong result
+types, unknown values, cost exhaustion, and oversized activations fail closed.
+
+## Validate and simulate
+
+```bash
+latchway config apply --environment env_... --file candidate.json --dry-run
+latchway config validate rev_...
+latchway routes simulate rev_... \
+  --feature assistant \
+  --platform react_native_ios \
+  --trust-level app_verified \
+  --claims-file normalized-claims.json
+```
+
+Simulation uses the same compiled policy and deterministic route resolver but
+does not create a session, reserve quota, or dispatch upstream. Its
+`requested_input_tokens` and application-version fields are explanatory only
+and cannot influence CEL or production reservation.
+
+See [Configuration schema](/reference/config-schema) for field bounds and
+[Routing and quotas](/concepts/routing-and-quotas) for the policy-to-dispatch
+sequence.

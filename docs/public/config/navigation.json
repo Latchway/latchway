@@ -134,6 +134,13 @@
         {
           "group": "Support contracts",
           "pages": [
+            "reference/sdk-bundles",
+            "reference/sdk-bundles/android",
+            "reference/sdk-bundles/ios",
+            "reference/sdk-bundles/js",
+            "reference/sdk-bundles/react-native",
+            "reference/config-schema",
+            "reference/cel-policy-context",
             "reference/compatibility",
             "reference/glossary"
           ]

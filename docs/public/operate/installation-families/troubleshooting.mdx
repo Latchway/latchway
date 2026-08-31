@@ -4,18 +4,26 @@ description: "Map extension provisioning failures to entitlements, definitions, 
 ---
 
 <Warning>
-  Stable pre-release Installation Family error codes will come from generated
-  OpenAPI. Names here are diagnostic categories, not released protocol codes.
+  The codes below are generated from the stable version 1 error registry. They
+  describe the pre-release source candidate, not proof that server and SDK
+  artifacts have been published.
 </Warning>
 
-| Symptom | Check |
+| Stable code or symptom | Check |
 | --- | --- |
-| Extension says setup is required | Open the containing app and confirm the root established current direct trust. |
-| Provisioning is rejected | Compare application, environment, bundle identifier, component type, and public-key binding with the Component Definition. |
-| Key cannot be loaded | Check the target's Keychain entitlement and component-local access group. |
+| `containing_app_setup_required` | Open the containing app and confirm the root established current direct trust. |
+| `component_definition_not_found`, `component_not_configured` | Compare the active revision, component definition ID, platform, kind, and exact application identifier. |
+| `component_not_provisioned` | Ask the trusted parent to issue one fresh bounded provisioning grant for the component key. |
+| `component_key_invalid`, `component_key_replaced` | Load the component-local non-exportable P-256 key and clear credentials bound to a replaced key. |
+| Key cannot be loaded | Check the target's Keychain entitlement and component-local access group. This is a local platform failure, not a gateway code. |
 | Handoff is missing | Check the App Group entitlement and that only non-secret bounded provisioning data is shared. |
-| Session stops refreshing | Check delegation expiry, root trust, user relationship, component revocation, and family revocation. |
-| Feature is denied | Check component scope, trust requirement, and family/user/application policy. |
+| `component_delegation_expired`, `component_parent_trust_expired` | Re-establish parent trust, then provision a new delegation. Do not extend an expired grant locally. |
+| `component_direct_attestation_required` | Complete the definition's component-specific direct App Attest step-up. Do not relabel delegated trust as direct. |
+| `component_feature_not_granted` | Use a feature in the sealed delegation or ask the parent/operator for a new bounded grant. |
+| `component_revoked`, `installation_family_revoked` | Clear the exact terminal credential scope. Family revocation requires clearing every component session. |
+
+The complete generated registry, including HTTP status, retryability, and exact
+guidance, is in [Errors](/reference/errors).
 
 Collect a request ID and safe diagnostics. Do not include access or refresh
 tokens, private keys, DPoP proofs, identity tokens, upstream credentials, or raw

@@ -1,0 +1,85 @@
+{
+  "examples": [
+    {
+      "kind": "quickstart",
+      "name": "URLSession quickstart",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Examples/BasicURLSession/BasicURLSession.swift",
+        "region": {
+          "end_line": 34,
+          "start_line": 1
+        },
+        "region_sha256": "c29538ef0257810d3f6261b3d7afdb9ec6104fdf891ff5651aaff39d9755570c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "c29538ef0257810d3f6261b3d7afdb9ec6104fdf891ff5651aaff39d9755570c"
+      }
+    },
+    {
+      "kind": "physical_device",
+      "name": "App Attest physical-device application",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Examples/AppAttestConformance/Sources/AppAttestConformanceApp.swift",
+        "region": {
+          "end_line": 109,
+          "start_line": 1
+        },
+        "region_sha256": "b2d8f33354f5d4adcce45518bf3dd4bd137f3841f73d82a393de539cbd26533e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "9f6c3cba680f3f134a20a799fb5450550c6569b8bdb69fb02c007b2f9b526a83"
+      }
+    },
+    {
+      "kind": "component",
+      "name": "App-extension component host",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Examples/AppExtensionComponents/Host/ComponentHostApp.swift",
+        "region": {
+          "end_line": 121,
+          "start_line": 1
+        },
+        "region_sha256": "30e6a14ade8b767a805b41df3b15f3fcc744f0ef1db5cb9cdd80037882ce38f7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30e6a14ade8b767a805b41df3b15f3fcc744f0ef1db5cb9cdd80037882ce38f7"
+      }
+    },
+    {
+      "kind": "framework",
+      "name": "SwiftOpenAI adapter",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 153,
+          "start_line": 1
+        },
+        "region_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "kind": "framework",
+      "name": "Apple Foundation Models adapter",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 315,
+          "start_line": 1
+        },
+        "region_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    }
+  ],
+  "schema_version": 1
+}

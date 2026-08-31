@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Stable command wrapper for SDK documentation synchronization."""
+
+from docs_sdk_bundle import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

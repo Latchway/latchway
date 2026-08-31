@@ -742,6 +742,20 @@ func TestObservers(t *testing.T) {
 			usage.ReportedCost != (protocol.ProviderReportedCost{NanoUSD: 43_235, Present: true, Known: true}) {
 			t.Fatalf("usage=%+v err=%v", usage, err)
 		}
+		if observer.FirstTokenObserved() {
+			t.Fatal("usage metadata without generated content marked first token")
+		}
+	})
+
+	t.Run("json generated content", func(t *testing.T) {
+		observer := &jsonObserver{}
+		_ = observer.Observe([]byte(`{"choices":[{"message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		if _, err := observer.Finalize(); err != nil {
+			t.Fatal(err)
+		}
+		if !observer.FirstTokenObserved() {
+			t.Fatal("generated JSON content did not mark first token")
+		}
 	})
 
 	t.Run("partial usage is conservative", func(t *testing.T) {
@@ -879,6 +893,55 @@ func TestSSEObserverLifecycleAcrossChunkPartitions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSSEObserverFirstTokenRequiresGeneratedContent(t *testing.T) {
+	t.Parallel()
+
+	observer := &sseObserver{}
+	for _, lifecycle := range []string{
+		": heartbeat\n\n",
+		"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+		"data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\n",
+		"data: {\"choices\":[{\"delta\":{\"audio\":{\"id\":\"audio_fixture\"}}}]}\n\n",
+	} {
+		if err := observer.Observe([]byte(lifecycle)); err != nil {
+			t.Fatal(err)
+		}
+		if observer.FirstTokenObserved() {
+			t.Fatalf("lifecycle-only SSE event marked first token: %q", lifecycle)
+		}
+	}
+	if err := observer.Observe([]byte(
+		"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.FirstTokenObserved() {
+		t.Fatal("generated content delta did not mark first token")
+	}
+}
+
+func TestSSEObserverFirstTokenRecognizesGeneratedToolContent(t *testing.T) {
+	t.Parallel()
+
+	observer := &sseObserver{}
+	if err := observer.Observe([]byte(
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_fixture\",\"type\":\"custom\"}]}}]}\n\n",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.FirstTokenObserved() {
+		t.Fatal("tool-call lifecycle metadata marked first token")
+	}
+	if err := observer.Observe([]byte(
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"custom\":{\"input\":\"print(1)\"}}]}}]}\n\n",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.FirstTokenObserved() {
+		t.Fatal("generated custom-tool delta did not mark first token")
 	}
 }
 

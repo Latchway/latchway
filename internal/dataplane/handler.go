@@ -620,6 +620,7 @@ type executionResult struct {
 	relay         upstream.RelayOutcome
 	startedAt     time.Time
 	firstByteAt   time.Time
+	firstTokenAt  time.Time
 	circuitState  string
 	err           error
 	beginInvoked  bool
@@ -835,6 +836,7 @@ func protocolFeatureDecision(
 		ProviderPath:          endpoint.providerPath,
 		AllowedMethods:        append([]string(nil), policy.AllowedMethods...),
 		PathPrefixes:          append([]string(nil), policy.PathPrefixes...),
+		PathTemplates:         append([]string(nil), policy.PathTemplates...),
 		MaximumBodyBytes:      policy.MaximumBodyBytes,
 		AllowedRequestHeaders: append([]string(nil), policy.AllowedRequestHeaders...),
 		MaximumResponseBytes:  decision.Route.MaximumResponseBytes,
@@ -1251,7 +1253,7 @@ func (handler *Handler) dispatchAttempt(
 			result.err = errDispatchNotConsumed
 			return result.err
 		}
-		result.relay, result.firstByteAt, result.err = handler.consumeResponse(
+		result.relay, result.firstByteAt, result.firstTokenAt, result.err = handler.consumeResponse(
 			ctx, writer, adapter, decision, result.attempt, response,
 		)
 		return result.err
@@ -1272,22 +1274,23 @@ func (handler *Handler) consumeResponse(
 	decision policy.Decision,
 	attempt quota.Attempt,
 	response *upstream.DispatchedResponse,
-) (upstream.RelayOutcome, time.Time, error) {
+) (upstream.RelayOutcome, time.Time, time.Time, error) {
 	if response == nil || response.Response == nil {
-		return upstream.RelayOutcome{}, time.Time{}, errDispatchNotConsumed
+		return upstream.RelayOutcome{}, time.Time{}, time.Time{}, errDispatchNotConsumed
 	}
 	// Relay reports response-body close failures. This cleanup also covers the
 	// early protocol-validation exits before Relay takes ownership.
 	defer func() { _ = response.Close() }()
 	if nilDependency(adapter) {
-		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, errInvalidConfiguration
+		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, time.Time{}, errInvalidConfiguration
 	}
 	observer, err := adapter.ObserveResponse(ctx, response.Response)
 	if err != nil {
-		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, fmt.Errorf("%w: %w", errUpstreamProtocol, err)
+		return upstream.RelayOutcome{StatusCode: response.StatusCode}, time.Time{}, time.Time{}, fmt.Errorf("%w: %w", errUpstreamProtocol, err)
 	}
 	streamCtx, finishStream := handler.startStage(ctx, "streaming observation", attemptTelemetryLabels(decision))
 	var firstByteAt time.Time
+	var firstTokenAt time.Time
 	outcome, err := handler.relayer.Relay(streamCtx, writer, response, observer, upstream.ResponseRelayConfig{
 		FirstByteTimeout:   decision.Upstream.Timeouts.FirstByte,
 		IdleTimeout:        decision.Upstream.Timeouts.Idle,
@@ -1305,12 +1308,21 @@ func (handler *Handler) consumeResponse(
 			}
 			return nil
 		},
+		OnFirstToken: func(firstTokenContext context.Context) {
+			firstTokenAt = handler.now().UTC()
+			markContext, cancelMark := context.WithTimeout(context.WithoutCancel(firstTokenContext), handler.persistenceTimeout)
+			defer cancelMark()
+			// First-token persistence is observability-only. A storage failure
+			// leaves first_token_at NULL but must not truncate a response after
+			// protocol-validated content has already reached the client.
+			_ = handler.quotas.MarkFirstToken(markContext, attempt)
+		},
 	})
 	finishStream(handler.telemetryOutcome(err))
 	if err != nil {
-		return outcome, firstByteAt, fmt.Errorf("%w: %w", errUpstreamRelay, err)
+		return outcome, firstByteAt, firstTokenAt, fmt.Errorf("%w: %w", errUpstreamRelay, err)
 	}
-	return outcome, firstByteAt, nil
+	return outcome, firstByteAt, firstTokenAt, nil
 }
 
 func (handler *Handler) maximumResponseBytes(decision policy.Decision) int64 {
@@ -1970,7 +1982,8 @@ func validFeatureProtocolPolicy(feature configuration.Feature) bool {
 	}
 	policy := feature.OpaqueHTTP
 	if policy == nil || len(policy.AllowedMethods) == 0 || len(policy.AllowedMethods) > 5 ||
-		len(policy.PathPrefixes) == 0 || len(policy.PathPrefixes) > 32 ||
+		(len(policy.PathPrefixes) == 0) == (len(policy.PathTemplates) == 0) ||
+		len(policy.PathPrefixes) > protocol.MaximumOpaqueHTTPPathRules ||
 		policy.MaximumBodyBytes < 0 || policy.MaximumBodyBytes > maximumRequestBodyLimit ||
 		len(policy.AllowedRequestHeaders) > 32 {
 		return false
@@ -1997,6 +2010,9 @@ func validFeatureProtocolPolicy(feature configuration.Feature) bool {
 			return false
 		}
 		seenPrefixes[prefix] = struct{}{}
+	}
+	if len(policy.PathTemplates) > 0 && !protocol.ValidOpaqueHTTPPathTemplates(policy.PathTemplates) {
+		return false
 	}
 	seenHeaders := make(map[string]struct{}, len(policy.AllowedRequestHeaders))
 	for _, name := range policy.AllowedRequestHeaders {
@@ -2228,8 +2244,8 @@ func (handler *Handler) recordAttempt(
 		costNanoUSD = outcome.Cost.NanoUSD
 	}
 	firstToken := time.Duration(-1)
-	if !result.startedAt.IsZero() && !result.firstByteAt.IsZero() && !result.firstByteAt.Before(result.startedAt) {
-		firstToken = result.firstByteAt.Sub(result.startedAt)
+	if !result.startedAt.IsZero() && !result.firstTokenAt.IsZero() && !result.firstTokenAt.Before(result.startedAt) {
+		firstToken = result.firstTokenAt.Sub(result.startedAt)
 	}
 	if condition == "" {
 		condition = telemetry.RouteAttemptConditionNone

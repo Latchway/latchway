@@ -1,0 +1,66 @@
+{
+  "bundle_schema_version": "latchway.sdk-documentation-bundle.v1",
+  "bundles": [
+    {
+      "archive": "docs/sdk-bundles/android/docs-bundle-1.0.0.tar.gz",
+      "archive_bytes": 29801,
+      "archive_sha256": "bde9d735ce8de0522560a8756159a8fcbdff80029afdefa391f06753d6c2c2b1",
+      "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+      "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
+      "id": "android",
+      "manifest_sha256": "44e4ef25181ff3ff162bdba23eca3874dde0237a91f7a7aa1cf3bfe471b0ce78",
+      "package": "dev.latchway",
+      "release": "v1.0.0",
+      "repository": "https://github.com/Latchway/latchway-android",
+      "source_date_epoch": 1788138379,
+      "source_tree_clean": false,
+      "version": "1.0.0"
+    },
+    {
+      "archive": "docs/sdk-bundles/ios/docs-bundle-1.0.0.tar.gz",
+      "archive_bytes": 44670,
+      "archive_sha256": "c8303f1eb5d5f4b15f7a55ea7a6613148b63156850ea55fd08e1a41b8be6e018",
+      "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+      "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
+      "id": "ios",
+      "manifest_sha256": "e54436df8b0748caf01a5e05ad7e0030626478f8d2b4e1ba4883d6611500a2aa",
+      "package": "Latchway",
+      "release": "v1.0.0",
+      "repository": "https://github.com/Latchway/latchway-ios-sdk",
+      "source_date_epoch": 1788138379,
+      "source_tree_clean": false,
+      "version": "1.0.0"
+    },
+    {
+      "archive": "docs/sdk-bundles/js/docs-bundle-1.0.0.tar.gz",
+      "archive_bytes": 26056,
+      "archive_sha256": "436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c",
+      "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+      "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
+      "id": "js",
+      "manifest_sha256": "9d787539b82a62262f388ad2af691071b2500f7a7dbd8bca1cd1c45f52bd86cf",
+      "package": "@latchway/client",
+      "release": "v1.0.0",
+      "repository": "https://github.com/Latchway/latchway-js",
+      "source_date_epoch": 1788138379,
+      "source_tree_clean": false,
+      "version": "1.0.0"
+    },
+    {
+      "archive": "docs/sdk-bundles/react-native/docs-bundle-1.0.0.tar.gz",
+      "archive_bytes": 24856,
+      "archive_sha256": "c1845f786be8b6ddcbaf3def8061099ef8a24cdb7bb2c7a4866a0bc73b405413",
+      "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+      "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
+      "id": "react-native",
+      "manifest_sha256": "7ae24708a66e08e05cd8bb39ebbb1fbde4c4f9aabd4f1bbda9418db83b67e6ae",
+      "package": "@latchway/react-native",
+      "release": "v1.0.0",
+      "repository": "https://github.com/Latchway/latchway-react-native-sdk",
+      "source_date_epoch": 1788138483,
+      "source_tree_clean": false,
+      "version": "1.0.0"
+    }
+  ],
+  "schema_version": "latchway.sdk-documentation-lock.v1"
+}

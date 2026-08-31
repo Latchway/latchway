@@ -360,6 +360,7 @@ const AttemptSchema = z
     completed_at: OptionalInstant,
     failure_code: PublicAttemptFailureCode.optional(),
     first_byte_at: OptionalInstant,
+    first_token_at: OptionalInstant,
     http_status: z.number().int().min(100).max(599).optional(),
     id: OpaqueID,
     model: z.string().max(512),
@@ -382,6 +383,7 @@ const AttemptSchema = z
   .superRefine((attempt, context) => {
     const startedAt = Date.parse(attempt.started_at);
     const firstByteAt = attempt.first_byte_at ? Date.parse(attempt.first_byte_at) : undefined;
+    const firstTokenAt = attempt.first_token_at ? Date.parse(attempt.first_token_at) : undefined;
     const completedAt = attempt.completed_at ? Date.parse(attempt.completed_at) : undefined;
     if (firstByteAt !== undefined && firstByteAt < startedAt) {
       context.addIssue({ code: "custom", message: "First byte precedes attempt start.", path: ["first_byte_at"] });
@@ -391,6 +393,12 @@ const AttemptSchema = z
     }
     if (firstByteAt !== undefined && completedAt !== undefined && firstByteAt > completedAt) {
       context.addIssue({ code: "custom", message: "First byte follows attempt completion.", path: ["first_byte_at"] });
+    }
+    if (firstTokenAt !== undefined && (firstByteAt === undefined || firstTokenAt < firstByteAt)) {
+      context.addIssue({ code: "custom", message: "First token requires and cannot precede first byte.", path: ["first_token_at"] });
+    }
+    if (firstTokenAt !== undefined && completedAt !== undefined && firstTokenAt > completedAt) {
+      context.addIssue({ code: "custom", message: "First token follows attempt completion.", path: ["first_token_at"] });
     }
     if (attempt.status === "unknown") {
       if (attempt.completed_at || attempt.http_status || attempt.failure_code) {

@@ -93,6 +93,86 @@ func TestAdapterAllowsAnExplicitRootPathPrefix(t *testing.T) {
 	}
 }
 
+func TestAdapterMatchesExactDepthPathTemplatesAndPreservesLegacyPrefixes(t *testing.T) {
+	t.Parallel()
+
+	adapter := Adapter{}
+	templateDecision := opaqueDecision()
+	templateDecision.OpaqueHTTP.PathPrefixes = nil
+	templateDecision.OpaqueHTTP.PathTemplates = []string{
+		"/v2/current", "/v2/users/{user_id}",
+	}
+	for _, path := range []string{
+		"/proxy/weather/v2/current",
+		"/proxy/weather/v2/users/alice",
+	} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		templateDecision.OpaqueHTTP.ProviderPath = strings.TrimPrefix(path, "/proxy/weather")
+		if _, err := adapter.InspectRequest(context.Background(), request); err != nil {
+			t.Fatalf("InspectRequest(%q): %v", path, err)
+		}
+		if _, err := adapter.ApplyFeature(context.Background(), request, templateDecision); err != nil {
+			t.Fatalf("template ApplyFeature(%q): %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		"/proxy/weather/v2/users/alice/events",
+		"/proxy/weather/v2/groups/alice",
+	} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		templateDecision.OpaqueHTTP.ProviderPath = strings.TrimPrefix(path, "/proxy/weather")
+		if _, err := adapter.InspectRequest(context.Background(), request); err != nil {
+			t.Fatalf("InspectRequest(%q): %v", path, err)
+		}
+		if _, err := adapter.ApplyFeature(context.Background(), request, templateDecision); !protocol.IsCode(err, "request_invalid") {
+			t.Fatalf("out-of-template ApplyFeature(%q) error = %v", path, err)
+		}
+	}
+
+	legacy := opaqueDecision()
+	for _, path := range []string{"/v2", "/v2/current", "/v2/users/alice"} {
+		legacy.OpaqueHTTP.ProviderPath = path
+		request := httptest.NewRequest(http.MethodPost, "/proxy/weather"+path, nil)
+		if _, err := adapter.ApplyFeature(context.Background(), request, legacy); err != nil {
+			t.Fatalf("legacy segment-bound prefix %q changed behavior: %v", path, err)
+		}
+	}
+	legacy.OpaqueHTTP.ProviderPath = "/v20/current"
+	request := httptest.NewRequest(http.MethodPost, "/proxy/weather/v20/current", nil)
+	if _, err := adapter.ApplyFeature(context.Background(), request, legacy); !protocol.IsCode(err, "request_invalid") {
+		t.Fatalf("legacy prefix escaped its segment boundary: %v", err)
+	}
+}
+
+func TestAdapterRejectsMixedOrAmbiguousTemplatePolicy(t *testing.T) {
+	t.Parallel()
+
+	adapter := Adapter{}
+	request := httptest.NewRequest(http.MethodPost, "/proxy/weather/v2/current", nil)
+	for name, mutate := range map[string]func(*protocol.OpaqueHTTPDecision){
+		"mixed template and legacy prefix": func(policy *protocol.OpaqueHTTPDecision) {
+			policy.PathTemplates = []string{"/v2/{resource_id}"}
+		},
+		"ambiguous templates": func(policy *protocol.OpaqueHTTPDecision) {
+			policy.PathPrefixes = nil
+			policy.PathTemplates = []string{"/v2/{resource_id}", "/v2/current"}
+		},
+		"open wildcard": func(policy *protocol.OpaqueHTTPDecision) {
+			policy.PathPrefixes = nil
+			policy.PathTemplates = []string{"/v2/*"}
+		},
+	} {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			decision := opaqueDecision()
+			mutate(decision.OpaqueHTTP)
+			if _, err := adapter.ApplyFeature(context.Background(), request.Clone(context.Background()), decision); err == nil {
+				t.Fatalf("unsafe opaque path policy was accepted: %+v", decision.OpaqueHTTP)
+			}
+		})
+	}
+}
+
 func TestAdapterRejectsNonCanonicalPublicInputsAndEncodedBodies(t *testing.T) {
 	adapter := Adapter{MaximumBodyBytes: 8}
 	for _, target := range []string{
@@ -100,6 +180,7 @@ func TestAdapterRejectsNonCanonicalPublicInputsAndEncodedBodies(t *testing.T) {
 		"/proxy/Weather/v2/current",
 		"/proxy/weather/v2/current?destination=https://evil.example",
 		"/proxy/weather/v2//current",
+		"/proxy/weather/v2/%2fprivate",
 	} {
 		request := httptest.NewRequest(http.MethodPost, target, nil)
 		if adapter.Match(request) {

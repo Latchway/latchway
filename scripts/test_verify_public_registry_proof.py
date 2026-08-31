@@ -41,11 +41,12 @@ class PublicRegistryProofTests(unittest.TestCase):
         ios_assets = {
             ios_archive, f"{ios_archive}.sha256", "cocoapods-published-podspec.json",
             "cocoapods-reviewed-podspec.json", "cocoapods-release-evidence.json",
-            "cocoapods-release-evidence.SHA256SUMS",
+            "cocoapods-release-evidence.SHA256SUMS", "docs-bundle-1.0.0.tar.gz",
         }
         android_assets = {
             "latchway-android-1.0.0-maven-repository.zip",
             "latchway-android-1.0.0-central-portal.zip", "SHA256SUMS",
+            "docs-bundle-1.0.0.tar.gz",
             "github-release-tag-binding.json", "latchway-maven-signing-public-key.asc",
             "maven-central-upload-intent.json", "maven-central-deployment.json",
             "maven-central-deployment-status.json", "maven-central-release-evidence.json",
@@ -256,11 +257,13 @@ class PublicRegistryProofTests(unittest.TestCase):
             },
             "release_asset_digests": {
                 "latchway-client-1.0.0.tgz": "sha256:" + sha,
+                "docs-bundle-1.0.0.tar.gz": "sha256:" + "9" * 64,
                 "package-evidence.json": "sha256:" + "d" * 64,
                 "build-reproducibility.json": "sha256:" + "e" * 64,
             },
             "release_asset_attestation_verifications": {
                 "latchway-client-1.0.0.tgz": [{"verified": True}],
+                "docs-bundle-1.0.0.tar.gz": [{"verified": True}],
                 "package-evidence.json": [{"verified": True}],
                 "build-reproducibility.json": [{"verified": True}],
             },
@@ -452,6 +455,7 @@ class PublicRegistryProofTests(unittest.TestCase):
         payloads = {
             "latchway-android-1.0.0-maven-repository.zip": archive,
             "latchway-android-1.0.0-central-portal.zip": portal,
+            "docs-bundle-1.0.0.tar.gz": b"documentation bundle",
             "github-release-tag-binding.json": (
                 json.dumps(tag_binding, indent=2, sort_keys=True) + "\n"
             ).encode(),
@@ -485,6 +489,9 @@ class PublicRegistryProofTests(unittest.TestCase):
         return proof
 
     def test_npm_requires_exact_release_asset_names_and_tarball_digest(self) -> None:
+        for package in ("@latchway/client", "@latchway/react-native"):
+            expected, _ = MODULE.expected_npm_release_assets(package, "1.0.0")
+            self.assertIn("docs-bundle-1.0.0.tar.gz", expected)
         proof = self.npm_proof()
         coordinate = {
             "version": "1.0.0",
@@ -492,10 +499,15 @@ class PublicRegistryProofTests(unittest.TestCase):
             "tag": "v1.0.0",
         }
         MODULE.validate_npm(proof, "@latchway/client", coordinate)
-        for mutation in ("extra", "wrong-tarball-digest", "missing-provenance", "wrong-provenance-source", "failed-adoption", "changed-retained-attestations"):
+        for mutation in ("extra", "missing-docs", "wrong-tarball-digest", "missing-provenance", "wrong-provenance-source", "failed-adoption", "changed-retained-attestations"):
             tampered = copy.deepcopy(proof)
             if mutation == "extra":
                 tampered["release_asset_digests"]["unreviewed.json"] = "sha256:" + "f" * 64
+            elif mutation == "missing-docs":
+                tampered["release_asset_digests"].pop("docs-bundle-1.0.0.tar.gz")
+                tampered["release_asset_attestation_verifications"].pop(
+                    "docs-bundle-1.0.0.tar.gz"
+                )
             else:
                 if mutation == "wrong-tarball-digest":
                     tampered["release_asset_digests"]["latchway-client-1.0.0.tgz"] = "sha256:" + "f" * 64
@@ -543,6 +555,14 @@ class PublicRegistryProofTests(unittest.TestCase):
         extra_deployment_field = copy.deepcopy(proof)
         extra_deployment_field["deployment"]["unreviewed"] = True
         mutations.append(extra_deployment_field)
+        missing_docs_bundle = copy.deepcopy(proof)
+        for field in (
+            "release_asset_source_attestations",
+            "immutable_release_asset_verifications",
+            "retained_release_assets",
+        ):
+            missing_docs_bundle[field].pop("docs-bundle-1.0.0.tar.gz")
+        mutations.append(missing_docs_bundle)
         for index, tampered in enumerate(mutations):
             with self.subTest(index=index), self.assertRaises(MODULE.ProofError):
                 MODULE.validate_maven(tampered, coordinate)
@@ -556,6 +576,11 @@ class PublicRegistryProofTests(unittest.TestCase):
             "latchway-android-1.0.0-central-portal.zip"
         )
         mutations.append(missing_android_asset)
+        missing_docs_bundle = copy.deepcopy(evidence)
+        missing_docs_bundle["dependencies"]["ios"]["release_assets"].pop(
+            "docs-bundle-1.0.0.tar.gz"
+        )
+        mutations.append(missing_docs_bundle)
         wrong_js_commit = copy.deepcopy(evidence)
         wrong_js_commit["dependencies"]["javascript"]["source_commit"] = "0" * 40
         mutations.append(wrong_js_commit)

@@ -1282,8 +1282,23 @@
     },
     "OpaqueHttpPolicy": {
       "type": "object",
+      "description": "Closed opaque HTTP request policy. Exactly one of preferred pathTemplates or compatibility-only pathPrefixes is required.",
       "additionalProperties": false,
-      "required": ["allowedMethods", "pathPrefixes", "maxBodyBytes"],
+      "required": ["allowedMethods", "maxBodyBytes"],
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": ["pathTemplates"],
+              "not": { "required": ["pathPrefixes"] }
+            },
+            {
+              "required": ["pathPrefixes"],
+              "not": { "required": ["pathTemplates"] }
+            }
+          ]
+        }
+      ],
       "properties": {
         "allowedMethods": {
           "type": "array",
@@ -1297,6 +1312,16 @@
           "minItems": 1,
           "maxItems": 32,
           "uniqueItems": true,
+          "deprecated": true,
+          "description": "Compatibility-only v1 provider-relative segment-bound prefixes. Prefer pathTemplates for new configurations.",
+          "items": { "type": "string", "pattern": "^/", "maxLength": 512 }
+        },
+        "pathTemplates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "description": "Exact-depth provider-relative templates. A whole segment may be a unique {lower_snake_name} capture; catch-alls and overlapping templates are rejected.",
           "items": { "type": "string", "pattern": "^/", "maxLength": 512 }
         },
         "maxBodyBytes": { "type": "integer", "minimum": 0, "maximum": 104857600 },

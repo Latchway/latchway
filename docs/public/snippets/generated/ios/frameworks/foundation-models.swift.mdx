@@ -1,0 +1,168 @@
+<Info>
+  Generated from working-tree source `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L28-L189` for release candidate `v1.0.0` and recorded commit `0074f532d639b83c27966f8c75ffe37ed8df6cc8`. The dirty bundle does not claim that this region is already at that commit. Bundle SHA-256: `c8303f1eb5d5f4b15f7a55ea7a6613148b63156850ea55fd08e1a41b8be6e018`.
+</Info>
+
+```swift
+/// A Foundation Models custom provider backed by a feature-bound Latchway
+/// Responses transport. Its capability declaration is intentionally empty:
+/// v1 supports text transcripts and streaming, while guided generation,
+/// attachments, reasoning, and tool calling fail explicitly until their wire
+/// translations pass conformance.
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayLanguageModel: LanguageModel, Sendable {
+    public struct Configuration: Hashable, Sendable {
+        fileprivate let identity: UUID
+        fileprivate let transport: LatchwayFeatureTransport
+
+        public init(
+            transport: LatchwayFeatureTransport
+        ) {
+            identity = UUID()
+            self.transport = transport
+        }
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.identity == rhs.identity
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            hasher.combine(identity)
+        }
+    }
+
+    public typealias Executor = LatchwayLanguageModelExecutor
+
+    public let capabilities = LanguageModelCapabilities([])
+    public let executorConfiguration: Configuration
+
+    public init(configuration: Configuration) {
+        executorConfiguration = configuration
+    }
+
+    public init(
+        client: LatchwayClient,
+        feature: String,
+        frameworkVersion: String
+    ) {
+        executorConfiguration = Configuration(
+            transport: client.transport(
+                feature: feature,
+                framework: .foundationModels(version: frameworkVersion)
+            )
+        )
+    }
+
+    public init(
+        client: LatchwayExtensionClient,
+        feature: String,
+        frameworkVersion: String
+    ) {
+        executorConfiguration = Configuration(
+            transport: client.transport(
+                feature: feature,
+                framework: .foundationModels(version: frameworkVersion)
+            )
+        )
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
+    public typealias Configuration = LatchwayLanguageModel.Configuration
+    public typealias Model = LatchwayLanguageModel
+
+    private let configuration: Configuration
+
+    public init(configuration: Configuration) throws {
+        self.configuration = configuration
+    }
+
+    public func prewarm(model _: Model, transcript _: Transcript) {
+        // Remote Latchway routes have no local model assets to prewarm.
+    }
+
+    public func respond(
+        to request: LanguageModelExecutorGenerationRequest,
+        model _: Model,
+        streamingInto channel: LanguageModelExecutorGenerationChannel
+    ) async throws {
+        try Task.checkCancellation()
+        if request.schema != nil {
+            throw LanguageModelError.unsupportedGenerationGuide(.init(
+                schemaName: nil,
+                debugDescription: "Latchway v1 does not yet translate Foundation Models generation schemas."
+            ))
+        }
+        if !request.enabledToolDefinitions.isEmpty {
+            throw LanguageModelError.unsupportedCapability(.init(
+                capability: .toolCalling,
+                debugDescription: "Latchway v1 does not yet translate Foundation Models tool calls."
+            ))
+        }
+        if request.generationOptions.samplingMode != nil {
+            throw LatchwayFoundationModelsError.unsupportedSamplingMode
+        }
+
+        let body = try Self.makeRequestBody(from: request)
+        var urlRequest = URLRequest(
+            url: try configuration.transport.endpoint(path: "v1/responses")
+        )
+        urlRequest.httpMethod = "POST"
+        urlRequest.httpBody = try JSONEncoder().encode(body)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+
+        let stream = try await configuration.transport.bytes(for: urlRequest)
+        defer { stream.cancel() }
+        guard (200 ... 299).contains(stream.response.statusCode) else {
+            throw Self.gatewayError(from: stream.response)
+        }
+
+        var receivedTerminalEvent = false
+        for try await line in stream.bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" {
+                receivedTerminalEvent = true
+                break
+            }
+            guard let data = payload.data(using: .utf8),
+                  let event = try? JSONDecoder().decode(ResponsesEvent.self, from: data)
+            else { throw LatchwayFoundationModelsError.invalidGatewayStream }
+            switch event.type {
+            case "response.output_text.delta":
+                guard let delta = event.delta else {
+                    throw LatchwayFoundationModelsError.invalidGatewayStream
+                }
+                await channel.send(.response(action: .appendText(delta, tokenCount: 0)))
+            case "response.completed":
+                if let usage = event.response?.usage {
+                    await channel.send(.response(action: .updateUsage(
+                        input: .init(
+                            totalTokenCount: usage.inputTokens,
+                            cachedTokenCount: usage.inputTokensDetails?.cachedTokens ?? 0
+                        ),
+                        output: .init(
+                            totalTokenCount: usage.outputTokens,
+                            reasoningTokenCount: usage.outputTokensDetails?.reasoningTokens ?? 0
+                        )
+                    )))
+                }
+                receivedTerminalEvent = true
+            case "response.failed", "error":
+                throw LatchwayFoundationModelsError.gateway(
+                    statusCode: stream.response.statusCode,
+                    requestID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
+                )
+            default:
+                continue
+            }
+        }
+        guard receivedTerminalEvent else {
+            throw LatchwayFoundationModelsError.invalidGatewayStream
+        }
+    }
+```

@@ -708,6 +708,32 @@ func TestJSONObserverBoundsMemoryAndFallsBackToUnknown(t *testing.T) {
 	}
 }
 
+func TestJSONObserverFirstTokenRequiresGeneratedContent(t *testing.T) {
+	t.Parallel()
+
+	metadataOnly := &jsonObserver{}
+	if err := metadataOnly.Observe([]byte(`{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metadataOnly.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if metadataOnly.FirstTokenObserved() {
+		t.Fatal("usage metadata without generated content marked first token")
+	}
+
+	content := &jsonObserver{}
+	if err := content.Observe([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := content.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if !content.FirstTokenObserved() {
+		t.Fatal("generated JSON output did not mark first token")
+	}
+}
+
 func TestSSEObserverExtractsTerminalCompletedUsage(t *testing.T) {
 	stream := "event: response.created\n" +
 		"data: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n" +
@@ -733,6 +759,32 @@ func TestSSEObserverExtractsTerminalCompletedUsage(t *testing.T) {
 	}
 	if usage != want {
 		t.Fatalf("usage=%+v, want %+v", usage, want)
+	}
+}
+
+func TestSSEObserverFirstTokenRequiresGeneratedContent(t *testing.T) {
+	t.Parallel()
+
+	observer := &sseObserver{}
+	for _, lifecycle := range []string{
+		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{}}\n\n",
+		": heartbeat\n\n",
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\"}\n\n",
+	} {
+		if err := observer.Observe([]byte(lifecycle)); err != nil {
+			t.Fatal(err)
+		}
+		if observer.FirstTokenObserved() {
+			t.Fatalf("lifecycle-only SSE event marked first token: %q", lifecycle)
+		}
+	}
+	if err := observer.Observe([]byte(
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.FirstTokenObserved() {
+		t.Fatal("generated output-text delta did not mark first token")
 	}
 }
 

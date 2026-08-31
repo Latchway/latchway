@@ -3,6 +3,9 @@ title: "Mobile-first quickstart"
 description: "Run a local Latchway gateway, verify its source path, and prepare production-native configuration."
 ---
 
+import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
+import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+
 This exercise starts the gateway and proves its isolated local source path. It
 then prepares the production-native configuration used by React Native, iOS,
 or Android. It does not prove App Attest, Play Integrity, a live provider,
@@ -89,30 +92,11 @@ display name, bundle ID, Android package name, or a user-chosen slug.
 
 ## Connect React Native first
 
-```typescript
-import { createLatchwayClient } from "@latchway/react-native";
+<ReactNativeCreateClient />
 
-const latchway = createLatchwayClient({
-  baseURL: "https://gateway.example.com",
-  applicationID: "app_...",
-  environment: "production",
-  getIdentityToken: async () => applicationIdentity.currentToken(),
-  android: {
-    playIntegrityCloudProjectNumber: applicationConfiguration.googleCloudProjectNumber,
-  },
-});
+Then send a streaming request through the native-backed client:
 
-const response = await latchway.fetch("/v1/responses", {
-  method: "POST",
-  latchwayFeature: "assistant",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    model: "client-placeholder",
-    input: "Hello from React Native",
-    max_output_tokens: 64,
-  }),
-});
-```
+<ReactNativeStreamingFetch />
 
 The server replaces the model and injects the provider credential. The app
 must never contain that credential. While packages remain unpublished, run

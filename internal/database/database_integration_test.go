@@ -22,7 +22,7 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
-const latestTestSchemaVersion int64 = 23
+const latestTestSchemaVersion int64 = 24
 
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()
@@ -34,7 +34,8 @@ func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 		{
 			name: "upstream attempt", typeOf: reflect.TypeOf(dbsql.UpstreamAttempt{}),
 			fields: map[string]string{
-				"ModelKey": "model_key", "AttemptDecisionBindingVersion": "attempt_decision_binding_version",
+				"FirstTokenAt": "first_token_at",
+				"ModelKey":     "model_key", "AttemptDecisionBindingVersion": "attempt_decision_binding_version",
 				"AttemptDecisionSha256":            "attempt_decision_sha256",
 				"PerRequestOutputTokenBound":       "per_request_output_token_bound",
 				"InputAccountingBindingVersion":    "input_accounting_binding_version",

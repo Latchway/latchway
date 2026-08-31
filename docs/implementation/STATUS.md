@@ -17,7 +17,7 @@ remain open.
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
 | Last passing commit in each repository | Exact coordinates are listed below |
 | Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
-| Database schema version | `23` |
+| Database schema version | `24` in the current worktree; the recorded passing release coordinate remains schema `23` |
 | Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the recorded coordinates; the synchronized Mintlify mirror passed its separate full documentation gate |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical Android/Play proof, delegated-extension runtime proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
@@ -91,7 +91,7 @@ python3 scripts/cross-repo-conformance.py --scope source \
 | Contract freeze | Core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
-| Database | Schema `23` |
+| Database | Recorded candidate schema `23`; current worktree schema `24` is not yet a release coordinate |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | Release state | `unreleased`; no tag or package publication authorized |
 
@@ -105,14 +105,14 @@ checkpoint and reproducible draft bundle above.
 | --- | --- | --- |
 | Family/component contract and migrations | Implemented through schema 23; bundle and locks converged | Protected exact-candidate evidence |
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including a generic component App Attest step-up protocol | Exact-candidate rerun and protected observations |
-| Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
+| Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; opaque HTTP now has pairwise-disjoint exact-depth path templates while retaining the prior segment-bound `pathPrefixes` mode for existing v1 revisions; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
 | Weighted/sticky routing, fallback, retry, accounting | Complete | Exact-image load/failure evidence |
-| Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete | Deployment operator acceptance |
+| Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete; the current worktree adds the exact `latchway test-upstream serve` fixture command and separate first-byte/first-token request timestamps | Deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a development-signed physical React Native iOS run passed production App Attest registration and same-key assertion, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical Play Integrity, delegated-extension runtime, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
 | React Native SDK | Implemented and pinned to the exact three native/source commits; a physical iOS 27 Release-configuration app passed the current-source development run | Protected Apple distribution candidate, physical Android proof, extension runtime proof, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
-| Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests | Protected exact-image drills |
+| Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware and leaves lifecycle-only, opaque, and historical attempts without an inferred token timestamp | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
 | Mintlify public docs | Canonical source and generated mirror converge and pass locally | Merge and production deploy validation |
 
@@ -141,6 +141,17 @@ checkpoint and reproducible draft bundle above.
   and cleanup. It was not a protected or distribution-signed release receipt.
 - Actionlint across all workflows, deterministic contract regeneration, and a
   binary `govulncheck` result with no called vulnerabilities.
+- Nine Foundation Models public-API tests passed on an iOS 27.0 simulator,
+  covering single/multi-turn text, incremental streaming and usage,
+  cancellation, quota/unavailable mapping, refresh, extension initialization,
+  and explicit tools/structured-output rejection.
+- An exact MacPaw/OpenAI 0.5.1 upstream patch adding ordered asynchronous
+  request interception passed all 217 upstream tests. The published 0.5.1
+  package remains unsupported until an equivalent seam is accepted and
+  released upstream.
+- Koog 1.1.1 passed six exact integration cases through the Android OkHttp seam
+  on OkHttp/okhttp-sse 5.3.0; its four non-streaming cases pass on 4.9.2, while
+  its upstream SSE implementation links an OkHttp 5-only method.
 - Mintlify structure, build, links/anchors/redirects/snippets, accessibility,
   and Vale MDX prose validation.
 
@@ -177,22 +188,21 @@ compatibility.
 
 ## Framework claim boundary
 
-The canonical registry currently records six exact locally tested integrations
-as `experimental`: OpenAI JavaScript 7.8.0, Vercel AI SDK 7.0.85, LangChain
-OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 5.3.0/4.9.2, and React Native 0.82.0.
-Foundation Models remains `planned` because its runtime suite could not execute
-on the available host OS. MacPaw/OpenAI 0.5.1 remains `unsupported`. No
-framework is represented as released support.
+The canonical registry currently records eight exact locally tested
+integrations as `experimental`: OpenAI JavaScript 7.8.0, Vercel AI SDK 7.0.85,
+LangChain OpenAI 1.5.10, SwiftOpenAI 4.6.0, OkHttp 4.9.2/5.3.0, Koog 1.1.1,
+React Native 0.82.0, and Foundation Models 27.0.0. MacPaw/OpenAI 0.5.1 remains
+`unsupported`; a passing local upstream patch is contribution evidence, not a
+released framework seam. No framework is represented as released support.
 
 The JavaScript repository now runs a protocol-valid local debug fixture through
-the real pinned OpenAI, Vercel AI, and LangChain packages. Its 50 registered
-framework/case combinations cover the applicable Responses, Chat, embeddings,
-streaming usage, cancellation, tools, structured output, quota/provider error,
-retry/refresh, credential-stripping, origin/path, redaction, and fetch-isolation
-paths. This upgrades LangChain streaming and OpenAI embeddings to locally
-verified capabilities, but does not satisfy hosted/exact-image, live-provider,
-revocation, scheduled-run, or clean-published-consumer gates; all three rows
-therefore remain `experimental`.
+the real pinned OpenAI, Vercel AI, and LangChain packages. Its 62 registered
+framework/case combinations cover Responses, Chat, embeddings, streaming usage,
+cancellation/timeouts, tools, structured output, middleware, telemetry,
+batch/concurrency behavior, quota/provider error, retry/refresh,
+credential-stripping, origin/path, redaction, and fetch isolation. This does
+not satisfy hosted/exact-image, live-provider, revocation, scheduled-run, or
+clean-published-consumer gates; all three rows remain `experimental`.
 
 ## External-required gates
 

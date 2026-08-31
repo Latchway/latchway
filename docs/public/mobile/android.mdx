@@ -3,6 +3,8 @@ title: "Native Android"
 description: "Use the Kotlin SDK, Android Keystore, OkHttp, and Play Integrity."
 ---
 
+import AndroidBasicClient from "/snippets/generated/android/quickstart/basic-client.kt.mdx";
+
 The Android SDK provides an Android Keystore P-256 installation key, encrypted
 session state, RFC 9449 DPoP, OkHttp integration, and Google Play Integrity
 attestation. Native libraries support Android API 23 or newer.
@@ -24,32 +26,12 @@ dependencies {
 
 ## Create a client
 
-```kotlin
-val latchway = LatchwayClient(
-    configuration = LatchwayConfiguration(
-        baseUrl = "https://gateway.example.com/".toHttpUrl(),
-        applicationId = "app_01J00000000000000000000000",
-        environment = "production",
-        defaultFeature = "habit-assistant",
-    ),
-    identityTokenProvider = FirebaseIdentityTokenProvider(),
-    attestationProvider = PlayIntegrityAttestationProvider(
-        context = applicationContext,
-        cloudProjectNumber = cloudProjectNumber,
-    ),
-    context = applicationContext,
-)
+<AndroidBasicClient />
 
-val http = OkHttpClient.Builder()
-    .addInterceptor(latchway.interceptor())
-    .addNetworkInterceptor(latchway.originGuard())
-    .authenticator(latchway.authenticator())
-    .build()
-```
-
-Install both `interceptor()` and `originGuard()`. The network guard blocks DPoP
-and Latchway headers before OkHttp can follow a redirect to another origin and
-catches credentials added later by application interceptors or cookie jars.
+When building the final OkHttp client, install both `interceptor()` and
+`originGuard()`. The network guard blocks DPoP and Latchway headers before
+OkHttp can follow a redirect to another origin and catches credentials added
+later by application interceptors or cookie jars.
 
 The client also exposes `quota(feature)`, `refresh()`,
 `revokeCurrentInstallation()`, and `diagnostics()`. Diagnostics is a protected

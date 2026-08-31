@@ -947,7 +947,7 @@ func TestResolverResolveQuotaReturnsStableDetachedProjectionWithoutRouting(t *te
 		{ID: "two", When: "true", ModelID: "missing-two", Priority: 1, Weight: 0, StickyBy: "installation", FallbackOn: []string{"status_502"}},
 	}
 	feature.OpaqueHTTP = &configuration.OpaqueHTTPPolicy{
-		AllowedMethods: []string{"POST"}, PathPrefixes: []string{"/safe"},
+		AllowedMethods: []string{"POST"}, PathTemplates: []string{"/safe/{resource_id}"},
 		AllowedRequestHeaders: []string{"content-type"},
 	}
 	snapshot.features["assistant"] = feature
@@ -976,10 +976,12 @@ func TestResolverResolveQuotaReturnsStableDetachedProjectionWithoutRouting(t *te
 	projection.Feature.Output.AbsoluteMaximumTokens = 1
 	projection.Feature.Routes[0].FallbackOn[0] = "changed"
 	projection.Feature.OpaqueHTTP.AllowedMethods[0] = "DELETE"
+	projection.Feature.OpaqueHTTP.PathTemplates[0] = "/changed"
 	projection.LimitPlan.Limits[0].Scope[0] = "installation"
 	if snapshot.features["assistant"].Output.AbsoluteMaximumTokens != 1500 ||
 		snapshot.features["assistant"].Routes[0].FallbackOn[0] != "status_503" ||
 		snapshot.features["assistant"].OpaqueHTTP.AllowedMethods[0] != "POST" ||
+		snapshot.features["assistant"].OpaqueHTTP.PathTemplates[0] != "/safe/{resource_id}" ||
 		snapshot.plans["premium"].Limits[0].Scope[0] != "user" {
 		t.Fatal("returned quota projection retained snapshot-owned mutable state")
 	}

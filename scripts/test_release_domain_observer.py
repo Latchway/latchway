@@ -1936,12 +1936,17 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             json.dumps(release).encode(), "v1.0.0",
             expected_assets=expected, adoption_required=adoption_required,
         )
-        for mutation in ("unknown", "missing", "no-adoption"):
+        for mutation in ("unknown", "missing", "missing-docs", "no-adoption"):
             changed = copy.deepcopy(release)
             if mutation == "unknown":
                 changed["assets"].append({"id": 99, "name": "evil.json", "size": 1, "digest": "sha256:" + "f" * 64})
             elif mutation == "missing":
                 changed["assets"] = [item for item in changed["assets"] if item["name"] != "package-evidence.json"]
+            elif mutation == "missing-docs":
+                changed["assets"] = [
+                    item for item in changed["assets"]
+                    if item["name"] != "docs-bundle-1.0.0.tar.gz"
+                ]
             else:
                 changed["assets"] = [item for item in changed["assets"] if not item["name"].startswith("npm-release-adoption-")]
             with self.subTest(mutation=mutation), self.assertRaisesRegex(
@@ -1950,6 +1955,42 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 MODULE.Observer._validate_release(
                     json.dumps(changed).encode(), "v1.0.0",
                     expected_assets=expected, adoption_required=adoption_required,
+                )
+
+    def test_every_sdk_release_requires_the_versioned_documentation_bundle(self) -> None:
+        for repository_id in ("javascript", "ios", "android", "react_native"):
+            expected, adoption_required = MODULE.Observer._expected_release_assets(
+                repository_id, "1.0.0"
+            )
+            self.assertIn("docs-bundle-1.0.0.tar.gz", expected)
+            names = sorted(expected)
+            if adoption_required:
+                names.append("npm-release-adoption-8-1.json")
+            release = {
+                "id": 81,
+                "tag_name": "v1.0.0",
+                "draft": False,
+                "prerelease": False,
+                "immutable": True,
+                "assets": [
+                    {
+                        "id": index + 1,
+                        "name": name,
+                        "size": 1,
+                        "digest": "sha256:" + f"{index + 1:064x}",
+                    }
+                    for index, name in enumerate(names)
+                    if name != "docs-bundle-1.0.0.tar.gz"
+                ],
+            }
+            with self.subTest(repository_id=repository_id), self.assertRaisesRegex(
+                MODULE.ObservationError, "github_release_asset_set_invalid"
+            ):
+                MODULE.Observer._validate_release(
+                    json.dumps(release).encode(),
+                    "v1.0.0",
+                    expected_assets=expected,
+                    adoption_required=adoption_required,
                 )
 
     def test_android_release_schema_tracks_canonical_portal_assets_and_intent(self) -> None:
@@ -1968,6 +2009,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             {
                 "latchway-android-1.0.0-maven-repository.zip",
                 "latchway-android-1.0.0-central-portal.zip",
+                "docs-bundle-1.0.0.tar.gz",
                 "SHA256SUMS",
                 "github-release-tag-binding.json",
                 "latchway-maven-signing-public-key.asc",
@@ -2089,6 +2131,7 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             "latchway-android-1.0.0-central-portal.zip": {
                 "bytes": portal_archive
             },
+            "docs-bundle-1.0.0.tar.gz": {"bytes": b"documentation bundle"},
             "latchway-maven-signing-public-key.asc": {"bytes": public_key},
             "maven-central-upload-intent.json": {"bytes": intent_bytes},
             "maven-central-deployment.json": {"bytes": deployment_bytes},

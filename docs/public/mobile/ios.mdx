@@ -3,6 +3,8 @@ title: "Native iOS"
 description: "Use the Swift SDK, device-bound DPoP keys, and Apple App Attest."
 ---
 
+import IOSURLSessionQuickstart from "/snippets/generated/ios/quickstart/url-session.swift.mdx";
+
 The iOS SDK provides the handwritten client, hardened transport, Keychain or
 Secure Enclave installation key, rotating sessions, and Apple App Attest
 integration. It uses Swift 6 strict concurrency and supports iOS 15 or newer.
@@ -19,51 +21,7 @@ Link `Latchway` and `LatchwayAppAttest` to the application target.
 
 ## Create and authorize a request
 
-```swift
-import Latchway
-import LatchwayAppAttest
-
-// Use the fully resolved private app-ID group that appears first in the
-// application's signed keychain-access-groups entitlement.
-let rootKeychainAccessGroup = "ABCDE12345.com.example.myapp"
-let extensionSharedKeychainAccessGroups = [
-    "ABCDE12345.com.example.myapp.intent",
-]
-let appAttest = LatchwayAppAttestProvider(
-    applicationID: "app_01J00000000000000000000000",
-    environment: "production",
-    rootKeychainAccessGroup: rootKeychainAccessGroup,
-    legacySharedKeychainAccessGroups: extensionSharedKeychainAccessGroups
-)
-let configuration = LatchwayConfiguration(
-    baseURL: URL(string: "https://gateway.example.com")!,
-    applicationID: "app_01J00000000000000000000000",
-    environment: "production",
-    rootKeychainAccessGroup: rootKeychainAccessGroup,
-    legacySharedKeychainAccessGroups: extensionSharedKeychainAccessGroups,
-    identityProvider: "firebase",
-    appVersion: "1.2.3",
-    softwareKeyFallbackPolicy: .disallow,
-    attestationProvider: appAttest
-)
-let client = LatchwayClient(
-    configuration: configuration,
-    identityTokenProvider: ApplicationIdentityProvider()
-)
-
-var request = URLRequest(
-    url: URL(string: "https://gateway.example.com/v1/responses")!
-)
-request.httpMethod = "POST"
-request.httpBody = requestBody
-request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-try await client.authorize(&request, feature: "habit-assistant")
-
-let (bytes, _) = try await client.makeURLSession().bytes(for: request)
-for try await byte in bytes {
-    consume(byte)
-}
-```
+<IOSURLSessionQuickstart />
 
 ## Security behavior
 

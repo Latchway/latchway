@@ -4,8 +4,9 @@ description: "Choose component, root, or family revocation and understand which 
 ---
 
 <Warning>
-  These revocation semantics are a pre-release target and are not exposed by
-  the current Admin API.
+  These controls are implemented in the version 1 source candidate's Admin API
+  and CLI. They remain pre-release until the exact server and CLI artifacts are
+  promoted and published.
 </Warning>
 
 ## Root revocation propagation
@@ -60,3 +61,19 @@ mismatch, and policy changes can also terminate affected credentials.
 Revocation must be authoritative across replicas. Cached authorization cannot
 extend a revoked component's access beyond the final contract's explicit
 bounded behavior.
+
+## Apply the action
+
+```bash
+latchway components revoke cmp_... \
+  --reason 'component credential compromise'
+
+latchway installation-families revoke fam_... \
+  --reason 'family credential compromise'
+```
+
+Use `require-reattestation` or `require-renewal` when the intent is fresh trust
+for future refresh rather than immediate revocation. Re-read the component or
+family after every mutation and retain its request ID in redaction-safe incident
+records. If the server returns `operation_indeterminate`, reconcile the
+operation ID against audit evidence before retrying.

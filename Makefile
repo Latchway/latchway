@@ -49,6 +49,7 @@ fuzz-smoke:
 	$(GO) test ./internal/clientapi -run '^$$' -fuzz '^FuzzProtectedCredentialHeaders$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/limitscope -run '^$$' -fuzz '^FuzzClaimDigestRejectsUnboundedOrNonCanonicalScalars$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/pricing -run '^$$' -fuzz '^FuzzParseUSDDecimalNanoUSD$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
+	$(GO) test ./internal/protocol -run '^$$' -fuzz '^FuzzOpaqueHTTPPathTemplateMatcherFailsClosed$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/quota -run '^$$' -fuzz '^FuzzTokenBucketReservationArithmetic$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzActiveSnapshotCompilation$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)
 	$(GO) test ./internal/configuration -run '^$$' -fuzz '^FuzzCompiledInputAccountingProfile$$' -fuzztime=$(FUZZ_TIME) -parallel=$(FUZZ_PARALLEL)

@@ -1971,6 +1971,7 @@ class Observer:
         if repository_id == "javascript":
             return {
                 f"latchway-client-{version}.tgz",
+                f"docs-bundle-{version}.tar.gz",
                 "SHA256SUMS",
                 "build-reproducibility.json",
                 "contract-evidence.json",
@@ -1989,6 +1990,7 @@ class Observer:
             return {
                 f"latchway-react-native-{version}.tgz",
                 f"latchway-react-native-{version}.tgz.sha256",
+                f"docs-bundle-{version}.tar.gz",
                 "package-evidence.json",
                 "build-reproducibility.json",
                 "published-dependency-evidence.json",
@@ -2004,6 +2006,7 @@ class Observer:
             return {
                 archive,
                 f"{archive}.sha256",
+                f"docs-bundle-{version}.tar.gz",
                 "cocoapods-published-podspec.json",
                 "cocoapods-reviewed-podspec.json",
                 "cocoapods-release-evidence.json",
@@ -2013,6 +2016,7 @@ class Observer:
             return {
                 f"latchway-android-{version}-maven-repository.zip",
                 f"latchway-android-{version}-central-portal.zip",
+                f"docs-bundle-{version}.tar.gz",
                 "SHA256SUMS",
                 "github-release-tag-binding.json",
                 "latchway-maven-signing-public-key.asc",
@@ -2183,6 +2187,7 @@ class Observer:
         )
         ios_source_attestations = {ios_archive_name: ios_attestation}
         for name in (
+            f"docs-bundle-{ios['version']}.tar.gz",
             "cocoapods-published-podspec.json",
             "cocoapods-reviewed-podspec.json",
             "cocoapods-release-evidence.json",
@@ -2410,6 +2415,9 @@ class Observer:
         package_evidence_asset = release_assets["package-evidence.json"]["metadata"]
         reproducibility_bytes = release_assets["build-reproducibility.json"]["bytes"]
         reproducibility_asset = release_assets["build-reproducibility.json"]["metadata"]
+        docs_bundle_name = f"docs-bundle-{coordinate['version']}.tar.gz"
+        docs_bundle_bytes = release_assets[docs_bundle_name]["bytes"]
+        docs_bundle_asset = release_assets[docs_bundle_name]["metadata"]
         package_evidence = load_output(package_evidence_bytes, "registry_npm_package_evidence_invalid")
         reproducibility = load_output(reproducibility_bytes, "registry_npm_reproducibility_invalid")
         published_dependencies: dict[str, Any] | None = None
@@ -2437,6 +2445,7 @@ class Observer:
             tarball_name: reviewed_root / tarball_name,
             "package-evidence.json": reviewed_root / "package-evidence.json",
             "build-reproducibility.json": reviewed_root / "build-reproducibility.json",
+            docs_bundle_name: reviewed_root / docs_bundle_name,
         }
         if dependency_evidence_bytes is not None:
             reviewed_paths["published-dependency-evidence.json"] = (
@@ -2445,6 +2454,7 @@ class Observer:
         reviewed_paths[tarball_name].write_bytes(reviewed_bytes)
         reviewed_paths["package-evidence.json"].write_bytes(package_evidence_bytes)
         reviewed_paths["build-reproducibility.json"].write_bytes(reproducibility_bytes)
+        reviewed_paths[docs_bundle_name].write_bytes(docs_bundle_bytes)
         if dependency_evidence_bytes is not None:
             reviewed_paths["published-dependency-evidence.json"].write_bytes(
                 dependency_evidence_bytes
@@ -2508,6 +2518,7 @@ class Observer:
                 tarball_name: reviewed_asset["digest"],
                 "package-evidence.json": package_evidence_asset["digest"],
                 "build-reproducibility.json": reproducibility_asset["digest"],
+                docs_bundle_name: docs_bundle_asset["digest"],
             },
             "release_asset_attestation_verifications": asset_attestations,
             "immutable_release_asset_verifications": {

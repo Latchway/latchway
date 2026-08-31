@@ -2122,6 +2122,10 @@ components:
           type: string
           format: date-time
           description: First response byte observed by the gateway, when one was observed; never precedes started_at or follows completed_at.
+        first_token_at:
+          type: string
+          format: date-time
+          description: First protocol-validated generated content observed by the gateway, when one was observed; requires first_byte_at and never precedes it or follows completed_at.
         completed_at: { type: string, format: date-time }
         status: { type: string, enum: [succeeded, failed, canceled, unknown] }
         http_status:

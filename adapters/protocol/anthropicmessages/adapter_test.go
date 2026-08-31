@@ -623,6 +623,32 @@ func TestJSONObserverBoundsMemoryAndHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestJSONObserverFirstTokenRequiresGeneratedContent(t *testing.T) {
+	t.Parallel()
+
+	metadataOnly := &jsonObserver{ctx: context.Background()}
+	if err := metadataOnly.Observe([]byte(`{"type":"message","usage":{"input_tokens":1,"output_tokens":1}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metadataOnly.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if metadataOnly.FirstTokenObserved() {
+		t.Fatal("usage metadata without generated content marked first token")
+	}
+
+	content := &jsonObserver{ctx: context.Background()}
+	if err := content.Observe([]byte(`{"type":"message","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":1,"output_tokens":1}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := content.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if !content.FirstTokenObserved() {
+		t.Fatal("generated JSON content did not mark first token")
+	}
+}
+
 func TestSSEObserverExtractsTerminalCumulativeUsage(t *testing.T) {
 	stream := "event: message_start\n" +
 		"data: {\"type\":\"message_start\",\"message\":{\"type\":\"message\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n" +
@@ -664,6 +690,32 @@ func TestSSEObserverSupportsBOMCRLFMultilineDataAndUnknownEvents(t *testing.T) {
 	usage, err := observer.Finalize()
 	if err != nil || usage.InputTokens != 1 || usage.OutputTokens != 2 || usage.TotalTokens != 3 {
 		t.Fatalf("Finalize() usage=%+v error=%v", usage, err)
+	}
+}
+
+func TestSSEObserverFirstTokenRequiresGeneratedContent(t *testing.T) {
+	t.Parallel()
+
+	observer := &sseObserver{ctx: context.Background()}
+	for _, lifecycle := range []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"type\":\"message\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+		"event: ping\ndata: {\"type\":\"ping\"}\n\n",
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+	} {
+		if err := observer.Observe([]byte(lifecycle)); err != nil {
+			t.Fatal(err)
+		}
+		if observer.FirstTokenObserved() {
+			t.Fatalf("lifecycle-only SSE event marked first token: %q", lifecycle)
+		}
+	}
+	if err := observer.Observe([]byte(
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.FirstTokenObserved() {
+		t.Fatal("generated content-block delta did not mark first token")
 	}
 }
 

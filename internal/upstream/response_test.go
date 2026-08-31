@@ -71,6 +71,52 @@ func TestRelayResponseStreamsChunksAndReturnsNormalizedOutcome(t *testing.T) {
 	}
 }
 
+func TestRelayResponseFirstTokenHookWaitsForObserverSignal(t *testing.T) {
+	t.Parallel()
+
+	body := &scriptedResponseBody{steps: []responseRead{
+		{data: "lifecycle"},
+		{data: "content"},
+		{data: "terminal", err: io.EOF},
+	}}
+	observer := &recordingResponseObserver{firstTokenAfterChunks: 2}
+	writer := newRelayResponseWriter()
+	firstByteCalls, firstTokenCalls := 0, 0
+	config := validRelayConfig()
+	config.OnFirstByte = func(context.Context) error {
+		firstByteCalls++
+		return nil
+	}
+	config.OnFirstToken = func(context.Context) {
+		firstTokenCalls++
+		if got := writer.body.String(); got != "lifecyclecontent" {
+			t.Fatalf("first-token hook observed client body %q", got)
+		}
+	}
+	if _, err := RelayResponse(context.Background(), writer, validRelayResponse(body), observer, config); err != nil {
+		t.Fatal(err)
+	}
+	if firstByteCalls != 1 || firstTokenCalls != 1 {
+		t.Fatalf("hooks: first_byte=%d first_token=%d", firstByteCalls, firstTokenCalls)
+	}
+}
+
+func TestRelayResponseFirstTokenHookCanBeFinalizationAware(t *testing.T) {
+	t.Parallel()
+
+	body := &scriptedResponseBody{steps: []responseRead{{data: "complete-json", err: io.EOF}}}
+	observer := &recordingResponseObserver{firstTokenOnFinalize: true}
+	firstTokenCalls := 0
+	config := validRelayConfig()
+	config.OnFirstToken = func(context.Context) { firstTokenCalls++ }
+	if _, err := RelayResponse(context.Background(), newRelayResponseWriter(), validRelayResponse(body), observer, config); err != nil {
+		t.Fatal(err)
+	}
+	if firstTokenCalls != 1 {
+		t.Fatalf("first-token hook calls = %d", firstTokenCalls)
+	}
+}
+
 func TestRelayResponseConvertsSilentPartialWriteToShortWrite(t *testing.T) {
 	t.Parallel()
 
@@ -940,24 +986,35 @@ func waitForResponseRead(t *testing.T, body *blockingResponseBody) {
 }
 
 type recordingResponseObserver struct {
-	observed      bytes.Buffer
-	chunks        []string
-	usage         protocol.Usage
-	observeErr    error
-	finalizeErr   error
-	finalizeCalls int
+	observed              bytes.Buffer
+	chunks                []string
+	usage                 protocol.Usage
+	observeErr            error
+	finalizeErr           error
+	finalizeCalls         int
+	firstTokenAfterChunks int
+	firstTokenOnFinalize  bool
+	firstToken            bool
 }
 
 func (observer *recordingResponseObserver) Observe(chunk []byte) error {
 	observer.chunks = append(observer.chunks, string(chunk))
 	_, _ = observer.observed.Write(chunk)
+	if observer.firstTokenAfterChunks > 0 && len(observer.chunks) >= observer.firstTokenAfterChunks {
+		observer.firstToken = true
+	}
 	return observer.observeErr
 }
 
 func (observer *recordingResponseObserver) Finalize() (protocol.Usage, error) {
 	observer.finalizeCalls++
+	if observer.firstTokenOnFinalize {
+		observer.firstToken = true
+	}
 	return observer.usage, observer.finalizeErr
 }
+
+func (observer *recordingResponseObserver) FirstTokenObserved() bool { return observer.firstToken }
 
 type relayResponseWriter struct {
 	header                http.Header

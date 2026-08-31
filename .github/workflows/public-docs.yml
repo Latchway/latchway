@@ -4,12 +4,38 @@ on:
   pull_request:
     paths:
       - "docs/public/**"
+      - "api/admin.openapi.yaml"
+      - "api/error-codes.yaml"
+      - "api/config.schema.json"
+      - "compatibility/**"
+      - "docs/sdk-bundles.lock"
+      - "docs/sdk-bundles/**"
+      - "scripts/docs-sync-sdk"
+      - "scripts/docs_sdk_bundle.py"
+      - "scripts/test_docs_sdk_bundle.py"
+      - "scripts/public_reference.py"
+      - "scripts/framework_compatibility.py"
+      - "scripts/test_public_reference.py"
+      - "scripts/test_framework_compatibility.py"
       - "scripts/sync-public-docs.py"
       - ".github/workflows/public-docs.yml"
   push:
     branches: [main]
     paths:
       - "docs/public/**"
+      - "api/admin.openapi.yaml"
+      - "api/error-codes.yaml"
+      - "api/config.schema.json"
+      - "compatibility/**"
+      - "docs/sdk-bundles.lock"
+      - "docs/sdk-bundles/**"
+      - "scripts/docs-sync-sdk"
+      - "scripts/docs_sdk_bundle.py"
+      - "scripts/test_docs_sdk_bundle.py"
+      - "scripts/public_reference.py"
+      - "scripts/framework_compatibility.py"
+      - "scripts/test_public_reference.py"
+      - "scripts/test_framework_compatibility.py"
       - "scripts/sync-public-docs.py"
       - ".github/workflows/public-docs.yml"
   workflow_dispatch:
@@ -54,6 +80,16 @@ jobs:
       - name: Expose the pinned MDX parser
         run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
 
+      - name: Prove deterministic generated public references
+        working-directory: .
+        run: |
+          python3 -m unittest \
+            scripts/test_docs_sdk_bundle.py \
+            scripts/test_public_reference.py \
+            scripts/test_framework_compatibility.py
+          scripts/docs-sync-sdk --check
+          python3 scripts/public_reference.py --check-generated
+
       - name: Lint public prose
         uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3
         with:
@@ -70,4 +106,4 @@ jobs:
         # Vale already ran in the pinned action above. The action intentionally
         # does not install a `vale` executable into later steps, so repeat only
         # the remaining self-contained documentation gates here.
-        run: pnpm check:structure && pnpm validate && pnpm check:links && pnpm check:a11y
+        run: pnpm check:generated && pnpm check:structure && pnpm validate && pnpm check:links && pnpm check:a11y

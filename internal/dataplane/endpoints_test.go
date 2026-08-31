@@ -91,6 +91,14 @@ func TestEndpointRegistryBoundsAndCanonicalizesOpaqueShape(t *testing.T) {
 		match.opaquePath != "/v2/current" || match.providerPath != "/v2/current" {
 		t.Fatalf("canonical opaque match = %+v violation=%+v", match, violation)
 	}
+	absolute := httptest.NewRequest(
+		http.MethodPost, "https://attacker.example/proxy/weather/v2/current", nil,
+	)
+	match, violation = registry.match(absolute)
+	if violation != nil || match.publicURL.String() != "https://gateway.example/proxy/weather/v2/current" ||
+		match.providerPath != "/v2/current" {
+		t.Fatalf("client authority changed opaque binding: match=%+v violation=%+v", match, violation)
+	}
 	for _, test := range []struct {
 		name string
 		path string

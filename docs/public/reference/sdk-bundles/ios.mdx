@@ -1,0 +1,398 @@
+---
+title: "iOS SDK source bundle"
+description: "Generated, version-bound examples and compatibility metadata for iOS SDK 1.0.0."
+---
+
+<Warning>
+  This page proves the checked-in source bundle and its provenance. It does not claim
+  that the package or protected external release evidence has been published.
+</Warning>
+
+## Bundle identity
+
+| Field | Value |
+| --- | --- |
+| Package | `Latchway` |
+| Release | `v1.0.0` |
+| Commit | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` |
+| Source tree clean | `no` |
+| Bundle SHA-256 | `c8303f1eb5d5f4b15f7a55ea7a6613148b63156850ea55fd08e1a41b8be6e018` |
+
+## Supported versions
+
+| Dependency or platform | Tested version | Source |
+| --- | --- | --- |
+| Latchway | `1.0.0` | `Latchway.podspec:L1-L20` |
+| iOS | `15.0` | `Latchway.podspec:L19-L20` |
+| Swift | `6.0` | `Latchway.podspec:L19-L20` |
+| SwiftOpenAI minimum | `4.6.0` | `Package.swift:L20-L24` |
+| SwiftOpenAI latest | `4.6.0` | `Package.swift:L20-L24` |
+| Apple Foundation Models OS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+
+## Version-bound examples
+
+### `frameworks/foundation-models.swift`
+
+Working-tree source: `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L28-L189`. The bundle records candidate commit `0074f532d639b83c27966f8c75ffe37ed8df6cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```swift
+/// A Foundation Models custom provider backed by a feature-bound Latchway
+/// Responses transport. Its capability declaration is intentionally empty:
+/// v1 supports text transcripts and streaming, while guided generation,
+/// attachments, reasoning, and tool calling fail explicitly until their wire
+/// translations pass conformance.
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayLanguageModel: LanguageModel, Sendable {
+    public struct Configuration: Hashable, Sendable {
+        fileprivate let identity: UUID
+        fileprivate let transport: LatchwayFeatureTransport
+
+        public init(
+            transport: LatchwayFeatureTransport
+        ) {
+            identity = UUID()
+            self.transport = transport
+        }
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.identity == rhs.identity
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            hasher.combine(identity)
+        }
+    }
+
+    public typealias Executor = LatchwayLanguageModelExecutor
+
+    public let capabilities = LanguageModelCapabilities([])
+    public let executorConfiguration: Configuration
+
+    public init(configuration: Configuration) {
+        executorConfiguration = configuration
+    }
+
+    public init(
+        client: LatchwayClient,
+        feature: String,
+        frameworkVersion: String
+    ) {
+        executorConfiguration = Configuration(
+            transport: client.transport(
+                feature: feature,
+                framework: .foundationModels(version: frameworkVersion)
+            )
+        )
+    }
+
+    public init(
+        client: LatchwayExtensionClient,
+        feature: String,
+        frameworkVersion: String
+    ) {
+        executorConfiguration = Configuration(
+            transport: client.transport(
+                feature: feature,
+                framework: .foundationModels(version: frameworkVersion)
+            )
+        )
+    }
+}
+
+@available(iOS 27.0, macOS 27.0, visionOS 27.0, watchOS 27.0, *)
+@available(tvOS, unavailable)
+public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
+    public typealias Configuration = LatchwayLanguageModel.Configuration
+    public typealias Model = LatchwayLanguageModel
+
+    private let configuration: Configuration
+
+    public init(configuration: Configuration) throws {
+        self.configuration = configuration
+    }
+
+    public func prewarm(model _: Model, transcript _: Transcript) {
+        // Remote Latchway routes have no local model assets to prewarm.
+    }
+
+    public func respond(
+        to request: LanguageModelExecutorGenerationRequest,
+        model _: Model,
+        streamingInto channel: LanguageModelExecutorGenerationChannel
+    ) async throws {
+        try Task.checkCancellation()
+        if request.schema != nil {
+            throw LanguageModelError.unsupportedGenerationGuide(.init(
+                schemaName: nil,
+                debugDescription: "Latchway v1 does not yet translate Foundation Models generation schemas."
+            ))
+        }
+        if !request.enabledToolDefinitions.isEmpty {
+            throw LanguageModelError.unsupportedCapability(.init(
+                capability: .toolCalling,
+                debugDescription: "Latchway v1 does not yet translate Foundation Models tool calls."
+            ))
+        }
+        if request.generationOptions.samplingMode != nil {
+            throw LatchwayFoundationModelsError.unsupportedSamplingMode
+        }
+
+        let body = try Self.makeRequestBody(from: request)
+        var urlRequest = URLRequest(
+            url: try configuration.transport.endpoint(path: "v1/responses")
+        )
+        urlRequest.httpMethod = "POST"
+        urlRequest.httpBody = try JSONEncoder().encode(body)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+
+        let stream = try await configuration.transport.bytes(for: urlRequest)
+        defer { stream.cancel() }
+        guard (200 ... 299).contains(stream.response.statusCode) else {
+            throw Self.gatewayError(from: stream.response)
+        }
+
+        var receivedTerminalEvent = false
+        for try await line in stream.bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" {
+                receivedTerminalEvent = true
+                break
+            }
+            guard let data = payload.data(using: .utf8),
+                  let event = try? JSONDecoder().decode(ResponsesEvent.self, from: data)
+            else { throw LatchwayFoundationModelsError.invalidGatewayStream }
+            switch event.type {
+            case "response.output_text.delta":
+                guard let delta = event.delta else {
+                    throw LatchwayFoundationModelsError.invalidGatewayStream
+                }
+                await channel.send(.response(action: .appendText(delta, tokenCount: 0)))
+            case "response.completed":
+                if let usage = event.response?.usage {
+                    await channel.send(.response(action: .updateUsage(
+                        input: .init(
+                            totalTokenCount: usage.inputTokens,
+                            cachedTokenCount: usage.inputTokensDetails?.cachedTokens ?? 0
+                        ),
+                        output: .init(
+                            totalTokenCount: usage.outputTokens,
+                            reasoningTokenCount: usage.outputTokensDetails?.reasoningTokens ?? 0
+                        )
+                    )))
+                }
+                receivedTerminalEvent = true
+            case "response.failed", "error":
+                throw LatchwayFoundationModelsError.gateway(
+                    statusCode: stream.response.statusCode,
+                    requestID: stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
+                )
+            default:
+                continue
+            }
+        }
+        guard receivedTerminalEvent else {
+            throw LatchwayFoundationModelsError.invalidGatewayStream
+        }
+    }
+```
+
+### `frameworks/swift-openai.swift`
+
+Working-tree source: `Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift:L11-L99`. The bundle records candidate commit `0074f532d639b83c27966f8c75ffe37ed8df6cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```swift
+public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
+    public static let testedFrameworkVersion = "4.6.0"
+
+    public let transport: LatchwayFeatureTransport
+
+    public init(
+        client: LatchwayClient,
+        feature: String,
+        frameworkVersion: String = testedFrameworkVersion
+    ) {
+        transport = client.transport(
+            feature: feature,
+            framework: .swiftOpenAI(version: frameworkVersion)
+        )
+    }
+
+    public init(
+        client: LatchwayExtensionClient,
+        feature: String,
+        frameworkVersion: String = testedFrameworkVersion
+    ) {
+        transport = client.transport(
+            feature: feature,
+            framework: .swiftOpenAI(version: frameworkVersion)
+        )
+    }
+
+    init(transport: LatchwayFeatureTransport) {
+        self.transport = transport
+    }
+
+    /// The non-secret sentinel SwiftOpenAI may place in its Authorization
+    /// header. Latchway removes exactly this value before native authorization.
+    public var placeholderAPIKey: String { LatchwayFeatureTransport.placeholderAPIKey }
+
+    /// Creates a SwiftOpenAI service whose ordinary and streaming HTTP paths
+    /// both use this adapter. WebSocket Realtime is not supported because
+    /// SwiftOpenAI currently dispatches that path through `URLSession.shared`.
+    public func makeService(debugEnabled: Bool = false) throws -> any OpenAIService {
+        let address = try Self.swiftOpenAIAddress(for: transport.gatewayBaseURL)
+        return OpenAIServiceFactory.service(
+            apiKey: placeholderAPIKey,
+            overrideBaseURL: address.origin,
+            proxyPath: address.proxyPath,
+            overrideVersion: "v1",
+            httpClient: self,
+            debugEnabled: debugEnabled
+        )
+    }
+
+    public func data(for request: HTTPRequest) async throws -> (Data, HTTPResponse) {
+        let response = try await transport.send(Self.urlRequest(from: request))
+        return (
+            response.body,
+            HTTPResponse(statusCode: response.statusCode, headers: response.headers)
+        )
+    }
+
+    public func bytes(for request: HTTPRequest) async throws -> (HTTPByteStream, HTTPResponse) {
+        let response = try await transport.bytes(for: Self.urlRequest(from: request))
+        let lines = AsyncThrowingStream<String, Error>(bufferingPolicy: .bufferingOldest(1)) { continuation in
+            let producer = Task {
+                do {
+                    for try await line in response.bytes.lines {
+                        try Task.checkCancellation()
+                        try await Self.yieldWithBackpressure(line, to: continuation)
+                    }
+                    response.finish()
+                    continuation.finish()
+                } catch is CancellationError {
+                    response.cancel()
+                    continuation.finish(throwing: LatchwayError.cancelled)
+                } catch {
+                    response.cancel()
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in producer.cancel() }
+        }
+        var headers: [String: String] = [:]
+        for (name, value) in response.response.allHeaderFields {
+            guard let name = name as? String else { continue }
+            headers[name] = String(describing: value)
+        }
+        return (
+            .lines(lines),
+            HTTPResponse(statusCode: response.response.statusCode, headers: headers)
+        )
+    }
+```
+
+### `quickstart/app-extension-component.swift`
+
+Working-tree source: `Examples/AppExtensionComponents/Host/ComponentHostApp.swift:L37-L89`. The bundle records candidate commit `0074f532d639b83c27966f8c75ffe37ed8df6cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```swift
+    func prepareWidget() async {
+        do {
+            let client = try makeClient()
+            let component = try ComponentExampleConfiguration.widget()
+            let result = try await client.prepareComponents([component])
+            let prepared = result.first?.containingAppActionRequired == false
+            status = prepared ? "Widget key and one-time grant are prepared." : "Preparation needs attention."
+            self.client = client
+        } catch {
+            status = safeDescription(error)
+        }
+    }
+
+    func replaceWidget() async {
+        do {
+            let client = try makeClient()
+            let component = try ComponentExampleConfiguration.widget()
+            _ = try await client.replaceComponent(component)
+            status = "The old component session is revoked and a new key is prepared."
+            self.client = client
+        } catch {
+            status = safeDescription(error)
+        }
+    }
+
+    func revokeFamily() async {
+        do {
+            let client = try client ?? makeClient()
+            let component = try ComponentExampleConfiguration.widget()
+            try await client.revokeCurrentInstallationFamily(retiring: [component])
+            status = "The family is revoked and root/component Keychain material was erased."
+            self.client = nil
+        } catch {
+            status = safeDescription(error)
+        }
+    }
+
+    private func makeClient() throws -> LatchwayClient {
+        let applicationID = try requiredInfo("LatchwayApplicationID")
+        let environment = try requiredInfo("LatchwayEnvironment")
+        let attestation = LatchwayAppAttestProvider(
+            applicationID: applicationID,
+            environment: environment,
+            rootKeychainAccessGroup: try ComponentExampleConfiguration.rootKeychainAccessGroup(),
+            legacySharedKeychainAccessGroups: ComponentExampleConfiguration.legacySharedKeychainAccessGroups()
+        )
+        return LatchwayClient(
+            configuration: try ComponentExampleConfiguration.latchway(
+                attestationProvider: attestation
+            ),
+            identityTokenProvider: LaunchEnvironmentIdentityProvider()
+        )
+    }
+```
+
+### `quickstart/url-session.swift`
+
+Working-tree source: `Examples/BasicURLSession/BasicURLSession.swift:L1-L34`. The bundle records candidate commit `0074f532d639b83c27966f8c75ffe37ed8df6cc8`, but does not claim that this dirty source region is already present at that commit.
+
+```swift
+import Foundation
+import Latchway
+import LatchwayAppAttest
+
+func performRequest(identity: any LatchwayIdentityTokenProvider, body: Data) async throws -> Data {
+    let baseURL = URL(string: "https://gateway.example.com")!
+    let rootKeychainAccessGroup = "ABCDE12345.com.example.app"
+    let appAttest = LatchwayAppAttestProvider(
+        applicationID: "app_01J00000000000000000000000",
+        environment: "production",
+        rootKeychainAccessGroup: rootKeychainAccessGroup
+    )
+    let client = LatchwayClient(
+        configuration: LatchwayConfiguration(
+            baseURL: baseURL,
+            applicationID: "app_01J00000000000000000000000",
+            environment: "production",
+            rootKeychainAccessGroup: rootKeychainAccessGroup,
+            appVersion: "1.0.0",
+            attestationProvider: appAttest
+        ),
+        identityTokenProvider: identity
+    )
+    var request = URLRequest(url: baseURL.appendingPathComponent("v1/responses"))
+    request.httpMethod = "POST"
+    request.httpBody = body
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    try await client.authorize(&request, feature: "habit-assistant")
+    let (data, response) = try await client.makeURLSession().data(for: request)
+    guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+        throw LatchwayError.invalidServerResponse
+    }
+    return data
+}
+```

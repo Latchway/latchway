@@ -30,6 +30,47 @@ func TestRuntimeAttestationPolicyAcceptsAllSevenClientPlatforms(t *testing.T) {
 	}
 }
 
+func TestRuntimeOpaquePolicySupportsOneTemplateOrLegacyPrefixMode(t *testing.T) {
+	t.Parallel()
+
+	base := OpaqueHTTPPolicy{
+		AllowedMethods: []string{"POST"}, MaximumBodyBytes: 1024,
+		AllowedRequestHeaders: []string{"Content-Type"},
+	}
+	legacy := base
+	legacy.PathPrefixes = []string{"/v1", "/legacy/"}
+	if !runtimeOpaquePolicyValid(legacy) {
+		t.Fatal("legacy segment-bound prefix policy rejected")
+	}
+	templates := base
+	templates.PathTemplates = []string{"/v2/current", "/v2/users/{user_id}"}
+	if !runtimeOpaquePolicyValid(templates) {
+		t.Fatal("exact-depth template policy rejected")
+	}
+	for name, mutate := range map[string]func(*OpaqueHTTPPolicy){
+		"neither mode": func(*OpaqueHTTPPolicy) {},
+		"mixed modes": func(policy *OpaqueHTTPPolicy) {
+			policy.PathPrefixes = []string{"/v1"}
+			policy.PathTemplates = []string{"/v1/{id}"}
+		},
+		"ambiguous templates": func(policy *OpaqueHTTPPolicy) {
+			policy.PathTemplates = []string{"/v1/{id}", "/v1/current"}
+		},
+		"open wildcard": func(policy *OpaqueHTTPPolicy) {
+			policy.PathTemplates = []string{"/v1/*"}
+		},
+	} {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			policy := base
+			mutate(&policy)
+			if runtimeOpaquePolicyValid(policy) {
+				t.Fatalf("unsafe runtime opaque policy accepted: %+v", policy)
+			}
+		})
+	}
+}
+
 func TestCompiledLimitRefillRateRequiresCanonicalExactNumber(t *testing.T) {
 	t.Parallel()
 

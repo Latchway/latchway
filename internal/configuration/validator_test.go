@@ -225,6 +225,110 @@ func TestValidatorEnforcesClosedOpaqueHTTPRouteAndForwardingPolicy(t *testing.T)
 	}
 }
 
+func TestValidatorCompilesExactOpaqueHTTPPathTemplatesAndRejectsUnsafeOrAmbiguousSets(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newDocument := func() map[string]any {
+		document := configurationObject(t)
+		spec := objectValue(document, "spec")
+		feature := objectArray(spec, "features")[0]
+		feature["protocol"] = "opaque_http"
+		delete(feature, "output")
+		feature["opaqueHttp"] = map[string]any{
+			"allowedMethods":        []any{"GET", "POST"},
+			"pathTemplates":         []any{"/v2/current", "/v2/users/{user_id}"},
+			"maxBodyBytes":          json.Number("1024"),
+			"allowedRequestHeaders": []any{"Content-Type", "X-Trace"},
+		}
+		objectArray(feature, "routes")[0]["maxResponseBytes"] = json.Number("4096")
+		objectArray(spec, "models")[0]["capabilities"] = []any{"opaque_http"}
+		objectArray(spec, "upstreams")[0]["type"] = "generic"
+		return document
+	}
+
+	document := newDocument()
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+	if !report.Valid || compiled == nil {
+		t.Fatalf("valid path templates did not compile: report=%+v compiled=%s", report, compiled)
+	}
+	snapshot, err := newActiveSnapshot("templates", "environment", encoded, compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaque := snapshot.features["assistant"].OpaqueHTTP
+	if opaque == nil || !slices.Equal(opaque.PathTemplates, []string{"/v2/current", "/v2/users/{user_id}"}) ||
+		len(opaque.PathPrefixes) != 0 {
+		t.Fatalf("compiled opaque path policy = %+v", opaque)
+	}
+
+	for name, templates := range map[string][]any{
+		"duplicate capture name": {"/v2/{resource_id}/{resource_id}"},
+		"partial capture":        {"/v2/pre-{resource_id}"},
+		"catch all":              {"/v2/{remaining...}"},
+		"traversal":              {"/v2/../private"},
+		"encoded separator":      {"/v2/%2fprivate"},
+		"query":                  {"/v2/{resource_id}?admin=true"},
+		"absolute destination":   {"https://provider.example/v2/{resource_id}"},
+	} {
+		name, templates := name, templates
+		t.Run(name, func(t *testing.T) {
+			document := newDocument()
+			feature := objectArray(objectValue(document, "spec"), "features")[0]
+			objectValue(feature, "opaqueHttp")["pathTemplates"] = templates
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			issueCode := "opaque_http_path_template_invalid"
+			if name == "absolute destination" {
+				issueCode = "schema_pattern"
+			}
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, issueCode) {
+				t.Fatalf("unsafe template compiled: report=%+v compiled=%s", report, compiled)
+			}
+		})
+	}
+	for name, templates := range map[string][]any{
+		"capture naming":  {"/v2/users/{user_id}", "/v2/users/{account_id}"},
+		"literal overlap": {"/v2/users/{user_id}", "/v2/users/me"},
+	} {
+		name, templates := name, templates
+		t.Run(name, func(t *testing.T) {
+			document := newDocument()
+			feature := objectArray(objectValue(document, "spec"), "features")[0]
+			objectValue(feature, "opaqueHttp")["pathTemplates"] = templates
+			encoded, marshalErr := json.Marshal(document)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			report, compiled := validator.Validate(encoded, testEnvironment(), time.Now())
+			if report.Valid || compiled != nil || !hasIssue(report.Issues, "opaque_http_path_template_ambiguous") {
+				t.Fatalf("ambiguous templates compiled: report=%+v compiled=%s", report, compiled)
+			}
+		})
+	}
+
+	document = newDocument()
+	policy := objectValue(objectArray(objectValue(document, "spec"), "features")[0], "opaqueHttp")
+	policy["pathPrefixes"] = []any{"/legacy"}
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, compiled = validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || compiled != nil || !hasIssue(report.Issues, "schema_allof") {
+		t.Fatalf("mixed template/prefix policy compiled: report=%+v compiled=%s", report, compiled)
+	}
+}
+
 func TestValidatorBindsStructuredProtocolsToUpstreamFamiliesAndOutputPolicies(t *testing.T) {
 	t.Parallel()
 
@@ -501,7 +605,8 @@ func TestValidatorCapabilityGatesSchemaValidLimitAlgorithmsAndMetrics(t *testing
 						!strings.Contains(issue.Message, "capacity from 1 through 9223372") ||
 						!strings.Contains(issue.Message, "through 1000000") ||
 						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens calendar") ||
-						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens per_request") ||
+						!strings.Contains(issue.Message, "input_tokens/output_tokens/total_tokens/request_bytes/image_units/tool_calls per_request") ||
+						!strings.Contains(issue.Message, "request_bytes/image_units/tool_calls additionally require exact request measurement") ||
 						!strings.Contains(issue.Message, "cost_nano_usd calendar") ||
 						!strings.Contains(issue.Message, "concurrent_requests/concurrent_streams concurrency")) {
 					t.Fatalf("stale capability wording: %q", issue.Message)

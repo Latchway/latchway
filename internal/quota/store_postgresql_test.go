@@ -158,6 +158,19 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 		if err := fixture.store.MarkFirstByte(fixture.ctx, attempt); err != nil {
 			t.Fatalf("mark first byte replay: %v", err)
 		}
+		if err := fixture.store.MarkFirstToken(fixture.ctx, attempt); err != nil {
+			t.Fatalf("mark first token: %v", err)
+		}
+		var firstByteAt, firstTokenAt time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT first_byte_at, first_token_at
+			FROM upstream_attempts WHERE upstream_attempt_id = $1
+		`, attempt.ID()).Scan(&firstByteAt, &firstTokenAt); err != nil {
+			t.Fatalf("read first-token ordering: %v", err)
+		}
+		if firstTokenAt.Before(firstByteAt) {
+			t.Fatalf("first token %s precedes first byte %s", firstTokenAt, firstByteAt)
+		}
 		outcome := Outcome{Status: AttemptSucceeded, HTTPStatus: 200}
 		if err := fixture.store.Settle(fixture.ctx, attempt, outcome); err != nil {
 			t.Fatalf("settle: %v", err)

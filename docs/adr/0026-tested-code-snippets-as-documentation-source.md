@@ -9,9 +9,10 @@ can still teach insecure key handling or fail in a clean consumer.
 ## Decision
 
 SDK repositories own compilable examples and publish versioned documentation
-bundles. The core docs build extracts marked snippets, verifies their source
-coordinate and digest, compiles or runs the owning example, and fails when the
-rendered MDX differs. Manually maintained executable copies are forbidden.
+bundles. Owning SDK CI compiles or runs the example before producing its bundle.
+The core docs build verifies the archive, manifest, checksums, source coordinate,
+and digest, then fails when the generated public output differs. Manually
+maintained executable copies are forbidden.
 
 ## Alternatives
 
@@ -40,9 +41,10 @@ need a versioned manifest before public publication.
 
 ## Documentation implications
 
-Generated pages identify supported package versions and source links. Docs CI
-checks extraction drift, compilation, bundle integrity, missing sources, and
-unreferenced generated output.
+Generated pages identify tested package versions and exact source coordinates.
+Docs CI checks extraction drift, bundle integrity, missing sources, and
+unreferenced generated output. SDK and cross-repository release gates own
+compilation and clean-consumer evidence.
 
 ## Consequences
 
@@ -53,7 +55,13 @@ prevents silent API or security drift.
 
 ## Status
 
-Accepted on 2026-08-30 and implemented through repository-owned documentation
-bundles, fixture synchronization, clean package consumers, snippet/link drift
-validation, and cross-repository source conformance. Published-package
-quickstarts remain a post-publication verification gate.
+Accepted on 2026-08-30 and implemented for the version `1.0.0` SDK source
+candidates on 2026-08-31. Each owning SDK builds a deterministic, checksummed,
+source-provenanced documentation bundle. The core importer strictly verifies
+and locks those four archives, regenerates public snippets, catalogs, and
+release-bound reference pages, and fails CI on archive, provenance, lock, or
+rendered-output drift. Owning SDK CI compiles or runs the source examples from
+which the bundle regions are extracted. Published-package quickstarts and clean
+release-produced archives remain protected post-publication verification gates;
+the checked-in local-candidate locks record `source_tree_clean: false` rather
+than claiming that external release evidence already exists.

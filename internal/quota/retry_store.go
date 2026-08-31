@@ -2160,7 +2160,7 @@ func settleRetryAttemptLocked(
 	command, err := tx.Exec(ctx, `
 		UPDATE upstream_attempts
 		SET status = $2,
-		    completed_at = GREATEST(started_at, COALESCE(first_byte_at, started_at), $3),
+		    completed_at = GREATEST(started_at, COALESCE(first_byte_at, started_at), COALESCE(first_token_at, started_at), $3),
 		    http_status = $4,
 		    failure_code = $5,
 		    billed_cost_nano_usd = $6,

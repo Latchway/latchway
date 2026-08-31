@@ -18,3 +18,39 @@ and revocation state.
 Family membership is not a general device graph. Components must share the
 authorized application, environment, user relationship, and logical
 installation boundary defined by the final contract.
+
+## Inspect the trust graph
+
+Use a scoped bearer from an environment variable. List summaries first, then
+inspect only the selected family:
+
+```bash
+latchway installation-families list --environment env_...
+latchway --output json installation-families inspect fam_...
+latchway components list --environment env_... --family fam_...
+latchway --output json components inspect cmp_...
+```
+
+The family detail contains the root component and every bounded descendant.
+Component detail exposes the key identifier and DPoP thumbprint, trust source,
+attestation provider, parent and delegation metadata, granted feature IDs,
+session status, refresh-reuse count, request count, token totals, and integer
+nano-USD cost. It never returns a private key, access or refresh token, raw
+attestation object, identity token, provider body, or upstream credential.
+
+## Choose the narrowest action
+
+| Operator intent | Command |
+| --- | --- |
+| Require fresh root trust before future refresh or provisioning | `latchway installation-families require-renewal fam_...` |
+| Revoke every credential in the family | `latchway installation-families revoke fam_...` |
+| Require fresh trust for one component subtree | `latchway components require-reattestation cmp_...` |
+| Revoke one component subtree without revoking siblings | `latchway components revoke cmp_...` |
+
+Use `--reason` only for a redaction-safe operational classification. Never put
+an identity token, key, proof, credential, raw user identifier, or provider
+payload in the reason.
+
+See the generated [Admin API](/reference/admin-api) for exact paths and schemas
+and [Revoke components and families](/operate/installation-families/revocation)
+for propagation semantics.

@@ -11,8 +11,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
-	pathpkg "path"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,8 +23,6 @@ const (
 
 	defaultMaximumBody = int64(1 << 20)
 	maximumPolicyBytes = int64(100 << 20)
-	maximumPathBytes   = 2048
-	maximumPrefixBytes = 512
 )
 
 var featurePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -57,14 +53,14 @@ func (Adapter) Match(request *http.Request) bool {
 	}, request.Method) || request.URL.Opaque != "" || request.URL.User != nil ||
 		request.URL.RawPath != "" || request.URL.RawQuery != "" || request.URL.ForceQuery ||
 		request.URL.Fragment != "" || request.URL.RawFragment != "" ||
-		len(request.URL.Path) > maximumPathBytes ||
+		len(request.URL.Path) > protocol.MaximumOpaqueHTTPProviderPathBytes ||
 		request.URL.EscapedPath() != request.URL.Path ||
 		!strings.HasPrefix(request.URL.Path, protocol.OpaqueHTTPPublicPrefix) {
 		return false
 	}
 	remainder := strings.TrimPrefix(request.URL.Path, protocol.OpaqueHTTPPublicPrefix)
 	feature, providerPath, found := strings.Cut(remainder, "/")
-	return found && featurePattern.MatchString(feature) && canonicalProviderPath("/"+providerPath)
+	return found && featurePattern.MatchString(feature) && protocol.ValidOpaqueHTTPProviderPath("/"+providerPath)
 }
 
 func (Adapter) Capabilities() protocol.Capabilities {
@@ -111,7 +107,7 @@ func (adapter Adapter) ApplyFeature(
 	if !slices.Contains(policy.AllowedMethods, request.Method) {
 		return 0, requestMalformed("the method is not allowed for this opaque HTTP feature")
 	}
-	if !pathAllowed(policy.ProviderPath, policy.PathPrefixes) {
+	if !pathAllowed(policy.ProviderPath, policy.PathPrefixes, policy.PathTemplates) {
 		return 0, requestMalformed("the path is not allowed for this opaque HTTP feature")
 	}
 	body, err := adapter.readBody(ctx, request, policy.MaximumBodyBytes)
@@ -222,9 +218,10 @@ func (adapter Adapter) maximumBodyBytes() int64 {
 }
 
 func validDecision(policy protocol.OpaqueHTTPDecision) bool {
-	if !featurePattern.MatchString(policy.FeatureID) || !canonicalProviderPath(policy.ProviderPath) ||
+	if !featurePattern.MatchString(policy.FeatureID) || !protocol.ValidOpaqueHTTPProviderPath(policy.ProviderPath) ||
 		len(policy.AllowedMethods) == 0 || len(policy.AllowedMethods) > 5 ||
-		len(policy.PathPrefixes) == 0 || len(policy.PathPrefixes) > 32 ||
+		(len(policy.PathPrefixes) == 0) == (len(policy.PathTemplates) == 0) ||
+		len(policy.PathPrefixes) > protocol.MaximumOpaqueHTTPPathRules ||
 		len(policy.AllowedRequestHeaders) > 32 || policy.MaximumBodyBytes < 0 ||
 		policy.MaximumBodyBytes > maximumPolicyBytes || policy.MaximumResponseBytes <= 0 ||
 		policy.MaximumResponseBytes > maximumPolicyBytes {
@@ -244,13 +241,17 @@ func validDecision(policy protocol.OpaqueHTTPDecision) bool {
 	}
 	seenPrefixes := make(map[string]struct{}, len(policy.PathPrefixes))
 	for _, prefix := range policy.PathPrefixes {
-		if len(prefix) > maximumPrefixBytes || (prefix != "/" && !canonicalProviderPath(prefix)) {
+		if len(prefix) > protocol.MaximumOpaqueHTTPPathTemplateBytes ||
+			(prefix != "/" && !protocol.ValidOpaqueHTTPProviderPath(prefix)) {
 			return false
 		}
 		if _, duplicate := seenPrefixes[prefix]; duplicate {
 			return false
 		}
 		seenPrefixes[prefix] = struct{}{}
+	}
+	if len(policy.PathTemplates) > 0 && !protocol.ValidOpaqueHTTPPathTemplates(policy.PathTemplates) {
+		return false
 	}
 	return true
 }
@@ -264,7 +265,15 @@ func publicBinding(request *http.Request) (string, string, bool) {
 	return featureID, "/" + remaining, found
 }
 
-func pathAllowed(providerPath string, prefixes []string) bool {
+func pathAllowed(providerPath string, prefixes, templates []string) bool {
+	if len(templates) > 0 {
+		for _, template := range templates {
+			if protocol.OpaqueHTTPPathMatchesTemplate(providerPath, template) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, prefix := range prefixes {
 		if prefix == "/" || providerPath == prefix {
 			return true
@@ -280,26 +289,6 @@ func pathAllowed(providerPath string, prefixes []string) bool {
 		}
 	}
 	return false
-}
-
-func canonicalProviderPath(value string) bool {
-	if len(value) < 2 || len(value) > maximumPathBytes || value[0] != '/' ||
-		strings.ContainsAny(value, "\\%?#") || strings.Contains(value, "//") {
-		return false
-	}
-	for index := 0; index < len(value); index++ {
-		if value[index] < 0x20 || value[index] >= 0x7f {
-			return false
-		}
-	}
-	if (&url.URL{Path: value}).EscapedPath() != value {
-		return false
-	}
-	canonical := pathpkg.Clean(value)
-	if strings.HasSuffix(value, "/") && canonical != "/" {
-		canonical += "/"
-	}
-	return canonical == value
 }
 
 func installRequestBody(request *http.Request, body []byte) {

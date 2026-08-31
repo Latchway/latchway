@@ -1178,8 +1178,9 @@ func (discardObserver) Observe([]byte) error { return nil }
 func (discardObserver) Finalize() (protocol.Usage, error) { return unknownUsage(), nil }
 
 type jsonObserver struct {
-	buffer   bytes.Buffer
-	overflow bool
+	buffer     bytes.Buffer
+	overflow   bool
+	firstToken bool
 }
 
 func (o *jsonObserver) Observe(chunk []byte) error {
@@ -1207,8 +1208,14 @@ func (o *jsonObserver) Finalize() (protocol.Usage, error) {
 	if !ok {
 		return protocol.Usage{}, upstreamMalformed("upstream JSON must be an object")
 	}
-	return usageFromResponseObject(root)
+	usage, err := usageFromResponseObject(root)
+	if err == nil && responseObjectContainsToken(root) {
+		o.firstToken = true
+	}
+	return usage, err
 }
+
+func (o *jsonObserver) FirstTokenObserved() bool { return o.firstToken }
 
 type sseObserver struct {
 	pending    []byte
@@ -1218,6 +1225,7 @@ type sseObserver struct {
 	events     int
 	usage      protocol.Usage
 	done       bool
+	firstToken bool
 }
 
 func (o *sseObserver) Observe(chunk []byte) error {
@@ -1256,6 +1264,8 @@ func (o *sseObserver) Finalize() (protocol.Usage, error) {
 	}
 	return o.usage, nil
 }
+
+func (o *sseObserver) FirstTokenObserved() bool { return o.firstToken }
 
 func (o *sseObserver) drainEvents(eof bool) error {
 	eventStart := 0
@@ -1345,6 +1355,9 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	if eventName != "" && eventName != eventType {
 		return upstreamMalformed("upstream SSE event and data types do not match")
 	}
+	if responseEventContainsToken(eventType, root) {
+		o.firstToken = true
+	}
 	if eventType != "response.completed" {
 		return nil
 	}
@@ -1359,6 +1372,52 @@ func (o *sseObserver) observeEvent(event []byte) error {
 	o.usage = usage
 	o.done = true
 	return nil
+}
+
+func responseEventContainsToken(eventType string, root map[string]any) bool {
+	switch eventType {
+	case "response.output_text.delta", "response.refusal.delta",
+		"response.function_call_arguments.delta", "response.reasoning_text.delta",
+		"response.reasoning_summary_text.delta":
+		delta, ok := root["delta"].(string)
+		return ok && delta != ""
+	default:
+		return false
+	}
+}
+
+func responseObjectContainsToken(root map[string]any) bool {
+	output, ok := root["output"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawItem := range output {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"arguments", "text", "refusal"} {
+			if value, ok := item[field].(string); ok && value != "" {
+				return true
+			}
+		}
+		content, ok := item["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawContent := range content {
+			contentItem, ok := rawContent.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, field := range []string{"text", "refusal"} {
+				if value, ok := contentItem[field].(string); ok && value != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func sseEventFields(event []byte) (string, []byte, bool, error) {

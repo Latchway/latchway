@@ -253,7 +253,7 @@ func (store *operationalStore) usageLatency(
 			  AND requested_at >= $3 AND requested_at < $4 AND completed_at IS NOT NULL
 		), first_tokens AS (
 			SELECT request.logical_request_id,
-			       floor(extract(epoch FROM (min(attempt.first_byte_at) - request.requested_at)) * 1000)::bigint AS value
+			       floor(extract(epoch FROM (min(attempt.first_token_at) - request.requested_at)) * 1000)::bigint AS value
 			FROM logical_requests request
 			JOIN upstream_attempts attempt
 			  ON attempt.organization_id = request.organization_id
@@ -261,7 +261,7 @@ func (store *operationalStore) usageLatency(
 			 AND attempt.logical_request_id = request.logical_request_id
 			WHERE request.organization_id = $1 AND request.environment_id = $2
 			  AND request.requested_at >= $3 AND request.requested_at < $4
-			  AND attempt.first_byte_at IS NOT NULL
+			  AND attempt.first_token_at IS NOT NULL
 			GROUP BY request.logical_request_id, request.requested_at
 		)
 		SELECT

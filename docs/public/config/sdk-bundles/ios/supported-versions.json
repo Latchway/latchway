@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "versions": [
+    {
+      "name": "Latchway",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Latchway.podspec",
+        "region": {
+          "end_line": 20,
+          "start_line": 1
+        },
+        "region_sha256": "bf7d81d23209bbb14f97c0a1d8c70ef6bcc3c73bd7e279532bb9bd4f0375b7f3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f73eefce81542be13c9f906001762deeb877685edf64c1148aab663513b48911"
+      },
+      "version": "1.0.0"
+    },
+    {
+      "name": "iOS",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Latchway.podspec",
+        "region": {
+          "end_line": 20,
+          "start_line": 19
+        },
+        "region_sha256": "c07e7d1d5d93b7c953c701d708d88a2c4c5a72bf911b0ff06ee373bc6af8c300",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f73eefce81542be13c9f906001762deeb877685edf64c1148aab663513b48911"
+      },
+      "version": "15.0"
+    },
+    {
+      "name": "Swift",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Latchway.podspec",
+        "region": {
+          "end_line": 20,
+          "start_line": 19
+        },
+        "region_sha256": "c07e7d1d5d93b7c953c701d708d88a2c4c5a72bf911b0ff06ee373bc6af8c300",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f73eefce81542be13c9f906001762deeb877685edf64c1148aab663513b48911"
+      },
+      "version": "6.0"
+    },
+    {
+      "name": "SwiftOpenAI minimum",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Package.swift",
+        "region": {
+          "end_line": 24,
+          "start_line": 20
+        },
+        "region_sha256": "60e06fd63c614a57e2ecb9277dec4efa3aea2ca3b81029cc631e68514dcd0a52",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d0b0bb8c80e7b7a861798d5759f33cd2c99b9741d4d04d3e9e610cdf86b6d303"
+      },
+      "version": "4.6.0"
+    },
+    {
+      "name": "SwiftOpenAI latest",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Package.swift",
+        "region": {
+          "end_line": 24,
+          "start_line": 20
+        },
+        "region_sha256": "60e06fd63c614a57e2ecb9277dec4efa3aea2ca3b81029cc631e68514dcd0a52",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d0b0bb8c80e7b7a861798d5759f33cd2c99b9741d4d04d3e9e610cdf86b6d303"
+      },
+      "version": "4.6.0"
+    },
+    {
+      "name": "Apple Foundation Models OS availability",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 8,
+          "start_line": 1
+        },
+        "region_sha256": "501219b7ad96ec0e4e741c276c8907364306b717b56a6f2590664d684d7955f4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      },
+      "version": "27.0"
+    }
+  ]
+}

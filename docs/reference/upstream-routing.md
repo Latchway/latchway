@@ -49,6 +49,14 @@ These route values can only narrow the server's 32 KiB parsed-header boundary,
 the protocol adapter's configured request-body boundary, and protocol-specific
 shape limits. They do not enlarge an ingress or adapter limit.
 
+For opaque HTTP, `pathTemplates` is an exact-depth allowlist. Literal segments
+match literally and `{lower_snake_name}` captures exactly one canonical segment.
+Template sets must be pairwise disjoint and cannot contain catch-alls, partial
+or repeated captures, traversal, encoded separators, queries, fragments, or an
+absolute destination. Captures are never used to select an authority. Existing
+`pathPrefixes` policies retain their v1 segment-bound behavior when templates
+are absent; configuring both modes is invalid.
+
 ## Timeout stages
 
 Upstream defaults are:

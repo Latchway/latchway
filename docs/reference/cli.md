@@ -1,9 +1,10 @@
 # Latchway CLI reference
 
 The `latchway` binary operates the gateway through the same canonical Admin API
-used by the console. Except for `serve`, `migrate`, the local bootstrap doctor,
-and the explicitly isolated `verify local` gate, control-plane commands do not
-open PostgreSQL or read server configuration files.
+used by the console. Except for `serve`, `test-upstream serve`, `migrate`, the
+local bootstrap doctor, and the explicitly isolated `verify local` gate,
+control-plane commands do not open PostgreSQL or read server configuration
+files.
 
 ## Authentication and output
 
@@ -159,7 +160,7 @@ latchway audit --organization org_...
 
 List commands use bounded keyset pages. Pass the printed opaque cursor back via
 `--cursor`; never decode or modify it. Request output contains metadata,
-contiguously ordered attempt numbers, routes, start/first-byte/completion
+contiguously ordered attempt numbers, routes, start/first-byte/first-token/completion
 times, optional HTTP status, the closed sanitized failure category, normalized
 usage, and separate token/cost provenance. It never contains prompt/response
 bodies, provider error text, or raw internal errors; unrecognized durable
@@ -202,6 +203,21 @@ requested-input-token estimate are explicitly explanatory: they are returned
 for comparison but cannot influence CEL or reservation.
 
 ## Secrets and verification
+
+The deterministic conformance upstream is available as an exact local CLI
+command. It is unauthenticated by design and therefore accepts only an explicit
+loopback listen address:
+
+```bash
+latchway test-upstream serve \
+  --listen 127.0.0.1:19090 \
+  --scenario stream
+```
+
+It exposes `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, and
+`/v1/messages`. Use `--allow-scenario-header` only for an isolated harness that
+needs bounded per-request selection; otherwise the process-wide `--scenario`
+is authoritative.
 
 Secret values must come from stdin, a regular file, a file descriptor, or a
 named environment variable; they are never returned:

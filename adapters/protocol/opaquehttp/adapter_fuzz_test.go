@@ -19,7 +19,7 @@ func FuzzInspectAndApplyFeature(f *testing.F) {
 	f.Add(http.MethodPost, "https://evil.example/private", []byte("blocked"))
 
 	f.Fuzz(func(t *testing.T, method, remaining string, input []byte) {
-		if len(input) > 64<<10 || len(remaining) > maximumPathBytes {
+		if len(input) > 64<<10 || len(remaining) > protocol.MaximumOpaqueHTTPProviderPathBytes {
 			t.Skip()
 		}
 		request := &http.Request{

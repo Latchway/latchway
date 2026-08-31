@@ -204,6 +204,7 @@ describe("canonical Admin API browser client", () => {
 	const attempt = {
 	  attempt_number: 1, completed_at: "2026-08-29T00:00:02Z",
 	  cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", http_status: 200,
+	  first_byte_at: "2026-08-29T00:00:00.500Z", first_token_at: "2026-08-29T00:00:01Z",
 	  id: "atm_0123456789abcdef", model: "openai/gpt", started_at: "2026-08-29T00:00:00Z",
 	  route: "primary", status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
 	};
@@ -246,6 +247,12 @@ describe("canonical Admin API browser client", () => {
 	expect(() => RequestSchema.parse({ ...request, attempts: [{ ...attempt, attempt_number: 2 }] })).toThrow();
 	expect(() => RequestSchema.parse({
 	  ...request, attempts: [{ ...attempt, first_byte_at: "2026-08-29T00:00:03Z" }]
+	})).toThrow();
+	expect(() => RequestSchema.parse({
+	  ...request, attempts: [{ ...attempt, first_byte_at: undefined }]
+	})).toThrow();
+	expect(() => RequestSchema.parse({
+	  ...request, attempts: [{ ...attempt, first_token_at: "2026-08-29T00:00:02.500Z" }]
 	})).toThrow();
 	expect(() => RequestSchema.parse({
 	  ...request, attempts: [{ ...attempt, failure_code: "upstream_timeout" }]

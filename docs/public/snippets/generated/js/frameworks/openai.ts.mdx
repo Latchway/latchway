@@ -1,0 +1,77 @@
+<Info>
+  Generated from working-tree source `packages/openai/src/index.ts:L1-L71` for release candidate `v1.0.0` and recorded commit `8e36364419783b07acdd8fae82e457885f1c5447`. The dirty bundle does not claim that this region is already at that commit. Bundle SHA-256: `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c`.
+</Info>
+
+```typescript
+import OpenAI, { type ClientOptions } from "openai";
+import { VERSION as OPENAI_VERSION } from "openai/version";
+
+const placeholder = "latchway-managed-not-a-provider-secret";
+
+export interface AuthenticatedTransport {
+  readonly gatewayURL: string;
+  fetchFor(
+    feature: string,
+    framework: Readonly<{ id: "openai-js"; version: string }>,
+  ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export type LatchwayOpenAIClientOptions = Pick<
+  ClientOptions,
+  "fetchOptions" | "logLevel" | "logger" | "maxRetries" | "timeout"
+>;
+
+export interface LatchwayOpenAIOptions {
+  latchway: AuthenticatedTransport;
+  feature: string;
+  clientOptions?: LatchwayOpenAIClientOptions;
+}
+
+/**
+ * Creates the official OpenAI client with a feature-bound Latchway fetch.
+ * The placeholder satisfies the framework constructor and is removed by the
+ * authenticated transport before any network dispatch.
+ */
+export function createLatchwayOpenAI(options: LatchwayOpenAIOptions): OpenAI {
+  const authenticatedFetch = options.latchway.fetchFor(options.feature, {
+    id: "openai-js",
+    version: OPENAI_VERSION,
+  });
+  return new OpenAI({
+    ...options.clientOptions,
+    apiKey: placeholder,
+    baseURL: `${options.latchway.gatewayURL}/v1`,
+    dangerouslyAllowBrowser: true,
+    fetch: withProviderRequestID(authenticatedFetch),
+  });
+}
+
+export { OPENAI_VERSION };
+
+/** Mirrors Latchway's correlation ID into the conventional OpenAI header. */
+function withProviderRequestID(fetch: NonNullable<ClientOptions["fetch"]>): NonNullable<ClientOptions["fetch"]> {
+  return async (input, init) => aliasRequestID(await fetch(input, init));
+}
+
+function aliasRequestID(response: Response): Response {
+  const requestID = response.headers.get("X-Latchway-Request-ID");
+  if (requestID === null || response.headers.has("X-Request-ID")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-ID", requestID);
+  const aliased = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  preserveResponseLocation(aliased, response);
+  return aliased;
+}
+
+function preserveResponseLocation(target: Response, source: Response): void {
+  Object.defineProperties(target, {
+    redirected: { value: source.redirected },
+    type: { value: source.type },
+    url: { value: source.url },
+  });
+}
+```

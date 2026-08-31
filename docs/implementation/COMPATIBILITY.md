@@ -34,12 +34,13 @@ validated against
 The public compatibility page is generated at
 [`docs/public/reference/compatibility.mdx`](../public/reference/compatibility.mdx).
 
-Six entries are `experimental` at exact locally tested versions: OkHttp 5.3.0,
+Eight entries are `experimental` at exact locally tested versions: OkHttp
+4.9.2/5.3.0, Koog 1.1.1, Foundation Models 27.0.0,
 `@langchain/openai` 1.5.10, OpenAI JavaScript 7.8.0, React Native 0.82.0,
-SwiftOpenAI 4.6.0, and Vercel AI SDK 7.0.85. Foundation Models remains
-`planned` because its runtime tests were skipped on the older host OS.
-MacPaw/OpenAI 0.5.1 is `unsupported` because its public seams cannot preserve
-fresh asynchronous DPoP and streaming dispatch. No entry is `supported`.
+SwiftOpenAI 4.6.0, and Vercel AI SDK 7.0.85. MacPaw/OpenAI 0.5.1 is
+`unsupported` because its published public seams cannot preserve fresh
+asynchronous DPoP and streaming dispatch; the passing repository upstream
+patch is not an accepted release. No entry is `supported`.
 
 Support states mean:
 
@@ -84,8 +85,8 @@ are not package-publication or production-support claims.
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
 | JavaScript `@latchway/client` | `8e36364419783b07acdd8fae82e457885f1c5447` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, and composite-trust decoding implemented and locked |
-| Swift `Latchway` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, bounded invalid-input recovery, private root-Keychain isolation, explicit legacy shared-group migration detection, and delegated-only iOS extension/component transport implemented and locked; a development-signed physical root-app registration and same-key assertion passed, while protected distribution evidence remains required |
-| Android `dev.latchway:latchway-*` | `c05a74e735da3589f907eb0a788a2970245c0cc8` | Android API 23+, Java 17 | Component/OkHttp transport, Retrofit/OpenAI Kotlin/LangChain4j fixtures, and composite-trust decoding implemented and locked; direct component step-up is unsupported by design and physical Play evidence remains required |
+| Swift `Latchway` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, and the narrow Foundation Models 27 adapter are implemented; nine simulator runtime tests and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
+| Android `dev.latchway:latchway-*` | `c05a74e735da3589f907eb0a788a2970245c0cc8` | Android API 23+, Java 17 | Component/OkHttp transport plus Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
 | React Native `@latchway/react-native` | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage implemented and source-pinned; a development-signed physical iOS run passed, while protected Apple distribution, extension-runtime, and physical Android evidence remain required |
 
 The historical wire-1 locks remain recoverable from their immutable repository

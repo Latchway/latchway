@@ -81,6 +81,10 @@ A route can narrow or replace these values within the ten-minute total bound.
 Fallback and retry use the selected route's effective values and can happen
 only for configured conditions before any response bytes are committed.
 Restricted opaque HTTP also requires explicit method replay safety.
+Its preferred path policy is a pairwise-disjoint set of exact-depth templates
+with optional whole-segment captures. Captures never change the protected
+target. Compatibility-only `pathPrefixes` retain v1 segment-bound behavior but
+cannot be combined with templates.
 
 ## Trusted accounting
 

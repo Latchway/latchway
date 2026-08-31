@@ -133,7 +133,7 @@ describe("rich usage and route-simulator views", () => {
 	  upstream: "openrouter", usage_provenance: "unknown"
 	}, {
 	  attempt_number: 2, completed_at: "2026-08-29T00:00:02.500Z", cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost",
-	  first_byte_at: "2026-08-29T00:00:01Z", http_status: 200, id: "atm_0123456789abcdeg", model: "openai/gpt",
+	  first_byte_at: "2026-08-29T00:00:01Z", first_token_at: "2026-08-29T00:00:01.500Z", http_status: 200, id: "atm_0123456789abcdeg", model: "openai/gpt",
 	  route: "fallback", started_at: "2026-08-29T00:00:00.500Z", status: "succeeded", upstream: "openrouter",
 	  usage: { cost_nano_usd: 321, input_tokens: 10, logical_requests: 0, output_tokens: 20, total_tokens: 30 }, usage_provenance: "unknown"
 	}], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z", component_definition_id: "ios-main", component_kind: "main_app", environment_id: "env_0123456789abcdef", feature: "assistant", framework: "swift-openai", framework_version: "4.6.0",
@@ -153,7 +153,7 @@ describe("rich usage and route-simulator views", () => {
 	expect(adminRequestMock).toHaveBeenCalledWith("/admin/v1/requests/req_0123456789abcdef", expect.anything());
 	expect(screen.getByRole("heading", { name: "Aggregate usage" })).toBeInTheDocument();
 	expect(screen.getByRole("heading", { name: "Ordered upstream attempts" })).toBeInTheDocument();
-	expect(screen.getByText("500 ms")).toBeInTheDocument();
+	expect(screen.getByText("1 s")).toBeInTheDocument();
 	expect(screen.getAllByText("321")).toHaveLength(2);
 	expect(screen.getByText("fallback")).toBeInTheDocument();
 	expect(screen.getByText("504")).toBeInTheDocument();

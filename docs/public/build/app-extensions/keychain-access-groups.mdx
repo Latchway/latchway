@@ -3,6 +3,8 @@ title: "Configure Keychain access groups"
 description: "Separate component private material while using narrowly scoped Keychain and App Group entitlements for app-extension provisioning."
 ---
 
+import IOSAppExtensionComponent from "/snippets/generated/ios/quickstart/app-extension-component.swift.mdx";
+
 <Warning>
   These identifiers and APIs describe the pre-release source candidate. No
   released SDK package or protected physical-device proof exists yet; bind the
@@ -31,10 +33,12 @@ The extension target includes only its component-specific group. Use
 resolved values returned by the Apple signing coordinates; unresolved build
 settings fail closed.
 
+The following non-executable configuration sketch names the fields that must
+agree. Use the generated host example below for version-bound Swift source.
 Pass the private root group and the complete explicit shared-group list to both
 the root client and App Attest provider:
 
-```swift
+```text
 let rootGroup = "ABCDE12345.com.example.myapp"
 let sharedGroups = ["ABCDE12345.com.example.myapp.intent"]
 
@@ -56,13 +60,18 @@ let configuration = LatchwayConfiguration(
 
 Pass the component's exact resolved group to its component configuration:
 
-```swift
+```text
 let intentComponent = LatchwayComponentConfiguration.appIntent(
     definitionID: "assistant_intent",
     keychainAccessGroup: "ABCDE12345.com.example.myapp.intent",
     requestedFeatures: ["assistant"]
 )
 ```
+
+The tested host source performs component preparation, replacement, and family
+revocation through the same configuration boundary:
+
+<IOSAppExtensionComponent />
 
 The containing app needs the component group so it can create and provision
 that component's key. The extension uses the same group to open only its own

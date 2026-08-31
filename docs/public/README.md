@@ -42,8 +42,16 @@ The structural check requires only Python 3 and can run before dependencies are
 installed:
 
 ```sh
+pnpm check:generated
 python3 scripts/check-structure.py
 ```
+
+The generated gate derives the Admin API, stable errors, configuration schema,
+framework compatibility pages, and release-bound SDK examples and catalogs
+from the canonical core contracts and locked SDK documentation bundles.
+Editing a generated page or snippet without its normative source fails the
+drift check. Update SDK material only with the commands documented on
+[SDK documentation bundles](/reference/sdk-bundles).
 
 ## Source and mirror ownership
 
@@ -68,8 +76,12 @@ That mode refuses to mutate a mismatched mirror.
 
 Mintlify deployment is GitHub-App driven from the generated
 `Latchway/latchway-docs` `main` branch. The mirror workflow validates
-configuration, internal links, anchors, redirects, snippets, accessibility, and
-the fail-closed hashes in the checked-in source manifest before changes merge.
+configuration, internal links, anchors, redirects, MDX snippet references,
+accessibility, and the fail-closed hashes in the checked-in source manifests
+before changes merge. The core gate also revalidates each vendored SDK archive,
+manifest, checksum closure, source provenance, lock, and generated output.
+Owning SDK release workflows compile or run the source examples before building
+their bundles; Mintlify validation does not substitute for those SDK tests.
 The core-side synchronizer performs the byte-for-byte canonical-source
 comparison before updating that manifest. Neither validation path deploys or
 requires a cross-repository credential.

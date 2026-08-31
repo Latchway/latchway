@@ -1,0 +1,5165 @@
+{
+  "schema_version": 1,
+  "symbols": [
+    {
+      "name": "AsyncIterator",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 47,
+          "start_line": 47
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "Configuration",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 36,
+          "start_line": 36
+        },
+        "region_sha256": "3e0c0a6216f627a34c374f853630c2d86ac537b804bc7d8341a24f4e93005825",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "Configuration",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 95,
+          "start_line": 95
+        },
+        "region_sha256": "4b88846fd5237fc5fc2868a491a008593ec4dd68b76bdf4cb8d38dfd55a4f8b1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "Element",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 46,
+          "start_line": 46
+        },
+        "region_sha256": "f2e0d1183877676a768671b5968eb17207f25c0f9a0cc47c3d713ca478f4dcf5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "Executor",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 55,
+          "start_line": 55
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "FirebaseIdentityTokenSource",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
+        "region": {
+          "end_line": 26,
+          "start_line": 26
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30451cf4bf60829d1dfc26f63f770fbb33cc3a24d3bdaf9f9bbc490fbd0f51f8"
+      }
+    },
+    {
+      "name": "FirebaseLatchwayIdentityTokenProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "5ada31650da171d2ec20150fd4ba9db4b9bfc5d85eacd7f42255990a65579683",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30451cf4bf60829d1dfc26f63f770fbb33cc3a24d3bdaf9f9bbc490fbd0f51f8"
+      }
+    },
+    {
+      "name": "Handler",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 152,
+          "start_line": 152
+        },
+        "region_sha256": "6b00b129fd23d2ac67a3f29b21780bccee3d33b25a8870074f15d6397c4cb922",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayAppAttestProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 10,
+          "start_line": 10
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "LatchwayAsyncBytes",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 45,
+          "start_line": 45
+        },
+        "region_sha256": "3f3791d3abdffe6e0274e514483a60b952515c366c422bca7282645599a70fa6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "LatchwayAttestationChallenge",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 147,
+          "start_line": 147
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayAttestationEvidence",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 169,
+          "start_line": 169
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayAttestationProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayAttestationStatus",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 179,
+          "start_line": 179
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayClient",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "LatchwayClientComponentSummary",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 89,
+          "start_line": 89
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayClientRuntime",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 18,
+          "start_line": 18
+        },
+        "region_sha256": "6d7d128a1d4972639221ce43c39f5c5a2b8095c801e25f3bd3a0cf2ef0bbc985",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayClock",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 68,
+          "start_line": 68
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayClosureIdentityTokenProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayComponentConfiguration",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 9,
+          "start_line": 9
+        },
+        "region_sha256": "fd169f3e60ca02afdf3f6c3b882075232115c9dd120b80c5c78ffa9c05cb23c9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayComponentDiagnostics",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 138,
+          "start_line": 138
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayComponentError",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 197,
+          "start_line": 197
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayComponentKeyManager",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 9,
+          "start_line": 9
+        },
+        "region_sha256": "11e3cf85b4e19147b697698cc5335f2768f332af4151d75c8a200ac8d6a4f605",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "LatchwayComponentRecovery",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 178,
+          "start_line": 178
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayComponentTrustSource",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 128,
+          "start_line": 128
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayConfiguration",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 31,
+          "start_line": 31
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayDPoPProofFactory",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/DPoP.swift",
+        "region": {
+          "end_line": 3,
+          "start_line": 3
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "b836dfd2fbeb947fc215e1e8ff932f762dba6e44be1ede32c034f2ee298aa76b"
+      }
+    },
+    {
+      "name": "LatchwayDeterministicInstallationKey",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 84,
+          "start_line": 84
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayDiagnostics",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 273,
+          "start_line": 273
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayError",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 159,
+          "start_line": 159
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "LatchwayErrorCode",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "LatchwayExtensionClient",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 18,
+          "start_line": 18
+        },
+        "region_sha256": "53d88b06d7dd365206f0af71da1f3bc956da410761175f79ed1fc4142a2d8f83",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "LatchwayFeatureTransport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 172,
+          "start_line": 172
+        },
+        "region_sha256": "632b3fc87bffeceeb5071950d1f0f7c19237f630bac819beda8a00e07ca1d64e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "LatchwayFixedAttestationProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 165,
+          "start_line": 165
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayFoundationModelsError",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 8,
+          "start_line": 8
+        },
+        "region_sha256": "59dbf1ee8a856da71eb755b855407d9bdd84d16f8a54bb5b9bc1d6b9579b3a02",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "LatchwayFrameworkMetadata",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "LatchwayHTTPResponse",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 20,
+          "start_line": 20
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayHTTPTransport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 36,
+          "start_line": 36
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayIdentityTokenProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayInMemorySessionStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 57,
+          "start_line": 57
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayInstallationFamilySummary",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 79,
+          "start_line": 79
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "LatchwayInstallationKey",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 13,
+          "start_line": 13
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayInstallationKeyManager",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 3,
+          "start_line": 3
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "LatchwayInstallationSummary",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 221,
+          "start_line": 221
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayJSONValue",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 88,
+          "start_line": 88
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayKeyStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 140,
+          "start_line": 140
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayKeychainSessionStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f2a18fbfa9071c2e67ea5102481810e6b91d67994c17d653fade8d343255018d"
+      }
+    },
+    {
+      "name": "LatchwayLanguageModel",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 35,
+          "start_line": 35
+        },
+        "region_sha256": "fe965ec33ff1c7058562b409684d54d953f20cbff35874675b76006ef068c6a8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "LatchwayLanguageModelExecutor",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 94,
+          "start_line": 94
+        },
+        "region_sha256": "523b73b6964d0eed98f4ddda650d668da5b39175197177f768645d067a6985db",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "LatchwayProblem",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 126,
+          "start_line": 126
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "LatchwayPublicJWK",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 120,
+          "start_line": 120
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayQuotaSnapshot",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 195,
+          "start_line": 195
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayRootKeychainPreflight",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
+        "region": {
+          "end_line": 6,
+          "start_line": 6
+        },
+        "region_sha256": "593032017f9e386ad85ecb4ad3690bb4018dac590a03cd09ddfe0e5086642420",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "ba03a876831d4282f165d5084a6d2a254e21126b0e5c06340183d9727d20f953"
+      }
+    },
+    {
+      "name": "LatchwayScriptedAttestationProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 121,
+          "start_line": 121
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayScriptedTransport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 150,
+          "start_line": 150
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwaySessionStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 62,
+          "start_line": 62
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwaySoftwareKeyFallbackPolicy",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 6,
+          "start_line": 6
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayStaticIdentityTokenProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 4,
+          "start_line": 4
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayStoredSession",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 40,
+          "start_line": 40
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayStreamingResponse",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 130,
+          "start_line": 130
+        },
+        "region_sha256": "e9308fe034bad0f0285f6ccadc8bd42adf4798279a08842494080f4808fcfa50",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "LatchwaySwiftOpenAIHTTPClient",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "8c3f60e2a2f5910b4f5e57c0e13623e62cd0a8be0f10154501cb4fa9dc412beb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "LatchwaySystemClock",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 72,
+          "start_line": 72
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "LatchwayTestClock",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 18,
+          "start_line": 18
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "LatchwayTrustSummary",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 233,
+          "start_line": 233
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "LatchwayURLSessionTransport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "84f7b189cebd574f35dc4d18c7b95435d663531cf32b064fd7509f33a2646e99"
+      }
+    },
+    {
+      "name": "LatchwayVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 2,
+          "start_line": 2
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "Limit",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 197,
+          "start_line": 197
+        },
+        "region_sha256": "c72de9b21226cebfc8cd6a67b1405537f80e8908943574844835767a72deb867",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "Model",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 96,
+          "start_line": 96
+        },
+        "region_sha256": "edc4a4c2acae9585417247d02e2bb5c771fd29d1d8bf289f2c884d49429effe2",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "SessionState",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 275,
+          "start_line": 275
+        },
+        "region_sha256": "def2b9ddfc7e9cf8b4577bce5e1d91d252c440bf0ebb9ee5d347bda1fa450758",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "Support",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 181,
+          "start_line": 181
+        },
+        "region_sha256": "6975258134c5722d3841546c64f1cbb66fc9bfc78028261e22f5d5ac3c9ca33f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "TokenOperation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
+        "region": {
+          "end_line": 12,
+          "start_line": 12
+        },
+        "region_sha256": "a5865847cc1eeee97953fe3b1bc3343dad3507126ed509ae1453f8b7f26b0506",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30451cf4bf60829d1dfc26f63f770fbb33cc3a24d3bdaf9f9bbc490fbd0f51f8"
+      }
+    },
+    {
+      "name": "action",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 180,
+          "start_line": 180
+        },
+        "region_sha256": "871384168f107ad594ae590287dbb9d5ab8a5bd8b6cd7c5468308c8c857aefd6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "advance",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 31,
+          "start_line": 31
+        },
+        "region_sha256": "7f7274f62756417219b8afe04d067d4636d97d3619c9793d65f020c92a4e8382",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "appIntent",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 52,
+          "start_line": 52
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "appVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 46,
+          "start_line": 46
+        },
+        "region_sha256": "512bcccf73cbb997cc42fd7743c545f2de161a2b6807495b6ee8063139ddbaa6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "applicationID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 34,
+          "start_line": 34
+        },
+        "region_sha256": "77f1d002a213c83aa4931eb685a337df1a1c30da345d934871c8bc9f3d2fdb48",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "attestation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 284,
+          "start_line": 284
+        },
+        "region_sha256": "c64f0d331f579ea5cb55030b45cb3ce551a30d715c0fa3be0f075f936fbe1ccd",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "attestationProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 48,
+          "start_line": 48
+        },
+        "region_sha256": "b27749e380ae0aff52645db5ef54d06c36f052935d1de42e107669c8bad44c58",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "authorize",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 132,
+          "start_line": 132
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "authorize",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 150,
+          "start_line": 150
+        },
+        "region_sha256": "c82acedba97a0eafffa3ebe64fdbd353c62615df5f63f958bec0d84c0ec035b6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "authorize",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 135,
+          "start_line": 135
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "authorize",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 215,
+          "start_line": 215
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "baseURL",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 33,
+          "start_line": 33
+        },
+        "region_sha256": "863c63dea61de9562ea0e1fb966f507d30b2048bf9528677ba5ed73318ff55bc",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "body",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 24,
+          "start_line": 24
+        },
+        "region_sha256": "e307675c4ac38b503775611dc36e7884e1091822fe6951a791d34a62555ed3b0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "boundFeature",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 401,
+          "start_line": 401
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "bytes",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 132,
+          "start_line": 132
+        },
+        "region_sha256": "c7a515e14c76e7efa088e117db72aa5a3a87ab3bb29a6f3d73373ae028b104c1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "bytes",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 233,
+          "start_line": 233
+        },
+        "region_sha256": "b326c2b9f5f394e6154763183dd15c7b7c0bc0c66a90a073fb39cc577ac32115",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "bytes",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 68,
+          "start_line": 68
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "cancel",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 161,
+          "start_line": 161
+        },
+        "region_sha256": "03e8bdd89ef38235e674387834cc748630050196891fe4b9459bbf6b797aa3c3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "capabilities",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 57,
+          "start_line": 57
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "clear",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
+        "region": {
+          "end_line": 61,
+          "start_line": 61
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f2a18fbfa9071c2e67ea5102481810e6b91d67994c17d653fade8d343255018d"
+      }
+    },
+    {
+      "name": "clear",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 79,
+          "start_line": 79
+        },
+        "region_sha256": "984153e2357c2707b4beea18f47ea23dc1aea42a92709429f38d5c15db1f1cb3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "clientDataHash",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 151,
+          "start_line": 151
+        },
+        "region_sha256": "aff6aa4fb526bc941d48fcc9a6b21475b38d2609cdadbbbe67c840d592a3e1bf",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "clientRuntime",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 44,
+          "start_line": 44
+        },
+        "region_sha256": "0acdc7a35e0f8215adb50f5430d141f7ef14af7959092665d1864a9d64a6ed98",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "clientSDKVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 45,
+          "start_line": 45
+        },
+        "region_sha256": "f6be4a6ebb0a1758c5dde7f21f91839543fd58f253fcbb8263f4a778711a4415",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "code",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 128,
+          "start_line": 128
+        },
+        "region_sha256": "71cd3ec95fb9c41bd5713e22c64bbefce0fdea880d584755f61847d2c91f837e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "component",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 46,
+          "start_line": 46
+        },
+        "region_sha256": "7e6fc77ea03ba678c204fcec1210d6f81acba2c2e33f5f879ea03636752e4283",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "componentDefinitionID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 294,
+          "start_line": 294
+        },
+        "region_sha256": "ede57ef17afb72ceddb3f8aa2c789a46909e64789668026947b4cdb25fa7b8e6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "componentDiagnostics",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 600,
+          "start_line": 600
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "componentID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 141,
+          "start_line": 141
+        },
+        "region_sha256": "d4a0c57ea3ce5de883604da3a7ac60ce01dcc67379c2fb03826fa0b36596caed",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "componentID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 293,
+          "start_line": 293
+        },
+        "region_sha256": "d4a0c57ea3ce5de883604da3a7ac60ce01dcc67379c2fb03826fa0b36596caed",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "componentKind",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 295,
+          "start_line": 295
+        },
+        "region_sha256": "7b95024c01b5e44481251b02f9fc02ffcf4a381101eb1166a34610e9550e9c39",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "containingAppActionRequired",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 150,
+          "start_line": 150
+        },
+        "region_sha256": "25dbbe4392b0b2a981fbfcdaefd808a178991464c805b418dc9c5e652f90eeaa",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "contract",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 5,
+          "start_line": 5
+        },
+        "region_sha256": "5009568a3aa35bffe1f97e10df356d29fa3b448d13fe01a012d7171f0a2360bf",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "contractVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 280,
+          "start_line": 280
+        },
+        "region_sha256": "45ae405895460053485e14c04037cc38509d294411c612b193ea4d3351d67159",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "controlRequestTimeout",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 49,
+          "start_line": 49
+        },
+        "region_sha256": "33c9745aef49cdebd0d6990ab638513e93b31fca910aae485e0ad32da5f37533",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "curve",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 123,
+          "start_line": 123
+        },
+        "region_sha256": "fd843a58e931834a19c6577f78dbf6b263ce5d7f8e5e208380414f363bae4f57",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "data",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 60,
+          "start_line": 60
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "definitionID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 10,
+          "start_line": 10
+        },
+        "region_sha256": "067df287120bf1fbebe1ef237f0a1da310169c78f91289959d80c912f09219e5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "definitionID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 92,
+          "start_line": 92
+        },
+        "region_sha256": "067df287120bf1fbebe1ef237f0a1da310169c78f91289959d80c912f09219e5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "definitionID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 142,
+          "start_line": 142
+        },
+        "region_sha256": "067df287120bf1fbebe1ef237f0a1da310169c78f91289959d80c912f09219e5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "delegationID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 240,
+          "start_line": 240
+        },
+        "region_sha256": "688ef58097109f571ab69f8adb43efa4b85ed7f03c9f508c7d15a6b333dad753",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "description",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 61,
+          "start_line": 61
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "description",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 173,
+          "start_line": 173
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "detail",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 130,
+          "start_line": 130
+        },
+        "region_sha256": "79ce5992231a5c8d32d82f4c08b2899218662b7fddf118c909cdf9c039e8158d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "diagnostics",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 620,
+          "start_line": 620
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "diagnostics",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 220,
+          "start_line": 220
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "didAccept",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 225,
+          "start_line": 225
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "didAccept",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 142,
+          "start_line": 142
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "dpopJKT",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 96,
+          "start_line": 96
+        },
+        "region_sha256": "76fda12634dd9840098dbc274371ca9590814261c6edda8b1528e9d10a5b1dbb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "dpopJKT",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 225,
+          "start_line": 225
+        },
+        "region_sha256": "76fda12634dd9840098dbc274371ca9590814261c6edda8b1528e9d10a5b1dbb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "encode",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 107,
+          "start_line": 107
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "endpoint",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 406,
+          "start_line": 406
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "environment",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 35,
+          "start_line": 35
+        },
+        "region_sha256": "e3a3daeb4340f09bfe71cf3ab1ead300bac1f6d9b39026f7be77957da9aafeea",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "errorDescription",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 280,
+          "start_line": 280
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "errorDescription",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 191,
+          "start_line": 191
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "errorDescription",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 13,
+          "start_line": 13
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "establishDirectAttestation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 148,
+          "start_line": 148
+        },
+        "region_sha256": "a86d83392671b937ea01358e6caecd145ae8ad4bedfdd14edad1ad1f1a075961",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "evidence",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 172,
+          "start_line": 172
+        },
+        "region_sha256": "7191e3cee8268db78d8d9a4aa317c651faa5a5e6a2b469932a894824b548d6a6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "evidence",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 162,
+          "start_line": 162
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "evidence",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 136,
+          "start_line": 136
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "evidence",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 177,
+          "start_line": 177
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "executorConfiguration",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 59,
+          "start_line": 59
+        },
+        "region_sha256": "5ad4c423dbc4724bbb81e633ec10a38bc57b97375b9495dd8227745725e1bd0b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "expiresAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 152,
+          "start_line": 152
+        },
+        "region_sha256": "a84d011c0169f9b59afc3d53d73a37034023686b06f5eb855ed4e0b469bc032b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "expiresAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 242,
+          "start_line": 242
+        },
+        "region_sha256": "a84d011c0169f9b59afc3d53d73a37034023686b06f5eb855ed4e0b469bc032b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "familyID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 140,
+          "start_line": 140
+        },
+        "region_sha256": "1047c7f20dbbe8c26d91d361c92efecf74d3fbccb5a0dd0296ba944a70ead8e6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "feature",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 211,
+          "start_line": 211
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "finish",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 154,
+          "start_line": 154
+        },
+        "region_sha256": "0969994affefbd3438536a428b9c228f69ac6f9e2f504ccbf0b60fc21397b251",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "foundationModels",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "frameworkMetadata",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 403,
+          "start_line": 403
+        },
+        "region_sha256": "2563f2383d35b15aa804eff0422a06e58c08c2d60cef3adb45bc59e2b745d17f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "gatewayBaseURL",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 405,
+          "start_line": 405
+        },
+        "region_sha256": "99d9164474ad126380e185bbfb03ab9a4c22b6fc0287c7fa6407856a0e23c636",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "grantAvailable",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 146,
+          "start_line": 146
+        },
+        "region_sha256": "074c49fb84c6a3d759255be67a76a9ee4a1ce3c00050af573721ef5b43ee3910",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "grantedFeatures",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 98,
+          "start_line": 98
+        },
+        "region_sha256": "623520d0efbc5caa81c0cded76fa5f475fc033fc779471a1720924deaad535ca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "hard",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 204,
+          "start_line": 204
+        },
+        "region_sha256": "cfa3418e459a83de3954a6861c4774662ee767684384d526ce38fa306a0f61ad",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "hash",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 50,
+          "start_line": 50
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "header",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 31,
+          "start_line": 31
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "headers",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "8807ce08281334479e4c2f1d4172f52de023d256cc1c66b65df2a8a7c5827cb7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 81,
+          "start_line": 81
+        },
+        "region_sha256": "1e93bcfc7d0388c813b5c0929845106a0833910f0a837953128990f8a4ffda22",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 91,
+          "start_line": 91
+        },
+        "region_sha256": "1e93bcfc7d0388c813b5c0929845106a0833910f0a837953128990f8a4ffda22",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 149,
+          "start_line": 149
+        },
+        "region_sha256": "1e93bcfc7d0388c813b5c0929845106a0833910f0a837953128990f8a4ffda22",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 223,
+          "start_line": 223
+        },
+        "region_sha256": "1e93bcfc7d0388c813b5c0929845106a0833910f0a837953128990f8a4ffda22",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "identifier",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 4,
+          "start_line": 4
+        },
+        "region_sha256": "7d8e587b02395616d9e1f500c17f46717acedc0d27fc30ba8d4d818db2996888",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "identityProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 43,
+          "start_line": 43
+        },
+        "region_sha256": "8d0d55dd4e10494756bc19873b37940d0ffbbb65ae1122b4c5d95927d1a3c861",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "identityToken",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
+        "region": {
+          "end_line": 19,
+          "start_line": 19
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30451cf4bf60829d1dfc26f63f770fbb33cc3a24d3bdaf9f9bbc490fbd0f51f8"
+      }
+    },
+    {
+      "name": "identityToken",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 9,
+          "start_line": 9
+        },
+        "region_sha256": "f40c73121b276c15e9c86adc9fb6b9121c840b529b01890086d7d6df0bc7c122",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "identityToken",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 16,
+          "start_line": 16
+        },
+        "region_sha256": "34cccfe3cdba21059a5088ec0d180dcfee16a434d559db72d713f00d59e11428",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "immediateRetryUseful",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 183,
+          "start_line": 183
+        },
+        "region_sha256": "8dee203441d9e9686ddfc78a31962f33caf31ed7296ae67ef92623065b2ac421",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 14,
+          "start_line": 14
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 83,
+          "start_line": 83
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 107,
+          "start_line": 107
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 151,
+          "start_line": 151
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 184,
+          "start_line": 184
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 19,
+          "start_line": 19
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/DPoP.swift",
+        "region": {
+          "end_line": 7,
+          "start_line": 7
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "b836dfd2fbeb947fc215e1e8ff932f762dba6e44be1ede32c034f2ee298aa76b"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 16,
+          "start_line": 16
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 24,
+          "start_line": 24
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 71,
+          "start_line": 71
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 57,
+          "start_line": 57
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 138,
+          "start_line": 138
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
+        "region": {
+          "end_line": 9,
+          "start_line": 9
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f2a18fbfa9071c2e67ea5102481810e6b91d67994c17d653fade8d343255018d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 25,
+          "start_line": 25
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 47,
+          "start_line": 47
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 74,
+          "start_line": 74
+        },
+        "region_sha256": "39243609f76a3d8afbfbdd79f004f6be77f2264bbbb990a2b47c8752c77fe152",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 50,
+          "start_line": 50
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 96,
+          "start_line": 96
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 132,
+          "start_line": 132
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 154,
+          "start_line": 154
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 173,
+          "start_line": 173
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 188,
+          "start_line": 188
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 252,
+          "start_line": 252
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 305,
+          "start_line": 305
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 32,
+          "start_line": 32
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 76,
+          "start_line": 76
+        },
+        "region_sha256": "ecb78a0abe7aa9a05bf942aafa2d4cf9644e5ed78200a72e61ca3035be9e7680",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 6,
+          "start_line": 6
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
+        "region": {
+          "end_line": 6,
+          "start_line": 6
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "84f7b189cebd574f35dc4d18c7b95435d663531cf32b064fd7509f33a2646e99"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 42,
+          "start_line": 42
+        },
+        "region_sha256": "ecb78a0abe7aa9a05bf942aafa2d4cf9644e5ed78200a72e61ca3035be9e7680",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 68,
+          "start_line": 68
+        },
+        "region_sha256": "ecb78a0abe7aa9a05bf942aafa2d4cf9644e5ed78200a72e61ca3035be9e7680",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 102,
+          "start_line": 102
+        },
+        "region_sha256": "ecb78a0abe7aa9a05bf942aafa2d4cf9644e5ed78200a72e61ca3035be9e7680",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
+        "region": {
+          "end_line": 15,
+          "start_line": 15
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "30451cf4bf60829d1dfc26f63f770fbb33cc3a24d3bdaf9f9bbc490fbd0f51f8"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 39,
+          "start_line": 39
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 60,
+          "start_line": 60
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 64,
+          "start_line": 64
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 77,
+          "start_line": 77
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 99,
+          "start_line": 99
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 15,
+          "start_line": 15
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 26,
+          "start_line": 26
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 7,
+          "start_line": 7
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 14,
+          "start_line": 14
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 63,
+          "start_line": 63
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 89,
+          "start_line": 89
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 128,
+          "start_line": 128
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 156,
+          "start_line": 156
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "init",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 169,
+          "start_line": 169
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "installation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 44,
+          "start_line": 44
+        },
+        "region_sha256": "4c469ccd94e8814e3f5b0e7e9f6069efc76b080afe0e1bff7866fb5255103da0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "installationFamily",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 45,
+          "start_line": 45
+        },
+        "region_sha256": "a4ffd50d29c92a99f5d81236bb533343da0ec20feba191acea9a2c2212f6e817",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "installationFamilyID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 290,
+          "start_line": 290
+        },
+        "region_sha256": "b176a466e3b920deea532038b6ab5b3651431d0d95970bf8efc69b98ace7d3e3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "installationID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 287,
+          "start_line": 287
+        },
+        "region_sha256": "cde5c73c45c0c5d2b8ae981171984748b10f2cebb102e722e2d38a0382bc48e5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "isRoot",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 95,
+          "start_line": 95
+        },
+        "region_sha256": "1c5af84e2f112037534574a08a13a015723cb673cc6e597e7816011bc8914339",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "keyAvailable",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 144,
+          "start_line": 144
+        },
+        "region_sha256": "682af0763c430d3acea22c7f617d0c0d22f3a4cac0166f7767fade37b700508c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "keyID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 186,
+          "start_line": 186
+        },
+        "region_sha256": "57651752b6611c576f3b371d02d6e223409923f940a6a8eb1e3f49eb5a2e0fc4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "keyStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 145,
+          "start_line": 145
+        },
+        "region_sha256": "3cc065684c9510e1cd21cd9a229a4f6b675139e394e48d2da561611b47cc9870",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "keyStorage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 282,
+          "start_line": 282
+        },
+        "region_sha256": "3cc065684c9510e1cd21cd9a229a4f6b675139e394e48d2da561611b47cc9870",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "keyThumbprint",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 283,
+          "start_line": 283
+        },
+        "region_sha256": "106b536846dd47ceab1177591c5fcd801395d785223fbf3b0afcc74d321e259c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "keyType",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 122,
+          "start_line": 122
+        },
+        "region_sha256": "d23306c343cd2345d757eca9d697651392e2f029651260ac1c5c14fd0fba55ff",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "keychainAccessGroup",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 12,
+          "start_line": 12
+        },
+        "region_sha256": "cb08aa0b7a84e1ed341698f4a0af48aeb66ea55a8d9b2266423217a5065cae8c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "keychainAccessGroup",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 143,
+          "start_line": 143
+        },
+        "region_sha256": "cb08aa0b7a84e1ed341698f4a0af48aeb66ea55a8d9b2266423217a5065cae8c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "kind",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "f6785878f1e72a7c6d0847bbb9c992931b3eddcd811026f2c18aec97eabd758d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "kind",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 93,
+          "start_line": 93
+        },
+        "region_sha256": "f6785878f1e72a7c6d0847bbb9c992931b3eddcd811026f2c18aec97eabd758d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "lastErrorCode",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 304,
+          "start_line": 304
+        },
+        "region_sha256": "614dba5a653d28afc300af953744b52edd094fdfee81ed2f4021513aae059473",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "lastOperation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 187,
+          "start_line": 187
+        },
+        "region_sha256": "e5be47a4fdbefcb82f665f41a4fae387f286dc7105d0720151fc89baf39dc38a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "lastRequestID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 303,
+          "start_line": 303
+        },
+        "region_sha256": "94ed2db03bf66ba76013645268d5df520d91b9bec00dab7dc9c7fa5ca0b80fcb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "legacySharedKeychainAccessGroups",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 42,
+          "start_line": 42
+        },
+        "region_sha256": "cde52f9e5d9aaa00d4053ebdebb0e4b3165c9ed59e80ae78527abc000ba322e1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "level",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 236,
+          "start_line": 236
+        },
+        "region_sha256": "094c78c37e1ef9f72c631d50329ec4cbe9e8109fe3a76a8e673563ea56c721d3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "limits",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 214,
+          "start_line": 214
+        },
+        "region_sha256": "dfe78841d461d3b28fec6ca7e82b425132f2fd3c691f80790592befadd68284a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "load",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
+        "region": {
+          "end_line": 45,
+          "start_line": 45
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f2a18fbfa9071c2e67ea5102481810e6b91d67994c17d653fade8d343255018d"
+      }
+    },
+    {
+      "name": "load",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 71,
+          "start_line": 71
+        },
+        "region_sha256": "5fb603fd4fc6c44c0bf7b04e3b3cbb12393154ee3b1eea61ce5df5d1b0d1189c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "makeAsyncIterator",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 104,
+          "start_line": 104
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "makeService",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 49,
+          "start_line": 49
+        },
+        "region_sha256": "b35cb2a81671b1b0237a724cbd912e8d0ff2b83c9dd0ddba92e87d4e95c110fa",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "makeURLSession",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 446,
+          "start_line": 446
+        },
+        "region_sha256": "2f70178ba2d5ca657cb322fa8bae6ad677ca0f9357ce862f42c7c24eeb9ec2d5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "maximum",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 199,
+          "start_line": 199
+        },
+        "region_sha256": "c4c964a0bf05d2d7576f6b60914dbba2a0be3727a495555de26b1cd305699610",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "metric",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 198,
+          "start_line": 198
+        },
+        "region_sha256": "2802f2a40f4e8e236534a49906b0349f61a0755299e46ea0086890d8a417aefb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "minimumProtocolVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 8,
+          "start_line": 8
+        },
+        "region_sha256": "49f6b4c640e98b5e65f1758661d724ab8b8c8ba6ffc8967ba21474ecfb65a990",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "next",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 64,
+          "start_line": 64
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "normalizedHTU",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/DPoP.swift",
+        "region": {
+          "end_line": 74,
+          "start_line": 74
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "b836dfd2fbeb947fc215e1e8ff932f762dba6e44be1ede32c034f2ee298aa76b"
+      }
+    },
+    {
+      "name": "notificationService",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 65,
+          "start_line": 65
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "now",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 75,
+          "start_line": 75
+        },
+        "region_sha256": "775c478915579b9dee429455878f9b482617978d3e560eb058f3069ccfbf4685",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "now",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 25,
+          "start_line": 25
+        },
+        "region_sha256": "4541dfac151caec8991a8c1aa43f3a9765616d3f9a89f8dab09addc6a049de19",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "observedAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 213,
+          "start_line": 213
+        },
+        "region_sha256": "2fcf3e95c04599a6329328cd4254f681a4a1f6edc79148083a9245eefe3c0932",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "openingContainingAppCanFix",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 181,
+          "start_line": 181
+        },
+        "region_sha256": "0bef06bb8804cc9726acb766c8f934176b23dba2a3127420507247db4a6b03a3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "operationID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 137,
+          "start_line": 137
+        },
+        "region_sha256": "432e6b26cb1026f1835fc40eceb5db7e704c34e2c96becf2ed44e229aa94f380",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "options",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 153,
+          "start_line": 153
+        },
+        "region_sha256": "49ecc6635d3a6295971916b6e0c1c1f4cb4311bb951c42b23c86dfd915b3f458",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "parentAttestationProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 239,
+          "start_line": 239
+        },
+        "region_sha256": "0934cd3fbf128cd40fa418ae129b57975ecc90b96733f7c5f04ec3c0fae44c17",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "parentComponentID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 238,
+          "start_line": 238
+        },
+        "region_sha256": "79b282b47cfbef0368187b8b4dc9fbac2e3032c7afaf48b08e14bf9dc28883aa",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "pendingReadCount",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 37,
+          "start_line": 37
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "placeholderAPIKey",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 173,
+          "start_line": 173
+        },
+        "region_sha256": "336dfc45f6077817929405377b15095c68ad93c0d3c13dbd3381bfa65e708de2",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "placeholderAPIKey",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 44,
+          "start_line": 44
+        },
+        "region_sha256": "51e5e6719460a4cee0de65a9656ee93f09cfc82d3ee5c19cf44cfd47609e0528",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "platform",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 94,
+          "start_line": 94
+        },
+        "region_sha256": "f96be6eac8ec21afce0217be05c9ff26803f283840832fb4938c8bb88cdf361b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "platform",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 224,
+          "start_line": 224
+        },
+        "region_sha256": "f96be6eac8ec21afce0217be05c9ff26803f283840832fb4938c8bb88cdf361b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "platformIdentifier",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 21,
+          "start_line": 21
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "prepareComponents",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 556,
+          "start_line": 556
+        },
+        "region_sha256": "2e5fee6e39527f8770d3042a13e1abcfd579cd4cfe42916835e477155892b435",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "prewarm",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 103,
+          "start_line": 103
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "proof",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/DPoP.swift",
+        "region": {
+          "end_line": 12,
+          "start_line": 12
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "b836dfd2fbeb947fc215e1e8ff932f762dba6e44be1ede32c034f2ee298aa76b"
+      }
+    },
+    {
+      "name": "protocolVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 6,
+          "start_line": 6
+        },
+        "region_sha256": "5d26ef55c9d6186b5292b0a8d92a7eded03ed9ba72ee623bfd153e0f4297ebb9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "protocolVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 281,
+          "start_line": 281
+        },
+        "region_sha256": "3d6b7ae510152322b1c2a8b8ab9c117c64c8e120a0ffdac34ce80fff8c63bcd0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 150,
+          "start_line": 150
+        },
+        "region_sha256": "761a8fb9bef3ef8af7835fc92c00802687e2d9af6f51ed845d80b8da87b30b6a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 171,
+          "start_line": 171
+        },
+        "region_sha256": "761a8fb9bef3ef8af7835fc92c00802687e2d9af6f51ed845d80b8da87b30b6a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 235,
+          "start_line": 235
+        },
+        "region_sha256": "761a8fb9bef3ef8af7835fc92c00802687e2d9af6f51ed845d80b8da87b30b6a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "publicJWK",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 72,
+          "start_line": 72
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "publicJWK",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 55,
+          "start_line": 55
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "publicJWK",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 94,
+          "start_line": 94
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "quota",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 449,
+          "start_line": 449
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "recovery",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 212,
+          "start_line": 212
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "refresh",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 254,
+          "start_line": 254
+        },
+        "region_sha256": "30498749134c29a27012f3471dfd14b0e390231f8fe5e1ed31a9a024f43e43e7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "refresh",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 139,
+          "start_line": 139
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "refreshExpiresAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 43,
+          "start_line": 43
+        },
+        "region_sha256": "3cfeeae9bb0a52b429e39a1b760597c982dd5ca8eaef8ede7497b9c1c6eb505d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "refreshToken",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 42,
+          "start_line": 42
+        },
+        "region_sha256": "4d8f799ca3a5bfc617f479ff34b27327096a2be02864f768f64ea39d5d652962",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "remaining",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 202,
+          "start_line": 202
+        },
+        "region_sha256": "42f3bed423ecc84683cfddd957c12b9ccd1c29de818e07bd051b3fc5f3466b90",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "replaceComponent",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 576,
+          "start_line": 576
+        },
+        "region_sha256": "25e3325beb71667ec323b020f061c465b4f6603729d1d0d50cf84860440130e0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "requestID",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 132,
+          "start_line": 132
+        },
+        "region_sha256": "4157918def81fe015b031e26de8a50d2db5afdde01be84b29d4396525a0a657b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "requestedFeatures",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 13,
+          "start_line": 13
+        },
+        "region_sha256": "404cf5dcc841db29145b8e4996d9a1f833f07a23351e508ca74b686876c4116e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "reserved",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 201,
+          "start_line": 201
+        },
+        "region_sha256": "645045ef920de4d8a5fe36ca4e3d255fdb5f7c0ae82f0dfe7c14058f5ea61946",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 113,
+          "start_line": 113
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 94,
+          "start_line": 94
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 291,
+          "start_line": 291
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 108,
+          "start_line": 108
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 146,
+          "start_line": 146
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 179,
+          "start_line": 179
+        },
+        "region_sha256": "b32f631eda886eabb8e00f8e1a6ac1c35681f953b66c0ef0364d69255282cb33",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "resetsAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 203,
+          "start_line": 203
+        },
+        "region_sha256": "0906d2963b11671ed8fd8f3501577dd62e75ca8f7eb5edb4e3ad27500e9bf7ca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "respond",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
+        "region": {
+          "end_line": 107,
+          "start_line": 107
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "af776f961ddce513616882bb668896d451186d5ce7cbf85c7c15ab27bd1c419f"
+      }
+    },
+    {
+      "name": "response",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 131,
+          "start_line": 131
+        },
+        "region_sha256": "3dc2ab4bda22883d8a6de03e58f3d705808d7ab3dc614536c307b261ed1b595f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "resumeOneReadAndAllowFutureReads",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 42,
+          "start_line": 42
+        },
+        "region_sha256": "589aab481d90f8e159dc5bc4585eb004a81a9fe4f1e7b30991fab9f17aaab478",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "resumePendingReads",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 47,
+          "start_line": 47
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "retryAfter",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 134,
+          "start_line": 134
+        },
+        "region_sha256": "070e8556606f7c8ca905b4c2aa7f589d53e98bd1fe0d1b7ed3ebe7c3b920305c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "retryable",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 133,
+          "start_line": 133
+        },
+        "region_sha256": "44aef845bf5d5656ef12d009083c515a2dbbb47ee4917aa468ef01c6affc32ad",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "revokeComponent",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 583,
+          "start_line": 583
+        },
+        "region_sha256": "a1ac220918be22643e67aa97c84b02f7458d35b1307d46145859b406b8b7bbc1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "revokeCurrentInstallation",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 477,
+          "start_line": 477
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "revokeCurrentInstallationFamily",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 505,
+          "start_line": 505
+        },
+        "region_sha256": "9d75b0ad61a15920898a3e315646e16efbabcba591bd21bfa790c4c3d8042082",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "revokeCurrentInstallationFamily",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 516,
+          "start_line": 516
+        },
+        "region_sha256": "1b437f461782ced99875d330764ac5a262b65b63434fd217d0ddc84e5667da93",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "rootKeychainAccessGroup",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 38,
+          "start_line": 38
+        },
+        "region_sha256": "581bb2df4a7c2fe1d43e3be05a9b25f0696340d17de342fffb9770b39c24e3d7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "save",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
+        "region": {
+          "end_line": 55,
+          "start_line": 55
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f2a18fbfa9071c2e67ea5102481810e6b91d67994c17d653fade8d343255018d"
+      }
+    },
+    {
+      "name": "save",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 72,
+          "start_line": 72
+        },
+        "region_sha256": "43b28f1c681a89df2e00511d92940980fe7330e463c259f270e469608f52dab5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "sdk",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 4,
+          "start_line": 4
+        },
+        "region_sha256": "4ba6ad928cccc9c47fce2392078b702eec0976ff4daf2af46b3103cee5fb0463",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "sdkIdentifier",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "sdkVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 278,
+          "start_line": 278
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "send",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 308,
+          "start_line": 308
+        },
+        "region_sha256": "a31090510a74e1242a454083a6599d5013a85f6e3b4a178e99e850482e51e8bd",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "send",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 219,
+          "start_line": 219
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "send",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
+        "region": {
+          "end_line": 11,
+          "start_line": 11
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "84f7b189cebd574f35dc4d18c7b95435d663531cf32b064fd7509f33a2646e99"
+      }
+    },
+    {
+      "name": "send",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 158,
+          "start_line": 158
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "serverVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 296,
+          "start_line": 296
+        },
+        "region_sha256": "0c2a9c6fda22da8d3ccb2f01e75939c21438b3b4631b9fe494f10bd866e7ca64",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "sessionAvailable",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 147,
+          "start_line": 147
+        },
+        "region_sha256": "830c06edd49882f574096559d17461c5497626c0a8ac8d9098a5390aa06bfac9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "sessionExpiresAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 286,
+          "start_line": 286
+        },
+        "region_sha256": "bee4f9c2685f6f06f09e9ee30c9d30eb526218cfc99be0f6806891cb8f11272e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "sessionState",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 285,
+          "start_line": 285
+        },
+        "region_sha256": "864e987c9a13800ad633179e5e6532e180666c0ba7c4a32428f075f3442f8a32",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "set",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 32,
+          "start_line": 32
+        },
+        "region_sha256": "a5f852788a492e287f48ebdb5fb04847d849c8ce964309f24278308bf72d2415",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "shareExtension",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 39,
+          "start_line": 39
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "sign",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 87,
+          "start_line": 87
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "sign",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 69,
+          "start_line": 69
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "sign",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 101,
+          "start_line": 101
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "softwareKeyFallbackPolicy",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 47,
+          "start_line": 47
+        },
+        "region_sha256": "0135fb112f3393d1bca23d5c04f73837928a8d0e770499bc5aefb3f785b42da4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "source",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 237,
+          "start_line": 237
+        },
+        "region_sha256": "982c273c381555548ffaba3755d6252ab8329133becd3f0a4a16893c04622b49",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 82,
+          "start_line": 82
+        },
+        "region_sha256": "7de11ea53e241c657793799feb2ab9b4fd857f6da647b0ed817f6f9eac838f8b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 97,
+          "start_line": 97
+        },
+        "region_sha256": "7de11ea53e241c657793799feb2ab9b4fd857f6da647b0ed817f6f9eac838f8b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 131,
+          "start_line": 131
+        },
+        "region_sha256": "8f64aa6a3a39b8fbdb9c0b548739b70dfcd7f6710b9cb48d7112096e3f6c6bd1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 226,
+          "start_line": 226
+        },
+        "region_sha256": "7de11ea53e241c657793799feb2ab9b4fd857f6da647b0ed817f6f9eac838f8b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
+        "region": {
+          "end_line": 320,
+          "start_line": 320
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "6176902648ff5c270aba59f3b21fbabd7540508b68af2dad4cf9cc2975835a1c"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 148,
+          "start_line": 148
+        },
+        "region_sha256": "3d689c8bccec073fd0850c42c63a8edb552cf1d41248ed78b4d0d9ec0e8db451",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 180,
+          "start_line": 180
+        },
+        "region_sha256": "3d689c8bccec073fd0850c42c63a8edb552cf1d41248ed78b4d0d9ec0e8db451",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "statusCode",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Protocols.swift",
+        "region": {
+          "end_line": 22,
+          "start_line": 22
+        },
+        "region_sha256": "ad2d5c06534c82623776a3fd377d838412c50bc78d8b9303d2f0a612cc0bae01",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "a4c1366dc1039e3cd6df6604804d7cac0cc722eae055e066c29855d51cc0005c"
+      }
+    },
+    {
+      "name": "storage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
+        "region": {
+          "end_line": 101,
+          "start_line": 101
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d3aba5b52943424541c53b7941cc2d8125a1e03b3723938f44c40d17eb4cc50d"
+      }
+    },
+    {
+      "name": "storage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
+        "region": {
+          "end_line": 81,
+          "start_line": 81
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "e001707fbf5af2477078c63f14c7bda46b25b31ce42ec52e4ea6669c16d3bbad"
+      }
+    },
+    {
+      "name": "storage",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 106,
+          "start_line": 106
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "support",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 184,
+          "start_line": 184
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "supportedProtocolVersions",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayVersion.swift",
+        "region": {
+          "end_line": 7,
+          "start_line": 7
+        },
+        "region_sha256": "adde8cef4a98b393e1d4e4ad1e124c4ef393d3fd5616e3702b0894f9a7b39bdc",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "81987e8bc133c55dbabd867cefcbe61715e2d42f9a3993cd7e877b04274937ac"
+      }
+    },
+    {
+      "name": "suspendReads",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwayTesting/TestDoubles.swift",
+        "region": {
+          "end_line": 36,
+          "start_line": 36
+        },
+        "region_sha256": "8265c60212592fd4af9cedc8ef9e04b156401e44a8cee6bf4a47d98ae81c4401",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2fcdc71ecc26bf09f4d2d5e512f78ebc9cbb6af671ad1c772d8531bcde5eba2c"
+      }
+    },
+    {
+      "name": "swiftOpenAI",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 15,
+          "start_line": 15
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "testedFrameworkVersion",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 12,
+          "start_line": 12
+        },
+        "region_sha256": "8e305e4db614c076c6955d5255c20fe76190ae539116e6537227de764dbbdadd",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "thumbprint",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Crypto/DPoP.swift",
+        "region": {
+          "end_line": 54,
+          "start_line": 54
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "b836dfd2fbeb947fc215e1e8ff932f762dba6e44be1ede32c034f2ee298aa76b"
+      }
+    },
+    {
+      "name": "title",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 129,
+          "start_line": 129
+        },
+        "region_sha256": "762a004c127742e38c0528015283cabb847afd1a96747e094f9f6367c5644a4b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+      }
+    },
+    {
+      "name": "transport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/LatchwayClient.swift",
+        "region": {
+          "end_line": 171,
+          "start_line": 171
+        },
+        "region_sha256": "3dae52e9c35ca1e9585a25d3f68925a6975468033b69e3032449e595366883e9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "2a8f17f0a93a9a127c9a1db64ffa9b8411ad6d1c2beaf6f3a3550caba0376838"
+      }
+    },
+    {
+      "name": "transport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Session/ExtensionClient.swift",
+        "region": {
+          "end_line": 109,
+          "start_line": 109
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "552913d555d1ec538daf833b1fde82b9c3b4b35697b26585af0d5ad0d423fd49"
+      }
+    },
+    {
+      "name": "transport",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
+        "region": {
+          "end_line": 13,
+          "start_line": 13
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "046affc8218d4796548e364c80c706351d3db45bd4f625f6d857484f46a6e873"
+      }
+    },
+    {
+      "name": "trustExpiresAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 149,
+          "start_line": 149
+        },
+        "region_sha256": "eae9384bbe047ee038dbb9e506b7f2ccde0a6ca9c860356c8bc6bd707f2784c4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "trustLevel",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 302,
+          "start_line": 302
+        },
+        "region_sha256": "6de35d5d7c0638966383e7b5a5a5f85604ff41f39a3320909deda3225194d62b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "trustProvider",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 299,
+          "start_line": 299
+        },
+        "region_sha256": "7b7c1137e174bf58a3189541327271bc3f1379faf94593ec98af9107c658022b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "trustSource",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 148,
+          "start_line": 148
+        },
+        "region_sha256": "d4ed658a6ed525e2e9a4aab41a0135bea769e8bed1d5c81fdc3b73f024d31272",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "used",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 200,
+          "start_line": 200
+        },
+        "region_sha256": "2894bffcd3a07e619fe9facafb11db36bf003a4440cec16779f2eba43411e77b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "userAuthenticationRequired",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 182,
+          "start_line": 182
+        },
+        "region_sha256": "ea541f37c0f26357875a7ecbac65fe6850312f505d8283af9ff012e63168ca2c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "validateAccessGroups",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
+        "region": {
+          "end_line": 9,
+          "start_line": 9
+        },
+        "region_sha256": "4675853dd4d3a6d0128385affd5c9e79343b173dd4c21e53db69b50a1780db03",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "ba03a876831d4282f165d5084a6d2a254e21126b0e5c06340183d9727d20f953"
+      }
+    },
+    {
+      "name": "verifiedAt",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 241,
+          "start_line": 241
+        },
+        "region_sha256": "29a91fe51cc9a954a7a9b77b2c8edacf66107a9eeab4ee1a96991f60d09201d9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "verifySignedDefaultAccessGroup",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
+        "region": {
+          "end_line": 41,
+          "start_line": 41
+        },
+        "region_sha256": "c02c72e259e1f4ba795462b90b760b277e3758f2d15e6c1276b57df48e5c83ae",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "ba03a876831d4282f165d5084a6d2a254e21126b0e5c06340183d9727d20f953"
+      }
+    },
+    {
+      "name": "version",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/Transport/FeatureTransport.swift",
+        "region": {
+          "end_line": 5,
+          "start_line": 5
+        },
+        "region_sha256": "f0269516937a05ae4cdd3cb137a72f3e81f2dca7c8f1c3edb17f0c8cf50b8b4f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "f7192190200a1d770bd6af1c80fbf9a92988a1b6421e959c6466907c2d695abd"
+      }
+    },
+    {
+      "name": "widget",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/ComponentTypes.swift",
+        "region": {
+          "end_line": 26,
+          "start_line": 26
+        },
+        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "564a8e458b622b88951c7b34a525b2fb4daf660d3275556ae7f7750bda058c09"
+      }
+    },
+    {
+      "name": "x",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 124,
+          "start_line": 124
+        },
+        "region_sha256": "c8b99e5ff68617ea0f81ee23e5eca6d69c219a8ee9c0826f6e4cd10b87d99c4f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    },
+    {
+      "name": "y",
+      "source": {
+        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "file": "Sources/Latchway/PublicTypes.swift",
+        "region": {
+          "end_line": 125,
+          "start_line": 125
+        },
+        "region_sha256": "c8a628251051da4946e8317186cddb3a35698a74d1ed46e15c33826f23edc386",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "140ca2b664b2e262632fb61de7c3078dd1d0b77bf5ea3e516314db44a78e0c7d"
+      }
+    }
+  ]
+}
