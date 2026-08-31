@@ -4,7 +4,7 @@
     {
       "name": "AsyncIterator",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 47,
@@ -19,7 +19,7 @@
     {
       "name": "Configuration",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 36,
@@ -34,7 +34,7 @@
     {
       "name": "Configuration",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 95,
@@ -49,7 +49,7 @@
     {
       "name": "Element",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 46,
@@ -64,7 +64,7 @@
     {
       "name": "Executor",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 55,
@@ -79,7 +79,7 @@
     {
       "name": "FirebaseIdentityTokenSource",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
         "region": {
           "end_line": 26,
@@ -94,7 +94,7 @@
     {
       "name": "FirebaseLatchwayIdentityTokenProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
         "region": {
           "end_line": 11,
@@ -109,7 +109,7 @@
     {
       "name": "Handler",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 152,
@@ -124,7 +124,7 @@
     {
       "name": "LatchwayAppAttestProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 10,
@@ -139,7 +139,7 @@
     {
       "name": "LatchwayAsyncBytes",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 45,
@@ -154,7 +154,7 @@
     {
       "name": "LatchwayAttestationChallenge",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 147,
@@ -169,7 +169,7 @@
     {
       "name": "LatchwayAttestationEvidence",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 169,
@@ -184,7 +184,7 @@
     {
       "name": "LatchwayAttestationProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 2,
@@ -199,7 +199,7 @@
     {
       "name": "LatchwayAttestationStatus",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 179,
@@ -214,7 +214,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 2,
@@ -229,7 +229,7 @@
     {
       "name": "LatchwayClientComponentSummary",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 89,
@@ -244,7 +244,7 @@
     {
       "name": "LatchwayClientRuntime",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 18,
@@ -259,7 +259,7 @@
     {
       "name": "LatchwayClock",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 68,
@@ -274,7 +274,7 @@
     {
       "name": "LatchwayClosureIdentityTokenProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 11,
@@ -289,7 +289,7 @@
     {
       "name": "LatchwayComponentConfiguration",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 9,
@@ -304,7 +304,7 @@
     {
       "name": "LatchwayComponentDiagnostics",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 138,
@@ -319,7 +319,7 @@
     {
       "name": "LatchwayComponentError",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 197,
@@ -334,7 +334,7 @@
     {
       "name": "LatchwayComponentKeyManager",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 9,
@@ -349,7 +349,7 @@
     {
       "name": "LatchwayComponentRecovery",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 178,
@@ -364,7 +364,7 @@
     {
       "name": "LatchwayComponentTrustSource",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 128,
@@ -379,7 +379,7 @@
     {
       "name": "LatchwayConfiguration",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 31,
@@ -394,7 +394,7 @@
     {
       "name": "LatchwayDPoPProofFactory",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/DPoP.swift",
         "region": {
           "end_line": 3,
@@ -409,7 +409,7 @@
     {
       "name": "LatchwayDeterministicInstallationKey",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 84,
@@ -424,7 +424,7 @@
     {
       "name": "LatchwayDiagnostics",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 273,
@@ -439,22 +439,22 @@
     {
       "name": "LatchwayError",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 159,
-          "start_line": 159
+          "end_line": 177,
+          "start_line": 177
         },
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "LatchwayErrorCode",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 2,
@@ -463,13 +463,13 @@
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "LatchwayExtensionClient",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 18,
@@ -484,7 +484,7 @@
     {
       "name": "LatchwayFeatureTransport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 172,
@@ -499,7 +499,7 @@
     {
       "name": "LatchwayFixedAttestationProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 165,
@@ -514,7 +514,7 @@
     {
       "name": "LatchwayFoundationModelsError",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,
@@ -529,7 +529,7 @@
     {
       "name": "LatchwayFrameworkMetadata",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 2,
@@ -544,7 +544,7 @@
     {
       "name": "LatchwayHTTPResponse",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 20,
@@ -559,7 +559,7 @@
     {
       "name": "LatchwayHTTPTransport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 36,
@@ -574,7 +574,7 @@
     {
       "name": "LatchwayIdentityTokenProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 2,
@@ -589,7 +589,7 @@
     {
       "name": "LatchwayInMemorySessionStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 57,
@@ -604,7 +604,7 @@
     {
       "name": "LatchwayInstallationFamilySummary",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 79,
@@ -619,7 +619,7 @@
     {
       "name": "LatchwayInstallationKey",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 13,
@@ -634,7 +634,7 @@
     {
       "name": "LatchwayInstallationKeyManager",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 3,
@@ -649,7 +649,7 @@
     {
       "name": "LatchwayInstallationSummary",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 221,
@@ -664,7 +664,7 @@
     {
       "name": "LatchwayJSONValue",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 88,
@@ -679,7 +679,7 @@
     {
       "name": "LatchwayKeyStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 140,
@@ -694,7 +694,7 @@
     {
       "name": "LatchwayKeychainSessionStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
         "region": {
           "end_line": 2,
@@ -709,7 +709,7 @@
     {
       "name": "LatchwayLanguageModel",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 35,
@@ -724,7 +724,7 @@
     {
       "name": "LatchwayLanguageModelExecutor",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 94,
@@ -739,22 +739,22 @@
     {
       "name": "LatchwayProblem",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 126,
-          "start_line": 126
+          "end_line": 141,
+          "start_line": 141
         },
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "LatchwayPublicJWK",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 120,
@@ -769,7 +769,7 @@
     {
       "name": "LatchwayQuotaSnapshot",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 195,
@@ -784,7 +784,7 @@
     {
       "name": "LatchwayRootKeychainPreflight",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
         "region": {
           "end_line": 6,
@@ -799,7 +799,7 @@
     {
       "name": "LatchwayScriptedAttestationProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 121,
@@ -814,7 +814,7 @@
     {
       "name": "LatchwayScriptedTransport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 150,
@@ -829,7 +829,7 @@
     {
       "name": "LatchwaySessionStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 62,
@@ -844,7 +844,7 @@
     {
       "name": "LatchwaySoftwareKeyFallbackPolicy",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 6,
@@ -859,7 +859,7 @@
     {
       "name": "LatchwayStaticIdentityTokenProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 4,
@@ -874,7 +874,7 @@
     {
       "name": "LatchwayStoredSession",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 40,
@@ -889,7 +889,7 @@
     {
       "name": "LatchwayStreamingResponse",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 130,
@@ -904,7 +904,7 @@
     {
       "name": "LatchwaySwiftOpenAIHTTPClient",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 11,
@@ -919,7 +919,7 @@
     {
       "name": "LatchwaySystemClock",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 72,
@@ -934,7 +934,7 @@
     {
       "name": "LatchwayTestClock",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 18,
@@ -949,7 +949,7 @@
     {
       "name": "LatchwayTrustSummary",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 233,
@@ -964,7 +964,7 @@
     {
       "name": "LatchwayURLSessionTransport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
         "region": {
           "end_line": 2,
@@ -979,7 +979,7 @@
     {
       "name": "LatchwayVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 2,
@@ -994,7 +994,7 @@
     {
       "name": "Limit",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 197,
@@ -1009,7 +1009,7 @@
     {
       "name": "Model",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 96,
@@ -1024,7 +1024,7 @@
     {
       "name": "SessionState",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 275,
@@ -1039,7 +1039,7 @@
     {
       "name": "Support",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 181,
@@ -1054,7 +1054,7 @@
     {
       "name": "TokenOperation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
         "region": {
           "end_line": 12,
@@ -1069,7 +1069,7 @@
     {
       "name": "action",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 180,
@@ -1084,7 +1084,7 @@
     {
       "name": "advance",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 31,
@@ -1099,7 +1099,7 @@
     {
       "name": "appIntent",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 52,
@@ -1114,7 +1114,7 @@
     {
       "name": "appVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 46,
@@ -1129,7 +1129,7 @@
     {
       "name": "applicationID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 34,
@@ -1144,7 +1144,7 @@
     {
       "name": "attestation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 284,
@@ -1159,7 +1159,7 @@
     {
       "name": "attestationProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 48,
@@ -1174,7 +1174,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 132,
@@ -1189,7 +1189,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 150,
@@ -1204,7 +1204,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 135,
@@ -1219,7 +1219,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 215,
@@ -1234,7 +1234,7 @@
     {
       "name": "baseURL",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 33,
@@ -1249,7 +1249,7 @@
     {
       "name": "body",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 24,
@@ -1264,7 +1264,7 @@
     {
       "name": "boundFeature",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 401,
@@ -1279,7 +1279,7 @@
     {
       "name": "bytes",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 132,
@@ -1294,7 +1294,7 @@
     {
       "name": "bytes",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 233,
@@ -1309,7 +1309,7 @@
     {
       "name": "bytes",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 68,
@@ -1324,7 +1324,7 @@
     {
       "name": "cancel",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 161,
@@ -1339,7 +1339,7 @@
     {
       "name": "capabilities",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 57,
@@ -1354,7 +1354,7 @@
     {
       "name": "clear",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
         "region": {
           "end_line": 61,
@@ -1369,7 +1369,7 @@
     {
       "name": "clear",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 79,
@@ -1384,7 +1384,7 @@
     {
       "name": "clientDataHash",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 151,
@@ -1399,7 +1399,7 @@
     {
       "name": "clientRuntime",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 44,
@@ -1414,7 +1414,7 @@
     {
       "name": "clientSDKVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 45,
@@ -1429,22 +1429,22 @@
     {
       "name": "code",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 128,
-          "start_line": 128
+          "end_line": 143,
+          "start_line": 143
         },
         "region_sha256": "71cd3ec95fb9c41bd5713e22c64bbefce0fdea880d584755f61847d2c91f837e",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "component",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 46,
@@ -1459,7 +1459,7 @@
     {
       "name": "componentDefinitionID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 294,
@@ -1474,7 +1474,7 @@
     {
       "name": "componentDiagnostics",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 600,
@@ -1489,7 +1489,7 @@
     {
       "name": "componentID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 141,
@@ -1504,7 +1504,7 @@
     {
       "name": "componentID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 293,
@@ -1519,7 +1519,7 @@
     {
       "name": "componentKind",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 295,
@@ -1534,7 +1534,7 @@
     {
       "name": "containingAppActionRequired",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 150,
@@ -1549,7 +1549,7 @@
     {
       "name": "contract",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 5,
@@ -1564,7 +1564,7 @@
     {
       "name": "contractVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 280,
@@ -1579,7 +1579,7 @@
     {
       "name": "controlRequestTimeout",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 49,
@@ -1594,7 +1594,7 @@
     {
       "name": "curve",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 123,
@@ -1609,7 +1609,7 @@
     {
       "name": "data",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 60,
@@ -1624,7 +1624,7 @@
     {
       "name": "definitionID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 10,
@@ -1639,7 +1639,7 @@
     {
       "name": "definitionID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 92,
@@ -1654,7 +1654,7 @@
     {
       "name": "definitionID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 142,
@@ -1669,7 +1669,7 @@
     {
       "name": "delegationID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 240,
@@ -1684,7 +1684,7 @@
     {
       "name": "description",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 61,
@@ -1693,43 +1693,43 @@
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "description",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 173,
-          "start_line": 173
+          "end_line": 191,
+          "start_line": 191
         },
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "detail",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 130,
-          "start_line": 130
+          "end_line": 145,
+          "start_line": 145
         },
         "region_sha256": "79ce5992231a5c8d32d82f4c08b2899218662b7fddf118c909cdf9c039e8158d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "diagnostics",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 620,
@@ -1744,7 +1744,7 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 220,
@@ -1759,7 +1759,7 @@
     {
       "name": "didAccept",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 225,
@@ -1774,7 +1774,7 @@
     {
       "name": "didAccept",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 142,
@@ -1787,9 +1787,39 @@
       }
     },
     {
+      "name": "documentationURL",
+      "source": {
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 73,
+          "start_line": 73
+        },
+        "region_sha256": "de0b9611b90ab923fbc3b2aea1164ef2e0ec5b69f75877ccda5ccfb3666f6415",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
+      }
+    },
+    {
+      "name": "documentationURL",
+      "source": {
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
+        "file": "Sources/Latchway/LatchwayError.swift",
+        "region": {
+          "end_line": 175,
+          "start_line": 175
+        },
+        "region_sha256": "474996295912ce65e44a4b6606ca8d98a4e97a5a40cbe79d9013ea071c66e799",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-ios-sdk",
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
+      }
+    },
+    {
       "name": "dpopJKT",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 96,
@@ -1804,7 +1834,7 @@
     {
       "name": "dpopJKT",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 225,
@@ -1819,7 +1849,7 @@
     {
       "name": "encode",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 107,
@@ -1834,7 +1864,7 @@
     {
       "name": "endpoint",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 406,
@@ -1849,7 +1879,7 @@
     {
       "name": "environment",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 35,
@@ -1864,7 +1894,7 @@
     {
       "name": "errorDescription",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 280,
@@ -1879,22 +1909,22 @@
     {
       "name": "errorDescription",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 191,
-          "start_line": 191
+          "end_line": 209,
+          "start_line": 209
         },
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "errorDescription",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 13,
@@ -1909,7 +1939,7 @@
     {
       "name": "establishDirectAttestation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 148,
@@ -1924,7 +1954,7 @@
     {
       "name": "evidence",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 172,
@@ -1939,7 +1969,7 @@
     {
       "name": "evidence",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 162,
@@ -1954,7 +1984,7 @@
     {
       "name": "evidence",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 136,
@@ -1969,7 +1999,7 @@
     {
       "name": "evidence",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 177,
@@ -1984,7 +2014,7 @@
     {
       "name": "executorConfiguration",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 59,
@@ -1999,7 +2029,7 @@
     {
       "name": "expiresAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 152,
@@ -2014,7 +2044,7 @@
     {
       "name": "expiresAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 242,
@@ -2029,7 +2059,7 @@
     {
       "name": "familyID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 140,
@@ -2044,7 +2074,7 @@
     {
       "name": "feature",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 211,
@@ -2059,7 +2089,7 @@
     {
       "name": "finish",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 154,
@@ -2074,7 +2104,7 @@
     {
       "name": "foundationModels",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 11,
@@ -2089,7 +2119,7 @@
     {
       "name": "frameworkMetadata",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 403,
@@ -2104,7 +2134,7 @@
     {
       "name": "gatewayBaseURL",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 405,
@@ -2119,7 +2149,7 @@
     {
       "name": "grantAvailable",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 146,
@@ -2134,7 +2164,7 @@
     {
       "name": "grantedFeatures",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 98,
@@ -2149,7 +2179,7 @@
     {
       "name": "hard",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 204,
@@ -2164,7 +2194,7 @@
     {
       "name": "hash",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 50,
@@ -2179,7 +2209,7 @@
     {
       "name": "header",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 31,
@@ -2194,7 +2224,7 @@
     {
       "name": "headers",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 23,
@@ -2209,7 +2239,7 @@
     {
       "name": "id",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 81,
@@ -2224,7 +2254,7 @@
     {
       "name": "id",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 91,
@@ -2239,7 +2269,7 @@
     {
       "name": "id",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 149,
@@ -2254,7 +2284,7 @@
     {
       "name": "id",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 223,
@@ -2269,7 +2299,7 @@
     {
       "name": "identifier",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 4,
@@ -2284,7 +2314,7 @@
     {
       "name": "identityProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 43,
@@ -2299,7 +2329,7 @@
     {
       "name": "identityToken",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
         "region": {
           "end_line": 19,
@@ -2314,7 +2344,7 @@
     {
       "name": "identityToken",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 9,
@@ -2329,7 +2359,7 @@
     {
       "name": "identityToken",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 16,
@@ -2344,7 +2374,7 @@
     {
       "name": "immediateRetryUseful",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 183,
@@ -2359,7 +2389,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 14,
@@ -2374,7 +2404,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 83,
@@ -2389,7 +2419,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 107,
@@ -2404,7 +2434,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 151,
@@ -2419,7 +2449,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 184,
@@ -2434,7 +2464,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 19,
@@ -2449,7 +2479,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/DPoP.swift",
         "region": {
           "end_line": 7,
@@ -2464,7 +2494,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 16,
@@ -2479,7 +2509,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 24,
@@ -2494,7 +2524,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 71,
@@ -2509,7 +2539,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
           "end_line": 57,
@@ -2518,28 +2548,28 @@
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 138,
-          "start_line": 138
+          "end_line": 153,
+          "start_line": 153
         },
         "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
         "region": {
           "end_line": 9,
@@ -2554,7 +2584,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 25,
@@ -2569,7 +2599,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 47,
@@ -2584,7 +2614,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 74,
@@ -2599,7 +2629,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 50,
@@ -2614,7 +2644,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 96,
@@ -2629,7 +2659,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 132,
@@ -2644,7 +2674,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 154,
@@ -2659,7 +2689,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 173,
@@ -2674,7 +2704,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 188,
@@ -2689,7 +2719,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 252,
@@ -2704,7 +2734,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 305,
@@ -2719,7 +2749,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 32,
@@ -2734,7 +2764,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 76,
@@ -2749,7 +2779,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 6,
@@ -2764,7 +2794,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
         "region": {
           "end_line": 6,
@@ -2779,7 +2809,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 42,
@@ -2794,7 +2824,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 68,
@@ -2809,7 +2839,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 102,
@@ -2824,7 +2854,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFirebaseAuth/FirebaseLatchwayIdentityTokenProvider.swift",
         "region": {
           "end_line": 15,
@@ -2839,7 +2869,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 39,
@@ -2854,7 +2884,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 60,
@@ -2869,7 +2899,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 64,
@@ -2884,7 +2914,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 77,
@@ -2899,7 +2929,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 99,
@@ -2914,7 +2944,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 15,
@@ -2929,7 +2959,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 26,
@@ -2944,7 +2974,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 7,
@@ -2959,7 +2989,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 14,
@@ -2974,7 +3004,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 23,
@@ -2989,7 +3019,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 63,
@@ -3004,7 +3034,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 89,
@@ -3019,7 +3049,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 128,
@@ -3034,7 +3064,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 156,
@@ -3049,7 +3079,7 @@
     {
       "name": "init",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 169,
@@ -3064,7 +3094,7 @@
     {
       "name": "installation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 44,
@@ -3079,7 +3109,7 @@
     {
       "name": "installationFamily",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 45,
@@ -3094,7 +3124,7 @@
     {
       "name": "installationFamilyID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 290,
@@ -3109,7 +3139,7 @@
     {
       "name": "installationID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 287,
@@ -3124,7 +3154,7 @@
     {
       "name": "isRoot",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 95,
@@ -3139,7 +3169,7 @@
     {
       "name": "keyAvailable",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 144,
@@ -3154,7 +3184,7 @@
     {
       "name": "keyID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 186,
@@ -3169,7 +3199,7 @@
     {
       "name": "keyStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 145,
@@ -3184,7 +3214,7 @@
     {
       "name": "keyStorage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 282,
@@ -3199,7 +3229,7 @@
     {
       "name": "keyThumbprint",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 283,
@@ -3214,7 +3244,7 @@
     {
       "name": "keyType",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 122,
@@ -3229,7 +3259,7 @@
     {
       "name": "keychainAccessGroup",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 12,
@@ -3244,7 +3274,7 @@
     {
       "name": "keychainAccessGroup",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 143,
@@ -3259,7 +3289,7 @@
     {
       "name": "kind",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 11,
@@ -3274,7 +3304,7 @@
     {
       "name": "kind",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 93,
@@ -3289,7 +3319,7 @@
     {
       "name": "lastErrorCode",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 304,
@@ -3304,7 +3334,7 @@
     {
       "name": "lastOperation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 187,
@@ -3319,7 +3349,7 @@
     {
       "name": "lastRequestID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 303,
@@ -3334,7 +3364,7 @@
     {
       "name": "legacySharedKeychainAccessGroups",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 42,
@@ -3349,7 +3379,7 @@
     {
       "name": "level",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 236,
@@ -3364,7 +3394,7 @@
     {
       "name": "limits",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 214,
@@ -3379,7 +3409,7 @@
     {
       "name": "load",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
         "region": {
           "end_line": 45,
@@ -3394,7 +3424,7 @@
     {
       "name": "load",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 71,
@@ -3409,7 +3439,7 @@
     {
       "name": "makeAsyncIterator",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 104,
@@ -3424,7 +3454,7 @@
     {
       "name": "makeService",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 49,
@@ -3439,7 +3469,7 @@
     {
       "name": "makeURLSession",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 446,
@@ -3454,7 +3484,7 @@
     {
       "name": "maximum",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 199,
@@ -3469,7 +3499,7 @@
     {
       "name": "metric",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 198,
@@ -3484,7 +3514,7 @@
     {
       "name": "minimumProtocolVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 8,
@@ -3499,7 +3529,7 @@
     {
       "name": "next",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 64,
@@ -3514,7 +3544,7 @@
     {
       "name": "normalizedHTU",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/DPoP.swift",
         "region": {
           "end_line": 74,
@@ -3529,7 +3559,7 @@
     {
       "name": "notificationService",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 65,
@@ -3544,7 +3574,7 @@
     {
       "name": "now",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 75,
@@ -3559,7 +3589,7 @@
     {
       "name": "now",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 25,
@@ -3574,7 +3604,7 @@
     {
       "name": "observedAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 213,
@@ -3589,7 +3619,7 @@
     {
       "name": "openingContainingAppCanFix",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 181,
@@ -3604,22 +3634,22 @@
     {
       "name": "operationID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 137,
-          "start_line": 137
+          "end_line": 152,
+          "start_line": 152
         },
         "region_sha256": "432e6b26cb1026f1835fc40eceb5db7e704c34e2c96becf2ed44e229aa94f380",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "options",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 153,
@@ -3634,7 +3664,7 @@
     {
       "name": "parentAttestationProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 239,
@@ -3649,7 +3679,7 @@
     {
       "name": "parentComponentID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 238,
@@ -3664,7 +3694,7 @@
     {
       "name": "pendingReadCount",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 37,
@@ -3679,7 +3709,7 @@
     {
       "name": "placeholderAPIKey",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 173,
@@ -3694,7 +3724,7 @@
     {
       "name": "placeholderAPIKey",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 44,
@@ -3709,7 +3739,7 @@
     {
       "name": "platform",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 94,
@@ -3724,7 +3754,7 @@
     {
       "name": "platform",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 224,
@@ -3739,7 +3769,7 @@
     {
       "name": "platformIdentifier",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 21,
@@ -3754,7 +3784,7 @@
     {
       "name": "prepareComponents",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 556,
@@ -3769,7 +3799,7 @@
     {
       "name": "prewarm",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 103,
@@ -3784,7 +3814,7 @@
     {
       "name": "proof",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/DPoP.swift",
         "region": {
           "end_line": 12,
@@ -3799,7 +3829,7 @@
     {
       "name": "protocolVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 6,
@@ -3814,7 +3844,7 @@
     {
       "name": "protocolVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 281,
@@ -3829,7 +3859,7 @@
     {
       "name": "provider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 150,
@@ -3844,7 +3874,7 @@
     {
       "name": "provider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 171,
@@ -3859,7 +3889,7 @@
     {
       "name": "provider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 235,
@@ -3874,7 +3904,7 @@
     {
       "name": "publicJWK",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 72,
@@ -3889,7 +3919,7 @@
     {
       "name": "publicJWK",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 55,
@@ -3904,7 +3934,7 @@
     {
       "name": "publicJWK",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 94,
@@ -3919,7 +3949,7 @@
     {
       "name": "quota",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 449,
@@ -3934,7 +3964,7 @@
     {
       "name": "recovery",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 212,
@@ -3949,7 +3979,7 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 254,
@@ -3964,7 +3994,7 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 139,
@@ -3979,7 +4009,7 @@
     {
       "name": "refreshExpiresAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 43,
@@ -3994,7 +4024,7 @@
     {
       "name": "refreshToken",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 42,
@@ -4009,7 +4039,7 @@
     {
       "name": "remaining",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 202,
@@ -4024,7 +4054,7 @@
     {
       "name": "replaceComponent",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 576,
@@ -4039,22 +4069,22 @@
     {
       "name": "requestID",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 132,
-          "start_line": 132
+          "end_line": 147,
+          "start_line": 147
         },
         "region_sha256": "4157918def81fe015b031e26de8a50d2db5afdde01be84b29d4396525a0a657b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "requestedFeatures",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 13,
@@ -4069,7 +4099,7 @@
     {
       "name": "reserved",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 201,
@@ -4084,7 +4114,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 113,
@@ -4099,7 +4129,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 94,
@@ -4114,7 +4144,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 291,
@@ -4129,7 +4159,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 108,
@@ -4144,7 +4174,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 146,
@@ -4159,7 +4189,7 @@
     {
       "name": "reset",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 179,
@@ -4174,7 +4204,7 @@
     {
       "name": "resetsAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 203,
@@ -4189,7 +4219,7 @@
     {
       "name": "respond",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 107,
@@ -4204,7 +4234,7 @@
     {
       "name": "response",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 131,
@@ -4219,7 +4249,7 @@
     {
       "name": "resumeOneReadAndAllowFutureReads",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 42,
@@ -4234,7 +4264,7 @@
     {
       "name": "resumePendingReads",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 47,
@@ -4249,37 +4279,37 @@
     {
       "name": "retryAfter",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 134,
-          "start_line": 134
+          "end_line": 149,
+          "start_line": 149
         },
         "region_sha256": "070e8556606f7c8ca905b4c2aa7f589d53e98bd1fe0d1b7ed3ebe7c3b920305c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "retryable",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 133,
-          "start_line": 133
+          "end_line": 148,
+          "start_line": 148
         },
         "region_sha256": "44aef845bf5d5656ef12d009083c515a2dbbb47ee4917aa468ef01c6affc32ad",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "revokeComponent",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 583,
@@ -4294,7 +4324,7 @@
     {
       "name": "revokeCurrentInstallation",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 477,
@@ -4309,7 +4339,7 @@
     {
       "name": "revokeCurrentInstallationFamily",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 505,
@@ -4324,7 +4354,7 @@
     {
       "name": "revokeCurrentInstallationFamily",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 516,
@@ -4339,7 +4369,7 @@
     {
       "name": "rootKeychainAccessGroup",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 38,
@@ -4354,7 +4384,7 @@
     {
       "name": "save",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/KeychainSessionStorage.swift",
         "region": {
           "end_line": 55,
@@ -4369,7 +4399,7 @@
     {
       "name": "save",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 72,
@@ -4384,7 +4414,7 @@
     {
       "name": "sdk",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 4,
@@ -4399,7 +4429,7 @@
     {
       "name": "sdkIdentifier",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 23,
@@ -4414,7 +4444,7 @@
     {
       "name": "sdkVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 278,
@@ -4429,7 +4459,7 @@
     {
       "name": "send",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 308,
@@ -4444,7 +4474,7 @@
     {
       "name": "send",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 219,
@@ -4459,7 +4489,7 @@
     {
       "name": "send",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/URLSessionTransport.swift",
         "region": {
           "end_line": 11,
@@ -4474,7 +4504,7 @@
     {
       "name": "send",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 158,
@@ -4489,7 +4519,7 @@
     {
       "name": "serverVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 296,
@@ -4504,7 +4534,7 @@
     {
       "name": "sessionAvailable",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 147,
@@ -4519,7 +4549,7 @@
     {
       "name": "sessionExpiresAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 286,
@@ -4534,7 +4564,7 @@
     {
       "name": "sessionState",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 285,
@@ -4549,7 +4579,7 @@
     {
       "name": "set",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 32,
@@ -4564,7 +4594,7 @@
     {
       "name": "shareExtension",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 39,
@@ -4579,7 +4609,7 @@
     {
       "name": "sign",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 87,
@@ -4594,7 +4624,7 @@
     {
       "name": "sign",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 69,
@@ -4609,7 +4639,7 @@
     {
       "name": "sign",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 101,
@@ -4624,7 +4654,7 @@
     {
       "name": "softwareKeyFallbackPolicy",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 47,
@@ -4639,7 +4669,7 @@
     {
       "name": "source",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 237,
@@ -4654,7 +4684,7 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 82,
@@ -4669,7 +4699,7 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 97,
@@ -4684,22 +4714,22 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 131,
-          "start_line": 131
+          "end_line": 146,
+          "start_line": 146
         },
         "region_sha256": "8f64aa6a3a39b8fbdb9c0b548739b70dfcd7f6710b9cb48d7112096e3f6c6bd1",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 226,
@@ -4714,7 +4744,7 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayAppAttest/LatchwayAppAttestProvider.swift",
         "region": {
           "end_line": 320,
@@ -4729,7 +4759,7 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 148,
@@ -4744,7 +4774,7 @@
     {
       "name": "status",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 180,
@@ -4759,7 +4789,7 @@
     {
       "name": "statusCode",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Protocols.swift",
         "region": {
           "end_line": 22,
@@ -4774,7 +4804,7 @@
     {
       "name": "storage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/ComponentKeyManager.swift",
         "region": {
           "end_line": 101,
@@ -4789,7 +4819,7 @@
     {
       "name": "storage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/InstallationKeyManager.swift",
         "region": {
           "end_line": 81,
@@ -4804,7 +4834,7 @@
     {
       "name": "storage",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 106,
@@ -4819,7 +4849,7 @@
     {
       "name": "support",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 184,
@@ -4834,7 +4864,7 @@
     {
       "name": "supportedProtocolVersions",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayVersion.swift",
         "region": {
           "end_line": 7,
@@ -4849,7 +4879,7 @@
     {
       "name": "suspendReads",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayTesting/TestDoubles.swift",
         "region": {
           "end_line": 36,
@@ -4864,7 +4894,7 @@
     {
       "name": "swiftOpenAI",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 15,
@@ -4879,7 +4909,7 @@
     {
       "name": "testedFrameworkVersion",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 12,
@@ -4894,7 +4924,7 @@
     {
       "name": "thumbprint",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Crypto/DPoP.swift",
         "region": {
           "end_line": 54,
@@ -4909,22 +4939,22 @@
     {
       "name": "title",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayError.swift",
         "region": {
-          "end_line": 129,
-          "start_line": 129
+          "end_line": 144,
+          "start_line": 144
         },
         "region_sha256": "762a004c127742e38c0528015283cabb847afd1a96747e094f9f6367c5644a4b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "d7ce6fb09e4a69babe73178ba8efa5497dc2ffafb37cf83255641062c6917d7d"
+        "source_sha256": "5e4ef77cf0fa70a15eac8ac724fe332706798df36fa13a254d490bd95c28358f"
       }
     },
     {
       "name": "transport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/LatchwayClient.swift",
         "region": {
           "end_line": 171,
@@ -4939,7 +4969,7 @@
     {
       "name": "transport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Session/ExtensionClient.swift",
         "region": {
           "end_line": 109,
@@ -4954,7 +4984,7 @@
     {
       "name": "transport",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 13,
@@ -4969,7 +4999,7 @@
     {
       "name": "trustExpiresAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 149,
@@ -4984,7 +5014,7 @@
     {
       "name": "trustLevel",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 302,
@@ -4999,7 +5029,7 @@
     {
       "name": "trustProvider",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 299,
@@ -5014,7 +5044,7 @@
     {
       "name": "trustSource",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 148,
@@ -5029,7 +5059,7 @@
     {
       "name": "used",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 200,
@@ -5044,7 +5074,7 @@
     {
       "name": "userAuthenticationRequired",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 182,
@@ -5059,7 +5089,7 @@
     {
       "name": "validateAccessGroups",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
         "region": {
           "end_line": 9,
@@ -5074,7 +5104,7 @@
     {
       "name": "verifiedAt",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 241,
@@ -5089,7 +5119,7 @@
     {
       "name": "verifySignedDefaultAccessGroup",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Persistence/RootKeychainPreflight.swift",
         "region": {
           "end_line": 41,
@@ -5104,7 +5134,7 @@
     {
       "name": "version",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/Transport/FeatureTransport.swift",
         "region": {
           "end_line": 5,
@@ -5119,7 +5149,7 @@
     {
       "name": "widget",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/ComponentTypes.swift",
         "region": {
           "end_line": 26,
@@ -5134,7 +5164,7 @@
     {
       "name": "x",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 124,
@@ -5149,7 +5179,7 @@
     {
       "name": "y",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/Latchway/PublicTypes.swift",
         "region": {
           "end_line": 125,

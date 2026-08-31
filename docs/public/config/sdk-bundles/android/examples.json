@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Basic Android client",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt",
         "region": {
           "end_line": 39,
@@ -17,26 +17,26 @@
       }
     },
     {
-      "kind": "quickstart",
-      "name": "Firebase identity provider",
+      "kind": "physical_device",
+      "name": "Firebase and Play Integrity golden journey",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt",
         "region": {
-          "end_line": 29,
+          "end_line": 301,
           "start_line": 1
         },
-        "region_sha256": "6637f72300f782c9dd6c459304c8bc4c5c2ba9e7e4c0690d60d2f28a32590a17",
+        "region_sha256": "97bd4f050a6340bc666f1db8c21b67799b84c2090dc372191552efcdb8029c54",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "6637f72300f782c9dd6c459304c8bc4c5c2ba9e7e4c0690d60d2f28a32590a17"
+        "source_sha256": "97bd4f050a6340bc666f1db8c21b67799b84c2090dc372191552efcdb8029c54"
       }
     },
     {
       "kind": "framework",
       "name": "Retrofit conformance consumer",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt",
         "region": {
           "end_line": 288,
@@ -52,7 +52,7 @@
       "kind": "framework",
       "name": "OpenAI Kotlin conformance consumer",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt",
         "region": {
           "end_line": 197,
@@ -68,7 +68,7 @@
       "kind": "framework",
       "name": "LangChain4j conformance consumer",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt",
         "region": {
           "end_line": 215,
@@ -84,7 +84,7 @@
       "kind": "framework",
       "name": "Koog conformance consumer",
       "source": {
-        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
+        "commit": "659b9c8728a3766bd1ed383e840515c4227305ae",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt",
         "region": {
           "end_line": 372,

@@ -1,40 +1,253 @@
 <Info>
-  Generated from [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2/Examples/BasicURLSession/BasicURLSession.swift#L1-L34) at release `v1.0.0`. Bundle SHA-256: `d059bbf9894e2a23b2da1989d8deda18ba6bb81bbd9ee3f8dffe414ee329ba79`.
+  Generated from [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/a0d0a118f897e594f8808067ce1a01fa571fdde2/Examples/BasicURLSession/BasicURLSession.swift#L1-L247) at release `v1.0.0`. Bundle SHA-256: `4342f060efa90b4e08db7bcd46194856b292fef65b42b5b70fa96c03e6d542e1`.
 </Info>
 
 ```swift
-import Foundation
+@preconcurrency import Foundation
 import Latchway
 import LatchwayAppAttest
+import LatchwayFirebaseAuth
 
-func performRequest(identity: any LatchwayIdentityTokenProvider, body: Data) async throws -> Data {
-    let baseURL = URL(string: "https://gateway.example.com")!
-    let rootKeychainAccessGroup = "ABCDE12345.com.example.app"
+/// Deployment values supplied by the Latchway setup wizard and the signed app.
+public struct LatchwayGoldenJourneyConfiguration: Sendable {
+    public let baseURL: URL
+    public let applicationID: String
+    public let environment: String
+    public let rootKeychainAccessGroup: String
+    public let legacySharedKeychainAccessGroups: [String]
+    public let feature: String
+    public let model: String
+    public let appVersion: String
+
+    public init(
+        baseURL: URL,
+        applicationID: String,
+        environment: String,
+        rootKeychainAccessGroup: String,
+        legacySharedKeychainAccessGroups: [String] = [],
+        feature: String,
+        model: String,
+        appVersion: String
+    ) {
+        self.baseURL = baseURL
+        self.applicationID = applicationID
+        self.environment = environment
+        self.rootKeychainAccessGroup = rootKeychainAccessGroup
+        self.legacySharedKeychainAccessGroups = legacySharedKeychainAccessGroups
+        self.feature = feature
+        self.model = model
+        self.appVersion = appVersion
+    }
+}
+
+public struct LatchwayGoldenJourneyResult: Sendable {
+    public let responseRequestID: String
+    public let diagnostics: LatchwayDiagnostics
+    public let quota: LatchwayQuotaSnapshot
+}
+
+public enum LatchwayGoldenJourneyStage: String, Sendable {
+    case response
+    case diagnostics
+    case quota
+    case revocation
+}
+
+/// Redacted application-facing failure context. Server detail and credentials
+/// are deliberately excluded; the stable documentation URL is safe to show.
+public struct LatchwayGoldenJourneyFailure: Error, Sendable, LocalizedError {
+    public let stage: LatchwayGoldenJourneyStage
+    public let requestID: String?
+    public let statusCode: Int?
+    public let documentationURL: URL?
+
+    public var errorDescription: String? {
+        "Latchway golden journey failed during \(stage.rawValue)."
+    }
+}
+
+/// Runs the complete production integration path from a signed iOS app.
+///
+/// `firebaseIDToken` should call `Auth.auth().currentUser?.getIDToken()` and
+/// `firebaseSignOut` should call the application's ordinary Firebase sign-out.
+/// The token is fetched on demand and is never stored or rendered by this code.
+public func runLatchwayGoldenJourney(
+    configuration: LatchwayGoldenJourneyConfiguration,
+    firebaseIDToken: @escaping @Sendable () async throws -> String,
+    firebaseSignOut: @escaping @Sendable () async -> Void,
+    receiveResponseByte: @escaping @Sendable (UInt8) async throws -> Void
+) async throws -> LatchwayGoldenJourneyResult {
+    let identity = FirebaseLatchwayIdentityTokenProvider(identityToken: firebaseIDToken)
     let appAttest = LatchwayAppAttestProvider(
-        applicationID: "app_01J00000000000000000000000",
-        environment: "production",
-        rootKeychainAccessGroup: rootKeychainAccessGroup
+        applicationID: configuration.applicationID,
+        environment: configuration.environment,
+        rootKeychainAccessGroup: configuration.rootKeychainAccessGroup,
+        legacySharedKeychainAccessGroups: configuration.legacySharedKeychainAccessGroups
     )
     let client = LatchwayClient(
         configuration: LatchwayConfiguration(
-            baseURL: baseURL,
-            applicationID: "app_01J00000000000000000000000",
-            environment: "production",
-            rootKeychainAccessGroup: rootKeychainAccessGroup,
-            appVersion: "1.0.0",
+            baseURL: configuration.baseURL,
+            applicationID: configuration.applicationID,
+            environment: configuration.environment,
+            rootKeychainAccessGroup: configuration.rootKeychainAccessGroup,
+            legacySharedKeychainAccessGroups: configuration.legacySharedKeychainAccessGroups,
+            identityProvider: "firebase",
+            appVersion: configuration.appVersion,
+            softwareKeyFallbackPolicy: .disallow,
             attestationProvider: appAttest
         ),
         identityTokenProvider: identity
     )
-    var request = URLRequest(url: baseURL.appendingPathComponent("v1/responses"))
-    request.httpMethod = "POST"
-    request.httpBody = body
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    try await client.authorize(&request, feature: "habit-assistant")
-    let (data, response) = try await client.makeURLSession().data(for: request)
-    guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-        throw LatchwayError.invalidServerResponse
+
+    var revocationAttempted = false
+    do {
+        let responseRequestID = try await streamResponses(
+            client: client,
+            configuration: configuration,
+            receiveResponseByte: receiveResponseByte
+        )
+
+        let diagnostics = await client.diagnostics()
+        guard diagnostics.sessionState == .active,
+              diagnostics.keyStorage == .secureEnclave,
+              diagnostics.attestation.support == .supported,
+              diagnostics.trustProvider == "app_attest",
+              diagnostics.trustLevel == "app_verified",
+              diagnostics.lastRequestID?.isEmpty == false
+        else {
+            throw LatchwayGoldenJourneyFailure(
+                stage: .diagnostics,
+                requestID: diagnostics.lastRequestID,
+                statusCode: nil,
+                documentationURL: nil
+            )
+        }
+
+        let quota: LatchwayQuotaSnapshot
+        do {
+            quota = try await client.quota(feature: configuration.feature)
+        } catch {
+            throw goldenJourneyFailure(stage: .quota, error: error)
+        }
+        guard quota.feature == configuration.feature else {
+            throw LatchwayGoldenJourneyFailure(
+                stage: .quota,
+                requestID: diagnostics.lastRequestID,
+                statusCode: nil,
+                documentationURL: nil
+            )
+        }
+
+        revocationAttempted = true
+        do {
+            try await client.revokeCurrentInstallation()
+        } catch {
+            throw goldenJourneyFailure(stage: .revocation, error: error)
+        }
+
+        await firebaseSignOut()
+        return LatchwayGoldenJourneyResult(
+            responseRequestID: responseRequestID,
+            diagnostics: diagnostics,
+            quota: quota
+        )
+    } catch {
+        // Revocation is attempted once for an active session. In particular,
+        // an indeterminate revocation is never replayed automatically.
+        let cleanupDiagnostics = await client.diagnostics()
+        let shouldRevoke = !revocationAttempted && cleanupDiagnostics.sessionState == .active
+        revocationAttempted = revocationAttempted || shouldRevoke
+        await Task.detached {
+            if shouldRevoke { try? await client.revokeCurrentInstallation() }
+            await firebaseSignOut()
+        }.value
+        throw error
     }
-    return data
+}
+
+private func streamResponses(
+    client: LatchwayClient,
+    configuration: LatchwayGoldenJourneyConfiguration,
+    receiveResponseByte: @escaping @Sendable (UInt8) async throws -> Void
+) async throws -> String {
+    var request = URLRequest(
+        url: configuration.baseURL.appendingPathComponent("v1/responses")
+    )
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+    request.httpBody = try JSONEncoder().encode(
+        ResponsesRequest(
+            model: configuration.model,
+            input: "Return the word verified.",
+            stream: true
+        )
+    )
+
+    let stream: LatchwayStreamingResponse
+    do {
+        stream = try await client
+            .transport(feature: configuration.feature)
+            .bytes(for: request)
+    } catch {
+        throw goldenJourneyFailure(stage: .response, error: error)
+    }
+    let requestID = stream.response.value(forHTTPHeaderField: "X-Latchway-Request-ID")
+    guard (200 ..< 300).contains(stream.response.statusCode),
+          let requestID,
+          !requestID.isEmpty
+    else {
+        stream.cancel()
+        throw LatchwayGoldenJourneyFailure(
+            stage: .response,
+            requestID: requestID,
+            statusCode: stream.response.statusCode,
+            documentationURL: nil
+        )
+    }
+    do {
+        for try await byte in stream.bytes {
+            try await receiveResponseByte(byte)
+        }
+        stream.finish()
+        return requestID
+    } catch {
+        stream.cancel()
+        throw goldenJourneyFailure(
+            stage: .response,
+            error: error,
+            fallbackRequestID: requestID
+        )
+    }
+}
+
+private func goldenJourneyFailure(
+    stage: LatchwayGoldenJourneyStage,
+    error: Error,
+    fallbackRequestID: String? = nil
+) -> LatchwayGoldenJourneyFailure {
+    if let failure = error as? LatchwayGoldenJourneyFailure { return failure }
+    if let latchway = error as? LatchwayError,
+       case let .server(problem) = latchway
+    {
+        return LatchwayGoldenJourneyFailure(
+            stage: stage,
+            requestID: problem.requestID,
+            statusCode: problem.status,
+            documentationURL: problem.documentationURL
+        )
+    }
+    return LatchwayGoldenJourneyFailure(
+        stage: stage,
+        requestID: fallbackRequestID,
+        statusCode: nil,
+        documentationURL: nil
+    )
+}
+
+private struct ResponsesRequest: Encodable {
+    let model: String
+    let input: String
+    let stream: Bool
 }
 ```

@@ -2,25 +2,25 @@
   "examples": [
     {
       "kind": "quickstart",
-      "name": "URLSession quickstart",
+      "name": "Native App Attest golden journey",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Examples/BasicURLSession/BasicURLSession.swift",
         "region": {
-          "end_line": 34,
+          "end_line": 247,
           "start_line": 1
         },
-        "region_sha256": "c29538ef0257810d3f6261b3d7afdb9ec6104fdf891ff5651aaff39d9755570c",
+        "region_sha256": "4e8a947666a977dcd2159d9428ff3f40a08c143d279a6f1520212a8c28bb5f31",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
-        "source_sha256": "c29538ef0257810d3f6261b3d7afdb9ec6104fdf891ff5651aaff39d9755570c"
+        "source_sha256": "4e8a947666a977dcd2159d9428ff3f40a08c143d279a6f1520212a8c28bb5f31"
       }
     },
     {
       "kind": "physical_device",
       "name": "App Attest physical-device application",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Examples/AppAttestConformance/Sources/AppAttestConformanceApp.swift",
         "region": {
           "end_line": 109,
@@ -36,7 +36,7 @@
       "kind": "component",
       "name": "App-extension component host",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Examples/AppExtensionComponents/Host/ComponentHostApp.swift",
         "region": {
           "end_line": 121,
@@ -52,7 +52,7 @@
       "kind": "framework",
       "name": "SwiftOpenAI adapter",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 153,
@@ -68,7 +68,7 @@
       "kind": "framework",
       "name": "Apple Foundation Models adapter",
       "source": {
-        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
+        "commit": "a0d0a118f897e594f8808067ce1a01fa571fdde2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 315,

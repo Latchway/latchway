@@ -22,8 +22,8 @@ coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
 historical coordinate. The component-attestation additions invalidated earlier
 intermediate draft hashes. The current SDK locks now converge on core checkpoint
-`6e44d1aacd85535d005db7d1df2f0e470f3dcffb` and bundle SHA-256
-`695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c`.
+`1fa6b2bf67906390e7af9be81fc946dedae71741` and bundle SHA-256
+`33c57d9dfeb227ca2472a4a4a964e6df37f4932699cacb423dee11ce15e8824e`.
 
 ## Framework registry
 
@@ -84,10 +84,10 @@ are not package-publication or production-support claims.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `b0069e993967662f4ee2729dbc393595793c5e50` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, and tested vanilla-Web documentation sources implemented and locked |
-| Swift `Latchway` | `d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, and the narrow Foundation Models 27 adapter are implemented; nine simulator runtime tests and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
-| Android `dev.latchway:latchway-*` | `b5b7d5321b54179f595f663892e7cda9bf34f7fd` | Android API 23+, Java 17 | Component/OkHttp transport plus Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
-| React Native `@latchway/react-native` | `abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage implemented and source-pinned; a development-signed physical iOS run passed, while protected Apple distribution, extension-runtime, and physical Android evidence remain required |
+| JavaScript `@latchway/client` | `3d1d372a550c38e74c073207e334805e03a09208` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, three-browser conformance, bundler consumers, and tested vanilla-Web documentation sources implemented and locked |
+| Swift `Latchway` | `a0d0a118f897e594f8808067ce1a01fa571fdde2` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, a compiled Firebase/App Attest golden journey, and the narrow Foundation Models 27 adapter are implemented; simulator gates and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
+| Android `dev.latchway:latchway-*` | `659b9c8728a3766bd1ed383e840515c4227305ae` | Android API 23+, Java 17 | Component/OkHttp transport plus a compiled Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
+| React Native `@latchway/react-native` | `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage are implemented and source-pinned; the exact committed source passed a development-signed iPad App Attest/Firebase/real-upstream run, while protected Apple distribution, extension-runtime, and physical Android evidence remain required |
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. Current locks all point to the draft version 1 checkpoint named above.

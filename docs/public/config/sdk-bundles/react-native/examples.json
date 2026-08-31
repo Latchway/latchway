@@ -4,39 +4,39 @@
       "kind": "physical_device",
       "name": "React Native physical-device application",
       "source": {
-        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
+        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
         "file": "example/src/App.tsx",
         "region": {
-          "end_line": 812,
+          "end_line": 1110,
           "start_line": 1
         },
-        "region_sha256": "16ce92e6887197f6e3ff2744a6fa16c8afff47dae1b93c55964a84cd6f35973f",
+        "region_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "16ce92e6887197f6e3ff2744a6fa16c8afff47dae1b93c55964a84cd6f35973f"
+        "source_sha256": "cd273c567b29f5251ebfe787a016f3c4d317279f817c937c2b106d5f98dce9a3"
       }
     },
     {
       "kind": "framework",
       "name": "OpenAI, Vercel AI, LangChain, and Anthropic consumers",
       "source": {
-        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
+        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
         "file": "example/src/framework-consumers.ts",
         "region": {
-          "end_line": 126,
+          "end_line": 153,
           "start_line": 1
         },
-        "region_sha256": "c766874e8c651be115ce9e81e46f9fbcea4518cc6840d376d1234dffefe1eb71",
+        "region_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-        "source_sha256": "c766874e8c651be115ce9e81e46f9fbcea4518cc6840d376d1234dffefe1eb71"
+        "source_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270"
       }
     },
     {
       "kind": "component",
       "name": "iOS App Intent extension",
       "source": {
-        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
+        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
         "file": "example/ios/AppIntents/AppIntents.swift",
         "region": {
           "end_line": 29,
@@ -52,7 +52,7 @@
       "kind": "physical_device",
       "name": "Android host application",
       "source": {
-        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
+        "commit": "6de46e1c7264e1d45cdd31174e4ea040a8c24acf",
         "file": "example/android/app/src/main/java/com/latchwayexample/MainApplication.kt",
         "region": {
           "end_line": 22,

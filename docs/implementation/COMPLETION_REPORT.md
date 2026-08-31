@@ -16,7 +16,7 @@ deployments, or protected evidence that does not exist.
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `24` |
-| Contract bundle | SHA-256 `695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c` at core checkpoint `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| Contract bundle | SHA-256 `33c57d9dfeb227ca2472a4a4a964e6df37f4932699cacb423dee11ce15e8824e` at core checkpoint `1fa6b2bf67906390e7af9be81fc946dedae71741` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 
@@ -76,16 +76,15 @@ source gateway, including the multi-audience token shape emitted by Firebase.
 The arbitrary ngrok hostname was not claimed as passing, and this observation
 is not protected immutable-candidate evidence.
 
-A separate real-device development run used the React Native example in iOS 27
-Release configuration, automatic Apple Development signing, and bundle
-`dev.latchway`. Apple production App Attest trust was accepted at validation
-category `3` and bundle version `1`; registration and the next assertion reused
-one App Attest key through a temporary ngrok tunnel, the current source gateway,
-and Firebase identity. Durable state recorded the assertion counter and hash.
-Secure Enclave DPoP, upstream non-streaming and streaming requests, quota, the
-typed `403 component_feature_not_granted` response, the native bridge, and
-cleanup also passed. This is development-signed physical evidence, not a
-protected immutable-candidate or distribution receipt.
+A final real-device development run used React Native commit
+`6de46e1c7264e1d45cdd31174e4ea040a8c24acf` in Debug configuration on an
+iPad running iPadOS 26.5, with automatic Apple Development signing and bundle
+`dev.latchway`. Apple production App Attest was accepted as `app_verified`;
+Firebase identity, the native DPoP path, signed root/App Intents entitlement
+isolation, a real OpenRouter Responses request to `openai/gpt-5-mini`, reported
+input/output/total usage, production quota settlement, and terminal session and
+installation revocation all passed. This is development-signed physical
+evidence, not a protected immutable-candidate or distribution receipt.
 
 Those results establish implementation confidence; they are not release
 receipts. The final convergence run has:
@@ -129,7 +128,7 @@ One immutable candidate still requires all of the following:
 8. production Mintlify deployment followed by link, accessibility, redirect,
    and AI-readable-output validation.
 
-The connected iPhone and Xcode-managed `dev.latchway` profile supported
+The connected iPad and Xcode-managed `dev.latchway` profile supported
 automatic Apple Development signing and the supplemental physical observation.
 No physical result closes the release gate until the protected collector and
 finalizer bind an Apple distribution-derived candidate to the exact repository,

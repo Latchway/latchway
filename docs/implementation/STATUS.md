@@ -16,7 +16,7 @@ remain open.
 | Current phase | Phase 9: source-converged candidate with supplemental physical iOS development evidence |
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
 | Last passing commit in each repository | Exact coordinates are listed below |
-| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `1fa6b2bf67906390e7af9be81fc946dedae71741` |
 | Database schema version | `24` at the recorded passing source coordinate |
 | Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the source-converged tuple; the later JavaScript documentation-source checkpoint passed its full repository gate and deterministic bundle gate; the synchronized Mintlify mirror passed its separate full documentation gate |
 | Passing test commands | Verified commands and required working directories are listed below |
@@ -28,12 +28,12 @@ remain open.
 
 | Repository | Passing source coordinate |
 | --- | --- |
-| Core `latchway` | `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
-| JavaScript `latchway-js` | `b0069e993967662f4ee2729dbc393595793c5e50` |
-| Swift `latchway-ios-sdk` | `d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2` |
-| Android `latchway-android` | `b5b7d5321b54179f595f663892e7cda9bf34f7fd` |
-| React Native `latchway-react-native-sdk` | `abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602` |
-| Mintlify mirror `latchway-docs` | `0233d6fde2bd9ede53dcbe3860f055a14fe55786` |
+| Core contract/source checkpoint `latchway` | `1fa6b2bf67906390e7af9be81fc946dedae71741` |
+| JavaScript `latchway-js` | `3d1d372a550c38e74c073207e334805e03a09208` |
+| Swift `latchway-ios-sdk` | `a0d0a118f897e594f8808067ce1a01fa571fdde2` |
+| Android `latchway-android` | `659b9c8728a3766bd1ed383e840515c4227305ae` |
+| React Native `latchway-react-native-sdk` | `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` |
+| Mintlify mirror `latchway-docs` | Synchronized branch commit recorded after the canonical docs commit |
 
 ### Passing test commands
 
@@ -88,8 +88,8 @@ python3 scripts/cross-repo-conformance.py --scope source \
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
 | Contract | `1.0.0` draft, `released_at: null` |
-| Contract freeze | Core checkpoint `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
-| Bundle SHA-256 | `695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c` |
+| Contract freeze | Core checkpoint `1fa6b2bf67906390e7af9be81fc946dedae71741` |
+| Bundle SHA-256 | `33c57d9dfeb227ca2472a4a4a964e6df37f4932699cacb423dee11ce15e8824e` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Recorded source candidate schema `24` |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
@@ -110,7 +110,7 @@ checkpoint and reproducible draft bundle above.
 | Admin API, CLI, dashboard, wizard, request/usage/audit views | Complete; the current worktree adds the exact `latchway test-upstream serve` fixture command and separate first-byte/first-token request timestamps | Deployment operator acceptance |
 | Native/Web trust verifiers and component proof | Complete in source; a development-signed physical React Native iOS run passed production App Attest registration and same-key assertion, and a browser-minted Firebase App Check token passes the current source gateway | Apple distribution-derived protected candidate, physical Play Integrity, delegated-extension runtime, protected immutable-candidate App Check rerun, and Turnstile evidence |
 | Swift, Android, JavaScript SDKs | Implemented and locked to the frozen contract | Physical proof where applicable and publication |
-| React Native SDK | Implemented and pinned to the exact three native/source commits; a physical iOS 27 Release-configuration app passed the current-source development run | Protected Apple distribution candidate, physical Android proof, extension runtime proof, and publication |
+| React Native SDK | Implemented and pinned to the exact three native/source commits; the exact committed source passed a physical iPadOS 26.5 Debug development run | Protected Apple distribution candidate, physical Android proof, extension runtime proof, and publication |
 | Framework adapters | Locally tested experimental scope | Hosted common conformance; physical native proof |
 | Telemetry, jobs, rotation, recovery, upgrades, replicas | Complete in source/local tests; schema 24 makes TTFT protocol-aware and leaves lifecycle-only, opaque, and historical attempts without an inferred token timestamp | Protected exact-image drills |
 | Cloud and supply-chain workflows | Complete and statically/dry-run validated | Registry digests, scans, SBOM, signature, provenance, cloud smokes |
@@ -130,15 +130,15 @@ checkpoint and reproducible draft bundle above.
   origin passed the current source gateway, including Firebase's
   multi-audience JWT form. This is not protected immutable-candidate evidence,
   and the arbitrary ngrok hostname was not claimed as passing.
-- A real physical iOS 27 React Native app built in Release configuration with
-  automatic Apple Development signing and bundle `dev.latchway` passed Apple
-  production App Attest trust at validation category `3` and bundle version
-  `1`. Registration and a later assertion reused the same App Attest key
-  through a temporary ngrok tunnel, the current source gateway, and Firebase
-  identity; the server persisted the assertion counter and hash. The run also
-  passed Secure Enclave DPoP, upstream non-streaming and streaming requests,
-  quota, the typed `403 component_feature_not_granted` path, bridge behavior,
-  and cleanup. It was not a protected or distribution-signed release receipt.
+- A real physical iPad running iPadOS 26.5 built React Native commit
+  `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` in Debug configuration with
+  automatic Apple Development signing and bundle `dev.latchway`. Apple App
+  Attest was accepted as `app_verified`; Firebase identity, the native DPoP
+  path, signed root/App Intents entitlement isolation, a real OpenRouter
+  Responses request to `openai/gpt-5-mini`, reported token usage, all five
+  quota settlements, bridge behavior, and terminal session/installation
+  revocation passed. It was not a protected or distribution-signed release
+  receipt.
 - Actionlint across all workflows, deterministic contract regeneration, and a
   binary `govulncheck` result with no called vulnerabilities.
 - Nine Foundation Models public-API tests passed on an iOS 27.0 simulator,
@@ -157,16 +157,14 @@ checkpoint and reproducible draft bundle above.
 
 These are source-development results, not protected release receipts. The
 clean-tree cross-repository source gate passed for core
-`6e44d1aacd85535d005db7d1df2f0e470f3dcffb`, JavaScript
-`e88ae112b9deb372868064f9b9c70803d37faf87`, iOS
-`d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2`, Android
-`b5b7d5321b54179f595f663892e7cda9bf34f7fd`, and React Native
-`abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602`. The synchronized documentation
-mirror passed its separate gate. These results do not substitute for any
-protected external domain. The later JavaScript-only documentation-source
-checkpoint `b0069e993967662f4ee2729dbc393595793c5e50` passed `pnpm check` and
-produced a clean deterministic SDK documentation bundle; it did not change a
-server or cross-SDK contract input.
+`1fa6b2bf67906390e7af9be81fc946dedae71741`, JavaScript
+`3d1d372a550c38e74c073207e334805e03a09208`, iOS
+`a0d0a118f897e594f8808067ce1a01fa571fdde2`, Android
+`659b9c8728a3766bd1ed383e840515c4227305ae`, and React Native
+`6de46e1c7264e1d45cdd31174e4ea040a8c24acf`. All four clean SDK documentation
+bundles record those exact commits and `source_tree_clean: true`. The
+synchronized documentation mirror passes its separate gate. These results do
+not substitute for any protected external domain.
 
 ## Direct component attestation boundary
 
