@@ -12,7 +12,7 @@
     },
     {
       "path": "reference/compatibility.mdx",
-      "sha256": "1b3dbcd1fce4fe43b93cc814711b9fc4be1814d38bcc74704dae5c321ca8e3ae"
+      "sha256": "3ff8df8c326ad675dcf2d18b750027b4bb228b09d42bbf99b4e4d5c45168af5b"
     },
     {
       "path": "reference/config-schema.mdx",
@@ -46,7 +46,7 @@
     },
     {
       "path": "compatibility/frameworks.yaml",
-      "sha256": "2d347eb2072a4ae9c64e6d29e34f613932ecdec77288c7ea9e123e5ad7d6d588"
+      "sha256": "de89fde95bd67a87ff7146af43c3b63bc1e8051fa3549139bc146e5ff48c5bdc"
     }
   ]
 }
