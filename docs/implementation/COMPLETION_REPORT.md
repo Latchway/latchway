@@ -16,7 +16,7 @@ deployments, or protected evidence that does not exist.
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `23` |
-| Contract bundle | SHA-256 `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` at core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Contract bundle | SHA-256 `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` at core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 

@@ -22,7 +22,7 @@ coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
 historical coordinate. The component-attestation additions invalidated earlier
 intermediate draft hashes. The current SDK locks now converge on core checkpoint
-`a62b0f6aa2328604101c1073c56f5ecb3bed3618` and bundle SHA-256
+`72a52d7b42e6ea159e8222c5dd0346be286fb39a` and bundle SHA-256
 `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765`.
 
 ## Framework registry

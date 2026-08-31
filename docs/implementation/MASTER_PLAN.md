@@ -30,7 +30,7 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract freeze | Core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Contract freeze | Core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Database | Schema `23` |

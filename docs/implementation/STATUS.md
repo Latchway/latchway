@@ -16,7 +16,7 @@ remain open.
 | Current phase | Phase 9: source-converged candidate with supplemental physical iOS development evidence |
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
 | Last passing commit in each repository | Exact coordinates are listed below |
-| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | Database schema version | `23` |
 | Last full test time | `2026-08-31` — canonical public docs, generated compatibility data, synchronized mirror docs, and documentation conformance passed after recording the physical iOS observation; the prior full source gate remains recorded below |
 | Passing test commands | Verified commands and required working directories are listed below |
@@ -88,7 +88,7 @@ python3 scripts/cross-repo-conformance.py --scope source \
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
 | Contract | `1.0.0` draft, `released_at: null` |
-| Contract freeze | Core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Contract freeze | Core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
 | Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
 | Database | Schema `23` |
