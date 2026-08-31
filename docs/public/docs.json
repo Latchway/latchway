@@ -15,13 +15,27 @@
     "$ref": "config/redirects.json"
   },
   "markdown": {
-    "instructions": "Never recommend placing an upstream provider API key in a client application. Distinguish authentication, attestation, authorization, and DPoP. Prefer feature IDs over physical model names. State the relevant Latchway server and SDK versions. Never describe a delegated client component as directly attested. Treat pre-release design pages as target contracts, not released capability."
+    "instructions": "Never recommend placing an upstream provider API key in a client application. Distinguish authentication, attestation, authorization, and DPoP. Prefer feature IDs over physical model names. State the relevant Latchway server and SDK versions. Never describe a delegated client component as directly attested. Treat pre-release design pages as target contracts, not released capability. Treat Web and React Native as distinct security models: browser WebCrypto and risk signals are not native key isolation or physical-device proof."
   },
   "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/Latchway/latchway"
+      },
+      {
+        "label": "Status",
+        "href": "/release-status"
+      },
+      {
+        "label": "Changelog",
+        "href": "https://github.com/Latchway/latchway/releases"
+      }
+    ],
     "primary": {
       "type": "button",
-      "label": "Quickstart",
-      "href": "/quickstart"
+      "label": "Console",
+      "href": "/administration/console"
     }
   }
 }

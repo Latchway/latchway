@@ -112,9 +112,12 @@ expose the fixture control surface publicly and never package it in the
 production image.
 
 The fixture's authenticated control endpoint supports only `healthy`,
-`fail-500`, `delayed-first-byte`, `disconnect-before-response`, and
-`disconnect-during-stream`. The stream hold must exceed the load harness hold
-plus establishment time.
+`fail-500`, `delayed-first-byte`, `disconnect-before-response`,
+`disconnect-during-stream`, `hold-before-response`, and `drain-hold`.
+The final two modes expose bounded counters so the failure driver can establish
+an exact pre-response or post-first-byte barrier before the host controller
+injects a fault. Changing the mode releases every held request. The stream
+hold must exceed the load harness hold plus establishment time.
 
 For the self-contained Docker gate only, the fixture may bind one exact RFC1918
 address when `-acknowledge-isolated-container-network` is supplied and the
@@ -316,7 +319,9 @@ release process, a network actually cut PostgreSQL, or a load balancer actually
 routed across replicas. The six `external` matrix entries therefore remain
 release-blocking until supplied.
 
-For every live case:
+For every live case the repo-owned controller enforces the fault/cleanup
+boundary, while the fixed observer inside the disposable network establishes
+and verifies application state:
 
 1. use the exact release OCI reference pinned as
    `registry/repository@sha256:<digest>`, record the exact executed
@@ -333,11 +338,40 @@ For every live case:
    no post-commit retry, and the expected known/unknown usage provenance;
 8. record raw logs/state as files and SHA-256 every artifact.
 
-Create one document named `<scenario-id>.json` from
-[`tests/failure/external-evidence.example.json`](../../tests/failure/external-evidence.example.json).
-Artifact paths must be relative to the evidence directory. The validator checks
-the scenario ID, exact current commit, timestamps, all assertions, artifact
-presence, and every SHA-256 digest.
+Do not hand-author passing documents or install an observer on the runner.
+[`scripts/run-release-failure-controller.sh`](../../scripts/run-release-failure-controller.sh)
+builds the observer and deterministic tools from the exact clean checkout,
+creates the isolated internal-only topology, provisions authenticated traffic,
+generates the strict controller plan, invokes
+[`scripts/fault-controller.py`](../../scripts/fault-controller.py), and removes
+the validated containers and network before it can pass. It requires explicit
+disposable-target acknowledgement, exact candidate index/platform references
+already bound to a loaded `linux/amd64` image ID, an exact loaded PostgreSQL
+digest/image ID, commit, operator, a bounded unique run ID, and an absolute
+empty output directory. The controller produces one `<scenario-id>.json`
+document in the existing external-evidence schema and hash-addresses every
+artifact. The committed
+[`tests/failure/controller-plan.example.json`](../../tests/failure/controller-plan.example.json)
+is the generated plan schema example, not an operator input. The example
+[`tests/failure/external-evidence.example.json`](../../tests/failure/external-evidence.example.json)
+remains a schema reference, not an authorization to synthesize results.
+
+The canonical release workflow supplies those exact references and loaded
+image IDs. A manual isolated run uses the same boundary:
+
+```bash
+scripts/run-release-failure-controller.sh \
+  --acknowledge-disposable-target \
+  --run-id manual-unique01 \
+  --output-dir /tmp/latchway-v1-evidence/live-failures \
+  --commit "$CANDIDATE_COMMIT" \
+  --image "$CANDIDATE_INDEX_REFERENCE" \
+  --platform-image "$CANDIDATE_AMD64_REFERENCE" \
+  --candidate-image-id "$CANDIDATE_LOCAL_IMAGE_ID" \
+  --postgres-image "$POSTGRES_DIGEST_REFERENCE" \
+  --postgres-image-id "$POSTGRES_LOCAL_IMAGE_ID" \
+  --operator "manual isolated verification"
+```
 
 Then run the release scope:
 

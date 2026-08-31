@@ -1,0 +1,62 @@
+---
+title: "Configure the React Native iOS host"
+description: "Wire CocoaPods, App Attest, bundle identity, Keychain groups, and the native Swift security module into a React Native iOS target."
+icon: "apple"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="blue">iOS 15+</Badge> <Badge color="purple">Native security state</Badge>
+
+## Outcome
+
+The React Native iOS host loads the version-locked Swift SDK, signs for the
+exact bundle identifier, and keeps App Attest, Secure Enclave or Keychain,
+DPoP, and refresh state behind the native bridge.
+
+## Configure the target
+
+1. install CocoaPods from the source workspace;
+2. enable the App Attest entitlement for the exact application identifier;
+3. put the fully resolved private root app-ID Keychain group first in the
+   signed entitlement;
+4. add only explicit extension-shared groups after it;
+5. set `apple.rootKeychainAccessGroup` to the resolved private group; and
+6. list extension-shared groups as
+   `apple.legacySharedKeychainAccessGroups` only when they contain a known
+   legacy root record coordinate.
+
+Never pass `$(AppIdentifierPrefix)` at runtime. Inspect the built `.app`
+entitlements rather than inferring expansion from the Xcode project.
+
+## Keep the bridge narrow
+
+The TypeScript layer may supply non-secret configuration and a current external
+identity token. It must not supply or receive an App Attest challenge, raw
+evidence, DPoP private key, access token, refresh token, or provider credential.
+
+Equivalent JavaScript clients in one runtime share the same native security
+scope. Conflicting gateway, application, environment, Keychain, or trust
+configuration must fail closed.
+
+## Verify
+
+Build the example workspace and run on the exact intended device. Confirm:
+
+```text
+Platform: react_native_ios
+Native key storage: reported
+Trust provider: app_attest
+DPoP: verified
+JavaScript credential fields: absent
+```
+
+A development-signed result is useful device evidence but remains distinct
+from a protected Apple distribution receipt. Continue with the
+[production checklist](/clients/react-native/production-checklist).
+
+For the other host, open [Android native setup](/clients/react-native/android-native-setup).

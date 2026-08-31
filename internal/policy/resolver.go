@@ -27,6 +27,7 @@ import (
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
 	"github.com/latchway/latchway/internal/useroverride"
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 var (
@@ -830,9 +831,30 @@ func validRuntimeAttestationPolicy(policy configuration.AttestationPolicy) bool 
 			!slices.Contains([]string{"disabled", "preferred", "required"}, selection.Mode) ||
 			!validTrustLevel(selection.MinimumTrustLevel) ||
 			(selection.Mode == "required" && selection.MinimumTrustLevel == "none") ||
-			(selection.Mode != "disabled" && (len(selection.ApplicationIdentifiers) != 0 || len(selection.AllowedOrigins) != 0)) {
+			(selection.Mode != "disabled" && len(selection.ApplicationIdentifiers) != 0) ||
+			!validRuntimeAttestationOrigins(platform, selection) {
 			return false
 		}
+	}
+	return true
+}
+
+func validRuntimeAttestationOrigins(platform string, selection configuration.PlatformAttestation) bool {
+	if selection.Mode == "disabled" || platform != "web" {
+		return len(selection.AllowedOrigins) == 0
+	}
+	if len(selection.AllowedOrigins) == 0 || len(selection.AllowedOrigins) > 32 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(selection.AllowedOrigins))
+	for _, origin := range selection.AllowedOrigins {
+		if !weborigin.Canonical(origin) {
+			return false
+		}
+		if _, duplicate := seen[origin]; duplicate {
+			return false
+		}
+		seen[origin] = struct{}{}
 	}
 	return true
 }

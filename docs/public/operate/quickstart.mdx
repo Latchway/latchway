@@ -1,0 +1,178 @@
+---
+title: "Run and verify Latchway locally"
+description: "Start the source candidate with PostgreSQL and prove its isolated end-to-end path with the local verifier."
+icon: "server-cog"
+audience: "operator"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-08-31"
+owner: "core-operations"
+---
+
+<Badge color="blue">Local</Badge> <Badge color="yellow">Source candidate</Badge>
+
+**Expected time:** 10 minutes on a prepared development machine.
+
+**Mode:** Local, isolated source verification.
+
+**Coordinates:** server contract `1.0.0`; current source binary `1.0.0-rc.1`;
+SDK not applicable.
+
+This pre-release path validates the exact checkout; it is not a published
+server or production deployment claim.
+
+## Outcome
+
+Run a healthy Latchway gateway and obtain a passing, cleanup-verified
+`latchway verify local` report from the same core checkout.
+
+## Before you start
+
+- Docker with Compose, Go 1.27, Git, OpenSSL, and `curl`
+- an authorized checkout of `github.com/Latchway/latchway`
+- ports 8080 and 5432 available on the development machine
+- one non-loopback private IPv4 address for verifier-owned upstream fixtures
+
+The database role in this walkthrough may create and drop schemas. Do not give
+that capability to a routine production data-plane role.
+
+## What you will build
+
+<Frame caption="The verifier owns temporary identity, attestation, route, quota, and upstream fixtures.">
+
+```text
+CLI verifier -> temporary PostgreSQL schema -> production session/proxy path -> mock upstream
+                  |                                                      |
+                  +---------------- drop and prove absent ----------------+
+```
+
+</Frame>
+
+## Procedure
+
+<Steps>
+  <Step title="Create local secrets">
+    In the repository root, create `.env` once. Preserve its master key for as
+    long as the local PostgreSQL volume exists.
+
+```bash
+if [ ! -e .env ]; then
+  umask 077
+  cp .env.example .env
+  printf 'LATCHWAY_MASTER_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+  printf 'LATCHWAY_ADMIN_BOOTSTRAP_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+fi
+```
+
+    Expected result: `.env` is untracked and readable only by the current user.
+    Diagnostic: run `test -r .env && git check-ignore -q .env`; do not print
+    the file or its secret values.
+  </Step>
+  <Step title="Start the gateway">
+    Build the exact checkout into the Compose image.
+
+```bash
+docker compose up -d --build
+curl --fail http://127.0.0.1:8080/healthz
+curl --fail http://127.0.0.1:8080/readyz
+```
+
+    Expected result: both health endpoints return success. Diagnostic: inspect
+    `docker compose ps` and `docker compose logs --no-log-prefix latchway`.
+  </Step>
+  <Step title="Build the matching CLI">
+
+```bash
+mkdir -p ./bin
+go build -trimpath -o ./bin/latchway ./cmd/latchway
+./bin/latchway version
+```
+
+    Expected result: the binary reports the source build. A published CLI is
+    not required for this source-mode path. Diagnostic: run `go version` and
+    `go env GOMOD` if the build cannot resolve the checkout.
+  </Step>
+  <Step title="Run the isolated verifier">
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://latchway:latchway-local-development@127.0.0.1:5432/latchway?sslmode=disable'
+./bin/latchway --output json verify local \
+  --timeout 2m \
+  --junit /tmp/latchway-local.xml
+```
+
+    Expected result: every ordered check passes and the verifier proves that
+    its generated schema was dropped. The JSON and JUnit reports exclude
+    generated identifiers, credentials, and database coordinates. Diagnostic:
+    inspect `docker compose ps` and the redacted JUnit failure in
+    `/tmp/latchway-local.xml`; never copy fixture credentials into a report.
+  </Step>
+</Steps>
+
+## Verification
+
+The command must exit with status 0. Keep `/tmp/latchway-local.xml` only as
+local evidence. The verifier exercises production session, DPoP, proxy,
+trusted accounting, quota, fallback, recovery, header, SSRF, activation, and
+rollback code against deterministic fixtures.
+
+The verifier deliberately does not write its fixture requests into the
+long-running local console tenant because it uses and then destroys a temporary
+schema.
+
+## What Latchway established
+
+- The exact core source can migrate a temporary schema and serve its protected
+  request path against deterministic identity, signed debug evidence, and mock
+  upstream fixtures.
+- Reserve, execute, settle, fallback, replay, and cleanup invariants passed.
+- The source verifier did not establish a published artifact, live provider,
+  cloud deployment, or physical-device attestation.
+
+## Production next step
+
+<Card title="Harden a production deployment" icon="shield-check" href="/operations/production-readiness">
+  Replace local secrets and HTTP with managed secret custody, TLS, production
+  identity and trust, backups, operational jobs, and immutable release evidence.
+</Card>
+
+## Keep a client quickstart environment running
+
+The isolated verifier above exits and drops its fixtures. When a client
+quickstart needs a stable local environment, use the same source binary and
+database role in a private foreground terminal:
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://latchway:latchway-local-development@127.0.0.1:5432/latchway?sslmode=disable'
+./bin/latchway --output json develop \
+  --listen 127.0.0.1:8080 \
+  --browser-origin http://localhost:5173
+```
+
+Expected result: the ready document names the temporary application,
+`habit-assistant` feature, helper URLs, and one-run Console login used by the
+[Web quickstart](/clients/web/quickstart). Diagnostic: no ready document means
+the process failed before serving; inspect only the redacted error and local
+PostgreSQL health. Ctrl-C drops the isolated schema and invalidates that login.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="The gateway never becomes ready">
+    Run `docker compose ps` and `docker compose logs --no-log-prefix latchway`.
+    Confirm that `.env` contains one valid 32-byte base64 master key and that
+    PostgreSQL is healthy.
+  </Accordion>
+  <Accordion title="The verifier cannot create its schema">
+    Confirm the selected database URL and grant schema create/drop only to this
+    development verifier role. Do not broaden the production service role.
+  </Accordion>
+  <Accordion title="A verifier-owned upstream cannot bind">
+    Confirm that the host has a non-loopback private IPv4 address and no local
+    firewall blocks the bounded fixture listener.
+  </Accordion>
+</AccordionGroup>
+
+For other failures, use [Troubleshooting](/troubleshooting) and [Self-tests and
+verification](/operations/self-tests).

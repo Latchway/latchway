@@ -1,0 +1,66 @@
+---
+title: "Install the Android SDK"
+description: "Align the Kotlin source modules, Android API baseline, OkHttp adapter, and optional identity or integrity products before client setup."
+icon: "package"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+<Badge color="blue">Development</Badge> <Badge color="yellow">Source candidate</Badge>
+
+## Outcome
+
+The Android application resolves every Latchway module from one version-locked
+source candidate and compiles the exact native adapters required by policy.
+
+## Use one included build
+
+Until Maven Central publication, point `settings.gradle.kts` at the authorized
+SDK checkout:
+
+```kotlin
+includeBuild("../latchway-android")
+```
+
+Keep the intended coordinates in the application module so the publication
+transition is reviewable:
+
+```kotlin
+dependencies {
+    implementation(platform("dev.latchway:latchway-bom:1.0.0"))
+    implementation("dev.latchway:latchway-okhttp")
+    implementation("dev.latchway:latchway-play-integrity")
+    implementation("dev.latchway:latchway-firebase-auth") // optional
+}
+```
+
+The adapters carry `latchway-core` transitively. Add only the identity and
+attestation products the application uses. Test support is repository-only and
+must not become a production dependency.
+
+## Match the platform baseline
+
+- native libraries require Android API 23 or newer;
+- the source checkout pins its Gradle, Android Gradle Plugin, Kotlin, Java, and
+  Android SDK requirements;
+- framework versions must match the generated compatibility registry; and
+- React Native uses a separate API 24+ host boundary.
+
+Do not infer a broad compatibility range from a newer local dependency graph.
+
+## Verify
+
+From the SDK checkout:
+
+```bash
+./gradlew test assemble lint
+```
+
+Then compile the application target and inspect dependency resolution to
+confirm it did not pull a same-named remote artifact. A passing build proves
+source compatibility only; continue with [Play Integrity](/clients/android/play-integrity)
+for a real trust result.

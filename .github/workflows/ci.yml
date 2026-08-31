@@ -181,7 +181,10 @@ jobs:
           cache-dependency-path: go.sum
       - name: Validate operational-resilience evidence tooling
         run: |
-          python3 -m unittest scripts/test_operational_resilience_evidence.py
+          bash -n scripts/run-release-failure-controller.sh
+          python3 -m unittest \
+            scripts/test_fault_controller.py \
+            scripts/test_operational_resilience_evidence.py
           python3 -m unittest \
             scripts/test_security_evidence.py \
             scripts/test_security_workflow.py

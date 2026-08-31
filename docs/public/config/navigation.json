@@ -1,41 +1,132 @@
 {
   "tabs": [
     {
-      "tab": "Start",
+      "tab": "Get started",
       "groups": [
         {
-          "group": "Get started",
+          "group": "Overview",
           "pages": [
             "index",
             "start/why-latchway",
-            "quickstart",
             "start/architecture-at-a-glance",
             "start/choose-an-integration",
+            "quickstart",
+            "operations/production-readiness",
             "start/concepts",
             "release-status"
-          ]
-        },
-        {
-          "group": "Runtime model",
-          "pages": [
-            "concepts/installation-families",
-            "concepts/client-components",
-            "concepts/trust-provenance"
           ]
         }
       ]
     },
     {
-      "tab": "Build",
+      "tab": "Client SDKs",
       "groups": [
         {
-          "group": "Client SDKs",
+          "group": "Choose an SDK",
+          "pages": ["clients/choose-an-sdk"]
+        },
+        {
+          "group": "iOS",
           "pages": [
-            "mobile/react-native",
-            "mobile/ios",
-            "mobile/android",
-            "mobile/device-proof"
+            "clients/ios/index",
+            "clients/ios/quickstart",
+            "clients/ios/installation",
+            "clients/ios/authentication",
+            "clients/ios/app-attest",
+            "clients/ios/send-a-request",
+            "clients/ios/streaming",
+            "clients/ios/framework-integrations",
+            "clients/ios/app-extensions",
+            "clients/ios/error-handling",
+            "clients/ios/production-checklist",
+            "mobile/ios"
           ]
+        },
+        {
+          "group": "Android",
+          "pages": [
+            "clients/android/index",
+            "clients/android/quickstart",
+            "clients/android/installation",
+            "clients/android/authentication",
+            "clients/android/play-integrity",
+            "clients/android/okhttp",
+            "clients/android/retrofit",
+            "clients/android/streaming",
+            "clients/android/background-execution",
+            "clients/android/error-handling",
+            "clients/android/production-checklist",
+            "mobile/android"
+          ]
+        },
+        {
+          "group": "Web: start",
+          "pages": [
+            "clients/web/index",
+            "clients/web/quickstart",
+            "clients/web/installation",
+            "clients/web/authentication",
+            "clients/web/send-a-request",
+            "clients/web/streaming"
+          ]
+        },
+        {
+          "group": "Web: trust",
+          "pages": [
+            "clients/web/webcrypto-dpop",
+            "clients/web/browser-trust",
+            "clients/web/firebase-app-check",
+            "clients/web/turnstile"
+          ]
+        },
+        {
+          "group": "Web: browser security",
+          "pages": [
+            "clients/web/origins-and-cors",
+            "clients/web/content-security-policy",
+            "clients/web/session-storage",
+            "clients/web/multiple-tabs"
+          ]
+        },
+        {
+          "group": "Web: runtimes and frameworks",
+          "pages": [
+            "clients/web/browser-vs-node",
+            "clients/web/server-rendering",
+            "clients/web/react",
+            "clients/web/nextjs",
+            "clients/web/vite"
+          ]
+        },
+        {
+          "group": "Web: ship and support",
+          "pages": [
+            "clients/web/errors",
+            "clients/web/troubleshooting",
+            "clients/web/production-checklist"
+          ]
+        },
+        {
+          "group": "React Native",
+          "pages": [
+            "clients/react-native/index",
+            "clients/react-native/quickstart",
+            "clients/react-native/installation",
+            "clients/react-native/ios-native-setup",
+            "clients/react-native/android-native-setup",
+            "clients/react-native/authentication",
+            "clients/react-native/send-a-request",
+            "clients/react-native/streaming",
+            "clients/react-native/framework-integrations",
+            "clients/react-native/app-extensions",
+            "clients/react-native/error-handling",
+            "clients/react-native/production-checklist",
+            "mobile/react-native"
+          ]
+        },
+        {
+          "group": "Authentication providers",
+          "pages": ["clients/authentication-providers"]
         },
         {
           "group": "AI framework integrations",
@@ -63,7 +154,7 @@
           ]
         },
         {
-          "group": "Features and routing",
+          "group": "Features and protocols",
           "pages": [
             "concepts/providers-and-protocols",
             "concepts/routing-and-quotas"
@@ -74,6 +165,10 @@
     {
       "tab": "Operate",
       "groups": [
+        {
+          "group": "Start",
+          "pages": ["operate/quickstart"]
+        },
         {
           "group": "Configure and administer",
           "pages": [
@@ -90,8 +185,7 @@
             "operations/self-tests",
             "operations/key-rotation",
             "operations/backup-restore",
-            "operations/upgrades",
-            "operations/production-readiness"
+            "operations/upgrades"
           ]
         },
         {
@@ -114,7 +208,11 @@
             "concepts/security-boundary",
             "concepts/identity-and-attestation",
             "concepts/security-and-privacy",
-            "security/delegated-components"
+            "concepts/installation-families",
+            "concepts/client-components",
+            "concepts/trust-provenance",
+            "security/delegated-components",
+            "mobile/device-proof"
           ]
         }
       ]

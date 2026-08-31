@@ -1,0 +1,41 @@
+---
+title: "Stream Web responses"
+description: "Consume browser ReadableStream data incrementally while preserving cancellation and safe pre-dispatch retry limits."
+icon: "waves"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Latchway returns the original Fetch Response. It does not buffer streaming
+response bodies:
+
+```typescript
+const controller = new AbortController();
+const response = await aiFetch("/v1/responses", {
+  method: "POST",
+  body: JSON.stringify({ input: "Plan my afternoon.", stream: true }),
+  signal: controller.signal,
+});
+
+if (response.body === null) throw new Error("Missing response stream");
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+for (;;) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  render(decoder.decode(value, { stream: true }));
+}
+```
+
+Calling `controller.abort()` cancels Fetch and the upstream path. The SDK never
+buffers a streaming request body to make it replayable. If a new DPoP nonce or
+session is required before dispatch and the body is already consumed, it fails
+with [`transport_request_not_replayable`](/reference/errors#transport_request_not_replayable).
+
+Automatic retries are limited to one canonical, correlated pre-dispatch DPoP
+nonce challenge and one canonical pre-dispatch `session_expired` response.
+Ambiguous upstream failures are not replayed.

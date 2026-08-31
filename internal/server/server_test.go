@@ -110,6 +110,66 @@ func TestAdminAPIIsMountedAheadOfConsoleFallback(t *testing.T) {
 	}
 }
 
+func TestDevelopmentAPIIsMountedOnlyOnCanonicalLoopbackHTTPOrigin(t *testing.T) {
+	t.Parallel()
+
+	for _, origin := range []string{
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+	} {
+		origin := origin
+		t.Run(origin, func(t *testing.T) {
+			t.Parallel()
+			development := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/development/v1/probe" {
+					t.Fatalf("mounted development path = %q, want full development path", r.URL.Path)
+				}
+				w.WriteHeader(http.StatusAccepted)
+			})
+			httpServer, err := New(config.Config{
+				ListenAddress: "127.0.0.1:8080", PublicOrigin: origin,
+				ReadTimeout: time.Second, IdleTimeout: time.Second,
+			}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), Handlers{
+				AdminAPI: http.NotFoundHandler(), ClientAPI: http.NotFoundHandler(),
+				DataPlane: http.NotFoundHandler(), DevelopmentAPI: development,
+			})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			response := httptest.NewRecorder()
+			httpServer.httpServer.Handler.ServeHTTP(
+				response, httptest.NewRequest(http.MethodGet, "/development/v1/probe", nil),
+			)
+			if response.Code != http.StatusAccepted {
+				t.Fatalf("development route status = %d, want %d", response.Code, http.StatusAccepted)
+			}
+		})
+	}
+
+	for _, origin := range []string{
+		"", "https://localhost:8080", "http://gateway.example.test:8080",
+		"http://0.0.0.0:8080", "http://localhost:80",
+		"http://LOCALHOST:8080", "http://localhost:8080/", "http://localhost:8080/path",
+		"http://user@localhost:8080", "http://localhost:8080?query=true", "http://localhost:8080#fragment",
+	} {
+		origin := origin
+		t.Run("reject_"+origin, func(t *testing.T) {
+			t.Parallel()
+			_, err := New(config.Config{
+				ListenAddress: "127.0.0.1:8080", PublicOrigin: origin,
+				ReadTimeout: time.Second, IdleTimeout: time.Second,
+			}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), Handlers{
+				AdminAPI: http.NotFoundHandler(), ClientAPI: http.NotFoundHandler(),
+				DataPlane: http.NotFoundHandler(), DevelopmentAPI: http.NotFoundHandler(),
+			})
+			if err == nil || err.Error() != "development API requires a canonical loopback HTTP public origin" {
+				t.Fatalf("New() error = %v, want strict development origin rejection", err)
+			}
+		})
+	}
+}
+
 func TestClientAPIIsMountedAtUnstrippedPathsAheadOfConsoleFallback(t *testing.T) {
 	t.Parallel()
 

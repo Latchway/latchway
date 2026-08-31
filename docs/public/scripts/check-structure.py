@@ -11,8 +11,105 @@ import sys
 from typing import Any
 
 
-EXPECTED_TABS = ["Start", "Build", "Operate", "Security", "Reference", "Community"]
+EXPECTED_TABS = ["Get started", "Client SDKs", "Operate", "Security", "Reference", "Community"]
+GOLDEN_PAGES = {
+    "operate/quickstart",
+    "clients/ios/quickstart",
+    "clients/android/quickstart",
+    "clients/web/quickstart",
+    "clients/react-native/quickstart",
+}
+WEB_PAGES = {
+    "clients/web/index",
+    "clients/web/quickstart",
+    "clients/web/installation",
+    "clients/web/authentication",
+    "clients/web/send-a-request",
+    "clients/web/streaming",
+    "clients/web/webcrypto-dpop",
+    "clients/web/browser-trust",
+    "clients/web/firebase-app-check",
+    "clients/web/turnstile",
+    "clients/web/origins-and-cors",
+    "clients/web/content-security-policy",
+    "clients/web/session-storage",
+    "clients/web/multiple-tabs",
+    "clients/web/browser-vs-node",
+    "clients/web/server-rendering",
+    "clients/web/react",
+    "clients/web/nextjs",
+    "clients/web/vite",
+    "clients/web/errors",
+    "clients/web/troubleshooting",
+    "clients/web/production-checklist",
+}
+IOS_PAGES = {
+    "clients/ios/index",
+    "clients/ios/quickstart",
+    "clients/ios/installation",
+    "clients/ios/authentication",
+    "clients/ios/app-attest",
+    "clients/ios/send-a-request",
+    "clients/ios/streaming",
+    "clients/ios/framework-integrations",
+    "clients/ios/app-extensions",
+    "clients/ios/error-handling",
+    "clients/ios/production-checklist",
+}
+ANDROID_PAGES = {
+    "clients/android/index",
+    "clients/android/quickstart",
+    "clients/android/installation",
+    "clients/android/authentication",
+    "clients/android/play-integrity",
+    "clients/android/okhttp",
+    "clients/android/retrofit",
+    "clients/android/streaming",
+    "clients/android/background-execution",
+    "clients/android/error-handling",
+    "clients/android/production-checklist",
+}
+REACT_NATIVE_PAGES = {
+    "clients/react-native/index",
+    "clients/react-native/quickstart",
+    "clients/react-native/installation",
+    "clients/react-native/ios-native-setup",
+    "clients/react-native/android-native-setup",
+    "clients/react-native/authentication",
+    "clients/react-native/send-a-request",
+    "clients/react-native/streaming",
+    "clients/react-native/framework-integrations",
+    "clients/react-native/app-extensions",
+    "clients/react-native/error-handling",
+    "clients/react-native/production-checklist",
+}
+SKILL_NAMES = {
+    "install-latchway",
+    "deploy-latchway",
+    "configure-upstream",
+    "configure-firebase",
+    "configure-app-attest",
+    "configure-play-integrity",
+    "integrate-ios",
+    "integrate-android",
+    "integrate-web",
+    "integrate-react-native",
+    "create-feature",
+    "create-limit-plan",
+    "troubleshoot-request",
+}
+COMPONENT_USES = {
+    "BrowserTrustStack": "clients/web/browser-trust",
+    "CompatibilityMatrix": "reference/compatibility",
+    "ConfigDiff": "administration/configuration",
+    "QuotaPreview": "concepts/routing-and-quotas",
+    "SecurityGuarantee": "concepts/security-and-privacy",
+    "SetupPath": "index",
+    "TrustPath": "concepts/client-components",
+}
 REQUIRED_PAGES = {
+    "clients/choose-an-sdk",
+    "clients/authentication-providers",
     "start/architecture-at-a-glance",
     "start/choose-an-integration",
     "start/concepts",
@@ -50,7 +147,7 @@ REQUIRED_PAGES = {
     "reference/sdk-bundles/js",
     "reference/sdk-bundles/react-native",
     "community/agent-resources",
-}
+} | GOLDEN_PAGES | WEB_PAGES | IOS_PAGES | ANDROID_PAGES | REACT_NATIVE_PAGES
 INTEGRATION_PAGES = {
     "integrations/raw-http",
     "integrations/openai-js",
@@ -244,6 +341,12 @@ def main() -> int:
         "skill.md",
         "skills/latchway/SKILL.md",
     ]
+    required_files.extend(
+        f".mintlify/skills/{name}/SKILL.md" for name in sorted(SKILL_NAMES)
+    )
+    required_files.extend(
+        f"components/{name}.jsx" for name in sorted(COMPONENT_USES)
+    )
     for relative in required_files:
         if not (root / relative).is_file():
             errors.append(f"required public-doc file is missing: {relative}")
@@ -259,6 +362,39 @@ def main() -> int:
     tab_names = [tab.get("tab") for tab in tabs if isinstance(tab, dict)]
     if tab_names != EXPECTED_TABS:
         errors.append(f"navigation tabs must be exactly {EXPECTED_TABS}; found {tab_names}")
+
+    client_tab = next(
+        (tab for tab in tabs if isinstance(tab, dict) and tab.get("tab") == "Client SDKs"),
+        None,
+    )
+    client_groups = client_tab.get("groups", []) if isinstance(client_tab, dict) else []
+    if not client_groups or client_groups[0] != {
+        "group": "Choose an SDK",
+        "pages": ["clients/choose-an-sdk"],
+    }:
+        errors.append("Client SDK navigation must begin with the Choose an SDK route")
+    if {
+        "group": "Authentication providers",
+        "pages": ["clients/authentication-providers"],
+    } not in client_groups:
+        errors.append("Client SDK navigation must expose the Authentication providers route")
+
+    navbar = resolved_docs.get("navbar", {})
+    navbar_links = navbar.get("links", []) if isinstance(navbar, dict) else []
+    link_coordinates = {
+        (item.get("label"), item.get("href"))
+        for item in navbar_links
+        if isinstance(item, dict)
+    }
+    if link_coordinates != {
+        ("GitHub", "https://github.com/Latchway/latchway"),
+        ("Status", "/release-status"),
+        ("Changelog", "https://github.com/Latchway/latchway/releases"),
+    }:
+        errors.append("navbar must expose the exact GitHub, Status, and Changelog links")
+    primary = navbar.get("primary", {}) if isinstance(navbar, dict) else {}
+    if primary != {"type": "button", "label": "Console", "href": "/administration/console"}:
+        errors.append("navbar primary action must link to the Console documentation")
 
     nav_pages = collect_pages(navigation)
     duplicate_nav = sorted({page for page in nav_pages if nav_pages.count(page) > 1})
@@ -278,6 +414,63 @@ def main() -> int:
         errors.append(f"public MDX page is not referenced in navigation: {route}")
     for route in sorted(REQUIRED_PAGES - files_by_route.keys()):
         errors.append(f"required foundation page is missing: {route}")
+
+    for component, route in COMPONENT_USES.items():
+        page = files_by_route.get(route)
+        if page is not None and f"<{component}" not in page.read_text(encoding="utf-8"):
+            errors.append(f"custom component {component} is not rendered on {route}")
+
+    setup_path = root / "components/SetupPath.jsx"
+    if setup_path.is_file():
+        setup_text = setup_path.read_text(encoding="utf-8")
+        for phrase in (
+            'firebase: ["Firebase", "/clients/authentication-providers#firebase"]',
+            '"cloud-run": ["Google Cloud Run source template (provider proof open)"',
+            "[role, platform, authentication, integration, deployment, webFramework, webTrust]",
+        ):
+            if phrase not in setup_text:
+                errors.append(f"SetupPath selector is not wired to a truthful result: {phrase}")
+
+    homepage = files_by_route.get("index")
+    if homepage is not None:
+        homepage_text = homepage.read_text(encoding="utf-8")
+        for snippet in (
+            "/snippets/generated/ios/quickstart/url-session.swift.mdx",
+            "/snippets/generated/android/quickstart/basic-client.kt.mdx",
+            "/snippets/generated/js/quickstart/vanilla-streaming-fetch.ts.mdx",
+            "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx",
+        ):
+            if snippet not in homepage_text:
+                errors.append(f"homepage preview is not source-provenanced: {snippet}")
+
+    android_quickstart = files_by_route.get("clients/android/quickstart")
+    if android_quickstart is not None:
+        android_text = android_quickstart.read_text(encoding="utf-8")
+        for stale_handwritten_example in ("OkHttpClient.Builder()", "http.newCall(request).execute()"):
+            if stale_handwritten_example in android_text:
+                errors.append(
+                    "Android quickstart contains a handwritten transport example instead "
+                    f"of SDK-owned provenance: {stale_handwritten_example}"
+                )
+
+    foundation_page = files_by_route.get("integrations/foundation-models")
+    if foundation_page is not None:
+        foundation_text = foundation_page.read_text(encoding="utf-8")
+        for current_claim in ("pre-release experimental", "exact `27.0.0`", "Nine iOS 27.0 simulator tests"):
+            if current_claim not in foundation_text:
+                errors.append(f"Foundation Models page lacks current generated status: {current_claim}")
+    choose_page = files_by_route.get("start/choose-an-integration")
+    if choose_page is not None and "Foundation Models remains planned" in choose_page.read_text(encoding="utf-8"):
+        errors.append("integration chooser still calls the experimental Foundation Models source seam planned")
+
+    origins_page = files_by_route.get("clients/web/origins-and-cors")
+    if origins_page is not None:
+        origins_text = origins_page.read_text(encoding="utf-8")
+        if "clientOrigins:" in origins_text:
+            errors.append("Web origin guide uses nonexistent clientOrigins configuration")
+        for field in ("attestationPolicies:", "web:", "allowedOrigins:"):
+            if field not in origins_text:
+                errors.append(f"Web origin guide lacks canonical configuration path: {field}")
 
     seen_titles: dict[str, str] = {}
     seen_descriptions: dict[str, str] = {}

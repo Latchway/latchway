@@ -1,0 +1,50 @@
+---
+title: "Choose your SDK"
+description: "Select the Latchway client whose runtime and security boundary match an iOS, Android, Web, or React Native application."
+icon: "panels-top-left"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "docs"
+---
+
+<Badge color="yellow">Source candidate 1.0.0</Badge>
+
+Choose by runtime and trust boundary, not by programming-language similarity.
+All four version 1 SDKs are evaluated from authorized source checkouts until
+[Release status](/release-status) records package publication.
+
+| Application runtime | Start here | Client-owned security state | Production trust |
+| --- | --- | --- | --- |
+| Native iOS | [iOS quickstart](/clients/ios/quickstart) | Keychain or Secure Enclave key, DPoP, and native session | App Attest |
+| Native Android | [Android quickstart](/clients/android/quickstart) | Android Keystore key, DPoP, and native session | Play Integrity |
+| Browser Web | [Web quickstart](/clients/web/quickstart) | Non-exportable WebCrypto key, IndexedDB session, and exact-origin policy | App Check or Turnstile when required |
+| React Native | [React Native quickstart](/clients/react-native/quickstart) | Native iOS or Android module owns keys, DPoP, session, and attestation | App Attest or Play Integrity through the native module |
+
+<Warning>
+  Web and React Native both expose TypeScript, but they are not interchangeable.
+  Browser Web uses WebCrypto, IndexedDB, origin policy, and browser-risk signals.
+  React Native delegates security state to native Apple or Android code.
+</Warning>
+
+## Choose authentication separately
+
+The SDK preserves the application's existing user identity. Select and configure
+that provider through [Authentication providers](/clients/authentication-providers), then
+configure the platform trust mechanism independently.
+
+## Add a framework only after the platform client
+
+OpenAI, Vercel AI SDK, LangChain, Foundation Models, and other framework adapters
+sit above a platform SDK or authenticated transport. Use the generated
+[Compatibility matrix](/reference/compatibility) to verify the exact experimental
+tuple before adding one.
+
+## Verify the choice
+
+The selected quickstart must identify one successful feature-bound request by
+request ID and show the expected platform, user, Installation Family, Client
+Component, trust source, feature, and usage. A source example or shared language
+surface alone is not completion proof.

@@ -18,5 +18,40 @@
     "source": "/integrations",
     "destination": "/integrations/overview",
     "permanent": true
+  },
+  {
+    "source": "/operator-quickstart",
+    "destination": "/operate/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/clients",
+    "destination": "/clients/choose-an-sdk",
+    "permanent": true
+  },
+  {
+    "source": "/authentication",
+    "destination": "/clients/authentication-providers",
+    "permanent": true
+  },
+  {
+    "source": "/ios",
+    "destination": "/clients/ios/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/android",
+    "destination": "/clients/android/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/web",
+    "destination": "/clients/web/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/react-native",
+    "destination": "/clients/react-native/quickstart",
+    "permanent": true
   }
 ]

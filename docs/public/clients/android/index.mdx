@@ -1,0 +1,67 @@
+---
+title: "Build with the Android SDK"
+description: "Choose the Kotlin installation, Play Integrity, OkHttp, streaming, background, framework, and release tasks for Android."
+icon: "smartphone"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Android API 23+</Badge>
+
+The Android SDK keeps the P-256 key, encrypted refresh state, Play Integrity
+token, and request-time DPoP proof in native modules. The application retains
+its existing identity provider and OkHttp-based networking.
+
+## Start here
+
+<CardGroup cols={2}>
+  <Card title="Complete the quickstart" icon="send" href="/clients/android/quickstart">
+    Send one feature-bound request and inspect its identity, trust, route, and usage.
+  </Card>
+  <Card title="Install the source candidate" icon="package" href="/clients/android/installation">
+    Align native modules from one version-locked included build.
+  </Card>
+  <Card title="Configure Play Integrity" icon="badge-check" href="/clients/android/play-integrity">
+    Match the cloud project, package, certificate, track, request hash, and policy.
+  </Card>
+  <Card title="Prepare a release" icon="list-checks" href="/clients/android/production-checklist">
+    Review identity, signing, trust, transport, background, and Play evidence gates.
+  </Card>
+</CardGroup>
+
+## Request path
+
+```text
+existing identity -> Play Integrity-aware session -> Keystore DPoP -> feature policy -> upstream
+```
+
+- [Authentication](/clients/android/authentication) defines the current-user
+  token callback independently from integrity.
+- [OkHttp](/clients/android/okhttp) installs the application interceptor,
+  network origin guard, and bounded authenticator.
+- [Retrofit](/clients/android/retrofit) reuses that hardened client without
+  duplicating session logic.
+- [Streaming](/clients/android/streaming) covers incremental response bodies
+  and cancellation.
+- [Background execution](/clients/android/background-execution) covers
+  lifecycle and work constraints without moving secrets into job input.
+- [Error handling](/clients/android/error-handling) starts from stable codes and
+  safe request IDs.
+
+## Support boundary
+
+The native libraries support Android API 23 or newer. The React Native bridge
+requires API 24 or newer. The intended Maven coordinates remain unpublished
+until [Release status](/release-status) records promotion. Use the generated
+[Android SDK bundle](/reference/sdk-bundles/android) for source-provenanced
+version and example evidence.
+
+<Warning>
+  A fixture, emulator, or sideloaded APK does not establish a production Play
+  Integrity verdict. The final trust gate requires the exact signed application
+  installed through the configured Google Play track.
+</Warning>

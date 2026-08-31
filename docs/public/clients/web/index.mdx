@@ -1,0 +1,54 @@
+---
+title: "Latchway for Web applications"
+description: "Build a browser client with WebCrypto-bound sessions, existing user identity, and explicit same-origin security controls."
+icon: "globe-2"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+The browser SDK is a first-class Latchway client. It creates a non-exportable
+P-256 key with WebCrypto, stores the key object and rotating session state in
+IndexedDB, binds every protected request with DPoP, and preserves Fetch
+streaming and cancellation.
+
+<Warning>
+  WebCrypto key possession and App Check or Turnstile are browser risk
+  controls. They are not Secure Enclave, Android Keystore, App Attest, or Play
+  Integrity equivalents. Same-origin JavaScript can invoke the key.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="Send a browser request" icon="send" href="/clients/web/quickstart">
+    Use vanilla TypeScript and feature-bound fetch before adding a framework.
+  </Card>
+  <Card title="Understand browser trust" icon="shield-check" href="/clients/web/browser-trust">
+    Separate identity, key possession, risk signals, origin policy, and CSP.
+  </Card>
+  <Card title="Secure the origin" icon="lock-keyhole" href="/clients/web/origins-and-cors">
+    Configure exact origins, redirect rejection, CORS, and browser preflight.
+  </Card>
+  <Card title="Prepare production" icon="clipboard-check" href="/clients/web/production-checklist">
+    Review identity, risk, storage, CSP, feature, quota, and release gates.
+  </Card>
+</CardGroup>
+
+## Runtime boundary
+
+```text
+Browser user identity
+        +
+non-exportable WebCrypto component key
+        +
+optional required App Check or Turnstile challenge evidence
+        |
+        v
+exact-origin, feature-bound Fetch -> Latchway policy, quota, and routing
+```
+
+Use [Browser versus Node.js](/clients/web/browser-vs-node) before importing the
+package in a hybrid runtime. Node conformance mode uses a memory-only software
+key and does not inherit browser trust.

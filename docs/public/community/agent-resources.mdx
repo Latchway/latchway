@@ -1,6 +1,13 @@
 ---
 title: "Agent resources"
 description: "Use Latchway documentation safely from coding agents and inspect the source instructions that constrain version and security advice."
+icon: "users"
+audience: "community"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "community"
 ---
 
 Mintlify serves page Markdown and generates AI-readable indexes for the public
@@ -10,7 +17,10 @@ site. This source tree also contains:
 - `AGENTS.md` for agents editing the public source;
 - `llms.txt` as a source-tree index and release warning;
 - `skill.md` as the human-readable agent contract;
-- `skills/latchway/SKILL.md` as an installable skill package source.
+- `skills/latchway/SKILL.md` as the broad installable skill package source;
+- `.mintlify/skills/*/SKILL.md` as 13 bounded procedures for installation,
+  deployment, configuration, iOS, Android, Web, React Native, feature and limit
+  creation, and request troubleshooting.
 
 Agents must verify release status and compatibility before recommending a
 package or adapter. They must never suggest putting an upstream provider API key
@@ -19,3 +29,6 @@ tokens across components, or calling delegated trust direct attestation.
 
 When a referenced generated compatibility row, OpenAPI page, or SDK snippet is
 missing, say that support is unverified instead of filling the gap from memory.
+The `integrate-web` skill keeps browser execution separate from Node and React
+Native, requires feature-bound Fetch, preserves streams and cancellation, and
+adds exact origin and CSP guidance.

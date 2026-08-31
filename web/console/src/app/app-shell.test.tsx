@@ -331,4 +331,35 @@ describe("AppShell", () => {
     }
     expect(within(navigation).getByText("Applications", { exact: true }).closest("a")).toHaveAttribute("aria-current", "page");
   });
+
+  it("resolves an explicit application environment and preserves it in task URLs", async () => {
+    const user = userEvent.setup();
+    const organizationID = "org_0123456789abcdef";
+    const applicationID = "app_0123456789abcdef";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestURL(input);
+      if (url === "/admin/v1/auth/session") return new Response(JSON.stringify(adminSession), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === "/admin/v1/organizations?page_size=200") return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:00:00Z", display_name: "Example Org", id: organizationID, slug: "example" }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === `/admin/v1/applications?organization_id=${organizationID}&page_size=200`) return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:00:00Z", display_name: "Habitify", id: applicationID, organization_id: organizationID, slug: "habitify" }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === `/admin/v1/applications/${applicationID}/environments`) return new Response(JSON.stringify({ items: [
+        { active_revision_id: "rev_0123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production", slug: "production" },
+        { active_revision_id: "rev_1123456789abcdef", application_id: applicationID, created_at: "2026-08-29T00:00:00Z", display_name: "Staging", id: "env_1123456789abcdef", kind: "staging", slug: "staging" }
+      ] }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === "/admin/v1/environments/env_0123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [{ created_at: "2026-08-29T00:01:00Z", created_by: "adm_0123456789abcdef", document: { apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig", metadata: {}, spec: {} }, environment_id: "env_0123456789abcdef", id: "rev_2123456789abcdef", state: "valid", version: 2 }], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      if (url === "/admin/v1/environments/env_1123456789abcdef/config-revisions?page_size=1") return new Response(JSON.stringify({ items: [], page: { has_more: false } }), { headers: { "Content-Type": "application/json" }, status: 200 });
+      return healthResponse(url) ?? new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConsole("/applications");
+
+    await waitFor(() => expect(screen.getByLabelText("Current application")).toHaveValue("habitify"));
+    await waitFor(() => expect(screen.getByLabelText("Current environment")).toHaveValue("production"));
+    expect(screen.getByText("Production", { selector: ".environment-badge" })).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Draft valid" })).toHaveAttribute("href", expect.stringContaining("/configuration-revisions"));
+    await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=production"));
+
+    await user.selectOptions(screen.getByLabelText("Current environment"), "staging");
+    await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Primary navigation" })).getByText("Features", { exact: true }).closest("a")?.getAttribute("href")).toContain("environment=staging"));
+    expect(screen.getByText("staging", { selector: ".environment-badge" })).toBeVisible();
+  });
 });

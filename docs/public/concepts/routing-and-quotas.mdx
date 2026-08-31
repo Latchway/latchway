@@ -1,7 +1,16 @@
 ---
 title: "Routing and quotas"
 description: "How features select routes and how Latchway reserves trusted usage before dispatch."
+icon: "book-open"
+audience: "mixed"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
 ---
+
+import { QuotaPreview } from "/components/QuotaPreview.jsx";
 
 Applications request a **feature**, not an upstream credential or trusted
 physical model. The active immutable configuration maps that feature to policy,
@@ -126,6 +135,12 @@ expire or are replaced according to their own policy.
 This design prevents concurrent overspend and avoids refunding unknown usage as
 zero. Quotas can compose across environment, feature, plan, user override, and
 abuse-control scopes.
+
+<QuotaPreview />
+
+The preview teaches the lifecycle with illustrative token units. It is not an
+authoritative tokenizer, price calculator, or policy simulator; server-owned
+preflight and the active immutable revision determine the real reservation.
 
 ## Operator verification
 

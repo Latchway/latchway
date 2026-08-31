@@ -53,7 +53,6 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_conformance_run_id }}
           SOURCE_RUN_ATTEMPT: ${{ inputs.source_conformance_run_attempt }}
           POSTGRES_IMAGE: ${{ inputs.postgres_image }}
-          CAPTURE_DIRECTORY: ${{ vars.LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY }}
         run: |
           set -Eeuo pipefail
           version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
@@ -66,7 +65,6 @@ jobs:
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$POSTGRES_IMAGE" =~ ^docker\.io/library/postgres@sha256:[0-9a-f]{64}$ ]]
-          [[ "$CAPTURE_DIRECTORY" == /* ]]
           test "$GITHUB_REPOSITORY" = Latchway/latchway
           test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
       - name: Authenticate the exact candidate and source runs
@@ -134,19 +132,13 @@ jobs:
             --source-digest "$CANDIDATE_COMMIT" \
             --source-ref refs/heads/main \
             --deny-self-hosted-runners
-      - name: Retain only authenticated inputs and the non-secret capture coordinate
+      - name: Retain only authenticated candidate and source inputs
         shell: bash
-        env:
-          CAPTURE_DIRECTORY: ${{ vars.LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY }}
         run: |
           set -Eeuo pipefail
           mkdir -p "$RUNNER_TEMP/release-failure-authenticated"
           cp -R -- "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/source" \
             "$RUNNER_TEMP/release-failure-authenticated/"
-          jq --null-input --arg path "$CAPTURE_DIRECTORY" \
-            '{capture_directory: $path}' \
-            > "$RUNNER_TEMP/release-failure-authenticated/capture-coordinate.json"
-          chmod 0600 "$RUNNER_TEMP/release-failure-authenticated/capture-coordinate.json"
       - name: Upload authenticated failure-producer inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -164,6 +156,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      packages: read
     steps:
       - name: Check out the exact candidate producer without retained credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -212,40 +205,101 @@ jobs:
           test "$index" != "$amd64"
           echo "index=$index" >> "$GITHUB_OUTPUT"
           echo "amd64=$amd64" >> "$GITHUB_OUTPUT"
-      - name: Import only the protected runner's bounded raw fault observations
+      - name: Authenticate only for exact immutable image pulls
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/release-failure-registry-auth
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull and bind the exact authenticated linux amd64 images
+        id: preloaded
         shell: bash
         env:
-          CAPTURE_COORDINATE: ${{ runner.temp }}/authenticated/capture-coordinate.json
+          DOCKER_CONFIG: ${{ runner.temp }}/release-failure-registry-auth
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_AMD64: ${{ steps.candidate.outputs.amd64 }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
         run: |
           set -Eeuo pipefail
-          jq --exit-status '(keys == ["capture_directory"]) and (.capture_directory | type == "string")' \
-            "$CAPTURE_COORDINATE" >/dev/null
-          CAPTURE_DIRECTORY=$(jq --raw-output .capture_directory "$CAPTURE_COORDINATE")
-          [[ "$CAPTURE_DIRECTORY" == /* ]]
-          test -d "$CAPTURE_DIRECTORY"
-          test ! -L "$CAPTURE_DIRECTORY"
-          test -z "$(find "$CAPTURE_DIRECTORY" -type l -print -quit)"
+          timeout --signal=TERM --kill-after=15s 600s docker pull --platform linux/amd64 "$CANDIDATE_AMD64" >/dev/null
+          timeout --signal=TERM --kill-after=15s 600s docker pull --platform linux/amd64 "$POSTGRES_IMAGE" >/dev/null
+          candidate_id=$(docker image inspect --format '{{.Id}}' "$CANDIDATE_AMD64")
+          postgres_id=$(docker image inspect --format '{{.Id}}' "$POSTGRES_IMAGE")
+          [[ "$candidate_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$postgres_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$candidate_id" != "$postgres_id"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$candidate_id")" = linux/amd64
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgres_id")" = linux/amd64
+          test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "$candidate_id")" = "$CANDIDATE_COMMIT"
+          docker image inspect --format '{{json .RepoDigests}}' "$candidate_id" \
+            | jq --exit-status --arg reference "$CANDIDATE_AMD64" 'index($reference) != null' >/dev/null
+          docker image inspect --format '{{json .RepoDigests}}' "$postgres_id" \
+            | jq --exit-status --arg reference "$POSTGRES_IMAGE" 'index($reference) != null' >/dev/null
+          echo "candidate_id=$candidate_id" >> "$GITHUB_OUTPUT"
+          echo "postgres_id=$postgres_id" >> "$GITHUB_OUTPUT"
+      - name: Remove registry credentials before repo-owned topology code executes
+        if: always()
+        shell: bash
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/release-failure-registry-auth
+        run: |
+          set -Eeuo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          rm -rf -- "$DOCKER_CONFIG"
+          mkdir -m 0700 "$RUNNER_TEMP/release-failure-empty-docker-config"
+          printf 'DOCKER_CONFIG=%s\n' "$RUNNER_TEMP/release-failure-empty-docker-config" >> "$GITHUB_ENV"
+      - name: Initialize the repo-owned failure evidence directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
           mkdir -p "$RUNNER_TEMP/failure/live-failures"
-          cp -R -- "$CAPTURE_DIRECTORY/." "$RUNNER_TEMP/failure/live-failures/"
+          test -z "$(find "$RUNNER_TEMP/failure/live-failures" -mindepth 1 -print -quit)"
           cp -- tests/failure/matrix.json "$RUNNER_TEMP/failure/failure-matrix.json"
+      - name: Provision and execute the repo-owned bounded failure topology
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_INDEX: ${{ steps.candidate.outputs.index }}
+          CANDIDATE_AMD64: ${{ steps.candidate.outputs.amd64 }}
+          CANDIDATE_IMAGE_ID: ${{ steps.preloaded.outputs.candidate_id }}
+          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+          POSTGRES_IMAGE_ID: ${{ steps.preloaded.outputs.postgres_id }}
+        run: |
+          set -Eeuo pipefail
+          scripts/run-release-failure-controller.sh \
+            --acknowledge-disposable-target \
+            --run-id "gha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --output-dir "$RUNNER_TEMP/failure/live-failures" \
+            --commit "$CANDIDATE_COMMIT" \
+            --image "$CANDIDATE_INDEX" \
+            --platform-image "$CANDIDATE_AMD64" \
+            --candidate-image-id "$CANDIDATE_IMAGE_ID" \
+            --postgres-image "$POSTGRES_IMAGE" \
+            --postgres-image-id "$POSTGRES_IMAGE_ID" \
+            --operator "github-actions:$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
       - name: Start an isolated exact PostgreSQL dependency
         id: postgres
         shell: bash
         env:
-          POSTGRES_IMAGE: ${{ inputs.postgres_image }}
+          POSTGRES_IMAGE_ID: ${{ steps.preloaded.outputs.postgres_id }}
         run: |
           set -Eeuo pipefail
+          [[ "$POSTGRES_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(docker image inspect --format '{{.Id}}' "$POSTGRES_IMAGE_ID")" = "$POSTGRES_IMAGE_ID"
           name="latchway-failure-postgres-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           password="$(openssl rand -hex 32)"
           umask 077
           printf '%s' "$password" > "$RUNNER_TEMP/failure-postgres-password"
-          docker pull "$POSTGRES_IMAGE" >/dev/null
           docker run --detach --name "$name" \
             --publish 127.0.0.1::5432 \
             --env POSTGRES_DB=latchway \
             --env POSTGRES_USER=latchway \
             --env "POSTGRES_PASSWORD=$password" \
-            "$POSTGRES_IMAGE" >/dev/null
+            "$POSTGRES_IMAGE_ID" >/dev/null
           port="$(docker port "$name" 5432/tcp | sed -n 's/.*://p')"
           [[ "$port" =~ ^[0-9]+$ ]]
           ready=false

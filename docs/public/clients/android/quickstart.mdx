@@ -1,0 +1,170 @@
+---
+title: "Send a protected request from Android"
+description: "Build the Kotlin source candidate, bind an OkHttp request to a feature, and verify Play Integrity-aware policy."
+icon: "smartphone"
+audience: "client-android"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+import AndroidBasicClient from "/snippets/generated/android/quickstart/basic-client.kt.mdx";
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Android API 23+</Badge>
+
+**Expected time:** 15 minutes after the mandatory gateway, identity, Android
+application, and Play prerequisites below are available.
+
+**Mode:** Source evaluation; a real integrity verdict requires a Play-installed
+signed application and remains separate from local compilation.
+
+**Coordinates:** server contract `1.0.0`; Android SDK source `1.0.0`.
+
+## Outcome
+
+Send an OkHttp request for `habit-assistant` through Android Keystore-backed
+DPoP and correlate the request with its Play Integrity result and usage.
+
+## Before you start
+
+- a configured gateway that passed the [operator quickstart](/operate/quickstart)
+- an Android application resource ID, environment, feature, identity policy,
+  Play cloud project, package, and certificate digest configured in Latchway
+- Android Studio and authorized `latchway-android` source
+- for a real verdict, the exact signed application installed from a configured
+  Google Play internal or production track
+
+<Warning>
+  Version 1.0.0 is not published to Maven Central. A fixture, emulator, or
+  sideloaded APK can test source behavior but is not production Play Integrity
+  evidence.
+</Warning>
+
+## What you will build
+
+```text
+Android app -> Latchway OkHttp -> configured Latchway -> selected upstream
+ identity      Keystore + DPoP      policy + quota       server credential
+```
+
+## Procedure
+
+<Steps>
+  <Step title="Include the local Android build">
+    In `settings.gradle.kts`, use an included build for the authorized SDK
+    checkout. Keep the intended version coordinate in application dependencies
+    so the published transition is explicit.
+
+```kotlin
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+includeBuild("../latchway-android")
+```
+
+    Expected result: the application resolves the intended local
+    `dev.latchway` modules rather than registry artifacts. Diagnostic: run
+    `./gradlew test assemble lint` in the SDK checkout if Gradle cannot resolve
+    the included build.
+  </Step>
+  <Step title="Create the Latchway client">
+    In `LatchwayModule.kt`, provide the existing identity callback and the Play
+    Integrity adapter required by server policy. The generated source example
+    shows the exact constructor boundary without inventing credentials.
+
+    <AndroidBasicClient />
+
+    Expected result: `LatchwayModule.kt` constructs a client only after the
+    application supplies both existing identity and policy-matched attestation
+    providers. Diagnostic: run `./gradlew :app:compileDebugKotlin` in the
+    application checkout.
+  </Step>
+  <Step title="Install both OkHttp guards">
+    In `NetworkModule.kt`, place the application interceptor before dispatch
+    and the origin guard in the network-interceptor chain. The current SDK
+    documentation bundle does not export a standalone application-owned
+    `NetworkModule.kt` region, so this step is an integration boundary rather
+    than a copy-ready generated snippet.
+
+    Expected result: DPoP and Latchway headers cannot follow a cross-origin
+    redirect or be added later by another application interceptor. Diagnostic:
+    run `./gradlew :app:testDebugUnitTest` and inspect the interceptor ordering
+    in the failing application test.
+  </Step>
+  <Step title="Bind and send the request">
+    In `HabitAssistantRepository.kt`, tag the request with the stable feature,
+    retain the returned `Call` for cancellation, and consume the response body
+    incrementally. The generated 1.0.0 bundle currently owns the client factory
+    shown above but not a complete application send-and-stream region; do not
+    treat prose or a partial request as compiled example evidence.
+
+    Expected result: OkHttp returns the protected response. Preserve the call
+    for cancellation and stream the response body rather than buffering it.
+    Diagnostic: run `./gradlew :app:assembleDebug`; if dispatch still fails,
+    correlate the safe request ID rather than logging identity or integrity
+    tokens.
+  </Step>
+</Steps>
+
+## Verification
+
+Confirm the response request ID matches one Console request with:
+
+```text
+Request status: Success
+Platform: android
+Feature: habit-assistant
+Trust provider: play_integrity
+User: usr_...
+Installation Family: fam_...
+Client Component: cmp_...
+Input and output usage: present
+```
+
+## What Latchway established
+
+<SecurityGuarantee
+  establishes={[
+    "The server accepted the existing application identity.",
+    "The request possessed its Android Keystore-backed component key.",
+    "The configured integrity, feature, route, and quota policies allowed dispatch.",
+  ]}
+  doesNotEstablish={[
+    "An emulator, fixture, or sideloaded APK produced a production Play verdict.",
+    "The client selected the physical provider or authoritative token charge.",
+    "A successful request is immutable release or live-provider conformance evidence.",
+  ]}
+/>
+
+## Production next step
+
+<Card title="Verify a Play-distributed candidate" icon="badge-check" href="/mobile/device-proof">
+  Install the exact signed artifact from the configured track and bind the
+  resulting verdict to its commit, digest, package, and certificate.
+</Card>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Play Integrity rejects the application">
+    Compare the numeric cloud project, package, certificate digest, release
+    track, and server environment. A locally installed build may not receive
+    the verdict required by production policy.
+  </Accordion>
+  <Accordion title="A redirect loses authorization">
+    This is intentional. Configure the exact HTTPS gateway origin and remove
+    the redirect. Never allow DPoP or authorization headers to cross origins.
+  </Accordion>
+  <Accordion title="The request receives a stable Latchway error">
+    Open [Errors](/reference/errors) for its direct diagnostic path. Correlate
+    the request ID and inspect trust, feature grant, and reserved quota.
+  </Accordion>
+</AccordionGroup>
+
+<Prompt title="Integrate Latchway Android source candidate 1.0.0">
+Use Latchway Android SDK 1.0.0 from an included build with server 1.0.0. Keep
+identity in the existing provider, keys in Android Keystore, and Play Integrity
+inside the native adapter. Install both OkHttp guards, preserve cancellation
+and streaming, bind requests to a feature ID, and never add provider secrets.
+</Prompt>

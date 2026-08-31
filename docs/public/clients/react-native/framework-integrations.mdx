@@ -1,0 +1,49 @@
+---
+title: "Use AI frameworks from React Native"
+description: "Connect tested OpenAI, Vercel AI, LangChain, and Anthropic consumers through feature-bound native fetch without browser or Node assumptions."
+icon: "plug"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+## Outcome
+
+A tested framework consumes `fetchFor(feature)` while native modules retain
+DPoP, attestation, session state, destination validation, and response
+streaming.
+
+## Start from generated evidence
+
+Use [React Native framework integration](/integrations/react-native) and the
+generated [Compatibility matrix](/reference/compatibility) for exact package
+versions and covered capabilities. The source candidate includes consumers for
+selected OpenAI JavaScript, Vercel AI, LangChain JavaScript, and Anthropic
+Messages paths.
+
+This is not a blanket claim for every API in those packages. Browser-only
+middleware, Node filesystem dependencies, service workers, Realtime, uploads,
+audio, images, streaming request bodies, or framework paths without a custom
+fetch seam remain outside the tested surface.
+
+## Bind each protocol separately
+
+Create a separate feature for Responses, Chat Completions, Embeddings,
+Anthropic Messages, or an allowed opaque route. One feature cannot represent
+multiple protocol adapters. Give the framework a fetch permanently bound to
+that feature and the canonical gateway origin.
+
+Use a conspicuous non-secret placeholder only when a constructor requires an
+API-key-shaped value. Native filtering must discard it. Disable
+framework-owned retries and preserve `AbortSignal` plus incremental response
+consumption.
+
+## Verify
+
+Run the exact repository-owned consumer smoke for the selected tuple on both
+native hosts. Confirm protocol, feature, native trust, DPoP, cancellation,
+tools or structured-output preservation where claimed, and one logical request
+per framework call.

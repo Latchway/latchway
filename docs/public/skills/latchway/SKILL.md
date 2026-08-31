@@ -27,6 +27,9 @@ description: Deploy, configure, integrate, verify, or troubleshoot Latchway, inc
 - Describe delegated trust precisely: a trusted root authorized a bounded
   component key. The delegated component did not independently complete App
   Attest unless a verified step-up occurred.
+- Treat Web and React Native as separate trust models. Browser WebCrypto key
+  possession and App Check or Turnstile risk signals are not native key
+  isolation, App Attest, or Play Integrity.
 - Sign only the configured Latchway origin, revalidate redirects, and create a
   fresh DPoP proof for each permitted request attempt.
 - Never request or expose tokens, private keys, proofs, raw attestation evidence,
@@ -40,7 +43,9 @@ description: Deploy, configure, integrate, verify, or troubleshoot Latchway, inc
 3. Reject static-base-URL or static-header-only approaches for full DPoP.
 4. Bind the transport to a feature, preserve streaming and cancellation, and
    retry only an exact replayable pre-dispatch rejection.
-5. Do not recreate chat, prompt, agent, tool, memory, RAG, structured-output, or
+5. For Web, configure exact origins and CSP, keep any debug signer outside the
+   browser, and do not move the browser component into a server-rendering path.
+6. Do not recreate chat, prompt, agent, tool, memory, RAG, structured-output, or
    framework session abstractions inside Latchway.
 
 ## Deploy and verify

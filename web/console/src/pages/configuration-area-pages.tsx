@@ -15,6 +15,12 @@ import {
   type ConfigurationAreaDefinition,
   type JSONRecord
 } from "./configuration-slice";
+import { FeatureWorkspacePage } from "./feature-workspace-page";
+import {
+  ClientAccessWorkspacePage,
+  ConnectionWorkspacePage,
+  UsagePlanWorkspacePage
+} from "./task-configuration-pages";
 
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 
@@ -140,14 +146,14 @@ function ConfigurationAreaEditor({ definition }: { definition: ConfigurationArea
 }
 
 export function AuthenticationProvidersPage() { return <ConfigurationAreaEditor definition={configurationAreas.identity} />; }
-export function AttestationConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.attestation} />; }
+export function AttestationConfigurationPage() { return <ClientAccessWorkspacePage />; }
 export function ComponentDefinitionsConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.components} />; }
-export function FeaturesConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.features} />; }
+export function FeaturesConfigurationPage() { return <FeatureWorkspacePage />; }
 export function RoutesConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.routes} />; }
-export function UpstreamsConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.upstreams} />; }
+export function UpstreamsConfigurationPage() { return <ConnectionWorkspacePage />; }
 export function ModelsPricingConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.modelsPricing} />; }
 export function AccessPoliciesConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.access} />; }
-export function LimitPlansConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.limits} />; }
+export function LimitPlansConfigurationPage() { return <UsagePlanWorkspacePage />; }
 export function AbuseControlsConfigurationPage() { return <ConfigurationAreaEditor definition={configurationAreas.abuse} />; }
 
 export { ConfigurationAreaEditor };

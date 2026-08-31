@@ -44,6 +44,7 @@ installed:
 ```sh
 pnpm check:generated
 python3 scripts/check-structure.py
+python3 scripts/check_metadata.py
 ```
 
 The generated gate derives the Admin API, stable errors, configuration schema,
@@ -52,6 +53,12 @@ from the canonical core contracts and locked SDK documentation bundles.
 Editing a generated page or snippet without its normative source fails the
 drift check. Update SDK material only with the commands documented on
 [SDK documentation bundles](/reference/sdk-bundles).
+
+Every canonical page resolves title, description, icon, audience, page type,
+server version, SDK version, verification date, and stable owner metadata.
+Authored pages carry those fields physically. The five generated SDK-bundle
+routes receive the same fields from a strictly validated deterministic overlay;
+tests fail when any route or field is absent.
 
 ## Source and mirror ownership
 

@@ -1,7 +1,16 @@
 ---
 title: "Security and privacy"
 description: "Understand Latchway's secret custody, data minimization, residual risks, and operator responsibilities."
+icon: "book-open"
+audience: "security"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
 ---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
 
 Latchway protects the boundary between an untrusted application and
 operator-configured infrastructure. It does not make a compromised device
@@ -75,3 +84,16 @@ before repeating a mutation.
 Before production, complete the exact-image security scan, SBOM, signature,
 provenance, physical-device, live-provider, cloud, failure, restore, upgrade,
 and cross-repository gates in [Production readiness](/operations/production-readiness).
+
+<SecurityGuarantee
+  establishes={[
+    "Provider credentials stay at the server-side use boundary.",
+    "Identity, trust, DPoP, feature, route, and quota policy are evaluated before dispatch.",
+    "Default operational records exclude prompt bodies and credential material.",
+  ]}
+  doesNotEstablish={[
+    "A compromised client, browser origin, administrator, or upstream is trustworthy.",
+    "Provider retention follows Latchway's no-body default.",
+    "Source tests replace exact-image, physical-device, or live-provider evidence.",
+  ]}
+/>

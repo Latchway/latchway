@@ -1,0 +1,61 @@
+---
+title: "Troubleshoot Web requests"
+description: "Diagnose browser storage, identity, trust, origin, DPoP, stream, and quota failures with safe request-level evidence."
+icon: "wrench"
+audience: "client-web"
+pageType: "troubleshooting"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "support"
+---
+
+## Symptom: the client fails before network activity
+
+**Exact codes:** [`storage_unavailable`](/clients/web/errors#storage-unavailable),
+[`client_configuration_invalid`](/clients/web/errors#client-configuration-invalid)
+
+Confirm the exact gateway URL, HTTPS or explicit local HTTP opt-in, application
+resource ID, environment, identity callback, trust provider, and IndexedDB
+availability. Inspect `latchway.diagnostics()` only after a session exists.
+
+Safe remediation: fix the configuration or browser storage policy. Select
+`allow-memory` only when session-only state and new components after navigation
+are an accepted product decision.
+
+Do not copy tokens, proofs, CryptoKey objects, or IndexedDB exports into a bug
+report.
+
+## Symptom: challenge exchange fails
+
+**Exact codes:** [`identity_token_invalid`](/reference/errors#identity_token_invalid),
+[`attestation_invalid`](/reference/errors#attestation_invalid),
+[`attestation_step_up_required`](/reference/errors#attestation_step_up_required)
+
+Correlate the request ID, then verify the identity issuer and audience, current
+sign-in state, configured provider, challenge expiry, App Check project or
+Turnstile action and `cData`. Recreate evidence from a new challenge; never
+reuse or weaken the production policy.
+
+## Symptom: the browser reports a network or CORS failure
+
+Confirm the final exact origin, OPTIONS response, allowed methods and headers,
+TLS, CSP `connect-src`, and absence of redirects. Browser CORS failures may hide
+the server Problem response, so correlate server access logs by time and
+origin without enabling wildcard access.
+
+## Symptom: streaming or retry stops
+
+**Exact code:** [`transport_request_not_replayable`](/reference/errors#transport_request_not_replayable)
+
+A consumed or streaming request body is not buffered for replay. Create a new
+application request after reauthentication or refresh. Preserve AbortSignal and
+do not retry an ambiguous upstream timeout.
+
+## Escalation information
+
+Provide the stable error code, HTTP status, Latchway request ID, SDK and server
+versions, browser/version, exact origin, persistence mode, feature ID, and a
+redacted timeline. Exclude identity tokens, access and refresh tokens, DPoP
+proofs, private keys, raw attestation evidence, prompt bodies, and provider
+credentials.

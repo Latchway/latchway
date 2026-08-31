@@ -1,0 +1,57 @@
+---
+title: "Stream responses on iOS"
+description: "Consume URLSession bytes incrementally, preserve Swift cancellation, and avoid unsafe replay after a response may have started."
+icon: "waves"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="blue">Incremental URLSession bytes</Badge>
+
+## Outcome
+
+The application consumes the response as bytes arrive and releases its private
+network task on normal completion, cancellation, or decoding failure.
+
+## Consume the stream
+
+Use the feature transport's byte operation shown in the
+[compiled quickstart snippet](/clients/ios/send-a-request). Retain the stream
+handle, process bytes incrementally, call `finish()` after normal EOF, and call
+`cancel()` when stopping early.
+
+Do not buffer an unbounded event stream in application memory. Apply any
+provider-specific SSE decoder above the byte stream while retaining the safe
+request ID from response headers.
+
+## Preserve cancellation
+
+Swift task cancellation should terminate decoding and the underlying request.
+Do not convert cancellation into an automatic new AI request. A new user action
+may create a new request after the previous operation is reconciled.
+
+## Understand retry safety
+
+The native transport may perform one bounded follow-up only for an exact,
+request-correlated canonical pre-dispatch `session_expired` or
+`dpop_nonce_required` problem. It does not replay:
+
+- an input stream;
+- a request after success bytes arrive;
+- an upstream error with uncertain dispatch state; or
+- a response whose problem document or nonce is ambiguous.
+
+For `operation_indeterminate`, preserve both the request ID and operation ID,
+then reconcile through the operator view before deciding whether the product
+should offer another action.
+
+## Verify
+
+Run one full stream and one cancellation case. The full stream must settle
+usage once. The cancelled operation must release or conservatively settle its
+reservation under server policy and must not create a silent second logical
+request.

@@ -1,0 +1,63 @@
+---
+title: "Configure Web authentication"
+description: "Connect the browser SDK to an existing identity provider without storing or forwarding identity tokens outside session setup."
+icon: "user-round-check"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Latchway does not replace application login. The browser SDK calls the
+configured identity callback only when a new session requires identity or
+reauthentication. Refresh uses only the rotating Latchway token plus a fresh
+DPoP proof.
+
+<Tabs>
+  <Tab title="Firebase">
+
+```typescript
+import { createFirebaseIdentityTokenProvider } from "@latchway/client/firebase";
+
+const identityTokenProvider = createFirebaseIdentityTokenProvider(
+  () => auth.currentUser!.getIdToken(),
+);
+```
+
+    Configure `identityProvider: "firebase"` and the matching Firebase project
+    in the active Latchway environment.
+  </Tab>
+  <Tab title="Supabase or Clerk">
+
+```typescript
+const identityTokenProvider = {
+  async getIdentityToken() {
+    const token = await applicationSession.getJWT();
+    if (!token) throw new Error("Sign in before using Latchway");
+    return token;
+  },
+};
+```
+
+    Configure the matching `supabase` provider from its exact HTTPS project URL,
+    or configure `clerk` with the exact issuer, audience, RS256 key source, and
+    allowed claims. Do not flatten either preset into a generic browser secret.
+  </Tab>
+  <Tab title="Custom JWT">
+
+```typescript
+const identityTokenProvider = {
+  getIdentityToken: () => identityBroker.currentAccessToken(),
+};
+```
+
+    Return a current token only. Never log it or copy it into IndexedDB,
+    localStorage, URLs, diagnostics, or error reports.
+  </Tab>
+</Tabs>
+
+Authentication identifies the application user. WebCrypto proves possession
+of a browser component key, and App Check or Turnstile can add browser-risk
+evidence. None of these signals substitutes for another.

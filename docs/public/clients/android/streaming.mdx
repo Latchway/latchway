@@ -1,0 +1,50 @@
+---
+title: "Stream responses on Android"
+description: "Consume an OkHttp response body incrementally, close resources, preserve cancellation, and prevent unsafe replay after dispatch."
+icon: "waves"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+<Badge color="blue">Incremental OkHttp body</Badge>
+
+## Outcome
+
+The application consumes streaming data without buffering the complete
+response and closes the network body and SDK resources on every exit path.
+
+## Consume incrementally
+
+Keep the OkHttp `Call`, inspect the response status and safe request ID, then
+read the response source or stream as bytes arrive. Apply SSE or provider frame
+decoding above that source. Use structured cleanup so the body closes after
+EOF, decoder failure, or cancellation.
+
+Do not convert an unbounded response into `string()` or `bytes()` for
+convenience. Bound any first error document separately from successful stream
+data.
+
+## Preserve cancellation
+
+Cancel the retained `Call` when the owning coroutine, lifecycle, or user action
+ends. Cancellation is terminal for the operation; it must not create another
+AI request. Close application-owned OkHttp dispatchers only when their owning
+scope ends.
+
+## Prevent replay
+
+One-shot and streaming request bodies are non-replayable. The adapter must not
+repeat them for session refresh, nonce acquisition, a connection race, an
+upstream error, or an uncertain response. A new request may occur only after
+the application has reconciled the original outcome.
+
+## Verify
+
+Test a full stream, cancellation before the first event, and cancellation
+midstream. Each case must produce at most one logical request. Usage must settle
+or remain conservatively reserved according to server policy, and no
+concurrency lease may remain permanently active.

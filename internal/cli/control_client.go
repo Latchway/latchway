@@ -33,13 +33,18 @@ type controlResponse struct {
 }
 
 type controlProblemError struct {
-	Code       string
-	Detail     string
-	StatusCode int
+	Code             string
+	Detail           string
+	StatusCode       int
+	ValidationIssues []validationIssueCLI
 }
 
 func (problem controlProblemError) Error() string {
-	return fmt.Sprintf("Admin API failed (%s): %s", problem.Code, problem.Detail)
+	message := fmt.Sprintf("Admin API failed (%s): %s", problem.Code, problem.Detail)
+	for _, issue := range problem.ValidationIssues {
+		message += fmt.Sprintf("\n- %s %s: %s", issue.Code, issue.Path, issue.Message)
+	}
+	return message
 }
 
 func newControlAPIClient(opts *options, tokenEnvironment string) (*controlAPIClient, error) {
@@ -187,7 +192,19 @@ func (client *controlAPIClient) problem(status int, header http.Header, body []b
 	if detail == "" {
 		detail = "The administrative request failed."
 	}
-	return controlProblemError{Code: document.Code, Detail: detail, StatusCode: status}
+	issues := make([]validationIssueCLI, 0)
+	if document.Errors != nil {
+		issues = make([]validationIssueCLI, 0, len(*document.Errors))
+		for _, issue := range *document.Errors {
+			issues = append(issues, validationIssueCLI{
+				Severity: client.safeText(*issue.Severity),
+				Code:     client.safeText(*issue.Code),
+				Path:     client.safeText(*issue.Path),
+				Message:  client.safeText(*issue.Message),
+			})
+		}
+	}
+	return controlProblemError{Code: document.Code, Detail: detail, StatusCode: status, ValidationIssues: issues}
 }
 
 func (client *controlAPIClient) containsToken(body []byte) bool {

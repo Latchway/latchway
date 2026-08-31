@@ -97,6 +97,7 @@ class PublicReferenceTests(unittest.TestCase):
         self.assertEqual(len(self.errors["codes"]), 59)
         for code in self.errors["codes"]:
             self.assertEqual(rendered.count(f"| `{code}` |"), 1, code)
+            self.assertEqual(rendered.count(f"### `{code}`\n"), 1, code)
         self.assertIn("`operation_id` is required only for `operation_indeterminate`", rendered)
 
     def test_config_reference_contains_every_definition(self) -> None:

@@ -1,12 +1,19 @@
 ---
 title: "CLI"
 description: "Operate the gateway and canonical Admin API without placing credentials in flags or output."
+icon: "book-key"
+audience: "reference"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-08-31"
+owner: "core-api"
 ---
 
 The `latchway` binary contains server, migration, diagnostics, and Admin API
-commands. Except for `serve`, `test-upstream serve`, `migrate`, `doctor`, and
-the isolated `verify local` gate, control-plane commands use HTTP and do not
-open PostgreSQL.
+commands. Except for `serve`, `develop`, `test-upstream serve`, `migrate`,
+`doctor`, and the isolated `verify local` gate, control-plane commands use HTTP
+and do not open PostgreSQL.
 
 ## Connection and authentication
 
@@ -39,6 +46,7 @@ accepted as a flag. HTTPS is mandatory except for an explicit loopback origin.
 | `latchway serve --role all` | Run API and worker roles together |
 | `latchway serve --role api` | Run client/Admin API and console only |
 | `latchway serve --role worker` | Run PostgreSQL-backed maintenance work |
+| `latchway develop` | Run the isolated foreground gateway, mock services, helper routes, and Console used by client quickstarts |
 | `latchway test-upstream serve` | Run the deterministic loopback-only upstream fixture |
 | `latchway migrate up` | Apply embedded forward-only migrations |
 | `latchway migrate status` | Compare current and available schema |
@@ -178,6 +186,23 @@ latchway verify local --timeout 2m --junit ./local-verify.xml
 It applies migrations, creates an ephemeral tenant and deterministic fixtures,
 executes the production session/proxy/quota/routing/recovery paths, and then
 proves the temporary schema was dropped—even after a failed check.
+
+Run the persistent client-quickstart environment in a private foreground
+terminal. `--listen` requires one canonical loopback IP, and `--browser-origin`
+requires one exact loopback HTTP browser origin:
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://...'
+latchway --output json develop \
+  --listen 127.0.0.1:8080 \
+  --browser-origin http://localhost:5173
+```
+
+The ready document prints the gateway, application, environment, feature,
+model, helper URLs, platform identifiers, and one random Console email/password
+pair. It never prints the debug signing key, database URL, master key, or mock
+upstream credential. Keep that terminal private. Ctrl-C shuts down the gateway
+and drops the isolated schema automatically.
 
 Ephemeral upstream verification keeps the provider key local to the CLI. Its
 generic protocol is OpenAI Chat in version 1:

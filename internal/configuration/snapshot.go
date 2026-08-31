@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 	"unicode/utf8"
+
+	"github.com/latchway/latchway/internal/weborigin"
 )
 
 type compiledSnapshotDocument struct {
@@ -380,7 +382,7 @@ func runtimeAttestationStrings(values []string, maximumLength int, origins bool)
 		if value == "" || (maximumLength > 0 && utf8.RuneCountInString(value) > maximumLength) {
 			return false
 		}
-		if origins && !canonicalBrowserHTTPSOrigin(value) {
+		if origins && !weborigin.Canonical(value) {
 			return false
 		}
 		if _, exists := seen[value]; exists {

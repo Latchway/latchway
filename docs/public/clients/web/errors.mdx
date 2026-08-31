@@ -1,0 +1,55 @@
+---
+title: "Handle Web SDK errors"
+description: "Map protected HTTP failures to stable Latchway codes and route users and operators to one-click diagnostic guidance."
+icon: "circle-alert"
+audience: "client-web"
+pageType: "reference"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Internal session and control operations throw `LatchwayError`. Protected Fetch
+requests retain normal Fetch semantics and return final non-2xx responses. Map
+one explicitly when application code needs the stable problem:
+
+```typescript
+import { errorFromResponse, LatchwayError } from "@latchway/client";
+
+if (!response.ok) {
+  const error = await errorFromResponse(response.clone());
+  if (error instanceof LatchwayError) {
+    report({ code: error.code, requestID: error.requestID });
+  }
+  throw error;
+}
+```
+
+| Browser symptom | Stable code | Direct action |
+| --- | --- | --- |
+| IndexedDB or CryptoKey cloning is unavailable | `storage_unavailable` | [Review persistent storage](#storage-unavailable) |
+| The configured origin or HTTP policy is unsafe | `client_configuration_invalid` | [Correct client configuration](#client-configuration-invalid) |
+| The browser cannot safely replay a consumed body | `transport_request_not_replayable` | [Create a new request](/reference/errors#transport_request_not_replayable) |
+| The identity session is no longer acceptable | `identity_reauthentication_required` | [Reauthenticate the user](/reference/errors#identity_reauthentication_required) |
+| Browser evidence is missing or wrong | `attestation_invalid` | [Create fresh challenge evidence](/reference/errors#attestation_invalid) |
+| A quota reservation is denied | `quota_exceeded` | [Inspect the authoritative limit](/reference/errors#quota_exceeded) |
+
+Never branch on the human `detail` string. Use `code`, status, retryability,
+request ID, and documented safe fields. A `retryable: true` value does not
+authorize replay after ambiguous upstream dispatch.
+
+See the [complete generated error registry](/reference/errors). It is generated
+from `api/error-codes.yaml`; CI rejects stale codes or missing deep-link anchors.
+
+## Browser-local diagnostic links
+
+### storage-unavailable
+
+The required IndexedDB or CryptoKey-cloning boundary is unavailable. Restore
+browser storage or explicitly accept session-only `allow-memory` behavior.
+
+### client-configuration-invalid
+
+Correct the exact URL, HTTPS policy, application ID, environment, identity
+callback, persistence mode, or attestation-provider configuration before retrying.

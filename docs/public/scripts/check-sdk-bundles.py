@@ -50,6 +50,9 @@ SDK_SPECS = {
             "frameworks/openai.ts",
             "frameworks/vercel-ai.ts",
             "quickstart/firebase-app-check.ts",
+            "quickstart/vanilla-development-helper.ts",
+            "quickstart/vanilla-development-client.ts",
+            "quickstart/vanilla-streaming-fetch.ts",
         },
     },
     "react-native": {

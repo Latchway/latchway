@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { z } from "zod";
 
 import { adminRequest, queryPath } from "../api/admin";
@@ -22,6 +22,7 @@ import {
   type UserOverrideResource
 } from "../api/resources";
 import { useConsoleSession } from "../api/session";
+import { useOptionalWorkspace } from "../app/workspace-context-value";
 
 const applicationIDPattern = /^app_[A-Za-z0-9_-]{16,128}$/;
 const environmentIDPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
@@ -288,29 +289,31 @@ function validStrongETag(value: string | undefined): value is string {
 
 export function ConfigurationRevisionsPage() {
   const session = useConsoleSession();
+  const workspace = useOptionalWorkspace();
   const [environmentID, setEnvironmentID] = useState("");
   const [page, setPage] = useState<ConfigurationRevisionResourcePage>();
   const [active, setActive] = useState<ConfigurationRevisionResource>();
   const [activeETag, setActiveETag] = useState<string>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
-  if (session.data?.mode !== "configured") return <AccessRequired resource="configuration revisions" />;
-  const canConfigure = session.data.session?.capabilities.includes("activate_configuration") ?? false;
+  const canConfigure = session.data?.mode === "configured" && (session.data.session?.capabilities.includes("activate_configuration") ?? false);
+  const selectedEnvironmentID = workspace?.environment?.id;
+  const effectiveEnvironmentID = selectedEnvironmentID ?? environmentID;
 
   function validEnvironment(): boolean {
-    if (environmentIDPattern.test(environmentID)) return true;
+    if (environmentIDPattern.test(effectiveEnvironmentID)) return true;
     setProblem(invalidResourceProblem("Enter a canonical environment ID before continuing."));
     return false;
   }
 
-  async function load(cursor?: string): Promise<void> {
+  async function load(cursor?: string, selectedEnvironment = effectiveEnvironmentID): Promise<void> {
     if (!validEnvironment()) return;
     setBusy(true); setProblem(undefined);
     try {
-      const history = await adminRequest(queryPath(`/admin/v1/environments/${environmentID}/config-revisions`, { page_size: "1", cursor }), ConfigurationRevisionResourcePageSchema);
+      const history = await adminRequest(queryPath(`/admin/v1/environments/${selectedEnvironment}/config-revisions`, { page_size: "1", cursor }), ConfigurationRevisionResourcePageSchema);
       setPage(history.data);
       try {
-        const current = await adminRequest(`/admin/v1/environments/${environmentID}/config`, ConfigurationRevisionResourceSchema);
+        const current = await adminRequest(`/admin/v1/environments/${selectedEnvironment}/config`, ConfigurationRevisionResourceSchema);
         setActive(current.data); setActiveETag(current.etag);
       } catch (error) {
         const activeProblem = problemFromError(error);
@@ -323,25 +326,37 @@ export function ConfigurationRevisionsPage() {
   async function rollback(target: ConfigurationRevisionResource): Promise<void> {
     setBusy(true); setProblem(undefined);
     try {
-      const current = await adminRequest(`/admin/v1/environments/${environmentID}/config`, ConfigurationRevisionResourceSchema);
+      const current = await adminRequest(`/admin/v1/environments/${effectiveEnvironmentID}/config`, ConfigurationRevisionResourceSchema);
       if (!validStrongETag(current.etag)) {
         setProblem({ code: "etag_required", detail: "The server omitted the strong ETag required for safe rollback.", retryable: true, status: 0, title: "Rollback precondition unavailable" });
         return;
       }
-      const rolledBack = (await adminRequest(`/admin/v1/environments/${environmentID}/rollback`, ConfigurationRevisionResourceSchema, { method: "POST", etag: current.etag, body: { revision_id: target.id } })).data;
+      const rolledBack = (await adminRequest(`/admin/v1/environments/${effectiveEnvironmentID}/rollback`, ConfigurationRevisionResourceSchema, { method: "POST", etag: current.etag, body: { revision_id: target.id } })).data;
       setActive(rolledBack); setActiveETag(undefined);
       setPage((currentPage) => currentPage ? { ...currentPage, items: currentPage.items.map((item) => item.id === rolledBack.id ? rolledBack : item) } : currentPage);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
   const item = page?.items[0];
+  const unpublished = Boolean(item && ["draft", "valid", "invalid"].includes(item.state));
   const rollbackAllowed = Boolean(canConfigure && active && item?.activated_at && item.id !== active.id && validStrongETag(activeETag));
+  useEffect(() => {
+    if (!selectedEnvironmentID) return;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) void load(undefined, selectedEnvironmentID);
+    });
+    return () => { cancelled = true; };
+    // The selected environment is the canonical trigger; load intentionally reads its current helpers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEnvironmentID]);
+  if (session.data?.mode !== "configured") return <AccessRequired resource="configuration revisions" />;
   return <div className="control-page">
     <PageHeading eyebrow="Operations" title="Configuration revisions">Inspect immutable redaction-safe history one full document at a time and atomically reactivate a previously activated revision.</PageHeading>
-    <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => { setEnvironmentID(event.target.value); setPage(undefined); setActive(undefined); setActiveETag(undefined); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load newest revision</button></div>
+    {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Newest server revision · one full document per page</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Refresh revisions</button></section> : <div className="filter-bar"><label>Environment ID<input pattern="env_[A-Za-z0-9_-]{16,128}" required value={environmentID} onChange={(event) => { setEnvironmentID(event.target.value); setPage(undefined); setActive(undefined); setActiveETag(undefined); }} /></label><button className="secondary-action" disabled={busy} onClick={() => void load()} type="button">Load newest revision</button></div>}
     <ProblemNotice problem={problem} />
     {active ? <p className="resource-result">Active revision: <code>{active.id}</code> (version {active.version})</p> : page ? <div className="control-notice"><strong>No active revision</strong><span>History can be inspected, but rollback requires an active ETag precondition.</span></div> : null}
-    {item ? <section className="detail-card"><div className="detail-card__heading"><div><h2>Revision {item.version}</h2><p><code>{item.id}</code></p></div><span className="state-badge">{item.id === active?.id ? "active" : item.state}</span></div><dl><div><dt>Created</dt><dd>{displayInstant(item.created_at)}</dd></div><div><dt>Created by</dt><dd>{item.created_by}</dd></div><div><dt>First activated</dt><dd>{displayInstant(item.activated_at)}</dd></div><div><dt>Validation</dt><dd>{item.validation ? item.validation.valid ? "valid" : "invalid" : "not recorded"}</dd></div></dl><details><summary>Inspect redaction-safe configuration document</summary><pre>{JSON.stringify(item.document, null, 2)}</pre></details><div className="button-row"><button className="primary-action" disabled={busy || !rollbackAllowed} onClick={() => void rollback(item)} type="button">Rollback to this revision</button>{!canConfigure ? <small>The activate_configuration capability is required.</small> : !item.activated_at ? <small>Only a previously activated valid revision can be restored.</small> : item.id === active?.id ? <small>This revision is already active.</small> : !validStrongETag(activeETag) ? <small>A strong active-revision ETag is required.</small> : null}</div></section> : page ? <div className="control-notice"><strong>No revisions</strong><span>This environment has no configuration history.</span></div> : null}
+    {item ? <section className="detail-card"><div className="detail-card__heading"><div><h2>Revision {item.version}</h2><p><code>{item.id}</code></p></div><span className="state-badge">{item.id === active?.id ? "active" : item.state}</span></div><dl><div><dt>Created</dt><dd>{displayInstant(item.created_at)}</dd></div><div><dt>Created by</dt><dd>{item.created_by}</dd></div><div><dt>First activated</dt><dd>{displayInstant(item.activated_at)}</dd></div><div><dt>Validation</dt><dd>{item.validation ? item.validation.valid ? "valid" : "invalid" : "not recorded"}</dd></div></dl>{unpublished ? <div className="control-notice"><strong>Unpublished server revision</strong><span>It does not affect traffic. The Admin API has no abandon/delete operation, so this audited revision cannot be removed from the console.</span><button className="small-action" disabled type="button">Abandon unavailable</button></div> : null}<details><summary>Inspect redaction-safe configuration document</summary><pre>{JSON.stringify(item.document, null, 2)}</pre></details><div className="button-row"><button className="primary-action" disabled={busy || !rollbackAllowed} onClick={() => void rollback(item)} type="button">Rollback to this revision</button>{!canConfigure ? <small>The activate_configuration capability is required.</small> : !item.activated_at ? <small>Only a previously activated valid revision can be restored.</small> : item.id === active?.id ? <small>This revision is already active.</small> : !validStrongETag(activeETag) ? <small>A strong active-revision ETag is required.</small> : null}</div></section> : page ? <div className="control-notice"><strong>No revisions</strong><span>This environment has no configuration history.</span></div> : null}
     {page ? <div className="button-row">{paginationButton("Newest", busy, () => void load())}{page.page.has_more && page.page.next_cursor ? paginationButton("Next older revision", busy, () => void load(page.page.next_cursor)) : null}</div> : null}
   </div>;
 }

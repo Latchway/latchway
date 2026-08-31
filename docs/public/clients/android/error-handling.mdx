@@ -1,0 +1,46 @@
+---
+title: "Handle Android SDK errors"
+description: "Diagnose Kotlin key, integrity, identity, session, transport, quota, and upstream failures using stable codes and redacted context."
+icon: "triangle-alert"
+audience: "client-android"
+pageType: "troubleshooting"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+## Capture only safe context
+
+Record the typed exception category, stable server code when present, request
+ID, documentation URL, retryability, and operation ID when required. Include
+the SDK/server/contract versions and safe key-storage category for support.
+
+Never log identity or session tokens, DPoP proofs, Android Keystore material,
+Play Integrity tokens or verdict payloads, cookies, provider headers, or
+response bodies containing application content.
+
+## Diagnose by boundary
+
+| Boundary | Confirm | Safe remediation |
+| --- | --- | --- |
+| Identity | Signed-in user and current issuer token | Reauthenticate the user; do not weaken integrity |
+| Key storage | Keystore availability and policy-approved backing | Correct device or policy; never export the key |
+| Play Integrity | Project, package, installed certificate, track, freshness, and verdict | Correct distribution or policy; do not retry permanent failures |
+| Session/DPoP | Exact canonical code, request ID, nonce, and replayability | Allow only the native adapter's bounded pre-dispatch recovery |
+| Destination | Exact HTTPS gateway origin and safe path | Remove redirects or arbitrary proxy targets |
+| Quota | Effective limit plan and reservation | Show the policy result; do not maintain an authoritative client counter |
+| Upstream | Request and attempt metadata | Follow route policy; do not add a provider credential to the app |
+
+## Follow the stable page
+
+Use [Error reference](/reference/errors) or the exception's
+`documentationUrl`. `operation_indeterminate` requires reconciliation by
+operation ID before the product offers another mutating action.
+
+## Escalate
+
+Provide safe resource IDs, package and version code, installed certificate
+digest, track, OS/API level, SDK/server/contract tuple, request or operation ID,
+component kind, and documentation URL. Exclude all credentials and raw verdict
+material.

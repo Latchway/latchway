@@ -1,0 +1,62 @@
+---
+title: "Ship an Android integration"
+description: "Verify identity, signing, Play Integrity, Keystore policy, OkHttp safety, background behavior, and release evidence for Android."
+icon: "list-checks"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+<Badge color="red">Production checklist</Badge>
+
+Bind this checklist to the exact AAB/APK payload, Play signing certificate,
+source commit, SDK graph, contract, gateway image, and active configuration
+revision under review.
+
+## Application and identity
+
+- [ ] The application uses the generated `app_...` resource ID and exact
+  production environment.
+- [ ] The configured identity issuer, audience, algorithm, and current-user
+  token validation pass independently from integrity.
+- [ ] Account switching and sign-out have explicit installation lifecycle
+  behavior.
+
+## Play and key trust
+
+- [ ] The numeric cloud project, package, installed certificate digest, version
+  policy, and Play track match the active server policy.
+- [ ] The Standard token provider receives the server hash directly as
+  `requestHash`.
+- [ ] StrongBox, hardware-backed, or policy-controlled fallback is reported
+  accurately and enforced as configured.
+- [ ] Transient retries are bounded; permanent integrity failures do not loop.
+- [ ] Revocation, stale trust, key reset, process death, and reinstall paths
+  were exercised.
+
+## Transport and lifecycle
+
+- [ ] OkHttp includes the application interceptor, network origin guard, and
+  authenticator in the documented roles.
+- [ ] Framework-owned retries are disabled and one-shot bodies are never
+  replayed.
+- [ ] Streaming, cancellation, background timeout, and uncertain-operation
+  reconciliation were tested.
+- [ ] No provider credential or native security artifact reaches app logs,
+  job input, or analytics.
+
+## Evidence
+
+- [ ] A request correlates user, family, component, trust, feature, route,
+  usage, and quota by safe request ID.
+- [ ] The exact candidate was installed through the configured Google Play
+  track; a sideloaded result was not substituted.
+- [ ] [Release status](/release-status) and the generated
+  [compatibility matrix](/reference/compatibility) record every claimed
+  artifact and framework tuple.
+
+Complete [Physical-device proof](/mobile/device-proof) before treating Play
+Integrity as release evidence.

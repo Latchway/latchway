@@ -1,11 +1,21 @@
 ---
 title: "Apple Foundation Models integration"
-description: "Define the planned provider-protocol adapter that keeps Apple framework abstractions while routing a feature through Latchway."
+description: "Evaluate the exact Apple Foundation Models 27.0.0 source adapter without mistaking simulator conformance for published support."
+icon: "plug"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "framework-integrations"
 ---
 
+import FoundationModelsSource from "/snippets/generated/ios/frameworks/foundation-models.swift.mdx";
+
 <Warning>
-  `LatchwayFoundationModels` and its advertised types are pre-release. No released
-  Swift product or supported Apple Foundation Models version exists yet.
+  `LatchwayFoundationModels` is a pre-release experimental source product. Exact 27.0.0
+  simulator conformance exists, but no released Swift artifact or supported
+  Apple Foundation Models tuple exists yet.
 </Warning>
 
 ## 1. What this integration does
@@ -16,30 +26,35 @@ introduce a parallel chat, prompt, tool, transcript, or model framework.
 
 ## 2. Supported framework versions
 
-None published. Availability and exact Apple SDK requirements must be generated
-from the tested Swift release bundle.
+The generated registry records one experimental source tuple: Apple Foundation
+Models `27.0.0` through `27.0.0`. Nine iOS 27.0 simulator tests cover text,
+transcript, incremental usage, cancellation, quota and unavailable mapping,
+refresh, and explicit tool and schema rejection. No broader or published range
+is implied.
 
 ## 3. Supported Latchway versions
 
-None published for this adapter. The current contract does not claim support.
+The tested source tuple uses Latchway Swift SDK `1.0.0` and server contract
+`1.0.0`. Neither coordinate is a published supported adapter release.
 
 ## 4. Security level
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Implemented through the Swift transport; OS 27 runtime evidence remains pending |
-| Private key remains native | Implemented through Swift platform storage; physical proof remains pending |
-| Streaming | Compiles in the OS 27 executor; runtime evidence remains pending |
-| Cancellation | Compiles in the OS 27 executor; runtime evidence remains pending |
-| App extensions | Conditional source integration; physical extension proof remains pending |
-| Structured output | Advertise only when translation is reliable |
-| Tool calls | Advertise only when translation is reliable |
+| Full DPoP preserved | Partial at this adapter seam; it delegates requests to the configured Swift transport |
+| Private key remains native | Partial source evidence; physical framework execution remains pending |
+| Streaming | Incremental simulator coverage passes at exact 27.0.0 |
+| Cancellation | Simulator cancellation reaches the transport at exact 27.0.0 |
+| App extensions | Conditional source integration; delegated-extension runtime remains pending |
+| Structured output | No; the adapter rejects generation schemas explicitly |
+| Tool calls | No; the adapter rejects tools explicitly |
 | Protocol | Draft contract `1.0.0` OpenAI Responses over current wire 2 |
 
 ## 5. Install packages
 
-Do not link a product named `LatchwayFoundationModels` until it is present in a
-signed, published Swift package release.
+For source evaluation, add the authorized `latchway-ios-sdk` checkout as a local
+Swift package and link its existing `LatchwayFoundationModels` product. Do not
+replace that checkout with a registry coordinate or call the product published.
 
 ## 6. Create the Latchway client
 
@@ -53,32 +68,36 @@ capabilities. It never exposes the physical model.
 
 ## 8. Create the framework client
 
-The source adapter implements the OS 27 custom executor interfaces. Type names
-remain pre-release and runtime execution was skipped on the older validation
-host, so this page does not advertise a runnable supported example.
+The source adapter implements the OS 27 custom executor interfaces. This
+generated region is the source-owned implementation and conformance reference;
+it is not a published quickstart or physical-device proof.
+
+<FoundationModelsSource />
 
 ## 9. Send a non-streaming request
 
-Single-turn and transcript translation must pass conformance before release.
+Single-turn text and transcript translation pass the exact simulator suite.
+Physical framework execution and a published consumer remain release gates.
 
 ## 10. Send a streaming request
 
-Streaming must preserve incremental framework events and cancellation without
-buffering the complete response.
+Incremental simulator coverage passes without replacing framework events with a
+single buffered completion. Physical execution remains unverified.
 
 ## 11. Use tools
 
-Tool translation is present only when the adapter can represent semantics
-truthfully. Latchway does not execute tools.
+Tools are not supported by this exact tuple. The adapter rejects them rather
+than silently dropping their semantics. Latchway does not execute tools.
 
 ## 12. Use structured output
 
-Generated structured types are supported only when translation preserves the
-framework's constraints and failure behavior.
+Generated schemas and structured output are not supported by this exact tuple.
+The adapter rejects them explicitly.
 
 ## 13. Handle cancellation
 
-Task cancellation must cancel the active transport and must not replay work.
+The exact simulator suite proves that task cancellation reaches the active
+transport and does not replay work.
 
 ## 14. Handle quota failures
 
@@ -92,14 +111,16 @@ rules; framework code never receives refresh credentials.
 
 ## 16. Known limitations
 
-Unsupported framework capabilities must be absent, not silently degraded.
-Platform availability can constrain application and extension targets.
+Tools, generated schemas, Chat Completions, embeddings, audio, and images are
+not supported. Physical framework execution, delegated-extension runtime,
+published artifacts, and versions outside exact 27.0.0 remain unverified.
 
 ## 17. Verify the integration
 
-Required cases include single-turn, transcripts, streaming, generated types,
-tools, cancellation, unavailable features, quotas, trust refresh, and extension
-component use.
+From the authorized iOS SDK checkout, run
+`swift test --filter LatchwayFoundationModelsTests`. A passing result proves the
+exact simulator source cases only; compare the generated
+[Compatibility matrix](/reference/compatibility) before making a support claim.
 
 ## 18. Troubleshooting
 
@@ -108,4 +129,5 @@ transport diagnostics before treating a translation error as a server failure.
 
 ## 19. Compatibility matrix
 
-No supported row is published. See [Compatibility](/reference/compatibility).
+The generated row is `experimental` at exact `27.0.0`; no supported row is
+published. See [Compatibility](/reference/compatibility).

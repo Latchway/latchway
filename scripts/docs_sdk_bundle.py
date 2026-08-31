@@ -50,6 +50,9 @@ SDK_SPECS: Mapping[str, Mapping[str, Any]] = {
         "directory": "latchway-js",
         "required_documents": {
             "quickstart/firebase-app-check.ts": "quickstart",
+            "quickstart/vanilla-development-helper.ts": "quickstart",
+            "quickstart/vanilla-development-client.ts": "quickstart",
+            "quickstart/vanilla-streaming-fetch.ts": "quickstart",
             "frameworks/openai.ts": "framework",
             "frameworks/vercel-ai.ts": "framework",
             "frameworks/langchain.ts": "framework",

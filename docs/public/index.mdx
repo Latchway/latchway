@@ -1,70 +1,139 @@
 ---
-title: "Latchway documentation"
-description: "Self-hosted, attested access to AI infrastructure for mobile and web applications."
+title: "Secure AI access from client applications"
+description: "Authenticate users, verify application trust, enforce limits, and route AI requests without shipping provider credentials."
+icon: "waypoints"
+audience: "mixed"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "docs"
 ---
 
+import { SetupPath } from "/components/SetupPath.jsx";
+import IOSFirstRequest from "/snippets/generated/ios/quickstart/url-session.swift.mdx";
+import AndroidFirstRequest from "/snippets/generated/android/quickstart/basic-client.kt.mdx";
+import WebFirstRequest from "/snippets/generated/js/quickstart/vanilla-streaming-fetch.ts.mdx";
+import ReactNativeFirstRequest from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+
+Latchway is a self-hosted access gateway for iOS, Android, Web, and React
+Native applications. It authenticates users, evaluates platform trust, binds
+short-lived sessions to component keys, applies server-owned feature policy and
+limits, and selects the upstream route without returning provider credentials
+to the client.
+
 <Warning>
-  Latchway version 1 is a repository-local tested source candidate, not an
-  independently audited, published, or supported release. Public images,
-  packages, tags, and production evidence are still gated by the release
-  process.
+  Version 1.0.0 is a tested source candidate. Public packages, final tags,
+  immutable release assets, and protected production evidence remain release
+  gates. Source-mode instructions on this site identify that boundary.
 </Warning>
 
-Latchway is an Apache-2.0-licensed access gateway that lets untrusted iOS,
-Android, React Native, and web applications call configured AI infrastructure
-without embedding an upstream-provider credential.
-
-Your application keeps its existing identity provider and request format.
-Latchway verifies identity and platform trust, issues a short-lived DPoP-bound
-session, applies feature policy and quotas, selects a server-controlled route,
-injects the upstream credential, streams the response, and records redacted
-usage.
-
-```text
-Application
-  identity token + platform attestation + P-256 DPoP key + AI request
-      |
-      v
-Latchway
-  identity -> attestation -> policy -> quota -> routing -> streaming -> usage
-      |
-      v
-Configured AI or HTTP upstream
-```
-
-## Start with your application
-
 <CardGroup cols={2}>
-  <Card title="React Native" href="/mobile/react-native">
-    Use one fetch-shaped API backed by the native iOS and Android security
-    implementations.
+  <Card title="Send your first request" icon="send" href="/quickstart">
+    Choose a platform journey and reach an objective verification result.
   </Card>
-  <Card title="Native iOS" href="/mobile/ios">
-    Use Swift concurrency, Keychain or Secure Enclave keys, and Apple App
-    Attest.
-  </Card>
-  <Card title="Native Android" href="/mobile/android">
-    Use Kotlin, Android Keystore, OkHttp, and Google Play Integrity.
-  </Card>
-  <Card title="Run locally" href="/quickstart">
-    Start the gateway, bootstrap its control plane, and run the isolated local
-    verification path.
+  <Card title="Deploy Latchway" icon="server-cog" href="/operate/quickstart">
+    Start the source candidate with PostgreSQL and run the isolated verifier.
   </Card>
 </CardGroup>
 
-## Security boundary
+[View the architecture](/start/architecture-at-a-glance) or [open the GitHub
+repository](https://github.com/Latchway/latchway).
 
-Applications can choose a feature and send supported request content. They
-cannot choose a trusted user, plan, physical model, upstream route, price, or
-usage result. They never receive an upstream-provider secret.
+## Choose your role
 
-Latchway does not replace your login system, store prompt bodies by default,
-or turn web risk signals into hardware-backed native attestation. Read
-[Security boundary](/concepts/security-boundary) before integrating a client.
+<CardGroup cols={3}>
+  <Card title="Build an iOS app" icon="apple" href="/clients/ios/quickstart">
+    Use a component-bound key and move from source evaluation to App Attest.
+  </Card>
+  <Card title="Build an Android app" icon="smartphone" href="/clients/android/quickstart">
+    Use Android Keystore and move from source evaluation to Play Integrity.
+  </Card>
+  <Card title="Build a Web app" icon="globe-2" href="/clients/web/quickstart">
+    Use WebCrypto, existing identity, and explicit browser-risk controls.
+  </Card>
+  <Card title="Build a React Native app" icon="atom" href="/clients/react-native/quickstart">
+    Keep one TypeScript API while native modules own keys and attestation.
+  </Card>
+  <Card title="Operate Latchway" icon="server-cog" href="/operate/quickstart">
+    Deploy, configure, observe, and verify the complete gateway.
+  </Card>
+</CardGroup>
 
-## Operator path
+<CardGroup cols={2}>
+  <Card title="Review the security model" icon="shield-check" href="/concepts/security-boundary">
+    Learn what Latchway establishes and which threats remain with the app.
+  </Card>
+  <Card title="Integrate an AI framework" icon="plug" href="/integrations/overview">
+    Preserve framework streaming and cancellation through a feature-bound transport.
+  </Card>
+</CardGroup>
 
-One Go binary contains the gateway, worker, migrations, diagnostics, CLI, and
-embedded administration console. PostgreSQL is the only required durable
-service. Start with [Deployment](/operations/deployment), then complete the
-[Production-readiness checklist](/operations/production-readiness).
+## Latchway in one screen
+
+<Frame caption="The client selects a feature. Latchway owns trust, limits, routing, and provider credentials.">
+
+```text
+Your app                  Latchway SDK                 Latchway                  AI upstream
+identity + trust    ->    DPoP-bound session    ->    policy + quotas    ->    credential injection
+```
+
+</Frame>
+
+The application may select a configured feature and send supported request
+content. It cannot select a trusted user, physical model, route, price, or
+usage result.
+
+## Source integration preview
+
+These previews come directly from the deterministic SDK documentation bundles;
+some show client construction and others show request dispatch.
+Each tab names its source repository, commit, file, region, and bundle digest;
+the platform quickstart explains the prerequisites and trust boundary.
+
+<Tabs>
+  <Tab title="iOS">
+
+    <IOSFirstRequest />
+
+  </Tab>
+  <Tab title="Android">
+
+    <AndroidFirstRequest />
+
+  </Tab>
+  <Tab title="Web">
+
+    <WebFirstRequest />
+
+  </Tab>
+  <Tab title="React Native">
+
+    <ReactNativeFirstRequest />
+
+  </Tab>
+</Tabs>
+
+The full platform quickstarts pin SDK and server source-candidate versions and
+show the corresponding trust boundary.
+
+## Production path
+
+<CardGroup cols={4}>
+  <Card title="1. Deploy" icon="cloud" href="/operations/deployment">
+    Run the immutable image with PostgreSQL, TLS, and secret custody.
+  </Card>
+  <Card title="2. Configure trust" icon="badge-check" href="/concepts/identity-and-attestation">
+    Bind identity, attestation or browser risk, and component policy.
+  </Card>
+  <Card title="3. Add a feature" icon="route" href="/administration/configuration">
+    Activate immutable routes, models, pricing, and limit plans.
+  </Card>
+  <Card title="4. Integrate" icon="braces" href="/start/choose-an-integration">
+    Connect a version-matched client or framework adapter.
+  </Card>
+</CardGroup>
+
+## Build your path
+
+<SetupPath />

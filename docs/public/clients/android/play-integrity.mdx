@@ -1,0 +1,72 @@
+---
+title: "Configure Google Play Integrity"
+description: "Bind a Play-distributed Android application and Standard integrity request to the Latchway challenge and active trust policy."
+icon: "badge-check"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+<Badge color="blue">Google Play track required</Badge>
+
+## Outcome
+
+The native adapter submits a Play Integrity Standard token whose `requestHash`
+is the server-provided Latchway challenge hash, and the gateway validates the
+configured application and verdict expectations.
+
+## Distinguish the three modes
+
+| Mode | What it tests | What it cannot prove |
+| --- | --- | --- |
+| Local development | Kotlin lifecycle, fixtures, request binding, error mapping | A real Play verdict |
+| Play internal testing | Exact signed candidate installed from a configured track | Production rollout status |
+| Production distribution | Released signing and policy coordinates | That the device or app is free from compromise |
+
+## Match exact coordinates
+
+Configure the same values in the Android candidate and active Latchway policy:
+
+- numeric Google Cloud project number;
+- package name;
+- expected installed signing-certificate digest;
+- application recognition verdict;
+- version constraints when policy uses them;
+- device integrity and account licensing requirements; and
+- feature trust requirement.
+
+Pass the server's `client_data_hash` directly as Play Integrity `requestHash`.
+Do not hash it again or reconstruct principal-bound JSON on the client.
+
+## Run the protected path
+
+1. warm the Standard token provider;
+2. install the exact signed application from the configured track;
+3. establish a fresh Latchway session;
+4. send one feature-bound request; and
+5. inspect the attestation event and request by safe ID.
+
+The adapter may renew an invalid provider once and retry only documented
+transient provider failures within its bounded policy. Permanent verdict
+failure is a policy result, not a retry loop.
+
+<SecurityGuarantee
+  establishes={[
+    "The configured Google Play application and integrity verdict were accepted.",
+    "The verdict was fresh and bound to the one-time Latchway challenge hash.",
+    "The resulting session is bound to the Android component DPoP key.",
+  ]}
+  doesNotEstablish={[
+    "A sideloaded APK or fixture produced production integrity evidence.",
+    "Every accepted device is free from compromise or abuse.",
+    "The client selected its authoritative route, price, or usage charge.",
+  ]}
+/>
+
+Continue with [Physical-device proof](/mobile/device-proof) for the immutable
+release-evidence contract.

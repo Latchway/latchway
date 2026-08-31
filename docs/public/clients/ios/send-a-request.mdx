@@ -1,0 +1,52 @@
+---
+title: "Send a request from iOS"
+description: "Bind a native URLRequest to a Latchway feature, preserve the application payload, and correlate the protected response safely."
+icon: "send"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+import IOSURLSessionQuickstart from "/snippets/generated/ios/quickstart/url-session.swift.mdx";
+
+## Outcome
+
+A normal `URLRequest` reaches an allowed Latchway data-plane path with a fresh
+request-time DPoP proof and one server-owned feature decision.
+
+## Create the request
+
+The complete compiled source region is:
+
+<IOSURLSessionQuickstart />
+
+Keep these invariants when adapting it:
+
+- use the generated `app_...` application resource ID rather than a bundle ID
+  or display name;
+- target the exact configured HTTPS gateway origin;
+- bind the transport to a stable feature such as `habit-assistant`;
+- allow Latchway to rewrite the physical model under active configuration;
+- never add an upstream provider authorization header or credential-shaped
+  query parameter; and
+- preserve the response request ID for correlation.
+
+## Choose the transport level
+
+Use the feature transport for ordinary buffered or streamed URLSession work.
+Use lower-level `authorize` only when the caller-owned transport can verify the
+exact destination and implement the documented one-time pre-dispatch recovery
+contract. A copied static authorization header is not a substitute for DPoP.
+
+## Verify
+
+Confirm one request row has the same response request ID, `Platform: ios`, the
+expected feature and user, a directly trusted root component, and authoritative
+usage. The provider, physical model, price, and usage shown in that row are
+server results rather than client assertions.
+
+Continue with [Streaming on iOS](/clients/ios/streaming) for incremental
+delivery and cancellation.

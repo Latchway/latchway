@@ -1,0 +1,67 @@
+---
+title: "Prepare a Web client for production"
+description: "Verify the browser identity, key, risk, origin, CSP, storage, policy, observability, and release boundaries before launch."
+icon: "clipboard-check"
+audience: "client-web"
+pageType: "runbook"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
+---
+
+<Badge color="green">Production</Badge>
+
+Complete every applicable item against the exact deployment and client
+candidate.
+
+## Transport and origin
+
+- [ ] The application and gateway use HTTPS; `allowInsecureHTTP` is absent.
+- [ ] Every allowed origin matches exact scheme, hostname, and port.
+- [ ] Wildcard authenticated origins and cross-origin redirects are rejected.
+- [ ] CORS preflight permits only documented methods and headers.
+- [ ] CSP includes the exact gateway in `connect-src`, avoids broad script
+      execution, and has been enforced after report-only review.
+
+## Identity and browser trust
+
+- [ ] The existing identity issuer, audience, keys, expiry, and reauthentication
+      behavior are verified.
+- [ ] Required Firebase App Check or Turnstile evidence is created only for the
+      active challenge and verified server-side.
+- [ ] Product and security owners accept that WebCrypto and risk signals are
+      not physical-device or native application attestation.
+
+## Key and session state
+
+- [ ] `persistence: { mode: "required" }` works in supported browsers.
+- [ ] Storage denial, private browsing, site-data reset, and multiple-component
+      cleanup behavior are tested.
+- [ ] Multi-tab refresh passes with the IndexedDB lease; no application code
+      reads, copies, or coordinates refresh tokens.
+- [ ] XSS prevention, dependency review, output encoding, and extension risk are
+      included in the application threat model.
+
+## Feature, quota, and request behavior
+
+- [ ] Feature IDs are fixed by application behavior, not untrusted URLs or
+      headers.
+- [ ] Physical routes, models, prices, and authoritative usage remain server-owned.
+- [ ] Streaming, AbortSignal cancellation, stable Problem mapping, and
+      non-replayable request behavior pass in every supported browser.
+- [ ] User, feature, and application limits deny before dispatch and settle
+      actual trusted usage afterward.
+
+## Release and operations
+
+- [ ] The exact SDK and server commits, package/image digests, contract, and
+      compatibility evidence are recorded.
+- [ ] No provider key, Admin API token, debug signer, refresh token, or secret is
+      present in browser assets, source maps, environment variables, or logs.
+- [ ] Request and audit views expose safe correlation fields without prompt
+      bodies, identity subjects, proofs, or credentials by default.
+- [ ] Revocation, key rotation, backup/restore, telemetry, and incident response
+      runbooks have been exercised.
+
+Finish with the broader [production-readiness checklist](/operations/production-readiness).

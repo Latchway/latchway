@@ -1,0 +1,45 @@
+---
+title: "Handle React Native SDK errors"
+description: "Map TypeScript, bridge, native key, attestation, session, transport, quota, and upstream failures without exposing security state."
+icon: "triangle-alert"
+audience: "client-react-native"
+pageType: "troubleshooting"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+## Capture safe diagnostics
+
+Use the mapped error category, stable server code, safe request ID,
+documentation URL, retryability, and operation ID when required. Add the
+React Native, native SDK, server, contract, OS, and platform tuple for support.
+
+Never log the external identity JWT, access or refresh tokens, DPoP proof or
+private key, App Attest or Play Integrity evidence, native credential headers,
+cookies, provider secrets, or application request/response content.
+
+## Diagnose the owning layer
+
+| Layer | Example | Action |
+| --- | --- | --- |
+| TypeScript configuration | `client_configuration_invalid` | Correct gateway, application, environment, feature, or native settings |
+| Bridge/runtime | native module unavailable or protocol response invalid | Rebuild New Architecture codegen and exact native dependencies |
+| Native storage | `storage_unavailable` or `crypto_unavailable` | Inspect platform policy and signed capabilities; never add a JS fallback key |
+| Attestation | `attestation_required`, invalid, stale, or unsupported | Fix the corresponding native App Attest or Play Integrity path |
+| Session/DPoP | expired, nonce, replay, or revoked | Allow only native bounded pre-dispatch recovery where the request is replayable |
+| Transport | destination or request not replayable | Correct the path/origin or create a new reconciled product operation |
+| Policy/upstream | quota, route, pricing, timeout, or protocol error | Follow the server-owned policy and request-attempt evidence |
+
+## Preserve uncertain operations
+
+An `operation_indeterminate` error includes a required operation ID. Keep it
+with the request ID and reconcile through the operator view before a user or
+background job creates another operation.
+
+## Follow the canonical page
+
+Start at [Error reference](/reference/errors) through the mapped
+documentation URL. The page is keyed by the stable code rather than an
+untrusted provider message.

@@ -1,0 +1,53 @@
+---
+title: "Configure the React Native Android host"
+description: "Wire the Gradle composite, Play project, package and certificate policy, and native Kotlin security module into React Native Android."
+icon: "smartphone"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="blue">Android API 24+</Badge> <Badge color="purple">Native security state</Badge>
+
+## Outcome
+
+The React Native Android host resolves the locked native modules, configures
+Play Integrity for the exact signed application, and keeps Keystore, DPoP,
+refresh, integrity, and protected networking behind the TurboModule.
+
+## Configure the host
+
+1. keep the repository's local Gradle composite override for source
+   evaluation;
+2. compile against the SDK candidate's pinned Android toolchain;
+3. set `android.playIntegrityCloudProjectNumber` to the numeric cloud project;
+4. match the server policy's package, installed signing certificate, Play
+   track, and verdict requirements; and
+5. retain the locked Latchway interceptor, network origin guard, and
+   authenticator supplied by the native bridge.
+
+Do not pass an integrity token, request hash, DPoP proof, private key, access
+token, refresh token, or provider credential through JavaScript configuration.
+
+## Verify source wiring
+
+```bash
+./android/gradlew -p example/android :app:compileDebugKotlin --no-daemon
+corepack pnpm example:bundle:check
+```
+
+Then use a Play-installed signed application for the real verdict. Confirm the
+request view reports `react_native_android`, the expected user and feature,
+Play Integrity trust, a native key-storage category, DPoP verification, and
+usage.
+
+<Warning>
+  An emulator or sideloaded APK tests host wiring only. It is not production
+  Play Integrity evidence, and an iOS React Native result does not substitute
+  for the Android gate.
+</Warning>
+
+For the Apple host, open [iOS native setup](/clients/react-native/ios-native-setup).

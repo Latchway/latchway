@@ -36,6 +36,40 @@ func TestRuntimeAttestationPolicyAcceptsWatchOSWithinSevenPlatformBound(t *testi
 	}
 }
 
+func TestRuntimeAttestationPolicyAcceptsEnabledWebOriginsAlongsideNative(t *testing.T) {
+	t.Parallel()
+
+	policy := configuration.AttestationPolicy{
+		ID: "verified-clients", MaxAge: 10 * time.Minute,
+		Platforms: map[string]configuration.PlatformAttestation{
+			"react_native_ios": {
+				Provider: "app_attest", Mode: "required", MinimumTrustLevel: "app_verified",
+			},
+			"web": {
+				Provider: "firebase_app_check", Mode: "required", MinimumTrustLevel: "web_risk_verified",
+				AllowedOrigins: []string{"https://app.example.test"},
+			},
+		},
+	}
+	if !validRuntimeAttestationPolicy(policy) {
+		t.Fatal("valid sibling web origins invalidated a native attestation policy")
+	}
+
+	invalid := configuration.AttestationPolicy{
+		ID: "verified-clients", MaxAge: 10 * time.Minute,
+		Platforms: map[string]configuration.PlatformAttestation{
+			"react_native_ios": policy.Platforms["react_native_ios"],
+			"web": {
+				Provider: "firebase_app_check", Mode: "required", MinimumTrustLevel: "web_risk_verified",
+				AllowedOrigins: []string{"https://app.example.test/path"},
+			},
+		},
+	}
+	if validRuntimeAttestationPolicy(invalid) {
+		t.Fatal("non-canonical sibling web origin was accepted")
+	}
+}
+
 func TestBoundedActivationMarksDelegatedDirectAttestationAsCompositeTrust(t *testing.T) {
 	t.Parallel()
 

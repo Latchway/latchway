@@ -1,0 +1,44 @@
+---
+title: "Configure Cloudflare Turnstile for Web"
+description: "Execute Turnstile once per Latchway challenge and bind the configured action and client-data hash to server verification."
+icon: "cloud"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+The widget action must equal the server-configured action. Its `cData` must
+equal `challenge.attestation.client_data_hash` exactly:
+
+```typescript
+import { createTurnstileProvider } from "@latchway/client/turnstile";
+
+const turnstile = createTurnstileProvider({
+  action: "latchway_session",
+  getToken: ({ challenge }) => runTurnstileForChallenge({
+    action: "latchway_session",
+    cData: challenge.attestation.client_data_hash,
+  }),
+});
+```
+
+Execute the widget once for each server challenge. Do not reuse evidence, attach
+it to ordinary requests, or add it to refresh. Latchway verifies the returned
+action and binding through Siteverify and rejects a mismatch.
+
+<SecurityGuarantee
+  establishes={[
+    "Siteverify accepted the configured Turnstile action and challenge binding.",
+    "The signal was evaluated with user identity, DPoP possession, origin, and server policy.",
+  ]}
+  doesNotEstablish={[
+    "Turnstile identifies a physical device or hardware key.",
+    "The browser origin is free from injected script.",
+    "A reusable token can safely attest later sessions.",
+  ]}
+/>

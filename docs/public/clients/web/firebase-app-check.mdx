@@ -1,0 +1,55 @@
+---
+title: "Configure Firebase App Check for Web"
+description: "Pass challenge-time Firebase App Check evidence through the browser adapter and let Latchway verify the verdict server-side."
+icon: "flame"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+Initialize Firebase App Check in application code using Firebase's supported
+Web provider, then pass only its official `getToken` callback to Latchway:
+
+```typescript
+import {
+  createFirebaseAppCheckProvider,
+  createFirebaseIdentityTokenProvider,
+} from "@latchway/client/firebase";
+
+const latchway = createLatchwayClient({
+  baseURL: "https://ai.example.com",
+  applicationID: "app_01J00000000000000000000000",
+  environment: "production",
+  identityProvider: "firebase",
+  identityTokenProvider: createFirebaseIdentityTokenProvider(
+    () => auth.currentUser!.getIdToken(),
+  ),
+  attestationProviders: [createFirebaseAppCheckProvider(
+    (forceRefresh) => getToken(appCheck, forceRefresh),
+  )],
+});
+```
+
+The adapter requests a fresh token during a Latchway challenge. Latchway sends
+that opaque value to the server-side verifier. Refresh contains no identity or
+App Check token; a step-up starts a new challenge flow.
+
+<SecurityGuarantee
+  establishes={[
+    "The configured Firebase App Check verifier accepted the challenge-time token.",
+    "The server combined that verdict with identity, key possession, origin, and feature policy.",
+  ]}
+  doesNotEstablish={[
+    "Firebase App Check provides native hardware-backed device attestation in a Web browser.",
+    "The page is protected from same-origin script compromise.",
+    "A debug App Check token is production evidence.",
+  ]}
+/>
+
+Use Firebase's documented debug facility only for an explicit development
+environment. Never enable a debug token or debug verifier in production.

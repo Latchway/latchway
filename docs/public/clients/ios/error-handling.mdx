@@ -1,0 +1,46 @@
+---
+title: "Handle iOS SDK errors"
+description: "Map Swift transport, key, attestation, session, quota, and upstream failures to safe recovery without credential logging or blind replay."
+icon: "triangle-alert"
+audience: "client-ios"
+pageType: "troubleshooting"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+## Start with safe fields
+
+Capture the typed SDK category, stable Latchway code when present, response
+request ID, documentation URL, retryable flag, and operation ID when required.
+Do not record the problem detail as a credential-safe substitute unless the
+application has reviewed that display path.
+
+Never log identity tokens, access or refresh tokens, DPoP proofs, private key
+material, App Attest evidence, cookies, or provider payloads.
+
+## Classify the failure
+
+| Symptom | Confirm | Safe action |
+| --- | --- | --- |
+| Identity unavailable | Current application user and provider token state | Ask the user to authenticate; do not weaken App Attest |
+| App Attest unavailable or invalid | Device support, entitlement, bundle, team, environment, and trust event | Correct signing or policy; use debug evidence only in an allowed development environment |
+| Keychain migration required | Signed first root group and explicit legacy shared groups | Run the documented explicit migration; do not scan arbitrary groups |
+| `session_expired` | Exact canonical pre-dispatch problem and matching request ID | Let the native transport perform its one bounded recovery when replayable |
+| `dpop_nonce_required` | One valid nonce and matching problem | Let the SDK create a fresh proof; never reuse the prior proof |
+| `quota_exceeded` | Request ID and effective limit plan | Show the policy outcome; do not change a client-side counter |
+| `operation_indeterminate` | Required operation ID | Reconcile before presenting another mutating action |
+
+## Use the canonical page
+
+Every public server code resolves through [Error reference](/reference/errors)
+and `https://docs.latchway.dev/errors/<code>`. Start there, then inspect the
+matching request, component, trust event, and policy revision.
+
+## Escalate safely
+
+Provide the request ID, operation ID when present, application/environment
+resource IDs, SDK/server/contract versions, platform and OS version, component
+kind, safe key-storage category, and the exact documentation URL. Exclude all
+credentials and raw attestation material.

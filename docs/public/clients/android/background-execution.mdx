@@ -1,0 +1,48 @@
+---
+title: "Run Android work in the background"
+description: "Scope Latchway clients and cancellable AI requests to Android lifecycle or scheduled work without serializing credentials into jobs."
+icon: "clock"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+## Outcome
+
+Background work creates or reuses the application-scoped native client,
+obtains identity only when the user session permits it, and cancels networking
+when the Android work contract ends.
+
+## Choose an ownership scope
+
+- keep one `LatchwayClient` per application security scope;
+- let the native SDK single-flight session establishment and refresh;
+- create an OkHttp `Call` inside the coroutine or worker execution scope;
+- close the call on cancellation or timeout; and
+- dispose application-owned networking only when no foreground or background
+  consumer remains.
+
+Do not serialize an identity token, Latchway access token, refresh token, DPoP
+proof, Play Integrity token, private key reference, or provider credential into
+WorkManager input, saved state, notifications, logs, or analytics.
+
+## Account for platform limits
+
+Background execution does not bypass Android process death, network
+constraints, battery policy, Play Integrity freshness, identity expiry, or
+Latchway quota. Configure work constraints and product-visible retry behavior
+outside the SDK.
+
+If dispatch becomes uncertain, record the safe request or operation ID and
+stop. WorkManager retry is a new product operation unless the application can
+prove the former operation did not reach the upstream.
+
+## Verify
+
+Exercise process recreation, network loss, user sign-out, worker cancellation,
+expired identity, stale integrity, and quota denial. Confirm each work attempt
+has bounded resources, no credential persistence, and no silent duplicate
+logical request.

@@ -1,0 +1,53 @@
+---
+title: "Integrate Latchway in iOS app extensions"
+description: "Route an iOS containing app, widget, share extension, or App Intent into the delegated Client Component guides."
+icon: "boxes"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="purple">Delegated trust</Badge>
+
+An iOS extension has its own component key, session family, feature grant, and
+quota attribution. Its containing app provisions that key after the root is
+trusted. The root does not share its DPoP key or refresh chain with the
+extension.
+
+<Warning>
+  Delegated trust proves that the directly trusted root authorized a bounded
+  extension key. It does not prove that the extension independently completed
+  App Attest. Apple does not support App Attest key generation from these
+  extension contexts.
+</Warning>
+
+## Follow the component path
+
+1. [Understand app-extension components](/build/app-extensions/overview).
+2. configure [Keychain access groups](/build/app-extensions/keychain-access-groups).
+3. complete [containing-app provisioning](/build/app-extensions/containing-app-provisioning).
+4. choose the [WidgetKit](/build/app-extensions/widgetkit) or
+   [share extension](/build/app-extensions/share-extension) execution guide.
+5. review the bounded
+   [direct-attestation step-up](/build/app-extensions/direct-attestation-step-up)
+   contract without assuming it is available in every extension runtime.
+
+## Lifecycle requirements
+
+- provision only a configured Component Definition;
+- seal the requested feature set to the definition and root grant;
+- keep the extension's private group and key independent;
+- handle first launch before provisioning with
+  `containing_app_setup_required`;
+- revoke one component without silently revoking its siblings; and
+- revoke or retire delegated descendants when root trust policy requires it.
+
+## Verify
+
+Inspect the extension request and confirm its component ID differs from the
+root, its trust provenance is delegated, its DPoP key belongs to the extension,
+and its feature and quota attribution are component-scoped. A signed extension
+fixture that cannot send a request is provisioning evidence only.

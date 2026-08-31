@@ -3,6 +3,8 @@ package console
 import (
 	"encoding/json"
 	"io/fs"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +52,28 @@ func TestAssetsContainManifestEntry(t *testing.T) {
 	}
 	if _, err := fs.Stat(assets, entryFile); err != nil {
 		t.Fatalf("stat entry asset %q: %v", entryFile, err)
+	}
+}
+
+func TestDockerConsoleBuildIncludesAdminAPIContract(t *testing.T) {
+	t.Parallel()
+
+	dockerfile, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatalf("read repository Dockerfile: %v", err)
+	}
+
+	const contractCopy = "COPY api/admin.openapi.yaml api/client.openapi.yaml api/config.schema.json /src/api/"
+	copyOffset := strings.Index(string(dockerfile), contractCopy)
+	if copyOffset < 0 {
+		t.Fatalf("Docker console-build stage must include %q", contractCopy)
+	}
+
+	goStageOffset := strings.Index(string(dockerfile), " AS go-build")
+	if goStageOffset < 0 {
+		t.Fatal("Dockerfile has no go-build stage")
+	}
+	if copyOffset > goStageOffset {
+		t.Fatal("Admin OpenAPI contract is copied too late for the console-build stage")
 	}
 }

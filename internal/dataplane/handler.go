@@ -250,7 +250,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	browserOrigin, originErr := weborigin.Read(request.Header)
 	if originErr != nil {
-		handler.writeViolation(writer, requestID, requestViolation("header.Origin", "Origin must be exactly one canonical HTTPS browser origin."))
+		handler.writeViolation(writer, requestID, requestViolation("header.Origin", "Origin must be exactly one canonical HTTPS browser origin or one canonical loopback HTTP origin."))
 		return
 	}
 	if browserOrigin != "" {

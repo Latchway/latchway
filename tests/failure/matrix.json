@@ -149,36 +149,42 @@
       "id": "live-process-kill-after-reservation",
       "requirement": "SIGKILL a released OCI process after a durable reservation but before dispatch, restart a worker, and prove the exact reservation is reclaimed without usage.",
       "kind": "external",
+      "controller_action": "docker_sigkill_api_after_reservation",
       "evidence_notes": "Requires process and database fault control against the release image; use an isolated environment and include before/after quota rows plus image digest."
     },
     {
       "id": "live-process-kill-during-stream",
       "requirement": "SIGKILL a released OCI process after an SSE first byte, restart worker/API replicas, and prove bounded conservative settlement with no permanently locked reservation.",
       "kind": "external",
+      "controller_action": "docker_sigkill_api_during_stream",
       "evidence_notes": "Requires an isolated stream fixture, process fault control, a released image digest, and durable reservation/attempt evidence."
     },
     {
       "id": "live-database-outage-boundaries",
       "requirement": "Cut database connectivity before dispatch and during settlement, restore it, then prove fail-closed dispatch and bounded pending-usage reconciliation.",
       "kind": "external",
+      "controller_action": "docker_postgresql_network_partition",
       "evidence_notes": "Requires network fault injection around PostgreSQL and must include request, upstream-observation, worker-reconciliation, and quota evidence."
     },
     {
       "id": "live-graceful-shutdown-and-drain",
       "requirement": "Send SIGTERM with in-flight non-stream and SSE work, prove the listener accepts no new work, and prove in-flight work ends within the configured drain bound.",
       "kind": "external",
+      "controller_action": "docker_sigterm_drain",
       "evidence_notes": "Run against the release image with an explicit shutdown timeout and the deterministic load fixture."
     },
     {
       "id": "live-upstream-and-client-disconnect",
       "requirement": "Drive a pre-response upstream disconnect, mid-SSE upstream disconnect, and downstream client cancellation through the released gateway, then prove one bounded terminal attempt and no retained reservation for each case.",
       "kind": "external",
+      "controller_action": "fixture_disconnect_sequence",
       "evidence_notes": "Use the authenticated deterministic fixture control modes and preserve fixture observations, client results, attempts, usage provenance, and quota snapshots."
     },
     {
       "id": "live-config-and-key-rotation-across-api-replicas",
       "requirement": "Change configuration, signing keys, and issuer JWKS while requests span at least two API replicas and two workers, without mixed decisions or invalidating active sessions.",
       "kind": "external",
+      "controller_action": "replicated_rotation_sequence",
       "evidence_notes": "Requires a real load balancer, shared PostgreSQL, two API replicas, two workers, and exact release image digests."
     }
   ]

@@ -23,14 +23,16 @@ import (
 const maximumBodyBytes = 1 << 20
 
 type state struct {
-	mode         atomic.Value
-	delayNanos   atomic.Int64
-	holdNanos    atomic.Int64
-	active       atomic.Int64
-	total        atomic.Int64
-	canceled     atomic.Int64
-	disconnected atomic.Int64
-	controlToken string
+	mode                  atomic.Value
+	delayNanos            atomic.Int64
+	holdNanos             atomic.Int64
+	active                atomic.Int64
+	total                 atomic.Int64
+	canceled              atomic.Int64
+	disconnected          atomic.Int64
+	waitingBeforeResponse atomic.Int64
+	waitingAfterFirstByte atomic.Int64
+	controlToken          string
 }
 
 type requestDocument struct {
@@ -108,7 +110,7 @@ func validateListenAddress(listen string, acknowledgeIsolatedContainerNetwork, h
 	if address.IsLoopback() {
 		return nil
 	}
-	if !acknowledgeIsolatedContainerNetwork || !hasControlToken {
+	if !address.IsPrivate() || !acknowledgeIsolatedContainerNetwork || !hasControlToken {
 		return errors.New("a non-loopback fixture requires -acknowledge-isolated-container-network and an authenticated control token")
 	}
 	if address.IsUnspecified() || address.IsMulticast() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() {
@@ -143,6 +145,15 @@ func (fixture *state) upstream(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	mode := fixture.mode.Load().(string)
+	if mode == "hold-before-response" || (mode == "drain-hold" && !document.Stream) {
+		fixture.waitingBeforeResponse.Add(1)
+		defer fixture.waitingBeforeResponse.Add(-1)
+		if !fixture.waitWhileMode(request.Context(), mode) {
+			fixture.canceled.Add(1)
+			return
+		}
+		mode = fixture.mode.Load().(string)
+	}
 	if delay := time.Duration(fixture.delayNanos.Load()); delay > 0 || mode == "delayed-first-byte" {
 		if mode == "delayed-first-byte" && delay == 0 {
 			delay = time.Second
@@ -184,6 +195,17 @@ func (fixture *state) stream(w http.ResponseWriter, request *http.Request, mode 
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl_load_fixture\",\"object\":\"chat.completion.chunk\",\"model\":\"fixture-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
 	flusher.Flush()
+	if mode == "drain-hold" {
+		fixture.waitingAfterFirstByte.Add(1)
+		if !fixture.waitWhileMode(request.Context(), mode) {
+			fixture.waitingAfterFirstByte.Add(-1)
+			fixture.canceled.Add(1)
+			return
+		}
+		fixture.waitingAfterFirstByte.Add(-1)
+		fixture.finishStream(w, flusher)
+		return
+	}
 	if mode == "disconnect-during-stream" {
 		fixture.disconnect(w)
 		return
@@ -194,15 +216,32 @@ func (fixture *state) stream(w http.ResponseWriter, request *http.Request, mode 
 		return
 	case <-time.After(time.Duration(fixture.holdNanos.Load())):
 	}
+	fixture.finishStream(w, flusher)
+}
+
+func (*state) finishStream(w http.ResponseWriter, flusher http.Flusher) {
 	_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl_load_fixture\",\"object\":\"chat.completion.chunk\",\"model\":\"fixture-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\ndata: [DONE]\n\n")
 	flusher.Flush()
 }
 
+func (fixture *state) waitWhileMode(ctx context.Context, mode string) bool {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for fixture.mode.Load().(string) == mode {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+	return true
+}
+
 func (fixture *state) disconnect(w http.ResponseWriter) {
-	fixture.disconnected.Add(1)
 	if hijacker, ok := w.(http.Hijacker); ok {
 		connection, _, err := hijacker.Hijack()
 		if err == nil {
+			fixture.disconnected.Add(1)
 			_ = connection.Close()
 			return
 		}
@@ -250,6 +289,8 @@ func (fixture *state) observations(w http.ResponseWriter, request *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode": fixture.mode.Load().(string), "active": fixture.active.Load(), "total": fixture.total.Load(),
 		"canceled": fixture.canceled.Load(), "disconnected": fixture.disconnected.Load(),
+		"waiting_before_response":  fixture.waitingBeforeResponse.Load(),
+		"waiting_after_first_byte": fixture.waitingAfterFirstByte.Load(),
 	})
 }
 
@@ -260,7 +301,7 @@ func constantToken(header, token string) bool {
 
 func supportedMode(mode string) bool {
 	switch strings.TrimSpace(mode) {
-	case "healthy", "fail-500", "delayed-first-byte", "disconnect-before-response", "disconnect-during-stream":
+	case "healthy", "fail-500", "delayed-first-byte", "disconnect-before-response", "disconnect-during-stream", "hold-before-response", "drain-hold":
 		return true
 	default:
 		return false

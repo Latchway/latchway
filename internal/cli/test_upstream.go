@@ -81,7 +81,7 @@ func newTestUpstreamServeCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen for test upstream: %w", err)
 			}
-			defer listener.Close()
+			defer func() { _ = listener.Close() }()
 			if err := opts.print(map[string]any{
 				"listen": listener.Addr().String(), "scenario": values.scenario,
 				"scenario_header": values.allowScenarioHeader, "status": "ready",

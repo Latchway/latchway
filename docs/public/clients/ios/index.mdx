@@ -1,0 +1,68 @@
+---
+title: "Build with the iOS SDK"
+description: "Choose the Swift installation, App Attest, transport, framework, and release tasks for a native iOS application."
+icon: "apple"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">iOS 15+</Badge>
+
+The Swift SDK keeps the component key, App Attest state, rotating refresh
+state, and request-time DPoP proof in native code. The application keeps its
+existing identity provider and requests a configured feature rather than a
+physical provider model.
+
+## Start here
+
+<CardGroup cols={2}>
+  <Card title="Complete the quickstart" icon="send" href="/clients/ios/quickstart">
+    Send one feature-bound request and correlate its request ID in the Console.
+  </Card>
+  <Card title="Install the source candidate" icon="package" href="/clients/ios/installation">
+    Add the version-locked Swift products and verify the signed application target.
+  </Card>
+  <Card title="Configure App Attest" icon="badge-check" href="/clients/ios/app-attest">
+    Bind the exact bundle, team, environment, challenge, and component key.
+  </Card>
+  <Card title="Prepare a release" icon="list-checks" href="/clients/ios/production-checklist">
+    Review identity, signing, trust, transport, observability, and evidence gates.
+  </Card>
+</CardGroup>
+
+## Request path
+
+```text
+existing identity -> App Attest-aware session -> component DPoP -> feature policy -> upstream
+```
+
+- [Authentication](/clients/ios/authentication) covers the existing user token
+  and reauthentication boundary.
+- [Send a request](/clients/ios/send-a-request) covers feature binding and
+  destination restrictions.
+- [Streaming](/clients/ios/streaming) covers incremental delivery,
+  cancellation, and retry safety.
+- [Framework integrations](/clients/ios/framework-integrations) routes to the
+  tested Foundation Models and SwiftOpenAI adapters.
+- [App extensions](/clients/ios/app-extensions) explains delegated component
+  trust without describing an extension as directly attested.
+- [Error handling](/clients/ios/error-handling) preserves stable error and
+  request identifiers without logging credentials.
+
+## Support boundary
+
+The source candidate supports iOS 15 or newer and Swift 6. Its intended public
+package and CocoaPods artifacts are not available until
+[Release status](/release-status) records publication. Review the generated
+[iOS SDK bundle](/reference/sdk-bundles/ios) for source-provenanced version and
+symbol evidence.
+
+<Warning>
+  A simulator, fixture, source build, or Apple Development-signed run is not a
+  protected distribution receipt. Production App Attest evidence must come
+  from the exact signed application and immutable gateway candidate under test.
+</Warning>

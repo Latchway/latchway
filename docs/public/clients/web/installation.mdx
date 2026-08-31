@@ -1,0 +1,43 @@
+---
+title: "Install the Web SDK"
+description: "Install the unpublished JavaScript 1.0.0 source candidate reproducibly and prepare for a future registry release."
+icon: "package-plus"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+<Badge color="yellow">Source mode</Badge>
+
+`@latchway/client` 1.0.0 has not been published to npm. Build and pack the
+authorized checkout, then install the resulting local archive:
+
+```bash
+cd latchway-js
+corepack pnpm install --frozen-lockfile
+corepack pnpm check
+corepack pnpm pack --pack-destination ../web-app/vendor
+cd ../web-app
+corepack pnpm add ./vendor/latchway-client-1.0.0.tgz
+```
+
+Commit the local archive digest or workspace coordinate used by a source
+evaluation. Do not replace it with an unrelated registry package of the same
+name. After promotion, switch to the verified npm provenance and exact 1.0.0
+integrity recorded by the release.
+
+## Runtime exports
+
+| Export | Intended runtime |
+| --- | --- |
+| `@latchway/client` | Browser default |
+| `@latchway/client/firebase` | Firebase identity and App Check callbacks |
+| `@latchway/client/turnstile` | Challenge-bound Turnstile callback |
+| `@latchway/client/service-worker` | Explicit service-worker handler |
+| `@latchway/client/node` | Bounded development and conformance mode |
+
+The package never patches global `fetch` and does not bundle Firebase or
+Turnstile provider SDKs.

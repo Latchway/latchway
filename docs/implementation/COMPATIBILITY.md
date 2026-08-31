@@ -10,7 +10,7 @@ packages, live providers, physical devices, or production support.
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `draft`, `released_at: null` |
 | Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
-| Database | Historical schema `20` | Schema `23`, including family/component state, component-scoped quota state, and direct component-attestation linkage |
+| Database | Historical schema `20` | Schema `24`, including family/component state, component-scoped quota state, direct component-attestation linkage, and protocol-aware first-token timing |
 | Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
 | Sessions | One installation key/session family | Independent component keys/session families |
 | Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
@@ -22,8 +22,8 @@ coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
 historical coordinate. The component-attestation additions invalidated earlier
 intermediate draft hashes. The current SDK locks now converge on core checkpoint
-`72a52d7b42e6ea159e8222c5dd0346be286fb39a` and bundle SHA-256
-`ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765`.
+`6e44d1aacd85535d005db7d1df2f0e470f3dcffb` and bundle SHA-256
+`695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c`.
 
 ## Framework registry
 
@@ -84,10 +84,10 @@ are not package-publication or production-support claims.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `8e36364419783b07acdd8fae82e457885f1c5447` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, and composite-trust decoding implemented and locked |
-| Swift `Latchway` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, and the narrow Foundation Models 27 adapter are implemented; nine simulator runtime tests and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
-| Android `dev.latchway:latchway-*` | `c05a74e735da3589f907eb0a788a2970245c0cc8` | Android API 23+, Java 17 | Component/OkHttp transport plus Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
-| React Native `@latchway/react-native` | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage implemented and source-pinned; a development-signed physical iOS run passed, while protected Apple distribution, extension-runtime, and physical Android evidence remain required |
+| JavaScript `@latchway/client` | `b0069e993967662f4ee2729dbc393595793c5e50` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, and tested vanilla-Web documentation sources implemented and locked |
+| Swift `Latchway` | `d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, and the narrow Foundation Models 27 adapter are implemented; nine simulator runtime tests and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
+| Android `dev.latchway:latchway-*` | `b5b7d5321b54179f595f663892e7cda9bf34f7fd` | Android API 23+, Java 17 | Component/OkHttp transport plus Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
+| React Native `@latchway/react-native` | `abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-app App Attest, private root-Keychain propagation, delegated-only iOS extensions, and fail-closed native physical-proof linkage implemented and source-pinned; a development-signed physical iOS run passed, while protected Apple distribution, extension-runtime, and physical Android evidence remain required |
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. Current locks all point to the draft version 1 checkpoint named above.

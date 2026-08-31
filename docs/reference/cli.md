@@ -1,10 +1,10 @@
 # Latchway CLI reference
 
 The `latchway` binary operates the gateway through the same canonical Admin API
-used by the console. Except for `serve`, `test-upstream serve`, `migrate`, the
-local bootstrap doctor, and the explicitly isolated `verify local` gate,
-control-plane commands do not open PostgreSQL or read server configuration
-files.
+used by the console. Except for `serve`, `develop`, `test-upstream serve`,
+`migrate`, the local bootstrap doctor, and the explicitly isolated `verify
+local` gate, control-plane commands do not open PostgreSQL or read server
+configuration files.
 
 ## Authentication and output
 
@@ -139,6 +139,11 @@ latchway config diff rev_...
 latchway config rollback rev_... --environment env_...
 ```
 
+When the server rejects a document, the CLI prints every bounded,
+redaction-safe validation issue with its stable code, JSON Pointer path, and
+operator-facing message. It never substitutes raw field values into that
+diagnostic.
+
 ## Operational views
 
 ```bash
@@ -256,6 +261,21 @@ secrets. A failed check still emits the report and JUnit evidence, returns a
 non-zero status, marks later dependent checks skipped, and always attempts
 cleanup. `DATABASE_URL` is used only as the default fallback when
 `LATCHWAY_DATABASE_URL` was not explicitly selected.
+
+`latchway develop` keeps an isolated client-quickstart environment alive in the
+foreground. It accepts only a canonical loopback IP listener and an exact
+loopback HTTP browser origin, then owns the sample tenant, mock identity and
+upstream, challenge-bound debug signer, gateway, Admin API, and embedded
+Console until Ctrl-C. The ready document contains copyable non-secret
+coordinates and a random Console password printed once; keep that terminal
+private. The generated schema is dropped on shutdown.
+
+```bash
+export LATCHWAY_DATABASE_URL='postgres://...'
+latchway --output json develop \
+  --listen 127.0.0.1:8080 \
+  --browser-origin http://localhost:5173
+```
 
 Ephemeral provider verification runs locally and never sends the provider key
 to Latchway's Admin API. Supply the key by environment-variable name or through

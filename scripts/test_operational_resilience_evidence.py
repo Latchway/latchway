@@ -1224,8 +1224,15 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
             "runs-on: [self-hosted, linux, x64, latchway-release-failure]",
             failure,
         )
-        self.assertIn("vars.LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY", failure)
-        self.assertIn("test -z \"$(find \"$CAPTURE_DIRECTORY\" -type l -print -quit)\"", failure)
+        self.assertNotIn("LATCHWAY_RELEASE_FAILURE_CONTROLLER_PLAN", failure)
+        self.assertIn("scripts/run-release-failure-controller.sh", failure)
+        launcher = SCRIPT.with_name("run-release-failure-controller.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/tools/latchway-failure-driver serve", launcher)
+        self.assertIn("docker pull --platform linux/amd64", failure)
+        self.assertIn("docker logout ghcr.io", failure)
+        self.assertIn("--acknowledge-disposable-target", failure)
         self.assertIn("-scope release", failure)
         self.assertIn("--domain failure", failure)
         self.assertIn("failure-producer.attestation.sigstore.json", failure)
@@ -1295,6 +1302,8 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                         authentication["permissions"].get("packages"), "read"
                     )
                     self.assertNotIn("packages", candidate["permissions"])
+                else:
+                    self.assertEqual(candidate["permissions"].get("packages"), "read")
                 self.assertEqual(attester["permissions"]["id-token"], "write")
                 self.assertEqual(attester["permissions"]["attestations"], "write")
                 self.assertEqual(
@@ -1364,6 +1373,20 @@ class OperationalResilienceEvidenceTests(unittest.TestCase):
                     )
                     self.assertIn(
                         "$RUNNER_TEMP/credential-free-docker", candidate_runs
+                    )
+                else:
+                    self.assertEqual(
+                        sum(
+                            value.startswith("docker/login-action@")
+                            for value in candidate_uses
+                        ),
+                        1,
+                    )
+                    self.assertIn("docker pull --platform linux/amd64", candidate_runs)
+                    self.assertIn("docker logout ghcr.io", candidate_runs)
+                    self.assertLess(
+                        candidate_runs.index("docker logout ghcr.io"),
+                        candidate_runs.index("scripts/run-release-failure-controller.sh"),
                     )
 
                 checkouts = [

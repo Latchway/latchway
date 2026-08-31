@@ -1,7 +1,16 @@
 ---
 title: "Configuration"
 description: "Build, validate, simulate, and atomically activate an immutable Latchway environment revision."
+icon: "settings"
+audience: "operator"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "not-applicable"
+lastVerified: "2026-08-31"
+owner: "core-operations"
 ---
+
+import { ConfigDiff } from "/components/ConfigDiff.jsx";
 
 An environment has one active immutable configuration revision. Editing never
 mutates that revision in place: Latchway creates a draft, replaces its complete
@@ -150,11 +159,19 @@ Validation covers schema, duplicate keys, references, secrets, identity and
 attestation settings, CEL, model capabilities, trusted input accounting,
 pricing, route bounds, destination policy, retries, limits, and active user
 overrides. Activation fails when the draft is invalid or its strong ETag is
-stale.
+stale. The CLI reports bounded validation issue codes, JSON Pointer paths, and
+safe messages without echoing rejected field values.
 
 Rollback atomically reactivates a previously valid revision; it does not edit
 history. Configuration activation is audited with actor, target, operation,
 and classification metadata, not secret or before/after values.
+
+<ConfigDiff
+  before={{ feature: "habit-assistant", primaryRoute: "route-a" }}
+  after={{ feature: "habit-assistant", primaryRoute: "route-b" }}
+  effectiveBehavior="New eligible requests use route-b after atomic activation; in-flight requests remain bound to their original decision."
+  rollback="Reactivate the reviewed route-a revision with config rollback; history remains immutable."
+/>
 
 <Info>
   The public configuration envelope is versioned `v1alpha1` in the version 1

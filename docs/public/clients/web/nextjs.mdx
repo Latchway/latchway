@@ -1,0 +1,43 @@
+---
+title: "Use Latchway in a Next.js client component"
+description: "Keep the Web SDK in the browser runtime and prevent browser identity, keys, and trust claims from crossing the Next.js server boundary."
+icon: "blocks"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Mark the module that creates the browser client as client-only:
+
+```tsx
+"use client";
+
+import { createLatchwayClient } from "@latchway/client";
+
+export const latchway = createLatchwayClient({
+  baseURL: process.env.NEXT_PUBLIC_LATCHWAY_URL!,
+  applicationID: process.env.NEXT_PUBLIC_LATCHWAY_APPLICATION_ID!,
+  environment: "production",
+  identityTokenProvider: { getIdentityToken: readCurrentBrowserIdentity },
+  attestationProviders: [browserTrustProvider],
+  persistence: { mode: "required" },
+});
+```
+
+Only non-secret public coordinates belong in `NEXT_PUBLIC_*`: the exact gateway
+URL, application resource ID, environment, and feature IDs. Do not expose an
+upstream key, debug-signing key, Latchway refresh token, Admin API token, or
+server-to-server credential.
+
+Do not import this module from a Server Component, route handler, middleware,
+or build step. Those runtimes have no browser WebCrypto key, IndexedDB,
+application-user session, origin policy, or App Check/Turnstile browser
+context. Design a separate server trust boundary when server execution is
+required.
+
+Preserve the response stream and `AbortSignal` in client hooks. A server-only
+Vercel AI SDK example is not browser-security evidence; see [Vercel AI SDK](/integrations/vercel-ai-sdk)
+for its exact tested integration boundary.

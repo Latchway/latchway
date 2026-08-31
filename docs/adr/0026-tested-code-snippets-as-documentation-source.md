@@ -61,7 +61,8 @@ source-provenanced documentation bundle. The core importer strictly verifies
 and locks those four archives, regenerates public snippets, catalogs, and
 release-bound reference pages, and fails CI on archive, provenance, lock, or
 rendered-output drift. Owning SDK CI compiles or runs the source examples from
-which the bundle regions are extracted. Published-package quickstarts and clean
-release-produced archives remain protected post-publication verification gates;
-the checked-in local-candidate locks record `source_tree_clean: false` rather
-than claiming that external release evidence already exists.
+which the bundle regions are extracted. The checked-in locks now bind all four
+clean SDK checkpoints and record `source_tree_clean: true`; generated examples
+link to those exact immutable source regions. Published-package quickstarts and
+public release assets remain protected post-publication verification gates, so
+this clean source provenance is not represented as publication evidence.

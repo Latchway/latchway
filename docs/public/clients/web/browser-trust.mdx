@@ -1,0 +1,46 @@
+---
+title: "Model browser trust"
+description: "Combine user identity, WebCrypto key possession, browser-risk evidence, origin policy, feature policy, and quotas without overstating assurance."
+icon: "shield-check"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
+---
+
+import { BrowserTrustStack } from "/components/BrowserTrustStack.jsx";
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+Browser trust is a layered risk decision, not native physical-device
+attestation.
+
+<BrowserTrustStack />
+
+Use identity to identify the user. Use the WebCrypto key to bind a component
+session. Configure Firebase App Check or Turnstile when server policy needs an
+additional application or abuse-risk signal. Restrict exact origins, reduce
+script injection with CSP, and keep feature and quota decisions on the server.
+
+<SecurityGuarantee
+  establishes={[
+    "The configured identity, key-possession, origin, trust-signal, feature, and quota checks passed.",
+    "The client did not receive an upstream provider credential.",
+    "The request was attributed to a browser component and Installation Family.",
+  ]}
+  doesNotEstablish={[
+    "The browser is a particular physical device.",
+    "Same-origin scripts or extensions are benign.",
+    "A browser risk provider is equivalent to App Attest or Play Integrity.",
+  ]}
+/>
+
+<CardGroup cols={2}>
+  <Card title="Firebase App Check" icon="flame" href="/clients/web/firebase-app-check">
+    Pass a fresh provider token for the active Latchway challenge.
+  </Card>
+  <Card title="Cloudflare Turnstile" icon="cloud" href="/clients/web/turnstile">
+    Bind the configured action and challenge hash to Siteverify.
+  </Card>
+</CardGroup>

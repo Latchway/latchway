@@ -1,0 +1,59 @@
+---
+title: "Configure React Native authentication"
+description: "Provide the current application identity token through the TypeScript callback without exposing native session or attestation state."
+icon: "user-round-check"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="blue">Existing application identity</Badge>
+
+## Outcome
+
+The root React Native client can request a current Firebase, Supabase, Clerk,
+or custom JWT token when the native session lifecycle requires identity. The
+callback does not replace the application's sign-in flow.
+
+## Implement `getIdentityToken`
+
+The callback should:
+
+1. require the current application user;
+2. obtain a current provider token;
+3. preserve Promise rejection and cancellation semantics;
+4. return the token only to the active native operation; and
+5. never store or log the raw token in React state, persistence, analytics, or
+   diagnostics.
+
+Configure the matching server verifier through
+[Authentication providers](/clients/authentication-providers). App Attest or
+Play Integrity remains a separate native input. DPoP remains a native key
+operation.
+
+## Understand the bridge boundary
+
+The external identity JWT is the root client's only application credential
+that crosses into the TurboModule. It is retained only for the native operation.
+Access and refresh tokens, DPoP proofs, private keys, raw attestation evidence,
+and provider credentials never return to JavaScript.
+
+A delegated component client has no identity callback and cannot acquire the
+containing application's root lease.
+
+## Sign out safely
+
+Call the required Latchway revocation operation, await or safely record its
+terminal result, sign out of the application identity provider, dispose the
+JavaScript client scope, and clear application-owned identity state. Secure
+installation behavior after `dispose()` remains governed by the native SDK and
+explicit revocation method.
+
+## Verify
+
+Run one request and confirm the Console shows a normalized application user and
+a separate `react_native_ios` or `react_native_android` trust result. Do not
+diagnose identity by printing the token or weakening native attestation.

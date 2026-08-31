@@ -1,0 +1,69 @@
+---
+title: "Configure iOS authentication"
+description: "Supply the current application identity token to the Swift SDK while keeping user authentication separate from App Attest and DPoP."
+icon: "user-round-check"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="blue">All identity providers</Badge>
+
+## Outcome
+
+The Swift client can obtain a current token from the application's existing
+identity provider when session establishment or reauthentication requires it.
+The callback does not own interactive sign-in.
+
+## Keep the boundaries separate
+
+```text
+identity token -> identifies the application user
+App Attest     -> supplies evidence about the signed Apple application
+DPoP proof     -> proves possession of the component session key
+feature policy -> decides whether the request may run
+```
+
+Configure the server provider first through
+[Authentication providers](/clients/authentication-providers). The SDK callback
+returns a current provider token; it must not return a Latchway access token,
+refresh token, App Attest assertion, or provider credential.
+
+## Implement the provider
+
+Use an application-owned type conforming to the SDK identity-token protocol.
+Its async operation should:
+
+1. require an authenticated application user;
+2. obtain a current token from Firebase, Supabase, Clerk, or the custom issuer;
+3. preserve cancellation;
+4. return the token only to the Latchway SDK call; and
+5. map sign-out or unavailable-user state to an application error without
+   logging the token.
+
+The optional Firebase product implements this boundary without making Firebase
+a dependency of the core `Latchway` product.
+
+## Session and sign-out behavior
+
+The SDK may request identity again after `identity_reauthentication_required`
+or an attestation step-up. On application sign-out:
+
+1. call `revokeCurrentInstallation()` when the product policy requires the
+   device session to end;
+2. wait for terminal revocation or record its safe error;
+3. sign out of the application identity provider; and
+4. never retain or print the former identity token.
+
+Decide separately whether account switching should create a new Installation
+Family or reuse a policy-approved device installation.
+
+## Verify
+
+Complete one request and confirm the request view shows a normalized `usr_...`
+identity and a separate App Attest trust result. If identity fails, follow the
+exact stable code in [Error reference](/reference/errors); do not weaken App
+Attest or DPoP while diagnosing authentication.

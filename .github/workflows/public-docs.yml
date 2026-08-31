@@ -18,6 +18,7 @@ on:
       - "scripts/test_public_reference.py"
       - "scripts/test_framework_compatibility.py"
       - "scripts/sync-public-docs.py"
+      - "scripts/test_sync_public_docs.py"
       - ".github/workflows/public-docs.yml"
   push:
     branches: [main]
@@ -37,6 +38,7 @@ on:
       - "scripts/test_public_reference.py"
       - "scripts/test_framework_compatibility.py"
       - "scripts/sync-public-docs.py"
+      - "scripts/test_sync_public_docs.py"
       - ".github/workflows/public-docs.yml"
   workflow_dispatch:
 
@@ -86,7 +88,8 @@ jobs:
           python3 -m unittest \
             scripts/test_docs_sdk_bundle.py \
             scripts/test_public_reference.py \
-            scripts/test_framework_compatibility.py
+            scripts/test_framework_compatibility.py \
+            scripts/test_sync_public_docs.py
           scripts/docs-sync-sdk --check
           python3 scripts/public_reference.py --check-generated
 
@@ -106,4 +109,4 @@ jobs:
         # Vale already ran in the pinned action above. The action intentionally
         # does not install a `vale` executable into later steps, so repeat only
         # the remaining self-contained documentation gates here.
-        run: pnpm check:generated && pnpm check:structure && pnpm validate && pnpm check:links && pnpm check:a11y
+        run: pnpm check:generated && pnpm check:structure && pnpm check:metadata && pnpm validate && pnpm check:links && pnpm check:a11y

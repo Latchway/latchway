@@ -113,7 +113,7 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 		return err
 	}
 	keyManager, err := session.NewSigningKeyManager(session.SigningKeyManagerConfig{
-		Pool: f.pool, Envelope: f.envelope, Now: func() time.Time { return f.now },
+		Pool: f.pool, Envelope: f.envelope, Now: f.clock,
 		KeyLifetime: 48 * time.Hour, RotationLead: 24 * time.Hour,
 	})
 	if err != nil {
@@ -123,22 +123,22 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 		return err
 	}
 	accessIssuer, err := session.NewAccessTokenIssuer(session.AccessTokenIssuerConfig{
-		Keys: keyManager, Issuer: publicOrigin, Audience: accessAudience,
-		Now: func() time.Time { return f.now },
+		Keys: keyManager, Issuer: f.origin(), Audience: accessAudience,
+		Now: f.clock,
 	})
 	if err != nil {
 		return err
 	}
 	accessVerifier, err := session.NewAccessTokenVerifier(session.AccessTokenVerifierConfig{
-		Keys: keyManager, Issuer: publicOrigin, Audience: accessAudience,
-		Now: func() time.Time { return f.now },
+		Keys: keyManager, Issuer: f.origin(), Audience: accessAudience,
+		Now: f.clock,
 	})
 	if err != nil {
 		return err
 	}
 	sessionStore, err := session.NewStore(session.StoreConfig{
 		Pool: f.pool, AccessTokens: accessIssuer, Configuration: f.configurationStore,
-		Now: func() time.Time { return f.now }, RotationProtector: f.envelope,
+		Now: f.clock, RotationProtector: f.envelope,
 	})
 	if err != nil {
 		return err
@@ -151,7 +151,7 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 		Pool: f.pool, Configuration: f.configurationStore, Users: userStore,
 		Sessions: sessionStore, AccessTokens: accessVerifier, Secrets: secretStore,
 		IdentityHTTPClient: f.oidc.server.Client(), IdentityKeyCache: identityCache,
-		Now: func() time.Time { return f.now },
+		Now: f.clock,
 	})
 	if err != nil {
 		return err
@@ -176,14 +176,14 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 	featureQuotas, err := dataplane.NewFeatureQuotaProvider(dataplane.FeatureQuotaConfig{
 		AccessTokens: accessVerifier, Sessions: sessionStore,
 		Configuration: f.configurationStore, Policies: resolver,
-		Quotas: quotaStore, PublicOrigin: publicOrigin,
+		Quotas: quotaStore, PublicOrigin: f.origin(),
 	})
 	if err != nil {
 		return err
 	}
 	clientAPI, err := clientapi.New(clientapi.Config{
 		Coordinator: coordinator, FeatureQuotas: featureQuotas,
-		JWKS: publicKeys, PublicOrigin: publicOrigin,
+		JWKS: publicKeys, PublicOrigin: f.origin(),
 	})
 	if err != nil {
 		return err
@@ -200,14 +200,16 @@ func (f *fixture) composeRuntime(ctx context.Context) error {
 		AccessTokens: accessVerifier, Sessions: sessionStore,
 		Configuration: f.configurationStore, Policies: policyEngine,
 		Quotas: quotaStore, Secrets: secretStore, Targets: targets,
-		PublicOrigin: publicOrigin, Now: func() time.Time { return f.now },
+		PublicOrigin: f.origin(), Now: f.clock,
 	})
 	if err != nil {
 		return err
 	}
 	f.dataPlane = dataPlane
-	f.clientHandler = withRequestIdentity(clientAPI.Handler())
-	f.dataHandler = withRequestIdentity(dataPlane.Handler())
+	f.clientRuntimeHandler = clientAPI.Handler()
+	f.dataRuntimeHandler = dataPlane.Handler()
+	f.clientHandler = withRequestIdentity(f.clientRuntimeHandler)
+	f.dataHandler = withRequestIdentity(f.dataRuntimeHandler)
 	return nil
 }
 
@@ -232,7 +234,7 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	challengeTarget, err := parseURL(publicOrigin + "/client/v1/session-challenges")
+	challengeTarget, err := parseURL(f.origin() + "/client/v1/session-challenges")
 	if err != nil {
 		return err
 	}
@@ -267,7 +269,7 @@ func (f *fixture) exchangeSession(ctx context.Context) error {
 	copy(bindingHash[:], bindingBytes)
 	expiresAt := f.now.Add(10 * time.Minute).Unix()
 	debugSignature := ed25519.Sign(f.debugKey, attestation.DebugSigningMessage(bindingHash, expiresAt))
-	exchangeTarget, err := parseURL(publicOrigin + "/client/v1/sessions")
+	exchangeTarget, err := parseURL(f.origin() + "/client/v1/sessions")
 	if err != nil {
 		return err
 	}

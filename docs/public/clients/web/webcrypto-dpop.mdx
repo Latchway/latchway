@@ -1,0 +1,49 @@
+---
+title: "Understand WebCrypto and DPoP"
+description: "Learn how the Web SDK binds sessions and requests to a non-exportable P-256 key, including the same-origin threat boundary."
+icon: "key-round"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+The browser SDK generates an ECDSA P-256 key with `extractable: false`, stores
+the CryptoKey object in origin-scoped IndexedDB, and gives the server only its
+public JWK and RFC 7638 thumbprint. Every protected request has a fresh RFC
+9449 DPoP proof for the exact method, URI, and access-token hash.
+
+```text
+non-exportable CryptoKey -> public JWK thumbprint -> bound session
+          |
+          +-> fresh proof(method, URI, token, jti) -> protected request
+```
+
+<SecurityGuarantee
+  establishes={[
+    "The request possessed the private key bound to the Latchway session.",
+    "A copied access token is not useful without a valid proof for the exact request.",
+    "The SDK signs only the configured gateway origin and supported route shapes.",
+  ]}
+  doesNotEstablish={[
+    "The private key is isolated like Secure Enclave, StrongBox, or Android Keystore.",
+    "Same-origin JavaScript cannot invoke the non-exportable key.",
+    "The page is free from XSS, a malicious extension, or compromised dependencies.",
+  ]}
+/>
+
+The SDK rejects caller-supplied credential-like headers and query names before
+identity, session, or network work. It rejects authenticated redirects and a
+custom Fetch result whose final origin differs from the configured gateway.
+
+## Trust lifetime
+
+The access token is short-lived. Refresh rotates a one-time token under a fresh
+DPoP proof. Identity reauthentication or attestation step-up clears the old
+session and starts a new challenge. Revoking the component or Installation
+Family invalidates its server state; clearing browser storage creates new local
+key material but does not itself delete the former server component.

@@ -1,0 +1,56 @@
+---
+title: "Configure Android authentication"
+description: "Provide a current application identity token to the Kotlin SDK while keeping authentication separate from Play Integrity and DPoP."
+icon: "user-round-check"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+<Badge color="blue">All identity providers</Badge>
+
+## Outcome
+
+The Android client obtains a current token from the application's existing
+identity system only when Latchway session establishment or reauthentication
+requires it.
+
+## Keep each trust input independent
+
+Authentication identifies the application user. Play Integrity provides
+application, licensing, and configured device signals. DPoP proves possession
+of the Android Keystore-backed component key. Active feature policy authorizes
+the request.
+
+Configure Firebase, Supabase, Clerk, or a custom JWT issuer through
+[Authentication providers](/clients/authentication-providers), then implement
+the Kotlin identity token provider. The callback must:
+
+- require a signed-in application user;
+- obtain a current token without blocking the main thread;
+- preserve coroutine cancellation;
+- return the token only to the Latchway native operation; and
+- never log or persist the raw token in SDK diagnostics.
+
+The optional Firebase adapter implements this callback and remains separate
+from `latchway-core`.
+
+## Reauthentication and account changes
+
+When the server returns `identity_reauthentication_required`, the SDK clears
+the obsolete session path and requests current identity as part of a fresh
+exchange. Do not retry the AI request unless the native transport has exact
+pre-dispatch proof and the body is replayable.
+
+On sign-out, revoke or retire the current installation according to product
+policy, sign out the identity provider, close application-owned network
+resources, and discard any application copy of the token.
+
+## Verify
+
+Correlate a successful request and confirm that the user field derives from the
+verified identity while the `play_integrity` trust result appears separately.
+An identity failure is not repaired by weakening the integrity policy.

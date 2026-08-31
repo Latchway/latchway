@@ -13,6 +13,9 @@ func TestCanonicalOriginAndExactHeader(t *testing.T) {
 		"https://app.example.test:8443",
 		"https://127.0.0.1:8443",
 		"https://[::1]:8443",
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://[::1]:5173",
 	}
 	for _, value := range valid {
 		if !Canonical(value) {
@@ -24,7 +27,7 @@ func TestCanonicalOriginAndExactHeader(t *testing.T) {
 		}
 	}
 	invalid := []string{
-		"null", "http://app.example.test", "https://App.example.test",
+		"null", "http://app.example.test", "http://localhost:80", "https://App.example.test",
 		"https://app.example.test/", "https://app.example.test:443",
 		"https://app.example.test/path", "https://user@app.example.test",
 		"https://app.example.test?x=1", "https://app.example.test#x",
@@ -37,6 +40,10 @@ func TestCanonicalOriginAndExactHeader(t *testing.T) {
 		if Canonical(value) {
 			t.Errorf("Canonical(%q) = true", value)
 		}
+	}
+	if !Secure("https://app.example.test") || Secure("http://localhost:5173") ||
+		!LoopbackHTTP("http://127.0.0.1:5173") || LoopbackHTTP("https://127.0.0.1:5173") {
+		t.Fatal("origin security classification is inconsistent")
 	}
 	duplicate := http.Header{"Origin": []string{"https://app.example.test", "https://other.example.test"}}
 	if _, err := Read(duplicate); err == nil {

@@ -1,0 +1,51 @@
+---
+title: "Send a request from React Native"
+description: "Use the bounded native-backed fetch surface, bind one feature, preserve allowed paths, and correlate the protected response."
+icon: "send"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
+import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+
+## Outcome
+
+JavaScript supplies the application payload and feature while native code
+attaches Authorization and DPoP, sends the request, and owns the response
+stream.
+
+## Create one stable client
+
+<ReactNativeCreateClient />
+
+The generated application resource ID is not a bundle ID, Android package,
+display name, or slug. Equivalent clients share one native security scope, so
+retain one stable instance per configuration.
+
+## Bind and send
+
+<ReactNativeStreamingFetch />
+
+Use `fetchFor(feature)` when adapting a framework. The client supports the
+contract-owned structured POST paths and explicitly configured safe opaque
+routes. It rejects a cross-origin destination, redirect, traversal-shaped
+path, fragment, unsafe query, forbidden credential header, streaming request
+body, or request body larger than the bridge limit.
+
+The model-shaped value required by some frameworks is a compatibility input;
+the server-selected route and physical model remain authoritative.
+
+## Verify
+
+Confirm the response request ID matches one Console row with the expected
+`react_native_ios` or `react_native_android` platform, normalized user, family,
+component, feature, native trust, DPoP result, route, and usage. JavaScript
+diagnostics must contain none of the native credentials or raw evidence.
+
+Continue with [Streaming](/clients/react-native/streaming) for backpressure and
+cancellation behavior.

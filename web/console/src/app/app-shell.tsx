@@ -1,10 +1,13 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { logoutAdministrator, problemFromError } from "../api/auth";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { consoleSessionQueryOptions, useConsoleSession, type ConsoleMode } from "../api/session";
+import { latestConfigurationRevisionQueryOptions } from "../api/workspace";
+import { WorkspaceProvider } from "./workspace-context";
+import { useWorkspace } from "./workspace-context-value";
 
 type ConsoleRoute =
   | "/"
@@ -53,6 +56,7 @@ function NavigationLink({ children, description, to }: NavigationLinkProps) {
       activeOptions={{ exact: to === "/" }}
       activeProps={{ "aria-current": "page", className: "nav-link nav-link--active" }}
       className="nav-link"
+      search={(previous) => previous}
       to={to}
     >
       <span className="nav-link__marker" aria-hidden="true" />
@@ -62,6 +66,45 @@ function NavigationLink({ children, description, to }: NavigationLinkProps) {
       </span>
     </Link>
   );
+}
+
+const commands: Array<{ description: string; label: string; to: ConsoleRoute }> = [
+  { description: "Review operational posture and setup progress", label: "Overview", to: "/" },
+  { description: "Create or review a client-visible AI capability", label: "Features", to: "/features" },
+  { description: "Inspect request outcomes and upstream attempts", label: "Requests", to: "/requests" },
+  { description: "Find an application user and effective controls", label: "Users", to: "/users" },
+  { description: "Connect a server-owned upstream", label: "AI connections", to: "/upstreams" },
+  { description: "Continue the guided first-run workflow", label: "Setup wizard", to: "/setup" },
+  { description: "Exercise the exact server policy resolver", label: "Route simulator", to: "/route-simulator" },
+  { description: "Run bounded installation diagnostics", label: "Self-tests", to: "/self-tests" },
+  { description: "Inspect gateway dependencies", label: "System health", to: "/system-health" }
+];
+
+function CommandPalette({ close }: { close: () => void }) {
+  const [query, setQuery] = useState("");
+  const results = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return normalized
+      ? commands.filter((command) => `${command.label} ${command.description}`.toLowerCase().includes(normalized))
+      : commands;
+  }, [query]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") close();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [close]);
+
+  return <div className="command-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) close(); }}>
+    <section aria-labelledby="command-heading" aria-modal="true" className="command-palette" role="dialog">
+      <div className="command-palette__heading"><div><p className="eyebrow">Search or jump</p><h2 id="command-heading">Go to an operator task</h2></div><button aria-label="Close command palette" className="small-action" onClick={close} type="button">Esc</button></div>
+      <label className="command-search"><span className="sr-only">Search pages and tasks</span><input autoFocus onChange={(event) => setQuery(event.target.value)} placeholder="Feature, request, setup, health…" value={query} /></label>
+      <div className="command-results" role="list">{results.length ? results.map((command) => <Link className="command-result" key={command.to} onClick={close} search={(previous) => previous} to={command.to}><strong>{command.label}</strong><span>{command.description}</span></Link>) : <p>No matching task.</p>}</div>
+      <p className="command-palette__hint">Dangerous actions open their review page; they never execute from search.</p>
+    </section>
+  </div>;
 }
 
 function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
@@ -74,13 +117,21 @@ function modeLabel(mode: ConsoleMode, userLabel: string | undefined): string {
   return "Discovering console";
 }
 
-export function AppShell() {
+function AppShellContent() {
   const queryClient = useQueryClient();
   const session = useConsoleSession();
+  const workspace = useWorkspace();
+  const [commandOpen, setCommandOpen] = useState(false);
   const [logoutError, setLogoutError] = useState<string>();
   const [loggingOut, setLoggingOut] = useState(false);
   const { liveness, readiness } = useSystemHealth();
   const mode = session.data?.mode ?? "unknown";
+  const latestRevision = useQuery({
+    ...latestConfigurationRevisionQueryOptions(workspace.environment?.id ?? ""),
+    enabled: mode === "configured" && Boolean(workspace.environment?.id)
+  });
+  const newestRevision = latestRevision.data?.items[0];
+  const newestIsDraft = newestRevision && ["draft", "valid", "invalid"].includes(newestRevision.state);
   const needsAccess = mode !== "configured";
   const overallState = overallHealthState(liveness.data, readiness.data);
   const healthLabel =
@@ -91,6 +142,17 @@ export function AppShell() {
         : overallState === "unavailable"
           ? "System unavailable"
           : "Checking system";
+
+  useEffect(() => {
+    function openCommand(event: KeyboardEvent): void {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen(true);
+      }
+    }
+    window.addEventListener("keydown", openCommand);
+    return () => window.removeEventListener("keydown", openCommand);
+  }, []);
 
   async function logout(): Promise<void> {
     setLoggingOut(true);
@@ -124,9 +186,9 @@ export function AppShell() {
         </div>
 
         <div className="environment-card" aria-label="Deployment context">
-          <span className="environment-card__label">Control plane</span>
-          <strong>Self-hosted gateway</strong>
-          <span className="environment-card__meta">Same-origin administration</span>
+          <span className="environment-card__label">Current scope</span>
+          <strong>{workspace.application?.display_name ?? "Select an application"}</strong>
+          <span className="environment-card__meta">{workspace.environment ? `${workspace.environment.display_name} · ${workspace.environment.kind}` : "No environment selected"}</span>
         </div>
 
         <nav className="primary-nav" aria-label="Primary navigation">
@@ -145,49 +207,47 @@ export function AppShell() {
           </NavigationLink>
 
           {!needsAccess ? <>
-            <NavigationLink description="Tenant application resources" to="/applications">Applications</NavigationLink>
-            <NavigationLink description="Application deployment scopes" to="/environments">Environments</NavigationLink>
-            <NavigationLink description="Guided native first run" to="/setup">Setup wizard</NavigationLink>
-
-            <p className="nav-group-label nav-group-label--spaced">Administration</p>
-            <NavigationLink description="Accounts and roles" to="/administrators">Administrators</NavigationLink>
-            <NavigationLink description="Scoped automation credentials" to="/api-tokens">API tokens</NavigationLink>
-
-            <p className="nav-group-label nav-group-label--spaced">Identity</p>
-            <NavigationLink description="Issuer and claim trust" to="/authentication-providers">Authentication providers</NavigationLink>
-            <NavigationLink description="Platform proof policies" to="/attestation">Attestation</NavigationLink>
-            <NavigationLink description="Pseudonymous identities" to="/users">Users</NavigationLink>
-            <NavigationLink description="Component trust and revocation" to="/installation-families">Installation families</NavigationLink>
-            <NavigationLink description="Legacy root installation records" to="/installations">Installations</NavigationLink>
-
-            <p className="nav-group-label nav-group-label--spaced">AI Configuration</p>
-            <NavigationLink description="Allowed roots, children, and feature grants" to="/component-definitions">Component definitions</NavigationLink>
             <NavigationLink description="Client-visible capabilities" to="/features">Features</NavigationLink>
-            <NavigationLink description="Ordered production resolution" to="/routes">Routes</NavigationLink>
-            <NavigationLink description="Provider destinations" to="/upstreams">Upstreams</NavigationLink>
-            <NavigationLink description="Physical models and rates" to="/models-pricing">Models &amp; pricing</NavigationLink>
-            <NavigationLink description="Write-only credentials" to="/secrets">Secrets</NavigationLink>
-            <NavigationLink description="Validate, diff, and activate" to="/configuration">Full configuration</NavigationLink>
-
-            <p className="nav-group-label nav-group-label--spaced">Governance</p>
-            <NavigationLink description="Per-feature authorization" to="/access-policies">Access policies</NavigationLink>
-            <NavigationLink description="Durable quota policies" to="/limit-plans">Limit plans</NavigationLink>
-            <NavigationLink description="Per-user plan selection" to="/user-overrides">User overrides</NavigationLink>
-            <NavigationLink description="Composed protective controls" to="/abuse-controls">Abuse controls</NavigationLink>
-
-            <p className="nav-group-label nav-group-label--spaced">Observability</p>
             <NavigationLink description="Metadata and attempts" to="/requests">Requests</NavigationLink>
+            <NavigationLink description="Pseudonymous identities and controls" to="/users">Users</NavigationLink>
             <NavigationLink description="Trusted token accounting" to="/usage">Usage</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Configure</p>
+            <NavigationLink description="Provider and gateway destinations" to="/upstreams"><span>Upstreams</span><span className="nav-link__operator-term"> · AI connections</span></NavigationLink>
+            <NavigationLink description="Authentication, app verification, and components" to="/attestation"><span>Attestation</span><span className="nav-link__operator-term"> · Client access</span></NavigationLink>
+            <NavigationLink description="Application deployment scopes" to="/environments">Environments</NavigationLink>
+            <NavigationLink description="Guided first-run checklist" to="/setup">Setup wizard</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Investigate</p>
             <NavigationLink description="Nano-USD and provenance" to="/cost">Cost</NavigationLink>
             <NavigationLink description="Request and first-token timing" to="/latency">Latency</NavigationLink>
             <NavigationLink description="Failure and denial rates" to="/errors">Errors</NavigationLink>
             <NavigationLink description="Rejected platform proofs" to="/attestation-failures">Attestation failures</NavigationLink>
+            <NavigationLink description="Component trust and revocation" to="/installation-families">Installation families</NavigationLink>
 
-            <p className="nav-group-label nav-group-label--spaced">Operations</p>
+            <p className="nav-group-label nav-group-label--spaced">Changes &amp; operations</p>
             <NavigationLink description="History and safe rollback" to="/configuration-revisions">Configuration revisions</NavigationLink>
             <NavigationLink description="Exact production resolver" to="/route-simulator">Route simulator</NavigationLink>
             <NavigationLink description="Bounded diagnostics" to="/self-tests">Self-tests</NavigationLink>
             <NavigationLink description="Redacted change history" to="/audit">Audit log</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Advanced configuration</p>
+            <NavigationLink description="Tenant application resources" to="/applications">Applications</NavigationLink>
+            <NavigationLink description="Issuer and claim trust" to="/authentication-providers">Authentication providers</NavigationLink>
+            <NavigationLink description="Allowed roots, children, and feature grants" to="/component-definitions">Component definitions</NavigationLink>
+            <NavigationLink description="Ordered conditional resolution" to="/routes">Routes</NavigationLink>
+            <NavigationLink description="Physical models and rates" to="/models-pricing">Models &amp; pricing</NavigationLink>
+            <NavigationLink description="Write-only credentials" to="/secrets">Secrets</NavigationLink>
+            <NavigationLink description="Validate, diff, and activate" to="/configuration">Full configuration</NavigationLink>
+            <NavigationLink description="Per-feature authorization" to="/access-policies">Access policies</NavigationLink>
+            <NavigationLink description="Durable quota policies" to="/limit-plans">Limit plans</NavigationLink>
+            <NavigationLink description="Per-user plan selection" to="/user-overrides">User overrides</NavigationLink>
+            <NavigationLink description="Composed protective controls" to="/abuse-controls">Abuse controls</NavigationLink>
+            <NavigationLink description="Legacy root installation records" to="/installations">Installations</NavigationLink>
+
+            <p className="nav-group-label nav-group-label--spaced">Team &amp; access</p>
+            <NavigationLink description="Accounts and roles" to="/administrators">Administrators</NavigationLink>
+            <NavigationLink description="Scoped automation credentials" to="/api-tokens">API tokens</NavigationLink>
           </> : null}
 
           <p className="nav-group-label nav-group-label--spaced">System</p>
@@ -213,18 +273,24 @@ export function AppShell() {
 
       <div className="main-column">
         <header className="topbar">
-          <div className="topbar__identity" aria-hidden="true">
+          <div className="topbar__identity">
             <span className="mobile-brand-mark">L</span>
-            <span>Latchway</span>
+            {mode === "configured" ? <div className="workspace-switchers">
+              <label><span className="sr-only">Current application</span><select aria-label="Current application" disabled={!workspace.applications.length} onChange={(event) => workspace.selectApplication(event.target.value)} value={workspace.application?.slug ?? ""}><option value="">Application…</option>{workspace.applications.map((application) => <option key={application.id} value={application.slug}>{application.display_name}</option>)}</select></label>
+              <span aria-hidden="true">/</span>
+              <label><span className="sr-only">Current environment</span><select aria-label="Current environment" className={`environment-select environment-select--${workspace.environment?.kind ?? "unknown"}`} disabled={!workspace.environments.length} onChange={(event) => workspace.selectEnvironment(event.target.value)} value={workspace.environment?.slug ?? ""}><option value="">Environment…</option>{workspace.environments.map((environment) => <option key={environment.id} value={environment.slug}>{environment.display_name} · {environment.kind}</option>)}</select></label>
+              {workspace.environment ? <span className={`environment-badge environment-badge--${workspace.environment.kind}`}>{workspace.environment.kind === "production" ? "Production" : workspace.environment.kind}</span> : null}
+            </div> : <span>Latchway</span>}
           </div>
-          <div className="topbar__actions"><Link
+          <div className="topbar__actions">{mode === "configured" ? <button aria-label="Search or jump" className="command-trigger" onClick={() => setCommandOpen(true)} type="button"><span>Search or jump…</span><kbd>{typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd></button> : null}<Link
             className={`health-pill health-pill--${overallState}`}
+            search={(previous) => previous}
             to="/system-health"
             aria-label={`${healthLabel}. Open system health.`}
           >
             <span className="health-pill__indicator" aria-hidden="true" />
             <span>{healthLabel}</span>
-          </Link>{mode === "configured" ? <button className="topbar__logout" disabled={loggingOut} onClick={() => void logout()} type="button">{loggingOut ? "Signing out…" : "Sign out"}</button> : null}</div>
+          </Link>{mode === "configured" ? <><Link className={`draft-indicator ${newestIsDraft ? "draft-indicator--pending" : ""}`} search={(previous) => previous} title={newestIsDraft ? `Newest server revision ${newestRevision.id} is ${newestRevision.state}.` : "Open configuration history."} to="/configuration-revisions">{newestIsDraft ? `Draft ${newestRevision.state}` : workspace.environment?.active_revision_id ? "Active configuration" : "Setup required"}</Link><span className="admin-identity">{session.data?.userLabel ?? "Administrator"}</span><button className="topbar__logout" disabled={loggingOut} onClick={() => void logout()} type="button">{loggingOut ? "Signing out…" : "Sign out"}</button></> : null}</div>
           {logoutError ? <span className="topbar__error" role="alert">{logoutError}</span> : null}
         </header>
 
@@ -232,6 +298,11 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      {commandOpen ? <CommandPalette close={() => setCommandOpen(false)} /> : null}
     </div>
   );
+}
+
+export function AppShell() {
+  return <WorkspaceProvider><AppShellContent /></WorkspaceProvider>;
 }

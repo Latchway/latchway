@@ -1,0 +1,60 @@
+---
+title: "Install the React Native SDK"
+description: "Resolve the source package, TurboModule code generation, CocoaPods, Gradle composite build, and exact native dependency locks."
+icon: "package"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="blue">Development</Badge> <Badge color="yellow">Source workspace</Badge>
+
+## Outcome
+
+The application resolves `@latchway/react-native` and the exact reviewed iOS,
+Android, JavaScript, contract, and gateway compatibility coordinates without
+falling back to unpublished registry packages.
+
+## Meet the baseline
+
+- React Native 0.82.x with the New Architecture enabled;
+- iOS 15+ and the version-locked Latchway CocoaPods/Swift source;
+- Android API 24+ and the version-locked `dev.latchway` source modules; and
+- the repository-pinned Node, pnpm, CocoaPods, Gradle, Java, and Android
+  toolchains used by the example.
+
+Legacy Architecture behavior and Expo-managed integration are not claimed by
+the source candidate.
+
+## Install the workspace
+
+From the React Native SDK checkout:
+
+```bash
+corepack pnpm install --frozen-lockfile
+cd example/ios && bundle exec pod install && cd ../..
+```
+
+The example contains local iOS and Android development overrides. Keep those
+overrides in development configuration; published package metadata must resolve
+the promoted native artifacts instead.
+
+## Verify generation and consumers
+
+```bash
+corepack pnpm example:check
+corepack pnpm example:bundle:check
+corepack pnpm codegen:check
+corepack pnpm consumer:check
+```
+
+Expected result: TypeScript, TurboModule generation, Metro bundles, native
+host dependency checks, and a clean packed consumer agree with the source
+locks. A passing bundle does not establish App Attest, Play Integrity, or
+physical-device behavior.
+
+Continue with [iOS native setup](/clients/react-native/ios-native-setup) and
+[Android native setup](/clients/react-native/android-native-setup).

@@ -1,0 +1,58 @@
+---
+title: "Authorize OkHttp requests"
+description: "Install the Android application interceptor, network origin guard, and bounded authenticator in the required request order."
+icon: "network"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+## Outcome
+
+OkHttp creates a fresh DPoP proof for each permitted network attempt, rejects
+cross-origin credential movement, and performs only the documented bounded
+pre-dispatch session recovery.
+
+## Install all three guards
+
+Build one application-owned client with:
+
+1. `latchway.interceptor()` as an application interceptor;
+2. `latchway.originGuard()` as a network interceptor; and
+3. `latchway.authenticator()` as the authenticator.
+
+The [Android quickstart](/clients/android/quickstart) shows the source-owned
+client boundary. Do not omit the network guard: it revalidates the final
+destination after application interceptors, cookies, and redirects have run.
+
+## Bind a feature
+
+Use the SDK's request feature helper or authorize a request explicitly with one
+configured feature ID. The adapter permits only contract-owned data paths and
+feature-bound safe opaque routes. It rejects an arbitrary destination URL,
+provider credential, cross-origin redirect, traversal-shaped path, or
+credential-shaped query.
+
+## Control retry ownership
+
+Disable framework-owned automatic retries. OkHttp's internal second connection
+attempt may be unsafe after uncertain dispatch and is classified as
+indeterminate. The Latchway authenticator owns at most one exact
+request-correlated `session_expired` or `dpop_nonce_required` pre-dispatch
+follow-up when the body is replayable.
+
+## Verify
+
+Test the final application client for:
+
+- a successful allowed-origin request;
+- a redirect to another origin that carries no Latchway credentials;
+- a one-shot body that is never replayed;
+- cancellation of an in-flight call; and
+- one request ID matching one logical request in the Console.
+
+For framework reuse, continue with [Retrofit](/clients/android/retrofit) or the
+generated [OkHttp integration guide](/integrations/okhttp).

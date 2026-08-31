@@ -1,119 +1,60 @@
 ---
-title: "Mobile-first quickstart"
-description: "Run a local Latchway gateway, verify its source path, and prepare production-native configuration."
+title: "Choose a Latchway quickstart"
+description: "Select the operator, iOS, Android, Web, or React Native journey that matches the outcome you need."
+icon: "rocket"
+audience: "mixed"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "docs"
 ---
 
-import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
-import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+Every journey separates deterministic source evaluation from production
+hardening. Start with the operator journey if no Latchway gateway is running.
 
-This exercise starts the gateway and proves its isolated local source path. It
-then prepares the production-native configuration used by React Native, iOS,
-or Android. It does not prove App Attest, Play Integrity, a live provider,
-cloud operation, or release compatibility.
+<CardGroup cols={3}>
+  <Card title="Operator" icon="server-cog" href="/operate/quickstart">
+    Start PostgreSQL and Latchway, then pass `latchway verify local`.
+  </Card>
+  <Card title="iOS" icon="apple" href="/clients/ios/quickstart">
+    Authorize a URLSession request and prepare App Attest on a physical device.
+  </Card>
+  <Card title="Android" icon="smartphone" href="/clients/android/quickstart">
+    Build an OkHttp client and prepare a Play-distributed integrity test.
+  </Card>
+  <Card title="Web" icon="globe-2" href="/clients/web/quickstart">
+    Create a WebCrypto-bound browser client and stream through fetch.
+  </Card>
+  <Card title="React Native" icon="atom" href="/clients/react-native/quickstart">
+    Exercise one TypeScript API through native iOS and Android transports.
+  </Card>
+</CardGroup>
 
-## Prerequisites
+## Two distinct stages
 
-- Docker with Compose
-- Git
-- `curl` and OpenSSL
-- an authorized checkout of the core source candidate
+<Tabs>
+  <Tab title="Local source evaluation">
+    <Badge color="blue">Local</Badge>
 
-## Start the gateway
+    Use Docker Compose, PostgreSQL, deterministic identity and upstream
+    fixtures, signed debug evidence owned by the verifier, and a temporary
+    schema. This proves the source path without third-party accounts.
+  </Tab>
+  <Tab title="Production hardening">
+    <Badge color="green">Production</Badge>
 
-From the core repository:
-
-```bash
-cp .env.example .env
-printf 'LATCHWAY_MASTER_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
-docker compose up -d --build
-curl --fail http://127.0.0.1:8080/healthz
-curl --fail http://127.0.0.1:8080/readyz
-```
-
-Generate the master key only once. Keep the untracked `.env` with the database
-volume. Losing or changing the key makes stored provider credentials and
-gateway signing keys intentionally unusable.
-
-<Warning>
-  The example bootstrap token and loopback HTTP origin are for local
-  development only. Production deployments require independent secret custody
-  and the exact configured HTTPS origin.
-</Warning>
-
-## Verify the local source path
-
-Run the destructive verifier only against a database role allowed to create
-and drop temporary schemas:
-
-```bash
-export LATCHWAY_DATABASE_URL='postgres://...'
-latchway verify local --timeout 2m --junit /tmp/latchway-local.xml
-```
-
-This is the supported source-candidate path for signed debug attestation. It
-creates its own tenant, debug key, identity and upstream fixtures, exercises
-the production session, proxy, accounting, quota, fallback, recovery, header,
-SSRF, activation, and rollback paths, and then proves its schema was dropped.
-
-The production React Native/native SDKs intentionally do not accept a debug
-attestation token from application code.
-
-## Bootstrap the control plane
-
-Open `http://127.0.0.1:8080` and use the bootstrap token from `.env` to create
-the first owner. Latchway permanently closes bootstrap after the first owner
-exists.
-
-The setup wizard creates a Firebase, App Attest, Play Integrity, and OpenAI
-Responses template for the environment kind and Apple distribution you select.
-Complete it in order:
-
-1. Create an organization, application, and environment.
-2. Enter the Firebase project used by the application identity callback.
-3. Select the Apple signing or distribution method and enter the App ID prefix,
-   bundle ID, and exact `CFBundleVersion` build number. Do not enter
-   `CFBundleShortVersionString` or the marketing version. Then enter the Android
-   package, project, and signing identifiers.
-4. Add a write-only upstream secret.
-5. Configure the upstream, physical model, pricing, feature, route, and limit
-   plan.
-6. Validate, plan, and activate the immutable configuration revision.
-7. Run the bounded server-owned self-test and copy the generated SDK values.
-
-Use the returned `app_...` application resource ID in every SDK. It is not the
-display name, bundle ID, Android package name, or a user-chosen slug.
+    Configure real identity, production attestation or browser-risk policy,
+    TLS, exact origins, upstream credentials, immutable routes and limits,
+    operational jobs, backups, and release evidence.
+  </Tab>
+</Tabs>
 
 <Warning>
-  Do not activate placeholder Team IDs, bundle/package identifiers, certificate
-  digests, model names, or provider keys. If those production values are not
-  available yet, stop after the isolated local verifier rather than weakening
-  a production environment.
+  A passing local verifier does not prove App Attest, Play Integrity, browser
+  integrity, live-provider behavior, a cloud deployment, or a published SDK.
 </Warning>
 
-## Connect React Native first
-
-<ReactNativeCreateClient />
-
-Then send a streaming request through the native-backed client:
-
-<ReactNativeStreamingFetch />
-
-The server replaces the model and injects the provider credential. The app
-must never contain that credential. While packages remain unpublished, run
-the version-matched example from authorized source checkouts rather than
-resolving a registry package.
-
-The gateway must be reachable at its exact configured HTTPS public origin from
-the physical device. `127.0.0.1` on a phone is the phone itself, not the
-developer Mac. Production App Attest and Play Integrity also require the exact
-signed/distributed application described in [Physical-device proof](/mobile/device-proof).
-
-## Confirm enforcement
-
-Use the console or CLI to inspect pseudonymous users, installations, requests,
-and usage. The request view should show selected routes, upstream attempts,
-models, timing, metered usage, and cost provenance without prompt bodies,
-identity subjects, proofs, or credentials.
-
-Next, configure the [React Native SDK](/mobile/react-native) or a native SDK,
-then follow the [production-readiness checklist](/operations/production-readiness).
+Continue with the [operator quickstart](/operate/quickstart), then choose a
+client journey after the gateway has an application resource ID, environment,
+feature, and compatible trust policy.

@@ -144,6 +144,14 @@ EXTERNAL_FAILURE_IDS = frozenset(
         "live-config-and-key-rotation-across-api-replicas",
     )
 )
+EXTERNAL_FAILURE_ACTIONS = {
+    "live-process-kill-after-reservation": "docker_sigkill_api_after_reservation",
+    "live-process-kill-during-stream": "docker_sigkill_api_during_stream",
+    "live-database-outage-boundaries": "docker_postgresql_network_partition",
+    "live-graceful-shutdown-and-drain": "docker_sigterm_drain",
+    "live-upstream-and-client-disconnect": "fixture_disconnect_sequence",
+    "live-config-and-key-rotation-across-api-replicas": "replicated_rotation_sequence",
+}
 MULTI_REPLICA_ASSERTIONS = frozenset(
     (
         "at_least_two_api_replicas_observed",
@@ -1761,7 +1769,12 @@ def failure_matrix_details() -> tuple[
             if identifier in external:
                 raise EvidenceError("failure_matrix_invalid")
             note = scenario.get("evidence_notes")
-            if not isinstance(note, str) or not note.strip():
+            if (
+                not isinstance(note, str)
+                or not note.strip()
+                or scenario.get("controller_action")
+                != EXTERNAL_FAILURE_ACTIONS.get(identifier)
+            ):
                 raise EvidenceError("failure_matrix_invalid")
             notes[identifier] = note
             external.add(identifier)

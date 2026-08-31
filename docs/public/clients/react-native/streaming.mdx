@@ -1,0 +1,50 @@
+---
+title: "Stream responses in React Native"
+description: "Consume the pull-driven native response stream, preserve AbortSignal cancellation, and avoid duplicate dispatch across the bridge."
+icon: "waves"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="blue">Pull-driven ReadableStream</Badge>
+
+## Outcome
+
+JavaScript consumes response chunks with backpressure while native code retains
+the credential-bearing network task and closes it on EOF, error, or
+`AbortSignal` cancellation.
+
+## Consume the response body
+
+Use the `ReadableStream` returned by the native-backed fetch surface. Retain
+the reader, decode provider frames incrementally, release the reader on normal
+completion, and abort when the owning UI or operation ends.
+
+Do not buffer an unbounded response into one string. The bridge buffers request
+bodies because native must sign and send them, but successful response bodies
+remain incremental.
+
+## Preserve cancellation
+
+Wire one `AbortController` to the owning operation. Component unmount, user
+cancel, or product timeout should abort the native request. Cancellation is a
+terminal outcome, not permission to clone and replay the request in JavaScript.
+
+## Keep recovery native
+
+JavaScript never clones an authenticated request. Any one-time recovery for an
+exact canonical pre-dispatch session or nonce rejection is exclusively a
+native SDK decision and requires a replayable buffered body. Redirects,
+streaming request bodies, uncertain dispatch, response bytes, and noncanonical
+errors are never replayed.
+
+## Verify
+
+Run full completion, cancellation before first byte, and midstream cancellation
+on both native platforms. Confirm at most one logical request per action,
+bounded memory, closed native handles, correct reservation settlement, and no
+credential or raw evidence in the JavaScript response metadata.

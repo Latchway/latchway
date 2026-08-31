@@ -1,0 +1,228 @@
+---
+title: "Send a protected request from the Web"
+description: "Create a vanilla TypeScript browser client, bind a WebCrypto session to a feature, and consume a streamed response."
+icon: "globe-2"
+audience: "client-web"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+import WebDevelopmentHelper from "/snippets/generated/js/quickstart/vanilla-development-helper.ts.mdx";
+import WebDevelopmentClient from "/snippets/generated/js/quickstart/vanilla-development-client.ts.mdx";
+import WebStreamingFetch from "/snippets/generated/js/quickstart/vanilla-streaming-fetch.ts.mdx";
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Browser</Badge>
+
+**Expected time:** 15 minutes with PostgreSQL and both source checkouts ready.
+
+**Mode:** Local foreground development environment; production trust remains a
+separate stage.
+
+**Coordinates:** server contract `1.0.0`; JavaScript SDK source `1.0.0`.
+
+## Outcome
+
+Build a vanilla TypeScript client that authenticates an application user,
+creates a WebCrypto-bound Latchway session, sends a request for
+`habit-assistant`, and consumes its response with `ReadableStream`.
+
+## Before you start
+
+- a core checkout that passed the [operator quickstart](/operate/quickstart)
+- a PostgreSQL URL whose role may create and drop an isolated schema
+- ports 8080 and 5173 available on loopback
+- Node 24.19, pnpm 10.15, and authorized `latchway-js` source
+
+<Info>
+  `latchway develop` owns the sample tenant, mock identity and upstream,
+  challenge-bound debug signer, gateway, Admin API, and Console until you stop
+  it. Its ephemeral schema and Console credential are cleaned up on exit.
+</Info>
+
+## What you will build
+
+```text
+Browser
+  existing identity token + non-exportable WebCrypto P-256 key
+  + challenge-bound development evidence from a trusted local helper
+        |
+        v
+feature-bound Fetch -> Latchway -> configured development upstream
+```
+
+## Procedure
+
+<Steps>
+  <Step title="Start the foreground development environment">
+    Build the core CLI, keep the terminal private, and start the exact loopback
+    environment. The command prints its random Console password once.
+
+```bash
+cd ../latchway
+go build -trimpath -o ./bin/latchway ./cmd/latchway
+export LATCHWAY_DATABASE_URL='postgres://latchway:latchway-local-development@127.0.0.1:5432/latchway?sslmode=disable'
+./bin/latchway --output json develop \
+  --listen 127.0.0.1:8080 \
+  --browser-origin http://localhost:5173
+```
+
+    Expected result: one `state: ready` document names `gateway_url`,
+    `application_id`, `development`, `habit-assistant`, `assistant_default`,
+    both helper URLs, and the Console credential. Diagnostic: if readiness does
+    not print, verify the database role and port, then run the isolated verifier
+    from the operator quickstart. Do not copy `console_password` into source,
+    shell history, or a bug report.
+  </Step>
+  <Step title="Build and install the source package">
+    Build the exact SDK checkout, create a local package archive, and install
+    that archive in the Vite application.
+
+```bash
+cd ../latchway-js
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
+corepack pnpm pack --pack-destination ../web-app/vendor
+cd ../web-app
+corepack pnpm add ./vendor/latchway-client-1.0.0.tgz
+```
+
+    Expected result: `package.json` resolves `@latchway/client` 1.0.0 from the
+    local archive. Diagnostic: run `corepack pnpm examples:check` in the SDK
+    checkout to detect source-example drift.
+  </Step>
+  <Step title="Connect the server-owned development helpers">
+    Add the tested helper module. It accepts only one exact loopback origin,
+    omits credentials, rejects redirects and oversized responses, and sends the
+    challenge ID, binding hash, DPoP thumbprint, platform, and deployment
+    coordinates back to the signer that owns the matching private key.
+
+    <WebDevelopmentHelper />
+
+    Expected result: `getIdentityToken()` uses only
+    `/development/v1/identity-token`; `getDevelopmentEvidence(context)` uses
+    only `/development/v1/attestation-evidence`. Diagnostic: HTTP 403 means the
+    exact browser origin or active challenge binding did not match; do not add a
+    signing key to browser code.
+  </Step>
+  <Step title="Create the client and safe diagnostics">
+    Add `src/latchway.ts` from the tested client module, then compose it with
+    the helpers using the ready document's `gateway_url` and `application_id`.
+
+    <WebDevelopmentClient />
+
+```ts
+const helpers = createLoopbackDevelopmentHelpers({
+  baseURL: "http://127.0.0.1:8080",
+});
+const latchway = createLoopbackDevelopmentBrowserClient({
+  baseURL: "http://127.0.0.1:8080",
+  applicationID: "app_...", // application_id from latchway develop
+  appVersion: "1.0.0",
+}, helpers);
+```
+
+    Expected result: construction performs no network request. Loopback HTTP is
+    accepted only when both the client opts in and the exact browser origin is
+    allowlisted by an environment whose kind is `development`. After a session
+    exists, `safeBrowserDiagnostics(latchway)` returns only allowlisted
+    request-correlation, version, platform, persistence, and clock fields.
+    Diagnostic: run `corepack pnpm exec tsc --noEmit` in the Vite application;
+    do not substitute a browser-held debug signing key for the missing helper.
+  </Step>
+  <Step title="Bind the feature, send, and stream the response">
+    Add `src/habit-assistant.ts`. Call `streamHabitAssistant(latchway, input,
+    controller.signal)` from application code after constructing the client.
+
+    <WebStreamingFetch />
+
+    Expected result: callers cannot change the feature through a destination
+    URL or provider header. Chunks remain browser Fetch data; Latchway does not
+    buffer the response. Abort the supplied controller to cancel the request.
+    Diagnostic: run `corepack pnpm build` in the Vite application and retain the
+    safe response request ID if runtime policy rejects the call.
+  </Step>
+  <Step title="Verify in the Console">
+    Open `console_url`, sign in with the printed one-run email and password,
+    then correlate `requestID` under **Requests** and inspect the accepted trust,
+    feature, selected route, attempts, and metered usage. Prompt bodies and
+    identity subjects are not present by default.
+
+    Expected result: one browser request row has the same request ID and the
+    fields in the Verification section below. Diagnostic: with an authenticated
+    CLI, run `latchway requests list --environment env_...` if the Console
+    cannot load.
+  </Step>
+</Steps>
+
+## Verification
+
+The correlated request should show:
+
+```text
+Request status: Success
+Platform: web
+Component kind: browser
+Trust source: debug
+Feature: habit-assistant
+DPoP: verified
+User: usr_...
+Installation Family: fam_...
+Client Component: cmp_...
+Input and output usage: present
+```
+
+## What Latchway established
+
+<SecurityGuarantee
+  establishes={[
+    "The server accepted the application identity and configured development evidence.",
+    "The request possessed the non-exportable WebCrypto key bound to its session.",
+    "The exact origin, feature, route, and quota policies allowed dispatch.",
+  ]}
+  doesNotEstablish={[
+    "The browser is free from XSS, malicious extensions, or compromised same-origin code.",
+    "WebCrypto provides Secure Enclave-equivalent private-key isolation.",
+    "Debug evidence, App Check, or Turnstile proves a physical device identity.",
+  ]}
+/>
+
+## Production next step
+
+<Card title="Harden browser trust" icon="shield-check" href="/clients/web/production-checklist">
+  Publish over HTTPS, remove `allowInsecureHTTP`, configure exact origins and
+  CSP, require App Check or Turnstile where policy needs it, and activate
+  production features and limits.
+</Card>
+
+Stop `latchway develop` with Ctrl-C. The process shuts down the gateway and
+drops its isolated schema; the printed Console password no longer authenticates.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="IndexedDB or CryptoKey persistence is unavailable">
+    The default `required` policy fails closed. Fix browser storage policy. Use
+    `allow-memory` only after accepting that navigation creates new local state.
+  </Accordion>
+  <Accordion title="The development evidence helper rejects the challenge">
+    Confirm that it signs only the active server challenge for the correct
+    application, environment, DPoP thumbprint, and short expiry. Never copy its
+    private key into the application bundle.
+  </Accordion>
+  <Accordion title="The protected request is redirected">
+    Configure the final exact gateway origin. Authenticated requests use
+    `redirect: "error"`; cross-origin authorization fails closed.
+  </Accordion>
+</AccordionGroup>
+
+<Prompt title="Integrate Latchway Web source candidate 1.0.0">
+Use @latchway/client 1.0.0 from the audited local archive with server 1.0.0.
+Keep the existing identity provider, use a feature-bound fetch, require
+WebCrypto persistence, preserve AbortSignal and ReadableStream behavior, add no
+provider credential, and keep any development evidence signer outside browser
+code. Treat browser and server execution as different trust models.
+</Prompt>

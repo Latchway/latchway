@@ -30,10 +30,10 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract freeze | Core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
-| Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
+| Contract freeze | Core checkpoint `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| Bundle SHA-256 | `695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Database | Schema `23` |
+| Database | Schema `24` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | Release state | `unreleased` |
 
@@ -107,7 +107,8 @@ from iOS app extensions.
 - [x] Implement schema-23 component-owned App Attest step-up with one-use
   challenges, binding-version-2 verification, retry-safe assertion handling,
   component-only session rotation, provider binding, key cleanup on
-  replacement/revocation, and preserved delegation ancestry.
+  replacement/revocation, and preserved delegation ancestry; retain it through
+  schema 24.
 - [x] Make policy, production input/total quotas, requests, usage, telemetry,
   retention, and audit component-aware.
 - [x] Pass complete unit, PostgreSQL integration, migration, race, replay,

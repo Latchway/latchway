@@ -17,7 +17,7 @@ contract bundle:
 
 ```bash
 python3 scripts/validate-contracts.py
-python3 scripts/build-contract-bundle.py --output /tmp/latchway-contract.tar.gz
+python3 scripts/build-contract-bundle.py --output-directory /tmp/latchway-contract
 ```
 
 ## Client request boundary

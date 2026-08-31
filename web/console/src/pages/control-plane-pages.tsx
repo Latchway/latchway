@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 
 import {
   adminRequest,
@@ -32,6 +32,8 @@ import {
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import { EnvironmentRequired } from "../app/workspace-context";
+import { useOptionalWorkspace } from "../app/workspace-context-value";
 
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 const environmentInputPattern = environmentPattern.source;
@@ -210,28 +212,36 @@ export function InstallationsPage() {
   </div>;
 }
 
-export function RequestsPage() {
+function RequestTimeline({ request }: { request: LogicalRequest }) {
+  const fallbackUsed = request.attempts.length > 1;
+  return <section className="request-explanation" aria-labelledby="execution-timeline-heading"><div className="detail-card__heading"><div><p className="eyebrow">Explain this request</p><h3 id="execution-timeline-heading">Execution timeline</h3></div><span className={`state-badge ${request.status === "succeeded" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{request.status}</span></div><ol className="execution-timeline"><li><span aria-hidden="true">✓</span><div><strong>Application user resolved</strong><small>{request.user_id}</small></div></li><li><span aria-hidden="true">✓</span><div><strong>Client trust recorded</strong><small>{request.trust_source ?? "Legacy installation trust"}{request.component_kind ? ` · ${request.component_kind}` : ""}</small></div></li><li><span aria-hidden="true">✓</span><div><strong>Feature request accepted</strong><small>{request.feature} · {request.protocol}</small></div></li>{request.attempts.map((attempt) => <li className={attempt.status === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={attempt.id}><span aria-hidden="true">{attempt.status === "succeeded" ? "✓" : "!"}</span><div><strong>{attempt.attempt_number === 1 ? "Primary" : "Fallback"} upstream {attempt.status}</strong><small>{attempt.route} → {attempt.upstream} / {attempt.model} · {duration(attempt.started_at, attempt.completed_at)}{attempt.failure_code ? ` · ${attempt.failure_code}` : ""}</small></div></li>)}{request.usage ? <li><span aria-hidden="true">✓</span><div><strong>Usage settled</strong><small>{request.usage.total_tokens.toLocaleString()} tokens · {request.usage.cost_nano_usd.toLocaleString()} nano-USD</small></div></li> : null}</ol><div className="why-grid"><article><strong>Why this outcome?</strong><p>{request.status === "succeeded" ? "Identity, trust, feature access, quota, and at least one upstream attempt completed successfully." : `The request ended ${request.status}; inspect the sanitized attempt failure below.`}</p></article><article><strong>Why this route?</strong><p>{fallbackUsed ? `The primary attempt did not complete successfully, so the configured fallback sequence used ${request.attempts.at(-1)?.route}.` : `The server selected ${request.attempts[0]?.route ?? "the configured route"} from the active revision.`}</p></article><article><strong>Cost confidence</strong><p>{request.attempts.some((attempt) => attempt.cost_provenance === "estimated") ? "At least one attempt uses estimated cost; do not treat the total as provider-reported." : "Attempt rows preserve independent usage and cost provenance."}</p></article></div></section>;
+}
+
+function RequestsWorkspacePage() {
   const session = useConsoleSession();
+  const workspace = useOptionalWorkspace();
   const [environment, setEnvironment] = useState("");
   const [page, setPage] = useState<LogicalRequestPage>();
   const [selected, setSelected] = useState<LogicalRequest>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function load(cursor?: string): Promise<void> {
+  const effectiveEnvironment = workspace?.environment?.id ?? environment;
+  async function load(cursor?: string, selectedEnvironment = effectiveEnvironment): Promise<void> {
     setBusy(true); setProblem(undefined);
     try {
-      const result = await adminRequest(queryPath("/admin/v1/requests", { environment_id: environment, page_size: "50", cursor }), RequestPageSchema);
+      const result = await adminRequest(queryPath("/admin/v1/requests", { environment_id: selectedEnvironment, page_size: "50", cursor }), RequestPageSchema);
       setPage(result.data); setSelected(undefined);
+      workspace?.updateSearch({ cursor, request: undefined });
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
-  async function loadRequest(requestID: string): Promise<void> {
+  async function loadRequest(requestID: string, selectedEnvironment = effectiveEnvironment): Promise<void> {
     setDetailBusy(true); setProblem(undefined);
     try {
       const response = await adminRequest(`/admin/v1/requests/${requestID}`, RequestSchema);
-      if (response.data.id !== requestID || response.data.environment_id !== environment) throw new Error("request_context");
+      if (response.data.id !== requestID || response.data.environment_id !== selectedEnvironment) throw new Error("request_context");
       setSelected(response.data);
+      workspace?.updateSearch({ request: requestID });
     }
     catch (error) {
       setSelected(undefined);
@@ -239,20 +249,41 @@ export function RequestsPage() {
     }
     finally { setDetailBusy(false); }
   }
+
+  useEffect(() => {
+    const selectedEnvironment = workspace?.environment?.id;
+    if (!selectedEnvironment) return;
+    const cursor = typeof workspace.search.cursor === "string" ? workspace.search.cursor : undefined;
+    const requestID = typeof workspace.search.request === "string" ? workspace.search.request : undefined;
+    void (async () => {
+      await load(cursor, selectedEnvironment);
+      if (requestID) await loadRequest(requestID, selectedEnvironment);
+    })();
+    // Workspace URL changes are the canonical trigger for this route.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.environment?.id]);
+
+  if (session.data?.mode !== "configured") return <AccessRequired />;
+
   return <div className="control-page">
-    <PageHeading eyebrow="Observability" title="Requests">Logical request metadata, attempts, usage, and provenance. Prompt and response bodies remain excluded.</PageHeading>
-    <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List requests</FormActions></form>
+    <PageHeading eyebrow="Requests" title="Understand what happened.">Inspect identity, client trust, the selected feature, upstream attempts, usage, and cost provenance. Prompt and response bodies remain excluded.</PageHeading>
+    {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Server-side pagination · shareable request selection</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load(undefined, workspace.environment?.id)} type="button">Refresh requests</button></section> : <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List requests</FormActions></form>}
     <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Request", "Feature", "Component", "Framework", "Protocol", "Status", "Attempts", "Started"]} rows={page.items.map((request) => [<button className="link-button" disabled={detailBusy} onClick={() => void loadRequest(request.id)} type="button">{request.id}</button>, request.feature, request.component_definition_id ?? "legacy", request.framework ? `${request.framework} ${request.framework_version}` : "raw transport", request.protocol, request.status, request.attempts.length, time(request.started_at)])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
+    {page ? <><Table headers={["Time", "Status", "Feature", "User", "Component / trust", "Route / model", "Latency", "Tokens", "Cost"]} rows={page.items.map((request) => { const attempt = request.attempts.at(-1); return [time(request.started_at), <button aria-label={request.id} className="link-button" disabled={detailBusy} onClick={() => void loadRequest(request.id)} type="button">{request.status}<br /><small>{request.id}</small></button>, request.feature, request.user_id, `${request.component_kind ?? "legacy"} · ${request.trust_source ?? "legacy trust"}`, attempt ? `${attempt.route} → ${attempt.model}` : "No attempt", duration(request.started_at, request.completed_at), request.usage?.total_tokens.toLocaleString() ?? "—", request.usage ? `${request.usage.cost_nano_usd.toLocaleString()} nUSD` : "—"]; })} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
     {detailBusy ? <p role="status">Loading exact request detail…</p> : null}
-    {selected ? <aside className="detail-card"><h2>Request detail</h2>
+    {selected ? <aside className="detail-card request-detail"><div className="detail-card__heading"><h2>Request detail</h2>{workspace ? <button className="small-action" onClick={() => { setSelected(undefined); workspace.updateSearch({ request: undefined }); }} type="button">Close detail</button> : null}</div>
       <dl><div><dt>Request</dt><dd>{selected.id}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id}</dd></div><div><dt>Feature</dt><dd>{selected.feature}</dd></div><div><dt>Protocol</dt><dd>{selected.protocol}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div><div><dt>Started</dt><dd>{time(selected.started_at)}</dd></div><div><dt>Completed</dt><dd>{time(selected.completed_at)}</dd></div><div><dt>Duration</dt><dd>{duration(selected.started_at, selected.completed_at)}</dd></div></dl>
-      <h3>Client attribution</h3><dl><div><dt>Installation</dt><dd>{selected.installation_id}</dd></div><div><dt>Installation Family</dt><dd>{selected.installation_family_id ?? "legacy request"}</dd></div><div><dt>Client component</dt><dd>{selected.client_component_id ?? "legacy request"}</dd></div><div><dt>Component definition</dt><dd>{selected.component_definition_id ?? "legacy request"}</dd></div><div><dt>Component kind</dt><dd>{selected.component_kind ?? "legacy request"}</dd></div><div><dt>Trust source</dt><dd>{selected.trust_source ?? "legacy request"}</dd></div><div><dt>Framework</dt><dd>{selected.framework ?? "raw transport"}</dd></div><div><dt>Framework version</dt><dd>{selected.framework_version ?? "—"}</dd></div></dl>
+      <RequestTimeline request={selected} />
+      <h3>Client attribution</h3><dl><div><dt>Installation</dt><dd>{selected.installation_id}</dd></div><div><dt>Installation Family</dt><dd>{selected.installation_family_id ?? "legacy request"}</dd></div><div><dt>Client component</dt><dd>{selected.client_component_id ?? "legacy request"}</dd></div><div><dt>Component definition</dt><dd>{selected.component_definition_id ?? "legacy request"}</dd></div><div><dt>Component kind</dt><dd>{selected.component_kind ?? "legacy request"}</dd></div><div><dt>Trust source</dt><dd>{selected.trust_source ?? "legacy request"}</dd></div><div><dt>Framework</dt><dd>{selected.framework ? `${selected.framework}${selected.framework_version ? ` ${selected.framework_version}` : ""}` : "raw transport"}</dd></div><div><dt>Framework version</dt><dd>{selected.framework_version ?? "—"}</dd></div></dl>
       <h3>Aggregate usage</h3><Table headers={["Logical requests", "Input tokens", "Output tokens", "Total tokens", "Cost nano-USD"]} rows={selected.usage ? [[selected.usage.logical_requests, selected.usage.input_tokens, selected.usage.output_tokens, selected.usage.total_tokens, selected.usage.cost_nano_usd]] : []} />
       <h3>Ordered upstream attempts</h3><Table headers={["#", "Attempt", "Route", "Started", "First byte", "First token", "TTFT", "Completed", "Duration", "Upstream", "Model", "Status", "HTTP", "Failure", "Input", "Output", "Total", "Cost nUSD", "Usage provenance", "Cost provenance", "Cost source"]} rows={selected.attempts.map((attempt) => [attempt.attempt_number, attempt.id, attempt.route, time(attempt.started_at), time(attempt.first_byte_at), time(attempt.first_token_at), duration(attempt.started_at, attempt.first_token_at), time(attempt.completed_at), duration(attempt.started_at, attempt.completed_at), attempt.upstream, attempt.model, attempt.status, attempt.http_status ?? "—", attempt.failure_code ?? "—", attempt.usage?.input_tokens ?? "—", attempt.usage?.output_tokens ?? "—", attempt.usage?.total_tokens ?? "—", attempt.usage?.cost_nano_usd ?? "—", attempt.usage_provenance, attempt.cost_provenance, attempt.cost_source ?? "—"])} />
       <p><small>Failure categories are a closed, sanitized vocabulary; unrecognized durable values appear as unknown. Prompt/response bodies, provider error text, raw internal errors, and identity subjects remain excluded.</small></p>
     </aside> : null}
   </div>;
+}
+
+export function RequestsPage() {
+  return <EnvironmentRequired><RequestsWorkspacePage /></EnvironmentRequired>;
 }
 
 type AnalyticsFocus = "attestation" | "cost" | "errors" | "latency" | "usage";

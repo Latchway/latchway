@@ -1,0 +1,61 @@
+---
+title: "Configure Web origins and CORS"
+description: "Allow exact browser origins, understand preflight and redirects, and reject wildcard production access."
+icon: "globe-lock"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "core-security"
+---
+
+An origin is the tuple of scheme, hostname, and port. These are different:
+`https://app.example.com`, `https://app.example.com:8443`, and
+`http://app.example.com`.
+
+Configure explicit origins inside the active Web attestation selection. This is
+a partial production `spec` fragment; preserve the other required environment
+resources when applying it:
+
+```yaml
+spec:
+  attestationPolicies:
+    - id: web
+      platforms:
+        web:
+          provider: firebase_app_check
+          mode: required
+          minimumTrustLevel: web_risk_verified
+          allowedOrigins:
+            - https://app.example.com
+            - https://staging.example.com
+          firebaseAppCheck:
+            projectNumber: "123456789012"
+            allowedAppIds:
+              - "1:123456789012:web:0123456789abcdef"
+```
+
+<Warning>
+  Do not configure `*` for an authenticated production deployment. An origin
+  allowlist is a browser boundary, not a substitute for identity, DPoP, or CSP.
+</Warning>
+
+The browser may send an OPTIONS preflight before POST. Allow only the methods
+and headers used by the Latchway contract, return the matching exact origin,
+and vary caches by Origin. The SDK does not use cookies for client data-plane
+authorization, so do not enable credentialed cross-origin requests unless a
+separate application requirement has been reviewed.
+
+Authenticated requests set `redirect: "error"`. Configure the final gateway
+URL in the SDK; do not rely on HTTP-to-HTTPS, apex-to-subdomain, or path
+redirects. A custom Fetch implementation that reports a followed redirect or
+cross-origin response is rejected.
+
+In an environment whose kind is exactly `development`, version 1 also accepts
+an exact loopback HTTP application origin such as `http://127.0.0.1:5173` or
+`http://localhost:5173`. Configure the exact serialization the browser sends;
+those two names are distinct. Non-loopback HTTP, staging, and production fail
+closed. `allowInsecureHTTP: true` separately permits an explicit loopback HTTP
+**gateway URL** in the JavaScript source client. Production clients must use the
+exact HTTPS application and gateway origins.

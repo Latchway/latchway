@@ -1,0 +1,54 @@
+---
+title: "Use React Native with iOS app extensions"
+description: "Understand the current delegated component diagnostic boundary for React Native extension targets without claiming unsupported requests."
+icon: "boxes"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="purple">Delegated component</Badge> <Badge color="yellow">Request operation unavailable</Badge>
+
+## Outcome
+
+An independently executing signed iOS extension can construct the separate
+component client for redacted delegated-session diagnostics after the
+containing app provisions its component key. It cannot use the root client or
+move root credentials through JavaScript.
+
+## Current version 1 boundary
+
+- the current process must be an iOS `.appex`;
+- the component descriptor contains only definition ID, kind, fully resolved
+  shared Keychain group, and requested feature IDs;
+- the extension owns an independent component key and delegated session;
+- it has no root identity callback or App Attest provider;
+- only redacted diagnostics cross the bridge; and
+- React Native version 1 exposes no component request operation.
+
+The example App Intents extension is a signing, bundle, and Keychain fixture.
+It does not host a React Native runtime and fails closed rather than sending a
+delegated request. Building or invoking it is not extension execution evidence.
+
+<Warning>
+  The containing application cannot attest on behalf of the extension. A
+  delegated component is not directly attested, and the presence of a legacy
+  direct-attestation symbol does not make that trust source available.
+</Warning>
+
+## Follow the native guides
+
+Configure [iOS app-extension trust](/clients/ios/app-extensions), containing-app
+provisioning, Keychain isolation, feature sealing, sign-out, and component
+revocation in the native SDK. Do not copy root DPoP keys, refresh chains,
+identity tokens, or App Attest evidence into the extension.
+
+## Verify
+
+Confirm diagnostics report the extension's independent component ID and key,
+delegated provenance, sealed feature scope, and no root or credential fields.
+Leave request execution unclaimed until a released API and physical extension
+conformance result exist.

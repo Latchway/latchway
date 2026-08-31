@@ -1,0 +1,80 @@
+---
+title: "Configure Apple App Attest"
+description: "Bind an iOS application, App Attest key, challenge, component DPoP key, and server trust policy without overstating device proof."
+icon: "badge-check"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+<Badge color="blue">Physical Apple device</Badge> <Badge color="yellow">Distribution evidence separate</Badge>
+
+## Outcome
+
+The main iOS component can register an App Attest key, bind its proof to the
+server-issued challenge and DPoP thumbprint, and use later assertions without
+moving raw evidence into application logs or JavaScript.
+
+## Match both sides exactly
+
+Configure the same values in the signed application and active Latchway
+environment:
+
+- application resource ID and environment;
+- Apple Team ID and bundle identifier;
+- App Attest development or production environment;
+- allowed application version or build policy;
+- directly trusted root Client Component definition; and
+- accepted key-storage fallback policy.
+
+The SDK persists its App Attest key before returning from first registration.
+Later exchanges use assertions from the same key. Invalid-key recovery is
+bounded; it must not loop until a server accepts a different identity.
+
+## Verify a device run
+
+1. build the exact signed application for a supported physical device;
+2. establish a fresh session;
+3. send one feature-bound request;
+4. inspect the request and attestation event by request ID; and
+5. record only the safe installation, component, trust, version, commit, and
+   artifact coordinates required by the evidence runbook.
+
+Expected result:
+
+```text
+Platform: ios
+Trust provider: app_attest
+Trust level: app_verified or stricter policy result
+DPoP: verified
+Component: directly trusted root
+```
+
+<SecurityGuarantee
+  establishes={[
+    "Apple App Attest evidence for the configured application identity was accepted.",
+    "The evidence was bound to the one-time Latchway challenge and component DPoP key.",
+    "The session records the accepted trust result until its configured expiry or revocation.",
+  ]}
+  doesNotEstablish={[
+    "The device or application is free from compromise.",
+    "A development-signed run is a protected distribution receipt.",
+    "An iOS application extension independently completed App Attest.",
+  ]}
+/>
+
+## Expiry and revocation
+
+Trust expires according to server policy and can require step-up. Root
+revocation ends the affected session and may propagate to delegated components
+in the Installation Family. An extension remains delegated unless it completes
+a supported component-owned step-up; the containing app cannot attest on the
+extension's behalf.
+
+For immutable release evidence, continue with
+[Physical-device proof](/mobile/device-proof).

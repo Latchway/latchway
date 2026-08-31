@@ -1,0 +1,59 @@
+---
+title: "Ship a React Native integration"
+description: "Verify JavaScript, TurboModule, native iOS and Android trust, transport, framework, observability, and release evidence together."
+icon: "list-checks"
+audience: "client-react-native"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+<Badge color="red">Production checklist</Badge>
+
+React Native release readiness requires two native proofs. Bind each result to
+the exact JavaScript archive, iOS and Android artifacts, source commits,
+contract, gateway image, active configuration, and signed application under
+test.
+
+## Shared package and bridge
+
+- [ ] React Native 0.82 New Architecture codegen, TypeScript, Metro bundles,
+  clean packed consumer, and exact compatibility locks pass.
+- [ ] Local native overrides are absent from published package metadata.
+- [ ] JavaScript receives no private key, access or refresh token, DPoP proof,
+  raw attestation evidence, or credential-bearing request.
+- [ ] One stable client owns each native security scope and conflicting
+  configurations fail closed.
+
+## iOS proof
+
+- [ ] The exact signed bundle, Team ID, App Attest entitlement, private root
+  Keychain group, extension groups, and server policy agree.
+- [ ] Real App Attest, native key storage, DPoP, streaming, cancellation,
+  diagnostics, quota, revocation, and sign-out were exercised.
+- [ ] Development-signed evidence is not reported as protected distribution
+  evidence.
+
+## Android proof
+
+- [ ] The exact Play project, package, installed certificate, track, verdict
+  policy, and native module graph agree.
+- [ ] A Play-installed candidate proves Play Integrity, Keystore, DPoP,
+  streaming, cancellation, diagnostics, quota, revocation, and sign-out.
+- [ ] An emulator, fixture, sideloaded APK, or iOS result is not substituted.
+
+## Transport and operations
+
+- [ ] Every framework is feature-bound and listed in the generated
+  compatibility matrix at its exact tested version.
+- [ ] Framework retries are disabled; `AbortSignal`, backpressure, safe error
+  mapping, and uncertain-operation reconciliation pass.
+- [ ] Request views correlate platform, user, family, component, trust,
+  feature, route, usage, and quota without exposing content or credentials.
+- [ ] [Release status](/release-status) records npm and native dependency
+  publication before installation instructions switch to registries.
+
+Complete [Physical-device proof](/mobile/device-proof) for each platform before
+promoting the React Native package.

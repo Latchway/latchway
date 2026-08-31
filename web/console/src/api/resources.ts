@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import type { components } from "../generated/admin-api";
+
+type AdminSchema<Name extends keyof components["schemas"]> = components["schemas"][Name];
+
 const opaqueID = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{16,128}$`));
 
@@ -17,7 +21,23 @@ const PageInfo = z
   .object({ has_more: z.boolean(), next_cursor: z.string().max(2048).optional() })
   .strict();
 
-export const ApplicationResourceSchema = z
+export const OrganizationResourceSchema: z.ZodType<AdminSchema<"Organization">> = z
+  .object({
+    created_at: Instant,
+    display_name: z.string().min(1).max(200),
+    id: OrganizationID,
+    slug: Identifier
+  })
+  .strict();
+
+export const OrganizationResourcePageSchema: z.ZodType<AdminSchema<"OrganizationPage">> = z
+  .object({
+    items: z.array(OrganizationResourceSchema).max(200),
+    page: PageInfo
+  })
+  .strict();
+
+export const ApplicationResourceSchema: z.ZodType<AdminSchema<"Application">> = z
   .object({
     created_at: Instant,
     display_name: z.string().min(1).max(200),
@@ -27,14 +47,14 @@ export const ApplicationResourceSchema = z
   })
   .strict();
 
-export const ApplicationResourcePageSchema = z
+export const ApplicationResourcePageSchema: z.ZodType<AdminSchema<"ApplicationPage">> = z
   .object({
     items: z.array(ApplicationResourceSchema).max(200),
     page: PageInfo
   })
   .strict();
 
-export const EnvironmentResourceSchema = z
+export const EnvironmentResourceSchema: z.ZodType<AdminSchema<"Environment">> = z
   .object({
     active_revision_id: RevisionID.optional(),
     application_id: ApplicationID,
@@ -46,7 +66,7 @@ export const EnvironmentResourceSchema = z
   })
   .strict();
 
-export const EnvironmentResourceListSchema = z
+export const EnvironmentResourceListSchema: z.ZodType<{ items: AdminSchema<"Environment">[] }> = z
   .object({ items: z.array(EnvironmentResourceSchema).max(1000) })
   .strict();
 
@@ -149,6 +169,7 @@ export const UserOverrideResourceSchema = z
 export type ApplicationResource = z.infer<typeof ApplicationResourceSchema>;
 export type ApplicationResourcePage = z.infer<typeof ApplicationResourcePageSchema>;
 export type EnvironmentResource = z.infer<typeof EnvironmentResourceSchema>;
+export type OrganizationResource = z.infer<typeof OrganizationResourceSchema>;
 export type SecretResource = z.infer<typeof SecretResourceSchema>;
 export type SecretResourcePage = z.infer<typeof SecretResourcePageSchema>;
 export type ConfigurationRevisionResource = z.infer<typeof ConfigurationRevisionResourceSchema>;

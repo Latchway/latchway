@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "latchway_disposable_fault_plan",
+  "run_id": "replace01",
+  "api_replicas": 2,
+  "worker_replicas": 2,
+  "candidate_image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "postgres_image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "tools_image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "scenario_timeout_seconds": 300,
+  "overall_timeout_seconds": 1800,
+  "drain_timeout_seconds": 45
+}

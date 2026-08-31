@@ -428,7 +428,7 @@
           "items": {
             "type": "string",
             "format": "uri",
-            "pattern": "^https://",
+            "pattern": "^(?:https://.*|http://(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::[0-9]+)?)$",
             "maxLength": 2048
           }
         }
@@ -529,7 +529,7 @@
             "minLength": 9,
             "maxLength": 2048,
             "format": "uri",
-            "pattern": "^https://"
+            "pattern": "^(?:https://.*|http://(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::[0-9]+)?)$"
           }
         },
         "secretRef": { "$ref": "#/$defs/SecretRef" },

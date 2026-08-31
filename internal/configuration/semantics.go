@@ -66,7 +66,7 @@ func (validator *Validator) semanticIssues(root map[string]any, environment Envi
 
 	issues = append(issues, validator.identityIssues(identities)...)
 	issues = append(issues, attestationSemanticIssues(attestations, environment.EnvironmentKind)...)
-	issues = append(issues, componentDefinitionSemanticIssues(components, features, attestations)...)
+	issues = append(issues, componentDefinitionSemanticIssues(components, features, attestations, environment.EnvironmentKind)...)
 	issues = append(issues, upstreamSemanticIssues(upstreams, environment.EnvironmentKind)...)
 	issues = append(issues, inputAccountingProfileSemanticIssues(inputAccounting)...)
 	issues = append(issues, modelSemanticIssues(models, upstreams, pricing, inputAccounting)...)
@@ -85,6 +85,7 @@ func componentDefinitionSemanticIssues(
 	definitions map[string]map[string]any,
 	features map[string]map[string]any,
 	attestations map[string]map[string]any,
+	environmentKind string,
 ) []Issue {
 	issues := make([]Issue, 0)
 	identifierOwners := make(map[string]string)
@@ -114,7 +115,7 @@ func componentDefinitionSemanticIssues(
 				}
 			}
 		}
-		if !componentIdentifierShapeValid(platform, identifiers) {
+		if !componentIdentifierShapeValid(platform, identifiers, environmentKind) {
 			issues = append(issues, errorIssue(
 				"component_identifier_platform_mismatch", base+"/identifiers",
 				"Component identifiers must use the identifier kind owned by the configured platform.",
@@ -243,7 +244,7 @@ func componentDefinitionSemanticIssues(
 	return issues
 }
 
-func componentIdentifierShapeValid(platform string, identifiers map[string]any) bool {
+func componentIdentifierShapeValid(platform string, identifiers map[string]any, environmentKind string) bool {
 	bundles := stringArray(identifiers, "bundleIdentifiers")
 	packages := stringArray(identifiers, "packageNames")
 	origins := stringArray(identifiers, "origins")
@@ -257,7 +258,7 @@ func componentIdentifierShapeValid(platform string, identifiers map[string]any) 
 			return false
 		}
 		for _, origin := range origins {
-			if !canonicalBrowserHTTPSOrigin(origin) {
+			if !canonicalBrowserOrigin(origin, environmentKind) {
 				return false
 			}
 		}
@@ -423,7 +424,11 @@ func canonicalIdentityHTTPSOrigin(raw string) bool {
 // request-time enforcement uses byte-for-byte membership rather than URL
 // equivalence or normalization.
 func canonicalBrowserHTTPSOrigin(raw string) bool {
-	return weborigin.Canonical(raw)
+	return weborigin.Secure(raw)
+}
+
+func canonicalBrowserOrigin(raw, environmentKind string) bool {
+	return weborigin.Secure(raw) || environmentKind == "development" && weborigin.LoopbackHTTP(raw)
 }
 
 func attestationSemanticIssues(policies map[string]map[string]any, environmentKind string) []Issue {
@@ -487,11 +492,11 @@ func attestationSemanticIssues(policies map[string]map[string]any, environmentKi
 			origins := stringArray(selection, "allowedOrigins")
 			if mode != "disabled" && platform == "web" {
 				if len(origins) == 0 {
-					issues = append(issues, errorIssue("attestation_allowed_origins_required", selectionPath+"/allowedOrigins", "Enabled web attestation requires at least one exact allowed HTTPS origin."))
+					issues = append(issues, errorIssue("attestation_allowed_origins_required", selectionPath+"/allowedOrigins", "Enabled web attestation requires at least one exact allowed HTTPS origin; development environments may use an exact loopback HTTP origin."))
 				}
 				for index, origin := range origins {
-					if !canonicalBrowserHTTPSOrigin(origin) {
-						issues = append(issues, errorIssue("attestation_allowed_origin_invalid", fmt.Sprintf("%s/allowedOrigins/%d", selectionPath, index), "Allowed web origins must use exact canonical HTTPS Origin serialization."))
+					if !canonicalBrowserOrigin(origin, environmentKind) {
+						issues = append(issues, errorIssue("attestation_allowed_origin_invalid", fmt.Sprintf("%s/allowedOrigins/%d", selectionPath, index), "Allowed web origins must use exact canonical HTTPS serialization; development environments may use exact loopback HTTP origins."))
 					}
 				}
 			} else if len(origins) != 0 {

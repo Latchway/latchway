@@ -1,7 +1,16 @@
 ---
 title: "Client Components"
 description: "Model each independently executing application surface with its own possession key, session family, scope, and revocation state."
+icon: "book-open"
+audience: "mixed"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
 ---
+
+import { TrustPath } from "/components/TrustPath.jsx";
 
 <Warning>
   Client Components are implemented in pre-release draft contract `1.0.0` on wire
@@ -33,6 +42,8 @@ to the component key that created it. Sign-out invalidates the family
 credentials associated with the prior user.
 
 ## Root and delegated components
+
+<TrustPath />
 
 The root component establishes the family's primary trust. A delegated
 component presents a short-lived, single-use authorization issued by the root

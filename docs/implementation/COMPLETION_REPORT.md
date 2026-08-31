@@ -15,8 +15,8 @@ deployments, or protected evidence that does not exist.
 | --- | --- |
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
-| Database | Schema `23` |
-| Contract bundle | SHA-256 `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` at core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
+| Database | Schema `24` |
+| Contract bundle | SHA-256 `695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c` at core checkpoint `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 
@@ -28,12 +28,12 @@ authorize version 1.
 
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
-| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 23, frozen bundle and synchronized locks | Protected exact-candidate evidence |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 24, frozen bundle and synchronized locks | Protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
 | Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
 | SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate; a real React Native iOS 27 development-signed run passed | Protected Apple distribution candidate, physical Android and delegated-extension runtime proof, and publication |
-| Frameworks | Six exact, locally tested integrations recorded as `experimental`; unsupported/planned seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
+| Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
 | Documentation | Canonical Mintlify source, synchronized generated mirror, tested snippets, validation, and credential-free checkpoint workflow | Merge, production deployment, and post-deploy validation |
@@ -92,7 +92,7 @@ receipts. The final convergence run has:
 
 - regenerated the contract bundle twice with identical bytes and recorded its
   final checksum;
-- synchronized the schema-23 contract, component-attestation schema/vector,
+- synchronized the schema-24 contract, component-attestation schema/vector,
   protocol coordinate, and bundle lock across all SDK repositories;
 - run the clean-tree core, SDK, dashboard, documentation, workflow, and
   cross-repository conformance gate on the exact commits; and

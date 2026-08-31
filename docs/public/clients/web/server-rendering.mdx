@@ -1,0 +1,46 @@
+---
+title: "Separate browser and server rendering"
+description: "Keep browser component identity in client execution and use a distinct trust design for server components, routes, workers, and SSR."
+icon: "panels-top-left"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Hybrid frameworks execute similar TypeScript in different security domains.
+Do not move one Latchway configuration between them without changing its trust
+model.
+
+<Tabs>
+  <Tab title="Browser Client Component">
+    - import `@latchway/client`
+    - use the signed-in application user's identity token
+    - generate and persist the WebCrypto component key in the browser
+    - provide configured App Check or Turnstile evidence
+    - call the exact Latchway origin directly
+  </Tab>
+  <Tab title="Server Component or route">
+    - do not reuse the browser component identity or storage
+    - do not claim App Check browser trust for server execution
+    - use only a separately configured server-to-server integration when one is
+      explicitly supported
+    - never serialize server credentials into HTML, React props, or client code
+  </Tab>
+  <Tab title="Service worker">
+    Use `@latchway/client/service-worker` only as an explicit handler. The
+    application supplies a deterministic feature selector. Same-origin
+    IndexedDB may share the refresh lease with pages; this is browser key
+    possession, not an independently attested worker.
+  </Tab>
+</Tabs>
+
+Server rendering may output UI that later creates a browser client, but it must
+not create that browser component during SSR. Gate construction behind the
+client runtime and keep identity callbacks out of serialized configuration.
+
+Clearing browser site data creates a new browser component on the next client
+render. Revoke the former component from user controls or operator policy when
+that reset was caused by suspected compromise.

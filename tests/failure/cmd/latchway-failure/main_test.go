@@ -27,6 +27,9 @@ func TestVersionedFailureMatrixIsStrictAndCoversEveryLiveFaultClass(t *testing.T
 			automated++
 		case "external":
 			external++
+			if !validControllerAction(scenario.ID, scenario.ControllerAction) {
+				t.Fatalf("external scenario %s has controller action %q", scenario.ID, scenario.ControllerAction)
+			}
 		}
 	}
 	if automated < 9 || external != 6 {

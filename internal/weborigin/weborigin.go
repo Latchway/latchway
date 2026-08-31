@@ -21,9 +21,11 @@ const (
 
 var ErrInvalid = errors.New("browser origin headers are invalid")
 
-// Read returns an exact canonical HTTPS browser origin. Absence is valid and
-// represented by an empty string; duplicates, comma lists, null origins, and
-// non-canonical aliases fail closed.
+// Read returns an exact canonical browser origin. HTTPS is accepted everywhere;
+// HTTP is accepted only for an exact loopback host so development browsers can
+// reach a loopback gateway without weakening remote-origin handling. Absence is
+// valid and represented by an empty string; duplicates, comma lists, null
+// origins, and non-canonical aliases fail closed.
 func Read(header http.Header) (string, error) {
 	if header == nil {
 		return "", nil
@@ -38,8 +40,8 @@ func Read(header http.Header) (string, error) {
 	return values[0], nil
 }
 
-// Canonical reports whether value is an exact browser HTTPS origin
-// serialization suitable for byte-for-byte allow-list membership.
+// Canonical reports whether value is an exact browser HTTPS origin or an exact
+// loopback HTTP origin suitable for byte-for-byte allow-list membership.
 func Canonical(value string) bool {
 	if value == "" || len(value) > maximumOriginBytes || strings.TrimSpace(value) != value ||
 		strings.ContainsAny(value, "\r\n\x00,") {
@@ -51,17 +53,24 @@ func Canonical(value string) bool {
 		}
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Opaque != "" || parsed.Scheme != "https" || parsed.User != nil ||
+	if err != nil || parsed.Opaque != "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil ||
 		parsed.Host == "" || parsed.Hostname() == "" || parsed.Path != "" || parsed.RawPath != "" ||
 		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.String() != value ||
 		parsed.Host != strings.ToLower(parsed.Host) || strings.Contains(parsed.Host, "%") ||
 		strings.HasSuffix(parsed.Hostname(), ".") {
 		return false
 	}
+	if parsed.Scheme == "http" && !loopbackHost(parsed.Hostname()) {
+		return false
+	}
 	port := parsed.Port()
 	if port != "" {
 		parsedPort, parseErr := strconv.ParseUint(port, 10, 16)
-		if parseErr != nil || parsedPort == 0 || parsedPort == 443 ||
+		defaultPort := uint64(443)
+		if parsed.Scheme == "http" {
+			defaultPort = 80
+		}
+		if parseErr != nil || parsedPort == 0 || parsedPort == defaultPort ||
 			strconv.FormatUint(parsedPort, 10) != port {
 			return false
 		}
@@ -94,6 +103,29 @@ func Canonical(value string) bool {
 		}
 	}
 	return true
+}
+
+// Secure reports whether value is a canonical HTTPS browser origin.
+func Secure(value string) bool {
+	return strings.HasPrefix(value, "https://") && Canonical(value)
+}
+
+// LoopbackHTTP reports whether value is a canonical HTTP browser origin whose
+// host resolves by syntax alone to localhost or a loopback IP address.
+func LoopbackHTTP(value string) bool {
+	if !strings.HasPrefix(value, "http://") || !Canonical(value) {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && loopbackHost(parsed.Hostname())
+}
+
+func loopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback() && address.String() == host
 }
 
 func asciiAlphaNumeric(value byte) bool {

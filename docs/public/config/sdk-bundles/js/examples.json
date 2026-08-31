@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Firebase App Check quickstart",
       "source": {
-        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
         "file": "examples/firebase/client.ts",
         "region": {
           "end_line": 23,
@@ -20,7 +20,7 @@
       "kind": "quickstart",
       "name": "Turnstile browser quickstart",
       "source": {
-        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
         "file": "examples/vanilla/client.ts",
         "region": {
           "end_line": 23,
@@ -33,10 +33,58 @@
       }
     },
     {
+      "kind": "quickstart",
+      "name": "Loopback development browser helpers",
+      "source": {
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
+        "file": "examples/vanilla/development-helper.ts",
+        "region": {
+          "end_line": 142,
+          "start_line": 1
+        },
+        "region_sha256": "c1452da5ee2aa7cbd901af60a3b960790b621d5c1074ef0701d10d1cd911cf43",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "c1452da5ee2aa7cbd901af60a3b960790b621d5c1074ef0701d10d1cd911cf43"
+      }
+    },
+    {
+      "kind": "quickstart",
+      "name": "Loopback development browser client",
+      "source": {
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
+        "file": "examples/vanilla/development-client.ts",
+        "region": {
+          "end_line": 82,
+          "start_line": 1
+        },
+        "region_sha256": "0d929594fd3a01f14f3c28cf1957200efc0d5589f761953c2096082e5ae72ae0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "0d929594fd3a01f14f3c28cf1957200efc0d5589f761953c2096082e5ae72ae0"
+      }
+    },
+    {
+      "kind": "quickstart",
+      "name": "Vanilla feature-bound streaming fetch",
+      "source": {
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
+        "file": "examples/vanilla/streaming-fetch.ts",
+        "region": {
+          "end_line": 93,
+          "start_line": 1
+        },
+        "region_sha256": "f7ebf07cf092a5bb14cf66cbb6cdf0b41a7a61ed392618c497463785486c34e5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "f7ebf07cf092a5bb14cf66cbb6cdf0b41a7a61ed392618c497463785486c34e5"
+      }
+    },
+    {
       "kind": "framework",
       "name": "OpenAI framework adapter",
       "source": {
-        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
         "file": "packages/openai/src/index.ts",
         "region": {
           "end_line": 71,
@@ -52,7 +100,7 @@
       "kind": "framework",
       "name": "Vercel AI framework adapter",
       "source": {
-        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
         "file": "packages/vercel-ai/src/index.ts",
         "region": {
           "end_line": 78,
@@ -68,7 +116,7 @@
       "kind": "framework",
       "name": "LangChain framework adapter",
       "source": {
-        "commit": "8e36364419783b07acdd8fae82e457885f1c5447",
+        "commit": "b0069e993967662f4ee2729dbc393595793c5e50",
         "file": "packages/langchain/src/index.ts",
         "region": {
           "end_line": 103,

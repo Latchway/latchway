@@ -1,0 +1,75 @@
+---
+title: "Install the iOS SDK"
+description: "Add the version-matched Swift products, resolve native entitlements, and verify an iOS application target before session setup."
+icon: "package"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="blue">Development</Badge> <Badge color="yellow">Source candidate</Badge>
+
+## Outcome
+
+The application builds against the intended `Latchway` and
+`LatchwayAppAttest` products, and its signed entitlements expose the exact
+private Keychain group and App Attest capability expected by configuration.
+
+## Select the package source
+
+Until publication, add an authorized local checkout in Xcode or the
+application package manifest:
+
+```swift
+.package(path: "../latchway-ios-sdk")
+```
+
+Link `Latchway` and `LatchwayAppAttest` to the main application target. Add
+`LatchwayFirebaseAuth` only when the application uses that optional adapter.
+Add `LatchwayAppExtensions` only to targets that execute the delegated
+component flow.
+
+<Warning>
+  The intended remote `1.0.0` coordinate and CocoaPods specification are
+  release outputs, not current installation instructions. Do not substitute a
+  same-named registry artifact before the release page records it.
+</Warning>
+
+## Resolve signed capabilities
+
+1. Enable App Attest on the exact application identifier.
+2. keep the root application's private app-ID Keychain group first.
+3. add extension-shared groups only when an extension requires them.
+4. pass the fully resolved group such as `ABCDE12345.com.example.app`; do not
+   pass `$(AppIdentifierPrefix)` at runtime.
+5. keep private keys and refresh state non-synchronizable.
+
+Inspect the built application rather than the unresolved project file:
+
+```bash
+codesign -d --entitlements :- /path/to/LatchwayConsumer.app
+```
+
+Expected result: the App Attest entitlement is present and the first
+`keychain-access-groups` value is the private root group supplied to the SDK.
+
+## Verify the package
+
+From the SDK checkout:
+
+```bash
+swift test
+```
+
+Then compile the application target. A passing package build establishes source
+and toolchain compatibility; it does not establish device attestation or
+distribution status.
+
+## Continue
+
+Configure [authentication](/clients/ios/authentication) and
+[App Attest](/clients/ios/app-attest), then complete the
+[iOS quickstart](/clients/ios/quickstart).

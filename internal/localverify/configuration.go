@@ -11,13 +11,18 @@ import (
 )
 
 const (
-	inputProfileID = "bounded_chat"
-	pricingID      = "local_verify_prices"
-	assistantPlan  = "assistant_limits"
-	outputPlan     = "output_limits"
-	pacePlan       = "pace_limits"
-	streamPlan     = "stream_limits"
-	fallbackPlan   = "fallback_limits"
+	inputProfileID            = "bounded_chat"
+	pricingID                 = "local_verify_prices"
+	assistantPlan             = "assistant_limits"
+	outputPlan                = "output_limits"
+	pacePlan                  = "pace_limits"
+	streamPlan                = "stream_limits"
+	fallbackPlan              = "fallback_limits"
+	developmentInputProfileID = "bounded_responses"
+	developmentPlan           = "habit_assistant_limits"
+	developmentPricingID      = "local_development_prices"
+	developmentModel          = "assistant_default"
+	developmentFeature        = "habit-assistant"
 )
 
 func (f *fixture) configurationDocument() ([]byte, error) {
@@ -124,6 +129,99 @@ func (f *fixture) configurationDocument() ([]byte, error) {
 	return json.Marshal(document)
 }
 
+func (f *fixture) developmentConfigurationDocument() ([]byte, error) {
+	if f.oidc == nil || f.browserOrigin == "" {
+		return nil, errors.New("local development identity or browser origin is unavailable")
+	}
+	debugSelection := func() map[string]any {
+		return map[string]any{
+			"provider": "debug", "mode": "required", "minimumTrustLevel": "debug",
+			"secretRef": "secret/debug-attestation-public-keys",
+		}
+	}
+	platforms := map[string]any{}
+	for _, platform := range []string{"ios", "android", "react_native_ios", "react_native_android"} {
+		platforms[platform] = debugSelection()
+	}
+	webSelection := debugSelection()
+	webSelection["allowedOrigins"] = []any{f.browserOrigin}
+	platforms["web"] = webSelection
+
+	component := func(identifier, platform, kind string, identifiers map[string]any) map[string]any {
+		return map[string]any{
+			"id": identifier, "platform": platform, "kind": kind, "identifiers": identifiers,
+			"familyRole":      "root",
+			"attestation":     map[string]any{"strategy": "direct", "provider": "debug"},
+			"allowedFeatures": []any{developmentFeature},
+		}
+	}
+	document := map[string]any{
+		"apiVersion": "latchway.dev/v1alpha1",
+		"kind":       "EnvironmentConfig",
+		"metadata": map[string]any{
+			"organization": "local-verify", "application": "mobile-app", "environment": "development",
+		},
+		"spec": map[string]any{
+			"identityProviders": []any{map[string]any{
+				"id": "mock_oidc", "type": "generic_oidc", "issuer": f.oidc.issuer,
+				"audiences": []any{oidcAudience}, "allowedAlgorithms": []any{"RS256"},
+				"jwksUrl": f.oidc.jwksURL, "subjectClaim": "sub", "clockSkewSeconds": 30,
+				"claimMappings": map[string]any{"tier": "claims.tier"},
+			}},
+			"attestationPolicies": []any{map[string]any{
+				"id": "development-clients", "maxAge": "10m", "platforms": platforms,
+			}},
+			"componentDefinitions": []any{
+				component("ios-main", "ios", "main_app", map[string]any{"bundleIdentifiers": []any{"dev.latchway.quickstart.ios"}}),
+				component("android-main", "android", "android_app", map[string]any{"packageNames": []any{"dev.latchway.quickstart.android"}}),
+				component("web-browser", "web", "browser", map[string]any{"origins": []any{f.browserOrigin}}),
+				component("react-native-ios-main", "react_native_ios", "main_app", map[string]any{"bundleIdentifiers": []any{"dev.latchway"}}),
+				component("react-native-android-main", "react_native_android", "android_app", map[string]any{"packageNames": []any{"dev.latchway.reactnative"}}),
+			},
+			"upstreams": []any{upstreamDocument("primary", configuredPrimary)},
+			"inputAccountingProfiles": []any{map[string]any{
+				"id": developmentInputProfileID, "protocol": protocol.OpenAIResponsesID,
+				"method": quota.UTF8ByteBPEDeclaredFramingV1, "physicalModel": providerModel,
+				"maximumFramingTokensPerRequest": int64(8),
+				"maximumFramingTokensPerMessage": int64(4),
+				"maximumContextTokens":           int64(4096),
+			}},
+			"models": []any{map[string]any{
+				"id": developmentModel, "upstream": "primary", "upstreamModel": providerModel,
+				"pricingRef": developmentPricingID, "inputAccountingRef": developmentInputProfileID,
+				"capabilities": []any{protocol.OpenAIResponsesID},
+			}},
+			"pricingCatalogs": []any{map[string]any{
+				"id": developmentPricingID, "currency": quota.USDCurrency,
+				"effectiveAt": "2020-01-01T00:00:00Z", "entries": []any{map[string]any{
+					"model": developmentModel, "inputNanoUsdPerMillion": int64(0),
+					"outputNanoUsdPerMillion": int64(0), "requestNanoUsd": int64(0),
+				}},
+			}},
+			"limitPlans": []any{map[string]any{
+				"id": developmentPlan, "limits": []any{
+					calendarLimit(quota.LogicalRequestsMetric, []any{"feature", "user"}, "1d", 100),
+					calendarLimit(quota.InputTokensMetric, []any{"feature", "user"}, "1d", 1_000_000),
+					calendarLimit(quota.OutputTokensMetric, []any{"feature", "user"}, "1d", 1_000_000),
+					calendarLimit(quota.TotalTokensMetric, []any{"feature", "user"}, "1d", 2_000_000),
+					perRequestLimit(quota.InputTokensMetric, []any{"feature", "user"}, 4096),
+					perRequestLimit(quota.OutputTokensMetric, []any{"feature", "user"}, 256),
+					perRequestLimit(quota.TotalTokensMetric, []any{"feature", "user"}, 4352),
+				},
+			}},
+			"features": []any{map[string]any{
+				"id": developmentFeature, "protocol": protocol.OpenAIResponsesID,
+				"attestationPolicy": "development-clients",
+				"access":            map[string]any{"expression": "principal.authenticated && principal.claims.tier == 'pro'"},
+				"limitPlan":         map[string]any{"expression": "'" + developmentPlan + "'"},
+				"output":            map[string]any{"defaultMaximumTokens": int64(128), "absoluteMaximumTokens": int64(256)},
+				"routes":            []any{routeDocument("primary", developmentModel, 10, nil)},
+			}},
+		},
+	}
+	return json.Marshal(document)
+}
+
 func upstreamDocument(identifier, baseURL string) map[string]any {
 	return map[string]any{
 		"id": identifier, "type": "openai_compatible", "baseUrl": baseURL,
@@ -183,7 +281,12 @@ func (f *fixture) activateConfiguration(ctx context.Context) error {
 		return err
 	}
 	f.configurationStore = store
-	document, err := f.configurationDocument()
+	var document []byte
+	if f.browserOrigin != "" {
+		document, err = f.developmentConfigurationDocument()
+	} else {
+		document, err = f.configurationDocument()
+	}
 	if err != nil {
 		return err
 	}

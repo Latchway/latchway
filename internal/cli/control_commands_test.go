@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,6 +99,40 @@ func TestConfigApplyCarriesDraftETagIntoActivation(t *testing.T) {
 	}
 	if !activated || !strings.Contains(stdout.String(), `"activated": true`) || strings.Contains(stdout.String(), token) {
 		t.Fatalf("activation output = %q, activated = %t", stdout.String(), activated)
+	}
+}
+
+func TestControlProblemPreservesRedactionSafeConfigurationIssues(t *testing.T) {
+	token := strings.Repeat("validation-control-token-", 2)
+	client := &controlAPIClient{token: token, tokenSensitive: secretSensitiveVariants(token)}
+	body := []byte(`{
+		"type":"https://latchway.dev/problems/configuration_invalid",
+		"title":"Configuration invalid",
+		"status":422,
+		"detail":"The configuration has validation errors and cannot be used.",
+		"code":"configuration_invalid",
+		"request_id":"request_test_123456",
+		"retryable":false,
+		"errors":[{
+			"severity":"error",
+			"code":"schema_format",
+			"path":"/spec/upstreams/0/baseUrl",
+			"message":"A configuration member has an invalid format."
+		}]
+	}`)
+	err := client.problem(http.StatusUnprocessableEntity, http.Header{
+		"Content-Type": []string{"application/problem+json"},
+	}, body)
+	var problem controlProblemError
+	if !errors.As(err, &problem) {
+		t.Fatalf("problem error type = %T", err)
+	}
+	if len(problem.ValidationIssues) != 1 ||
+		problem.ValidationIssues[0].Code != "schema_format" ||
+		problem.ValidationIssues[0].Path != "/spec/upstreams/0/baseUrl" ||
+		!strings.Contains(err.Error(), "A configuration member has an invalid format.") ||
+		strings.Contains(err.Error(), token) {
+		t.Fatalf("configuration problem = %#v, error = %q", problem, err)
 	}
 }
 

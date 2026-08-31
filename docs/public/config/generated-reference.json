@@ -4,19 +4,19 @@
   "outputs": [
     {
       "path": "reference/admin-api.mdx",
-      "sha256": "ee3094631e62618366037b1a385da25023b7a5cdef17ff7859ba46d08383cdbd"
+      "sha256": "0f78830f6bb93bfcb4c9b9c5a19f2eb7f0c3fc45aadcb33e1461f47ee69d6727"
     },
     {
       "path": "reference/compatibility.mdx",
-      "sha256": "217c13639ed09018f8d3b724e531fd02738217afdeaeb4942b280ea5dc02ba32"
+      "sha256": "6e5c761b40676f745677c7ee4239eeb92c6c09f6c9fa32f2fba4d62aeda38d73"
     },
     {
       "path": "reference/config-schema.mdx",
-      "sha256": "92688f124bfbe80779a57f4a0354ad23804f02c001e749607c101ca107c5db52"
+      "sha256": "3336240556fc37bb1e5cc8422423d64b7b2546a8cc80722d35da9280b2e57c3d"
     },
     {
       "path": "reference/errors.mdx",
-      "sha256": "78ede0480bae57c988a0935404e64af5623f1b1abe1e875b2438fef4cbf5523d"
+      "sha256": "91eb0bdbe2100f6350f5f93204ab7ac95d37e7160f37ceec0712cfb9fdeca1c7"
     }
   ],
   "sources": [
@@ -26,7 +26,7 @@
     },
     {
       "path": "api/config.schema.json",
-      "sha256": "54d153170f684ba25ebcf6e05b5d1e2c4e334e20698bc73a28fe2d2fa91c8502"
+      "sha256": "1106e273939652f839edf12b056e884561f9706587a049ec6d7adfee78ec13d2"
     },
     {
       "path": "api/error-codes.yaml",

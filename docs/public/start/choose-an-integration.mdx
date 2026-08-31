@@ -1,6 +1,13 @@
 ---
 title: "Choose your integration"
 description: "Select a source SDK or experimental framework adapter without mistaking local evidence for released support."
+icon: "compass"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "docs"
 ---
 
 Start with a supported platform SDK. Add a framework adapter only when its
@@ -10,9 +17,9 @@ and protocol versions you use.
 | Application surface | Starting point | Framework path |
 | --- | --- | --- |
 | React Native | [React Native SDK](/mobile/react-native) | Experimental native-backed fetch at React Native 0.82.0 |
-| Native iOS | [Native iOS SDK](/mobile/ios) | Experimental SwiftOpenAI seam; Foundation Models remains planned |
+| Native iOS | [Native iOS SDK](/mobile/ios) | Experimental SwiftOpenAI and exact Apple Foundation Models 27.0.0 source seams |
 | Native Android | [Native Android SDK](/mobile/android) | Experimental OkHttp 5.3.0 and minimum 4.9.2 seam |
-| Web | [Security boundary](/concepts/security-boundary) | Experimental OpenAI, Vercel AI SDK, and LangChain adapters with web-level trust |
+| Web | [Web quickstart](/clients/web/quickstart) | Browser-first raw Fetch, then exact OpenAI, Vercel AI SDK, or LangChain compatibility evidence |
 | Server or diagnostic client | [Client API](/reference/client-api) | Raw HTTP requires complete DPoP handling |
 
 <Warning>
@@ -25,3 +32,8 @@ and protocol versions you use.
 Never place an upstream provider API key in application code. A framework that
 accepts only a base URL, static API key, or static headers cannot preserve
 request-specific DPoP on its own.
+
+Web and React Native are different security models. Web uses a non-exportable
+WebCrypto key, IndexedDB state, exact origins, CSP, and optional browser-risk
+signals. React Native keeps keys, sessions, DPoP, and attestation in the native
+iOS or Android module.

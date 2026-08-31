@@ -1,0 +1,52 @@
+---
+title: "Use Latchway with React"
+description: "Create a stable browser client across renders, react to identity changes, cancel work on unmount, and surface typed failures safely."
+icon: "atom"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Create one client for one stable security scope. Do not recreate it for every
+render or every identity-token refresh:
+
+```tsx
+import { useEffect, useMemo, useState } from "react";
+import { createLatchwayClient, errorFromResponse } from "@latchway/client";
+
+export function useHabitAssistant(configuration: AppLatchwayConfiguration) {
+  const client = useMemo(() => createLatchwayClient(configuration), [
+    configuration.baseURL,
+    configuration.applicationID,
+    configuration.environment,
+  ]);
+  const [output, setOutput] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void client.fetchFor("habit-assistant")("/v1/responses", {
+      method: "POST",
+      body: JSON.stringify({ input: "Suggest one habit." }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw await errorFromResponse(response.clone());
+      setOutput(await response.text());
+    });
+    return () => controller.abort();
+  }, [client]);
+
+  return output;
+}
+```
+
+The identity callback reads the current application session when Latchway asks
+for it, so ordinary authentication state changes do not require rebuilding the
+client. Recreate the client only when its gateway, application, environment,
+persistence, or attestation-provider configuration changes.
+
+Use an Error Boundary for render failures and application state for request
+failures. Show the stable error code and request ID; never display tokens,
+proofs, raw provider evidence, or browser storage exports.

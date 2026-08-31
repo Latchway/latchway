@@ -1,0 +1,48 @@
+---
+title: "Use AI frameworks from iOS"
+description: "Choose the tested URLSession, SwiftOpenAI, Foundation Models, or raw transport seam without moving Latchway security into an AI framework."
+icon: "plug"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+## Outcome
+
+The selected framework uses a feature-bound native transport while Secure
+Enclave or Keychain state, App Attest, DPoP, refresh, and destination checks
+remain in the Latchway SDK.
+
+## Select an integration
+
+| Need | Path | Boundary |
+| --- | --- | --- |
+| Ordinary native HTTP | [Raw HTTP](/integrations/raw-http) | URLRequest and URLSession remain application-owned |
+| SwiftOpenAI | [MacPaw/OpenAI](/integrations/macpaw-openai) | Audited async HTTP and streaming adapter |
+| Apple Foundation Models | [Foundation Models](/integrations/foundation-models) | Narrow custom-executor adapter with explicit OS and device gates |
+
+Consult the generated [Compatibility matrix](/reference/compatibility) before
+claiming a framework version or capability. A compiled adapter does not imply
+that every tool, structured-output, upload, image, audio, or realtime path is
+supported.
+
+## Preserve the transport contract
+
+- bind one framework client or custom executor to one compatible feature;
+- keep the gateway URL as the destination;
+- use a conspicuous non-secret placeholder only when a framework requires an
+  API-key-shaped constructor value;
+- disable framework retries that could duplicate an uncertain request;
+- preserve streaming and cancellation; and
+- never let the framework read a DPoP key, refresh token, or App Attest
+  evidence.
+
+## Verify
+
+Run the exact repository-owned conformance consumer for the selected tuple.
+Then correlate one request in the Console and confirm its protocol, feature,
+route, component trust, DPoP result, usage provenance, and cancellation
+behavior match the compatibility row.

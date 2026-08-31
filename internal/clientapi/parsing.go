@@ -249,7 +249,7 @@ func parseChallengeRequest(r *http.Request, declaration clientDeclaration) (Chal
 	}
 	origin, originErr := weborigin.Read(r.Header)
 	if originErr != nil || (platform == "web" && origin == "") || (platform != "web" && origin != "") {
-		return ChallengeInput{}, invalidAt("header.Origin", "Web challenges require exactly one canonical HTTPS Origin and non-web challenges must omit it.")
+		return ChallengeInput{}, invalidAt("header.Origin", "Web challenges require exactly one canonical HTTPS Origin or canonical loopback HTTP Origin; non-web challenges must omit it.")
 	}
 	return ChallengeInput{
 		ApplicationID: applicationID, Environment: environment,

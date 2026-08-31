@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"runtime/debug"
@@ -23,6 +24,7 @@ import (
 	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/telemetry"
+	"github.com/latchway/latchway/internal/weborigin"
 	console "github.com/latchway/latchway/web/console"
 )
 
@@ -36,11 +38,12 @@ type Server struct {
 // the process. Keeping them explicit prevents the admin console fallback from
 // accidentally handling public client API paths.
 type Handlers struct {
-	AdminAPI  http.Handler
-	ClientAPI http.Handler
-	DataPlane http.Handler
-	Metrics   *telemetry.Registry
-	Readiness ReadinessChecks
+	AdminAPI       http.Handler
+	ClientAPI      http.Handler
+	DataPlane      http.Handler
+	DevelopmentAPI http.Handler
+	Metrics        *telemetry.Registry
+	Readiness      ReadinessChecks
 }
 
 // ReadinessChecks contains process-specific capabilities that cannot be
@@ -87,6 +90,12 @@ func New(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, handlers Ha
 	router.Handle("/proxy", handlers.ClientAPI)
 	router.Handle("/proxy/*", handlers.ClientAPI)
 	router.Handle("/.well-known/*", handlers.ClientAPI)
+	if handlers.DevelopmentAPI != nil {
+		if !loopbackPublicOrigin(cfg.PublicOrigin) {
+			return nil, errors.New("development API requires a canonical loopback HTTP public origin")
+		}
+		router.Mount("/development/v1", handlers.DevelopmentAPI)
+	}
 	router.NotFound(newConsoleHandler(consoleAssets).ServeHTTP)
 
 	return &Server{
@@ -184,10 +193,24 @@ func safeRequestIDHint(header http.Header) string {
 
 // Run serves until context cancellation and then drains in-flight work.
 func (s *Server) Run(ctx context.Context, shutdownTimeout time.Duration) error {
+	listener, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return fmt.Errorf("serve HTTP: %w", err)
+	}
+	return s.RunListener(ctx, shutdownTimeout, listener)
+}
+
+// RunListener serves on an already-bound listener. Local development uses this
+// to print copyable connection details only after the requested loopback port
+// has been acquired.
+func (s *Server) RunListener(ctx context.Context, shutdownTimeout time.Duration, listener net.Listener) error {
+	if listener == nil {
+		return errors.New("serve HTTP: listener is nil")
+	}
 	serveErr := make(chan error, 1)
 	go func() {
-		s.logger.Info("HTTP server listening", "address", s.httpServer.Addr)
-		serveErr <- s.httpServer.ListenAndServe()
+		s.logger.Info("HTTP server listening", "address", listener.Addr().String())
+		serveErr <- s.httpServer.Serve(listener)
 	}()
 
 	select {
@@ -206,6 +229,10 @@ func (s *Server) Run(ctx context.Context, shutdownTimeout time.Duration) error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	return nil
+}
+
+func loopbackPublicOrigin(raw string) bool {
+	return weborigin.LoopbackHTTP(raw)
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

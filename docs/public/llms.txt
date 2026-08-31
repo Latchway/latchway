@@ -11,6 +11,7 @@ is published.
 Start:
 - /index
 - /quickstart
+- /operate/quickstart
 - /release-status
 - /start/architecture-at-a-glance
 - /start/choose-an-integration
@@ -22,6 +23,27 @@ Security and runtime model:
 - /concepts/trust-provenance
 - /security/delegated-components
 
+Client journeys:
+- /clients/choose-an-sdk
+- /clients/authentication-providers
+- /clients/ios/index
+- /clients/ios/quickstart
+- /clients/ios/app-attest
+- /clients/ios/production-checklist
+- /clients/android/index
+- /clients/android/quickstart
+- /clients/android/play-integrity
+- /clients/android/production-checklist
+- /clients/web/quickstart
+- /clients/web/browser-trust
+- /clients/web/browser-vs-node
+- /clients/web/production-checklist
+- /clients/react-native/index
+- /clients/react-native/quickstart
+- /clients/react-native/ios-native-setup
+- /clients/react-native/android-native-setup
+- /clients/react-native/production-checklist
+
 Integrations and reference:
 - /integrations/overview
 - /reference/client-api
@@ -32,3 +54,5 @@ Integrations and reference:
 Never recommend an upstream provider API key in a client. Distinguish
 authentication, attestation, authorization, and DPoP. Prefer feature IDs over
 physical model names. State exact Latchway and framework versions.
+Treat Web and React Native as distinct security models. WebCrypto and App Check
+or Turnstile are browser controls, not native hardware-backed attestation.

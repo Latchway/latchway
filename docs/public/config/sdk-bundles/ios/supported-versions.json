@@ -4,7 +4,7 @@
     {
       "name": "Latchway",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -20,7 +20,7 @@
     {
       "name": "iOS",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -36,7 +36,7 @@
     {
       "name": "Swift",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Latchway.podspec",
         "region": {
           "end_line": 20,
@@ -52,7 +52,7 @@
     {
       "name": "SwiftOpenAI minimum",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Package.swift",
         "region": {
           "end_line": 24,
@@ -68,7 +68,7 @@
     {
       "name": "SwiftOpenAI latest",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Package.swift",
         "region": {
           "end_line": 24,
@@ -84,7 +84,7 @@
     {
       "name": "Apple Foundation Models OS availability",
       "source": {
-        "commit": "0074f532d639b83c27966f8c75ffe37ed8df6cc8",
+        "commit": "d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
           "end_line": 8,

@@ -1,0 +1,180 @@
+---
+title: "Send a protected request from React Native"
+description: "Run the version-locked source example and exercise one TypeScript API through native iOS and Android security modules."
+icon: "atom"
+audience: "client-react-native"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "react-native-sdk"
+---
+
+import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
+import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">React Native 0.82</Badge>
+
+**Expected time:** 15 minutes after the version-locked source checkouts,
+gateway resources, identity, and both native host configurations exist.
+
+**Mode:** Source evaluation; iOS and Android compilation is distinct from
+protected App Attest, Play Integrity, or distribution evidence.
+
+**Coordinates:** server contract `1.0.0`; React Native SDK source `1.0.0` with
+its locked iOS and Android SDK checkpoints.
+
+## Outcome
+
+Use the same TypeScript request surface on iOS and Android while native modules
+own component keys, DPoP, session rotation, and platform attestation.
+
+## Before you start
+
+- a gateway application, environment, feature, identity, and platform trust
+  configuration
+- authorized, version-locked checkouts of the React Native, iOS, and Android
+  SDK source candidates
+- React Native 0.82 with the New Architecture enabled
+- iOS 15+ and Android API 24+ native toolchains
+
+<Warning>
+  The npm package and native artifacts are not published. The source example is
+  the prepublication integration path. Current evidence covers a real iOS 27
+  Apple Development-signed app; Android physical and protected distribution
+  evidence remain release gates.
+</Warning>
+
+## What you will build
+
+```text
+TypeScript API -> native iOS or Android module -> platform key + attestation -> Latchway
+```
+
+JavaScript never receives a private key, attestation evidence, access token, or
+refresh token from the native bridge.
+
+## Procedure
+
+<Steps>
+  <Step title="Install the source workspace">
+    From the `latchway-react-native-sdk` checkout, install the locked JavaScript
+    dependencies and native host dependencies.
+
+```bash
+corepack pnpm install --frozen-lockfile
+cd example/ios && bundle exec pod install && cd ../..
+```
+
+    Expected result: the example resolves the pinned sibling iOS and Android
+    source coordinates. Do not substitute registry packages before promotion.
+    Diagnostic: run `corepack pnpm example:check` from the SDK root.
+  </Step>
+  <Step title="Complete native host setup">
+    <Tabs>
+      <Tab title="iOS">
+        Enable App Attest for the exact application identifier. Put the fully
+        resolved private root group first in the signed Keychain entitlement
+        and list only explicit extension-shared groups as migration inputs.
+      </Tab>
+      <Tab title="Android">
+        Compile against the source candidate's required API, configure the
+        numeric Play cloud project, and use the exact package and signing
+        certificate expected by the gateway.
+      </Tab>
+    </Tabs>
+
+    Expected result: each native host resolves only its intended sibling SDK
+    and exact signing or package coordinates. Diagnostic: build iOS with
+    `xcodebuild -workspace example/ios/LatchwayExample.xcworkspace -scheme LatchwayExample -showBuildSettings`
+    and Android with `./android/gradlew -p example/android :app:compileDebugKotlin --no-daemon`.
+  </Step>
+  <Step title="Create the client once">
+    Put the version-matched setup in `src/latchway.ts` and retain one client for
+    the application security scope.
+
+    <ReactNativeCreateClient />
+
+    Expected result: TypeScript creates one stable client whose private keys,
+    attestation evidence, access token, and refresh token stay behind the native
+    bridge. Diagnostic: run `corepack pnpm example:check` from the SDK root.
+  </Step>
+  <Step title="Send and consume the stream">
+    Put the request in `src/HabitAssistant.tsx`. The request is bound to a
+    feature; the model string is only a compatibility placeholder.
+
+    <ReactNativeStreamingFetch />
+
+    Expected result: the response body streams through the native-backed fetch
+    implementation and retains cancellation semantics. Diagnostic: run
+    `corepack pnpm example:bundle:check` before diagnosing a device-specific
+    failure from its safe request ID.
+  </Step>
+</Steps>
+
+## Verification
+
+Run the example once per native platform. Correlate the response request ID to
+one Console row on each platform:
+
+```text
+Platform: react_native_ios or react_native_android
+Feature: habit-assistant
+User: usr_...
+Installation Family: fam_...
+Client Component: cmp_...
+DPoP: verified
+Input and output usage: present
+```
+
+Mark Android as pending until it runs on the exact Play-distributed application;
+do not infer that result from the iOS example.
+
+## What Latchway established
+
+<SecurityGuarantee
+  establishes={[
+    "JavaScript used one API while the selected native SDK owned security state.",
+    "The request possessed the native component key bound to its session.",
+    "The server applied the configured identity, trust, feature, route, and quota policy.",
+  ]}
+  doesNotEstablish={[
+    "JavaScript storage became hardware-backed.",
+    "Development signing proved protected Apple distribution.",
+    "iOS evidence proved Android or delegated-extension runtime behavior.",
+  ]}
+/>
+
+## Production next step
+
+<Card title="Complete both native release proofs" icon="badge-check" href="/mobile/device-proof">
+  Bind each exact signed artifact to its platform verdict, gateway image,
+  source commit, contract coordinate, and request evidence.
+</Card>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="The native module is unavailable">
+    Confirm React Native 0.82 New Architecture, install CocoaPods on iOS, clean
+    the Android build, and rebuild the host application. Expo support is not
+    inferred from the source candidate.
+  </Accordion>
+  <Accordion title="Two clients report conflicting configuration">
+    Equivalent clients share one native security scope. Create one stable
+    client per scope and keep its gateway, application, environment, and native
+    security configuration identical.
+  </Accordion>
+  <Accordion title="Streaming stops after cancellation">
+    Cancellation is terminal for that request. Create a new request; never
+    replay a consumed or streaming body to recover a session.
+  </Accordion>
+</AccordionGroup>
+
+<Prompt title="Integrate Latchway React Native source candidate 1.0.0">
+Use React Native SDK 1.0.0 with React Native 0.82 New Architecture and server
+1.0.0. Keep keys, attestation, DPoP, and refresh state in native modules. Use
+one stable TypeScript client, bind fetch to a feature, preserve AbortSignal and
+streaming, and never expose native credentials or provider keys to JavaScript.
+</Prompt>

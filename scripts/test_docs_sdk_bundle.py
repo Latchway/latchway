@@ -88,6 +88,17 @@ class SDKDocumentationBundleTests(unittest.TestCase):
         return output.getvalue()
 
     def test_checked_in_lock_archives_and_generated_outputs_are_exact_and_idempotent(self) -> None:
+        web_documents = {
+            "frameworks/langchain.ts",
+            "frameworks/openai.ts",
+            "frameworks/vercel-ai.ts",
+            "quickstart/firebase-app-check.ts",
+            "quickstart/vanilla-development-helper.ts",
+            "quickstart/vanilla-development-client.ts",
+            "quickstart/vanilla-streaming-fetch.ts",
+        }
+        self.assertEqual(set(MODULE.SDK_SPECS["js"]["required_documents"]), web_documents)
+        self.assertEqual(MIRROR.SDK_SPECS["js"]["documents"], web_documents)
         locked = MODULE.load_locked_bundles(require_complete=True)
         self.assertEqual([entry["id"] for entry, _ in locked], sorted(MODULE.SDK_SPECS))
         first = MODULE.render_outputs(locked)

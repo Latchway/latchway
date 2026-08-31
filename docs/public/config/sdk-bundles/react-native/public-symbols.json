@@ -4,7 +4,7 @@
     {
       "name": "AndroidKeyPolicy",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 20,
@@ -19,7 +19,7 @@
     {
       "name": "AndroidKeyPolicy",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 13,
@@ -34,7 +34,7 @@
     {
       "name": "AndroidSecurityOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 21,
@@ -49,7 +49,7 @@
     {
       "name": "AndroidSecurityOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 30,
@@ -64,7 +64,7 @@
     {
       "name": "AppleSecurityOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 22,
@@ -79,7 +79,7 @@
     {
       "name": "AppleSecurityOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 18,
@@ -94,7 +94,7 @@
     {
       "name": "AppleSoftwareKeyFallbackPolicy",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 23,
@@ -109,7 +109,7 @@
     {
       "name": "AppleSoftwareKeyFallbackPolicy",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 11,
@@ -124,7 +124,7 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 13,
@@ -139,7 +139,7 @@
     {
       "name": "CONTRACT_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/version.ts",
         "region": {
           "end_line": 2,
@@ -154,7 +154,7 @@
     {
       "name": "DefaultLatchwayClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/client.ts",
         "region": {
           "end_line": 158,
@@ -169,7 +169,7 @@
     {
       "name": "DefaultLatchwayComponentClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/component-client.ts",
         "region": {
           "end_line": 24,
@@ -184,7 +184,7 @@
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 24,
@@ -199,7 +199,7 @@
     {
       "name": "FetchImplementation",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 38,
@@ -214,7 +214,7 @@
     {
       "name": "GetIdentityToken",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 25,
@@ -229,7 +229,7 @@
     {
       "name": "GetIdentityToken",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 9,
@@ -244,7 +244,7 @@
     {
       "name": "IdentityTokenProvider",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 26,
@@ -259,7 +259,7 @@
     {
       "name": "IdentityTokenProvider",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 5,
@@ -274,7 +274,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 5,
@@ -289,7 +289,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 27,
@@ -304,7 +304,7 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 186,
@@ -319,7 +319,7 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 6,
@@ -334,7 +334,7 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 28,
@@ -349,7 +349,7 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 174,
@@ -364,7 +364,7 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 7,
@@ -379,7 +379,7 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 29,
@@ -394,7 +394,7 @@
     {
       "name": "LatchwayComponentOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 135,
@@ -409,7 +409,7 @@
     {
       "name": "LatchwayError",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 11,
@@ -424,7 +424,7 @@
     {
       "name": "LatchwayFetch",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 31,
@@ -439,7 +439,7 @@
     {
       "name": "LatchwayFetch",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 36,
@@ -454,7 +454,7 @@
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 30,
@@ -469,7 +469,7 @@
     {
       "name": "LatchwayFetchInit",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 55,
@@ -484,7 +484,7 @@
     {
       "name": "LatchwayOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 8,
@@ -499,7 +499,7 @@
     {
       "name": "LatchwayOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 32,
@@ -514,7 +514,7 @@
     {
       "name": "LatchwayOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 40,
@@ -529,7 +529,7 @@
     {
       "name": "NativeLatchwayModule",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/native/bridge.ts",
         "region": {
           "end_line": 3,
@@ -544,7 +544,7 @@
     {
       "name": "NativeLease",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/coordinator.ts",
         "region": {
           "end_line": 24,
@@ -559,7 +559,7 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 14,
@@ -574,7 +574,7 @@
     {
       "name": "PROTOCOL_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/version.ts",
         "region": {
           "end_line": 3,
@@ -589,7 +589,7 @@
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 33,
@@ -604,7 +604,7 @@
     {
       "name": "QuotaLimit",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 59,
@@ -619,7 +619,7 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 34,
@@ -634,7 +634,7 @@
     {
       "name": "QuotaSnapshot",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 69,
@@ -649,7 +649,7 @@
     {
       "name": "ReactNativeComponentAppleOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 36,
@@ -664,7 +664,7 @@
     {
       "name": "ReactNativeComponentAppleOptions",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 124,
@@ -679,7 +679,7 @@
     {
       "name": "ReactNativeComponentDiagnostics",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 35,
@@ -694,7 +694,7 @@
     {
       "name": "ReactNativeComponentDiagnostics",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 156,
@@ -709,7 +709,7 @@
     {
       "name": "ReactNativeComponentTrustSource",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 37,
@@ -724,7 +724,7 @@
     {
       "name": "ReactNativeComponentTrustSource",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 146,
@@ -739,7 +739,7 @@
     {
       "name": "ReactNativeDiagnostics",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 38,
@@ -754,7 +754,7 @@
     {
       "name": "ReactNativeDiagnostics",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 75,
@@ -769,7 +769,7 @@
     {
       "name": "ReactNativeDirectAttestationComponent",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 39,
@@ -784,7 +784,7 @@
     {
       "name": "ReactNativeDirectAttestationComponent",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 117,
@@ -799,7 +799,7 @@
     {
       "name": "ReactNativeDirectAttestationComponentKind",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 40,
@@ -814,7 +814,7 @@
     {
       "name": "ReactNativeDirectAttestationComponentKind",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 107,
@@ -829,7 +829,7 @@
     {
       "name": "ReactNativePlatform",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 41,
@@ -844,7 +844,7 @@
     {
       "name": "ReactNativePlatform",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/types.ts",
         "region": {
           "end_line": 3,
@@ -859,7 +859,7 @@
     {
       "name": "RuntimeComponentConfiguration",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/config.ts",
         "region": {
           "end_line": 21,
@@ -874,7 +874,7 @@
     {
       "name": "RuntimeConfiguration",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/config.ts",
         "region": {
           "end_line": 9,
@@ -889,7 +889,7 @@
     {
       "name": "SDK_KIND",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 15,
@@ -904,7 +904,7 @@
     {
       "name": "SDK_KIND",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/version.ts",
         "region": {
           "end_line": 5,
@@ -919,7 +919,7 @@
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 16,
@@ -934,7 +934,7 @@
     {
       "name": "SDK_VERSION",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/version.ts",
         "region": {
           "end_line": 1,
@@ -949,7 +949,7 @@
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 17,
@@ -964,7 +964,7 @@
     {
       "name": "SUPPORTED_PROTOCOL_VERSIONS",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/version.ts",
         "region": {
           "end_line": 4,
@@ -979,7 +979,7 @@
     {
       "name": "Spec",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/native/NativeLatchway.ts",
         "region": {
           "end_line": 4,
@@ -994,7 +994,7 @@
     {
       "name": "abortError",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/errors.ts",
         "region": {
           "end_line": 154,
@@ -1009,7 +1009,7 @@
     {
       "name": "assertNoCredentialFields",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/native-output.ts",
         "region": {
           "end_line": 23,
@@ -1024,7 +1024,7 @@
     {
       "name": "configure",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/config.ts",
         "region": {
           "end_line": 29,
@@ -1039,7 +1039,7 @@
     {
       "name": "configureComponent",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/config.ts",
         "region": {
           "end_line": 104,
@@ -1054,7 +1054,7 @@
     {
       "name": "createLatchwayClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 44,
@@ -1069,7 +1069,7 @@
     {
       "name": "createLatchwayComponentClient",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 49,
@@ -1084,7 +1084,7 @@
     {
       "name": "errorFromResponse",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/index.ts",
         "region": {
           "end_line": 11,
@@ -1099,7 +1099,7 @@
     {
       "name": "fromNativeError",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/errors.ts",
         "region": {
           "end_line": 93,
@@ -1114,7 +1114,7 @@
     {
       "name": "installNativeModuleForTesting",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/testing.ts",
         "region": {
           "end_line": 5,
@@ -1129,7 +1129,7 @@
     {
       "name": "isCanonicalRequestID",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/request-id.ts",
         "region": {
           "end_line": 3,
@@ -1144,7 +1144,7 @@
     {
       "name": "nativeUnavailable",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/errors.ts",
         "region": {
           "end_line": 146,
@@ -1159,7 +1159,7 @@
     {
       "name": "setTestingNativeModule",
       "source": {
-        "commit": "11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc",
+        "commit": "abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602",
         "file": "src/native/bridge.ts",
         "region": {
           "end_line": 21,

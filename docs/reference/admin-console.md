@@ -4,20 +4,30 @@ The embedded console is a same-origin client of the canonical Admin API. It
 does not connect to PostgreSQL, invent a second configuration model, evaluate
 policy locally, or retain administrative credentials in Web Storage.
 
-## Named navigation
+## Workspace context and navigation
 
-The authenticated sidebar maps the v1 operator areas literally:
+The selected application and environment are first-class workspace context,
+not free-form IDs on task pages. The top bar resolves both through the
+canonical organization/application/environment endpoints and places their
+slugs in URL search parameters. Navigation preserves that search. An explicitly
+invalid URL is blocked, production is labeled with text as well as color, and
+the console never silently substitutes another environment.
+
+Primary navigation follows common operator tasks. Technical resources remain
+reachable under Configure, Investigate, Operations, and Advanced:
 
 | Group | Named views |
 | --- | --- |
-| Workspace | Applications, Environments, Setup wizard |
-| Administration | Administrators, API tokens |
-| Identity | Authentication providers, Attestation, Users, Installations |
-| AI Configuration | Features, Routes, Upstreams, Models & pricing, Secrets, Full configuration |
-| Governance | Access policies, Limit plans, User overrides, Abuse controls |
-| Observability | Requests, Usage, Cost, Latency, Errors, Attestation failures |
+| Primary | Features, Requests, Users, Usage |
+| Configure | AI connections, Client access, Environments, Setup guide |
+| Investigate | Cost, Latency, Errors, Attestation failures |
 | Operations | Configuration revisions, Route simulator, Self-tests, Audit log |
-| System | System health |
+| Advanced | Applications, Routes, Models & pricing, Secrets, policies, limits, full configuration |
+| Team and system | Administrators, API tokens, System health |
+
+`Command-K` / `Control-K` opens a searchable palette over those destinations.
+The palette can navigate to dangerous workflows but cannot activate, rotate,
+delete, revoke, or otherwise mutate data itself.
 
 Authentication providers, attestation, features, nested routes, upstreams,
 models/input-accounting/pricing, access policies, limit plans, and abuse
@@ -30,6 +40,44 @@ optionally activates under the newest strong ETag. A stale base or ETag fails
 before activation. The Admin API accepts the replacement document itself as
 the PATCH body; the console does not invent a `{document: ...}` wrapper or a
 partial server configuration model.
+
+Features additionally have a task-level workspace. Read-only cards summarize
+the active access expression, limit plan, primary/fallback route, and physical
+models, with full JSON behind an advanced disclosure. The add-feature wizard
+accepts only schema-backed fields. Saving clones the exact active revision,
+PATCHes the preserved full document, validates it, and obtains a redacted
+server plan; it never activates. Publishing is a separate action under the
+newest strong ETag and states the selected environment and production
+consequence next to the button. Client setup output includes only gateway and
+feature identifiers, never provider credentials.
+
+AI connections are also task-oriented. One form assembles an HTTPS upstream,
+write-only bearer secret reference (or explicit no-auth choice), physical model,
+input-accounting profile, and operator-reviewed USD pricing. Decimal prices are
+converted exactly to integer nano-USD without floating-point arithmetic. The
+secret value is cleared before the request completes and never enters the
+configuration document. The full document is staged and validated first;
+publishing and the bounded upstream self-test are separate, deliberate actions.
+The self-test uses only API-supported OpenAI-compatible targets and never acts
+as a client application.
+
+Client access groups the normally separate identity-provider, attestation-policy,
+component-definition, and feature-grant resources. The common path supports an
+iOS App Attest root component, an Android Play Integrity root component, or a
+Web Firebase App Check root component, with production-aware defaults and an
+optional Firebase authentication provider. Usage plans similarly translate
+daily request/token/cost ceilings, per-request token ceilings, concurrency,
+scope, and an IANA timezone into explicit hard server rules. The console shows
+configured plan sentences, but does not claim to show resolved effective limits:
+the Admin API does not expose effective values and their contributing sources.
+
+For the isolated Development workspace, `latchway develop` owns the mock
+identity, debug proof material, loopback upstream, seeded configuration, and
+one-run Console access. The console detects that active loopback fixture and
+guides the operator to run the official `habit-assistant` client sample. Its
+verification button only reads the bounded durable request list; it cannot
+provision the mock or submit a client request through the Admin API. The normal
+connection wizard remains HTTPS-only.
 
 Cost, latency, errors, and attestation failures are separate focused pages over
 the canonical bounded analytics endpoints. They deliberately render only the
@@ -67,14 +115,36 @@ an active strong ETag. On click, the console fetches the active revision again
 and sends that fresh ETag with the exact target revision ID. The server performs
 the atomic conflict check and audit mutation.
 
-Selecting a logical request loads the exact request-detail endpoint. The view
-shows request status, start/completion/duration, aggregate usage, and ordered
+The workspace top bar separately asks for the newest revision and surfaces its
+server state when it is draft, valid, or invalid. Following that indicator opens
+history already scoped to the selected environment. This is the strongest
+global draft affordance supported by the contract: there is no organization-wide
+draft count/filter endpoint and no abandon, delete, or archive operation for a
+configuration revision. The console labels that limitation and leaves an
+unpublished revision inert rather than presenting a destructive control that
+cannot be honored.
+
+Selecting a logical request stores the exact selection in the workspace URL and
+loads the exact request-detail endpoint. The view begins with a chronological
+identity/trust/feature/attempt/settlement timeline plus short explanations of
+outcome, fallback, and cost confidence. It then shows request status,
+start/completion/duration, aggregate usage, and ordered
 attempt number, route, start/first-byte/first-token/completion timing, upstream,
 physical model, public status, optional HTTP status, sanitized failure category,
 usage, cost, and independent usage/cost provenance. Failure values are restricted to
 the canonical public vocabulary and unknown durable values appear only as
 `unknown`. Raw request/response or provider error bodies, provider error text,
 internal errors, and identity subjects remain excluded.
+
+## Generated Admin API contract
+
+`web/console/scripts/generate-admin-api.mjs` compiles the canonical
+`api/admin.openapi.yaml` document with the exactly pinned `openapi-typescript`
+version into `web/console/src/generated/admin-api.ts`. The generated artifact is
+checked in for deterministic Go builds. `pnpm check:api` compares generated
+bytes and is part of `pnpm check` and `pnpm build`; `pnpm generate:api` is the
+only update path. Generated component types constrain console resource schemas,
+while strict bounded Zod schemas continue to validate untrusted runtime JSON.
 
 The route simulator can load one environment's exact active revision and its
 bounded canonical feature IDs. It preselects that revision/feature and rejects

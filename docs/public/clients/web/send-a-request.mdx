@@ -1,0 +1,36 @@
+---
+title: "Send a feature-bound Web request"
+description: "Use the browser Fetch surface without letting callers select upstream credentials, routes, or physical models."
+icon: "send"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Create one transport for a stable feature:
+
+```typescript
+const aiFetch = latchway.fetchFor("habit-assistant");
+
+const response = await aiFetch("/v1/responses", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ input: "Suggest one small habit." }),
+});
+```
+
+The server selects the physical route and model after policy evaluation. Do
+not derive the feature from a destination URL or untrusted request header.
+
+The SDK signs only the configured gateway origin and contract-declared
+Responses, Chat Completions, Embeddings, Anthropic Messages, or the bound
+feature's opaque proxy namespace. It removes incoming authorization, provider,
+cookie, and signed-cloud credential headers before adding Latchway
+authorization.
+
+Use `errorFromResponse(response.clone())` to map a final Problem response when
+the application wants typed Latchway errors. Ordinary protected HTTP failures
+remain Response objects so framework behavior is preserved.

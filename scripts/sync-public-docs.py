@@ -21,6 +21,8 @@ import tempfile
 MANIFEST_NAME = ".latchway-docs-source.json"
 IGNORED_PARTS = {".git", "__pycache__", "node_modules"}
 IGNORED_NAMES = {".DS_Store", MANIFEST_NAME}
+ASSISTANT_PATH = ".mintlify/Assistant.md"
+SKILLS_PREFIX = ".mintlify/skills/"
 
 
 def sha256(path: Path) -> str:
@@ -37,8 +39,12 @@ def source_files(source: Path) -> dict[str, Path]:
         relative = path.relative_to(source)
         if any(part in IGNORED_PARTS for part in relative.parts):
             continue
-        if ".mintlify" in relative.parts and relative.as_posix() != ".mintlify/Assistant.md":
-            continue
+        relative_text = relative.as_posix()
+        if ".mintlify" in relative.parts:
+            is_assistant = relative_text == ASSISTANT_PATH
+            is_skill_resource = relative_text.startswith(SKILLS_PREFIX)
+            if not (is_assistant or is_skill_resource):
+                continue
         if path.name in IGNORED_NAMES:
             continue
         if path.suffix in {".pyc", ".pyo"}:
@@ -46,7 +52,7 @@ def source_files(source: Path) -> dict[str, Path]:
         if path.is_symlink():
             raise ValueError(f"source contains a symlink: {relative}")
         if path.is_file():
-            files[relative.as_posix()] = path
+            files[relative_text] = path
     return files
 
 

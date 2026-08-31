@@ -1,0 +1,38 @@
+---
+title: "Coordinate Web sessions across tabs"
+description: "Use the SDK's IndexedDB refresh lease and in-process single flight without racing rotating refresh tokens."
+icon: "panels-top-left"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+One client instance single-flights concurrent refreshes in its JavaScript
+runtime. Across tabs or a same-origin service worker, an IndexedDB transaction
+acquires a short lease before using the rotating refresh token.
+
+```text
+Tab A                  IndexedDB                  Tab B
+  |-- acquire lease ------>|                        |
+  |-- refresh + rotate ----|                        |-- lease denied
+  |-- store new session -->|                        |-- poll session
+  |-- release lease ------>|                        |<- read new token state
+```
+
+A losing tab polls the updated session record and never submits the known-stale
+refresh token. The lease expires after a bounded interval so a crashed tab
+cannot block refresh forever. Server refresh remains idempotent only within its
+documented rotating-token rules; application code must not coordinate or copy
+refresh tokens itself.
+
+<Info>
+  Version 1.0.0 uses an IndexedDB lease. It does not use Web Locks or
+  BroadcastChannel. Documentation that attributes those mechanisms to this
+  source candidate is incorrect.
+</Info>
+
+Use the same persistence database scope for clients that intentionally share a
+browser Installation Family. Different origins never share IndexedDB state.

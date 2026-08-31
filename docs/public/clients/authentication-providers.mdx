@@ -1,0 +1,75 @@
+---
+title: "Authentication providers"
+description: "Connect an existing Firebase, Supabase, Clerk, or custom JWT identity without confusing authentication with client attestation."
+icon: "user-round-check"
+audience: "mixed"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "core-security"
+---
+
+<Badge color="blue">All client platforms</Badge> <Badge color="yellow">Source candidate</Badge>
+
+Latchway authenticates an application's existing users. It does not create a
+second login system. The application supplies a current identity token only when
+the SDK establishes or reauthenticates a session; the server verifies that token
+against the active environment's identity-provider policy.
+
+<Warning>
+  Authentication identifies the user. App Attest, Play Integrity, App Check,
+  Turnstile, or debug evidence evaluates the client. DPoP proves possession of
+  the session-bound component key. Configure and diagnose these inputs
+  separately.
+</Warning>
+
+## Firebase
+
+Configure the exact Firebase project ID in Latchway. The provider type pins the
+Firebase issuer and audience relationship and accepts only RS256. Keep normal
+Firebase sign-in in the application and give the SDK a callback that returns the
+current ID token. Native App Attest or Play Integrity and Web App Check are
+separate trust inputs; a Firebase identity token does not provide either one.
+
+- Web callback: [Configure Web authentication](/clients/web/authentication)
+- Server fields: [Identity and attestation](/concepts/identity-and-attestation)
+- Production trust: [Physical-device proof](/mobile/device-proof) or
+  [Browser trust](/clients/web/browser-trust)
+
+## Supabase
+
+Configure the exact HTTPS project URL; Latchway derives the bounded Supabase
+issuer, audience, and key-discovery relationship from it. Preserve the
+application's existing Supabase session and return only its current access
+token from the SDK identity callback.
+
+- Browser callback: [Supabase or Clerk](/clients/web/authentication)
+- Server constraints: [Identity and attestation](/concepts/identity-and-attestation)
+
+## Clerk
+
+Configure the exact issuer, audience, allowed algorithms, and key-discovery
+policy. The application remains responsible for interactive sign-in and token
+renewal; the SDK requests a current token only when the Latchway session needs
+identity.
+
+- Browser callback: [Supabase or Clerk](/clients/web/authentication)
+- Server constraints: [Identity and attestation](/concepts/identity-and-attestation)
+
+## Custom JWT
+
+Configure one exact issuer, a bounded audience set, a signature algorithm set,
+and a JWKS or acknowledged symmetric-secret policy. Do not accept an algorithm
+from an untrusted token header, and do not place the verifier secret in a client.
+
+- Browser callback: [Custom JWT](/clients/web/authentication)
+- Configuration fields: [Configuration schema](/reference/config-schema)
+
+## Verify authentication
+
+Complete one platform quickstart and correlate its request ID. The request view
+must show the normalized Latchway user and the separately accepted trust source.
+On `identity_token_invalid` or `identity_reauthentication_required`, follow the
+exact [error-code guidance](/reference/errors) rather than weakening the trust
+policy or logging the token.

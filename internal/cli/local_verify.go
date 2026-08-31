@@ -11,10 +11,55 @@ import (
 	"time"
 
 	"github.com/latchway/latchway/internal/localverify"
+	"github.com/latchway/latchway/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
 var environmentVariableName = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
+
+func newDevelopCommand(opts *options) *cobra.Command {
+	var databaseURLEnvironment, listenAddress, browserOrigin string
+	command := &cobra.Command{
+		Use:     "develop",
+		Aliases: []string{"dev"},
+		Short:   "Run an isolated local gateway, mock services, helpers, and Console for client quickstarts",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			databaseURL, err := localDatabaseURL(cmd, databaseURLEnvironment)
+			if err != nil {
+				return err
+			}
+			logger := telemetry.NewLogger(opts.stderr, "info")
+			return localverify.RunDevelopment(cmd.Context(), localverify.DevelopmentConfig{
+				DatabaseURL: databaseURL, ListenAddress: listenAddress,
+				BrowserOrigin: browserOrigin, Logger: logger,
+				OnReady: func(info localverify.DevelopmentInfo) error {
+					return opts.print(map[string]any{
+						"state": "ready", "gateway_url": info.GatewayURL,
+						"application_id": info.ApplicationID, "environment": info.Environment,
+						"feature": info.Feature, "model": info.Model, "browser_origin": info.BrowserOrigin,
+						"identity_token_url":       info.IdentityTokenURL,
+						"attestation_evidence_url": info.AttestationEvidenceURL,
+						"console_url":              info.ConsoleURL, "console_email": info.ConsoleEmail,
+						"console_password":               info.ConsolePassword,
+						"ios_bundle_identifier":          info.IOSBundleIdentifier,
+						"android_package_name":           info.AndroidPackageName,
+						"react_native_bundle_identifier": info.ReactNativeBundleID,
+						"react_native_package_name":      info.ReactNativePackageName,
+						"cleanup":                        "automatic_on_exit",
+					})
+				},
+			})
+		},
+	}
+	command.Flags().StringVar(
+		&databaseURLEnvironment, "database-url-env", "LATCHWAY_DATABASE_URL",
+		"environment variable containing the PostgreSQL URL (DATABASE_URL is the default fallback)",
+	)
+	command.Flags().StringVar(&listenAddress, "listen", "127.0.0.1:8080", "exact loopback IP and port for the development gateway")
+	command.Flags().StringVar(&browserOrigin, "browser-origin", "http://localhost:5173", "exact loopback HTTP browser Origin allowed by the development configuration")
+	return command
+}
 
 func newVerifyLocalCommand(opts *options) *cobra.Command {
 	var databaseURLEnvironment, junitPath string
@@ -23,15 +68,9 @@ func newVerifyLocalCommand(opts *options) *cobra.Command {
 		Use: "local", Short: "Run the isolated PostgreSQL, session, proxy, quota, routing, and recovery vertical",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !environmentVariableName.MatchString(databaseURLEnvironment) {
-				return errors.New("--database-url-env must name an uppercase environment variable")
-			}
-			databaseURL := strings.TrimSpace(os.Getenv(databaseURLEnvironment))
-			if databaseURL == "" && databaseURLEnvironment == "LATCHWAY_DATABASE_URL" && !cmd.Flags().Changed("database-url-env") {
-				databaseURL = strings.TrimSpace(os.Getenv("DATABASE_URL"))
-			}
-			if databaseURL == "" {
-				return fmt.Errorf("database URL environment variable %s is empty", databaseURLEnvironment)
+			databaseURL, err := localDatabaseURL(cmd, databaseURLEnvironment)
+			if err != nil {
+				return err
 			}
 			report := localverify.Run(cmd.Context(), localverify.Config{
 				DatabaseURL: databaseURL, Timeout: timeout,
@@ -54,6 +93,20 @@ func newVerifyLocalCommand(opts *options) *cobra.Command {
 	command.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "total verification timeout (10s-5m)")
 	command.Flags().StringVar(&junitPath, "junit", "", "optional JUnit XML evidence output path")
 	return command
+}
+
+func localDatabaseURL(command *cobra.Command, environmentName string) (string, error) {
+	if command == nil || !environmentVariableName.MatchString(environmentName) {
+		return "", errors.New("--database-url-env must name an uppercase environment variable")
+	}
+	databaseURL := strings.TrimSpace(os.Getenv(environmentName))
+	if databaseURL == "" && environmentName == "LATCHWAY_DATABASE_URL" && !command.Flags().Changed("database-url-env") {
+		databaseURL = strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	}
+	if databaseURL == "" {
+		return "", fmt.Errorf("database URL environment variable %s is empty", environmentName)
+	}
+	return databaseURL, nil
 }
 
 func printLocalVerification(opts *options, report localverify.Report) error {

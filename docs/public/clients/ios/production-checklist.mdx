@@ -1,0 +1,60 @@
+---
+title: "Ship an iOS integration"
+description: "Verify the identity, signing, App Attest, key storage, transport, observability, and release evidence required for an iOS candidate."
+icon: "list-checks"
+audience: "client-ios"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+<Badge color="red">Production checklist</Badge>
+
+Do not promote an iOS integration from a passing simulator or source build.
+Bind every item below to the exact application artifact, SDK source, contract,
+gateway image, and configuration revision under review.
+
+## Application and identity
+
+- [ ] The application uses the generated `app_...` resource ID and exact
+  production environment.
+- [ ] The existing identity provider verifies issuer, audience, algorithm, and
+  current user token server-side.
+- [ ] Sign-out revokes or retires Latchway state according to product policy.
+
+## Native trust and storage
+
+- [ ] App Attest is enabled for the exact bundle and Team ID.
+- [ ] The signed private root Keychain group is first and fully resolved.
+- [ ] Software-key fallback is disallowed when policy requires hardware-backed
+  storage.
+- [ ] Extension groups and Component Definitions are explicit and delegated
+  components do not share root credentials.
+- [ ] Trust expiry, step-up, key invalidation, reset, and revocation paths were
+  exercised.
+
+## Transport and policy
+
+- [ ] Every request targets the exact HTTPS gateway origin and configured data
+  path.
+- [ ] Each framework or URLSession client is permanently feature-bound.
+- [ ] Streaming, cancellation, safe pre-dispatch recovery, and
+  `operation_indeterminate` reconciliation were tested.
+- [ ] Provider credentials and forbidden forwarding headers never enter the
+  application.
+
+## Operational proof
+
+- [ ] Request, user, family, component, trust, feature, route, usage, and quota
+  records correlate by safe request ID.
+- [ ] The physical-device run used the exact signed artifact and immutable
+  release coordinates.
+- [ ] Error links, diagnostics, and logs expose no credentials or raw evidence.
+- [ ] [Release status](/release-status) and the generated
+  [compatibility matrix](/reference/compatibility) record every claimed
+  package and framework tuple.
+
+Complete [Physical-device proof](/mobile/device-proof) before treating App
+Attest as release evidence.

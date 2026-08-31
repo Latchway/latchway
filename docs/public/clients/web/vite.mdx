@@ -1,0 +1,48 @@
+---
+title: "Build the complete Web example with Vite"
+description: "Use Vite as the explicit browser-only example host for identity, WebCrypto persistence, feature-bound fetch, and streaming."
+icon: "zap"
+audience: "client-web"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+Vite makes the browser boundary visible: application modules run in the
+browser, while only the build tool runs in Node.
+
+```bash
+corepack pnpm create vite web-app --template vanilla-ts
+cd web-app
+corepack pnpm install
+corepack pnpm add ./vendor/latchway-client-1.0.0.tgz
+```
+
+Place public deployment coordinates in `.env.development`:
+
+```text
+VITE_LATCHWAY_URL=http://localhost:8080
+VITE_LATCHWAY_APPLICATION_ID=app_01J00000000000000000000000
+VITE_LATCHWAY_ENVIRONMENT=development
+VITE_LATCHWAY_FEATURE=habit-assistant
+```
+
+These values are bundled into browser code and are not secrets. Never add
+provider credentials, Admin API tokens, debug-signing material, or refresh
+tokens to a `VITE_*` variable.
+
+Use the complete client and stream functions from the [Web quickstart](/clients/web/quickstart),
+then run the development server:
+
+```bash
+corepack pnpm dev --host 127.0.0.1
+```
+
+Add `http://127.0.0.1:5173` to the Web attestation policy's `allowedOrigins` in
+an environment whose kind is exactly `development`. If the application opens
+`http://localhost:5173`, configure that distinct origin instead. Loopback HTTP
+is rejected in staging and production. Before production, use the final HTTPS
+gateway and application origins, remove insecure-HTTP opt-in, and complete the
+[Web production checklist](/clients/web/production-checklist).

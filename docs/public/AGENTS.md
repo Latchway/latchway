@@ -7,8 +7,10 @@ not a second authoring source.
 
 - Keep implementation plans, evidence ledgers, internal ADRs, and maintainer
   notes outside this directory.
-- Give every MDX page unique `title` and `description` frontmatter and add it to
-  exactly one navigation location.
+- Give every MDX page unique `title`, `description`, `icon`, `audience`,
+  `pageType`, `serverVersion`, `sdkVersion`, `lastVerified`, and `owner`
+  frontmatter and add it to exactly one navigation location. Only the five
+  generated SDK-bundle routes may use the validated metadata overlay.
 - Use calm, direct, security-aware language. Avoid “simply,” “just,” “fully
   secure,” and unsupported release claims.
 - Distinguish authentication, attestation, authorization, and DPoP. Distinguish
@@ -16,6 +18,8 @@ not a second authoring source.
   physical model.
 - Never recommend upstream provider credentials in a client. Never call a
   delegated component directly attested.
+- Treat Web and React Native as separate platforms. WebCrypto key possession,
+  App Check, and Turnstile do not inherit native hardware-attestation claims.
 - Use generated OpenAPI, compatibility, and SDK-bundle outputs when available.
   Do not hand-edit generated support claims or snippets.
 - Run `pnpm check` in the canonical directory before synchronization. From the

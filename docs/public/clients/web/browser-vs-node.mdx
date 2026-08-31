@@ -1,0 +1,41 @@
+---
+title: "Compare browser and Node.js runtimes"
+description: "Choose the correct JavaScript runtime entry point without transferring browser trust claims to server-side or conformance code."
+icon: "split"
+audience: "client-web"
+pageType: "concept"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "javascript-sdk"
+---
+
+The browser SDK is the first-class Web product. Node.js support is a separate,
+bounded development and conformance runtime.
+
+| Capability | Browser | Node.js |
+| --- | --- | --- |
+| Existing end-user identity | Yes | Possible through an explicit callback |
+| Component key | Non-exportable WebCrypto P-256 | Memory-only software P-256 in 1.0.0 |
+| App Check or Turnstile | Supported risk signals | Usually not applicable |
+| Origin enforcement | Exact browser origin and CORS | No browser origin model |
+| Browser Installation Family | Yes | No by default; platform is `node` |
+| Full native attestation | No | No |
+| Persistence | Required IndexedDB by default | Memory only |
+| Intended use | End-user Web application | Development, conformance, selected server integrations |
+| Provider key in client | Never | Still excluded from the Latchway client |
+
+Import browser code from `@latchway/client`. Import Node conformance code from
+`@latchway/client/node` and label it accurately:
+
+```typescript
+import {
+  createCustomAttestationProvider,
+  createNodeLatchwayClient,
+} from "@latchway/client/node";
+```
+
+Node mode accepts an explicit software-key and server-configured debug path. It
+does not claim browser origin, App Check, Turnstile, application, device, or
+hardware trust. A production server-to-server authentication product is not
+implied by this conformance surface.

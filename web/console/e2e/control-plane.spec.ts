@@ -468,8 +468,6 @@ test("owner completes resource, secret, override, and exact-ETag rollback workfl
   ]);
 
   await page.getByRole("link", { name: /^Configuration revisions/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load newest revision" }).click();
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.activeRevision}`);
   await page.getByRole("button", { name: "Rollback to this revision" }).click();
   await expect(page.locator(".resource-result")).toContainText(`Active revision: ${ids.revision}`);
@@ -487,24 +485,23 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await page.getByRole("button", { name: "Sign in securely" }).click();
 
   await page.getByRole("link", { name: /^Upstreams/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "Load active configuration" }).click();
-  await page.getByRole("button", { name: "Delete openai" }).click();
-  await expect(page.getByRole("heading", { name: "Stage deletion of openai" })).toBeVisible();
-  await page.getByRole("button", { name: "Cancel deletion" }).click();
-  expect(fixture.configurationPatchBodies).toHaveLength(0);
+  await expect(page.getByRole("heading", { name: "Connect a provider without exposing its credential." })).toBeVisible();
+  await page.getByLabel("Connection ID").fill("gateway");
+  await page.getByLabel("Base URL").fill("https://gateway.example.test/v1");
+  await page.getByLabel("Secret name").fill("gateway_api_key");
+  await page.getByLabel("Provider credential").fill("test-only-gateway-secret");
+  await page.getByLabel("Logical model ID").fill("gateway_assistant");
+  await page.getByLabel("Physical provider model").fill("gateway-model-v1");
+  await page.getByRole("button", { name: "Review connection change" }).click();
+  await expect(page.getByRole("heading", { name: "Publish gateway to Production?" })).toBeVisible();
+  await expect(page.getByLabel("Provider credential")).toHaveValue("");
+  expect(fixture.secretBodies.at(-1)).toEqual({ environment_id: ids.environment, name: "gateway_api_key", value: "test-only-gateway-secret" });
+  await page.getByRole("button", { name: "Publish to Production" }).click();
+  await expect(page.getByRole("heading", { name: "Test the published connection" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit openai" }).click();
-  const upstream = JSON.parse(await page.getByLabel("Resource JSON").inputValue()) as Record<string, unknown>;
-  upstream.baseUrl = "https://gateway.example.test/v1";
-  await page.getByLabel("Resource JSON").fill(JSON.stringify(upstream, null, 2));
-  await page.getByRole("button", { name: "Stage resource" }).click();
-  await expect(page.getByText("Staged changes", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Validate and activate" }).click();
-  await expect(page.locator(".resource-result")).toContainText(`Revision ${ids.draftRevision} is active`);
-
-  const patched = fixture.configurationPatchBodies[0] as { metadata: unknown; spec: { identityProviders: unknown; upstreams: Array<Record<string, unknown>> } };
-  expect(patched.spec.upstreams[0]).toEqual(expect.objectContaining({ baseUrl: "https://gateway.example.test/v1", id: "openai", type: "openai_compatible" }));
+  const patched = fixture.configurationPatchBodies[0] as { metadata: unknown; spec: { identityProviders: unknown; models: Array<Record<string, unknown>>; upstreams: Array<Record<string, unknown>> } };
+  expect(patched.spec.upstreams).toContainEqual(expect.objectContaining({ baseUrl: "https://gateway.example.test/v1", id: "gateway", type: "openai_compatible" }));
+  expect(patched.spec.models).toContainEqual(expect.objectContaining({ id: "gateway_assistant", upstream: "gateway", upstreamModel: "gateway-model-v1" }));
   expect(patched.metadata).toEqual({ application: "mobile-app", environment: "production", labels: { retained: "yes" }, organization: "example" });
   expect(patched.spec.identityProviders).toEqual([{ id: "firebase", projectId: "example-mobile", type: "firebase" }]);
   expect(fixture.configurationETags).toEqual([
@@ -526,13 +523,13 @@ test("owner activates a targeted configuration merge and uses focused observabil
   await expect(page.getByText(/contains no raw App Attest assertion/)).toBeVisible();
 
   await page.getByRole("link", { name: /^Requests/ }).click();
-  await page.getByLabel("Environment ID").fill(ids.environment);
-  await page.getByRole("button", { name: "List requests" }).click();
+  await expect(page.locator(".production-context code")).toHaveText(ids.environment);
   await page.getByRole("button", { name: ids.request }).click();
+  await expect(page.getByRole("heading", { name: "Execution timeline" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Aggregate usage" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ordered upstream attempts" })).toBeVisible();
-  await expect(page.getByText("2.5 s")).toBeVisible();
-  await expect(page.getByText("primary")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "2.5 s" })).toBeVisible();
+  await expect(page.getByRole("cell", { exact: true, name: "primary" })).toBeVisible();
   await expect(page.getByText("750 ms")).toBeVisible();
   await expect(page.getByText(/closed, sanitized vocabulary/)).toBeVisible();
 

@@ -3,7 +3,7 @@
     {
       "name": "attestation_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 88,
@@ -18,7 +18,7 @@
     {
       "name": "attestation_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 86,
@@ -33,7 +33,7 @@
     {
       "name": "attestation_stale",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 89,
@@ -48,7 +48,7 @@
     {
       "name": "attestation_step_up_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 90,
@@ -63,7 +63,7 @@
     {
       "name": "attestation_unsupported",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 87,
@@ -78,7 +78,7 @@
     {
       "name": "authentication_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 130,
@@ -93,7 +93,7 @@
     {
       "name": "bootstrap_disabled",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 137,
@@ -108,7 +108,7 @@
     {
       "name": "component_definition_not_found",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 101,
@@ -123,7 +123,7 @@
     {
       "name": "component_delegation_expired",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 107,
@@ -138,7 +138,7 @@
     {
       "name": "component_direct_attestation_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 110,
@@ -153,7 +153,7 @@
     {
       "name": "component_feature_not_granted",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 108,
@@ -168,7 +168,7 @@
     {
       "name": "component_key_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 105,
@@ -183,7 +183,7 @@
     {
       "name": "component_key_replaced",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 106,
@@ -198,7 +198,7 @@
     {
       "name": "component_not_configured",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 102,
@@ -213,7 +213,7 @@
     {
       "name": "component_not_provisioned",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 103,
@@ -228,7 +228,7 @@
     {
       "name": "component_parent_trust_expired",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 109,
@@ -243,7 +243,7 @@
     {
       "name": "component_revoked",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 104,
@@ -258,7 +258,7 @@
     {
       "name": "concurrency_exceeded",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 120,
@@ -273,7 +273,7 @@
     {
       "name": "configuration_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 127,
@@ -288,7 +288,7 @@
     {
       "name": "conflict",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 133,
@@ -303,7 +303,7 @@
     {
       "name": "containing_app_setup_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 111,
@@ -318,7 +318,7 @@
     {
       "name": "dpop_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 92,
@@ -333,7 +333,7 @@
     {
       "name": "dpop_missing",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 91,
@@ -348,7 +348,7 @@
     {
       "name": "dpop_nonce_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 94,
@@ -363,7 +363,7 @@
     {
       "name": "dpop_replayed",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 93,
@@ -378,7 +378,7 @@
     {
       "name": "etag_mismatch",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 136,
@@ -393,7 +393,7 @@
     {
       "name": "etag_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 135,
@@ -408,7 +408,7 @@
     {
       "name": "feature_not_allowed",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 117,
@@ -423,7 +423,7 @@
     {
       "name": "feature_not_found",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 116,
@@ -438,7 +438,7 @@
     {
       "name": "framework_integration_unsupported",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 112,
@@ -453,7 +453,7 @@
     {
       "name": "framework_version_unsupported",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 113,
@@ -468,7 +468,7 @@
     {
       "name": "identity_reauthentication_required",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 85,
@@ -483,7 +483,7 @@
     {
       "name": "identity_token_expired",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 84,
@@ -498,7 +498,7 @@
     {
       "name": "identity_token_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 83,
@@ -513,7 +513,7 @@
     {
       "name": "identity_token_missing",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 82,
@@ -528,7 +528,7 @@
     {
       "name": "installation_family_not_found",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 100,
@@ -543,7 +543,7 @@
     {
       "name": "installation_family_revoked",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 99,
@@ -558,7 +558,7 @@
     {
       "name": "installation_revoked",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 98,
@@ -573,7 +573,7 @@
     {
       "name": "internal_error",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 139,
@@ -588,7 +588,7 @@
     {
       "name": "key_unavailable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 140,
@@ -603,7 +603,7 @@
     {
       "name": "model_not_allowed",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 118,
@@ -618,7 +618,7 @@
     {
       "name": "network_unavailable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 142,
@@ -633,7 +633,7 @@
     {
       "name": "operation_indeterminate",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 138,
@@ -648,7 +648,7 @@
     {
       "name": "output_limit_exceeded",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 121,
@@ -663,7 +663,7 @@
     {
       "name": "permission_denied",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 131,
@@ -678,7 +678,7 @@
     {
       "name": "pricing_unavailable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 122,
@@ -693,7 +693,7 @@
     {
       "name": "protocol_version_unsupported",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 129,
@@ -708,7 +708,7 @@
     {
       "name": "quota_exceeded",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 119,
@@ -723,7 +723,7 @@
     {
       "name": "rate_limited",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 134,
@@ -738,7 +738,7 @@
     {
       "name": "refresh_token_reused",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 97,
@@ -753,7 +753,7 @@
     {
       "name": "request_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 81,
@@ -768,7 +768,7 @@
     {
       "name": "resource_not_found",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 132,
@@ -783,7 +783,7 @@
     {
       "name": "response_invalid",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 143,
@@ -798,7 +798,7 @@
     {
       "name": "route_not_found",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 123,
@@ -813,7 +813,7 @@
     {
       "name": "secure_state_unavailable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 141,
@@ -828,7 +828,7 @@
     {
       "name": "server_not_ready",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 128,
@@ -843,7 +843,7 @@
     {
       "name": "session_expired",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 95,
@@ -858,7 +858,7 @@
     {
       "name": "session_revoked",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 96,
@@ -873,7 +873,7 @@
     {
       "name": "transport_destination_not_allowed",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 114,
@@ -888,7 +888,7 @@
     {
       "name": "transport_request_not_replayable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 115,
@@ -903,7 +903,7 @@
     {
       "name": "upstream_protocol_error",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 126,
@@ -918,7 +918,7 @@
     {
       "name": "upstream_timeout",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 125,
@@ -933,7 +933,7 @@
     {
       "name": "upstream_unavailable",
       "source": {
-        "commit": "c05a74e735da3589f907eb0a788a2970245c0cc8",
+        "commit": "b5b7d5321b54179f595f663892e7cda9bf34f7fd",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 124,

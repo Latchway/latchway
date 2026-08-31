@@ -16,9 +16,9 @@ remain open.
 | Current phase | Phase 9: source-converged candidate with supplemental physical iOS development evidence |
 | Current objective | Close protected immutable-candidate release evidence without claiming, tagging, publishing, or deploying version 1 early |
 | Last passing commit in each repository | Exact coordinates are listed below |
-| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
-| Database schema version | `24` in the current worktree; the recorded passing release coordinate remains schema `23` |
-| Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the recorded coordinates; the synchronized Mintlify mirror passed its separate full documentation gate |
+| Protocol contract version | Draft `1.0.0`; wire protocol `2`; contract freeze `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| Database schema version | `24` at the recorded passing source coordinate |
+| Last full test time | `2026-08-31` — all five code worktrees passed clean cross-repository source conformance at the source-converged tuple; the later JavaScript documentation-source checkpoint passed its full repository gate and deterministic bundle gate; the synchronized Mintlify mirror passed its separate full documentation gate |
 | Passing test commands | Verified commands and required working directories are listed below |
 | Open blockers | Before release: an Apple Distribution/ad hoc/TestFlight/App Store protected immutable candidate, physical Android/Play proof, delegated-extension runtime proof, Turnstile, immutable-image provider/cloud/resilience, supply-chain, independent-review, publication, and post-publication receipts |
 | External credentials still required | Known missing: Apple release-distribution signing and protected collector/finalizer authority. Later gates also require verified Play signing/console, Turnstile, cloud, registry, KMS/signing, reviewer, and package-publisher identities |
@@ -28,11 +28,11 @@ remain open.
 
 | Repository | Passing source coordinate |
 | --- | --- |
-| Core `latchway` | `4f2a7b04e826906ce999c6152a33a4f1155cbd24` |
-| JavaScript `latchway-js` | `8e36364419783b07acdd8fae82e457885f1c5447` |
-| Swift `latchway-ios-sdk` | `0074f532d639b83c27966f8c75ffe37ed8df6cc8` |
-| Android `latchway-android` | `c05a74e735da3589f907eb0a788a2970245c0cc8` |
-| React Native `latchway-react-native-sdk` | `11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc` |
+| Core `latchway` | `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| JavaScript `latchway-js` | `b0069e993967662f4ee2729dbc393595793c5e50` |
+| Swift `latchway-ios-sdk` | `d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2` |
+| Android `latchway-android` | `b5b7d5321b54179f595f663892e7cda9bf34f7fd` |
+| React Native `latchway-react-native-sdk` | `abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602` |
 | Mintlify mirror `latchway-docs` | `0233d6fde2bd9ede53dcbe3860f055a14fe55786` |
 
 ### Passing test commands
@@ -88,10 +88,10 @@ python3 scripts/cross-repo-conformance.py --scope source \
 | --- | --- |
 | Core branch | `codex/v1-implementation` |
 | Contract | `1.0.0` draft, `released_at: null` |
-| Contract freeze | Core checkpoint `72a52d7b42e6ea159e8222c5dd0346be286fb39a` |
-| Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
+| Contract freeze | Core checkpoint `6e44d1aacd85535d005db7d1df2f0e470f3dcffb` |
+| Bundle SHA-256 | `695811e0601b7d393137fb7021d43b5c70638ef43fb4b41ad83ac5dd12085d5c` |
 | Wire | Current `2`; discovery supports `[1, 2]` |
-| Database | Recorded candidate schema `23`; current worktree schema `24` is not yet a release coordinate |
+| Database | Recorded source candidate schema `24` |
 | Package/server range | Minimum `1.0.0`; maximum locally tested `1.0.x` |
 | Release state | `unreleased`; no tag or package publication authorized |
 
@@ -103,7 +103,7 @@ checkpoint and reproducible draft bundle above.
 
 | Workstream | Local source status | Remaining boundary |
 | --- | --- | --- |
-| Family/component contract and migrations | Implemented through schema 23; bundle and locks converged | Protected exact-candidate evidence |
+| Family/component contract and migrations | Implemented through schema 24; bundle and locks converged | Protected exact-candidate evidence |
 | Server trust/session/revocation/policy/quota runtime | Complete in source, including a generic component App Attest step-up protocol | Exact-candidate rerun and protected observations |
 | Responses, Chat, Embeddings, Anthropic, opaque protocols | Complete; opaque HTTP now has pairwise-disjoint exact-depth path templates while retaining the prior segment-bound `pathPrefixes` mode for existing v1 revisions; bounded OpenRouter verification passed against the current source gateway | Immutable-image provider rerun |
 | Weighted/sticky routing, fallback, retry, accounting | Complete | Exact-image load/failure evidence |
@@ -157,19 +157,22 @@ checkpoint and reproducible draft bundle above.
 
 These are source-development results, not protected release receipts. The
 clean-tree cross-repository source gate passed for core
-`4f2a7b04e826906ce999c6152a33a4f1155cbd24`, JavaScript
-`8e36364419783b07acdd8fae82e457885f1c5447`, iOS
-`0074f532d639b83c27966f8c75ffe37ed8df6cc8`, Android
-`c05a74e735da3589f907eb0a788a2970245c0cc8`, and React Native
-`11bfaef12f373a8a81e0b08a0f2ef0ef313e13dc`. The synchronized documentation
+`6e44d1aacd85535d005db7d1df2f0e470f3dcffb`, JavaScript
+`e88ae112b9deb372868064f9b9c70803d37faf87`, iOS
+`d5d2c61c1056821f4eb99bbb8e4d98cc5ae56de2`, Android
+`b5b7d5321b54179f595f663892e7cda9bf34f7fd`, and React Native
+`abf2e0f54f2ac4b650e7ccba37a51ae65c3a3602`. The synchronized documentation
 mirror passed its separate gate. These results do not substitute for any
-protected external domain.
+protected external domain. The later JavaScript-only documentation-source
+checkpoint `b0069e993967662f4ee2729dbc393595793c5e50` passed `pnpm check` and
+produced a clean deterministic SDK documentation bundle; it did not change a
+server or cross-SDK contract input.
 
 ## Direct component attestation boundary
 
-Schema 23 and wire 2 contain generic component-owned App Attest
-challenge/exchange routes and binding version 2. If an eligible platform can
-produce component-owned evidence, a delegated component can rotate only its
+Schema 24 retains the generic component-owned App Attest challenge/exchange
+routes and binding version 2 introduced in schema 23. If an eligible platform
+can produce component-owned evidence, a delegated component can rotate only its
 own DPoP-bound session while retaining delegation ancestry under
 `delegated_direct_attested`. The configured component policy remains
 `preferred` so it cannot qualify an initial delegated session; the explicit

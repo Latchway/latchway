@@ -1,0 +1,167 @@
+---
+title: "Send a protected request from iOS"
+description: "Build the Swift source candidate, authorize URLSession with a component key, and verify an App Attest-aware request."
+icon: "apple"
+audience: "client-ios"
+pageType: "tutorial"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "ios-sdk"
+---
+
+import IOSURLSessionQuickstart from "/snippets/generated/ios/quickstart/url-session.swift.mdx";
+import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+
+<Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">iOS 15+</Badge>
+
+**Expected time:** 15 minutes after the mandatory gateway, identity, signing,
+and App Attest prerequisites below are available.
+
+**Mode:** Source evaluation with production App Attest inputs; prerequisite
+provisioning and protected distribution evidence are not included.
+
+**Coordinates:** server contract `1.0.0`; Swift SDK source `1.0.0`.
+
+## Outcome
+
+Authorize a URLSession request for `habit-assistant`, stream or read its
+response, and correlate the request with its user, Installation Family,
+component, feature, and metered usage.
+
+## Before you start
+
+- a gateway that passed the [operator quickstart](/operate/quickstart)
+- an application resource ID, environment, feature, identity policy, and App
+  Attest policy configured in Latchway
+- an iOS application with the App Attest entitlement and resolved Keychain
+  access group
+- Xcode and an authorized checkout of `latchway-ios-sdk`
+
+<Warning>
+  The Swift 1.0.0 package is not published yet. The production SDK does not
+  accept an application-supplied debug attestation token. Local unit and
+  contract tests are deterministic; an end-to-end App Attest request requires
+  a correctly signed application on a supported physical device.
+</Warning>
+
+## What you will build
+
+```text
+iOS app -> Latchway Swift SDK -> configured Latchway -> selected upstream
+ identity   Keychain/Secure Enclave   policy + quota     server credential
+```
+
+## Procedure
+
+<Steps>
+  <Step title="Add the local Swift package">
+    In Xcode, add the `latchway-ios-sdk` checkout as a local package and link
+    `Latchway` plus `LatchwayAppAttest` to the application target.
+
+```swift
+.package(path: "../latchway-ios-sdk")
+```
+
+    Expected result: the app compiles against version-matched source.
+    Diagnostic: run `swift test` in the SDK checkout for a source or toolchain
+    mismatch.
+  </Step>
+  <Step title="Configure identity and App Attest">
+    In `LatchwayClientFactory.swift`, provide the existing application identity
+    token and the exact `app_...` resource ID, environment, HTTPS gateway, app
+    version, and fully resolved private Keychain access group.
+
+    Never pass `$(AppIdentifierPrefix)` as a runtime value. The SDK and server
+    configuration must agree on the bundle ID, App ID prefix, environment, and
+    exact build number used by App Attest policy.
+
+    Expected result: the application builds with the exact bundle identifier,
+    App Attest entitlement, and private root Keychain group expected by policy.
+    Diagnostic: inspect the built app with
+    `codesign -d --entitlements :- <path-to-built-app>`; do not infer the
+    runtime group from the unexpanded project file.
+  </Step>
+  <Step title="Authorize and send the request">
+    Put this complete source candidate in `HabitAssistant.swift` and replace
+    only the documented deployment values and identity provider.
+
+    <IOSURLSessionQuickstart />
+
+    Expected result: URLSession returns a successful response through the
+    Latchway-owned route. Inspect the response request ID before decoding the
+    provider payload. Diagnostic: run `swift test` in the SDK checkout to
+    separate a source transport failure from application signing or policy.
+  </Step>
+  <Step title="Inspect the console">
+    Open **Requests**, filter by `habit-assistant`, and correlate the response
+    request ID. The physical provider and model shown there are server-owned.
+
+    Expected result: one request row has the same request ID and the fields in
+    the Verification section below. Diagnostic: with an authenticated CLI, run
+    `latchway requests list --environment env_...` if the Console cannot load.
+  </Step>
+</Steps>
+
+## Verification
+
+Confirm all of the following in the Console or Admin API:
+
+```text
+Request status: Success
+Platform: ios
+Feature: habit-assistant
+User: usr_...
+Installation Family: fam_...
+Client Component: cmp_...
+Trust provider: app_attest
+Input and output usage: present
+```
+
+## What Latchway established
+
+<SecurityGuarantee
+  establishes={[
+    "The request carried a valid application identity accepted by server policy.",
+    "The request possessed the P-256 component key bound to its DPoP session.",
+    "The configured feature, route, and authoritative quota policy allowed dispatch.",
+  ]}
+  doesNotEstablish={[
+    "A simulator or source test is production App Attest evidence.",
+    "Apple Development signing is an App Store or protected distribution receipt.",
+    "The client selected the physical provider, model, price, or usage result.",
+  ]}
+/>
+
+## Production next step
+
+<Card title="Capture physical-device proof" icon="badge-check" href="/mobile/device-proof">
+  Test the exact signed and distributed application, require hardware-backed
+  key policy, and bind the evidence to the immutable release candidate.
+</Card>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="App Attest is unavailable">
+    Confirm a supported physical device, the production entitlement, the exact
+    bundle and team identifiers, and the configured environment. A simulator
+    cannot provide production App Attest evidence.
+  </Accordion>
+  <Accordion title="The root Keychain group is rejected">
+    Pass the fully resolved private application group that appears first in the
+    signed entitlement. List extension-shared groups only as explicit legacy
+    migration coordinates.
+  </Accordion>
+  <Accordion title="The request is denied before upstream dispatch">
+    Follow the stable error code to [Errors](/reference/errors), then compare
+    the feature grant, trust expiry, quota reservation, and request ID.
+  </Accordion>
+</AccordionGroup>
+
+<Prompt title="Integrate Latchway iOS source candidate 1.0.0">
+Use Latchway iOS SDK 1.0.0 from a local checkout with server 1.0.0. Preserve
+the existing identity provider, use the exact application resource ID and
+feature ID, keep App Attest and DPoP keys in native code, never add an upstream
+provider credential, and preserve URLSession cancellation and streaming.
+</Prompt>

@@ -459,6 +459,35 @@ func TestCanonicalBrowserHTTPSOrigin(t *testing.T) {
 	}
 }
 
+func TestValidatorAllowsLoopbackHTTPOriginsOnlyInDevelopment(t *testing.T) {
+	t.Parallel()
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentObject := configurationWithAttestationSelection(t, "web", map[string]any{
+		"provider": "debug", "mode": "required", "secretRef": "secret/present",
+		"allowedOrigins": []any{"http://localhost:5173"},
+	})
+	document, err := json.Marshal(documentObject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	development := testEnvironment()
+	development.EnvironmentKind = "development"
+	if report, compiled := validator.Validate(document, development, time.Now()); !report.Valid || len(compiled) == 0 {
+		t.Fatalf("development loopback origin rejected: %+v", report.Issues)
+	}
+	for _, environmentKind := range []string{"staging", "production"} {
+		environment := testEnvironment()
+		environment.EnvironmentKind = environmentKind
+		report, _ := validator.Validate(document, environment, time.Now())
+		if report.Valid || !hasIssue(report.Issues, "attestation_allowed_origin_invalid") {
+			t.Fatalf("%s loopback origin was not rejected: %+v", environmentKind, report.Issues)
+		}
+	}
+}
+
 func configurationWithAttestationSelection(
 	t *testing.T,
 	platform string,

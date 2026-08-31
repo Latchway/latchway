@@ -40,16 +40,16 @@ import (
 )
 
 const (
-	publicOrigin       = "https://gateway.local-verify.invalid"
-	accessAudience     = "latchway-data-plane"
-	oidcAudience       = "latchway-local-verify"
-	providerModel      = "latchway-mock-model"
-	configuredPrimary  = "https://primary.local-verify.invalid/v1"
-	configuredFailure  = "https://failure.local-verify.invalid/v1"
-	configuredFallback = "https://fallback.local-verify.invalid/v1"
-	debugKeyID         = "local-verify-debug-key"
-	providerTenant     = "local-verify"
-	blockedPrompt      = "local-verify-concurrency-hold"
+	verificationPublicOrigin = "https://gateway.local-verify.invalid"
+	accessAudience           = "latchway-data-plane"
+	oidcAudience             = "latchway-local-verify"
+	providerModel            = "latchway-mock-model"
+	configuredPrimary        = "https://primary.local-verify.invalid/v1"
+	configuredFailure        = "https://failure.local-verify.invalid/v1"
+	configuredFallback       = "https://fallback.local-verify.invalid/v1"
+	debugKeyID               = "local-verify-debug-key"
+	providerTenant           = "local-verify"
+	blockedPrompt            = "local-verify-concurrency-hold"
 )
 
 var schemaNamePattern = regexp.MustCompile(`^latchway_verify_[0-9a-f]{24}$`)
@@ -62,10 +62,13 @@ type tenant struct {
 }
 
 type fixture struct {
-	databaseURL string
-	schema      string
-	adminPool   *pgxpool.Pool
-	pool        *pgxpool.Pool
+	databaseURL   string
+	schema        string
+	adminPool     *pgxpool.Pool
+	pool          *pgxpool.Pool
+	publicOrigin  string
+	browserOrigin string
+	nowFunction   func() time.Time
 
 	tenant    tenant
 	principal adminauth.Principal
@@ -94,12 +97,28 @@ type fixture struct {
 	failureServer      *privateServer
 	fallbackServer     *privateServer
 
-	clientHandler http.Handler
-	dataHandler   http.Handler
-	dataPlane     *dataplane.Handler
-	quotaStore    *quota.Store
+	clientHandler        http.Handler
+	dataHandler          http.Handler
+	clientRuntimeHandler http.Handler
+	dataRuntimeHandler   http.Handler
+	dataPlane            *dataplane.Handler
+	quotaStore           *quota.Store
 
 	cleanupOnce sync.Once
+}
+
+func (f *fixture) origin() string {
+	if f.publicOrigin != "" {
+		return f.publicOrigin
+	}
+	return verificationPublicOrigin
+}
+
+func (f *fixture) clock() time.Time {
+	if f.nowFunction != nil {
+		return f.nowFunction().UTC()
+	}
+	return f.now
 }
 
 func newSchemaName() (string, error) {

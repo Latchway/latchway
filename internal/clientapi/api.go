@@ -122,7 +122,7 @@ func (api *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Latchway-Request-ID", correlationID)
 	browserOrigin, originErr := weborigin.Read(r.Header)
 	if originErr != nil {
-		api.writeViolation(w, correlationID, invalidAt("header.Origin", "Origin must be exactly one canonical HTTPS browser origin."))
+		api.writeViolation(w, correlationID, invalidAt("header.Origin", "Origin must be exactly one canonical HTTPS browser origin or one canonical loopback HTTP origin."))
 		return
 	}
 	if browserOrigin != "" {

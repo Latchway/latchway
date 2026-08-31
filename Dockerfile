@@ -6,6 +6,7 @@ WORKDIR /src/web/console
 COPY web/console/package.json web/console/pnpm-lock.yaml web/console/.npmrc ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
+COPY api/admin.openapi.yaml api/client.openapi.yaml api/config.schema.json /src/api/
 COPY web/console/ ./
 # Browser E2E runs in the pinned CI runner before an image is published.
 # Keep the image build self-contained and deterministic: Playwright's

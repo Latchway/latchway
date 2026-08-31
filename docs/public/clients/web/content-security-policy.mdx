@@ -1,0 +1,39 @@
+---
+title: "Set a Content Security Policy for Web"
+description: "Start from a strict CSP baseline that permits the application and Latchway connection while reducing script-injection exposure."
+icon: "file-lock-2"
+audience: "client-web"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "security"
+---
+
+Start with a response-header policy and adapt only reviewed application
+dependencies:
+
+```text
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' 'nonce-{per-response-nonce}';
+  connect-src 'self' https://ai.example.com;
+  frame-src https://challenges.cloudflare.com;
+  worker-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  frame-ancestors 'none'
+```
+
+Put the exact Latchway gateway origin in `connect-src`. Add Firebase or
+Turnstile origins only when their official SDK requires them, and keep their
+scope as narrow as the deployed integration permits.
+
+`@latchway/client` uses no `eval`, `new Function`, inline-script injection, or
+provider script loader. That makes strict CSP possible, but the SDK cannot
+compensate for a broad application policy, unreviewed third-party script, or
+unsafe HTML rendering.
+
+Deploy CSP in report-only mode first, review violations, then enforce it.
+Automated source tests validate the SDK's no-eval boundary; the current release
+candidate does not claim conformance for every application CSP or browser.

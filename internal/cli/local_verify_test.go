@@ -86,3 +86,97 @@ func TestVerifyLocalRequiresNamedDatabaseEnvironment(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 }
+
+func TestDevelopRejectsUnsafeInputsBeforeDatabaseAccess(t *testing.T) {
+	t.Setenv("LATCHWAY_DEVELOP_TEST_DATABASE_URL", "postgres://unused.invalid/latchway")
+
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "hostname listen",
+			args: []string{"--listen", "localhost:8080", "--browser-origin", "http://localhost:5173"},
+			want: "canonical loopback IP",
+		},
+		{
+			name: "wildcard listen",
+			args: []string{"--listen", "0.0.0.0:8080", "--browser-origin", "http://localhost:5173"},
+			want: "canonical loopback IP",
+		},
+		{
+			name: "ambiguous port",
+			args: []string{"--listen", "127.0.0.1:08080", "--browser-origin", "http://localhost:5173"},
+			want: "numeric port between 0 and 65535",
+		},
+		{
+			name: "HTTPS browser",
+			args: []string{"--listen", "127.0.0.1:0", "--browser-origin", "https://localhost:5173"},
+			want: "exact loopback HTTP origin",
+		},
+		{
+			name: "remote browser",
+			args: []string{"--listen", "127.0.0.1:0", "--browser-origin", "http://example.test:5173"},
+			want: "exact loopback HTTP origin",
+		},
+		{
+			name: "browser path",
+			args: []string{"--listen", "127.0.0.1:0", "--browser-origin", "http://localhost:5173/"},
+			want: "exact loopback HTTP origin",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := []string{"develop", "--database-url-env", "LATCHWAY_DEVELOP_TEST_DATABASE_URL"}
+			args = append(args, test.args...)
+			var output bytes.Buffer
+			err := Execute(context.Background(), args, &output, &output)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() error = %v, want %q", err, test.want)
+			}
+			if strings.Contains(output.String(), "state") || strings.Contains(output.String(), "console_password") {
+				t.Fatalf("invalid develop command emitted ready output: %s", output.String())
+			}
+		})
+	}
+}
+
+func TestDevelopRequiresExplicitSafeDatabaseEnvironmentName(t *testing.T) {
+	for _, environmentName := range []string{"", "lowercase", "LATCHWAY-NOT-SAFE"} {
+		var output bytes.Buffer
+		err := Execute(context.Background(), []string{
+			"develop", "--database-url-env", environmentName,
+		}, &output, &output)
+		if err == nil || !strings.Contains(err.Error(), "must name an uppercase environment variable") {
+			t.Fatalf("environment %q error = %v", environmentName, err)
+		}
+	}
+
+	t.Setenv("LATCHWAY_DEVELOP_EMPTY_DATABASE_URL", "")
+	var output bytes.Buffer
+	err := Execute(context.Background(), []string{
+		"develop", "--database-url-env", "LATCHWAY_DEVELOP_EMPTY_DATABASE_URL",
+	}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), "LATCHWAY_DEVELOP_EMPTY_DATABASE_URL is empty") {
+		t.Fatalf("empty database environment error = %v", err)
+	}
+}
+
+func TestDevelopCommandPublishesStableDefaultsAndAlias(t *testing.T) {
+	t.Parallel()
+
+	command := newDevelopCommand(&options{output: "json", stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}})
+	if command.Use != "develop" || len(command.Aliases) != 1 || command.Aliases[0] != "dev" {
+		t.Fatalf("develop command identity = use %q aliases %v", command.Use, command.Aliases)
+	}
+	for name, want := range map[string]string{
+		"database-url-env": "LATCHWAY_DATABASE_URL",
+		"listen":           "127.0.0.1:8080",
+		"browser-origin":   "http://localhost:5173",
+	} {
+		flag := command.Flag(name)
+		if flag == nil || flag.DefValue != want {
+			t.Fatalf("--%s default = %v, want %q", name, flag, want)
+		}
+	}
+}

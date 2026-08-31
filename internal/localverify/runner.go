@@ -168,7 +168,7 @@ func chatBody(prompt string, streaming bool) map[string]any {
 }
 
 func (f *fixture) sendFeature(feature, clientRequestID, prompt string, streaming bool, label string) (*deadlineRecorder, string, error) {
-	target, err := parseURL(publicOrigin + protocol.OpenAIChatPublicPath)
+	target, err := parseURL(f.origin() + protocol.OpenAIChatPublicPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -401,7 +401,7 @@ func (f *fixture) verifyTokenBucketRefill(ctx context.Context) error {
 }
 
 func (f *fixture) verifyConcurrency(ctx context.Context) error {
-	target, err := parseURL(publicOrigin + protocol.OpenAIChatPublicPath)
+	target, err := parseURL(f.origin() + protocol.OpenAIChatPublicPath)
 	if err != nil {
 		return err
 	}

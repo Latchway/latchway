@@ -35,6 +35,7 @@ type scenario struct {
 	ID                  string       `json:"id"`
 	Requirement         string       `json:"requirement"`
 	Kind                string       `json:"kind"`
+	ControllerAction    string       `json:"controller_action,omitempty"`
 	RequiresEnvironment []string     `json:"requires_environment,omitempty"`
 	Invocations         []invocation `json:"invocations,omitempty"`
 	EvidenceNotes       string       `json:"evidence_notes,omitempty"`
@@ -213,7 +214,7 @@ func loadMatrix(path string) (matrix, error) {
 		seen[scenario.ID] = true
 		switch scenario.Kind {
 		case "automated":
-			if len(scenario.Invocations) == 0 || scenario.EvidenceNotes != "" {
+			if len(scenario.Invocations) == 0 || scenario.EvidenceNotes != "" || scenario.ControllerAction != "" {
 				return matrix{}, fmt.Errorf("automated scenario %s has invalid invocation/evidence shape", scenario.ID)
 			}
 			for _, invocation := range scenario.Invocations {
@@ -222,7 +223,7 @@ func loadMatrix(path string) (matrix, error) {
 				}
 			}
 		case "external":
-			if len(scenario.Invocations) != 0 || scenario.EvidenceNotes == "" {
+			if len(scenario.Invocations) != 0 || scenario.EvidenceNotes == "" || !validControllerAction(scenario.ID, scenario.ControllerAction) {
 				return matrix{}, fmt.Errorf("external scenario %s has invalid evidence shape", scenario.ID)
 			}
 		default:
@@ -230,6 +231,18 @@ func loadMatrix(path string) (matrix, error) {
 		}
 	}
 	return value, nil
+}
+
+func validControllerAction(scenarioID, action string) bool {
+	expected := map[string]string{
+		"live-process-kill-after-reservation":              "docker_sigkill_api_after_reservation",
+		"live-process-kill-during-stream":                  "docker_sigkill_api_during_stream",
+		"live-database-outage-boundaries":                  "docker_postgresql_network_partition",
+		"live-graceful-shutdown-and-drain":                 "docker_sigterm_drain",
+		"live-upstream-and-client-disconnect":              "fixture_disconnect_sequence",
+		"live-config-and-key-rotation-across-api-replicas": "replicated_rotation_sequence",
+	}
+	return expected[scenarioID] != "" && expected[scenarioID] == action
 }
 
 func runAutomated(scenario scenario, logDirectory string, timeout time.Duration) scenarioResult {

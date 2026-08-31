@@ -1,7 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
+import { adminRequest, queryPath, RequestPageSchema, RevisionSchema } from "../api/admin";
 import { overallHealthState, useSystemHealth } from "../api/health";
 import { useConsoleSession } from "../api/session";
+import { useOptionalWorkspace } from "../app/workspace-context-value";
 import { AdminAccessPanel } from "../components/admin-access-panel";
 
 function SignedOutOverview() {
@@ -80,7 +83,34 @@ function SessionCheckingOverview() {
 
 function OperatingOverview() {
   const { liveness, readiness } = useSystemHealth();
+  const workspace = useOptionalWorkspace();
+  const environment = workspace?.environment;
   const state = overallHealthState(liveness.data, readiness.data);
+  const configuration = useQuery({
+    enabled: Boolean(environment?.id),
+    queryFn: async () => (await adminRequest(`/admin/v1/environments/${environment?.id}/config`, RevisionSchema)).data,
+    queryKey: ["environment", environment?.id ?? "none", "active-configuration", "overview"],
+    retry: false
+  });
+  const recentRequests = useQuery({
+    enabled: Boolean(environment?.id),
+    queryFn: async () => (await adminRequest(queryPath("/admin/v1/requests", { environment_id: environment?.id, page_size: "1" }), RequestPageSchema)).data,
+    queryKey: ["environment", environment?.id ?? "none", "recent-request", "overview"],
+    retry: false
+  });
+  const spec = configuration.data?.document.spec;
+  const configObject = spec && typeof spec === "object" && !Array.isArray(spec) ? spec as Record<string, unknown> : undefined;
+  const configuredCount = (key: string): number => Array.isArray(configObject?.[key]) ? configObject[key].length : 0;
+  const setupSteps = [
+    { complete: true, label: "Administrator access established", to: "/administrators" as const },
+    { complete: Boolean(workspace?.application && environment), label: "Application and environment created", to: "/environments" as const },
+    { complete: configuredCount("identityProviders") > 0, label: "User authentication configured", to: "/authentication-providers" as const },
+    { complete: configuredCount("attestationPolicies") > 0, label: "Client verification configured", to: "/attestation" as const },
+    { complete: configuredCount("upstreams") > 0, label: "AI connection added", to: "/upstreams" as const },
+    { complete: configuredCount("features") > 0, label: "First feature published", to: "/features" as const },
+    { complete: Boolean(recentRequests.data?.items.length), label: "Client request verified", to: "/requests" as const }
+  ];
+  const completedSteps = setupSteps.filter((step) => step.complete).length;
   const heading =
     state === "available"
       ? "The gateway is ready for control-plane work."
@@ -128,22 +158,13 @@ function OperatingOverview() {
         </div>
       </section>
 
-      <section className="principles-grid" aria-label="Latchway operating model">
-        <article className="principle-card">
-          <span className="principle-card__index">01</span>
-          <h2>Feature-first routing</h2>
-          <p>Client-visible features map policy and models without exposing upstreams.</p>
-        </article>
-        <article className="principle-card">
-          <span className="principle-card__index">02</span>
-          <h2>Immutable revisions</h2>
-          <p>Validated configuration revisions activate atomically and remain reversible.</p>
-        </article>
-        <article className="principle-card">
-          <span className="principle-card__index">03</span>
-          <h2>Evidence before traffic</h2>
-          <p>Identity, attestation, DPoP, and limits are evaluated before proxy dispatch.</p>
-        </article>
+      <section className="action-center" aria-labelledby="needs-attention-heading">
+        <div className="detail-card__heading"><div><p className="eyebrow">Action center</p><h2 id="needs-attention-heading">Needs attention</h2></div>{environment ? <span className={`environment-badge environment-badge--${environment.kind}`}>{environment.kind === "production" ? "Production" : environment.kind}</span> : null}</div>
+        <div className="attention-list">{!workspace?.application || !environment ? <article><span aria-hidden="true">!</span><div><strong>Create an application environment</strong><p>The console will not open task workflows without an explicit server-owned environment.</p></div><Link search={(previous) => previous} to="/setup">Start setup</Link></article> : null}{environment && !environment.active_revision_id ? <article><span aria-hidden="true">!</span><div><strong>No active configuration</strong><p>{workspace.application?.display_name} / {environment.display_name} cannot serve feature traffic yet.</p></div><Link search={(previous) => previous} to="/setup">Continue setup</Link></article> : null}{state !== "available" ? <article><span aria-hidden="true">!</span><div><strong>Gateway health needs review</strong><p>Inspect readiness before publishing configuration.</p></div><Link search={(previous) => previous} to="/system-health">Investigate</Link></article> : null}{workspace?.application && environment?.active_revision_id && state === "available" && completedSteps === setupSteps.length ? <article className="attention-list__healthy"><span aria-hidden="true">✓</span><div><strong>No immediate setup blockers</strong><p>The selected environment has active configuration and a verified request.</p></div><Link search={(previous) => previous} to="/requests">Inspect requests</Link></article> : null}</div>
+      </section>
+
+      <section className="setup-checklist" aria-labelledby="setup-checklist-heading">
+        <div><p className="eyebrow">First-run setup</p><h2 id="setup-checklist-heading">Set up {workspace?.application?.display_name ?? "your application"}{environment ? ` / ${environment.display_name}` : ""}</h2><p>{completedSteps} of {setupSteps.length} complete. Each step uses the canonical Admin API and remains resumable.</p></div><ol>{setupSteps.map((step) => <li className={step.complete ? "setup-checklist__complete" : ""} key={step.label}><span aria-hidden="true">{step.complete ? "✓" : "○"}</span><Link search={(previous) => previous} to={step.to}>{step.label}</Link></li>)}</ol>
       </section>
     </>
   );

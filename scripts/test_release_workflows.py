@@ -36,6 +36,64 @@ def all_steps(workflow: dict) -> list[dict]:
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_failure_workflow_runs_repo_owned_disposable_controller(self) -> None:
+        workflow = load_workflow("release-failure-evidence.yml")
+        serialized = (WORKFLOWS / "release-failure-evidence.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("LATCHWAY_RELEASE_FAILURE_CONTROLLER_PLAN", serialized)
+        self.assertNotIn("LATCHWAY_RELEASE_FAILURE_CAPTURE_DIRECTORY", serialized)
+        self.assertNotIn("controller-plan-coordinate.json", serialized)
+        self.assertIn("scripts/run-release-failure-controller.sh", serialized)
+        self.assertIn("--acknowledge-disposable-target", serialized)
+        self.assertIn('--output-dir "$RUNNER_TEMP/failure/live-failures"', serialized)
+        self.assertIn("docker pull --platform linux/amd64", serialized)
+        self.assertIn("docker logout ghcr.io", serialized)
+        self.assertNotIn('cp -R -- "$CAPTURE_DIRECTORY/."', serialized)
+        failure = workflow["jobs"]["failure"]
+        self.assertEqual(
+            failure["runs-on"],
+            ["self-hosted", "linux", "x64", "latchway-release-failure"],
+        )
+        self.assertNotIn("id-token", failure.get("permissions", {}))
+        self.assertEqual(failure["permissions"]["packages"], "read")
+        names = [step.get("name", "") for step in failure["steps"]]
+        pull = names.index("Pull and bind the exact authenticated linux amd64 images")
+        logout = names.index(
+            "Remove registry credentials before repo-owned topology code executes"
+        )
+        topology = names.index(
+            "Provision and execute the repo-owned bounded failure topology"
+        )
+        self.assertLess(pull, logout)
+        self.assertLess(logout, topology)
+        controller_step = next(
+            step
+            for step in failure["steps"]
+            if step.get("name")
+            == "Provision and execute the repo-owned bounded failure topology"
+        )
+        self.assertNotIn("continue-on-error", controller_step)
+
+        launcher = ROOT / "scripts/run-release-failure-controller.sh"
+        launcher_text = launcher.read_text(encoding="utf-8")
+        self.assertNotEqual(launcher.stat().st_mode & 0o111, 0)
+        self.assertIn("docker network create", launcher_text)
+        self.assertIn("--internal", launcher_text)
+        self.assertIn("expected_network_id", launcher_text)
+        self.assertIn("expected_container_ids", launcher_text)
+        self.assertIn('observed_id" == "$expected_id', launcher_text)
+        self.assertIn('observed_network_id" == "$expected_network_id', launcher_text)
+        self.assertIn("/tools/latchway-failure-driver serve", launcher_text)
+        self.assertIn("python3 \"$repository_root/scripts/fault-controller.py\"", launcher_text)
+        self.assertNotIn("LATCHWAY_RELEASE_FAILURE_CONTROLLER_PLAN", launcher_text)
+
+        tools_dockerfile = (ROOT / "tests/load/Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("./tests/failure/cmd/latchway-failure-driver", tools_dockerfile)
+        self.assertIn("./tests/failure/cmd/latchway-failure-balancer", tools_dockerfile)
+        self.assertIn("/tools/latchway-failure-driver", tools_dockerfile)
+        self.assertIn("/tools/latchway-failure-balancer", tools_dockerfile)
+
     def test_sensitive_github_cli_operations_require_fixed_version_first(self) -> None:
         sensitive = ("gh release verify", "gh attestation verify")
         guarded: list[str] = []

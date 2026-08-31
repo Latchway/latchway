@@ -1,0 +1,47 @@
+---
+title: "Use Latchway with Retrofit"
+description: "Give Retrofit the hardened Latchway OkHttp client while preserving feature binding, streaming, cancellation, and server error metadata."
+icon: "plug"
+audience: "client-android"
+pageType: "how-to"
+serverVersion: "1.0.0"
+sdkVersion: "1.0.0"
+lastVerified: "2026-08-31"
+owner: "android-sdk"
+---
+
+## Outcome
+
+Retrofit uses the same native session, DPoP signer, origin guard, and bounded
+authenticator as direct OkHttp calls. It does not acquire a second credential
+or retry policy.
+
+## Reuse the configured client
+
+1. construct the client described in [Authorize OkHttp requests](/clients/android/okhttp);
+2. point Retrofit at the exact Latchway gateway origin;
+3. bind each request to the feature whose protocol matches the endpoint;
+4. disable application or converter retries that could repeat an uncertain
+   request; and
+5. keep the returned `Call` or coroutine handle for cancellation.
+
+The source-owned Retrofit conformance consumer is extracted on
+[OkHttp framework integration](/integrations/okhttp). Its generated
+compatibility row is the authority for the exact tested version.
+
+## Preserve response handling
+
+For streaming, expose the response body rather than converting it into a fully
+buffered object. For non-success responses, retain the body only long enough to
+decode the bounded canonical Latchway problem, then use its stable code,
+request ID, and documentation URL.
+
+Framework-native exceptions may preserve the HTTP status while discarding the
+Latchway code. Use direct error-body handling when the product needs exact
+quota, session, attestation, or routing guidance.
+
+## Verify
+
+Run the repository-owned Retrofit conformance test and one application request.
+Confirm cancellation stops the call, an origin change fails closed, no
+provider key is present, and the Console records one matching logical request.

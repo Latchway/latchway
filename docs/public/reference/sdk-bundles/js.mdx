@@ -14,9 +14,9 @@ description: "Generated, version-bound examples and compatibility metadata for J
 | --- | --- |
 | Package | `@latchway/client` |
 | Release | `v1.0.0` |
-| Commit | `8e36364419783b07acdd8fae82e457885f1c5447` |
+| Commit | `b0069e993967662f4ee2729dbc393595793c5e50` |
 | Source tree clean | `no` |
-| Bundle SHA-256 | `436f0fbe3fee05d8b5cee6e6f12e8cfedc36cf9778ecf3d7499750995363914c` |
+| Bundle SHA-256 | `986b46c48abb3bcdef707b91ef01706d6f83ab1426c2be357a67b6f1d905b70c` |
 
 ## Supported versions
 
@@ -24,6 +24,7 @@ description: "Generated, version-bound examples and compatibility metadata for J
 | --- | --- | --- |
 | @latchway/client | `1.0.0` | `package.json:L1-L13` |
 | Node.js | `24.19.0` | `package.json:L10-L14` |
+| Web browser matrix | `1.56.0` | `package.json:L88-L95` |
 | openai minimum | `7.8.0` | `conformance/framework-versions.json:L5-L11` |
 | openai latest | `7.8.0` | `conformance/framework-versions.json:L12-L18` |
 | ai minimum | `7.0.85` | `conformance/framework-versions.json:L5-L11` |
@@ -37,7 +38,7 @@ description: "Generated, version-bound examples and compatibility metadata for J
 
 ### `frameworks/langchain.ts`
 
-Working-tree source: `packages/langchain/src/index.ts:L1-L103`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+Working-tree source: `packages/langchain/src/index.ts:L1-L103`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
 
 ```typescript
 import {
@@ -147,7 +148,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/openai.ts`
 
-Working-tree source: `packages/openai/src/index.ts:L1-L71`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+Working-tree source: `packages/openai/src/index.ts:L1-L71`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
 
 ```typescript
 import OpenAI, { type ClientOptions } from "openai";
@@ -225,7 +226,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/vercel-ai.ts`
 
-Working-tree source: `packages/vercel-ai/src/index.ts:L1-L78`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+Working-tree source: `packages/vercel-ai/src/index.ts:L1-L78`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
 
 ```typescript
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
@@ -310,7 +311,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `quickstart/firebase-app-check.ts`
 
-Working-tree source: `examples/firebase/client.ts:L1-L23`. The bundle records candidate commit `8e36364419783b07acdd8fae82e457885f1c5447`, but does not claim that this dirty source region is already present at that commit.
+Working-tree source: `examples/firebase/client.ts:L1-L23`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
 
 ```typescript
 import { createLatchwayClient } from "@latchway/client";
@@ -335,5 +336,343 @@ export function createFirebaseClient(dependencies: FirebaseDependencies) {
     attestationProviders: [createFirebaseAppCheckProvider(dependencies.getAppCheckToken)],
     installation: { appVersion: "1.0.0" },
   });
+}
+```
+
+### `quickstart/vanilla-development-client.ts`
+
+Working-tree source: `examples/vanilla/development-client.ts:L1-L82`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import {
+  createCustomAttestationProvider,
+  createLatchwayClient,
+  type AttestationContext,
+  type LatchwayClient,
+} from "@latchway/client";
+
+export interface LoopbackDevelopmentDeployment {
+  baseURL: string;
+  applicationID: string;
+  appVersion: string;
+  /** Use a unique name when isolating local browser-conformance runs. */
+  databaseName?: string;
+}
+
+export interface LoopbackDevelopmentDependencies {
+  getIdentityToken(): Promise<string>;
+  /**
+   * Call an operator-owned development helper that signs only this active
+   * challenge. Never put its debug-signing key in browser code or storage.
+   */
+  getDevelopmentEvidence(
+    context: Readonly<AttestationContext>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+}
+
+export function createLoopbackDevelopmentBrowserClient(
+  deployment: Readonly<LoopbackDevelopmentDeployment>,
+  dependencies: Readonly<LoopbackDevelopmentDependencies>,
+): LatchwayClient {
+  const gateway = new URL(deployment.baseURL);
+  if (gateway.protocol !== "http:" || !new Set(["127.0.0.1", "localhost", "[::1]"]).has(gateway.hostname)) {
+    throw new TypeError("The development browser example requires a loopback HTTP gateway.");
+  }
+  return createLatchwayClient({
+    baseURL: gateway.href,
+    allowInsecureHTTP: true,
+    applicationID: deployment.applicationID,
+    environment: "development",
+    identityProvider: "custom_jwt",
+    identityTokenProvider: { getIdentityToken: dependencies.getIdentityToken },
+    attestationProviders: [createCustomAttestationProvider({
+      provider: "debug",
+      getEvidence: dependencies.getDevelopmentEvidence,
+    })],
+    persistence: {
+      mode: "required",
+      ...(deployment.databaseName === undefined ? {} : { databaseName: deployment.databaseName }),
+    },
+    installation: { appVersion: deployment.appVersion },
+  });
+}
+
+export interface SafeBrowserDiagnostics {
+  requestID: string;
+  serverVersion: string;
+  contractVersion: string;
+  protocolVersion: number;
+  sdkVersion: string;
+  platform: string;
+  keyPersistence: "indexeddb" | "memory";
+  sessionPersistence: "indexeddb" | "memory";
+  clockOffsetMilliseconds: number;
+}
+
+/** Return only the allowlisted fields suitable for a development bug report. */
+export async function safeBrowserDiagnostics(
+  client: Pick<LatchwayClient, "diagnostics">,
+): Promise<SafeBrowserDiagnostics> {
+  const diagnostics = await client.diagnostics();
+  return {
+    requestID: diagnostics.server.request_id,
+    serverVersion: diagnostics.server.server_version,
+    contractVersion: diagnostics.server.contract_version,
+    protocolVersion: diagnostics.server.protocol_version,
+    sdkVersion: diagnostics.client.sdkVersion,
+    platform: diagnostics.client.platform,
+    keyPersistence: diagnostics.client.keyPersistence,
+    sessionPersistence: diagnostics.client.sessionPersistence,
+    clockOffsetMilliseconds: diagnostics.client.clockOffsetMilliseconds,
+  };
+}
+```
+
+### `quickstart/vanilla-development-helper.ts`
+
+Working-tree source: `examples/vanilla/development-helper.ts:L1-L142`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import type { AttestationContext } from "@latchway/client";
+
+export interface LoopbackDevelopmentHelperOptions {
+  baseURL: string;
+  fetchImplementation?: typeof fetch;
+}
+
+export interface LoopbackDevelopmentHelpers {
+  getIdentityToken(): Promise<string>;
+  getDevelopmentEvidence(
+    context: Readonly<AttestationContext>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+}
+
+/**
+ * Connect the browser only to the helper routes owned by `latchway develop`.
+ * The debug signing key stays in the foreground server process.
+ */
+export function createLoopbackDevelopmentHelpers(
+  options: Readonly<LoopbackDevelopmentHelperOptions>,
+): LoopbackDevelopmentHelpers {
+  const gateway = new URL(options.baseURL);
+  const loopback = new Set(["127.0.0.1", "localhost", "[::1]"]);
+  if (gateway.protocol !== "http:" || !loopback.has(gateway.hostname) ||
+      gateway.origin !== options.baseURL) {
+    throw new TypeError("The development helper requires one exact loopback HTTP origin.");
+  }
+  const request = options.fetchImplementation ?? fetch;
+
+  return {
+    async getIdentityToken(): Promise<string> {
+      const document = await requestDevelopmentJSON(request, new URL(
+        "/development/v1/identity-token",
+        gateway,
+      ), { method: "GET" });
+      if (!hasOnlyKeys(document, ["identity_token"]) ||
+          typeof document.identity_token !== "string" ||
+          document.identity_token.length < 16 || document.identity_token.length > 65_536) {
+        throw new Error("The development identity helper returned an invalid document.");
+      }
+      return document.identity_token;
+    },
+
+    async getDevelopmentEvidence(
+      context: Readonly<AttestationContext>,
+    ): Promise<Readonly<Record<string, unknown>>> {
+      const document = await requestDevelopmentJSON(request, new URL(
+        "/development/v1/attestation-evidence",
+        gateway,
+      ), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge_id: context.challenge.challenge_id,
+          binding_hash: context.challenge.attestation.client_data_hash,
+          application_id: context.applicationID,
+          environment: context.environment,
+          dpop_jkt: context.dpopJkt,
+          platform: context.platform,
+        }),
+      });
+      if (!hasOnlyKeys(document, ["key_id", "binding_hash", "expires_at", "signature"]) ||
+          typeof document.key_id !== "string" ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(document.key_id) ||
+          document.binding_hash !== context.challenge.attestation.client_data_hash ||
+          typeof document.expires_at !== "number" || !Number.isSafeInteger(document.expires_at) ||
+          typeof document.signature !== "string" || !/^[A-Za-z0-9_-]{86}$/u.test(document.signature)) {
+        throw new Error("The development evidence helper returned an invalid document.");
+      }
+      return document;
+    },
+  };
+}
+
+async function requestDevelopmentJSON(
+  request: typeof fetch,
+  url: URL,
+  init: RequestInit,
+): Promise<Record<string, unknown>> {
+  const response = await request(url, {
+    ...init,
+    cache: "no-store",
+    credentials: "omit",
+    redirect: "error",
+    referrerPolicy: "no-referrer",
+    headers: { Accept: "application/json", ...init.headers },
+  });
+  if (!response.ok) {
+    throw new Error(`The development helper rejected the request with HTTP ${response.status}.`);
+  }
+  if (response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase() !==
+      "application/json") {
+    throw new Error("The development helper returned an invalid media type.");
+  }
+  const contentLength = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > 65_536) {
+    throw new Error("The development helper response is too large.");
+  }
+  const bytes = await readBounded(response, 65_536);
+  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The development helper returned an invalid JSON document.");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function readBounded(response: Response, maximumBytes: number): Promise<Uint8Array> {
+  if (response.body === null) {
+    throw new Error("The development helper returned an empty response.");
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel("development helper response limit exceeded");
+        throw new Error("The development helper response is too large.");
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) throw new Error("The development helper returned an empty response.");
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+```
+
+### `quickstart/vanilla-streaming-fetch.ts`
+
+Working-tree source: `examples/vanilla/streaming-fetch.ts:L1-L93`. The bundle records candidate commit `b0069e993967662f4ee2729dbc393595793c5e50`, but does not claim that this dirty source region is already present at that commit.
+
+```typescript
+import {
+  errorFromResponse,
+  LatchwayError,
+  type AuthenticatedTransport,
+  type FetchImplementation,
+  type LatchwayErrorCode,
+  type LatchwayErrorDocumentationURL,
+} from "@latchway/client";
+
+export interface HabitAssistantResult {
+  output: string;
+  requestID: string | null;
+}
+
+export interface SafeHabitAssistantFailure {
+  code: LatchwayErrorCode | null;
+  requestID: string | null;
+  retryable: boolean;
+  documentationURL: LatchwayErrorDocumentationURL | null;
+}
+
+export type HabitAssistantOutcome =
+  | { ok: true; result: HabitAssistantResult }
+  | { ok: false; error: SafeHabitAssistantFailure };
+
+export function createHabitAssistantFetch(
+  latchway: AuthenticatedTransport,
+): FetchImplementation {
+  return latchway.fetchFor("habit-assistant");
+}
+
+export async function streamHabitAssistant(
+  latchway: AuthenticatedTransport,
+  input: string,
+  signal?: AbortSignal,
+): Promise<HabitAssistantResult> {
+  const response = await createHabitAssistantFetch(latchway)("/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input, stream: true }),
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (!response.ok) throw await errorFromResponse(response.clone());
+  if (response.body === null) throw new Error("The protected response has no body.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let output = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      output += decoder.decode(value, { stream: true });
+    }
+    output += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return {
+    output,
+    requestID: response.headers.get("X-Latchway-Request-ID"),
+  };
+}
+
+/** A docs-safe journey result that never includes response bodies or causes. */
+export async function runHabitAssistantSafely(
+  latchway: AuthenticatedTransport,
+  input: string,
+  signal?: AbortSignal,
+): Promise<HabitAssistantOutcome> {
+  try {
+    return { ok: true, result: await streamHabitAssistant(latchway, input, signal) };
+  } catch (error) {
+    return { ok: false, error: safeHabitAssistantFailure(error) };
+  }
+}
+
+export function safeHabitAssistantFailure(error: unknown): SafeHabitAssistantFailure {
+  if (error instanceof LatchwayError) {
+    return {
+      code: error.code,
+      requestID: error.requestID ?? null,
+      retryable: error.retryable,
+      documentationURL: error.documentationURL,
+    };
+  }
+  return {
+    code: null,
+    requestID: null,
+    retryable: false,
+    documentationURL: null,
+  };
 }
 ```

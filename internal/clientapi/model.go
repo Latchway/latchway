@@ -116,9 +116,10 @@ type RequestMetadata struct {
 	FrameworkVersion string
 	HTTPMethod       string
 	TargetURL        url.URL
-	// Origin is the exact canonical HTTPS browser Origin header. It is empty
-	// for native and server-side transports and never derives from Host or
-	// forwarding headers.
+	// Origin is the exact canonical HTTPS browser Origin header, or the exact
+	// canonical loopback HTTP Origin used by development environments. It is
+	// empty for native and server-side transports and never derives from Host
+	// or forwarding headers.
 	Origin    string
 	DPoPProof SensitiveString
 }
