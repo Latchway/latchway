@@ -35,9 +35,9 @@ evidence defined by ADR 0028. Do not edit this page by hand.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Android OkHttp ecosystem | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | Conditional | Conditional | Yes | No |
 | Apple Foundation Models | No | No | Planned | Planned | Conditional | Planned | No | No | No | Planned | Conditional |
-| LangChain JavaScript | No | Yes | Yes | Conditional | Conditional | Conditional | Yes | No | No | Yes | No |
+| LangChain JavaScript | No | Yes | Yes | Yes | Conditional | Conditional | Yes | No | No | Yes | No |
 | MacPaw OpenAI | No | No | No | No | No | No | No | No | No | No | No |
-| OpenAI JavaScript SDK | Yes | Yes | Yes | Yes | Conditional | Conditional | Conditional | Conditional | Conditional | Yes | No |
+| OpenAI JavaScript SDK | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | Conditional | Conditional | Yes | No |
 | React Native framework fetch | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | No | No | Yes | No |
 | SwiftOpenAI | Yes | Yes | Yes | Yes | Conditional | Conditional | Conditional | Conditional | Conditional | Conditional | Conditional |
 | Vercel AI SDK | Yes | Yes | Yes | Yes | Conditional | Conditional | Yes | No | Conditional | Yes | No |
@@ -46,12 +46,12 @@ evidence defined by ADR 0028. Do not edit this page by hand.
 
 - **Android OkHttp ecosystem (`android-okhttp`):** Local source, route, replay, streaming, cancellation, and OkHttp 5.3.0 tests pass; hosted gateway conformance and physical Play-distributed key proof remain release gates.
 - **Apple Foundation Models (`foundation-models`):** The OS 27 custom executor compiles, but its runtime tests were skipped on an older host OS; gateway and physical-device execution remain pending.
-- **LangChain JavaScript (`langchain-js`):** Chat and embeddings pass local adapter tests at @langchain/openai 1.5.10; streaming/tool paths and hosted common conformance are not yet release evidence.
+- **LangChain JavaScript (`langchain-js`):** Local @langchain/openai 1.5.10 case-ID tests pass Chat, embeddings, streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; hosted/exact-image, live-provider, and revocation evidence remain release gates.
 - **MacPaw OpenAI (`macpaw-openai`):** MacPaw/OpenAI 0.5.1 exposes only synchronous request middleware and no public streaming transport injection, so a safe transparent Latchway adapter cannot be shipped.
-- **OpenAI JavaScript SDK (`openai-js`):** Responses plus chat streaming/cancellation pass local OpenAI 7.8.0 adapter tests; tools, media, embeddings, and hosted common conformance remain conditional.
-- **React Native framework fetch (`react-native-fetch`):** React Native 0.82.0 New Architecture hosts, native-only credentials, pull streaming and cancellation pass local gates; live gateway and physical iOS/Android proof remain pending.
+- **OpenAI JavaScript SDK (`openai-js`):** Local OpenAI 7.8.0 case-ID tests pass Responses, Chat, embeddings, Responses/Chat streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; media, hosted/exact-image, live-provider, and revocation evidence remain release gates.
+- **React Native framework fetch (`react-native-fetch`):** React Native 0.82.0 New Architecture local gates pass. A real iOS 27 Release-configuration app signed for Apple Development proved production App Attest registration and same-key assertion, Secure Enclave DPoP, gateway traffic, quota, typed component denial, bridge behavior, and cleanup. Android, delegated-extension runtime, and protected Apple distribution-derived exact-candidate evidence remain pending.
 - **SwiftOpenAI (`swift-openai`):** Buffered and line-stream HTTP pass exact SwiftOpenAI 4.6.0 tests; WebSocket Realtime bypasses the injectable HTTP client and is unsupported, while physical cancellation proof is pending.
-- **Vercel AI SDK (`vercel-ai-sdk`):** Responses, chat, embeddings, streaming and cancellation pass local AI SDK 7.0.85 adapter tests; tools, images and hosted common conformance remain conditional.
+- **Vercel AI SDK (`vercel-ai-sdk`):** Local AI SDK 7.0.85/@ai-sdk/openai 4.0.52 case-ID tests pass Responses, Chat, embeddings, both streams, tools, typed output, cancellation, errors, retry/refresh, and transport security; images, hosted/exact-image, live-provider, and revocation evidence remain release gates.
 
 ## Evidence required for support
 

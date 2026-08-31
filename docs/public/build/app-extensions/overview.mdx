@@ -6,9 +6,11 @@ description: "Use a containing app and extension as separate Client Components w
 <Warning>
   App-extension provisioning is source-implemented but pre-release. The Swift
   and React Native products and delegated-component APIs have local package,
-  consumer, and unsigned host/extension evidence. Candidate-bound physical
-  Keychain isolation, root-app App Attest, signing, and publication evidence
-  remain required.
+  consumer, and unsigned host/extension evidence. A separate development-signed
+  physical React Native root-app run passed App Attest, DPoP, and bridge
+  behavior, but it did not execute the extension. Candidate-bound Apple
+  distribution signing, physical delegated-runtime isolation, and publication
+  evidence remain required.
 </Warning>
 
 Treat every independently executing extension as its own Client Component. The

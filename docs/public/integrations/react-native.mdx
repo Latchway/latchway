@@ -18,8 +18,12 @@ authenticated dispatch, and origin checks.
 ## 2. Supported framework versions
 
 React Native `0.82.0` has an `experimental` native-backed-fetch row based on
-bounded local tests. It is not a published supported integration, and the
-named JavaScript framework rows do not automatically apply to React Native.
+bounded local tests and a supplemental development-signed physical iOS 27 run.
+That run passed App Attest registration and same-key assertion, Secure Enclave
+DPoP, upstream non-streaming and streaming requests, quota, typed component
+denial, bridge behavior, and cleanup against the current source gateway. It is
+not a published supported integration, and the named JavaScript framework rows
+do not automatically apply to React Native.
 
 ## 3. Supported Latchway versions
 
@@ -32,9 +36,9 @@ contract.
 
 | Capability | Target and current status |
 | --- | --- |
-| Full DPoP preserved | Partial experimental evidence; native dispatch and proof isolation pass local gates |
-| Private key remains native | Partial experimental evidence; JavaScript bridge credential scans and native tests pass |
-| Streaming | Native pull streaming passes local React Native 0.82.0 gates |
+| Full DPoP preserved | Partial cross-platform evidence; Secure Enclave DPoP passed on physical iOS, while Android remains unproven |
+| Private key remains native | Partial cross-platform evidence; physical iOS and local bridge isolation pass, while Android remains unproven |
+| Streaming | Native pull streaming passes local gates and a physical iOS upstream run; Android remains unproven |
 | Cancellation | Native cancellation passes local gates |
 | App extensions | Not provided by the React Native framework-fetch integration |
 | Structured output | Framework-specific evidence pending |
@@ -101,7 +105,9 @@ pre-dispatch retry. JavaScript never reads the refresh credential.
 ## 16. Known limitations
 
 Browser-only streams, uploads, or framework hooks may not exist in React
-Native. Do not infer runtime support from a browser test.
+Native. The physical iOS observation used automatic Apple Development signing,
+not an Apple distribution-derived protected immutable candidate. Android and
+delegated-extension runtime evidence remain open.
 
 ## 17. Verify the integration
 

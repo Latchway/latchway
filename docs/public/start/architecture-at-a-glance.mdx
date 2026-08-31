@@ -6,8 +6,13 @@ description: "Trace one feature-bound request from an untrusted application thro
 The client chooses a feature. It does not choose an upstream credential,
 provider, physical model, price, or route.
 
+## Latchway in one picture
+
 ```mermaid
 flowchart LR
+    accTitle: Latchway in one picture
+    accDescr: An untrusted application uses an existing AI framework and a Latchway authenticated transport to reach the Latchway gateway, which applies server-owned policy, quota, and routing with PostgreSQL before calling a configured upstream.
+
     subgraph client ["Untrusted client"]
         application["Application"]
         framework["Existing AI framework"]
@@ -31,21 +36,75 @@ flowchart LR
     transport -->|"DPoP-authorized HTTPS"| latchway
     latchway -->|"Evaluates"| policy
     policy -->|"Reads and writes"| postgres
-    policy -.->|"Selected route"| upstream
+    policy -->|"Server-selected dispatch"| upstream
 ```
 
-## Request boundary
+### What this establishes
 
 The SDK transport obtains identity input, uses platform trust evidence, owns the
 component key, and creates a fresh DPoP proof. Latchway authenticates the
 session, reserves quota, rewrites trusted fields, and dispatches to the route
 selected by current server configuration.
 
-## Control boundary
+### What this does not establish
+
+The path does not make the client trusted, prove that identity or attestation
+will pass, or establish support for an unreleased SDK or framework adapter. It
+also does not let the client select an upstream credential, route, price, or
+physical model.
+
+### What causes the relationship to expire
+
+The DPoP proof is valid for one request. Access tokens, refresh state, trust
+evidence, quota reservations, and configuration decisions each end, rotate, or
+are revoked on their own bounded lifecycle.
+
+## Control plane versus data plane
+
+```mermaid
+flowchart LR
+    accTitle: Control plane versus data plane
+    accDescr: A solid data-plane path runs from the untrusted client through the Latchway gateway to a configured upstream. Operators use the Admin API above the gateway to activate immutable configuration, while request, replay, quota, audit, and job state is coordinated in PostgreSQL below it.
+
+    subgraph client ["Untrusted client"]
+        request["Feature request"]
+    end
+    subgraph boundary ["Latchway boundary"]
+        dataPlane["Data plane: session, policy, quota, proxy"]
+        adminAPI["Control plane: Admin API"]
+    end
+    subgraph upstreamBoundary ["Configured upstream"]
+        upstream["AI or HTTP upstream"]
+    end
+
+    operator["Authorized operator"] -.->|"Configure and activate"| adminAPI
+    adminAPI -.->|"Immutable revision"| dataPlane
+    request -->|"DPoP-authorized HTTPS"| dataPlane
+    dataPlane -->|"Server-selected dispatch"| upstream
+    dataPlane -->|"Replay, quota, usage, jobs"| postgres[("PostgreSQL")]
+    adminAPI -.->|"Configuration and audit"| postgres
+```
+
+### What this establishes
 
 Operators configure applications, identity and attestation providers,
 features, routes, limits, pricing, and secrets. Client code cannot write those
-resources through the data plane.
+resources through the data plane. Both planes share PostgreSQL-backed
+coordination, but expose different authentication and authorization surfaces.
+
+### What this does not establish
+
+Access to the data plane does not grant control-plane authority, and an Admin
+API credential does not make a client request valid. The diagram does not
+imply that PostgreSQL, the dashboard, or an operator can bypass the canonical
+Admin API.
+
+### What causes the relationship to expire
+
+Data-plane authorization ends with the request or session lifecycle.
+Control-plane decisions are tied to an immutable configuration revision and
+are replaced when a later revision is activated; operator sessions and
+credentials expire or are revoked independently.
 
 ## Current release boundary
 

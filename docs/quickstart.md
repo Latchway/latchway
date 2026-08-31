@@ -32,8 +32,9 @@ steps in order:
 
 1. Create the organization, application, and environment.
 2. Select the application's existing identity provider.
-3. Select `debug` attestation for this local run.
-4. create a write-only upstream secret.
+3. Select the environment kind and exact Apple signing or distribution method,
+   then enter the exact `CFBundleVersion` build number and Android identifiers.
+4. Create a write-only upstream secret.
 5. Configure the upstream, physical model, pricing, feature, route, and limit
    plan.
 6. Validate, plan, and activate the immutable configuration revision.
@@ -108,10 +109,12 @@ Use the complete, version-matched examples in:
 - `latchway-android/README.md`
 - `latchway-react-native-sdk/README.md`
 
-Debug attestation is sufficient only for this local exercise. Before enabling
-a production environment, switch to App Attest or Play Integrity, pin the
-bundle/package and signing identifiers in the server configuration, and pass
-the physical-device conformance workflow.
+The wizard generates App Attest and Play Integrity policy rather than debug
+attestation. For a development-signed physical Apple build, choose a development
+or staging Latchway environment, category `3`, and the exact `CFBundleVersion`
+(`CURRENT_PROJECT_VERSION`). For production, pin the actual distribution
+category (`2` TestFlight, `4` App Store, or `5` ad hoc/enterprise), bundle/package
+and signing identifiers, and pass the physical-device conformance workflow.
 
 ## 5. Confirm enforcement
 

@@ -38,9 +38,11 @@ test.describe("real first-run control plane", () => {
     await page.getByLabel("Application name").fill("Native Mobile");
     await page.getByLabel("Application slug").fill("native-mobile");
     await page.getByLabel("Firebase project ID").fill("latchway-live-e2e");
+    await page.getByLabel("Environment kind").selectOption("production");
     await page.getByLabel("App ID prefix").fill("TEAM1234");
     await page.getByLabel("Bundle ID", { exact: true }).fill("dev.latchway.livee2e");
-    await page.getByLabel("Allowed bundle version").fill("1.0.0");
+    await page.getByLabel("Signing or distribution").selectOption("app_store");
+    await page.getByLabel("Allowed CFBundleVersion (build number)").fill("1");
     await page.getByLabel("Package name").fill("dev.latchway.livee2e.android");
     await page.getByLabel("Cloud project number").fill("123456789");
     await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(

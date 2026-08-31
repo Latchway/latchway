@@ -39,7 +39,52 @@ authorization, cookies, and known provider-credential fields. They retry only
 an exact bounded pre-dispatch session or nonce challenge. They do not replay a
 request that might have reached an upstream.
 
-## Protected request pipeline
+## Protected AI request sequence
+
+```mermaid
+sequenceDiagram
+    accTitle: Protected AI request sequence
+    accDescr: From top to bottom, an untrusted application asks for a feature, the SDK attaches a fresh DPoP proof, Latchway verifies the session and proof, PostgreSQL atomically reserves replay and quota state, a server-selected upstream receives a sanitized request, and Latchway streams the response before settling trusted usage.
+
+    participant App as Application
+    participant SDK as Latchway SDK
+    participant Gateway as Latchway
+    participant DB as PostgreSQL
+    participant Upstream as Configured upstream
+
+    App->>SDK: Feature-bound AI request
+    SDK->>Gateway: Access token + fresh DPoP proof
+    Gateway->>Gateway: Verify session, proof, policy, and input
+    Gateway->>DB: Reserve replay key, quota, and concurrency
+    DB-->>Gateway: Atomic reservation accepted
+    Gateway->>Upstream: Sanitized, server-routed request
+    Upstream-->>Gateway: Response stream + usage
+    Gateway-->>App: Sanitized response stream
+    Gateway->>DB: Settle usage and release remainder
+```
+
+### What this establishes
+
+Latchway verifies the proof-bound session and reserves replay, quota, and
+concurrency state before dispatch. It selects the route and credentials on the
+server, sanitizes both directions, and settles one logical request after the
+upstream attempt lifecycle.
+
+### What this does not establish
+
+A valid session does not guarantee that policy admits the request or that an
+upstream succeeds. A retry is not safe merely because a request body is
+replayable, and fallback is forbidden after response bytes have been committed
+to the client.
+
+### What causes the relationship to expire
+
+The DPoP proof and replay reservation apply to one request. Access tokens,
+nonces, quota and concurrency leases, route decisions, and upstream-attempt
+state end or rotate on their own bounded lifecycles; settlement or recovery
+closes the reservation.
+
+## Protected request pipeline details
 
 1. Apply transport limits and assign a request ID.
 2. Verify the access token and DPoP proof; reserve its replay key.

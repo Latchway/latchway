@@ -8,9 +8,54 @@ import (
 	"testing"
 	"time"
 
+	"github.com/latchway/latchway/internal/attestation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+func TestAppAttestFailurePhaseMetricVocabularyMatchesVerifier(t *testing.T) {
+	t.Parallel()
+
+	phases := []attestation.AppAttestFailurePhase{
+		attestation.AppAttestFailurePhaseRequest,
+		attestation.AppAttestFailurePhaseContext,
+		attestation.AppAttestFailurePhaseBinding,
+		attestation.AppAttestFailurePhaseEvidence,
+		attestation.AppAttestFailurePhaseClock,
+		attestation.AppAttestFailurePhaseAttestationObject,
+		attestation.AppAttestFailurePhaseCertificateChain,
+		attestation.AppAttestFailurePhaseCredentialBinding,
+		attestation.AppAttestFailurePhaseAttestationAuthenticator,
+		attestation.AppAttestFailurePhaseAttestationEnvironment,
+		attestation.AppAttestFailurePhaseAttestationExtensions,
+		attestation.AppAttestFailurePhaseAttestationNonce,
+		attestation.AppAttestFailurePhaseRegistration,
+		attestation.AppAttestFailurePhaseAssertionObject,
+		attestation.AppAttestFailurePhaseAssertionAuthenticator,
+		attestation.AppAttestFailurePhaseAssertionKey,
+		attestation.AppAttestFailurePhaseAssertionScope,
+		attestation.AppAttestFailurePhaseAssertionCounter,
+		attestation.AppAttestFailurePhaseAssertionSignature,
+		attestation.AppAttestFailurePhaseKeyStore,
+		attestation.AppAttestFailurePhaseResult,
+	}
+	seen := make(map[string]struct{}, len(phases))
+	for _, phase := range phases {
+		value := string(phase)
+		if safeAppAttestFailurePhase(value) != value {
+			t.Fatalf("verifier phase %q is absent from the metric vocabulary", value)
+		}
+		if _, duplicate := seen[value]; duplicate {
+			t.Fatalf("duplicate verifier phase %q", value)
+		}
+		seen[value] = struct{}{}
+	}
+	for _, unbounded := range []string{"", "assertion_signature_private", "credential=private", "req_01J00000000000000000000000"} {
+		if safeAppAttestFailurePhase(unbounded) != "invalid" {
+			t.Fatalf("unbounded verifier phase %q was accepted", unbounded)
+		}
+	}
+}
 
 func TestRegistryExposesPlanMetricsWithoutHighCardinalityLabels(t *testing.T) {
 	t.Parallel()
@@ -152,6 +197,16 @@ func TestRegistryAttestationAndActivationMetricsUseClosedDimensions(t *testing.T
 		Upstream: "provider-private-value", Platform: "attacker-platform",
 		AttestationLevel: "attacker-verdict", Outcome: "provider-private-outcome",
 	})
+	registry.RecordAppAttestVerifierFailure(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Feature: "must_not_appear", Route: "must_not_appear", Upstream: "must_not_appear",
+		ModelAlias: "must_not_appear", Platform: "react_native_ios",
+		AttestationLevel: "must_not_appear", Plan: "must_not_appear", Outcome: "must_not_appear",
+	}, "assertion_signature")
+	registry.RecordAppAttestVerifierFailure(context.Background(), Labels{
+		Application: "app_mobile", Environment: "env_production",
+		Platform: "attacker-platform", Upstream: "provider-private-value",
+	}, "credential=provider-private-failure")
 	registry.RecordConfigurationActivation(context.Background(), Labels{
 		Application: "app_mobile", Environment: "env_production",
 		Plan: "must_not_appear", Outcome: ConfigurationActivationOutcomeRolledBack,
@@ -167,6 +222,8 @@ func TestRegistryAttestationAndActivationMetricsUseClosedDimensions(t *testing.T
 	for _, expected := range []string{
 		`latchway_attestation_results_total{application="app_mobile",attestation_level="app_verified",environment="env_production",outcome="succeeded",platform="react_native_ios"} 1`,
 		`latchway_attestation_results_total{application="app_mobile",attestation_level="invalid",environment="env_production",outcome="invalid",platform="invalid"} 1`,
+		`latchway_app_attest_verifier_failures_total{application="app_mobile",environment="env_production",phase="assertion_signature",platform="react_native_ios"} 1`,
+		`latchway_app_attest_verifier_failures_total{application="app_mobile",environment="env_production",phase="invalid",platform="invalid"} 1`,
 		`latchway_config_revision_activations_total{application="app_mobile",environment="env_production",outcome="rolled_back"} 1`,
 		`latchway_config_revision_activations_total{application="app_mobile",environment="env_production",outcome="invalid"} 1`,
 	} {
@@ -177,6 +234,7 @@ func TestRegistryAttestationAndActivationMetricsUseClosedDimensions(t *testing.T
 	for _, forbidden := range []string{
 		"must_not_appear", "provider-private-value", "attacker-platform",
 		"attacker-verdict", "provider-private-outcome", "administrator-private-action",
+		"credential=provider-private-failure",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("closed metric disclosed %q:\n%s", forbidden, text)

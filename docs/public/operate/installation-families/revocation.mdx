@@ -8,6 +8,48 @@ description: "Choose component, root, or family revocation and understand which 
   the current Admin API.
 </Warning>
 
+## Root revocation propagation
+
+```mermaid
+flowchart TD
+    accTitle: Root revocation propagation
+    accDescr: Revoking a directly trusted root component invalidates that root's sessions and every outstanding delegation derived from it. The affected delegated Widget and Share Extension then lose their sessions and refresh chains. A separate child-only revocation stops that child without revoking the root or its siblings.
+
+    family["Installation Family"] --> root["Root component: directly trusted"]
+    root --> rootSessions["Root sessions and refresh chain"]
+    root -.-> widgetDelegation["Widget delegation"]
+    root -.-> shareDelegation["Share Extension delegation"]
+    widgetDelegation --> widgetSessions["Widget sessions and refresh chain"]
+    shareDelegation --> shareSessions["Share sessions and refresh chain"]
+    rootRevocation["Revoke root"] -.-> root
+    rootRevocation -.-> rootSessions
+    rootRevocation -.-> widgetDelegation
+    rootRevocation -.-> shareDelegation
+    widgetRevocation["Revoke Widget only"] -.-> widgetSessions
+    widgetRevocation -.-> isolation["Root and Share are not revoked by this action"]
+```
+
+### What this establishes
+
+Root revocation is authoritative for the root credential family and every
+delegation whose trust provenance depends on that root. Family revocation is
+broader still, while child-only revocation remains isolated to the selected
+component and its credential family.
+
+### What this does not establish
+
+Delegated children are not directly attested because their sessions once
+derived from a trusted root. Revoking one child does not revoke the root or a
+sibling, and cache state cannot extend authorization beyond the contract's
+bounded revocation behavior.
+
+### What causes the relationship to expire
+
+Root or family revocation ends the derived relationship immediately at the
+authoritative boundary. Root trust expiry, delegation expiry, component
+revocation, user sign-out, identity change, application or environment
+mismatch, and policy changes can also terminate affected credentials.
+
 | Action | Required effect |
 | --- | --- |
 | Revoke one component | Reject its access sessions, refresh chain, pending delegations, and future requests. |

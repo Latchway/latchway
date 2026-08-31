@@ -86,6 +86,17 @@ Production App Attest requires a production entitlement, matching server
 application policy, an Apple-signed application, and a supported physical
 device. A simulator or fixture cannot produce release evidence.
 
+<Info>
+  The React Native example has exercised this Swift App Attest provider on a
+  real iOS 27 device. The app used Release configuration with automatic Apple
+  Development signing and passed production App Attest registration and
+  same-key assertion through the current source gateway. That observation does
+  not prove an Apple distribution-derived candidate or a published standalone
+  Swift/CocoaPods consumer. CocoaPods lint passed with the beta Xcode toolchain;
+  the stable Xcode installation on the verification host lacks its required
+  platform component.
+</Info>
+
 The provider single-flights first-use key creation, persists a generated key
 before surfacing ordinary caller cancellation, and uses reset epochs so an
 in-flight operation cannot restore cleared state. Invalid-key recovery is

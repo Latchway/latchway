@@ -267,7 +267,10 @@ func appAttestAssertionPayloadForAppID(
 	}
 	nonceInput := append(append([]byte(nil), authenticatorData...), bindingHash[:]...)
 	nonce := sha256.Sum256(nonceInput)
-	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, nonce[:])
+	// App Attest signs the nonce through ECDSA-SHA256 message semantics, so
+	// the primitive ECDSA fixture receives SHA256(nonce), matching live iOS.
+	signatureDigest := sha256.Sum256(nonce[:])
+	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, signatureDigest[:])
 	if err != nil {
 		t.Fatal(err)
 	}

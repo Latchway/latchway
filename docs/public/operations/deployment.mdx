@@ -15,6 +15,52 @@ root.
   evaluation candidates until release promotion and provenance checks pass.
 </Warning>
 
+## PostgreSQL-only deployment
+
+```mermaid
+flowchart LR
+    accTitle: PostgreSQL-only deployment
+    accDescr: HTTPS clients enter one Latchway deployment boundary containing API and worker replicas created from the same non-root OCI image. Every replica coordinates configuration, sessions, replay, quota, usage, audit, and operational jobs through PostgreSQL 15 or newer, the only required external service. The API calls configured upstreams with server-held credentials.
+
+    clients["HTTPS clients"] --> loadBalancer["TLS ingress or load balancer"]
+    subgraph boundary ["Latchway deployment boundary"]
+        apiA["API replica"]
+        apiB["API replica"]
+        worker["Worker replica"]
+        migration["Migration job"]
+    end
+    loadBalancer --> apiA
+    loadBalancer --> apiB
+    apiA --> upstream["Configured upstreams"]
+    apiB --> upstream
+    apiA --> postgres[("PostgreSQL 15+")]
+    apiB --> postgres
+    worker --> postgres
+    migration -.->|"Schema lifecycle"| postgres
+    operator["Admin API or CLI"] -.-> apiA
+```
+
+### What this establishes
+
+API, worker, migration, diagnostics, and CLI roles come from one image, and
+PostgreSQL is the only required external service. PostgreSQL-backed state makes
+configuration, replay uniqueness, quota reservation, jobs, key rotation, and
+recovery authoritative across replicas.
+
+### What this does not establish
+
+The diagram does not prove that a cloud deployment, image publication,
+signature, provenance, backup, or restore gate passed. A load balancer, secret
+manager, and platform scheduler can be used without becoming hidden Latchway
+state stores, and the dashboard or CLI cannot bypass the canonical Admin API.
+
+### What causes the relationship to expire
+
+Worker heartbeats, database leases, sessions, reservations, and operator
+credentials are bounded and expire or rotate independently. Configuration
+changes take effect through immutable revisions; restoring PostgreSQL requires
+the matching master key rather than an in-place key replacement.
+
 ## Implemented deployment templates
 
 | Platform | Application and data shape |

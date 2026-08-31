@@ -13,8 +13,13 @@ An **Installation Family** groups related client components for one application
 user and one logical application installation. It is the parent for policy,
 trust provenance, aggregate visibility, and family-wide revocation.
 
+## Installation Family hierarchy
+
 ```mermaid
 flowchart TD
+    accTitle: Installation Family hierarchy
+    accDescr: An application user has one Installation Family parent. The directly attested main app and delegated Widget and Share Extension are separate child components, each with an independent P-256 DPoP key. Dashed authorization edges flow from the main app to the delegated components without claiming that they were directly attested.
+
     applicationUser["Application User"] --> family["Installation Family"]
     family --> mainApp["Main App: directly attested"]
     family --> widget["Widget: delegated trust"]
@@ -30,21 +35,22 @@ Every Client Component has an independent P-256 key, DPoP identity, session
 family, rotating refresh-token chain, feature scope, quota attribution, and
 revocation state. Components never share a rotating refresh token.
 
-## What this establishes
+### What this establishes
 
 Direct attestation establishes evidence about the root application instance.
 A valid delegation establishes that the attested root authorized a named
 component key under a configured Component Definition.
 
-## What this does not establish
+### What this does not establish
 
 Delegation does not establish that the extension independently completed App
 Attest. An Installation Family is also not a physical-device identifier and
 must not be used for cross-application or cross-environment correlation.
 
-## What causes the relationship to expire
+### What causes the relationship to expire
 
-Delegation expiry, root trust expiry, user sign-out, component revocation,
-family revocation, application or environment mismatch, and policy changes can
-invalidate the relationship. Family revocation must invalidate every component
-and its session family.
+An unconsumed delegation ends after its short lifetime or successful use. An
+established delegated relationship can end on root trust expiry, user sign-out,
+component revocation, family revocation, application or environment mismatch,
+or policy change. Family revocation must invalidate every component and its
+session family.

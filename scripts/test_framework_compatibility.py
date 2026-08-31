@@ -66,6 +66,20 @@ class FrameworkCompatibilityTests(unittest.TestCase):
         )
         self.assertEqual(vercel["latchway_package"], "@latchway/vercel-ai")
 
+        javascript = {
+            item["id"]: item
+            for item in validated["frameworks"]
+            if item["id"] in {"langchain-js", "openai-js", "vercel-ai-sdk"}
+        }
+        self.assertIs(javascript["langchain-js"]["capabilities"]["streaming"], True)
+        self.assertIs(javascript["openai-js"]["capabilities"]["embeddings"], True)
+        for item in javascript.values():
+            self.assertEqual(item["support"], "experimental")
+            limitation = " ".join(item["limitations"])
+            self.assertIn("case-ID tests pass", limitation)
+            self.assertIn("hosted/exact-image", limitation)
+            self.assertIn("revocation evidence remain release gates", limitation)
+
     def test_client_openapi_uses_exact_registry_ids(self) -> None:
         openapi = yaml.safe_load(
             (compatibility.ROOT / "api/client.openapi.yaml").read_text(encoding="utf-8")

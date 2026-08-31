@@ -12,6 +12,54 @@ Latchway makes two independent decisions before it issues a client session:
 Passing one never implies passing the other. The resulting session is also
 bound to the installation's P-256 key with DPoP.
 
+## Identity, attestation, and DPoP
+
+```mermaid
+flowchart LR
+    accTitle: Identity, attestation, and DPoP
+    accDescr: Three independent inputs cross the untrusted-client boundary: an identity token identifies the application user, platform evidence describes the application instance or web risk, and a P-256 proof demonstrates possession of the session-bound component key. Latchway verifies all three before policy authorizes a feature.
+
+    subgraph client ["Untrusted client"]
+        identityToken["Identity token"]
+        attestationEvidence["Attestation or web-risk evidence"]
+        componentKey["P-256 component key"]
+    end
+    subgraph boundary ["Latchway boundary"]
+        identityCheck["Authenticate user"]
+        attestationCheck["Verify trust evidence"]
+        dpopCheck["Verify DPoP possession"]
+        authorization["Authorize feature policy"]
+    end
+
+    identityToken --> identityCheck
+    attestationEvidence --> attestationCheck
+    componentKey -->|"Fresh proof"| dpopCheck
+    identityCheck --> authorization
+    attestationCheck --> authorization
+    dpopCheck --> authorization
+    authorization -->|"Server-owned decision"| session["Bounded session"]
+```
+
+### What this establishes
+
+The identity verifier establishes the configured application-user principal.
+The attestation verifier establishes a normalized trust result for the
+presented application instance or web environment. A valid DPoP proof
+establishes possession of the private key bound to the session.
+
+### What this does not establish
+
+Identity does not imply attestation, attestation does not authorize a feature,
+and DPoP does not prove that the calling code or device is safe. Web risk
+verification is not equivalent to native application attestation.
+
+### What causes the relationship to expire
+
+Identity tokens, one-time attestation challenges, attestation evidence, access
+tokens, and refresh state have separate bounded lifetimes. Each DPoP proof is
+single-use for its exact method and public URL; revocation or policy changes can
+end authorization earlier.
+
 ## Identity providers
 
 Your application keeps its existing login and account lifecycle. The SDK asks
@@ -55,10 +103,28 @@ cannot satisfy a feature policy requiring native trust.
 
 ### Apple App Attest
 
-The active policy pins the App ID prefix, bundle ID, Apple environment,
-accepted validation categories, and bundle versions. The server validates the
-Apple certificate chain, application identity, one-time challenge binding,
-attested key, assertion signature, and monotonic counter.
+The active policy pins the App ID prefix, bundle ID, Apple environment, exact
+launch-validation categories, and exact `CFBundleVersion` build numbers. The
+server validates the Apple certificate chain, application identity, one-time
+challenge binding, attested key, assertion signature, and monotonic counter.
+It accepts both Apple's legacy authenticator encoding and the current encoding
+that marks extension data explicitly. Current CodeDirectory-hash extensions
+must be a complete, well-formed SHA-256 pair; malformed, partial, unknown, or
+unrelated extensions fail closed.
+
+| Signed executable | App Attest environment | Validation category |
+| --- | --- | ---: |
+| Development signing | `development` | `3` |
+| TestFlight | `production` | `2` |
+| App Store | `production` | `4` |
+| Ad hoc or enterprise distribution | `production` | `5` |
+
+Category `1` identifies an operating-system executable; it is not a default for
+a third-party application. Categories `7`, `8`, and `9` represent restricted
+system-generated binaries and are rejected. Pin only the categories required by
+the deployment. The bundle-version allowlist uses `CFBundleVersion` (normally
+`CURRENT_PROJECT_VERSION`), not `CFBundleShortVersionString` or
+`MARKETING_VERSION`.
 
 Development and production App Attest environments are not interchangeable.
 Production proof requires the matching entitlement, an Apple-signed build, and
@@ -85,7 +151,53 @@ HTTPS origins.
 These tokens are short-lived challenge evidence. They are not retained in
 normal request records or logs.
 
-## Session lifecycle
+## Session bootstrap sequence
+
+```mermaid
+sequenceDiagram
+    accTitle: Session bootstrap sequence
+    accDescr: From top to bottom, the application supplies a fresh identity token, the SDK asks Latchway for a one-time challenge bound to its P-256 public key, the platform produces challenge evidence, and Latchway verifies identity, evidence, and key binding before storing rotating session state in PostgreSQL and returning a bounded session.
+
+    participant App as Application
+    participant SDK as Latchway SDK
+    participant Platform as Trust provider
+    participant Gateway as Latchway
+    participant DB as PostgreSQL
+
+    App->>SDK: Fresh identity token callback
+    SDK->>Gateway: Session challenge + component public key
+    Gateway->>DB: Persist one-time challenge binding
+    Gateway-->>SDK: Canonical challenge
+    SDK->>Platform: Obtain challenge-bound evidence
+    Platform-->>SDK: Attestation or web-risk token
+    SDK->>Gateway: Identity + evidence + key binding
+    Gateway->>Gateway: Verify identity, evidence, and DPoP key
+    Gateway->>DB: Consume challenge; create rotating session family
+    Gateway-->>SDK: Short-lived access token + refresh state
+```
+
+### What this establishes
+
+The sequence establishes that Latchway issued a session only after it verified
+the configured identity input, challenge-bound trust evidence, and the public
+key to which the session is bound. PostgreSQL makes challenge consumption and
+refresh-family state authoritative across replicas.
+
+### What this does not establish
+
+A successful bootstrap does not make later requests valid without fresh DPoP,
+does not attest arbitrary delegated components, and does not create a
+long-lived bearer credential. Refresh does not silently replace identity
+reauthentication or an attestation step-up.
+
+### What causes the relationship to expire
+
+The bootstrap challenge is one-time and short-lived. Evidence, access tokens,
+and refresh credentials expire independently; refresh rotates on every
+successful use, while reuse or revocation terminates the affected credential
+family.
+
+## Session lifecycle details
 
 1. The SDK creates or loads a P-256 installation key.
 2. `POST /client/v1/session-challenges` binds application, environment,

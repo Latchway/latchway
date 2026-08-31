@@ -31,7 +31,7 @@ mirror.
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
 | Contract freeze | Core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
-| Bundle SHA-256 | `36aa3c4786e60f2cdbbc3d0cd2f65bffe894a099479517b2e1faa01361c74b00` |
+| Bundle SHA-256 | `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Database | Schema `23` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |

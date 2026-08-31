@@ -13,13 +13,39 @@ description: "Classify framework extension points and determine whether an integ
 Keep your framework. Replace or extend its network transport. Bind that
 transport to a Latchway feature.
 
+## Framework-transparent integration
+
 ```mermaid
 flowchart LR
+    accTitle: Framework-transparent integration
+    accDescr: Application code continues to use its existing AI framework. A Latchway authenticated transport intercepts the framework's outbound request, binds it to an application feature, adds current session and DPoP authorization, and sends it through Latchway to a server-selected upstream.
+
     application["Application"] --> framework["Existing AI framework"]
     framework --> transport["Latchway authenticated transport"]
     transport --> gateway["Latchway gateway"]
     gateway --> upstream["Server-selected upstream"]
 ```
+
+### What this establishes
+
+A compatible request-time extension point lets the framework preserve its
+application-facing API while Latchway owns feature binding, session lifecycle,
+DPoP, redirect and destination checks, routing, quota, and safe response
+streaming underneath it.
+
+### What this does not establish
+
+A configurable base URL or static header alone does not establish full DPoP.
+The framework's chats, prompts, agents, tools, memory, structured-output logic,
+and RAG state remain framework concerns, and an example does not establish a
+released compatibility claim.
+
+### What causes the relationship to expire
+
+Each request needs current session authorization and a fresh DPoP proof. The
+transport binding remains supported only for the exact framework, adapter,
+SDK, server, contract, protocol, platform, and security-level range recorded
+in the generated compatibility matrix.
 
 Latchway owns identity input, trust verification, component identity, session
 lifecycle, DPoP, feature context, authorization, quotas, routing, metering, and

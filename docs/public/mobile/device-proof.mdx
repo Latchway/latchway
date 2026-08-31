@@ -8,10 +8,30 @@ simulators, emulators, debug evidence, and locally sideloaded builds prove
 development behavior only.
 
 <Warning>
-  The current version 1 source candidate has not completed protected physical
-  App Attest or Play Integrity runs. Do not describe it as device-proven until
-  those exact-candidate receipts exist.
+  The current version 1 source candidate has a development-signed physical iOS
+  observation, but it has not completed a protected Apple distribution-derived
+  App Attest run or a physical Play Integrity run. Do not describe it as
+  release-qualified or production-deployed until those exact-candidate receipts
+  exist.
 </Warning>
+
+## Current development-signed iOS observation
+
+A real physical device running iOS 27 exercised the React Native example in
+Release configuration with automatic Apple Development signing and bundle
+`dev.latchway`. The gateway accepted Apple production App Attest trust at
+validation category `3` and bundle version `1`. Registration and a subsequent
+assertion reused the same App Attest key through a temporary ngrok tunnel, the
+current source gateway, and Firebase identity. The server persisted the
+assertion counter and hash.
+
+The same run passed Secure Enclave DPoP, upstream non-streaming and streaming
+requests, quota, a typed `403 component_feature_not_granted` response, native
+bridge behavior, and cleanup. It did not use Apple Distribution, ad hoc,
+TestFlight, or App Store distribution; it was not bound to a protected
+immutable candidate; and it did not execute the delegated extension runtime.
+It is useful device evidence for development, but it does not close the release
+gate.
 
 ## iOS and React Native iOS
 
@@ -22,6 +42,10 @@ Prepare all of the following:
 - matching Team ID, bundle ID, signing certificate, and provisioning profile;
 - the App Attest environment selected consistently in the entitlement,
   application, gateway policy, and test runner;
+- the exact distribution-derived validation category: `3` for development
+  signing, `2` for TestFlight, `4` for App Store, or `5` for ad hoc/enterprise;
+- the exact `CFBundleVersion`/`CURRENT_PROJECT_VERSION` build number, not the
+  marketing version, in the gateway bundle-version allowlist;
 - a production-distributed application identity token;
 - the exact candidate gateway image and synchronized iOS or React Native SDK.
 

@@ -7,7 +7,54 @@ Applications request a **feature**, not an upstream credential or trusted
 physical model. The active immutable configuration maps that feature to policy,
 limit plans, routes, upstreams, physical models, pricing, and retry behavior.
 
-## Feature-first routing
+## Feature routing
+
+```mermaid
+flowchart LR
+    accTitle: Feature routing
+    accDescr: An untrusted client names only an application feature. Inside the Latchway boundary, the active immutable configuration combines verified identity, normalized trust, plan, health, weights, and sticky policy to select a route. The route chooses a configured upstream and physical model that the client cannot override.
+
+    subgraph client ["Untrusted client"]
+        feature["Feature ID"]
+    end
+    subgraph boundary ["Latchway boundary"]
+        verified["Verified principal and trust"]
+        policy["Feature policy"]
+        router["Weighted, sticky, health-aware routing"]
+    end
+    subgraph external ["Configured upstreams"]
+        routeA["Route A: upstream + physical model"]
+        routeB["Route B: fallback upstream + physical model"]
+    end
+
+    config["Active immutable configuration"] -.-> policy
+    feature --> policy
+    verified --> policy
+    policy --> router
+    router -->|"Primary selection"| routeA
+    router -->|"Policy-bounded fallback before response"| routeB
+    router -->|"Decision and attempts"| postgres[("PostgreSQL")]
+```
+
+### What this establishes
+
+The client requests a feature while the active server configuration owns
+policy, routes, weights, sticky inputs, upstreams, credentials, physical
+models, pricing, and fallback eligibility. Verified principal and trust inputs
+can influence a decision without becoming client assertions.
+
+### What this does not establish
+
+Feature access does not promise a stable provider or physical model, and a
+client cannot force a fallback. A configured fallback edge does not authorize
+a second attempt after response bytes have been committed.
+
+### What causes the relationship to expire
+
+A route decision is bounded to one logical request and its active
+configuration revision. Health, sticky-policy lifetime, configuration
+activation, revocation, or retry eligibility can change later decisions
+without changing the client-facing feature ID.
 
 Routing evaluates server-owned inputs such as platform, normalized trust,
 verified identity claims, plan, health, configured weights, and sticky keys.
@@ -30,7 +77,44 @@ must prove a conservative model-aware input estimate before dispatch. Rich
 input that cannot be safely accounted for fails closed rather than bypassing a
 quota.
 
-## Reserve, execute, settle
+## Reserve-execute-settle quota lifecycle
+
+```mermaid
+flowchart LR
+    accTitle: Reserve-execute-settle quota lifecycle
+    accDescr: Latchway first estimates a conservative maximum and atomically reserves every applicable quota and concurrency scope in PostgreSQL. It then calls the upstream without an open database transaction. Finally it settles trusted actual usage or conservatively accounts for an unknown outcome and releases only the unused remainder.
+
+    estimate["Trusted preflight estimate"] --> reserve["Reserve atomically in PostgreSQL"]
+    reserve -->|"Accepted"| execute["Execute upstream without open transaction"]
+    reserve -->|"Denied"| reject["Reject before dispatch"]
+    execute -->|"Reported or parsed usage"| settle["Settle actual charge"]
+    execute -->|"Unknown outcome"| conservative["Apply conservative accounting"]
+    settle --> close["Release unused reservation"]
+    conservative --> close
+    execute -.->|"Expired lease or interrupted worker"| recovery["Idempotent recovery job"]
+    recovery --> settle
+```
+
+### What this establishes
+
+Atomic reservation prevents concurrent requests from independently spending
+the same available limit. Upstream execution occurs without holding a database
+transaction, and settlement is idempotent across normal completion and job
+recovery.
+
+### What this does not establish
+
+A reservation is not a bill, does not guarantee upstream success, and does not
+make an untrusted client token count authoritative. Unknown usage is not
+refunded as zero, and an estimate that cannot safely prove a hard bound fails
+closed.
+
+### What causes the relationship to expire
+
+The reservation closes when settlement or conservative recovery records the
+final charge and releases only the unused remainder. Concurrency leases are
+bounded and recoverable; limit windows and immutable configuration revisions
+expire or are replaced according to their own policy.
 
 1. Estimate the worst permitted usage and atomically reserve every applicable
    quota and concurrency lease in PostgreSQL.

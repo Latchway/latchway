@@ -34,10 +34,16 @@ docker run --rm \
   "$terraform_image" \
   -c 'terraform fmt -check -recursive && terraform init -backend=false -input=false -lockfile=readonly && terraform validate'
 
-if command -v flyctl >/dev/null 2>&1; then
-  flyctl config validate --strict --config deploy/fly/fly.toml
-elif command -v fly >/dev/null 2>&1; then
-  fly config validate --strict --config deploy/fly/fly.toml
+if [[ -n "${FLY_API_TOKEN:-}" ]]; then
+  : "${FLY_APP:?FLY_APP is required when FLY_API_TOKEN is set}"
+  if command -v flyctl >/dev/null 2>&1; then
+    flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
+  elif command -v fly >/dev/null 2>&1; then
+    fly config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
+  else
+    echo "Fly CLI is required when FLY_API_TOKEN is set" >&2
+    exit 1
+  fi
 fi
 
 printf 'deployment validation passed; evidence: %s\n' "$output"

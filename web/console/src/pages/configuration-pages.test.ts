@@ -1,18 +1,51 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNativeSnippets, buildNativeTemplate } from "./native-template";
+import { buildNativeSnippets, buildNativeTemplate, type NativeTemplateInput } from "./native-template";
 import nativeTemplateFixture from "./native-template.fixture.json";
+
+function nativeTemplateInput(overrides: Partial<NativeTemplateInput> = {}): NativeTemplateInput {
+  return {
+    application: "mobile-app",
+    environment: "production",
+    environmentKind: "production",
+    organization: "example",
+    firebaseProject: "example-mobile",
+    appIDPrefix: "TEAM1234",
+    bundleID: "com.example.mobile",
+    bundleVersion: "234",
+    appleDistribution: "app_store",
+    packageName: "com.example.mobile.android",
+    cloudProject: 123456789,
+    certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    upstreamURL: "https://fixture.example.test/v1",
+    physicalModel: "fixture-model",
+    maximumFramingTokensPerRequest: 8,
+    maximumFramingTokensPerMessage: 4,
+    maximumContextTokens: 4096,
+    authentication: { type: "none" },
+    inputNanoUsdPerMillion: 0,
+    outputNanoUsdPerMillion: 0,
+    requestNanoUsd: 0,
+    dailyInputTokenMaximum: 1000,
+    dailyOutputTokenMaximum: 1000,
+    dailyTotalTokenMaximum: 2000,
+    perRequestInputTokenMaximum: 100,
+    ...overrides
+  };
+}
 
 describe("native setup template", () => {
   it("binds all native platforms and trusted Responses accounting", () => {
     const document = JSON.parse(buildNativeTemplate({
       application: "mobile-app",
       environment: "production",
+      environmentKind: "production",
       organization: "example",
       firebaseProject: "example-mobile",
       appIDPrefix: "TEAM1234",
       bundleID: "com.example.mobile",
-      bundleVersion: "2.3.4",
+      bundleVersion: "234",
+      appleDistribution: "app_store",
       packageName: "com.example.mobile.android",
       cloudProject: 123456789,
       certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
@@ -45,7 +78,7 @@ describe("native setup template", () => {
       "react_native_android", "react_native_ios"
     ]);
     expect(document.spec.attestationPolicies[0]?.platforms).toMatchObject({
-      react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
+      react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["234"] } },
       react_native_android: { minimumTrustLevel: "device_verified" }
     });
     expect(document.spec.componentDefinitions).toEqual([
@@ -93,8 +126,9 @@ describe("native setup template", () => {
   it("allows no-auth only as an explicit template input", () => {
     const input = JSON.parse(buildNativeTemplate({
       application: "mobile-app", environment: "production", organization: "example",
+      environmentKind: "production", appleDistribution: "app_store",
       firebaseProject: "example-mobile", appIDPrefix: "TEAM1234", bundleID: "com.example.mobile",
-      bundleVersion: "2.3.4", packageName: "com.example.mobile.android", cloudProject: 123456789,
+      bundleVersion: "234", packageName: "com.example.mobile.android", cloudProject: 123456789,
       certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
       upstreamURL: "https://fixture.example.test/v1", physicalModel: "fixture-model",
       maximumFramingTokensPerRequest: 8, maximumFramingTokensPerMessage: 4,
@@ -109,8 +143,9 @@ describe("native setup template", () => {
   it("generates exact native roots when Swift and Kotlin are selected", () => {
     const document = JSON.parse(buildNativeTemplate({
       application: "mobile-app", environment: "production", organization: "example",
+      environmentKind: "production", appleDistribution: "app_store",
       firebaseProject: "example-mobile", appIDPrefix: "TEAM1234", bundleID: "com.example.mobile",
-      bundleVersion: "2.3.4", packageName: "com.example.mobile.android", clientSurface: "native",
+      bundleVersion: "234", packageName: "com.example.mobile.android", clientSurface: "native",
       cloudProject: 123456789, certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
       upstreamURL: "https://fixture.example.test/v1", physicalModel: "fixture-model",
       maximumFramingTokensPerRequest: 8, maximumFramingTokensPerMessage: 4,
@@ -130,8 +165,9 @@ describe("native setup template", () => {
   it("rejects overlapping Apple and Android Component Definition identifiers", () => {
     expect(() => buildNativeTemplate({
       application: "mobile-app", environment: "production", organization: "example",
+      environmentKind: "production", appleDistribution: "app_store",
       firebaseProject: "example-mobile", appIDPrefix: "TEAM1234", bundleID: "com.example.mobile",
-      bundleVersion: "2.3.4", packageName: "com.example.mobile", cloudProject: 123456789,
+      bundleVersion: "234", packageName: "com.example.mobile", cloudProject: 123456789,
       certificateDigest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
       upstreamURL: "https://fixture.example.test/v1", physicalModel: "fixture-model",
       maximumFramingTokensPerRequest: 8, maximumFramingTokensPerMessage: 4,
@@ -140,6 +176,50 @@ describe("native setup template", () => {
       dailyInputTokenMaximum: 1000, dailyOutputTokenMaximum: 1000,
       dailyTotalTokenMaximum: 2000, perRequestInputTokenMaximum: 100
     })).toThrow("component_identifier_duplicate");
+  });
+
+  it.each([
+    ["development", "development", "development", 3],
+    ["testflight", "production", "production", 2],
+    ["app_store", "production", "production", 4],
+    ["ad_hoc_enterprise", "production", "production", 5]
+  ] as const)("maps %s signing to exact App Attest policy", (appleDistribution, environmentKind, appAttestEnvironment, validationCategory) => {
+    const document = JSON.parse(buildNativeTemplate(nativeTemplateInput({
+      appleDistribution,
+      environmentKind
+    }))) as {
+      spec: {
+        attestationPolicies: Array<{
+          platforms: {
+            react_native_ios: {
+              appAttest: {
+                allowedBundleVersions: string[];
+                allowedValidationCategories: number[];
+                environment: string;
+              };
+            };
+          };
+        }>;
+      };
+    };
+    expect(document.spec.attestationPolicies[0]?.platforms.react_native_ios.appAttest).toMatchObject({
+      environment: appAttestEnvironment,
+      allowedValidationCategories: [validationCategory],
+      allowedBundleVersions: ["234"]
+    });
+  });
+
+  it("rejects development App Attest in a production environment", () => {
+    expect(() => buildNativeTemplate(nativeTemplateInput({
+      appleDistribution: "development",
+      environmentKind: "production"
+    }))).toThrow("app_attest_environment_mismatch");
+  });
+
+  it("rejects an unknown Apple distribution instead of choosing a category", () => {
+    expect(() => buildNativeTemplate(nativeTemplateInput({
+      appleDistribution: "operating_system" as NativeTemplateInput["appleDistribution"]
+    }))).toThrow("app_attest_distribution_invalid");
   });
 
   it("emits a runnable React Native configuration and matching first request", () => {

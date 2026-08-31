@@ -16,6 +16,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/secrets"
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 const maximumCachedAttestationVerifiers = 256
@@ -86,7 +87,17 @@ func (coordinator *clientCoordinator) verifyAttestationEvidence(
 	if err != nil {
 		return attestation.Result{}, err
 	}
-	return verifier.Verify(ctx, evidence, binding)
+	result, verifyErr := verifier.Verify(ctx, evidence, binding)
+	if verifyErr != nil && coordinator.telemetry != nil {
+		if phase, ok := attestation.AppAttestFailurePhaseOf(verifyErr); ok {
+			coordinator.telemetry.RecordAppAttestVerifierFailure(ctx, telemetry.Labels{
+				Application: environment.ApplicationID,
+				Environment: environment.EnvironmentID,
+				Platform:    binding.Platform,
+			}, string(phase))
+		}
+	}
+	return result, verifyErr
 }
 
 func (coordinator *clientCoordinator) mobileAttestationVerifier(

@@ -31,6 +31,16 @@ are development-only and must not appear in a published package.
   is not delegated-component execution evidence.
 </Warning>
 
+<Info>
+  A real iOS 27 device has exercised this example in Release configuration
+  with automatic Apple Development signing. Production App Attest registration
+  and same-key assertion, Secure Enclave DPoP, upstream non-streaming and
+  streaming requests, quota, typed component denial, bridge behavior, and
+  cleanup passed against the current source gateway. This is development-signed
+  iOS evidence, not an Apple distribution-derived protected release receipt;
+  Android and delegated-extension runtime proof remain open.
+</Info>
+
 ## Create a client
 
 ```typescript
@@ -128,6 +138,6 @@ React Native delegates to the native SDKs:
 - Android uses the configured cloud project and an exact signed application
   installed through the configured Google Play track.
 
-Simulator, emulator, fixture, and sideloaded-debug success are development
-signals only. See [Physical-device proof](/mobile/device-proof) and
-[Security boundary](/concepts/security-boundary).
+Simulator, emulator, fixture, and locally sideloaded Apple Development success
+are development signals only. See [Physical-device proof](/mobile/device-proof)
+and [Security boundary](/concepts/security-boundary).

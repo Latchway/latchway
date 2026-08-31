@@ -54,6 +54,13 @@ nonce, attested key, assertion signature, and monotonic counter. Development
 and production credentials cannot be mixed. Simulators and fixtures are useful
 for tests but cannot produce release evidence.
 
+Pin the launch-validation category to the signed distribution: `3` for a
+development-signed build, `2` for TestFlight, `4` for App Store, or `5` for ad
+hoc/enterprise distribution. Category `1` is for an operating-system executable,
+not a normal application default. Also pin the exact `CFBundleVersion`
+(`CURRENT_PROJECT_VERSION`) build number; do not substitute the marketing
+version.
+
 Follow `latchway-ios-sdk/docs/real-device-conformance.md` for the protected
 physical run and `latchway-react-native-sdk/docs/physical-device-evidence.md`
 for the corresponding bridge proof.

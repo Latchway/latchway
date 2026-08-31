@@ -23,10 +23,15 @@ const (
 	maxAppAttestCOSEKeyBytes          = 256
 	maxAppAttestSignatureBytes        = 80
 
-	// App Attest uses an exact flags byte of 0x40 for attestation and 0x00
-	// for assertion. Apple's extension dictionary follows the credential or
-	// assertion header without setting WebAuthn's ED flag.
-	appAttestFlagAttestedData = byte(0x40)
+	// Older Apple vectors append the App Attest extension dictionary without
+	// setting WebAuthn's ED bit. Current Apple runtimes set ED whenever the
+	// dictionary is present. Current assertions can also set WebAuthn's AT bit
+	// while retaining App Attest's compact assertion layout (RP ID hash,
+	// counter, then the extension dictionary), rather than including WebAuthn
+	// attestedCredentialData. Accept those exact Apple encodings, but no
+	// unrelated flags.
+	appAttestFlagAttestedData  = byte(0x40)
+	appAttestFlagExtensionData = byte(0x80)
 )
 
 var appAttestNonceOID = asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 8, 2}
@@ -58,14 +63,19 @@ type appAttestCOSEKeyWire struct {
 }
 
 type appAttestExtensionsWire struct {
-	ValidationCategory *[]byte `cbor:"apple_validation_category_01"`
-	BundleVersion      *string `cbor:"apple_bundle_version_01"`
+	ValidationCategory    *[]byte `cbor:"apple_validation_category_01"`
+	BundleVersion         *string `cbor:"apple_bundle_version_01"`
+	CodeDirectoryHash     *[]byte `cbor:"apple_cd_hash_hash_01"`
+	CodeDirectoryHashType *[]byte `cbor:"apple_cd_hash_type_01"`
 }
 
 type appAttestExtensions struct {
-	present            bool
-	validationCategory uint32
-	bundleVersion      string
+	present                  bool
+	validationCategory       uint32
+	bundleVersion            string
+	codeDirectoryHashPresent bool
+	codeDirectoryHashType    byte
+	codeDirectoryHash        [sha256.Size]byte
 }
 
 type parsedAppAttestAuthenticator struct {
@@ -156,7 +166,7 @@ func parseAppAttestAttestationAuthenticator(encoded []byte) (parsedAppAttestAuth
 		return parsedAppAttestAuthenticator{}, invalid("app attest authenticator size")
 	}
 	flags := encoded[32]
-	if flags != appAttestFlagAttestedData {
+	if flags != appAttestFlagAttestedData && flags != appAttestFlagAttestedData|appAttestFlagExtensionData {
 		return parsedAppAttestAuthenticator{}, invalid("app attest authenticator flags")
 	}
 	result := parsedAppAttestAuthenticator{counter: binary.BigEndian.Uint32(encoded[33:37])}
@@ -189,6 +199,9 @@ func parseAppAttestAttestationAuthenticator(encoded []byte) (parsedAppAttestAuth
 	if err != nil {
 		return parsedAppAttestAuthenticator{}, err
 	}
+	if flags&appAttestFlagExtensionData != 0 && !extensions.present {
+		return parsedAppAttestAuthenticator{}, invalid("app attest authenticator flags")
+	}
 	result.publicKeyX963 = publicKeyX963
 	result.extensions = extensions
 	return result, nil
@@ -211,12 +224,16 @@ func parseAppAttestAssertionObject(encoded []byte) (parsedAppAttestAssertion, er
 		return parsedAppAttestAssertion{}, invalid("app attest assertion shape")
 	}
 	flags := wire.AuthenticatorData[32]
-	if flags != 0 {
+	if flags != 0 && flags != appAttestFlagAttestedData && flags != appAttestFlagExtensionData &&
+		flags != appAttestFlagAttestedData|appAttestFlagExtensionData {
 		return parsedAppAttestAssertion{}, invalid("app attest assertion flags")
 	}
 	extensions, err := decodeAppAttestExtensions(wire.AuthenticatorData[appAttestAuthenticatorHeaderBytes:])
 	if err != nil {
 		return parsedAppAttestAssertion{}, err
+	}
+	if flags&appAttestFlagExtensionData != 0 && !extensions.present {
+		return parsedAppAttestAssertion{}, invalid("app attest assertion flags")
 	}
 	result := parsedAppAttestAssertion{
 		signature:         append([]byte(nil), wire.Signature...),
@@ -261,7 +278,31 @@ func decodeAppAttestExtensions(encoded []byte) (appAttestExtensions, error) {
 	if !validAppAttestValidationCategory(category) {
 		return appAttestExtensions{}, invalid("app attest extensions")
 	}
-	return appAttestExtensions{present: true, validationCategory: category, bundleVersion: *wire.BundleVersion}, nil
+	hashPresent := wire.CodeDirectoryHash != nil
+	typePresent := wire.CodeDirectoryHashType != nil
+	if hashPresent != typePresent {
+		return appAttestExtensions{}, invalid("app attest extensions")
+	}
+	result := appAttestExtensions{present: true, validationCategory: category, bundleVersion: *wire.BundleVersion}
+	if hashPresent {
+		// Current Apple runtimes add the executable CodeDirectory digest and
+		// identify SHA-256 with type 2. The whole authenticatorData value is
+		// already covered by the App Attest certificate nonce or assertion
+		// signature and by Latchway's evidence hash. Validate this optional
+		// pair exactly, but do not create a second operator-controlled policy
+		// surface from an undocumented wire field.
+		if len(*wire.CodeDirectoryHash) != sha256.Size || len(*wire.CodeDirectoryHashType) != 1 ||
+			(*wire.CodeDirectoryHashType)[0] != 2 {
+			return appAttestExtensions{}, invalid("app attest extensions")
+		}
+		copy(result.codeDirectoryHash[:], *wire.CodeDirectoryHash)
+		if result.codeDirectoryHash == ([sha256.Size]byte{}) {
+			return appAttestExtensions{}, invalid("app attest extensions")
+		}
+		result.codeDirectoryHashPresent = true
+		result.codeDirectoryHashType = (*wire.CodeDirectoryHashType)[0]
+	}
+	return result, nil
 }
 
 func verifyAppAttestCertificateChain(encoded [][]byte, roots *x509.CertPool, now time.Time) (*x509.Certificate, error) {

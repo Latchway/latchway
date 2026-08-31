@@ -21,12 +21,20 @@ func FuzzParseAppAttestationObject(f *testing.F) {
 	if err != nil {
 		f.Fatalf("build legacy attestation seed: %v", err)
 	}
+	currentFixture, err := newAppAttestFixture(appAttestTestBinding(1), appAttestFixtureOptions{
+		environment: AppAttestProduction, flags: appAttestFlagAttestedData | appAttestFlagExtensionData,
+		includeCodeDirectoryHash: true,
+	})
+	if err != nil {
+		f.Fatalf("build current attestation seed: %v", err)
+	}
 	officialFixture, err := base64.StdEncoding.DecodeString(appAttestOfficialAttestationObjectBase64)
 	if err != nil {
 		f.Fatalf("decode official Apple attestation seed: %v", err)
 	}
 	f.Add(fixture.attestation)
 	f.Add(legacyFixture.attestation)
+	f.Add(currentFixture.attestation)
 	f.Add(officialFixture)
 	f.Add([]byte{0xbf, 0xff})
 	f.Add([]byte{0xa2, 0x63, 'f', 'm', 't', 0x61, 'a', 0x63, 'f', 'm', 't', 0x61, 'b'})
@@ -59,6 +67,8 @@ func FuzzParseAppAttestAssertionObject(f *testing.F) {
 	extensions, err := testAppAttestEncMode.Marshal(map[string]any{
 		"apple_validation_category_01": appAttestTestCategory(4),
 		"apple_bundle_version_01":      "1.0",
+		"apple_cd_hash_hash_01":        bytes.Repeat([]byte{0x5a}, sha256.Size),
+		"apple_cd_hash_type_01":        []byte{2},
 	})
 	if err != nil {
 		f.Fatalf("encode assertion extension seed: %v", err)
@@ -73,6 +83,14 @@ func FuzzParseAppAttestAssertionObject(f *testing.F) {
 	if err != nil {
 		f.Fatalf("encode assertion seed: %v", err)
 	}
+	currentAuthenticator := append([]byte(nil), authenticator...)
+	currentAuthenticator[32] = appAttestFlagAttestedData | appAttestFlagExtensionData
+	currentShape, err := testAppAttestEncMode.Marshal(appAttestAssertionWire{
+		Signature: bytes.Repeat([]byte{0x01}, 64), AuthenticatorData: currentAuthenticator,
+	})
+	if err != nil {
+		f.Fatalf("encode current assertion seed: %v", err)
+	}
 	legacyShape, err := testAppAttestEncMode.Marshal(appAttestAssertionWire{
 		Signature: bytes.Repeat([]byte{0x01}, 64), AuthenticatorData: authenticator[:appAttestAuthenticatorHeaderBytes],
 	})
@@ -80,6 +98,7 @@ func FuzzParseAppAttestAssertionObject(f *testing.F) {
 		f.Fatalf("encode legacy assertion seed: %v", err)
 	}
 	f.Add(validShape)
+	f.Add(currentShape)
 	f.Add(legacyShape)
 	f.Add([]byte{0xbf, 0xff})
 	f.Add([]byte{0xa2, 0x69, 's', 'i', 'g', 'n', 'a', 't', 'u', 'r', 'e', 0x41, 0x01, 0x69, 's', 'i', 'g', 'n', 'a', 't', 'u', 'r', 'e', 0x41, 0x02})
@@ -144,10 +163,17 @@ func FuzzDecodeAppAttestEvidence(f *testing.F) {
 
 func validParsedAppAttestExtensions(extensions appAttestExtensions) bool {
 	if !extensions.present {
-		return extensions.validationCategory == 0 && extensions.bundleVersion == ""
+		return extensions.validationCategory == 0 && extensions.bundleVersion == "" &&
+			!extensions.codeDirectoryHashPresent && extensions.codeDirectoryHashType == 0 &&
+			extensions.codeDirectoryHash == ([sha256.Size]byte{})
 	}
-	return validAppAttestValidationCategory(extensions.validationCategory) &&
-		validAppAttestBundleVersion(extensions.bundleVersion)
+	if !validAppAttestValidationCategory(extensions.validationCategory) || !validAppAttestBundleVersion(extensions.bundleVersion) {
+		return false
+	}
+	if !extensions.codeDirectoryHashPresent {
+		return extensions.codeDirectoryHashType == 0 && extensions.codeDirectoryHash == ([sha256.Size]byte{})
+	}
+	return extensions.codeDirectoryHashType == 2 && extensions.codeDirectoryHash != ([sha256.Size]byte{})
 }
 
 func FuzzAppAttestCertificateNonce(f *testing.F) {

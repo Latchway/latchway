@@ -35,7 +35,17 @@ override that the revision would strand.
 Check the SDK application resource ID, environment, public origin, platform,
 bundle or package identifier, signing identity, and cloud project against the
 active server policy. App Attest needs the matching entitlement and physical
-device. Production Play Integrity needs the exact signed Play-installed app.
+device. Its category must match the signed executable (`3` development, `2`
+TestFlight, `4` App Store, or `5` ad hoc/enterprise), and its bundle-version
+allowlist must contain the exact `CFBundleVersion`/`CURRENT_PROJECT_VERSION`
+build number rather than the marketing version. Production Play Integrity needs
+the exact signed Play-installed app.
+
+For App Attest, inspect `latchway_app_attest_verifier_failures_total` to
+separate bounded phases such as `assertion_object`, `assertion_scope`,
+`assertion_counter`, `assertion_signature`, and `key_store`. Client responses
+remain generic, and the metric never contains evidence, credential or
+installation identifiers, counters, bundle metadata, or error text.
 
 ## DPoP or nonce errors
 

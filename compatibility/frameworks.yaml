@@ -71,7 +71,7 @@ frameworks:
       responses: false
       chat_completions: true
       text: true
-      streaming: conditional
+      streaming: true
       tools: conditional
       structured_output: conditional
       embeddings: true
@@ -83,7 +83,7 @@ frameworks:
       dpop: full
       native_key_isolation: not_applicable
     limitations:
-      - Chat and embeddings pass local adapter tests at @langchain/openai 1.5.10; streaming/tool paths and hosted common conformance are not yet release evidence.
+      - Local @langchain/openai 1.5.10 case-ID tests pass Chat, embeddings, streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; hosted/exact-image, live-provider, and revocation evidence remain release gates.
   - id: macpaw-openai
     name: MacPaw OpenAI
     tier: tier_1
@@ -130,7 +130,7 @@ frameworks:
       streaming: true
       tools: conditional
       structured_output: conditional
-      embeddings: conditional
+      embeddings: true
       audio: conditional
       images: conditional
       cancellation: true
@@ -139,7 +139,7 @@ frameworks:
       dpop: full
       native_key_isolation: not_applicable
     limitations:
-      - Responses plus chat streaming/cancellation pass local OpenAI 7.8.0 adapter tests; tools, media, embeddings, and hosted common conformance remain conditional.
+      - Local OpenAI 7.8.0 case-ID tests pass Responses, Chat, embeddings, Responses/Chat streaming usage, tools, structured output, cancellation, error mapping, retry/refresh, and transport security; media, hosted/exact-image, live-provider, and revocation evidence remain release gates.
   - id: react-native-fetch
     name: React Native framework fetch
     tier: tier_1
@@ -167,7 +167,8 @@ frameworks:
       dpop: partial
       native_key_isolation: partial
     limitations:
-      - React Native 0.82.0 New Architecture hosts, native-only credentials, pull streaming and cancellation pass local gates; live gateway and physical iOS/Android proof remain pending.
+      - React Native 0.82.0 New Architecture local gates pass. A real iOS 27 Release-configuration app signed for Apple Development proved production App Attest registration and same-key assertion, Secure Enclave DPoP, gateway traffic, quota, typed component denial, bridge behavior, and cleanup.
+      - Android, delegated-extension runtime, and protected Apple distribution-derived exact-candidate evidence remain pending.
   - id: swift-openai
     name: SwiftOpenAI
     tier: tier_1
@@ -223,4 +224,4 @@ frameworks:
       dpop: full
       native_key_isolation: not_applicable
     limitations:
-      - Responses, chat, embeddings, streaming and cancellation pass local AI SDK 7.0.85 adapter tests; tools, images and hosted common conformance remain conditional.
+      - Local AI SDK 7.0.85/@ai-sdk/openai 4.0.52 case-ID tests pass Responses, Chat, embeddings, both streams, tools, typed output, cancellation, errors, retry/refresh, and transport security; images, hosted/exact-image, live-provider, and revocation evidence remain release gates.

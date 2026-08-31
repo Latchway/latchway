@@ -61,13 +61,16 @@ Open `http://127.0.0.1:8080` and use the bootstrap token from `.env` to create
 the first owner. Latchway permanently closes bootstrap after the first owner
 exists.
 
-The current setup wizard creates a production-native Firebase, App Attest,
-Play Integrity, and OpenAI Responses template. Complete it in order:
+The setup wizard creates a Firebase, App Attest, Play Integrity, and OpenAI
+Responses template for the environment kind and Apple distribution you select.
+Complete it in order:
 
 1. Create an organization, application, and environment.
 2. Enter the Firebase project used by the application identity callback.
-3. Enter the Apple Team/bundle/version and Android package/project/signing
-   identifiers for production attestation.
+3. Select the Apple signing or distribution method and enter the App ID prefix,
+   bundle ID, and exact `CFBundleVersion` build number. Do not enter
+   `CFBundleShortVersionString` or the marketing version. Then enter the Android
+   package, project, and signing identifiers.
 4. Add a write-only upstream secret.
 5. Configure the upstream, physical model, pricing, feature, route, and limit
    plan.

@@ -107,7 +107,11 @@ func TestDispatchJoinsPreparedAndOperationContexts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
-	defer response.Close()
+	defer func() {
+		if err := response.Close(); err != nil {
+			t.Errorf("response.Close() error = %v", err)
+		}
+	}()
 	if outbound == nil || response.Request == nil {
 		t.Fatal("dispatch returned an invalid request")
 	}

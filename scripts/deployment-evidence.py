@@ -553,41 +553,187 @@ def validate_aws_terraform() -> Mapping[str, Any]:
     return {"terraform_files": len(list(main.parent.glob("*.tf")))}
 
 
-def validate_fly() -> Mapping[str, Any]:
-    try:
-        document = tomllib.loads((ROOT / "deploy/fly/fly.toml").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-        raise EvidenceError("fly_toml_invalid") from None
+def require_exact_keys(value: Any, expected: Iterable[str], code: str) -> dict[str, Any]:
+    keys = set(expected)
+    if not isinstance(value, dict) or set(value) != keys:
+        raise EvidenceError(code)
+    return value
+
+
+def validate_fly_document(document: Any) -> Mapping[str, Any]:
+    root = require_exact_keys(
+        document,
+        (
+            "app",
+            "primary_region",
+            "kill_signal",
+            "kill_timeout",
+            "build",
+            "deploy",
+            "env",
+            "http_service",
+            "vm",
+        ),
+        "fly_top_level_fields_invalid",
+    )
+    require_exact_keys(root["build"], ("dockerfile",), "fly_build_fields_invalid")
+    require_exact_keys(
+        root["deploy"],
+        (
+            "release_command",
+            "release_command_timeout",
+            "strategy",
+            "max_unavailable",
+            "wait_timeout",
+        ),
+        "fly_deploy_fields_invalid",
+    )
+    require_exact_keys(
+        root["env"],
+        (
+            "PORT",
+            "LATCHWAY_ROLE",
+            "LATCHWAY_LOG_LEVEL",
+            "LATCHWAY_MIGRATE_ON_START",
+            "LATCHWAY_DB_MAX_CONNECTIONS",
+            "LATCHWAY_SHUTDOWN_TIMEOUT",
+        ),
+        "fly_environment_fields_invalid",
+    )
+    service = require_exact_keys(
+        root["http_service"],
+        (
+            "internal_port",
+            "force_https",
+            "auto_stop_machines",
+            "auto_start_machines",
+            "min_machines_running",
+            "processes",
+            "concurrency",
+            "checks",
+        ),
+        "fly_http_service_fields_invalid",
+    )
+    require_exact_keys(
+        service["concurrency"],
+        ("type", "soft_limit", "hard_limit"),
+        "fly_concurrency_fields_invalid",
+    )
+    checks = service["checks"]
+    if not isinstance(checks, list) or len(checks) != 2:
+        raise EvidenceError("fly_health_checks_invalid")
+    for check in checks:
+        require_exact_keys(
+            check,
+            ("grace_period", "interval", "method", "timeout", "path"),
+            "fly_health_check_fields_invalid",
+        )
+    machines = root["vm"]
+    if not isinstance(machines, list) or len(machines) != 1:
+        raise EvidenceError("fly_vm_invalid")
+    require_exact_keys(
+        machines[0], ("memory", "cpu_kind", "cpus"), "fly_vm_fields_invalid"
+    )
+    if (
+        root.get("app") != "replace-with-your-latchway-app"
+        or root.get("primary_region") != "sin"
+    ):
+        raise EvidenceError("fly_identity_template_invalid")
+    if nested(root, "build", "dockerfile") != "Dockerfile":
+        raise EvidenceError("fly_build_invalid")
     if nested(document, "deploy", "release_command") != "/latchway migrate up":
         raise EvidenceError("fly_migration_command_invalid")
     if nested(document, "deploy", "release_command_timeout") != "15m":
         raise EvidenceError("fly_migration_timeout_invalid")
-    if nested(document, "deploy", "max_unavailable") != 1 or nested(document, "deploy", "wait_timeout") != "10m":
+    if (
+        nested(document, "deploy", "max_unavailable") != 1
+        or nested(document, "deploy", "wait_timeout") != "10m"
+    ):
         raise EvidenceError("fly_rollout_budget_invalid")
-    if document.get("kill_signal") != "SIGTERM" or document.get("kill_timeout") != "35s":
+    if (
+        document.get("kill_signal") != "SIGTERM"
+        or document.get("kill_timeout") != "35s"
+    ):
         raise EvidenceError("fly_shutdown_budget_invalid")
     if nested(document, "env", "LATCHWAY_SHUTDOWN_TIMEOUT") != "30s":
         raise EvidenceError("fly_app_shutdown_timeout_invalid")
-    checks = nested(document, "http_service", "checks")
-    paths = {item.get("path") for item in checks if isinstance(item, dict)} if isinstance(checks, list) else set()
+    if nested(root, "deploy", "strategy") != "rolling":
+        raise EvidenceError("fly_rollout_strategy_invalid")
+    if (
+        nested(root, "env", "PORT") != "8080"
+        or nested(root, "env", "LATCHWAY_ROLE") != "all"
+        or nested(root, "env", "LATCHWAY_LOG_LEVEL") != "info"
+        or nested(root, "env", "LATCHWAY_MIGRATE_ON_START") != "false"
+        or nested(root, "env", "LATCHWAY_DB_MAX_CONNECTIONS") != "20"
+    ):
+        raise EvidenceError("fly_environment_invalid")
+    if (
+        nested(service, "internal_port") != 8080
+        or nested(service, "force_https") is not True
+        or nested(service, "auto_stop_machines") is not False
+        or nested(service, "auto_start_machines") is not True
+        or nested(service, "min_machines_running") != 2
+        or nested(service, "processes") != ["app"]
+    ):
+        raise EvidenceError("fly_http_service_invalid")
+    if (
+        nested(service, "concurrency", "type") != "requests"
+        or nested(service, "concurrency", "soft_limit") != 80
+        or nested(service, "concurrency", "hard_limit") != 100
+    ):
+        raise EvidenceError("fly_concurrency_invalid")
+    paths = {item["path"] for item in checks}
     if paths != {"/healthz", "/readyz"}:
         raise EvidenceError("fly_health_checks_invalid")
+    if any(item["method"] != "GET" for item in checks):
+        raise EvidenceError("fly_health_check_method_invalid")
+    checks_by_path = {item["path"]: item for item in checks}
+    if checks_by_path["/healthz"] != {
+        "grace_period": "10s",
+        "interval": "30s",
+        "method": "GET",
+        "timeout": "5s",
+        "path": "/healthz",
+    } or checks_by_path["/readyz"] != {
+        "grace_period": "30s",
+        "interval": "15s",
+        "method": "GET",
+        "timeout": "5s",
+        "path": "/readyz",
+    }:
+        raise EvidenceError("fly_health_check_timing_invalid")
+    if machines[0] != {"memory": "2gb", "cpu_kind": "shared", "cpus": 2}:
+        raise EvidenceError("fly_vm_invalid")
+    return {"health_paths": sorted(paths), "strict_offline_fields": True}
+
+
+def validate_fly() -> Mapping[str, Any]:
+    try:
+        document = tomllib.loads(
+            (ROOT / "deploy/fly/fly.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        raise EvidenceError("fly_toml_invalid") from None
+    result = validate_fly_document(document)
     require_text(
         ROOT / "scripts/validate-deployments.sh",
         (
-            "command -v flyctl",
-            "flyctl config validate --strict --config deploy/fly/fly.toml",
-            "elif command -v fly",
-            "fly config validate --strict --config deploy/fly/fly.toml",
+            'if [[ -n "${FLY_API_TOKEN:-}" ]]',
+            'FLY_APP is required when FLY_API_TOKEN is set',
+            'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
+            'fly config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
         ),
         "fly_cli_validation_incomplete",
     )
     require_text(
         ROOT / "deploy/fly/README.md",
-        ("flyctl config validate --strict --config deploy/fly/fly.toml",),
+        (
+            "python3 scripts/deployment-evidence.py static",
+            'flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml',
+        ),
         "fly_documentation_validation_incomplete",
     )
-    return {"health_paths": sorted(paths)}
+    return result
 
 
 def validate_cloudflare() -> Mapping[str, Any]:
@@ -847,6 +993,31 @@ def validate_workflow() -> Mapping[str, Any]:
         raise EvidenceError("deployment_compose_oidc_permission_forbidden")
     if capture_job.get("permissions", {}).get("id-token") != "write":
         raise EvidenceError("deployment_provider_oidc_permission_missing")
+    prepare_text = json.dumps(prepare_job, sort_keys=True)
+    if (
+        "setup-flyctl" in prepare_text
+        or "flyctl config validate" in prepare_text
+        or "${{ secrets." in prepare_text
+    ):
+        raise EvidenceError("deployment_fly_credential_boundary_invalid")
+    fly_validation_steps = [
+        step
+        for step in capture_job.get("steps", [])
+        if isinstance(step, dict)
+        and step.get("name")
+        == "Validate Fly configuration against the authenticated platform"
+    ]
+    if len(fly_validation_steps) != 1:
+        raise EvidenceError("deployment_fly_platform_validation_missing")
+    fly_validation = fly_validation_steps[0]
+    if (
+        fly_validation.get("if") != "inputs.platform == 'fly_io'"
+        or fly_validation.get("env")
+        != {"FLY_API_TOKEN": "${{ secrets.FLY_API_TOKEN }}"}
+        or fly_validation.get("run")
+        != 'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"'
+    ):
+        raise EvidenceError("deployment_fly_platform_validation_invalid")
     capture_text = json.dumps(capture_job, sort_keys=True)
     if any(
         fragment in capture_text

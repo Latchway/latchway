@@ -23,8 +23,8 @@
               "appIdPrefix": "TEAM1234",
               "bundleId": "com.example.mobile",
               "environment": "production",
-              "allowedValidationCategories": [1],
-              "allowedBundleVersions": ["2.3.4"]
+              "allowedValidationCategories": [4],
+              "allowedBundleVersions": ["234"]
             }
           },
           "react_native_android": {

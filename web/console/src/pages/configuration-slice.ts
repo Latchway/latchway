@@ -82,7 +82,7 @@ export const configurationAreas = {
     title: "Abuse controls"
   },
   attestation: {
-    collections: [specArray("attestationPolicies", "Attestation policies", "Edit one platform-proof policy while preserving identity, features, upstreams, and limits.", { id: "new_attestation_policy", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } })],
+    collections: [specArray("attestationPolicies", "Attestation policies", "Edit one platform-proof policy while preserving identity, features, upstreams, and limits. The starter is App Store-specific: choose the exact Apple distribution category and CFBundleVersion before activation.", { id: "new_attestation_policy", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1"], allowedValidationCategories: [4], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } })],
     description: "Edit bounded native, React Native, web, or Node proof policy resources. Server validation remains authoritative for provider/platform combinations.",
     title: "Attestation"
   },

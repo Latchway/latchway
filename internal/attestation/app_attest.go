@@ -207,29 +207,32 @@ func newAppAttestVerifier(config AppAttestConfig, roots *x509.CertPool) (*AppAtt
 func (*AppAttestVerifier) ID() string { return appAttestProvider }
 
 func (verifier *AppAttestVerifier) Verify(ctx context.Context, evidence Evidence, binding Binding) (Result, error) {
-	if verifier == nil || evidence.provider != appAttestProvider {
+	if verifier == nil {
 		return Result{}, ErrUnsupported
 	}
+	if evidence.provider != appAttestProvider {
+		return Result{}, appAttestFailure(AppAttestFailurePhaseRequest, ErrUnsupported)
+	}
 	if ctx == nil {
-		return Result{}, invalid("app attest context")
+		return Result{}, appAttestFailure(AppAttestFailurePhaseRequest, invalid("app attest context"))
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, appAttestFailure(AppAttestFailurePhaseContext, err)
 	}
 	if err := verifier.validateBinding(binding); err != nil {
-		return Result{}, err
+		return Result{}, appAttestFailure(AppAttestFailurePhaseBinding, err)
 	}
 	bindingHash, err := binding.Hash()
 	if err != nil {
-		return Result{}, err
+		return Result{}, appAttestFailure(AppAttestFailurePhaseBinding, err)
 	}
 	keyID, encodedObject, evidenceKind, err := decodeAppAttestEvidence(evidence.payload, bindingHash)
 	if err != nil {
-		return Result{}, err
+		return Result{}, appAttestFailure(AppAttestFailurePhaseEvidence, err)
 	}
 	now := verifier.now().UTC()
 	if now.IsZero() || now.Year() < 1 || now.Year() > 9998 {
-		return Result{}, ErrConfiguration
+		return Result{}, appAttestFailure(AppAttestFailurePhaseClock, ErrConfiguration)
 	}
 
 	var state AppAttestStoredKey
@@ -239,7 +242,7 @@ func (verifier *AppAttestVerifier) Verify(ctx context.Context, evidence Evidence
 	case "assertion":
 		state, err = verifier.verifyAndConsumeAssertion(ctx, keyID, encodedObject, binding, bindingHash)
 	default:
-		err = invalid("app attest evidence shape")
+		err = appAttestFailure(AppAttestFailurePhaseEvidence, invalid("app attest evidence shape"))
 	}
 	if err != nil {
 		return Result{}, err
@@ -255,10 +258,14 @@ func (verifier *AppAttestVerifier) Verify(ctx context.Context, evidence Evidence
 		signals["validation_category"] = int64(state.ValidationCategory)
 		signals["bundle_version"] = state.BundleVersion
 	}
-	return newResultWithAppAttestKeyID(
+	result, err := newResultWithAppAttestKeyID(
 		appAttestProvider, "app_verified", now, now.Add(verifier.resultLifetime),
 		signals, evidenceHash, bindingHash, keyID,
 	)
+	if err != nil {
+		return Result{}, appAttestFailure(AppAttestFailurePhaseResult, err)
+	}
+	return result, nil
 }
 
 // AppAttestKeyID returns the Apple credential identifier only from a valid,
@@ -294,37 +301,49 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 ) (AppAttestStoredKey, error) {
 	parsed, err := parseAppAttestationObject(object)
 	if err != nil {
-		return AppAttestStoredKey{}, err
+		return AppAttestStoredKey{}, appAttestFailure(AppAttestFailurePhaseAttestationObject, err)
 	}
 	leaf, err := verifyAppAttestCertificateChain(parsed.certificates, verifier.roots, now)
 	if err != nil {
-		return AppAttestStoredKey{}, err
+		return AppAttestStoredKey{}, appAttestFailure(AppAttestFailurePhaseCertificateChain, err)
 	}
 	if err := ctx.Err(); err != nil {
-		return AppAttestStoredKey{}, err
+		return AppAttestStoredKey{}, appAttestFailure(AppAttestFailurePhaseContext, err)
 	}
 	publicKey, ok := leaf.PublicKey.(*ecdsa.PublicKey)
 	if !ok || publicKey.Curve != elliptic.P256() {
-		return AppAttestStoredKey{}, invalid("app attest credential certificate key")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseCertificateChain, invalid("app attest credential certificate key"),
+		)
 	}
 	publicKeyX963, err := publicKey.Bytes()
 	if err != nil || len(publicKeyX963) != 65 || publicKeyX963[0] != 4 {
-		return AppAttestStoredKey{}, invalid("app attest credential certificate key")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseCertificateChain, invalid("app attest credential certificate key"),
+		)
 	}
 	publicKeyHash := sha256.Sum256(publicKeyX963)
 	if subtle.ConstantTimeCompare(publicKeyHash[:], keyID[:]) != 1 ||
 		subtle.ConstantTimeCompare(parsed.authenticator.credentialID[:], keyID[:]) != 1 ||
 		subtle.ConstantTimeCompare(parsed.authenticator.publicKeyX963, publicKeyX963) != 1 {
-		return AppAttestStoredKey{}, invalid("app attest credential binding")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseCredentialBinding, invalid("app attest credential binding"),
+		)
 	}
 	if subtle.ConstantTimeCompare(parsed.authenticator.rpIDHash[:], verifier.appIDHash[:]) != 1 || parsed.authenticator.counter != 0 {
-		return AppAttestStoredKey{}, invalid("app attest authenticator data")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseAttestationAuthenticator, invalid("app attest authenticator data"),
+		)
 	}
 	if !appAttestAAGUIDMatches(parsed.authenticator.aaguid, verifier.attestationEnvironment) {
-		return AppAttestStoredKey{}, invalid("app attest environment")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseAttestationEnvironment, invalid("app attest environment"),
+		)
 	}
 	if !verifier.extensionsAllowed(parsed.authenticator.extensions) {
-		return AppAttestStoredKey{}, invalid("app attest extensions")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseAttestationExtensions, invalid("app attest extensions"),
+		)
 	}
 
 	nonceInput := make([]byte, 0, len(parsed.authenticatorData)+sha256.Size)
@@ -333,7 +352,9 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 	expectedNonce := sha256.Sum256(nonceInput)
 	certificateNonce, err := appAttestCertificateNonce(leaf)
 	if err != nil || subtle.ConstantTimeCompare(certificateNonce, expectedNonce[:]) != 1 {
-		return AppAttestStoredKey{}, invalid("app attest nonce")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseAttestationNonce, invalid("app attest nonce"),
+		)
 	}
 
 	next := AppAttestStoredKey{
@@ -346,7 +367,7 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 		BundleVersion:      parsed.authenticator.extensions.bundleVersion, AttestedAt: now,
 	}
 	if err := validateAppAttestStoredKey(keyID, next); err != nil {
-		return AppAttestStoredKey{}, ErrConfiguration
+		return AppAttestStoredKey{}, appAttestFailure(AppAttestFailurePhaseKeyStore, ErrConfiguration)
 	}
 
 	var callbackErr error
@@ -379,7 +400,13 @@ func (verifier *AppAttestVerifier) verifyAndRegisterAttestation(
 		return cloneAppAttestStoredKey(next), nil
 	})
 	if err := normalizeAppAttestStoreError(ctx, storeErr, callbackErr, callbackCount); err != nil {
-		return AppAttestStoredKey{}, err
+		phase := AppAttestFailurePhaseRegistration
+		if errors.Is(err, ErrAppAttestKeyStore) {
+			phase = AppAttestFailurePhaseKeyStore
+		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			phase = AppAttestFailurePhaseContext
+		}
+		return AppAttestStoredKey{}, appAttestFailure(phase, err)
 	}
 	return cloneAppAttestStoredKey(next), nil
 }
@@ -410,32 +437,39 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 ) (AppAttestStoredKey, error) {
 	parsed, err := parseAppAttestAssertionObject(object)
 	if err != nil {
-		return AppAttestStoredKey{}, err
+		return AppAttestStoredKey{}, appAttestFailure(AppAttestFailurePhaseAssertionObject, err)
 	}
 	if subtle.ConstantTimeCompare(parsed.rpIDHash[:], verifier.appIDHash[:]) != 1 || !verifier.extensionsAllowed(parsed.extensions) {
-		return AppAttestStoredKey{}, invalid("app attest assertion authenticator data")
+		return AppAttestStoredKey{}, appAttestFailure(
+			AppAttestFailurePhaseAssertionAuthenticator, invalid("app attest assertion authenticator data"),
+		)
 	}
 	assertionHash := appAttestAssertionReplayHash(keyID, object, bindingHash)
 
 	var committed AppAttestStoredKey
 	var callbackErr error
+	var callbackPhase AppAttestFailurePhase
 	callbackCount := 0
 	storeErr := verifier.store.TransactAppAttestKey(ctx, keyID, func(current AppAttestStoredKey, exists bool) (AppAttestStoredKey, error) {
 		callbackCount++
 		if callbackCount != 1 {
+			callbackPhase = AppAttestFailurePhaseKeyStore
 			callbackErr = ErrAppAttestKeyStore
 			return AppAttestStoredKey{}, callbackErr
 		}
 		if err := ctx.Err(); err != nil {
+			callbackPhase = AppAttestFailurePhaseContext
 			callbackErr = err
 			return AppAttestStoredKey{}, err
 		}
 		if !exists {
+			callbackPhase = AppAttestFailurePhaseAssertionKey
 			callbackErr = invalid("app attest assertion key")
 			return AppAttestStoredKey{}, callbackErr
 		}
 		current = cloneAppAttestStoredKey(current)
 		if err := validateAppAttestStoredKey(keyID, current); err != nil {
+			callbackPhase = AppAttestFailurePhaseKeyStore
 			callbackErr = ErrAppAttestKeyStore
 			return AppAttestStoredKey{}, callbackErr
 		}
@@ -444,15 +478,18 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 			current.DPoPJKT != binding.DPoPJKT ||
 			current.AttestationEnvironment != verifier.attestationEnvironment ||
 			subtle.ConstantTimeCompare(current.AppIDHash[:], verifier.appIDHash[:]) != 1 {
+			callbackPhase = AppAttestFailurePhaseAssertionScope
 			callbackErr = invalid("app attest assertion scope")
 			return AppAttestStoredKey{}, callbackErr
 		}
 		if parsed.counter == 0 || parsed.counter < current.Counter {
+			callbackPhase = AppAttestFailurePhaseAssertionCounter
 			callbackErr = invalid("app attest assertion counter")
 			return AppAttestStoredKey{}, callbackErr
 		}
 		publicKey, err := parseAppAttestPublicKey(current.PublicKeyX963)
 		if err != nil {
+			callbackPhase = AppAttestFailurePhaseKeyStore
 			callbackErr = ErrAppAttestKeyStore
 			return AppAttestStoredKey{}, callbackErr
 		}
@@ -460,7 +497,15 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 		nonceInput = append(nonceInput, parsed.authenticatorData...)
 		nonceInput = append(nonceInput, bindingHash[:]...)
 		nonce := sha256.Sum256(nonceInput)
-		if !ecdsa.VerifyASN1(publicKey, nonce[:], parsed.signature) {
+		// Apple defines nonce as SHA-256(authenticatorData || clientDataHash),
+		// then signs that nonce with ECDSA-SHA256. Signature APIs that accept a
+		// message hash the 32-byte nonce once more before the ECDSA primitive.
+		// Go's VerifyASN1 accepts the primitive digest directly, so perform that
+		// algorithm hash explicitly. A physical iOS 27 assertion locks this
+		// otherwise easy-to-miss distinction alongside deterministic vectors.
+		signatureDigest := sha256.Sum256(nonce[:])
+		if !ecdsa.VerifyASN1(publicKey, signatureDigest[:], parsed.signature) {
+			callbackPhase = AppAttestFailurePhaseAssertionSignature
 			callbackErr = invalid("app attest assertion signature")
 			return AppAttestStoredKey{}, callbackErr
 		}
@@ -470,6 +515,7 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 				current.ExtensionsPresent != parsed.extensions.present ||
 				current.ValidationCategory != parsed.extensions.validationCategory ||
 				current.BundleVersion != parsed.extensions.bundleVersion {
+				callbackPhase = AppAttestFailurePhaseAssertionCounter
 				callbackErr = invalid("app attest assertion counter")
 				return AppAttestStoredKey{}, callbackErr
 			}
@@ -488,7 +534,14 @@ func (verifier *AppAttestVerifier) verifyAndConsumeAssertion(
 		return cloneAppAttestStoredKey(current), nil
 	})
 	if err := normalizeAppAttestStoreError(ctx, storeErr, callbackErr, callbackCount); err != nil {
-		return AppAttestStoredKey{}, err
+		phase := callbackPhase
+		if !validAppAttestFailurePhase(phase) || errors.Is(err, ErrAppAttestKeyStore) {
+			phase = AppAttestFailurePhaseKeyStore
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			phase = AppAttestFailurePhaseContext
+		}
+		return AppAttestStoredKey{}, appAttestFailure(phase, err)
 	}
 	return committed, nil
 }

@@ -103,30 +103,33 @@ type appAttestFixture struct {
 }
 
 type appAttestFixtureOptions struct {
-	environment        AppAttestEnvironment
-	aaguid             *[16]byte
-	rpIDHash           *[sha256.Size]byte
-	counter            uint32
-	credentialID       *[sha256.Size]byte
-	coseKeyScalar      int64
-	nonceOverride      *[sha256.Size]byte
-	validationCategory uint32
-	bundleVersion      string
-	omitExtensions     bool
-	flags              byte
-	flagsSet           bool
-	rootScalar         int64
-	leafNotBefore      time.Time
-	leafNotAfter       time.Time
+	environment              AppAttestEnvironment
+	aaguid                   *[16]byte
+	rpIDHash                 *[sha256.Size]byte
+	counter                  uint32
+	credentialID             *[sha256.Size]byte
+	coseKeyScalar            int64
+	nonceOverride            *[sha256.Size]byte
+	validationCategory       uint32
+	bundleVersion            string
+	omitExtensions           bool
+	includeCodeDirectoryHash bool
+	flags                    byte
+	flagsSet                 bool
+	rootScalar               int64
+	leafNotBefore            time.Time
+	leafNotAfter             time.Time
 }
 
 type appAttestAssertionOptions struct {
-	rpIDHash           *[sha256.Size]byte
-	validationCategory uint32
-	bundleVersion      string
-	omitExtensions     bool
-	flags              byte
-	signingKey         *ecdsa.PrivateKey
+	rpIDHash                 *[sha256.Size]byte
+	validationCategory       uint32
+	bundleVersion            string
+	omitExtensions           bool
+	includeCodeDirectoryHash bool
+	flags                    byte
+	signingKey               *ecdsa.PrivateKey
+	singleDigestSignature    bool
 }
 
 func TestAppAttestVerifierRegistersKeyAndConsumesBoundAssertion(t *testing.T) {
@@ -253,6 +256,72 @@ func TestAppAttestVerifierRegistersKeyAndConsumesBoundAssertion(t *testing.T) {
 	}
 }
 
+func TestAppAttestVerifierAcceptsCurrentAppleExtensionDataFlags(t *testing.T) {
+	attestationBinding := appAttestTestBinding(1)
+	fixture := mustAppAttestFixture(t, attestationBinding, appAttestFixtureOptions{
+		environment:              AppAttestProduction,
+		flags:                    appAttestFlagAttestedData | appAttestFlagExtensionData,
+		includeCodeDirectoryHash: true,
+	})
+	store := newMemoryAppAttestKeyStore()
+	verifier := mustTestAppAttestVerifierWithPolicy(
+		t, store, fixture.root, AppAttestProduction, []uint32{4}, []string{"1.0", "1"},
+	)
+	if _, err := verifier.Verify(
+		context.Background(),
+		mustAppAttestEvidence(t, fixture.keyID, "attestation_object", fixture.attestation, attestationBinding),
+		attestationBinding,
+	); err != nil {
+		t.Fatalf("verify extension-data attestation: %v", err)
+	}
+
+	assertionFlags := []struct {
+		name               string
+		flags              byte
+		bundleVersion      string
+		authenticatorBytes int
+	}{
+		{name: "legacy direct extensions", flags: 0},
+		{name: "attested-data marker", flags: appAttestFlagAttestedData},
+		{name: "extension-data marker", flags: appAttestFlagExtensionData},
+		{
+			name: "current Apple markers", flags: appAttestFlagAttestedData | appAttestFlagExtensionData,
+			bundleVersion: "1", authenticatorBytes: 179,
+		},
+	}
+	for index, test := range assertionFlags {
+		t.Run(test.name, func(t *testing.T) {
+			counter := uint32(index + 1)
+			assertionBinding := appAttestTestBinding(byte(counter + 1))
+			assertion := mustAppAttestAssertion(t, fixture, assertionBinding, counter, appAttestAssertionOptions{
+				flags:                    test.flags,
+				bundleVersion:            test.bundleVersion,
+				includeCodeDirectoryHash: true,
+			})
+			if test.authenticatorBytes != 0 {
+				var wire appAttestAssertionWire
+				if err := appAttestCBORMode.Unmarshal(assertion, &wire); err != nil {
+					t.Fatalf("decode assertion fixture: %v", err)
+				}
+				if len(wire.AuthenticatorData) != test.authenticatorBytes || wire.AuthenticatorData[32] != test.flags {
+					t.Fatalf("current assertion authenticator shape: bytes=%d flags=0x%02x", len(wire.AuthenticatorData), wire.AuthenticatorData[32])
+				}
+			}
+			if _, err := verifier.Verify(
+				context.Background(),
+				mustAppAttestEvidence(t, fixture.keyID, "assertion_object", assertion, assertionBinding),
+				assertionBinding,
+			); err != nil {
+				t.Fatalf("verify assertion flags 0x%02x: %v", test.flags, err)
+			}
+		})
+	}
+	stored, exists := store.snapshot(fixture.keyID)
+	if !exists || stored.Counter != uint32(len(assertionFlags)) || stored.LastAssertionHash == ([sha256.Size]byte{}) {
+		t.Fatalf("current assertion did not persist replay state: %#v exists=%v", stored, exists)
+	}
+}
+
 func TestAppAttestVerifierAcceptsLegacyAuthenticatorDataWithoutExtensions(t *testing.T) {
 	attestationBinding := appAttestTestBinding(1)
 	fixture := mustAppAttestFixture(t, attestationBinding, appAttestFixtureOptions{
@@ -295,8 +364,20 @@ func TestAppAttestVerifierAcceptsLegacyAuthenticatorDataWithoutExtensions(t *tes
 	if assertionResult.NormalizedSignals["app_attest_extensions_present"] != false {
 		t.Fatalf("legacy assertion did not record absent extensions: %#v", assertionResult.NormalizedSignals)
 	}
+
+	currentBinding := appAttestTestBinding(3)
+	currentAssertion := mustAppAttestAssertion(t, fixture, currentBinding, 2, appAttestAssertionOptions{
+		flags: appAttestFlagAttestedData, omitExtensions: true,
+	})
+	if _, err := verifier.Verify(
+		context.Background(),
+		mustAppAttestEvidence(t, fixture.keyID, "assertion_object", currentAssertion, currentBinding),
+		currentBinding,
+	); err != nil {
+		t.Fatalf("verify compact attested-data-marker assertion without extensions: %v", err)
+	}
 	stored, exists = store.snapshot(fixture.keyID)
-	if !exists || stored.Counter != 1 || stored.ExtensionsPresent || stored.ValidationCategory != 0 || stored.BundleVersion != "" {
+	if !exists || stored.Counter != 2 || stored.ExtensionsPresent || stored.ValidationCategory != 0 || stored.BundleVersion != "" {
 		t.Fatalf("legacy assertion state = %#v exists=%v", stored, exists)
 	}
 }
@@ -371,9 +452,11 @@ func TestAppAttestVerifierRejectsWrongBindingScopeBeforeStorage(t *testing.T) {
 			verifier := mustTestAppAttestVerifier(t, store, fixture.root, AppAttestProduction)
 			wrong := binding
 			test.mutate(&wrong)
-			if _, err := verifier.Verify(context.Background(), evidence, wrong); !errors.Is(err, ErrInvalid) {
+			_, err := verifier.Verify(context.Background(), evidence, wrong)
+			if !errors.Is(err, ErrInvalid) {
 				t.Fatalf("scope error = %v, want ErrInvalid", err)
 			}
+			assertAppAttestFailurePhase(t, err, AppAttestFailurePhaseBinding)
 			if store.callCount() != 0 {
 				t.Fatal("binding scope failure reached the key store")
 			}
@@ -382,63 +465,117 @@ func TestAppAttestVerifierRejectsWrongBindingScopeBeforeStorage(t *testing.T) {
 	store := newMemoryAppAttestKeyStore()
 	verifier := mustTestAppAttestVerifier(t, store, fixture.root, AppAttestProduction)
 	var nilContext context.Context
-	if _, err := verifier.Verify(nilContext, evidence, binding); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("nil context error = %v, want ErrInvalid", err)
+	_, nilContextErr := verifier.Verify(nilContext, evidence, binding)
+	if !errors.Is(nilContextErr, ErrInvalid) {
+		t.Fatalf("nil context error = %v, want ErrInvalid", nilContextErr)
 	}
+	assertAppAttestFailurePhase(t, nilContextErr, AppAttestFailurePhaseRequest)
 	debugEvidence, err := NewEvidence("debug", map[string]any{"opaque": true})
 	if err != nil {
 		t.Fatalf("construct provider-mismatch evidence: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), debugEvidence, binding); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("provider mismatch error = %v, want ErrUnsupported", err)
+	_, providerErr := verifier.Verify(context.Background(), debugEvidence, binding)
+	if !errors.Is(providerErr, ErrUnsupported) {
+		t.Fatalf("provider mismatch error = %v, want ErrUnsupported", providerErr)
+	}
+	assertAppAttestFailurePhase(t, providerErr, AppAttestFailurePhaseRequest)
+}
+
+func TestAppAttestFailurePhaseVocabularyIsClosedAndPreservesCauses(t *testing.T) {
+	phases := []AppAttestFailurePhase{
+		AppAttestFailurePhaseRequest,
+		AppAttestFailurePhaseContext,
+		AppAttestFailurePhaseBinding,
+		AppAttestFailurePhaseEvidence,
+		AppAttestFailurePhaseClock,
+		AppAttestFailurePhaseAttestationObject,
+		AppAttestFailurePhaseCertificateChain,
+		AppAttestFailurePhaseCredentialBinding,
+		AppAttestFailurePhaseAttestationAuthenticator,
+		AppAttestFailurePhaseAttestationEnvironment,
+		AppAttestFailurePhaseAttestationExtensions,
+		AppAttestFailurePhaseAttestationNonce,
+		AppAttestFailurePhaseRegistration,
+		AppAttestFailurePhaseAssertionObject,
+		AppAttestFailurePhaseAssertionAuthenticator,
+		AppAttestFailurePhaseAssertionKey,
+		AppAttestFailurePhaseAssertionScope,
+		AppAttestFailurePhaseAssertionCounter,
+		AppAttestFailurePhaseAssertionSignature,
+		AppAttestFailurePhaseKeyStore,
+		AppAttestFailurePhaseResult,
+	}
+	seen := make(map[AppAttestFailurePhase]struct{}, len(phases))
+	for _, phase := range phases {
+		if !validAppAttestFailurePhase(phase) {
+			t.Fatalf("declared App Attest failure phase %q is invalid", phase)
+		}
+		if _, duplicate := seen[phase]; duplicate {
+			t.Fatalf("duplicate App Attest failure phase %q", phase)
+		}
+		seen[phase] = struct{}{}
+		cause := fmt.Errorf("internal detail: %w", ErrInvalid)
+		wrapped := appAttestFailure(phase, cause)
+		got, ok := AppAttestFailurePhaseOf(wrapped)
+		if !ok || got != phase || !errors.Is(wrapped, ErrInvalid) {
+			t.Fatalf("wrapped App Attest failure phase=%q present=%t error=%v", got, ok, wrapped)
+		}
+	}
+
+	unbounded := AppAttestFailurePhase("credential=provider-private-detail")
+	cause := fmt.Errorf("provider-private-detail: %w", ErrInvalid)
+	wrapped := appAttestFailure(unbounded, cause)
+	if _, ok := AppAttestFailurePhaseOf(wrapped); ok || !errors.Is(wrapped, ErrInvalid) {
+		t.Fatalf("unbounded App Attest failure phase escaped: %v", wrapped)
 	}
 }
 
 func TestAppAttestVerifierRejectsAttestationTampering(t *testing.T) {
 	tests := []struct {
-		name    string
-		options appAttestFixtureOptions
-		mutate  func(*testing.T, *appAttestFixture)
+		name         string
+		options      appAttestFixtureOptions
+		mutate       func(*testing.T, *appAttestFixture)
+		failurePhase AppAttestFailurePhase
 	}{
-		{name: "wrong RP ID", options: appAttestFixtureOptions{rpIDHash: pointerToHash(sha256.Sum256([]byte("wrong-app-id")))}},
-		{name: "nonzero counter", options: appAttestFixtureOptions{counter: 1}},
-		{name: "wrong credential ID", options: appAttestFixtureOptions{credentialID: pointerToHash(sha256.Sum256([]byte("wrong-credential")))}},
-		{name: "COSE key differs from certificate", options: appAttestFixtureOptions{coseKeyScalar: 91}},
-		{name: "key identifier differs from public key", mutate: func(_ *testing.T, fixture *appAttestFixture) {
+		{name: "wrong RP ID", options: appAttestFixtureOptions{rpIDHash: pointerToHash(sha256.Sum256([]byte("wrong-app-id")))}, failurePhase: AppAttestFailurePhaseAttestationAuthenticator},
+		{name: "nonzero counter", options: appAttestFixtureOptions{counter: 1}, failurePhase: AppAttestFailurePhaseAttestationAuthenticator},
+		{name: "wrong credential ID", options: appAttestFixtureOptions{credentialID: pointerToHash(sha256.Sum256([]byte("wrong-credential")))}, failurePhase: AppAttestFailurePhaseCredentialBinding},
+		{name: "COSE key differs from certificate", options: appAttestFixtureOptions{coseKeyScalar: 91}, failurePhase: AppAttestFailurePhaseCredentialBinding},
+		{name: "key identifier differs from public key", failurePhase: AppAttestFailurePhaseCredentialBinding, mutate: func(_ *testing.T, fixture *appAttestFixture) {
 			fixture.keyID = sha256.Sum256([]byte("wrong-client-key-id"))
 		}},
-		{name: "wrong AAGUID", options: appAttestFixtureOptions{aaguid: pointerToAAGUID([16]byte{'n', 'o', 't', '-', 'a', 'p', 'p', '-', 'a', 't', 't', 'e', 's', 't'})}},
-		{name: "disallowed validation category", options: appAttestFixtureOptions{validationCategory: 3}},
-		{name: "disallowed bundle version", options: appAttestFixtureOptions{bundleVersion: "2.0"}},
-		{name: "user-presence flag", options: appAttestFixtureOptions{flags: 0x41}},
-		{name: "extension-data flag", options: appAttestFixtureOptions{flags: 0xc0}},
-		{name: "reserved flag", options: appAttestFixtureOptions{flags: 0x42}},
-		{name: "backup flag", options: appAttestFixtureOptions{flags: 0x50}},
-		{name: "missing attested-data flag", options: appAttestFixtureOptions{flagsSet: true}},
-		{name: "nonce mismatch", options: appAttestFixtureOptions{nonceOverride: pointerToHash(sha256.Sum256([]byte("wrong-nonce")))}},
-		{name: "expired leaf", options: appAttestFixtureOptions{leafNotBefore: appAttestTestNow.Add(-2 * time.Hour), leafNotAfter: appAttestTestNow.Add(-time.Hour)}},
-		{name: "format", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "wrong AAGUID", options: appAttestFixtureOptions{aaguid: pointerToAAGUID([16]byte{'n', 'o', 't', '-', 'a', 'p', 'p', '-', 'a', 't', 't', 'e', 's', 't'})}, failurePhase: AppAttestFailurePhaseAttestationEnvironment},
+		{name: "disallowed validation category", options: appAttestFixtureOptions{validationCategory: 3}, failurePhase: AppAttestFailurePhaseAttestationExtensions},
+		{name: "disallowed bundle version", options: appAttestFixtureOptions{bundleVersion: "2.0"}, failurePhase: AppAttestFailurePhaseAttestationExtensions},
+		{name: "user-presence flag", options: appAttestFixtureOptions{flags: 0x41}, failurePhase: AppAttestFailurePhaseAttestationObject},
+		{name: "extension-data flag without extensions", options: appAttestFixtureOptions{flags: 0xc0, omitExtensions: true}, failurePhase: AppAttestFailurePhaseAttestationObject},
+		{name: "reserved flag", options: appAttestFixtureOptions{flags: 0x42}, failurePhase: AppAttestFailurePhaseAttestationObject},
+		{name: "backup flag", options: appAttestFixtureOptions{flags: 0x50}, failurePhase: AppAttestFailurePhaseAttestationObject},
+		{name: "missing attested-data flag", options: appAttestFixtureOptions{flagsSet: true}, failurePhase: AppAttestFailurePhaseAttestationObject},
+		{name: "nonce mismatch", options: appAttestFixtureOptions{nonceOverride: pointerToHash(sha256.Sum256([]byte("wrong-nonce")))}, failurePhase: AppAttestFailurePhaseAttestationNonce},
+		{name: "expired leaf", options: appAttestFixtureOptions{leafNotBefore: appAttestTestNow.Add(-2 * time.Hour), leafNotAfter: appAttestTestNow.Add(-time.Hour)}, failurePhase: AppAttestFailurePhaseCertificateChain},
+		{name: "format", failurePhase: AppAttestFailurePhaseAttestationObject, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) { wire.Format = "packed" })
 		}},
-		{name: "empty receipt", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "empty receipt", failurePhase: AppAttestFailurePhaseAttestationObject, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) { wire.Statement.Receipt = nil })
 		}},
-		{name: "duplicate certificate", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "duplicate certificate", failurePhase: AppAttestFailurePhaseCertificateChain, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) {
 				wire.Statement.Certificates = append(wire.Statement.Certificates, append([]byte(nil), wire.Statement.Certificates[1]...))
 			})
 		}},
-		{name: "reversed certificate order", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "reversed certificate order", failurePhase: AppAttestFailurePhaseCertificateChain, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) {
 				wire.Statement.Certificates[0], wire.Statement.Certificates[1] = wire.Statement.Certificates[1], wire.Statement.Certificates[0]
 			})
 		}},
-		{name: "client supplied root", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "client supplied root", failurePhase: AppAttestFailurePhaseCertificateChain, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) {
 				wire.Statement.Certificates = append(wire.Statement.Certificates, append([]byte(nil), fixture.rootDER...))
 			})
 		}},
-		{name: "certificate corruption", mutate: func(t *testing.T, fixture *appAttestFixture) {
+		{name: "certificate corruption", failurePhase: AppAttestFailurePhaseCertificateChain, mutate: func(t *testing.T, fixture *appAttestFixture) {
 			fixture.attestation = rewriteAppAttestation(t, fixture.attestation, func(wire *appAttestationObjectWire) {
 				wire.Statement.Certificates[0][len(wire.Statement.Certificates[0])-1] ^= 0x01
 			})
@@ -457,9 +594,11 @@ func TestAppAttestVerifierRejectsAttestationTampering(t *testing.T) {
 			store := newMemoryAppAttestKeyStore()
 			verifier := mustTestAppAttestVerifier(t, store, fixture.root, AppAttestProduction)
 			evidence := mustAppAttestEvidence(t, fixture.keyID, "attestation_object", fixture.attestation, binding)
-			if _, err := verifier.Verify(context.Background(), evidence, binding); !errors.Is(err, ErrInvalid) {
+			_, err := verifier.Verify(context.Background(), evidence, binding)
+			if !errors.Is(err, ErrInvalid) {
 				t.Fatalf("tampered attestation error = %v, want ErrInvalid", err)
 			}
+			assertAppAttestFailurePhase(t, err, test.failurePhase)
 			if _, exists := store.snapshot(fixture.keyID); exists {
 				t.Fatal("invalid attestation registered a key")
 			}
@@ -480,43 +619,51 @@ func TestAppAttestVerifierRejectsAssertionTamperingAndScopeChanges(t *testing.T)
 		corruptPlatform      bool
 		registrationPlatform string
 		wantStoreError       bool
+		failurePhase         AppAttestFailurePhase
 	}{
-		{name: "zero counter", counter: 0},
-		{name: "equal counter", counter: 0},
-		{name: "wrong RP ID", counter: 1, options: appAttestAssertionOptions{rpIDHash: pointerToHash(sha256.Sum256([]byte("wrong-rp")))}},
-		{name: "disallowed category", counter: 1, options: appAttestAssertionOptions{validationCategory: 3}},
-		{name: "disallowed bundle", counter: 1, options: appAttestAssertionOptions{bundleVersion: "2.0"}},
-		{name: "reserved flag", counter: 1, options: appAttestAssertionOptions{flags: 0x02}},
-		{name: "backup flag", counter: 1, options: appAttestAssertionOptions{flags: 0x10}},
-		{name: "attested-data flag", counter: 1, options: appAttestAssertionOptions{flags: 0x40}},
-		{name: "extension-data flag", counter: 1, options: appAttestAssertionOptions{flags: 0x80}},
-		{name: "user-presence flag", counter: 1, options: appAttestAssertionOptions{flags: 0x01}},
-		{name: "bad signature", counter: 1, mutate: func(encoded []byte) []byte {
+		{name: "zero counter", counter: 0, failurePhase: AppAttestFailurePhaseAssertionCounter},
+		{name: "equal counter", counter: 0, failurePhase: AppAttestFailurePhaseAssertionCounter},
+		{name: "wrong RP ID", counter: 1, options: appAttestAssertionOptions{rpIDHash: pointerToHash(sha256.Sum256([]byte("wrong-rp")))}, failurePhase: AppAttestFailurePhaseAssertionAuthenticator},
+		{name: "disallowed category", counter: 1, options: appAttestAssertionOptions{validationCategory: 3}, failurePhase: AppAttestFailurePhaseAssertionAuthenticator},
+		{name: "disallowed bundle", counter: 1, options: appAttestAssertionOptions{bundleVersion: "2.0"}, failurePhase: AppAttestFailurePhaseAssertionAuthenticator},
+		{name: "reserved flag", counter: 1, options: appAttestAssertionOptions{flags: appAttestFlagAttestedData | appAttestFlagExtensionData | 0x02}, failurePhase: AppAttestFailurePhaseAssertionObject},
+		{name: "backup flag", counter: 1, options: appAttestAssertionOptions{flags: appAttestFlagAttestedData | appAttestFlagExtensionData | 0x10}, failurePhase: AppAttestFailurePhaseAssertionObject},
+		{name: "extension-data flag without extensions", counter: 1, options: appAttestAssertionOptions{flags: appAttestFlagAttestedData | appAttestFlagExtensionData, omitExtensions: true}, failurePhase: AppAttestFailurePhaseAssertionObject},
+		{name: "user-presence flag", counter: 1, options: appAttestAssertionOptions{flags: appAttestFlagAttestedData | appAttestFlagExtensionData | 0x01}, failurePhase: AppAttestFailurePhaseAssertionObject},
+		{name: "current markers with credential-data prefix", counter: 1, options: appAttestAssertionOptions{flags: appAttestFlagAttestedData | appAttestFlagExtensionData}, failurePhase: AppAttestFailurePhaseAssertionObject, mutate: func(encoded []byte) []byte {
+			return rewriteAppAssertion(t, encoded, func(wire *appAttestAssertionWire) {
+				extensions := append([]byte(nil), wire.AuthenticatorData[appAttestAuthenticatorHeaderBytes:]...)
+				wire.AuthenticatorData = append(wire.AuthenticatorData[:appAttestAuthenticatorHeaderBytes], 0xa0)
+				wire.AuthenticatorData = append(wire.AuthenticatorData, extensions...)
+			})
+		}},
+		{name: "bad signature", counter: 1, failurePhase: AppAttestFailurePhaseAssertionSignature, mutate: func(encoded []byte) []byte {
 			return rewriteAppAssertion(t, encoded, func(wire *appAttestAssertionWire) { wire.Signature[len(wire.Signature)-1] ^= 0x01 })
 		}},
-		{name: "wrong authoritative binding", counter: 1, verificationBind: func(binding Binding) Binding {
+		{name: "single-digest signature", counter: 1, options: appAttestAssertionOptions{singleDigestSignature: true}, failurePhase: AppAttestFailurePhaseAssertionSignature},
+		{name: "wrong authoritative binding", counter: 1, failurePhase: AppAttestFailurePhaseAssertionSignature, verificationBind: func(binding Binding) Binding {
 			binding.ChallengeNonce = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xf1}, sha256.Size))
 			return binding
 		}},
-		{name: "principal association", counter: 1, buildBinding: func() Binding {
+		{name: "principal association", counter: 1, failurePhase: AppAttestFailurePhaseAssertionScope, buildBinding: func() Binding {
 			binding := appAttestTestBinding(2)
 			binding.PrincipalID = "usr_01J00000000000000000000001"
 			return binding
 		}},
-		{name: "DPoP association", counter: 1, buildBinding: func() Binding {
+		{name: "DPoP association", counter: 1, failurePhase: AppAttestFailurePhaseAssertionScope, buildBinding: func() Binding {
 			binding := appAttestTestBinding(2)
 			binding.DPoPJKT = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xa7}, sha256.Size))
 			return binding
 		}},
-		{name: "native to React Native association", counter: 1, buildBinding: func() Binding {
+		{name: "native to React Native association", counter: 1, failurePhase: AppAttestFailurePhaseAssertionScope, buildBinding: func() Binding {
 			binding := appAttestTestBinding(2)
 			binding.Platform = "react_native_ios"
 			return binding
 		}},
-		{name: "React Native to native association", counter: 1, registrationPlatform: "react_native_ios"},
-		{name: "unregistered key", counter: 1, unknownKey: true},
-		{name: "corrupt stored public key", counter: 1, corruptStore: true, wantStoreError: true},
-		{name: "corrupt stored platform", counter: 1, corruptPlatform: true, wantStoreError: true},
+		{name: "React Native to native association", counter: 1, registrationPlatform: "react_native_ios", failurePhase: AppAttestFailurePhaseAssertionScope},
+		{name: "unregistered key", counter: 1, unknownKey: true, failurePhase: AppAttestFailurePhaseAssertionKey},
+		{name: "corrupt stored public key", counter: 1, corruptStore: true, wantStoreError: true, failurePhase: AppAttestFailurePhaseKeyStore},
+		{name: "corrupt stored platform", counter: 1, corruptPlatform: true, wantStoreError: true, failurePhase: AppAttestFailurePhaseKeyStore},
 	}
 
 	for _, test := range tests {
@@ -567,6 +714,10 @@ func TestAppAttestVerifierRejectsAssertionTamperingAndScopeChanges(t *testing.T)
 				}
 			} else if !errors.Is(err, ErrInvalid) {
 				t.Fatalf("assertion error = %v, want ErrInvalid", err)
+			}
+			phase, ok := AppAttestFailurePhaseOf(err)
+			if !ok || phase != test.failurePhase {
+				t.Fatalf("assertion failure phase = %q present=%t, want %q", phase, ok, test.failurePhase)
 			}
 			stored, _ := store.snapshot(fixture.keyID)
 			if stored.Counter != 0 {
@@ -852,6 +1003,17 @@ func TestAppAttestVerifierRejectsAmbiguousCBORAndEvidenceLimits(t *testing.T) {
 	if _, err := decodeAppAttestExtensions(duplicateExtension); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("duplicate extension error = %v, want ErrInvalid", err)
 	}
+	validCodeDirectoryHash := bytes.Repeat([]byte{0x5a}, sha256.Size)
+	decodedExtensions, err := decodeAppAttestExtensions(mustTestCBOR(t, map[string]any{
+		"apple_validation_category_01": appAttestTestCategory(4),
+		"apple_bundle_version_01":      "1.0",
+		"apple_cd_hash_hash_01":        validCodeDirectoryHash,
+		"apple_cd_hash_type_01":        []byte{2},
+	}))
+	if err != nil || !decodedExtensions.codeDirectoryHashPresent || decodedExtensions.codeDirectoryHashType != 2 ||
+		!bytes.Equal(decodedExtensions.codeDirectoryHash[:], validCodeDirectoryHash) {
+		t.Fatalf("current code-directory extensions = %#v err=%v", decodedExtensions, err)
+	}
 	extensionCases := []map[string]any{
 		{"apple_validation_category_01": appAttestTestCategory(4)},
 		{"apple_bundle_version_01": "1.0"},
@@ -864,6 +1026,12 @@ func TestAppAttestVerifierRejectsAmbiguousCBORAndEvidenceLimits(t *testing.T) {
 		{"apple_validation_category_01": appAttestTestCategory(7), "apple_bundle_version_01": "1.0"},
 		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "../1"},
 		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "unknown": true},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_hash_01": validCodeDirectoryHash},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_type_01": []byte{2}},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_hash_01": bytes.Repeat([]byte{1}, sha256.Size-1), "apple_cd_hash_type_01": []byte{2}},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_hash_01": bytes.Repeat([]byte{1}, sha256.Size), "apple_cd_hash_type_01": []byte{1}},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_hash_01": bytes.Repeat([]byte{1}, sha256.Size), "apple_cd_hash_type_01": []byte{2, 2}},
+		{"apple_validation_category_01": appAttestTestCategory(4), "apple_bundle_version_01": "1.0", "apple_cd_hash_hash_01": make([]byte, sha256.Size), "apple_cd_hash_type_01": []byte{2}},
 	}
 	for index, extension := range extensionCases {
 		if _, err := decodeAppAttestExtensions(mustTestCBOR(t, extension)); !errors.Is(err, ErrInvalid) {
@@ -1436,7 +1604,7 @@ func newAppAttestFixture(binding Binding, options appAttestFixtureOptions) (appA
 	}
 	authenticatorData, err := appAttestTestAttestationAuthenticator(
 		rpIDHash, options.flags, options.counter, aaguid, credentialID, &coseKey.PublicKey,
-		options.validationCategory, options.bundleVersion, options.omitExtensions,
+		options.validationCategory, options.bundleVersion, options.omitExtensions, options.includeCodeDirectoryHash,
 	)
 	if err != nil {
 		return appAttestFixture{}, err
@@ -1542,6 +1710,7 @@ func appAttestTestAttestationAuthenticator(
 	validationCategory uint32,
 	bundleVersion string,
 	omitExtensions bool,
+	includeCodeDirectoryHash bool,
 ) ([]byte, error) {
 	if publicKey == nil {
 		return nil, errors.New("fixture public key is invalid")
@@ -1560,10 +1729,15 @@ func appAttestTestAttestationAuthenticator(
 	}
 	var extensions []byte
 	if !omitExtensions {
-		extensions, err = testAppAttestEncMode.Marshal(map[string]any{
+		extensionMap := map[string]any{
 			"apple_validation_category_01": appAttestTestCategory(validationCategory),
 			"apple_bundle_version_01":      bundleVersion,
-		})
+		}
+		if includeCodeDirectoryHash {
+			extensionMap["apple_cd_hash_hash_01"] = bytes.Repeat([]byte{0x5a}, sha256.Size)
+			extensionMap["apple_cd_hash_type_01"] = []byte{2}
+		}
+		extensions, err = testAppAttestEncMode.Marshal(extensionMap)
 		if err != nil {
 			return nil, err
 		}
@@ -1604,10 +1778,15 @@ func mustAppAttestAssertion(
 	}
 	var extensions []byte
 	if !options.omitExtensions {
-		extensions = mustTestCBOR(t, map[string]any{
+		extensionMap := map[string]any{
 			"apple_validation_category_01": appAttestTestCategory(options.validationCategory),
 			"apple_bundle_version_01":      options.bundleVersion,
-		})
+		}
+		if options.includeCodeDirectoryHash {
+			extensionMap["apple_cd_hash_hash_01"] = bytes.Repeat([]byte{0x5a}, sha256.Size)
+			extensionMap["apple_cd_hash_type_01"] = []byte{2}
+		}
+		extensions = mustTestCBOR(t, extensionMap)
 	}
 	authenticatorData := make([]byte, 0, appAttestAuthenticatorHeaderBytes+len(extensions))
 	authenticatorData = append(authenticatorData, rpIDHash[:]...)
@@ -1624,11 +1803,15 @@ func mustAppAttestAssertion(
 	nonceInput = append(nonceInput, authenticatorData...)
 	nonceInput = append(nonceInput, bindingHash[:]...)
 	nonce := sha256.Sum256(nonceInput)
+	signatureDigest := sha256.Sum256(nonce[:])
+	if options.singleDigestSignature {
+		signatureDigest = nonce
+	}
 	signingKey := fixture.privateKey
 	if options.signingKey != nil {
 		signingKey = options.signingKey
 	}
-	signature, err := signingKey.Sign(nil, nonce[:], crypto.SHA256)
+	signature, err := signingKey.Sign(nil, signatureDigest[:], crypto.SHA256)
 	if err != nil {
 		t.Fatalf("sign deterministic assertion: %v", err)
 	}
@@ -1788,6 +1971,17 @@ func mustTestCBOR(t *testing.T, value any) []byte {
 		t.Fatalf("encode deterministic CBOR fixture: %v", err)
 	}
 	return encoded
+}
+
+func assertAppAttestFailurePhase(t *testing.T, err error, want AppAttestFailurePhase) {
+	t.Helper()
+	phase, ok := AppAttestFailurePhaseOf(err)
+	if !ok || phase != want {
+		t.Fatalf("App Attest failure phase = %q present=%t, want %q", phase, ok, want)
+	}
+	if !validAppAttestFailurePhase(phase) {
+		t.Fatalf("App Attest failure phase %q is outside the closed vocabulary", phase)
+	}
 }
 
 func pointerToHash(value [sha256.Size]byte) *[sha256.Size]byte { return &value }

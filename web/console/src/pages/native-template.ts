@@ -1,11 +1,13 @@
 export interface NativeTemplateInput {
   application: string;
   environment: string;
+  environmentKind: "development" | "staging" | "production";
   organization: string;
   firebaseProject: string;
   appIDPrefix: string;
   bundleID: string;
   bundleVersion: string;
+  appleDistribution: "development" | "testflight" | "app_store" | "ad_hoc_enterprise";
   packageName: string;
   clientSurface?: "native" | "react_native";
   cloudProject: number;
@@ -29,6 +31,19 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
   if (input.bundleID === input.packageName) {
     throw new Error("component_identifier_duplicate");
   }
+  const appAttestPolicy = {
+    development: { environment: "development", validationCategory: 3 },
+    testflight: { environment: "production", validationCategory: 2 },
+    app_store: { environment: "production", validationCategory: 4 },
+    ad_hoc_enterprise: { environment: "production", validationCategory: 5 }
+  } as const;
+  const appAttest = appAttestPolicy[input.appleDistribution];
+  if (!appAttest || (input.environmentKind !== "development" && input.environmentKind !== "staging" && input.environmentKind !== "production")) {
+    throw new Error("app_attest_distribution_invalid");
+  }
+  if (input.environmentKind === "production" && appAttest.environment !== "production") {
+    throw new Error("app_attest_environment_mismatch");
+  }
   const clientSurface = input.clientSurface ?? "react_native";
   const iosPlatform = clientSurface === "react_native" ? "react_native_ios" : "ios";
   const androidPlatform = clientSurface === "react_native" ? "react_native_android" : "android";
@@ -36,7 +51,13 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
   const androidDefinitionID = clientSurface === "react_native" ? "react-native-android-main" : "android-main";
   const appAttestSelection = {
     provider: "app_attest", mode: "required", minimumTrustLevel: "app_verified",
-    appAttest: { appIdPrefix: input.appIDPrefix, bundleId: input.bundleID, environment: "production", allowedValidationCategories: [1], allowedBundleVersions: [input.bundleVersion] }
+    appAttest: {
+      appIdPrefix: input.appIDPrefix,
+      bundleId: input.bundleID,
+      environment: appAttest.environment,
+      allowedValidationCategories: [appAttest.validationCategory],
+      allowedBundleVersions: [input.bundleVersion]
+    }
   };
   const playIntegritySelection = {
     provider: "play_integrity", mode: "required", minimumTrustLevel: "device_verified",
@@ -50,8 +71,8 @@ export function buildNativeTemplate(input: NativeTemplateInput): string {
       application: input.application,
       environment: input.environment,
       description: clientSurface === "react_native"
-        ? "React Native iOS and Android production gateway"
-        : "Native iOS and Android production gateway"
+        ? `React Native iOS and Android ${input.environmentKind} gateway`
+        : `Native iOS and Android ${input.environmentKind} gateway`
     },
     spec: {
       identityProviders: [{ id: "firebase", type: "firebase", projectId: input.firebaseProject }],

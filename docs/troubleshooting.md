@@ -46,12 +46,22 @@ activated revision.
 Confirm that the SDK application resource ID, environment, public gateway
 origin, platform, bundle/package identifier, signing identity, and cloud
 project match the active server policy. App Attest requires a physical Apple
-device and entitlement. Production Play Integrity requires the exact signed
-app installed from the configured Play track. A simulator, emulator, or
-sideloaded APK cannot satisfy those release policies.
+device and entitlement. Its exact validation category must match the signed
+executable (`3` development, `2` TestFlight, `4` App Store, or `5` ad
+hoc/enterprise), and its bundle-version allowlist must contain the exact
+`CFBundleVersion`/`CURRENT_PROJECT_VERSION`, not the marketing version.
+Production Play Integrity requires the exact signed app installed from the
+configured Play track. A simulator, emulator, or sideloaded APK cannot satisfy
+those release policies.
 
 Check the redaction-safe installation, attestation-failure, and audit views.
 Raw evidence is intentionally unavailable after verification.
+For App Attest, use `latchway_app_attest_verifier_failures_total` to separate
+bounded verifier phases such as `assertion_object`, `assertion_scope`,
+`assertion_counter`, `assertion_signature`, and `key_store`. The client still
+receives only the generic problem code; the metric never contains evidence,
+credential or installation identifiers, counters, bundle metadata, or error
+text.
 
 ## `dpop_invalid`, `dpop_replayed`, or `dpop_nonce_required`
 

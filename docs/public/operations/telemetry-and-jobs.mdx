@@ -42,6 +42,17 @@ Labels use closed bounded vocabularies. User IDs, installation IDs, request IDs,
 identity subjects, tokens, proofs, credentials, prompt content, and arbitrary
 provider text are not metric labels.
 
+`latchway_app_attest_verifier_failures_total` adds a bounded `phase` label so
+operators can distinguish input/binding failures, attestation object,
+certificate, credential, authenticator, environment, extension, nonce, and
+registration failures, assertion object, authenticator, key, scope, counter,
+and signature failures, key-store availability, and result sealing. The metric
+contains only application, environment, bounded platform, and phase labels. It
+never includes the Apple key ID, installation or principal ID, evidence bytes,
+counter value, bundle metadata, policy values, or verifier error text. Client
+HTTP responses remain the generic `attestation_invalid` or `server_not_ready`
+problem appropriate to the underlying error class.
+
 ## Traces and logs
 
 Traces are disabled unless the standard OpenTelemetry environment selects the

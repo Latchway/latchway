@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -412,6 +413,19 @@ class DeploymentEvidenceTests(unittest.TestCase):
             'flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"',
             text,
         )
+        prepare_text = json.dumps(jobs["prepare"], sort_keys=True)
+        self.assertNotIn("setup-flyctl", prepare_text)
+        self.assertNotIn("flyctl config validate", prepare_text)
+        fly_validation = next(
+            step
+            for step in jobs["capture"]["steps"]
+            if step.get("name")
+            == "Validate Fly configuration against the authenticated platform"
+        )
+        self.assertEqual(
+            fly_validation["env"],
+            {"FLY_API_TOKEN": "${{ secrets.FLY_API_TOKEN }}"},
+        )
         self.assertLess(
             text.index("uses: superfly/flyctl-actions/setup-flyctl@"),
             text.index(
@@ -586,6 +600,25 @@ class DeploymentEvidenceTests(unittest.TestCase):
             quickstart["services"]["postgres"]["volumes"],
             ["postgres-data:/var/lib/postgresql"],
         )
+
+    def test_fly_static_validator_rejects_unknown_fields(self) -> None:
+        document = tomllib.loads(
+            (SCRIPT.parent.parent / "deploy/fly/fly.toml").read_text(encoding="utf-8")
+        )
+        result = deployment.validate_fly_document(document)
+        self.assertTrue(result["strict_offline_fields"])
+
+        unknown_section = copy.deepcopy(document)
+        unknown_section["unrecognized"] = {}
+        with self.assertRaises(deployment.EvidenceError) as raised:
+            deployment.validate_fly_document(unknown_section)
+        self.assertEqual(raised.exception.code, "fly_top_level_fields_invalid")
+
+        unknown_check_key = copy.deepcopy(document)
+        unknown_check_key["http_service"]["checks"][0]["unrecognized"] = True
+        with self.assertRaises(deployment.EvidenceError) as raised:
+            deployment.validate_fly_document(unknown_check_key)
+        self.assertEqual(raised.exception.code, "fly_health_check_fields_invalid")
 
     def test_wrangler_toolchain_closure_is_exact_and_registry_only(self) -> None:
         result = deployment.validate_wrangler_toolchain()

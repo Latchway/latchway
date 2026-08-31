@@ -1,7 +1,8 @@
 # Version 1 completion gap ledger
 
-Status: **the version 1 source implementation is locally converged, but the
-candidate is not released or production-proven**.
+Status: **the version 1 source implementation is locally converged and has
+supplemental development-signed physical iOS evidence, but the candidate is
+not released or production-proven**.
 
 This checked-in file is a source-status ledger. It is not the immutable
 candidate-bound completion report produced by the protected release workflow.
@@ -15,7 +16,7 @@ deployments, or protected evidence that does not exist.
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `23` |
-| Contract bundle | SHA-256 `36aa3c4786e60f2cdbbc3d0cd2f65bffe894a099479517b2e1faa01361c74b00` at core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
+| Contract bundle | SHA-256 `ad7afe992181553996eba39e44d4aeb498e8159e2b52671756b5c93ab68eb765` at core checkpoint `a62b0f6aa2328604101c1073c56f5ecb3bed3618` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 
@@ -28,10 +29,10 @@ authorize version 1.
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
 | Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 23, frozen bundle and synchronized locks | Protected exact-candidate evidence |
-| Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation | Protected physical trust and lifecycle observations; iOS extensions remain delegated-only |
+| Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
 | Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
-| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate | Physical platform proof and publication |
+| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate; a real React Native iOS 27 development-signed run passed | Protected Apple distribution candidate, physical Android and delegated-extension runtime proof, and publication |
 | Frameworks | Six exact, locally tested integrations recorded as `experimental`; unsupported/planned seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
@@ -75,6 +76,17 @@ source gateway, including the multi-audience token shape emitted by Firebase.
 The arbitrary ngrok hostname was not claimed as passing, and this observation
 is not protected immutable-candidate evidence.
 
+A separate real-device development run used the React Native example in iOS 27
+Release configuration, automatic Apple Development signing, and bundle
+`dev.latchway`. Apple production App Attest trust was accepted at validation
+category `3` and bundle version `1`; registration and the next assertion reused
+one App Attest key through a temporary ngrok tunnel, the current source gateway,
+and Firebase identity. Durable state recorded the assertion counter and hash.
+Secure Enclave DPoP, upstream non-streaming and streaming requests, quota, the
+typed `403 component_feature_not_granted` response, the native bridge, and
+cleanup also passed. This is development-signed physical evidence, not a
+protected immutable-candidate or distribution receipt.
+
 Those results establish implementation confidence; they are not release
 receipts. The final convergence run has:
 
@@ -92,9 +104,10 @@ receipts. The final convergence run has:
 
 One immutable candidate still requires all of the following:
 
-1. protected physical iOS and React Native iOS root-app App Attest plus
-   delegated Widget/Share/Action isolation, with candidate-bound identities,
-   independent keys/sessions, sibling denial, no-host, background,
+1. a protected Apple Distribution, ad hoc, TestFlight, or App Store-derived
+   immutable iOS candidate that repeats root-app App Attest, plus delegated
+   Widget/Share/Action execution and isolation, with candidate-bound
+   identities, independent keys/sessions, sibling denial, no-host, background,
    termination, and no-user-presence behavior, plus App Intents signed-binary
    and entitlement isolation while its non-executing fixture remains
    fail-closed;
@@ -116,15 +129,16 @@ One immutable candidate still requires all of the following:
 8. production Mintlify deployment followed by link, accessibility, redirect,
    and AI-readable-output validation.
 
-An iPhone is connected and registered with Xcode. The current Xcode-managed
-`dev.latchway` development profile includes that device and its App Attest
-entitlement lists both `development` and `production`, but the host Keychain
-contains zero valid code-signing identities. Device connectivity and profile
-registration are execution capacity, not proof by themselves. No physical result closes a gate
-until the protected collector and finalizer bind it to the exact repository,
+The connected iPhone and Xcode-managed `dev.latchway` profile supported
+automatic Apple Development signing and the supplemental physical observation.
+No physical result closes the release gate until the protected collector and
+finalizer bind an Apple distribution-derived candidate to the exact repository,
 contract, application identity, signing, entitlement, package, and image
-coordinates. Play Integrity additionally requires a Play-distributed signed
-application and is deferred until an Android device is available.
+coordinates. The root-app observation did not execute the delegated extension.
+Play Integrity additionally requires a Play-distributed signed application and
+is deferred until an Android device is available. The CocoaPods lint passed
+with the beta Xcode toolchain; the stable Xcode installation on this host lacks
+the required platform component and cannot independently run that lint.
 
 ## Completion decision
 

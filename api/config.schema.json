@@ -715,6 +715,7 @@
         "environment": { "enum": ["development", "production"] },
         "allowedValidationCategories": {
           "type": "array",
+          "description": "Exact Apple launch ValidationCategory allowlist: 2 TestFlight, 3 development signing, 4 App Store, 5 ad hoc or enterprise, 6 Developer ID, 10 otherwise classified signing; category 1 is reserved for operating-system executables.",
           "minItems": 1,
           "maxItems": 7,
           "uniqueItems": true,
@@ -722,6 +723,7 @@
         },
         "allowedBundleVersions": {
           "type": "array",
+          "description": "Exact apple_bundle_version_01 values, sourced from CFBundleVersion/CURRENT_PROJECT_VERSION rather than CFBundleShortVersionString/MARKETING_VERSION.",
           "minItems": 1,
           "maxItems": 64,
           "uniqueItems": true,
@@ -1356,8 +1358,8 @@
                   "appIdPrefix": "TEAM1234",
                   "bundleId": "com.example.habits",
                   "environment": "production",
-                  "allowedValidationCategories": [1],
-                  "allowedBundleVersions": ["1.0"]
+                  "allowedValidationCategories": [4],
+                  "allowedBundleVersions": ["1"]
                 }
               },
               "android": {

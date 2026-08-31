@@ -83,6 +83,62 @@ CAPABILITY_TERMS = [
     "Tool calls",
     "Protocol",
 ]
+CANONICAL_DIAGRAMS = {
+    "Latchway in one picture": (
+        "start/architecture-at-a-glance",
+        ("Untrusted client", "Latchway boundary", "PostgreSQL", "upstream"),
+    ),
+    "Control plane versus data plane": (
+        "start/architecture-at-a-glance",
+        ("Data plane", "Control plane", "Admin API", "PostgreSQL"),
+    ),
+    "Identity, attestation, and DPoP": (
+        "concepts/identity-and-attestation",
+        ("Identity token", "Attestation", "DPoP", "Authorize feature policy"),
+    ),
+    "Session bootstrap sequence": (
+        "concepts/identity-and-attestation",
+        ("sequenceDiagram", "Session challenge", "component public key", "PostgreSQL"),
+    ),
+    "Protected AI request sequence": (
+        "concepts/security-boundary",
+        ("sequenceDiagram", "fresh DPoP proof", "Reserve replay key", "Settle usage"),
+    ),
+    "Reserve-execute-settle quota lifecycle": (
+        "concepts/routing-and-quotas",
+        ("Trusted preflight estimate", "Reserve atomically", "without open transaction", "Settle actual charge"),
+    ),
+    "Feature routing": (
+        "concepts/routing-and-quotas",
+        ("Feature ID", "Active immutable configuration", "physical model", "fallback"),
+    ),
+    "Installation Family hierarchy": (
+        "concepts/installation-families",
+        ("Installation Family", "directly attested", "delegated trust", "DPoP key"),
+    ),
+    "Delegated component provisioning": (
+        "build/app-extensions/containing-app-provisioning",
+        ("sequenceDiagram", "single-use delegation", "component-key possession", "Component-scoped session"),
+    ),
+    "Root revocation propagation": (
+        "operate/installation-families/revocation",
+        ("Revoke root", "delegation", "refresh chain", "Revoke Widget only"),
+    ),
+    "Framework-transparent integration": (
+        "integrations/overview",
+        ("Existing AI framework", "authenticated transport", "application feature", "Server-selected upstream"),
+    ),
+    "PostgreSQL-only deployment": (
+        "operations/deployment",
+        ("API replica", "Worker replica", "Migration job", "only required external service"),
+    ),
+}
+DIAGRAM_CAPTIONS = (
+    "What this establishes",
+    "What this does not establish",
+    "What causes the relationship to expire",
+)
+MERMAID_BLOCK = re.compile(r"```mermaid\s*\n(?P<body>.*?)\n```", re.DOTALL)
 PRE_RELEASE_PAGES = {
     page
     for page in REQUIRED_PAGES
@@ -300,12 +356,86 @@ def main() -> int:
         if phrase.casefold() not in normalized_installation_text:
             errors.append(f"Installation Family concepts lack required invariant: {phrase}")
 
-    mermaid_count = sum(
-        path.read_text(encoding="utf-8").count("```mermaid")
-        for path in files_by_route.values()
-    )
-    if mermaid_count < 4:
-        errors.append(f"foundation requires at least four repository-native diagrams; found {mermaid_count}")
+    diagrams: list[tuple[str, str]] = []
+    for route, path in sorted(files_by_route.items()):
+        text = path.read_text(encoding="utf-8")
+        matches = list(MERMAID_BLOCK.finditer(text))
+        for match in matches:
+            body = match.group("body")
+            title_match = re.search(r"(?m)^\s*accTitle:\s*(.+?)\s*$", body)
+            description_match = re.search(r"(?m)^\s*accDescr:\s*(.+?)\s*$", body)
+            if not title_match:
+                errors.append(f"Mermaid diagram lacks accTitle: {route}")
+                continue
+            title = title_match.group(1).strip()
+            diagrams.append((title, route))
+            if not description_match or len(description_match.group(1).strip()) < 40:
+                errors.append(f"canonical diagram lacks a useful accDescr: {title} ({route})")
+
+            expected = CANONICAL_DIAGRAMS.get(title)
+            if expected is None:
+                errors.append(f"unexpected canonical diagram: {title} ({route})")
+                continue
+            expected_route, semantic_terms = expected
+            if route != expected_route:
+                errors.append(
+                    f"canonical diagram is on the wrong page: {title} must be in "
+                    f"{expected_route}, found {route}"
+                )
+            if route not in nav_set:
+                errors.append(f"canonical diagram page is absent from navigation: {route}")
+            preceding = text[: match.start()].rstrip()
+            if not preceding.endswith(f"## {title}"):
+                errors.append(f"canonical diagram must immediately follow its level-two heading: {title}")
+            normalized_body = body.casefold()
+            for term in semantic_terms:
+                if term.casefold() not in normalized_body:
+                    errors.append(f"canonical diagram lacks required semantic ({term}): {title}")
+
+            following = text[match.end() :]
+            next_level_two = re.search(r"(?m)^##\s+", following)
+            caption_region = following[: next_level_two.start()] if next_level_two else following
+            caption_matches: list[re.Match[str]] = []
+            for caption in DIAGRAM_CAPTIONS:
+                heading = rf"(?m)^### {re.escape(caption)}\s*$"
+                caption_match = re.search(heading, caption_region)
+                if not caption_match:
+                    errors.append(f"canonical diagram lacks trust caption ({caption}): {title}")
+                else:
+                    caption_matches.append(caption_match)
+            if len(caption_matches) == len(DIAGRAM_CAPTIONS):
+                if [item.start() for item in caption_matches] != sorted(
+                    item.start() for item in caption_matches
+                ):
+                    errors.append(f"canonical diagram trust captions are out of order: {title}")
+                for index, caption_match in enumerate(caption_matches):
+                    body_end = (
+                        caption_matches[index + 1].start()
+                        if index + 1 < len(caption_matches)
+                        else len(caption_region)
+                    )
+                    caption_body = re.sub(
+                        r"[\s>#*`]+", " ", caption_region[caption_match.end() : body_end]
+                    ).strip()
+                    if len(caption_body) < 40:
+                        errors.append(
+                            f"canonical diagram trust caption lacks an explanation "
+                            f"({DIAGRAM_CAPTIONS[index]}): {title}"
+                        )
+
+    mermaid_count = len(diagrams)
+    if mermaid_count != len(CANONICAL_DIAGRAMS):
+        errors.append(
+            f"foundation requires exactly {len(CANONICAL_DIAGRAMS)} canonical diagrams; "
+            f"found {mermaid_count}"
+        )
+    diagram_titles = [title for title, _ in diagrams]
+    duplicate_diagrams = sorted({title for title in diagram_titles if diagram_titles.count(title) > 1})
+    if duplicate_diagrams:
+        errors.append(f"canonical diagrams occur more than once: {', '.join(duplicate_diagrams)}")
+    missing_diagrams = sorted(CANONICAL_DIAGRAMS.keys() - set(diagram_titles))
+    if missing_diagrams:
+        errors.append(f"canonical diagrams are missing: {', '.join(missing_diagrams)}")
 
     forbidden_roots = {"implementation", "adr", "engineering", "internal"}
     for forbidden in forbidden_roots:

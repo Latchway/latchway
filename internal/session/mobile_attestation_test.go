@@ -15,6 +15,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"github.com/latchway/latchway/internal/attestation"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/secrets"
+	"github.com/latchway/latchway/internal/telemetry"
 )
 
 func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.T) {
@@ -90,6 +92,79 @@ func TestCoordinatorBuildsProductionMobileVerifierAndProviderOptions(t *testing.
 	options = attestationProviderOptions(turnstile)
 	if len(options) != 1 || options["action"] != "session" {
 		t.Fatalf("Turnstile provider options = %#v", options)
+	}
+}
+
+func TestCoordinatorRecordsClosedAppAttestFailurePhaseAndKeepsGenericError(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	metrics, err := telemetry.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = metrics.Shutdown(context.Background()) })
+
+	environment := clientEnvironment{
+		OrganizationID: "org_00000000000000000000000000",
+		ApplicationID:  "app_00000000000000000000000000",
+		EnvironmentID:  "env_00000000000000000000000000",
+		Slug:           "production", Kind: "production",
+	}
+	binding := attestation.Binding{
+		Version: 1, ChallengeID: "chl_01J00000000000000000000000",
+		ChallengeNonce: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x31}, sha256.Size)),
+		ApplicationID:  environment.ApplicationID, Environment: environment.Slug,
+		PrincipalID: "usr_01J00000000000000000000000",
+		DPoPJKT:     base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x32}, sha256.Size)),
+		Platform:    "react_native_ios", IssuedAt: now.Unix(),
+	}
+	bindingHash, err := binding.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID := bytes.Repeat([]byte{0x33}, sha256.Size)
+	malformedObject := []byte{0xff}
+	evidence, err := attestation.NewEvidence("app_attest", map[string]any{
+		"key_id":           base64.StdEncoding.EncodeToString(keyID),
+		"client_data_hash": base64.RawURLEncoding.EncodeToString(bindingHash[:]),
+		"assertion_object": base64.RawURLEncoding.EncodeToString(malformedObject),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &clientCoordinator{
+		now: nowClock(now), appAttestKeys: &recordingAppAttestKeyStore{}, telemetry: metrics,
+		attestationCache: make(map[attestationVerifierCacheKey]*preparedAttestationVerifier),
+	}
+	_, verifyErr := coordinator.verifyAttestationEvidence(
+		context.Background(), environment,
+		configuration.ActiveSnapshot{RevisionID: "rev_00000000000000000000000000"},
+		configuration.AttestationPolicy{ID: "native", MaxAge: 10 * time.Minute},
+		validAppAttestSelection(), evidence, binding,
+	)
+	if !errors.Is(verifyErr, attestation.ErrInvalid) || mapAttestationError(verifyErr) != "attestation_invalid" {
+		t.Fatalf("App Attest verifier error=%v client_code=%q", verifyErr, mapAttestationError(verifyErr))
+	}
+	phase, ok := attestation.AppAttestFailurePhaseOf(verifyErr)
+	if !ok || phase != attestation.AppAttestFailurePhaseAssertionObject {
+		t.Fatalf("App Attest failure phase=%q present=%t", phase, ok)
+	}
+
+	recorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	metricText := recorder.Body.String()
+	wantSeries := `latchway_app_attest_verifier_failures_total{application="` + environment.ApplicationID +
+		`",environment="` + environment.EnvironmentID + `",phase="assertion_object",platform="react_native_ios"} 1`
+	if !strings.Contains(metricText, wantSeries) {
+		t.Fatalf("App Attest verifier metric missing %q:\n%s", wantSeries, metricText)
+	}
+	for _, private := range []string{
+		binding.ChallengeID, binding.PrincipalID,
+		base64.StdEncoding.EncodeToString(keyID),
+		base64.RawURLEncoding.EncodeToString(malformedObject),
+	} {
+		if strings.Contains(metricText, private) {
+			t.Fatalf("App Attest verifier metric disclosed private value %q:\n%s", private, metricText)
+		}
 	}
 }
 

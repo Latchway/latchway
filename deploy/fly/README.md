@@ -29,7 +29,8 @@ application Machine use the same released image:
 
 ```bash
 export LATCHWAY_IMAGE='ghcr.io/latchway/latchway@sha256:<64 lowercase hex>'
-flyctl config validate --strict --config deploy/fly/fly.toml
+export FLY_APP='replace-with-your-latchway-app'
+flyctl config validate --strict --app "$FLY_APP" --config deploy/fly/fly.toml
 flyctl deploy --app replace-with-your-latchway-app \
   --config deploy/fly/fly.toml \
   --image "$LATCHWAY_IMAGE" \
@@ -84,5 +85,15 @@ public HTTPS endpoint, and Fly app name. The pinned collector records the provid
 resolved digest of every running Machine, binds migration output to an existing
 Machine, restarts one Machine explicitly with SIGTERM and a 35-second timeout,
 waits for a new Machine instance, and probes `/healthz` plus `/readyz`.
-Successful local `flyctl config validate --strict` output is static evidence
-only.
+The credential-free structural gate is:
+
+```bash
+python3 scripts/deployment-evidence.py static \
+  --output /tmp/latchway-deployment-static.json
+```
+
+It rejects unknown Fly configuration fields and validates the fixed migration,
+health, rollout, resource, and drain contract without contacting Fly. The
+authoritative `flyctl config validate --strict` command requires an authenticated
+Fly session and is executed again inside the protected provider-capture job; its
+success is still static evidence only.

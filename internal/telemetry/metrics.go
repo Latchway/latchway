@@ -102,6 +102,7 @@ type Registry struct {
 	concurrencyDenials    metric.Int64Counter
 	identityFailures      metric.Int64Counter
 	attestationResults    metric.Int64Counter
+	appAttestFailures     metric.Int64Counter
 	dpopFailures          metric.Int64Counter
 	activeRequests        metric.Int64UpDownCounter
 	activeStreams         metric.Int64UpDownCounter
@@ -229,6 +230,10 @@ func (registry *Registry) initialize(meter metric.Meter) (err error) {
 		return err
 	}
 	registry.attestationResults, err = meter.Int64Counter("latchway_attestation_results_total")
+	if err != nil {
+		return err
+	}
+	registry.appAttestFailures, err = meter.Int64Counter("latchway_app_attest_verifier_failures_total")
 	if err != nil {
 		return err
 	}
@@ -443,6 +448,28 @@ func (registry *Registry) RecordAttestationResult(ctx context.Context, labels La
 	registry.attestationResults.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
 }
 
+// RecordAppAttestVerifierFailure records one provider-internal verifier branch
+// without changing the generic client-facing failure. The phase is reduced to
+// a closed vocabulary and the label surface is restricted to trusted tenant
+// scope plus the already bounded platform. Provider payloads, key/installation
+// identifiers, counters, bundle metadata, policy values, and error text cannot
+// become dimensions.
+func (registry *Registry) RecordAppAttestVerifierFailure(ctx context.Context, labels Labels, phase string) {
+	if registry == nil {
+		return
+	}
+	labels.Feature = ""
+	labels.Route = ""
+	labels.Upstream = ""
+	labels.ModelAlias = ""
+	labels.AttestationLevel = ""
+	labels.Plan = ""
+	labels.Outcome = ""
+	labels.Platform = safeAttestationPlatform(labels.Platform)
+	attributes := append(labels.attributes(), attribute.String("phase", safeAppAttestFailurePhase(phase)))
+	registry.appAttestFailures.Add(ctx, 1, metric.WithAttributes(attributes...))
+}
+
 func (registry *Registry) RecordDPoPFailure(ctx context.Context, labels Labels) {
 	if registry != nil {
 		registry.dpopFailures.Add(ctx, 1, metric.WithAttributes(labels.attributes()...))
@@ -566,6 +593,35 @@ func safeAttestationOutcome(outcome string) string {
 	switch outcome {
 	case AttestationOutcomeSucceeded, AttestationOutcomeRejected, AttestationOutcomeUnavailable:
 		return outcome
+	default:
+		return "invalid"
+	}
+}
+
+func safeAppAttestFailurePhase(phase string) string {
+	switch phase {
+	case "request",
+		"context",
+		"binding",
+		"evidence",
+		"clock",
+		"attestation_object",
+		"certificate_chain",
+		"credential_binding",
+		"attestation_authenticator",
+		"attestation_environment",
+		"attestation_extensions",
+		"attestation_nonce",
+		"registration",
+		"assertion_object",
+		"assertion_authenticator",
+		"assertion_key",
+		"assertion_scope",
+		"assertion_counter",
+		"assertion_signature",
+		"key_store",
+		"result":
+		return phase
 	default:
 		return "invalid"
 	}

@@ -80,7 +80,7 @@ async function installAdminFixture(page: Page) {
     apiVersion: "latchway.dev/v1alpha1", kind: "EnvironmentConfig",
     metadata: { application: "mobile-app", environment: "production", labels: { retained: "yes" }, organization: "example" },
     spec: {
-      attestationPolicies: [{ id: "native", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } }],
+      attestationPolicies: [{ id: "native", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1"], allowedValidationCategories: [4], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } }],
       features: [{ access: { expression: "principal.authenticated" }, attestationPolicy: "native", id: "assistant", limitPlan: { expression: "'free'" }, protocol: "openai_responses", routes: [{ id: "primary", model: "assistant_default", priority: 10, when: "true" }] }],
       identityProviders: [{ id: "firebase", projectId: "example-mobile", type: "firebase" }],
       inputAccountingProfiles: [{ id: "assistant_input", maximumContextTokens: 128000, maximumFramingTokensPerMessage: 4, maximumFramingTokensPerRequest: 8, method: "utf8_byte_bpe_declared_framing_v1", physicalModel: "gpt-5-mini", protocol: "openai_responses" }],
@@ -302,9 +302,11 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
   await page.getByLabel("Application name").fill("Mobile App");
   await page.getByLabel("Application slug").fill("mobile-app");
   await page.getByLabel("Firebase project ID").fill("example-mobile");
+  await page.getByLabel("Environment kind").selectOption("production");
   await page.getByLabel("App ID prefix").fill("TEAM1234");
   await page.getByLabel("Bundle ID", { exact: true }).fill("com.example.mobile");
-  await page.getByLabel("Allowed bundle version").fill("2.3.4");
+  await page.getByLabel("Signing or distribution").selectOption("app_store");
+  await page.getByLabel("Allowed CFBundleVersion (build number)").fill("234");
   await page.getByLabel("Package name").fill("com.example.mobile.android");
   await page.getByLabel("Cloud project number").fill("123456789");
   await page.getByLabel("Certificate SHA-256 digest (base64url)").fill(
@@ -328,7 +330,7 @@ test("first run, Admin-only mutation path, user block, and logout", async ({ pag
     "react_native_android", "react_native_ios"
   ]);
   expect(generated.spec.attestationPolicies[0]?.platforms).toMatchObject({
-    react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { allowedBundleVersions: ["2.3.4"] } },
+    react_native_ios: { minimumTrustLevel: "app_verified", appAttest: { environment: "production", allowedValidationCategories: [4], allowedBundleVersions: ["234"] } },
     react_native_android: { minimumTrustLevel: "device_verified" }
   });
   expect(generated.spec.inputAccountingProfiles[0]).toMatchObject({

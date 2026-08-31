@@ -513,17 +513,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/provider-inputs/cloudflare"
           install -m 0644 deploy/compose/compose.release.yaml "$RUNNER_TEMP/provider-inputs/compose.review.yaml"
           install -m 0644 deploy/fly/fly.toml "$RUNNER_TEMP/provider-inputs/fly.toml"
-      - name: Install pinned Fly CLI for credential-free configuration validation
+      - name: Validate Fly configuration closure without provider credentials
         if: inputs.platform == 'fly_io'
-        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
-        with:
-          version: '0.4.89'
-      - name: Validate Fly configuration before any provider credential exists
-        if: inputs.platform == 'fly_io'
-        env:
-          FLY_APP: ${{ inputs.fly_app }}
-          FLY_NO_UPDATE_CHECK: '1'
-        run: flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"
+        run: python3 scripts/deployment-evidence.py static --output "$RUNNER_TEMP/fly-static.json"
       - name: Set up pinned pnpm for credential-free Cloudflare preparation
         if: inputs.platform == 'cloudflare_containers'
         uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
@@ -776,6 +768,11 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
         with:
           version: '0.4.89'
+      - name: Validate Fly configuration against the authenticated platform
+        if: inputs.platform == 'fly_io'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl config validate --strict --app "$FLY_APP" --config "$RUNNER_TEMP/provider-inputs/fly.toml"
       - name: Set up pinned Node.js for Cloudflare evidence
         if: inputs.platform == 'cloudflare_containers'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

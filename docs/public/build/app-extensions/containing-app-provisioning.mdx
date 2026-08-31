@@ -9,8 +9,13 @@ description: "Understand the draft root-authorized flow that binds a component p
   than infer a wire format from this page; publication remains gated.
 </Warning>
 
+## Delegated component provisioning
+
 ```mermaid
 sequenceDiagram
+    accTitle: Delegated component provisioning
+    accDescr: From top to bottom, an extension gives its public key and component definition to the directly trusted containing app. The containing app asks Latchway for a bounded single-use delegation. The extension presents that non-secret envelope and proves possession of its own key before Latchway creates an independent component-scoped session family.
+
     participant Extension
     participant ContainingApp
     participant Latchway
@@ -27,16 +32,29 @@ component key for one configured Component Definition, application,
 environment, family, user relationship, and short lifetime. The extension then
 proves possession of that key and obtains its own session family.
 
+### What this establishes
+
+The flow establishes that the directly trusted root authorized the named
+component key for the configured Component Definition and that the extension
+proved possession of that independent key.
+
+### What this does not establish
+
+The flow does not establish that the extension independently completed App
+Attest. The delegation is not a shared refresh credential and cannot authorize
+features, component types, applications, environments, or users outside its
+bounded claims.
+
+### What causes the relationship to expire
+
+The provisioning authorization ends after successful consumption or when its
+short lifetime expires. An established component trust relationship and its
+sessions end on any invalidating root, family, component, environment,
+application, user, or policy state.
+
 ## Failure behavior
 
 Reject replay, expiry, component-type mismatch, key substitution,
 cross-application use, cross-environment use, identity change, root revocation,
 and family revocation. Do not silently create an unscoped component or fall back
 to the root session.
-
-## What this establishes
-
-The flow establishes that the directly trusted root authorized the named
-component key. It does not establish that the extension independently completed
-App Attest. The relationship expires with the delegation or any invalidating
-root, family, component, environment, application, or user state.

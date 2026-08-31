@@ -29,7 +29,7 @@ function documentFixture(): JSONRecord {
     kind: "EnvironmentConfig",
     metadata: { application: "mobile", environment: "production", labels: { owner: "mobile" }, organization: "example" },
     spec: {
-      attestationPolicies: [{ id: "native", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } }],
+      attestationPolicies: [{ id: "native", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1"], allowedValidationCategories: [4], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } }],
       features: [{ access: { expression: "principal.authenticated" }, attestationPolicy: "native", id: "assistant", limitPlan: { expression: "'free'" }, protocol: "openai_responses", routes: [{ fallbackOn: [], id: "primary", model: "assistant_default", priority: 10, weight: 100, when: "true" }] }],
       identityProviders: [{ id: "firebase", projectId: "example-mobile", type: "firebase" }],
       inputAccountingProfiles: [{ id: "input_default", maximumContextTokens: 128000, maximumFramingTokensPerMessage: 4, maximumFramingTokensPerRequest: 8, method: "utf8_byte_bpe_declared_framing_v1", physicalModel: "gpt-5-mini", protocol: "openai_responses" }],
@@ -133,7 +133,7 @@ describe("targeted configuration slice editing", () => {
     expect(templates.identity).toEqual({ id: "new_identity_provider", projectId: "replace-me", type: "firebase" });
     expect(templates.access).toEqual({ access: { expression: "principal.authenticated" }, feature_id: "assistant" });
     expect(templates.abuse).toEqual({ access: { expression: "principal.authenticated" }, attestationPolicy: "native", feature_id: "assistant", limitPlan: { expression: "'free'" } });
-    expect(templates.attestation).toEqual({ id: "new_attestation_policy", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1.0.0"], allowedValidationCategories: [1], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } });
+    expect(templates.attestation).toEqual({ id: "new_attestation_policy", platforms: { react_native_ios: { appAttest: { allowedBundleVersions: ["1"], allowedValidationCategories: [4], appIdPrefix: "TEAMID", bundleId: "com.example.app", environment: "production" }, minimumTrustLevel: "app_verified", mode: "required", provider: "app_attest" } } });
     expect(templates.component).toEqual({ id: "new_component", platform: "ios", kind: "main_app", identifiers: { bundleIdentifiers: ["com.example.app"] }, familyRole: "root", attestation: { strategy: "direct", provider: "app_attest" }, allowedFeatures: ["assistant"] });
 
     const upstreams = configurationAreas.upstreams.collections[0];
