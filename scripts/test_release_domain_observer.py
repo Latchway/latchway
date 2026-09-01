@@ -802,7 +802,10 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             policy = MODULE.LIVE_SDK_RECEIPTS[receipt_id]
             names = set(policy["tests"])
             mapped = policy["mapped_error_type"]
-        tests = [{"id": name, "status": "passed"} for name in sorted(names)]
+        tests = [
+            {"id": name, "status": "passed", "duration_ms": 1}
+            for name in sorted(names)
+        ]
         by_id = {item["id"]: item for item in tests}
         by_id["dpop_authorized_request"].update(
             http_status=200, request_id="request-authorized-1234"
@@ -849,6 +852,20 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 error_code="component_key_invalid",
                 request_id="request-sibling-1234",
             )
+            for role in ("widget", "share", "action"):
+                by_id[f"{role}_delegated_request"].update(
+                    http_status=200,
+                    request_id=f"request-{role}-1234",
+                )
+            by_id["component_keychain_sibling_denied"].update(
+                os_status=-34018,
+                os_status_name="errSecMissingEntitlement",
+            )
+            by_id["component_refresh_race"].update(
+                concurrent_request_count=2,
+                credential_before_sha256="8" * 64,
+                credential_after_sha256="a" * 64,
+            )
         if javascript:
             by_id["streamed_request"]["byte_count"] = 128
             by_id["quota"].update(
@@ -872,46 +889,57 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 "definition_id": expected_pins[f"{role}_definition_id"],
                 "bundle_identifier": expected_pins[f"{role}_bundle_identifier"],
                 "binary_sha256": expected_pins[f"{role}_binary_sha256"],
+                "attestation_mode": (
+                    "root_app_attest" if role == "host" else "delegated_only"
+                ),
                 "principal_id_sha256": principal * 64,
                 "dpop_key_id_sha256": key * 64,
                 "session_id_sha256": session * 64,
             }
             for role, (kind, principal, key, session) in values.items()
         ]
-        component_ids = {
-            "component_candidate_identities",
-            "action_direct_attestation_step_up",
-            "component_key_isolation",
-            "component_session_isolation",
-            "component_sibling_denied",
-            "component_no_host_process",
-            "component_background_execution",
-            "component_host_termination",
-            "component_no_user_presence",
-        }
         tests = [
-            item for item in self.concrete_tests("ios") if item["id"] in component_ids
+            item
+            for item in self.concrete_tests("ios")
+            if item["id"] in MODULE.IOS_COMPONENT_TESTS
         ]
         return {
-            "schema_version": "latchway.ios-component-observation.v1",
+            "schema_version": MODULE.IOS_COMPONENT_OBSERVATION_VERSION,
             "platform": "ios_app_attest",
             "run_id": run_id,
             "started_at": "2026-08-29T10:01:00Z",
             "completed_at": "2026-08-29T10:04:00Z",
             "runtime": {
                 "identities": identities,
-                "direct_step_up": {
+                "widget_delegated_execution": {
+                    "role": "widget",
+                    "definition_id": expected_pins["widget_definition_id"],
+                    "component_id_sha256": "d" * 64,
+                    "dpop_key_id_sha256": "1" * 64,
+                    "session_id_sha256": "5" * 64,
+                    "trust_source": "delegated_from_attested_root",
+                    "http_status": 200,
+                    "request_id": "request-widget-1234",
+                },
+                "share_delegated_execution": {
+                    "role": "share",
+                    "definition_id": expected_pins["share_definition_id"],
+                    "component_id_sha256": "e" * 64,
+                    "dpop_key_id_sha256": "2" * 64,
+                    "session_id_sha256": "6" * 64,
+                    "trust_source": "delegated_from_attested_root",
+                    "http_status": 200,
+                    "request_id": "request-share-1234",
+                },
+                "delegated_execution": {
                     "role": "action",
                     "definition_id": expected_pins["action_definition_id"],
                     "component_id_sha256": "f" * 64,
                     "dpop_key_id_sha256": "3" * 64,
-                    "session_before_sha256": "a" * 64,
-                    "session_after_sha256": "7" * 64,
-                    "app_attest_key_id_sha256": "8" * 64,
-                    "trust_source_before": "delegated_from_attested_root",
-                    "trust_source_after": "delegated_direct_attested",
-                    "binding_version": 2,
-                    "request_hash_bound": True,
+                    "session_id_sha256": "7" * 64,
+                    "trust_source": "delegated_from_attested_root",
+                    "http_status": 200,
+                    "request_id": "request-action-1234",
                 },
                 "sibling_denial": {
                     "requesting_role": "action",
@@ -921,8 +949,44 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                     "error_code": "component_key_invalid",
                     "request_id": "request-sibling-1234",
                 },
+                "keychain_sibling_denial": {
+                    "requesting_role": "action",
+                    "target_role": "share",
+                    "target_key_id_sha256": "2" * 64,
+                    "operation": "SecItemCopyMatching",
+                    "os_status": -34018,
+                    "os_status_name": "errSecMissingEntitlement",
+                    "key_material_returned": False,
+                },
+                "component_refresh_race": {
+                    "role": "action",
+                    "component_id_sha256": "f" * 64,
+                    "dpop_key_id_sha256": "3" * 64,
+                    "session_id_before_sha256": "8" * 64,
+                    "old_credential_sha256": "8" * 64,
+                    "requests_started_concurrently": True,
+                    "overlap_observed": True,
+                    "requests": [
+                        {
+                            "request_id": "request-refresh-race-a",
+                            "http_status": 200,
+                            "access_credential_sha256": "9" * 64,
+                            "refresh_credential_sha256": "a" * 64,
+                            "session_id_sha256": "7" * 64,
+                        },
+                        {
+                            "request_id": "request-refresh-race-b",
+                            "http_status": 200,
+                            "access_credential_sha256": "9" * 64,
+                            "refresh_credential_sha256": "a" * 64,
+                            "session_id_sha256": "7" * 64,
+                        },
+                    ],
+                    "session_id_after_sha256": "7" * 64,
+                    "results_identical": True,
+                },
                 "lifecycle": {
-                    "host_process_running_during_step_up": False,
+                    "host_process_running_during_action_request": False,
                     "background_execution_observed": True,
                     "host_termination_observed": True,
                     "user_presence_prompt_observed": False,
@@ -2917,9 +2981,40 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                         workflow_finished=self.workflow_finished,
                     )
 
-    def test_ios_component_observer_rejects_identity_step_up_isolation_and_lifecycle_tampering(self) -> None:
+    def test_ios_component_observer_rejects_delegation_keychain_race_and_lifecycle_tampering(self) -> None:
         observer = self.bare_observer("live_sdk_conformance")
         policy = MODULE.LIVE_SDK_RECEIPTS["ios"]
+        profile, evidence = self.physical_case("ios")
+        component = self.ios_component_case(
+            profile["expected_pins"], evidence["run"]["id"]
+        )
+        component["schema_version"] = "latchway.ios-component-observation.v1"
+        component_payload = json.dumps(component).encode()
+        evidence["artifacts"]["component_observation_sha256"] = hashlib.sha256(
+            component_payload
+        ).hexdigest()
+        receipt = {
+            "payloads": {
+                policy["profile"]: json.dumps(profile).encode(),
+                policy["evidence"]: json.dumps(evidence).encode(),
+                policy["component_observation"]: component_payload,
+            },
+            "initial_hashes": {"SHA256SUMS": "8" * 64},
+        }
+        with self.assertRaisesRegex(
+            MODULE.ObservationError, "live_sdk_component_observation_invalid"
+        ):
+            observer._validate_physical_receipt(
+                receipt,
+                policy=policy,
+                gateway="https://gateway.example.test",
+                run_id=12345,
+                run_attempt=2,
+                artifact_name="app-attest-physical-12345-2",
+                workflow_started=self.workflow_started,
+                workflow_finished=self.workflow_finished,
+            )
+
         mutations = (
             (
                 "live_sdk_component_runtime_invalid",
@@ -2930,14 +3025,36 @@ class ReleaseDomainObserverTests(unittest.TestCase):
             (
                 "live_sdk_component_runtime_invalid",
                 lambda runtime: runtime["identities"][3].__setitem__(
+                    "attestation_mode", "root_app_attest"
+                ),
+            ),
+            (
+                "live_sdk_component_runtime_invalid",
+                lambda runtime: runtime["identities"][3].__setitem__(
                     "dpop_key_id_sha256",
                     runtime["identities"][0]["dpop_key_id_sha256"],
                 ),
             ),
             (
-                "live_sdk_component_step_up_invalid",
-                lambda runtime: runtime["direct_step_up"].__setitem__(
-                    "trust_source_after", "delegated_from_attested_root"
+                "live_sdk_component_runtime_invalid",
+                lambda runtime: runtime.pop("widget_delegated_execution"),
+            ),
+            (
+                "live_sdk_component_delegated_execution_invalid",
+                lambda runtime: runtime["widget_delegated_execution"].__setitem__(
+                    "http_status", 401
+                ),
+            ),
+            (
+                "live_sdk_component_delegated_execution_invalid",
+                lambda runtime: runtime["share_delegated_execution"].__setitem__(
+                    "request_id", runtime["widget_delegated_execution"]["request_id"]
+                ),
+            ),
+            (
+                "live_sdk_component_delegated_execution_invalid",
+                lambda runtime: runtime["delegated_execution"].__setitem__(
+                    "trust_source", "delegated_identity_only"
                 ),
             ),
             (
@@ -2948,9 +3065,51 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 ),
             ),
             (
+                "live_sdk_component_keychain_denial_invalid",
+                lambda runtime: runtime["keychain_sibling_denial"].__setitem__(
+                    "os_status", -25300
+                ),
+            ),
+            (
+                "live_sdk_component_keychain_denial_invalid",
+                lambda runtime: runtime["keychain_sibling_denial"].__setitem__(
+                    "target_key_id_sha256", runtime["identities"][3]["dpop_key_id_sha256"]
+                ),
+            ),
+            (
+                "live_sdk_component_keychain_denial_invalid",
+                lambda runtime: runtime["keychain_sibling_denial"].__setitem__(
+                    "key_material_returned", True
+                ),
+            ),
+            (
+                "live_sdk_component_refresh_race_invalid",
+                lambda runtime: runtime["component_refresh_race"].__setitem__(
+                    "requests_started_concurrently", False
+                ),
+            ),
+            (
+                "live_sdk_component_refresh_race_invalid",
+                lambda runtime: runtime["component_refresh_race"]["requests"][1].__setitem__(
+                    "request_id", "request-refresh-race-a"
+                ),
+            ),
+            (
+                "live_sdk_component_refresh_race_invalid",
+                lambda runtime: runtime["component_refresh_race"]["requests"][1].__setitem__(
+                    "access_credential_sha256", "b" * 64
+                ),
+            ),
+            (
+                "live_sdk_component_refresh_race_invalid",
+                lambda runtime: runtime["component_refresh_race"].__setitem__(
+                    "session_id_before_sha256", "7" * 64
+                ),
+            ),
+            (
                 "live_sdk_component_lifecycle_invalid",
                 lambda runtime: runtime["lifecycle"].__setitem__(
-                    "host_process_running_during_step_up", True
+                    "host_process_running_during_action_request", True
                 ),
             ),
             (

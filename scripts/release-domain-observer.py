@@ -204,6 +204,24 @@ LIVE_SDK_COMMON_PHYSICAL_TESTS = frozenset(
         "protocol_version_rejection",
     }
 )
+IOS_COMPONENT_OBSERVATION_VERSION = "latchway.ios-component-observation.v2"
+IOS_COMPONENT_TESTS = frozenset(
+    {
+        "component_candidate_identities",
+        "widget_delegated_request",
+        "share_delegated_request",
+        "action_delegated_request",
+        "component_key_isolation",
+        "component_session_isolation",
+        "component_sibling_denied",
+        "component_keychain_sibling_denied",
+        "component_refresh_race",
+        "component_no_host_process",
+        "component_background_execution",
+        "component_host_termination",
+        "component_no_user_presence",
+    }
+)
 LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
     "ios": {
         "repository_id": "ios",
@@ -218,21 +236,13 @@ LIVE_SDK_RECEIPTS: Mapping[str, Mapping[str, Any]] = {
         "component_observation": "component-observation.json",
         "mapped_error_type": "swift_latchway_problem",
         "tests": LIVE_SDK_COMMON_PHYSICAL_TESTS
+        | IOS_COMPONENT_TESTS
         | {
             "app_attest_supported",
             "secure_enclave_key",
             "app_attest_registration",
             "session_created",
             "app_attest_assertion",
-            "component_candidate_identities",
-            "action_direct_attestation_step_up",
-            "component_key_isolation",
-            "component_session_isolation",
-            "component_sibling_denied",
-            "component_no_host_process",
-            "component_background_execution",
-            "component_host_termination",
-            "component_no_user_presence",
         },
         "manifest": frozenset(
             {
@@ -5224,20 +5234,19 @@ class Observer:
         evidence_tests = [
             item for item in evidence.get("tests", [])
             if isinstance(item, dict)
-            and item.get("id") in {
-                "component_candidate_identities",
-                "action_direct_attestation_step_up",
-                "component_key_isolation",
-                "component_session_isolation",
-                "component_sibling_denied",
-                "component_no_host_process",
-                "component_background_execution",
-                "component_host_termination",
-                "component_no_user_presence",
-            }
+            and item.get("id") in IOS_COMPONENT_TESTS
         ]
+        component_tests = (
+            {
+                item.get("id"): item
+                for item in tests
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if isinstance(tests, list)
+            else {}
+        )
         if (
-            value["schema_version"] != "latchway.ios-component-observation.v1"
+            value["schema_version"] != IOS_COMPONENT_OBSERVATION_VERSION
             or value["platform"] != "ios_app_attest"
             or value["run_id"] != nested(evidence, "run", "id")
             or started < run_started
@@ -5246,19 +5255,29 @@ class Observer:
             or completed - started > EVIDENCE.timedelta(hours=2)
             or runtime != evidence.get("component_runtime")
             or tests != evidence_tests
+            or not isinstance(tests, list)
+            or len(component_tests) != len(tests)
+            or set(component_tests) != IOS_COMPONENT_TESTS
+            or any(
+                test.get("status") != "passed"
+                for test in component_tests.values()
+            )
             or nested(evidence, "artifacts", "component_observation_sha256")
             != raw_sha256
         ):
             raise ObservationError("live_sdk_component_observation_invalid")
 
         if not isinstance(runtime, dict) or set(runtime) != {
-            "identities", "direct_step_up", "sibling_denial", "lifecycle",
+            "identities", "widget_delegated_execution", "share_delegated_execution",
+            "delegated_execution", "sibling_denial", "keychain_sibling_denial",
+            "component_refresh_race", "lifecycle",
         }:
             raise ObservationError("live_sdk_component_runtime_invalid")
         identities = runtime["identities"]
         identity_fields = {
             "role", "kind", "definition_id", "bundle_identifier", "binary_sha256",
-            "principal_id_sha256", "dpop_key_id_sha256", "session_id_sha256",
+            "attestation_mode", "principal_id_sha256", "dpop_key_id_sha256",
+            "session_id_sha256",
         }
         if not isinstance(identities, list) or len(identities) != 4:
             raise ObservationError("live_sdk_component_runtime_invalid")
@@ -5287,6 +5306,8 @@ class Observer:
                 or identity["bundle_identifier"] != expected_pins.get(bundle_pin)
                 or identity["definition_id"] != expected_pins.get(definition_pin)
                 or identity["binary_sha256"] != expected_pins.get(binary_pin)
+                or identity["attestation_mode"]
+                != ("root_app_attest" if role == "host" else "delegated_only")
                 or any(
                     EVIDENCE.SHA256.fullmatch(str(identity[field])) is None
                     for field in (
@@ -5300,34 +5321,46 @@ class Observer:
             if len({identity[field] for identity in identities}) != 4:
                 raise ObservationError("live_sdk_component_runtime_invalid")
 
-        action = by_role["action"]
-        step_up = runtime["direct_step_up"]
-        step_fields = {
+        request_id = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+        execution_fields = {
             "role", "definition_id", "component_id_sha256", "dpop_key_id_sha256",
-            "session_before_sha256", "session_after_sha256",
-            "app_attest_key_id_sha256", "trust_source_before", "trust_source_after",
-            "binding_version", "request_hash_bound",
+            "session_id_sha256", "trust_source", "http_status", "request_id",
         }
-        if (
-            not isinstance(step_up, dict)
-            or set(step_up) != step_fields
-            or step_up["role"] != "action"
-            or step_up["definition_id"] != action["definition_id"]
-            or step_up["component_id_sha256"] != action["principal_id_sha256"]
-            or step_up["dpop_key_id_sha256"] != action["dpop_key_id_sha256"]
-            or step_up["session_after_sha256"] != action["session_id_sha256"]
-            or step_up["session_before_sha256"] == step_up["session_after_sha256"]
-            or step_up["trust_source_before"]
-            not in {"delegated_from_attested_root", "delegated_identity_only"}
-            or step_up["trust_source_after"] != "delegated_direct_attested"
-            or step_up["binding_version"] != 2
-            or step_up["request_hash_bound"] is not True
-            or EVIDENCE.SHA256.fullmatch(str(step_up["app_attest_key_id_sha256"])) is None
-            or step_up["app_attest_key_id_sha256"]
-            in {identity["dpop_key_id_sha256"] for identity in identities}
-        ):
-            raise ObservationError("live_sdk_component_step_up_invalid")
+        execution_policy = {
+            "widget": "widget_delegated_execution",
+            "share": "share_delegated_execution",
+            "action": "delegated_execution",
+        }
+        execution_request_ids: list[str] = []
+        for role, field in execution_policy.items():
+            identity = by_role[role]
+            execution = runtime[field]
+            if (
+                not isinstance(execution, dict)
+                or set(execution) != execution_fields
+                or execution["role"] != role
+                or execution["definition_id"] != identity["definition_id"]
+                or execution["component_id_sha256"] != identity["principal_id_sha256"]
+                or execution["dpop_key_id_sha256"] != identity["dpop_key_id_sha256"]
+                or execution["session_id_sha256"] != identity["session_id_sha256"]
+                or execution["trust_source"] != "delegated_from_attested_root"
+                or isinstance(execution["http_status"], bool)
+                or not isinstance(execution["http_status"], int)
+                or not 200 <= execution["http_status"] <= 299
+                or request_id.fullmatch(str(execution["request_id"])) is None
+            ):
+                raise ObservationError("live_sdk_component_delegated_execution_invalid")
+            execution_test = component_tests[f"{role}_delegated_request"]
+            if (
+                execution_test.get("http_status") != execution["http_status"]
+                or execution_test.get("request_id") != execution["request_id"]
+            ):
+                raise ObservationError("live_sdk_component_delegated_execution_invalid")
+            execution_request_ids.append(execution["request_id"])
+        if len(set(execution_request_ids)) != len(execution_request_ids):
+            raise ObservationError("live_sdk_component_delegated_execution_invalid")
 
+        action = by_role["action"]
         denial = runtime["sibling_denial"]
         denial_fields = {
             "requesting_role", "credential_role", "credential_session_id_sha256",
@@ -5336,7 +5369,6 @@ class Observer:
         if not isinstance(denial, dict) or set(denial) != denial_fields:
             raise ObservationError("live_sdk_component_sibling_denial_invalid")
         sibling = by_role.get(str(denial.get("credential_role")), {})
-        request_id = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
         if (
             denial["requesting_role"] != "action"
             or denial["credential_role"] not in {"widget", "share"}
@@ -5355,8 +5387,107 @@ class Observer:
             "http_status", "error_code", "request_id",
         )):
             raise ObservationError("live_sdk_component_sibling_denial_invalid")
+
+        keychain_denial = runtime["keychain_sibling_denial"]
+        keychain_fields = {
+            "requesting_role", "target_role", "target_key_id_sha256", "operation",
+            "os_status", "os_status_name", "key_material_returned",
+        }
+        if (
+            not isinstance(keychain_denial, dict)
+            or set(keychain_denial) != keychain_fields
+        ):
+            raise ObservationError("live_sdk_component_keychain_denial_invalid")
+        target_role = keychain_denial.get("target_role")
+        target = by_role.get(str(target_role), {})
+        keychain_test = component_tests["component_keychain_sibling_denied"]
+        if (
+            keychain_denial["requesting_role"] != "action"
+            or not isinstance(target_role, str)
+            or target_role not in {"widget", "share"}
+            or keychain_denial["target_key_id_sha256"] != target.get("dpop_key_id_sha256")
+            or keychain_denial["target_key_id_sha256"] == action["dpop_key_id_sha256"]
+            or keychain_denial["operation"] != "SecItemCopyMatching"
+            or keychain_denial["os_status"] != -34018
+            or keychain_denial["os_status_name"] != "errSecMissingEntitlement"
+            or keychain_denial["key_material_returned"] is not False
+            or keychain_test.get("os_status") != keychain_denial["os_status"]
+            or keychain_test.get("os_status_name") != keychain_denial["os_status_name"]
+        ):
+            raise ObservationError("live_sdk_component_keychain_denial_invalid")
+
+        race = runtime["component_refresh_race"]
+        race_fields = {
+            "role", "component_id_sha256", "dpop_key_id_sha256",
+            "session_id_before_sha256", "old_credential_sha256",
+            "requests_started_concurrently", "overlap_observed", "requests",
+            "session_id_after_sha256", "results_identical",
+        }
+        race_request_fields = {
+            "request_id", "http_status", "access_credential_sha256",
+            "refresh_credential_sha256", "session_id_sha256",
+        }
+        if not isinstance(race, dict) or set(race) != race_fields:
+            raise ObservationError("live_sdk_component_refresh_race_invalid")
+        race_role = race.get("role")
+        race_identity = by_role.get(str(race_role), {})
+        race_requests = race.get("requests")
+        if (
+            not isinstance(race_role, str)
+            or race_role not in {"widget", "share", "action"}
+            or race["component_id_sha256"] != race_identity.get("principal_id_sha256")
+            or race["dpop_key_id_sha256"] != race_identity.get("dpop_key_id_sha256")
+            or race["session_id_after_sha256"] != race_identity.get("session_id_sha256")
+            or EVIDENCE.SHA256.fullmatch(str(race["session_id_before_sha256"])) is None
+            or race["session_id_before_sha256"] == race["session_id_after_sha256"]
+            or EVIDENCE.SHA256.fullmatch(str(race["old_credential_sha256"])) is None
+            or race["requests_started_concurrently"] is not True
+            or race["overlap_observed"] is not True
+            or race["results_identical"] is not True
+            or not isinstance(race_requests, list)
+            or len(race_requests) != 2
+        ):
+            raise ObservationError("live_sdk_component_refresh_race_invalid")
+        for request in race_requests:
+            if (
+                not isinstance(request, dict)
+                or set(request) != race_request_fields
+                or request_id.fullmatch(str(request.get("request_id", ""))) is None
+                or isinstance(request.get("http_status"), bool)
+                or not isinstance(request.get("http_status"), int)
+                or not 200 <= request["http_status"] <= 299
+                or any(
+                    EVIDENCE.SHA256.fullmatch(str(request.get(field, ""))) is None
+                    for field in (
+                        "access_credential_sha256", "refresh_credential_sha256",
+                        "session_id_sha256",
+                    )
+                )
+            ):
+                raise ObservationError("live_sdk_component_refresh_race_invalid")
+        if (
+            race_requests[0]["request_id"] == race_requests[1]["request_id"]
+            or race_requests[0]["access_credential_sha256"]
+            != race_requests[1]["access_credential_sha256"]
+            or race_requests[0]["refresh_credential_sha256"]
+            != race_requests[1]["refresh_credential_sha256"]
+            or race_requests[0]["session_id_sha256"]
+            != race_requests[1]["session_id_sha256"]
+            or race_requests[0]["session_id_sha256"] != race["session_id_after_sha256"]
+            or race_requests[0]["refresh_credential_sha256"] == race["old_credential_sha256"]
+        ):
+            raise ObservationError("live_sdk_component_refresh_race_invalid")
+        race_test = component_tests["component_refresh_race"]
+        if (
+            race_test.get("concurrent_request_count") != 2
+            or race_test.get("credential_before_sha256") != race["old_credential_sha256"]
+            or race_test.get("credential_after_sha256")
+            != race_requests[0]["refresh_credential_sha256"]
+        ):
+            raise ObservationError("live_sdk_component_refresh_race_invalid")
+
         if runtime["lifecycle"] != {
-            "host_process_running_during_step_up": False,
+            "host_process_running_during_action_request": False,
             "background_execution_observed": True,
             "host_termination_observed": True,
             "user_presence_prompt_observed": False,
@@ -5653,17 +5784,8 @@ class Observer:
                 "streamed_request",
                 "quota",
                 "protocol_version_rejection",
-                "component_candidate_identities",
-                "action_direct_attestation_step_up",
-                "component_key_isolation",
-                "component_session_isolation",
-                "component_sibling_denied",
-                "component_no_host_process",
-                "component_background_execution",
-                "component_host_termination",
-                "component_no_user_presence",
             }
-        )
+        ) | IOS_COMPONENT_TESTS
 
     @staticmethod
     def _redacted_test_record(test: Mapping[str, Any]) -> dict[str, Any]:
@@ -5677,6 +5799,9 @@ class Observer:
             "installation_before_sha256",
             "installation_after_sha256",
             "protocol_version_sent",
+            "os_status",
+            "os_status_name",
+            "concurrent_request_count",
             "byte_count",
             "feature",
             "limit_count",
