@@ -169,11 +169,11 @@ observation remains bound to predecessor
 materially adds component lifecycle and the Debug native App Intent request
 path; its full local check plus generic iOS and isolated Debug/Release App
 Intent build gates pass, but the App Intent has not yet been physically
-invoked. All four clean SDK documentation bundles
-record the current source coordinates and `source_tree_clean: true`. Final
-authored public-doc synchronization and the mirror's complete Mintlify rerun
-remain pending. These results do not substitute for any protected external
-domain.
+invoked. All four clean SDK documentation bundles record the current source
+coordinates and `source_tree_clean: true`. The final authored public docs are
+synchronized to mirror commit
+`a0c3559b11353a8196bde800d4b7484726e9f76a`, whose complete Mintlify suite
+passed. These results do not substitute for any protected external domain.
 
 ## Direct component attestation boundary
 

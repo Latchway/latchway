@@ -202,8 +202,9 @@ to apply to supported Android application trust surfaces.
 - [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
   verifiable-language rules.
 - [x] Pass the local 127-page Mintlify validation suite.
-- [ ] Synchronize the final authored pages to the generated mirror and rerun
-  the mirror's complete local suite at the exact final source coordinate.
+- [x] Synchronize the final authored pages to the generated mirror and rerun
+  the mirror's complete local suite at the exact final source coordinate;
+  mirror commit `a0c3559b11353a8196bde800d4b7484726e9f76a` passed.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
   and validate the production URL after the branch merges.
 
