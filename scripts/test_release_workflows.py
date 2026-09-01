@@ -706,7 +706,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertNotIn("python3 latchway/scripts/", serialized, job_name)
                 self.assertNotIn("cross-repo-conformance.py", serialized, job_name)
 
-    def test_private_sibling_sources_use_a_least_privilege_read_token(self) -> None:
+    def test_sibling_sources_are_anonymous_or_use_a_least_privilege_read_token(self) -> None:
         expected = "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN || github.token }}"
         for workflow_name in ("release-domain-observations.yml",):
             sibling_checkouts = [
@@ -731,6 +731,23 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN }}",
             str(authority),
         )
+        source_step = next(
+            step
+            for step in authority["steps"]
+            if step.get("name")
+            == "Resolve and package authenticated repository objects without a checkout"
+        )
+        source_run = source_step["run"]
+        self.assertNotIn('test -n "$SIBLING_TOKEN"', source_run)
+        self.assertIn('if [[ -n "$token" ]]', source_run)
+        self.assertNotIn("curl ", source_run)
+        self.assertIn("GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0", source_run)
+        self.assertIn("git -c credential.helper=", source_run)
+        self.assertIn('"https://github.com/$repository.git" "$requested_ref"', source_run)
+        self.assertIn("rev-parse --verify 'FETCH_HEAD^{commit}'", source_run)
+        self.assertIn("jq --null-input --arg sha", source_run)
+        self.assertIn('GH_TOKEN="$token" gh api', source_run)
+        self.assertIn('LATCHWAY_FETCH_TOKEN="$token"', source_run)
         self.assertNotIn("|| github.token", str(authority))
         self.assertNotIn("secrets.", str(evidence))
         self.assertNotIn("id-token", evidence["permissions"])

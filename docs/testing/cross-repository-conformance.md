@@ -302,9 +302,10 @@ workflow. Supply `scope` plus immutable `core_ref`, `javascript_ref`, `ios_ref`,
 require `core_release_tag`, `candidate_oci_image_digest`, and the exact
 `external_evidence_run_id` plus `external_evidence_run_attempt` of the protected
 aggregate producer. The artifact name is derived from that run identity; it is
-not an operator input. The protected `private-sibling-read` authority job
-resolves those refs, fetches Git objects without creating a worktree, and seals
-credential-free source archives. A separate job runs this command with no
+not an operator input. The `private-sibling-read` authority job resolves those
+refs, fetches Git objects without creating a worktree, and seals credential-free
+source archives. The fixed public Latchway repositories are read anonymously
+over HTTPS. A separate job runs this command with no
 repository credential or OIDC permission. A fresh no-checkout job in the
 protected `release-evidence-signing` environment validates the fixed report
 coordinates before attesting the exact source, promotion, or release JSON
@@ -314,11 +315,14 @@ source-scope evidence must verify the attestation against this exact workflow,
 neither needs nor claims an already-created tag. The workflow has no package,
 registry, release, or deployment-environment mutation permission.
 
-Configure `LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` in the protected
+No sibling-repository credential is required for the public Latchway sources.
+For a private fork or mirror, configure the optional
+`LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` secret in the protected
 `private-sibling-read` environment as a fine-grained credential with Contents:
-read access only to the four SDK repositories and the documentation mirror. The authority job fails closed
-when that credential is absent, never checks out or executes repository code,
-and does not pass the credential to the conformance or attestation jobs.
+read access only to the four SDK repositories and the documentation mirror. In
+either mode, the authority job validates every resolved commit, never checks out
+or executes repository code, fails closed on a ref-resolution or Git error, and does not
+pass the credential to the conformance or attestation jobs.
 Configure required reviewers on `release-evidence-signing`; it contains no
 repository or provider secret.
 

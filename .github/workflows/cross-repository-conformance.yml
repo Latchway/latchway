@@ -122,7 +122,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
-          test -n "$SIBLING_TOKEN"
           archive_root="$RUNNER_TEMP/authenticated-inputs/source-archives"
           mkdir -p "$archive_root" "$RUNNER_TEMP/bare-sources"
           askpass="$RUNNER_TEMP/latchway-git-askpass"
@@ -141,17 +140,32 @@ jobs:
             local encoded metadata commit bare
             encoded=$(jq --null-input --raw-output --arg value "$requested_ref" '$value | @uri')
             metadata="$RUNNER_TEMP/$id-commit.json"
-            GH_TOKEN="$token" gh api "repos/$repository/commits/$encoded" > "$metadata"
-            commit=$(jq --raw-output '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$metadata")
-            test -n "$commit"
             bare="$RUNNER_TEMP/bare-sources/$id.git"
             git init --bare "$bare" >/dev/null
-            GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 LATCHWAY_FETCH_TOKEN="$token" \
-              git -C "$bare" fetch --no-tags \
-                "https://github.com/$repository.git" "$commit"
-            GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 LATCHWAY_FETCH_TOKEN="$token" \
-              git -C "$bare" fetch --force \
-                "https://github.com/$repository.git" '+refs/tags/*:refs/tags/*'
+            if [[ -n "$token" ]]; then
+              GH_TOKEN="$token" gh api "repos/$repository/commits/$encoded" > "$metadata"
+              commit=$(jq --raw-output '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$metadata")
+              test -n "$commit"
+            else
+              GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0 \
+                git -c credential.helper= -C "$bare" fetch --no-tags \
+                  "https://github.com/$repository.git" "$requested_ref"
+              commit=$(git -C "$bare" rev-parse --verify 'FETCH_HEAD^{commit}')
+              [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+              jq --null-input --arg sha "$commit" '{sha: $sha}' > "$metadata"
+            fi
+            if [[ -n "$token" ]]; then
+              GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 LATCHWAY_FETCH_TOKEN="$token" \
+                git -C "$bare" fetch --no-tags \
+                  "https://github.com/$repository.git" "$commit"
+              GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 LATCHWAY_FETCH_TOKEN="$token" \
+                git -C "$bare" fetch --force \
+                  "https://github.com/$repository.git" '+refs/tags/*:refs/tags/*'
+            else
+              GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0 \
+                git -c credential.helper= -C "$bare" fetch --force \
+                  "https://github.com/$repository.git" '+refs/tags/*:refs/tags/*'
+            fi
             git -C "$bare" update-ref refs/heads/authenticated "$commit"
             git -C "$bare" symbolic-ref HEAD refs/heads/authenticated
             GIT_INDEX_FILE="$bare/index" git --git-dir="$bare" read-tree "$commit"
