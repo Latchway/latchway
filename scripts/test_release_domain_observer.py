@@ -1939,6 +1939,94 @@ class ReleaseDomainObserverTests(unittest.TestCase):
                 json.dumps(swift).encode(), coordinate
             )
 
+    def test_cocoapods_spec_requires_every_reviewed_subspec_and_no_hooks(self) -> None:
+        coordinate = {
+            "version": "1.0.0",
+            "tag": "v1.0.0",
+            "commit": "a" * 40,
+        }
+        spec = {
+            "name": "Latchway",
+            "version": "1.0.0",
+            "source": {
+                "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+                "tag": "v1.0.0",
+            },
+            "subspecs": [
+                {"name": name, "source_files": f"Sources/{name}/**/*.swift"}
+                for name in ("Core", "AppAttest", "AppExtensions", "FirebaseAuth")
+            ],
+        }
+        self.assertEqual(
+            MODULE.Observer._validate_cocoapods_spec(
+                json.dumps(spec).encode(), coordinate
+            ),
+            spec,
+        )
+        mutations = []
+        missing_extensions = copy.deepcopy(spec)
+        missing_extensions["subspecs"] = [
+            item
+            for item in missing_extensions["subspecs"]
+            if item["name"] != "AppExtensions"
+        ]
+        mutations.append(missing_extensions)
+        duplicate_core = copy.deepcopy(spec)
+        duplicate_core["subspecs"].append({"name": "Core"})
+        mutations.append(duplicate_core)
+        injected_hook = copy.deepcopy(spec)
+        injected_hook["subspecs"][0]["script_phase"] = {"script": "unreviewed"}
+        mutations.append(injected_hook)
+        wrong_source = copy.deepcopy(spec)
+        wrong_source["source"]["tag"] = "v1.0.1"
+        mutations.append(wrong_source)
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                MODULE.ObservationError, "registry_cocoapods_spec_invalid"
+            ):
+                MODULE.Observer._validate_cocoapods_spec(
+                    json.dumps(mutation).encode(), coordinate
+                )
+
+        archive_sha256 = "b" * 64
+        proof = {
+            "schema_version": 1,
+            "kind": "latchway_cocoapods_release_evidence",
+            "status": "passed",
+            "registry": "cocoapods",
+            "package": "Latchway",
+            "version": "1.0.0",
+            "published_spec_sha256": "c" * 64,
+            "reviewed_source_archive_sha256": archive_sha256,
+            "published_spec_equals_reviewed_podspec": True,
+            "reviewed_source_archive_equals_release_tag": True,
+            "reviewed_spec_sha256": "d" * 64,
+            "source_commit": "a" * 40,
+            "source_tag": "v1.0.0",
+            "registry_url": "https://cdn.cocoapods.org/Specs/0/0/0/Latchway/1.0.0/Latchway.podspec.json",
+            "source": spec["source"],
+        }
+        MODULE.Observer._validate_cocoapods_proof(
+            json.dumps(proof).encode(),
+            coordinate,
+            {"digest": f"sha256:{archive_sha256}"},
+        )
+        for field, replacement in (
+            ("source_commit", "e" * 40),
+            ("status", "registry_only"),
+            ("reviewed_spec_sha256", "not-a-hash"),
+        ):
+            tampered = copy.deepcopy(proof)
+            tampered[field] = replacement
+            with self.subTest(field=field), self.assertRaisesRegex(
+                MODULE.ObservationError, "registry_cocoapods_proof_invalid"
+            ):
+                MODULE.Observer._validate_cocoapods_proof(
+                    json.dumps(tampered).encode(),
+                    coordinate,
+                    {"digest": f"sha256:{archive_sha256}"},
+                )
+
     def test_npm_provenance_origin_may_fail_but_adoption_must_succeed(self) -> None:
         run = {
             "id": 41,

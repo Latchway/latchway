@@ -91,6 +91,44 @@ class PublicRegistryProofTests(unittest.TestCase):
         }
         return evidence, repositories
 
+    def test_cocoapods_spec_requires_complete_safe_subspec_surface(self) -> None:
+        coordinate = {"version": "1.0.0", "tag": "v1.0.0", "commit": "c" * 40}
+        spec = {
+            "name": "Latchway",
+            "version": "1.0.0",
+            "source": {
+                "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+                "tag": "v1.0.0",
+            },
+            "subspecs": [
+                {"name": name, "source_files": f"Sources/{name}/**/*.swift"}
+                for name in ("Core", "AppAttest", "AppExtensions", "FirebaseAuth")
+            ],
+        }
+        MODULE.validate_cocoapods_spec(spec, coordinate)
+        mutations = []
+        missing_extensions = copy.deepcopy(spec)
+        missing_extensions["subspecs"] = [
+            item
+            for item in missing_extensions["subspecs"]
+            if item["name"] != "AppExtensions"
+        ]
+        mutations.append(missing_extensions)
+        duplicate_core = copy.deepcopy(spec)
+        duplicate_core["subspecs"].append({"name": "Core"})
+        mutations.append(duplicate_core)
+        injected_hook = copy.deepcopy(spec)
+        injected_hook["subspecs"][0]["prepare_command"] = "unreviewed"
+        mutations.append(injected_hook)
+        wrong_source = copy.deepcopy(spec)
+        wrong_source["source"]["git"] = "https://example.test/unreviewed.git"
+        mutations.append(wrong_source)
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                MODULE.ProofError, "cocoapods_spec_invalid"
+            ):
+                MODULE.validate_cocoapods_spec(mutation, coordinate)
+
     def npm_proof(self) -> dict:
         sha = "a" * 64
         integrity = "sha512-" + "A" * 86 + "=="

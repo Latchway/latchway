@@ -79,6 +79,12 @@ REPOSITORY_NAMES = {
 NPM_ADOPTION_ASSET = re.compile(
     r"^npm-release-adoption-[1-9][0-9]*-[1-9][0-9]*\.json$"
 )
+IOS_COCOAPODS_SUBSPECS = frozenset(
+    {"AppAttest", "AppExtensions", "Core", "FirebaseAuth"}
+)
+COCOAPODS_FORBIDDEN_HOOKS = frozenset(
+    {"prepare_command", "script_phase", "script_phases"}
+)
 PROVIDER_CHECKS = {
     "provider.openrouter.non-streaming": "non_streaming",
     "provider.openrouter.streaming": "streaming",
@@ -2219,6 +2225,12 @@ class Observer:
                 )
             },
         )
+        published_spec = ios_assets["cocoapods-published-podspec.json"]["bytes"]
+        reviewed_spec = ios_assets["cocoapods-reviewed-podspec.json"]["bytes"]
+        published_spec_value = self._validate_cocoapods_spec(published_spec, ios)
+        reviewed_spec_value = self._validate_cocoapods_spec(reviewed_spec, ios)
+        if published_spec_value != reviewed_spec_value:
+            raise ObservationError("registry_cocoapods_spec_mismatch")
         cocoa_command = (
             str(self.repositories["ios"] / "scripts/verify-cocoapods-release.sh"),
             ios["version"],
@@ -2237,7 +2249,13 @@ class Observer:
         self._validate_cocoapods_proof(canonical_json(cocoa), ios, ios_asset)
         if live_cocoa != cocoa:
             raise ObservationError("registry_cocoapods_retained_proof_changed")
-        published_spec = ios_assets["cocoapods-published-podspec.json"]["bytes"]
+        if (
+            cocoa.get("published_spec_sha256")
+            != hashlib.sha256(published_spec).hexdigest()
+            or cocoa.get("reviewed_spec_sha256")
+            != hashlib.sha256(reviewed_spec).hexdigest()
+        ):
+            raise ObservationError("registry_cocoapods_spec_mismatch")
         live_podspec = self._download_https(
             cocoa.get("registry_url"),
             allowed_hosts={"cdn.cocoapods.org"},
@@ -3334,16 +3352,80 @@ class Observer:
             raise ObservationError("reviewed_maven_archive_invalid")
 
     @staticmethod
+    def _validate_cocoapods_spec(
+        payload: bytes, coordinate: Mapping[str, str]
+    ) -> dict[str, Any]:
+        value = load_output(payload, "registry_cocoapods_spec_invalid")
+        source = value.get("source") if isinstance(value, dict) else None
+        subspecs = value.get("subspecs") if isinstance(value, dict) else None
+        names = (
+            [item.get("name") for item in subspecs if isinstance(item, dict)]
+            if isinstance(subspecs, list)
+            else []
+        )
+
+        def contains_forbidden_hook(item: Any) -> bool:
+            if isinstance(item, dict):
+                return bool(COCOAPODS_FORBIDDEN_HOOKS.intersection(item)) or any(
+                    contains_forbidden_hook(child) for child in item.values()
+                )
+            if isinstance(item, list):
+                return any(contains_forbidden_hook(child) for child in item)
+            return False
+
+        if (
+            not isinstance(value, dict)
+            or value.get("name") != "Latchway"
+            or value.get("version") != coordinate["version"]
+            or source
+            != {
+                "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+                "tag": coordinate["tag"],
+            }
+            or not isinstance(subspecs, list)
+            or len(names) != len(subspecs)
+            or any(not isinstance(name, str) for name in names)
+            or len(names) != len(set(names))
+            or set(names) != IOS_COCOAPODS_SUBSPECS
+            or contains_forbidden_hook(value)
+        ):
+            raise ObservationError("registry_cocoapods_spec_invalid")
+        return value
+
+    @staticmethod
     def _validate_cocoapods_proof(payload: bytes, coordinate: Mapping[str, str], asset: Mapping[str, Any]) -> None:
         value = load_output(payload, "registry_cocoapods_proof_invalid")
         if (
-            value.get("schema_version") != 1
+            not isinstance(value, dict)
+            or set(value)
+            != {
+                "schema_version", "kind", "status", "registry", "package",
+                "version", "published_spec_sha256",
+                "reviewed_source_archive_sha256",
+                "published_spec_equals_reviewed_podspec",
+                "reviewed_source_archive_equals_release_tag",
+                "reviewed_spec_sha256", "source_commit", "source_tag",
+                "registry_url", "source",
+            }
+            or value.get("schema_version") != 1
+            or value.get("kind") != "latchway_cocoapods_release_evidence"
+            or value.get("status") != "passed"
             or value.get("registry") != "cocoapods"
+            or value.get("package") != "Latchway"
             or value.get("version") != coordinate["version"]
             or value.get("published_spec_equals_reviewed_podspec") is not True
             or value.get("reviewed_source_archive_equals_release_tag") is not True
             or value.get("reviewed_source_archive_sha256") != str(asset["digest"]).removeprefix("sha256:")
-            or nested(value, "source", "tag") != coordinate["tag"]
+            or EVIDENCE.SHA256.fullmatch(str(value.get("published_spec_sha256"))) is None
+            or EVIDENCE.SHA256.fullmatch(str(value.get("reviewed_spec_sha256"))) is None
+            or value.get("source_commit") != coordinate["commit"]
+            or value.get("source_tag") != coordinate["tag"]
+            or value.get("source")
+            != {
+                "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+                "tag": coordinate["tag"],
+            }
+            or not isinstance(value.get("registry_url"), str)
         ):
             raise ObservationError("registry_cocoapods_proof_invalid")
 

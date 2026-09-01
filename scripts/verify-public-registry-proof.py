@@ -18,6 +18,12 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 MAXIMUM = 32 * 1024 * 1024
+IOS_COCOAPODS_SUBSPECS = frozenset(
+    {"AppAttest", "AppExtensions", "Core", "FirebaseAuth"}
+)
+COCOAPODS_FORBIDDEN_HOOKS = frozenset(
+    {"prepare_command", "script_phase", "script_phases"}
+)
 
 
 class ProofError(Exception):
@@ -120,6 +126,45 @@ def load_retained_json(envelope: Any, expected_name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ProofError("retained_registry_evidence_invalid")
     return value
+
+
+def validate_cocoapods_spec(
+    value: Any, coordinate: Mapping[str, Any]
+) -> None:
+    source = value.get("source") if isinstance(value, dict) else None
+    subspecs = value.get("subspecs") if isinstance(value, dict) else None
+    names = (
+        [item.get("name") for item in subspecs if isinstance(item, dict)]
+        if isinstance(subspecs, list)
+        else []
+    )
+
+    def contains_forbidden_hook(item: Any) -> bool:
+        if isinstance(item, dict):
+            return bool(COCOAPODS_FORBIDDEN_HOOKS.intersection(item)) or any(
+                contains_forbidden_hook(child) for child in item.values()
+            )
+        if isinstance(item, list):
+            return any(contains_forbidden_hook(child) for child in item)
+        return False
+
+    if (
+        not isinstance(value, dict)
+        or value.get("name") != "Latchway"
+        or value.get("version") != coordinate.get("version")
+        or source
+        != {
+            "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+            "tag": coordinate.get("tag"),
+        }
+        or not isinstance(subspecs, list)
+        or len(names) != len(subspecs)
+        or any(not isinstance(name, str) for name in names)
+        or len(names) != len(set(names))
+        or set(names) != IOS_COCOAPODS_SUBSPECS
+        or contains_forbidden_hook(value)
+    ):
+        raise ProofError("cocoapods_spec_invalid")
 
 
 def expected_npm_release_assets(package: str, version: str) -> tuple[set[str], str]:
@@ -1138,17 +1183,29 @@ def validate(root: Path, candidate_commit: str, release_tag: str) -> dict[str, A
         repositories,
     )
     cocoa = proofs["ios"]
+    cocoa_source = cocoa.get("source") if isinstance(cocoa, dict) else None
     if (
-        cocoa.get("schema_version") != 1
+        not isinstance(cocoa, dict)
+        or cocoa.get("schema_version") != 1
+        or cocoa.get("kind") != "latchway_cocoapods_release_evidence"
+        or cocoa.get("status") != "passed"
         or cocoa.get("registry") != "cocoapods"
+        or cocoa.get("package") != "Latchway"
         or cocoa.get("version") != repositories["ios"].get("version")
         or cocoa.get("published_spec_equals_reviewed_podspec") is not True
         or cocoa.get("reviewed_source_archive_equals_release_tag") is not True
         or not cocoa.get("release_asset_attestation_verification")
-        or cocoa.get("source", {}).get("tag") != repositories["ios"].get("tag")
+        or cocoa.get("source_commit") != repositories["ios"].get("commit")
+        or cocoa.get("source_tag") != repositories["ios"].get("tag")
+        or cocoa_source
+        != {
+            "git": "https://github.com/Latchway/latchway-ios-sdk.git",
+            "tag": repositories["ios"].get("tag"),
+        }
     ):
         raise ProofError("cocoapods_byte_proof_invalid")
     require_hash(cocoa.get("published_spec_sha256"))
+    require_hash(cocoa.get("reviewed_spec_sha256"))
     require_hash(cocoa.get("reviewed_source_archive_sha256"))
     ios_version = repositories["ios"].get("version")
     if not isinstance(ios_version, str):
@@ -1193,6 +1250,26 @@ def validate(root: Path, candidate_commit: str, release_tag: str) -> dict[str, A
         for name in expected_cocoa_sums
     ):
         raise ProofError("cocoapods_release_checksum_invalid")
+    published_spec = load_retained_json(
+        retained_ios["cocoapods-published-podspec.json"],
+        "cocoapods-published-podspec.json",
+    )
+    reviewed_spec = load_retained_json(
+        retained_ios["cocoapods-reviewed-podspec.json"],
+        "cocoapods-reviewed-podspec.json",
+    )
+    validate_cocoapods_spec(published_spec, repositories["ios"])
+    validate_cocoapods_spec(reviewed_spec, repositories["ios"])
+    if (
+        published_spec != reviewed_spec
+        or cocoa.get("published_spec_sha256")
+        != retained_ios["cocoapods-published-podspec.json"]["sha256"]
+        or cocoa.get("reviewed_spec_sha256")
+        != retained_ios["cocoapods-reviewed-podspec.json"]["sha256"]
+        or cocoa.get("reviewed_source_archive_sha256")
+        != retained_ios[ios_archive]["sha256"]
+    ):
+        raise ProofError("cocoapods_spec_invalid")
     retained_cocoa = load_retained_json(
         retained_ios["cocoapods-release-evidence.json"],
         "cocoapods-release-evidence.json",
