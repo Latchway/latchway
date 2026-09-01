@@ -4,7 +4,8 @@ import {
   AdminRequestError,
   adminAuthEndpoints,
   bootstrapFirstOwner,
-  loginAdministrator
+  loginAdministrator,
+  responseProblem
 } from "./auth";
 
 const adminSession = {
@@ -98,7 +99,8 @@ describe("administrator credential requests", () => {
             retryable: false,
             status: 401,
             title: "Authentication required",
-            type: "https://latchway.dev/problems/authentication_required"
+            type: "https://docs.latchway.dev/errors/authentication-required",
+            documentation_url: "https://docs.latchway.dev/errors/authentication-required"
           }),
           {
             headers: { "Content-Type": "application/problem+json" },
@@ -119,6 +121,7 @@ describe("administrator credential requests", () => {
       problem: {
         code: "authentication_required",
         detail: "The administrator credentials are invalid.",
+        documentationURL: "https://docs.latchway.dev/errors/authentication-required",
         requestId: "request_test_1234",
         retryable: false,
         status: 401,
@@ -126,6 +129,24 @@ describe("administrator credential requests", () => {
       }
     });
     expect(JSON.stringify(error)).not.toContain("test-only-login-password");
+  });
+
+  it("rejects a server-supplied documentation URL that does not match the stable code", async () => {
+    const response = new Response(JSON.stringify({
+      code: "authentication_required",
+      detail: "The administrator credentials are invalid.",
+      documentation_url: "https://docs.latchway.dev/errors/quota-exceeded",
+      request_id: "request_test_1234",
+      retryable: false,
+      status: 401,
+      title: "Authentication required",
+      type: "https://docs.latchway.dev/errors/authentication-required"
+    }), { headers: { "Content-Type": "application/problem+json" }, status: 401 });
+
+    expect(responseProblem(response, await response.json())).toMatchObject({
+      code: "request_failed",
+      documentationURL: undefined
+    });
   });
 
   it("does not render an unstructured or mismatched server body as an error", async () => {

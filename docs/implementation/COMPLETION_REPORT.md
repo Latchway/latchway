@@ -15,7 +15,7 @@ deployments, or protected evidence that does not exist.
 | --- | --- |
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
-| Database | Schema `25` in the current working source; the recorded clean checkpoint was schema `24` |
+| Database | Schema `27` in the current working source; the recorded clean checkpoint was schema `24` |
 | Contract bundle | SHA-256 `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` at core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
 | SDK source tuple | JavaScript `379a6d20bed9cbda9af6210f5511250fbbe9b571`; Swift `ab38ae00838a81be071f53740c624dc4f0558dcb`; Android `17c108706998f2c30fe511fd92ed049c024c8e85`; React Native `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
@@ -29,10 +29,10 @@ authorize version 1.
 
 | Workstream | Implemented in local source | Remaining before release |
 | --- | --- | --- |
-| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 25, exact challenge-Origin binding, authoritative root-definition selection, and an unchanged frozen contract bundle | Refresh the clean core checkpoint and protected exact-candidate evidence |
+| Contract and persistence | Family/component APIs, wire-2 claims, strict schemas/errors/vectors, migrations through schema 27, exact challenge-Origin binding, logical-request decision stages, bounded audit attribution/browse indexes, authoritative root-definition selection, and an unchanged frozen contract bundle | Refresh the clean core checkpoint and protected exact-candidate evidence |
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
-| Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
+| Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, canonical redaction-safe doctor/support bundles, and scoped actions | Deployment operator acceptance on the final image |
 | SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate. React Native `af3860cbf39ab6a8d1d76da392cb699b9e019e42` adds root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed; historical root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a real iPadOS 26.5 Debug run with automatic Apple Development signing. | Physical invocation of the current Debug App Intent, protected Apple distribution/extension-matrix proof, physical Android proof, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |

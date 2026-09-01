@@ -307,6 +307,9 @@ func TestStorePostgreSQLSimulationSnapshotIsExecutableTenantScopedAndRedacted(t 
 	if _, err := store.SimulationSnapshot(ctx, viewer, draft.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("viewer SimulationSnapshot() error = %v", err)
 	}
+	if _, err := store.ExplanationSnapshot(ctx, viewer, draft.ID); !errors.Is(err, ErrConfigurationInvalid) {
+		t.Fatalf("draft ExplanationSnapshot() error = %v", err)
+	}
 	report, err := store.ValidateRevision(ctx, principal, draft.ID)
 	if err != nil || !report.Valid {
 		t.Fatalf("ValidateRevision() report=%+v error=%v", report, err)
@@ -324,10 +327,23 @@ func TestStorePostgreSQLSimulationSnapshotIsExecutableTenantScopedAndRedacted(t 
 		bytes.Contains(simulation.Snapshot.CompiledJSON(), secretValue) {
 		t.Fatal("simulation snapshot disclosed decrypted secret material")
 	}
+	explanation, err := store.ExplanationSnapshot(ctx, viewer, draft.ID)
+	if err != nil {
+		t.Fatalf("ExplanationSnapshot(valid) error = %v", err)
+	}
+	if explanation.Scope != scope || explanation.EnvironmentKind != "production" ||
+		explanation.Snapshot.PolicyRevision() != draft.ID ||
+		bytes.Contains(explanation.Snapshot.DocumentJSON(), secretValue) ||
+		bytes.Contains(explanation.Snapshot.CompiledJSON(), secretValue) {
+		t.Fatalf("explanation snapshot was incorrect or disclosed secret material: %+v", explanation)
+	}
 	crossTenant := principal
 	crossTenant.OrganizationID = mustConfigID(t, id.Organization)
 	if _, err := store.SimulationSnapshot(ctx, crossTenant, draft.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant SimulationSnapshot() error = %v", err)
+	}
+	if _, err := store.ExplanationSnapshot(ctx, crossTenant, draft.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant ExplanationSnapshot() error = %v", err)
 	}
 
 	active, err := store.ActivateRevision(ctx, principal, draft.ID, draft.ETag)
@@ -351,6 +367,10 @@ func TestStorePostgreSQLSimulationSnapshotIsExecutableTenantScopedAndRedacted(t 
 	}
 	if _, err := store.SimulationSnapshot(ctx, principal, active.ID); !errors.Is(err, ErrConfigurationInvalid) {
 		t.Fatalf("superseded SimulationSnapshot() error = %v", err)
+	}
+	if historical, err := store.ExplanationSnapshot(ctx, viewer, active.ID); err != nil ||
+		historical.Snapshot.PolicyRevision() != active.ID {
+		t.Fatalf("superseded ExplanationSnapshot() snapshot=%+v error=%v", historical, err)
 	}
 }
 

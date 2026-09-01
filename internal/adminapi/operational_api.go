@@ -79,6 +79,11 @@ func (api *API) setUserBlocked(w http.ResponseWriter, r *http.Request, blocked b
 		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
 		return
 	}
+	confirmation, ok := decodeConfirmedUserOperation(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The confirmed user operation is invalid."))
+		return
+	}
 	operationID, err := newMutationOperationID(r.Context())
 	if err != nil {
 		api.internal(w, r, err)
@@ -86,7 +91,7 @@ func (api *API) setUserBlocked(w http.ResponseWriter, r *http.Request, blocked b
 	}
 	item, err := api.operations.setUserBlocked(
 		r.Context(), mustPrincipal(r.Context()), environmentID,
-		chi.URLParam(r, "userID"), blocked, operationID,
+		chi.URLParam(r, "userID"), blocked, confirmation, operationID,
 	)
 	if err != nil {
 		api.handleOperationalError(w, r, err, operationID)
@@ -171,7 +176,12 @@ func (api *API) revokeInstallation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) requests(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "environment_id", "cursor", "page_size") {
+	if !onlyQueryKeys(
+		r, "environment_id", "cursor", "page_size", "status", "feature", "user_id",
+		"platform", "component_kind", "trust_source", "route", "upstream", "model",
+		"error_code", "request_id", "start", "end", "latency_min_ms", "latency_max_ms",
+		"tokens_min", "tokens_max", "cost_min_nano_usd", "cost_max_nano_usd", "sort",
+	) {
 		api.writeProblem(w, r, invalidRequest("The request-list query is invalid."))
 		return
 	}
@@ -180,20 +190,100 @@ func (api *API) requests(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, invalidRequest("The environment identifier is required."))
 		return
 	}
-	page, err := parseOperationalPage(r, id.LogicalRequest)
-	if err != nil {
-		api.writeProblem(w, r, invalidRequest("The pagination cursor is invalid."))
+	filter, ok := parseRequestListFilter(r)
+	if !ok {
+		api.writeProblem(w, r, invalidRequest("The request-list filters or pagination cursor are invalid."))
 		return
 	}
-	items, err := api.operations.listRequests(r.Context(), mustPrincipal(r.Context()), environmentID, page)
+	items, err := api.operations.listRequests(r.Context(), mustPrincipal(r.Context()), environmentID, filter)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
 		return
 	}
-	items, pageDocument := buildPage(items, int(page.size), func(item logicalRequestDocument) cursorDocument {
+	items, pageDocument := buildPage(items, int(filter.page.size), func(item logicalRequestDocument) cursorDocument {
 		return cursorDocument{CreatedAt: item.StartedAt, ID: item.ID}
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+}
+
+func parseRequestListFilter(r *http.Request) (requestListFilter, bool) {
+	page, err := parseOperationalPage(r, id.LogicalRequest)
+	if err != nil {
+		return requestListFilter{}, false
+	}
+	values := make(map[string]string, 14)
+	for _, name := range []string{
+		"status", "feature", "user_id", "platform", "component_kind", "trust_source",
+		"route", "upstream", "model", "error_code", "request_id", "start", "end", "sort",
+	} {
+		value, ok := optionalQueryValue(r, name)
+		if !ok {
+			return requestListFilter{}, false
+		}
+		values[name] = value
+	}
+	filter := requestListFilter{
+		page: page, status: values["status"], feature: values["feature"], userID: values["user_id"],
+		platform: values["platform"], componentKind: values["component_kind"], trustSource: values["trust_source"],
+		route: values["route"], upstream: values["upstream"], model: values["model"],
+		errorCode: values["error_code"], requestID: values["request_id"], sort: values["sort"],
+	}
+	if filter.sort == "" {
+		filter.sort = "started_at_desc"
+	}
+	if values["start"] != "" {
+		filter.start, err = parseRequestFilterTime(values["start"])
+		if err != nil {
+			return requestListFilter{}, false
+		}
+	}
+	if values["end"] != "" {
+		filter.end, err = parseRequestFilterTime(values["end"])
+		if err != nil {
+			return requestListFilter{}, false
+		}
+	}
+	for name, target := range map[string]**int64{
+		"latency_min_ms":    &filter.minimumLatencyMS,
+		"latency_max_ms":    &filter.maximumLatencyMS,
+		"tokens_min":        &filter.minimumTokens,
+		"tokens_max":        &filter.maximumTokens,
+		"cost_min_nano_usd": &filter.minimumCost,
+		"cost_max_nano_usd": &filter.maximumCost,
+	} {
+		parsed, ok := parseOptionalRequestInteger(r, name)
+		if !ok {
+			return requestListFilter{}, false
+		}
+		*target = parsed
+	}
+	return filter, filter.validate() == nil
+}
+
+func parseRequestFilterTime(value string) (time.Time, error) {
+	if len(value) > 64 {
+		return time.Time{}, errOperationalInvalid
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, errOperationalInvalid
+	}
+	return parsed.UTC(), nil
+}
+
+func parseOptionalRequestInteger(r *http.Request, name string) (*int64, bool) {
+	value, ok := optionalQueryValue(r, name)
+	if !ok {
+		return nil, false
+	}
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return nil, false
+	}
+	return &parsed, true
 }
 
 func (api *API) request(w http.ResponseWriter, r *http.Request) {
@@ -276,13 +366,13 @@ func (api *API) usageTimeseries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) auditEvents(w http.ResponseWriter, r *http.Request) {
-	if !onlyQueryKeys(r, "organization_id", "cursor", "page_size") {
+	if !onlyQueryKeys(r, "organization_id", "environment_id", "actor_kind", "actor_id", "action", "resource_type", "resource_id", "source", "reason", "result", "start", "end", "cursor", "page_size") {
 		api.writeProblem(w, r, invalidRequest("The audit-event query is invalid."))
 		return
 	}
-	organizationID, ok := optionalQueryValue(r, "organization_id")
+	filter, ok := parseAuditFilter(r)
 	if !ok {
-		api.writeProblem(w, r, invalidRequest("The organization filter is invalid."))
+		api.writeProblem(w, r, invalidRequest("The audit-event filters are invalid."))
 		return
 	}
 	page, err := parseOperationalPage(r, id.AuditEvent)
@@ -291,7 +381,7 @@ func (api *API) auditEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := api.operations.listAuditEvents(
-		r.Context(), mustPrincipal(r.Context()), organizationID, page,
+		r.Context(), mustPrincipal(r.Context()), filter, page,
 	)
 	if err != nil {
 		api.handleOperationalError(w, r, err, "")
@@ -301,6 +391,52 @@ func (api *API) auditEvents(w http.ResponseWriter, r *http.Request) {
 		return cursorDocument{CreatedAt: item.Timestamp, ID: item.ID}
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "page": pageDocument})
+}
+
+func (api *API) auditEvent(w http.ResponseWriter, r *http.Request) {
+	if !onlyQueryKeys(r) {
+		api.writeProblem(w, r, invalidRequest("The audit-event detail query is invalid."))
+		return
+	}
+	item, err := api.operations.getAuditEvent(r.Context(), mustPrincipal(r.Context()), chi.URLParam(r, "auditEventID"))
+	if err != nil {
+		api.handleOperationalError(w, r, err, "")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func parseAuditFilter(r *http.Request) (auditFilter, bool) {
+	values := make(map[string]string, 12)
+	for _, name := range []string{"organization_id", "environment_id", "actor_kind", "actor_id", "action", "resource_type", "resource_id", "source", "reason", "result", "start", "end"} {
+		value, ok := optionalQueryValue(r, name)
+		if !ok {
+			return auditFilter{}, false
+		}
+		values[name] = value
+	}
+	filter := auditFilter{
+		OrganizationID: values["organization_id"], EnvironmentID: values["environment_id"],
+		ActorKind: values["actor_kind"], ActorID: values["actor_id"], Action: values["action"],
+		ResourceType: values["resource_type"], ResourceID: values["resource_id"],
+		Source: values["source"], Reason: values["reason"], Result: values["result"],
+	}
+	var err error
+	if values["start"] != "" {
+		filter.Start, err = time.Parse(time.RFC3339, values["start"])
+		if err != nil {
+			return auditFilter{}, false
+		}
+		filter.Start = filter.Start.UTC()
+	}
+	if values["end"] != "" {
+		filter.End, err = time.Parse(time.RFC3339, values["end"])
+		if err != nil {
+			return auditFilter{}, false
+		}
+		filter.End = filter.End.UTC()
+	}
+	return filter, true
 }
 
 type createSelfTestScheduleRequest struct {
@@ -556,6 +692,11 @@ func (api *API) handleOperationalError(w http.ResponseWriter, r *http.Request, e
 		api.writeProblem(w, r, problem.Error{Code: "permission_denied", Detail: "The administrator cannot perform this operation."})
 	case errors.Is(err, errOperationalNotFound):
 		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The requested tenant-scoped resource was not found."})
+	case errors.Is(err, errOperationalConflict):
+		api.writeProblem(w, r, problem.Error{
+			Code:   "conflict",
+			Detail: "The user state changed after the reviewed impact. Load the impact again before retrying.",
+		})
 	case errors.Is(err, errOperationalIndeterminate):
 		if id.Validate(operationID, id.AdminRequest) != nil {
 			api.internal(w, r, errors.New("indeterminate operational mutation has no correlation ID"))

@@ -58,8 +58,17 @@ converted exactly to integer nano-USD without floating-point arithmetic. The
 secret value is cleared before the request completes and never enters the
 configuration document. The full document is staged and validated first;
 publishing and the bounded upstream self-test are separate, deliberate actions.
-The self-test uses only API-supported OpenAI-compatible targets and never acts
-as a client application.
+The self-test uses only API-supported Responses, Chat, Embeddings, or Anthropic
+Messages targets and never acts as a client application.
+
+The first-run wizard is server-state-backed rather than browser-state-backed.
+On reload it reconstructs only non-secret progress from the selected
+application/environment, latest configuration revision, and secret metadata.
+It never restores a credential value. Repeating application or environment
+creation resolves an exact matching slug and immutable scope, including
+conflict reconciliation, while a mismatched name or environment kind fails
+closed. Applying an unchanged document reuses the latest draft/valid revision,
+or the already-active revision, instead of creating another revision.
 
 Client access groups the normally separate identity-provider, attestation-policy,
 component-definition, and feature-grant resources. The common path supports an
@@ -67,9 +76,14 @@ iOS App Attest root component, an Android Play Integrity root component, or a
 Web Firebase App Check root component, with production-aware defaults and an
 optional Firebase authentication provider. Usage plans similarly translate
 daily request/token/cost ceilings, per-request token ceilings, concurrency,
-scope, and an IANA timezone into explicit hard server rules. The console shows
-configured plan sentences, but does not claim to show resolved effective limits:
-the Admin API does not expose effective values and their contributing sources.
+scope, and an IANA timezone into explicit hard server rules. The user inspector
+can now project one feature through the exact active compiled revision and
+production policy resolver. It shows the selected plan, algorithm-specific
+effective limits, output-token clamps, component decision, and ordered
+priority/weight/sticky/fallback/retry route inputs with their sources. This is
+a read-only projection: it neither reserves quota nor dispatches upstream.
+Normalized claim keys can be named, but claim values and credential material
+are excluded.
 
 For the isolated Development workspace, `latchway develop` owns the mock
 identity, debug proof material, loopback upstream, seeded configuration, and
@@ -108,6 +122,20 @@ requires `activate_configuration`. The console sends only the bounded plan,
 reason, optional expiration, environment ID, and opaque user ID; it cannot
 alter access or route selection.
 
+The application-user inspector treats blocking, unblocking, forced
+reauthentication, and forced app reverification as reviewed tasks. It first
+loads an application-wide impact preview with exact bounded counts for active
+user/component sessions, refresh credentials, installation families, and
+components. The operator must then supply a reason, type the exact user ID, and
+acknowledge the immediate effect. The mutation presents the preview's
+optimistic impact token; a status or count change produces `409 Conflict` and
+requires a new review. Blocking denies future access and revokes active
+credentials. Unblocking restores eligibility but never resurrects credentials.
+Reauthentication revokes user and component sessions/refresh credentials.
+App reverification expires platform trust and refresh credentials while
+existing access grants retain only their original bounded expiry. The free-form
+reason is not copied into audit metadata; only a reason-present marker is kept.
+
 Configuration revisions are paged one full redaction-safe document at a time
 because an individual document may approach the Admin client's response bound.
 Rollback is enabled only for a previously activated, non-current revision and
@@ -126,8 +154,17 @@ cannot be honored.
 
 Selecting a logical request stores the exact selection in the workspace URL and
 loads the exact request-detail endpoint. The view begins with a chronological
-identity/trust/feature/attempt/settlement timeline plus short explanations of
-outcome, fallback, and cost confidence. It then shows request status,
+identity, client-trust, client-context, configuration, inspection, policy,
+route, quota-rule, quota-reservation, attempt, and settlement timeline plus
+short explanations of outcome, fallback, and cost confidence. A
+`lifecycle_recovered` terminal stage explicitly identifies a stale authenticated
+row closed by the bounded worker after a persistence interruption. Durable decision
+rows name the exact configuration revision and bounded policy, limit, and route
+provenance where the server had selected them; a post-auth denial remains
+visible even when no reservation or attempt exists. The explorer uses the
+Admin API's server-side status, feature, user, platform, component, trust,
+route, upstream, model, public error, request-ID, time, latency, token, cost,
+and start-order filters rather than filtering only the loaded page. It then shows request status,
 start/completion/duration, aggregate usage, and ordered
 attempt number, route, start/first-byte/first-token/completion timing, upstream,
 physical model, public status, optional HTTP status, sanitized failure category,
@@ -135,6 +172,15 @@ usage, cost, and independent usage/cost provenance. Failure values are restricte
 the canonical public vocabulary and unknown durable values appear only as
 `unknown`. Raw request/response or provider error bodies, provider error text,
 internal errors, and identity subjects remain excluded.
+
+From request detail, **Explain recorded configuration** loads the immutable
+revision named by the request and validates the durable selected plan,
+pre-dispatch route selection, observed attempts, and append-only decision
+stages against that historical compiled revision. Historical claim values and
+the identity of any user override were not persisted in v1, so the view marks
+them unavailable and never substitutes the user's current claims or override.
+Legacy requests that predate plan, route, or stage provenance receive the same
+explicit unavailable treatment rather than a reconstructed narrative.
 
 ## Generated Admin API contract
 
@@ -163,6 +209,20 @@ as it is read and again after the call. Token plaintext is absent from the JSON
 body, Zod response types, component state, storage, and rendered detail; the
 returned stable token ID, pinned configuration revision, target, cadence, and
 cost ceilings are shown for review.
+
+The Audit log applies exact actor kind/ID, action, resource type/ID,
+environment, descriptive source, stable reason code, outcome, and time filters
+on the server. Pagination uses the opaque next cursor. Selecting an event loads
+the exact detail endpoint and renders its ordered value-free field changes;
+the raw disclosure is the same strict redaction-safe document. Console source
+is derived from an authenticated browser session. CLI versus API is only a
+bounded client claim by an authenticated API token and is not a security fact.
+
+System health combines the unauthenticated liveness/readiness probes with the
+authenticated canonical doctor report. Operators can rerun checks, copy the
+validated JSON, or download a structurally allowlisted support bundle. The
+bundle intentionally excludes credentials, tokens, cookies, proofs, the
+master key, evidence bytes, and request/response content.
 
 ## Browser boundary
 

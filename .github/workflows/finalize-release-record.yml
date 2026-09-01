@@ -177,6 +177,9 @@ jobs:
           diff --unified=0 \
             <(jq --sort-keys '.repositories' "$root/conformance/latchway-cross-repository.json") \
             <(jq --sort-keys '.promotion_conformance.repositories' "$summary")
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$root/conformance/latchway-cross-repository.json") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$summary")
       - name: Verify nested independent-review attestation on the credential-isolated runner
         shell: bash
         env:
@@ -444,6 +447,13 @@ jobs:
             --arg tag "$RELEASE_TAG" \
             '.scope == "release" and .verdict == "passed" and .release_ready == true and
              ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length == 1) and
+             .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+             .documentation.canonical_core_commit == $commit and
+             (.documentation.commit | test("^[0-9a-f]{40}$")) and
+             (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+             (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+             (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+             (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096) and
              ([.evidence_domains[] | select((.id == "public_tags" or .id == "public_registries") and .required == true and .status == "passed")] | length == 2)' \
             "$report" >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > "$RUNNER_TEMP/tag-ref.json"
@@ -1151,6 +1161,13 @@ jobs:
             .contract.core_release == $tag and
             ([.repositories[] |
               select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length == 1) and
+            .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+            .documentation.canonical_core_commit == $commit and
+            (.documentation.commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096) and
             ([.evidence_domains[] |
               select((.id == "public_tags" or .id == "public_registries") and
                      .required == true and .status == "passed")] | length == 2)
@@ -1607,6 +1624,16 @@ jobs:
                "local_promotion", "local_release", "local_source", "operational_resilience",
                "physical_devices", "public_registries", "public_tags", "supply_chain"]
           ' "$report" >/dev/null
+          jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
+            (.documentation | keys | sort) == ["canonical_core_commit","commit","owned_file_count","repository","source_commit","source_manifest_sha256","source_tree_sha256"] and
+            .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+            .documentation.canonical_core_commit == $commit and
+            (.documentation.commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096)
+          ' "$report" >/dev/null
           core_version=${RELEASE_TAG#v}
           js_version=$(jq --raw-output '.repositories[] | select(.id == "javascript") | .version' "$report")
           ios_version=$(jq --raw-output '.repositories[] | select(.id == "ios") | .version' "$report")
@@ -1614,6 +1641,11 @@ jobs:
           android_version=$(jq --raw-output '.repositories[] | select(.id == "android") | .version' "$report")
           rn_version=$(jq --raw-output '.repositories[] | select(.id == "react_native") | .version' "$report")
           image=$(jq --raw-output '.contract.oci_image_digest' "$report")
+          documentation_commit=$(jq --raw-output '.documentation.commit' "$report")
+          documentation_source_commit=$(jq --raw-output '.documentation.source_commit' "$report")
+          documentation_source_tree=$(jq --raw-output '.documentation.source_tree_sha256' "$report")
+          documentation_manifest=$(jq --raw-output '.documentation.source_manifest_sha256' "$report")
+          documentation_files=$(jq --raw-output '.documentation.owned_file_count' "$report")
           jq --exit-status \
             --arg commit "$CANDIDATE_COMMIT" --arg tag "$RELEASE_TAG" \
             --arg core_version "$core_version" --arg js_version "$js_version" \
@@ -1665,6 +1697,12 @@ jobs:
               .repositories[] | select(.id == $id) |
               "| `\(.id)` | `\(.version)` | `\(.intended_tag)` | `\(.commit)` |"
             ' "$report"
+            printf '\n## Documentation deployment source\n\n'
+            printf -- '- Repository: `https://github.com/Latchway/latchway-docs.git` at `%s`\n' "$documentation_commit"
+            printf -- '- Canonical docs source commit: `%s`\n' "$documentation_source_commit"
+            printf -- '- Canonical docs tree SHA-256: `%s`\n' "$documentation_source_tree"
+            printf -- '- Mirror manifest SHA-256: `%s`\n' "$documentation_manifest"
+            printf -- '- Mirrored files: `%s`\n' "$documentation_files"
             printf '\n## Published package coordinates\n\n'
             printf -- '- OCI: `%s`\n' "$image"
             printf -- '- JavaScript: `@latchway/client@%s`\n' "$js_version"

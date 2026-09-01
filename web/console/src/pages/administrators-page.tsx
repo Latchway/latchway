@@ -14,7 +14,7 @@ import { useConsoleSession } from "../api/session";
 type AdministratorRole = "owner" | "admin" | "operator" | "viewer";
 
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}</small></div> : null;
+  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
 }
 
 export function AdministratorsPage() {

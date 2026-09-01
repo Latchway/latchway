@@ -97,13 +97,17 @@ func TestAdminUserLimitOverrideUsesScopedBearerAPIWithoutPrintingToken(t *testin
 		if r.URL.Path != "/admin/v1/users/"+userID+"/limit-override" || r.URL.Query().Get("environment_id") != environmentID {
 			t.Fatalf("request URL = %s", r.URL.String())
 		}
-		if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("Origin") != "" {
+		if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("Origin") != "" ||
+			r.Header.Get("X-Latchway-Admin-Source") != "cli" {
 			t.Fatal("user override request did not use the expected non-browser bearer authorization")
 		}
 		var response string
 		status := http.StatusOK
 		switch r.Method {
 		case http.MethodPut:
+			if r.Header.Get("X-Latchway-Audit-Reason") != "operator_reason_provided" {
+				t.Fatalf("override audit reason attribution = %q", r.Header.Get("X-Latchway-Audit-Reason"))
+			}
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode override body: %v", err)
@@ -113,6 +117,9 @@ func TestAdminUserLimitOverrideUsesScopedBearerAPIWithoutPrintingToken(t *testin
 			}
 			response = `{"id":"` + userID + `","environment_id":"` + environmentID + `","limit_plan_override":{"id":"` + overrideID + `","limit_plan":"premium","reason":"support-approved upgrade","created_at":"2026-08-28T00:00:00Z"}}`
 		case http.MethodDelete:
+			if r.Header.Get("X-Latchway-Audit-Reason") != "" {
+				t.Fatal("reason-free override deletion carried audit reason attribution")
+			}
 			status = http.StatusNoContent
 		default:
 			t.Fatalf("request method = %s", r.Method)

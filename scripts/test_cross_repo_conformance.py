@@ -38,6 +38,7 @@ class SyntheticWorkspace:
             "ios": root / "latchway-ios-sdk",
             "android": root / "latchway-android",
             "react_native": root / "latchway-react-native-sdk",
+            "documentation": root / "latchway-docs",
         }
         self.commits: dict[str, str] = {}
         self.bundle_sha256 = ""
@@ -49,6 +50,7 @@ class SyntheticWorkspace:
 
     def create(self) -> None:
         self._create_core()
+        self._create_documentation()
         self._create_javascript()
         self._create_ios()
         self._create_android()
@@ -145,6 +147,7 @@ class SyntheticWorkspace:
                 "    restart: unless-stopped\n"
             ),
             "CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-08-29\n\n- Release.\n",
+            "docs/public/index.mdx": "---\ntitle: Latchway\ndescription: Test documentation.\n---\n",
         }.items():
             self.write(root / relative, contents)
         shutil.copyfile(
@@ -161,6 +164,10 @@ class SyntheticWorkspace:
         )
         (root / "scripts").mkdir(parents=True, exist_ok=True)
         shutil.copyfile(BUILDER, root / "scripts/build-contract-bundle.py")
+        shutil.copyfile(
+            CORE_ROOT / "scripts/sync-public-docs.py",
+            root / "scripts/sync-public-docs.py",
+        )
 
         with tempfile.TemporaryDirectory(prefix="latchway-test-bundle-") as temporary:
             subprocess.run(
@@ -192,6 +199,27 @@ class SyntheticWorkspace:
         }
         self.init_and_commit(root)
         self.commits["core"] = self.git(root, "rev-parse", "HEAD")
+
+    def _create_documentation(self) -> None:
+        root = self.repositories["documentation"]
+        source = self.repositories["core"] / "docs/public/index.mdx"
+        self.write(root / "index.mdx", source.read_text(encoding="utf-8"))
+        files = {"index.mdx": self.sha256(source)}
+        source_tree = hashlib.sha256(
+            (json.dumps(files, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        ).hexdigest()
+        self.write_json(
+            root / ".latchway-docs-source.json",
+            {
+                "format": 1,
+                "source": "latchway/docs/public",
+                "source_commit": self.commits["core"],
+                "source_tree_sha256": source_tree,
+                "files": files,
+            },
+        )
+        self.init_and_commit(root)
+        self.commits["documentation"] = self.git(root, "rev-parse", "HEAD")
 
     def _create_javascript(self) -> None:
         root = self.repositories["javascript"]
@@ -363,7 +391,13 @@ class SyntheticWorkspace:
                 "tag": self.core_release,
                 "version": self.version,
             }
-            for repository_id in self.repositories
+            for repository_id in (
+                "core",
+                "javascript",
+                "ios",
+                "android",
+                "react_native",
+            )
         }
         for domain, claims in EXTERNAL_CLAIMS.items():
             artifact = root / "artifacts" / f"{domain}.txt"
@@ -599,6 +633,26 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
         self.assertTrue(
             all(set(repository) == {"id", "commit", "version", "intended_tag"}
                 for repository in report["repositories"])
+        )
+        self.assertEqual(
+            report["documentation"],
+            {
+                "repository": "https://github.com/Latchway/latchway-docs.git",
+                "commit": self.workspace.commits["documentation"],
+                "canonical_core_commit": self.workspace.commits["core"],
+                "source_commit": self.workspace.commits["core"],
+                "source_manifest_sha256": self.workspace.sha256(
+                    self.workspace.repositories["documentation"]
+                    / ".latchway-docs-source.json"
+                ),
+                "source_tree_sha256": json.loads(
+                    (
+                        self.workspace.repositories["documentation"]
+                        / ".latchway-docs-source.json"
+                    ).read_text(encoding="utf-8")
+                )["source_tree_sha256"],
+                "owned_file_count": 1,
+            },
         )
         external = [
             domain

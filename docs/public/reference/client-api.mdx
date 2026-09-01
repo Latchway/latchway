@@ -19,6 +19,14 @@ owner: "core-api"
   playground: client applications should use a platform Latchway SDK.
 </Warning>
 
+## Playground policy
+
+The public documentation config disables its request playground for every
+Client API operation. Session creation and protected requests require a
+method-and-URL-bound RFC 9449 proof, a component key, current identity, and
+policy-selected attestation. A static bearer field cannot reproduce that
+contract. Use a version-matched SDK or the signed sample application.
+
 DPoP-bound client sessions and AI-compatible proxy routes.
 
 Normative draft for current wire protocol version 2. Legacy wire protocol version 1 remains accepted for compatible installation/session clients. Identity, attestation and DPoP establish a short-lived installation session. Protected AI requests name an application feature; clients cannot select trusted users, routes, prices or upstream credentials. Browser requests carry one exact canonical HTTPS `Origin`; it is authorized against the active web-attestation selection on every session and protected data-plane operation. Native requests omit it.

@@ -59,7 +59,6 @@ quietly advertise different compatibility states.
 
 Accepted on 2026-08-30 and implemented in draft contract `1.0.0`. The closed
 registry and schema are deterministic bundle members; semantic, adversarial,
-generated-page, version-bound adapter, and workflow gates pass locally. Six
-entries remain experimental, Foundation Models remains planned, and
-MacPaw/OpenAI 0.5.1 remains unsupported until new evidence changes those exact
-registry rows.
+generated-page, version-bound adapter, and workflow gates pass locally. Eight
+entries remain experimental, including Foundation Models, and MacPaw/OpenAI
+0.5.1 remains unsupported until new evidence changes those exact registry rows.

@@ -680,6 +680,72 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ApplicationUser' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/effective-configuration:
+    get:
+      tags: [Users]
+      operationId: getUserEffectiveConfiguration
+      summary: Explain the policy, effective limits, and ordered routes for a user's current server state.
+      description: |
+        Evaluates the exact active compiled revision through the production policy resolver without
+        reserving quota or dispatching upstream. Normalized-claim values, provider credentials,
+        authorization headers, and request or response bodies are never returned. When no matching
+        active session exists, the result is explicitly unavailable instead of inventing trust facts.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - name: feature
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: installation_id
+          in: query
+          schema: { $ref: '#/components/schemas/InstallationID' }
+        - name: component_id
+          in: query
+          description: Mutually exclusive with installation_id.
+          schema: { $ref: '#/components/schemas/ClientComponentID' }
+        - name: streaming
+          in: query
+          schema: { type: boolean, default: false }
+        - name: estimated_input_tokens
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
+        - name: maximum_output_tokens
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
+      responses:
+        '200':
+          description: Redaction-safe current-state projection with source provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveConfiguration' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/operation-impact:
+    get:
+      tags: [Users]
+      operationId: getUserOperationImpact
+      summary: Preview the exact credential impact of a sensitive user operation.
+      description: |
+        The user identity is application-wide, so counts cover all environments in that application.
+        Returns bounded affected-resource counts and an optimistic impact token. The corresponding
+        mutation must acknowledge the immediate effect and present the same token; stale previews
+        fail with conflict and must be reviewed again.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [block, unblock, require_reauthentication, require_app_reverification]
+      responses:
+        '200':
+          description: Current operation impact and optimistic confirmation token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOperationImpact' }
+        default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users/{userId}/block:
     post:
       tags: [Users]
@@ -689,12 +755,18 @@ paths:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmedUserOperationRequest' }
       responses:
         '200':
           description: Updated user.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApplicationUser' }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users/{userId}/unblock:
     post:
@@ -705,12 +777,63 @@ paths:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmedUserOperationRequest' }
       responses:
         '200':
           description: Updated user.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApplicationUser' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/require-reauthentication:
+    post:
+      tags: [Users]
+      operationId: requireApplicationUserReauthentication
+      summary: Revoke current user and component sessions so a fresh identity exchange is required.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmedUserOperationRequest' }
+      responses:
+        '200':
+          description: Completed operation, reviewed impact, and current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOperationResult' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/users/{userId}/require-app-reverification:
+    post:
+      tags: [Users]
+      operationId: requireApplicationUserAppReverification
+      summary: Expire app trust and refresh credentials so platform proof must be established again.
+      description: Existing access grants are not silently extended; they expire at their normal bound.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/EnvironmentFilter'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmedUserOperationRequest' }
+      responses:
+        '200':
+          description: Completed operation, reviewed impact, and current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOperationResult' }
+        '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/users/{userId}/limit-override:
     put:
@@ -956,10 +1079,75 @@ paths:
       tags: [Requests]
       operationId: listLogicalRequests
       summary: List redaction-safe logical request metadata.
+      description: Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned.
       parameters:
         - $ref: '#/components/parameters/EnvironmentFilter'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { type: string, enum: [succeeded, failed, denied, canceled, unknown] }
+        - name: feature
+          in: query
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: user_id
+          in: query
+          schema: { $ref: '#/components/schemas/UserID' }
+        - name: platform
+          in: query
+          schema: { type: string, enum: [ios, android, web, react_native_ios, react_native_android, node] }
+        - name: component_kind
+          in: query
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: trust_source
+          in: query
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: route
+          in: query
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: upstream
+          in: query
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: model
+          in: query
+          description: Matches the configured model key or exact redaction-safe physical-model identifier.
+          schema: { type: string, minLength: 1, maxLength: 512, pattern: '^[^\r\n\x00]+$' }
+        - name: error_code
+          in: query
+          description: Matches a stable registered problem code, a public upstream-failure category, or `unknown`.
+          schema: { type: string, pattern: '^[a-z][a-z0-9_]{0,99}$' }
+        - name: request_id
+          in: query
+          schema: { $ref: '#/components/schemas/RequestID' }
+        - name: start
+          in: query
+          description: Inclusive lower bound for request start time.
+          schema: { type: string, format: date-time }
+        - name: end
+          in: query
+          description: Exclusive upper bound for request start time.
+          schema: { type: string, format: date-time }
+        - name: latency_min_ms
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: latency_max_ms
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: tokens_min
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: tokens_max
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: cost_min_nano_usd
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: cost_max_nano_usd
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [started_at_desc, started_at_asc], default: started_at_desc }
       responses:
         '200':
           description: Logical request page.
@@ -971,15 +1159,34 @@ paths:
     get:
       tags: [Requests]
       operationId: getLogicalRequest
-      summary: Inspect one logical request and its upstream attempts.
+      summary: Inspect one logical request, its decisions, and upstream attempts.
       parameters:
         - $ref: '#/components/parameters/RequestResourceID'
       responses:
         '200':
-          description: Request metadata, attempts and usage provenance; no bodies by default.
+          description: Request metadata, append-only decision provenance, attempts, and usage provenance; no bodies.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LogicalRequest' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/requests/{requestId}/effective-configuration:
+    get:
+      tags: [Requests]
+      operationId: getRequestEffectiveConfiguration
+      summary: Explain one request from its immutable revision and recorded decision provenance.
+      description: |
+        Returns the exact recorded limit plan and observed attempts against the historical compiled
+        revision. Historical normalized claims and override identity were not persisted in v1 and are
+        explicitly marked unavailable; current user state is never substituted. Provider secrets,
+        headers, and bodies are excluded.
+      parameters:
+        - $ref: '#/components/parameters/RequestResourceID'
+      responses:
+        '200':
+          description: Redaction-safe historical effective configuration and provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveConfiguration' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/usage/summary:
     get:
@@ -1031,6 +1238,41 @@ paths:
       summary: List append-only redacted administrative audit events.
       parameters:
         - $ref: '#/components/parameters/OrganizationFilter'
+        - $ref: '#/components/parameters/EnvironmentFilterOptional'
+        - name: actor_kind
+          in: query
+          schema: { type: string, enum: [admin_user, admin_api_token, system] }
+        - name: actor_id
+          in: query
+          schema: { type: string, pattern: '^(adm|tok)_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        - name: action
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        - name: resource_type
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9_.]{0,63}$' }
+        - name: resource_id
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9]{1,15}_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        - name: source
+          in: query
+          description: Descriptive transport source. Console is derived from authenticated session transport; CLI versus API is a bounded API-token client claim and is not authorization evidence.
+          schema: { type: string, enum: [console, cli, api, system] }
+        - name: reason
+          in: query
+          description: Exact stable operational reason code; arbitrary free-form text is not stored in audit events.
+          schema: { $ref: '#/components/schemas/AuditReason' }
+        - name: result
+          in: query
+          schema: { type: string, enum: [succeeded, denied, failed, indeterminate] }
+        - name: start
+          in: query
+          description: Inclusive UTC occurrence-time bound.
+          schema: { type: string, format: date-time }
+        - name: end
+          in: query
+          description: Exclusive UTC occurrence-time bound.
+          schema: { type: string, format: date-time }
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/PageSize'
       responses:
@@ -1039,6 +1281,23 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuditPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/audit-events/{auditEventId}:
+    get:
+      tags: [Audit]
+      operationId: getAuditEvent
+      summary: Return one append-only redaction-safe audit event and its field-level diff.
+      parameters:
+        - name: auditEventId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^aud_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+      responses:
+        '200':
+          description: Audit event detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEvent' }
         default: { $ref: '#/components/responses/Problem' }
   /admin/v1/self-test-schedules:
     get:
@@ -1120,10 +1379,14 @@ paths:
         `local` runs durable PostgreSQL, schema and active-configuration checks.
         `upstream` and `openrouter` resolve one upstream and model from the active
         compiled revision, require an exact trusted-input profile plus active USD
-        pricing, prove the two-request worst-case cost is no greater than the
-        caller's ceiling, and only then use the server-held credential through the
-        protected dispatcher. OpenRouter additionally verifies key access/credit,
-        final streaming usage, output clamping, and body-free error normalization.
+        pricing, prove the complete protocol-specific request set's worst-case
+        cost is no greater than the caller's ceiling, and only then use the
+        server-held credential through the protected dispatcher. Responses, Chat,
+        and Anthropic Messages exercise non-streaming and streaming requests with
+        output clamping. Embeddings exercises one non-streaming request with a zero
+        generated-output bound and explicit skipped streaming/clamp checks.
+        OpenRouter remains Chat-only and additionally verifies key access/credit.
+        Every supported protocol verifies usage and body-free error normalization.
         No provider credential, prompt, response, URL, or provider error body is
         returned or written to the durable result.
       parameters:
@@ -1166,6 +1429,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SystemStatus' }
         default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/system/doctor:
+    get:
+      tags: [System]
+      operationId: runSystemDoctor
+      summary: Run the canonical bounded, redaction-safe deployment diagnostics.
+      description: Returns the same structured checks and facts used by `latchway doctor` and the Console Health center.
+      responses:
+        '200':
+          description: Current diagnostic report, including degraded or failed checks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DoctorReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /admin/v1/system/support-bundle:
+    get:
+      tags: [System]
+      operationId: downloadSystemSupportBundle
+      summary: Download a structurally allowlisted support bundle.
+      description: Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key.
+      responses:
+        '200':
+          description: Redacted JSON support bundle.
+          headers:
+            Content-Disposition:
+              schema: { type: string, const: 'attachment; filename="latchway-support-bundle.json"' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupportBundle' }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     AdminCookie:
@@ -1207,6 +1499,11 @@ components:
       name: environment_id
       in: query
       required: true
+      schema: { $ref: '#/components/schemas/EnvironmentID' }
+    EnvironmentFilterOptional:
+      name: environment_id
+      in: query
+      required: false
       schema: { $ref: '#/components/schemas/EnvironmentID' }
     InstallationFamilyFilter:
       name: installation_family_id
@@ -1590,8 +1887,12 @@ components:
               type: integer
               minimum: 0
               maximum: 100000000
-              description: Explanatory untrusted estimate; never used by CEL or reservation.
-            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+              description: Bounded untrusted simulation value exposed to CEL as request.estimated_input_tokens; never reservation, quota, accounting, pricing, or context-window authority.
+            requested_output_max:
+              type: integer
+              minimum: 0
+              maximum: 100000000
+              description: Exact normalized requested maximum exposed to CEL as request.maximum_output_tokens; the independent server-owned feature clamp remains authoritative.
             rewritten_request_bytes:
               type: integer
               minimum: 0
@@ -1639,15 +1940,23 @@ components:
             normalized_claims: { type: object, maxProperties: 64, additionalProperties: true }
             streaming: { type: boolean }
             app_version: { type: string, maxLength: 128 }
-            requested_input_tokens: { type: integer, minimum: 0, maximum: 100000000 }
-            requested_output_max: { type: integer, minimum: 0, maximum: 100000000 }
+            requested_input_tokens:
+              type: integer
+              minimum: 0
+              maximum: 100000000
+              description: Simulation input mapped to request.estimated_input_tokens; untrusted and never accounting authority.
+            requested_output_max:
+              type: integer
+              minimum: 0
+              maximum: 100000000
+              description: Simulation input mapped to request.maximum_output_tokens before the independent server-owned clamp.
             rewritten_request_bytes: { type: integer, minimum: 0, maximum: 104857600 }
             framing_unit_count: { type: integer, minimum: 0, maximum: 4096 }
             image_units: { type: integer, minimum: 0, maximum: 1000000 }
             tool_calls: { type: integer, minimum: 0, maximum: 1000000 }
         fact_usage:
           type: array
-          maxItems: 16
+          maxItems: 20
           items:
             type: object
             additionalProperties: false
@@ -1660,6 +1969,7 @@ components:
         protocol:
           type: string
           enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
+          description: Server-owned protocol bound from the immutable selected feature.
         matched_access_expression: { type: string, maxLength: 4096 }
         limit_plan: { $ref: '#/components/schemas/Identifier' }
         limits:
@@ -1904,6 +2214,189 @@ components:
       properties:
         items: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ApplicationUser' } }
         page: { $ref: '#/components/schemas/PageInfo' }
+    ConfirmedUserOperationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, impact_token, acknowledge_immediate_effect]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Required operator justification. Only a reason-present audit marker is persisted; free-form text is not copied into audit metadata.
+        impact_token:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Optimistic token from the immediately preceding operation-impact preview.
+        acknowledge_immediate_effect:
+          type: boolean
+          const: true
+    UserOperationCounts:
+      type: object
+      additionalProperties: false
+      required: [active_session_grants, active_refresh_tokens, active_component_sessions, active_component_refresh_tokens, active_installation_families, active_client_components]
+      properties:
+        active_session_grants: { type: integer, minimum: 0 }
+        active_refresh_tokens: { type: integer, minimum: 0 }
+        active_component_sessions: { type: integer, minimum: 0 }
+        active_component_refresh_tokens: { type: integer, minimum: 0 }
+        active_installation_families: { type: integer, minimum: 0 }
+        active_client_components: { type: integer, minimum: 0 }
+    UserOperationImpact:
+      type: object
+      additionalProperties: false
+      required: [action, immediate, reversible, applicable, current_status, access_effect, summary, counts, impact_token]
+      properties:
+        action: { type: string, enum: [block, unblock, require_reauthentication, require_app_reverification] }
+        immediate: { type: boolean }
+        reversible: { type: boolean }
+        applicable: { type: boolean }
+        current_status: { type: string, enum: [active, blocked] }
+        access_effect: { type: string, minLength: 1, maxLength: 128 }
+        summary: { type: string, minLength: 1, maxLength: 1024 }
+        counts: { $ref: '#/components/schemas/UserOperationCounts' }
+        impact_token: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+    UserOperationResult:
+      type: object
+      additionalProperties: false
+      required: [operation_id, impact, user]
+      properties:
+        operation_id: { type: string, pattern: '^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        impact: { $ref: '#/components/schemas/UserOperationImpact' }
+        user: { $ref: '#/components/schemas/ApplicationUser' }
+    EffectiveConfigurationSubject:
+      type: object
+      additionalProperties: false
+      required: [kind, id, user_id]
+      properties:
+        kind: { type: string, enum: [user, request] }
+        id: { type: string, pattern: '^(usr|req)_[A-Za-z0-9_-]{16,128}$' }
+        user_id: { $ref: '#/components/schemas/UserID' }
+        installation_id: { $ref: '#/components/schemas/InstallationID' }
+        component_id: { $ref: '#/components/schemas/ClientComponentID' }
+    EffectiveConfigurationInput:
+      type: object
+      additionalProperties: false
+      required: [fact, source, availability, detail]
+      properties:
+        fact: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}$' }
+        source: { type: string, minLength: 1, maxLength: 512 }
+        availability: { type: string, enum: [available, unavailable] }
+        keys:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 128 }
+        values:
+          type: object
+          maxProperties: 16
+          additionalProperties: { type: string, maxLength: 512 }
+        detail: { type: string, minLength: 1, maxLength: 2048 }
+    EffectiveLimit:
+      type: object
+      additionalProperties: false
+      required: [index, metric, algorithm, scope, hard, source]
+      properties:
+        index: { type: integer, minimum: 0, maximum: 63 }
+        metric: { $ref: '#/components/schemas/Identifier' }
+        algorithm: { type: string, enum: [calendar, token_bucket, per_request, concurrency] }
+        scope:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        window: { type: string, minLength: 2, maxLength: 32 }
+        timezone: { type: string, minLength: 1, maxLength: 128 }
+        maximum: { type: integer, minimum: 1 }
+        per_request_maximum: { type: integer, minimum: 1 }
+        capacity: { type: integer, minimum: 1 }
+        refill_per_second: { type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$' }
+        hard: { type: boolean, const: true }
+        source: { type: string, minLength: 1, maxLength: 512 }
+    EffectiveRoute:
+      type: object
+      additionalProperties: false
+      required: [order, route, upstream, model, physical_model, match_expression, configured_priority, configured_weight, fallback_on, retry_maximum_attempts, retry_on, source, observed]
+      properties:
+        order: { type: integer, minimum: 1, maximum: 32 }
+        route: { $ref: '#/components/schemas/Identifier' }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        model: { $ref: '#/components/schemas/Identifier' }
+        physical_model: { type: string, minLength: 1, maxLength: 512 }
+        match_expression: { type: string, minLength: 1, maxLength: 4096 }
+        configured_priority: { type: integer, minimum: 0 }
+        configured_weight: { type: integer, minimum: 1 }
+        sticky_by: { type: string, minLength: 1, maxLength: 256 }
+        fallback_on:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        retry_maximum_attempts: { type: integer, minimum: 1, maximum: 32 }
+        retry_on:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Identifier' }
+        source: { type: string, minLength: 1, maxLength: 512 }
+        observed: { type: boolean }
+    EffectiveOutput:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        configured_default_maximum_tokens: { type: integer, minimum: 1 }
+        configured_absolute_maximum_tokens: { type: integer, minimum: 1 }
+        effective_default_maximum_tokens: { type: integer, minimum: 1 }
+        effective_maximum_tokens: { type: integer, minimum: 1 }
+        requested_maximum_tokens: { type: integer, minimum: 1 }
+        source: { type: string, minLength: 1, maxLength: 512 }
+    EffectiveConfiguration:
+      type: object
+      additionalProperties: false
+      required: [subject, evaluation_mode, environment_id, environment_kind, revision_id, feature, policy_outcome, inputs, limits, routes, decision_stages, warnings]
+      properties:
+        subject: { $ref: '#/components/schemas/EffectiveConfigurationSubject' }
+        evaluation_mode: { type: string, enum: [current_user_projection, recorded_request] }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        environment_kind: { type: string, enum: [development, staging, production] }
+        revision_id: { $ref: '#/components/schemas/RevisionID' }
+        feature: { $ref: '#/components/schemas/Identifier' }
+        protocol: { type: string, enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http] }
+        request_status: { type: string, enum: [succeeded, failed, denied, canceled, unknown] }
+        policy_outcome: { type: string, enum: [allowed, denied, unavailable] }
+        denial_reason: { type: string, minLength: 1, maxLength: 128 }
+        matched_access_expression: { type: string, minLength: 1, maxLength: 4096 }
+        matched_limit_plan_expression: { type: string, minLength: 1, maxLength: 4096 }
+        limit_plan: { $ref: '#/components/schemas/Identifier' }
+        limit_plan_source: { type: string, minLength: 1, maxLength: 128 }
+        user_override_id: { $ref: '#/components/schemas/UserOverrideID' }
+        component_definition_id: { $ref: '#/components/schemas/Identifier' }
+        component_allowed: { type: boolean }
+        inputs:
+          type: array
+          maxItems: 16
+          items: { $ref: '#/components/schemas/EffectiveConfigurationInput' }
+        output: { $ref: '#/components/schemas/EffectiveOutput' }
+        limits:
+          type: array
+          maxItems: 64
+          items: { $ref: '#/components/schemas/EffectiveLimit' }
+        selected_route: { $ref: '#/components/schemas/EffectiveRoute' }
+        routes:
+          type: array
+          maxItems: 32
+          items: { $ref: '#/components/schemas/EffectiveRoute' }
+        decision_stages:
+          type: array
+          maxItems: 256
+          description: Exact append-only stages for recorded requests; empty for current-state projections and legacy requests.
+          items: { $ref: '#/components/schemas/RequestDecisionStage' }
+        warnings:
+          type: array
+          maxItems: 16
+          items: { type: string, minLength: 1, maxLength: 2048 }
     Installation:
       type: object
       additionalProperties: false
@@ -2009,7 +2502,7 @@ components:
         session_failure_count:
           type: integer
           minimum: 0
-          description: Count of this component's non-active revoked or expired session families.
+          description: Historical wire name for the count of this component's non-active revoked or expired session families; it is not a failed-request count.
         refresh_reuse_count: { type: integer, minimum: 0 }
         request_count: { type: integer, minimum: 0 }
         usage: { $ref: '#/components/schemas/UsageValues' }
@@ -2148,10 +2641,49 @@ components:
           minLength: 1
           maxLength: 64
           description: Fixed provider report source or configured pricing catalog identity when cost is known.
+    RequestDecisionStage:
+      type: object
+      additionalProperties: false
+      required: [number, stage, outcome, config_revision_id, started_at, completed_at, duration_ms]
+      properties:
+        number: { type: integer, minimum: 1, maximum: 256 }
+        stage:
+          type: string
+          enum: [identity_verified, client_trust_verified, client_context_validated, configuration_loaded, request_inspected, policy_evaluated, route_selected, quota_rule_evaluated, quota_reserved, lifecycle_recovered]
+        outcome: { type: string, enum: [succeeded, denied, failed, cancelled] }
+        failure_code:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,99}$'
+          description: Stable registered problem code or `unknown`; omitted for a successful stage. Raw dependency or provider errors are never returned.
+        config_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        policy_rule_key:
+          type: string
+          pattern: '^([a-z][a-z0-9_-]{0,62}|[A-Za-z0-9_-]{43})$'
+        limit_plan_key: { $ref: '#/components/schemas/Identifier' }
+        limit_rule_key: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        limit_metric: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
+        limit_algorithm: { type: string, enum: [calendar, token_bucket, per_request, concurrency] }
+        limit_maximum: { type: integer, format: int64, minimum: 0 }
+        route: { $ref: '#/components/schemas/Identifier' }
+        upstream: { $ref: '#/components/schemas/Identifier' }
+        model: { $ref: '#/components/schemas/Identifier' }
+        physical_model: { type: string, minLength: 1, maxLength: 512, pattern: '^[^\r\n\x00]+$' }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        duration_ms: { type: integer, format: int64, minimum: 0 }
+      dependentRequired:
+        limit_rule_key: [limit_metric, limit_algorithm, limit_maximum]
+        limit_metric: [limit_rule_key, limit_algorithm, limit_maximum]
+        limit_algorithm: [limit_rule_key, limit_metric, limit_maximum]
+        limit_maximum: [limit_rule_key, limit_metric, limit_algorithm]
+        route: [upstream, model, physical_model]
+        upstream: [route, model, physical_model]
+        model: [route, upstream, physical_model]
+        physical_model: [route, upstream, model]
     LogicalRequest:
       type: object
       additionalProperties: false
-      required: [id, environment_id, user_id, installation_id, feature, protocol, started_at, status, attempts]
+      required: [id, environment_id, user_id, installation_id, config_revision_id, selected_limit_plan, feature, protocol, started_at, status, decision_stages, attempts]
       properties:
         id: { $ref: '#/components/schemas/RequestID' }
         environment_id: { $ref: '#/components/schemas/EnvironmentID' }
@@ -2168,14 +2700,29 @@ components:
           minLength: 1
           maxLength: 128
           pattern: '^[^\r\n\x00]+$'
+        config_revision_id: { $ref: '#/components/schemas/RevisionID' }
+        selected_limit_plan: { $ref: '#/components/schemas/Identifier' }
+        selected_route: { $ref: '#/components/schemas/Identifier' }
+        selected_upstream: { $ref: '#/components/schemas/Identifier' }
+        selected_model: { $ref: '#/components/schemas/Identifier' }
+        selected_physical_model: { type: string, minLength: 1, maxLength: 512, pattern: '^[^\r\n\x00]+$' }
         feature: { $ref: '#/components/schemas/Identifier' }
         protocol:
           type: string
           enum: [openai_responses, openai_chat, openai_embeddings, anthropic_messages, opaque_http]
         started_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
-        status: { type: string, enum: [succeeded, failed, canceled, unknown] }
+        status: { type: string, enum: [succeeded, failed, denied, canceled, unknown] }
+        failure_code:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,99}$'
+          description: Stable registered problem code or `unknown`; omitted when the logical request has no terminal failure.
         usage: { $ref: '#/components/schemas/UsageValues' }
+        decision_stages:
+          type: array
+          maxItems: 256
+          description: Redaction-safe append-only lifecycle ordered by contiguous stage number beginning at one. Legacy pre-schema-26 requests can have no stages.
+          items: { $ref: '#/components/schemas/RequestDecisionStage' }
         attempts:
           type: array
           maxItems: 32
@@ -2189,6 +2736,10 @@ components:
         trust_source: [installation_family_id, client_component_id, component_definition_id, component_kind]
         framework: [framework_version]
         framework_version: [framework]
+        selected_route: [selected_upstream, selected_model, selected_physical_model]
+        selected_upstream: [selected_route, selected_model, selected_physical_model]
+        selected_model: [selected_route, selected_upstream, selected_physical_model]
+        selected_physical_model: [selected_route, selected_upstream, selected_model]
     RequestPage:
       type: object
       additionalProperties: false
@@ -2302,16 +2853,55 @@ components:
     AuditEvent:
       type: object
       additionalProperties: false
-      required: [id, timestamp, actor, action, target, result, request_id, summary]
+      required: [id, timestamp, actor, actor_kind, action, target, resource_type, resource_id, source, result, request_id, changes, summary]
       properties:
-        id: { type: string, pattern: '^aud_[A-Za-z0-9_-]{16,128}$' }
+        id: { type: string, pattern: '^aud_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
         timestamp: { type: string, format: date-time }
-        actor: { type: string }
-        action: { type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$' }
-        target: { type: string }
+        actor: { type: string, minLength: 1, maxLength: 256 }
+        actor_kind: { type: string, enum: [admin_user, admin_api_token, system] }
+        actor_id:
+          type: string
+          pattern: '^(adm|tok)_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$'
+        action: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        target: { type: string, minLength: 1, maxLength: 256 }
+        resource_type: { type: string, pattern: '^[a-z][a-z0-9_.]{0,63}$' }
+        resource_id: { type: string, pattern: '^[a-z][a-z0-9]{1,15}_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$' }
+        environment_id: { $ref: '#/components/schemas/EnvironmentID' }
+        source:
+          type: string
+          enum: [console, cli, api, system]
+          description: Descriptive transport source, never an authorization fact. Console and system are server-derived; CLI versus API is client-claimed by an authenticated API token.
+        reason: { $ref: '#/components/schemas/AuditReason' }
         result: { type: string, enum: [succeeded, denied, failed, indeterminate] }
-        request_id: { type: string }
-        summary: { type: object, additionalProperties: true, description: Redaction-safe structured change summary. }
+        request_id: { type: string, maxLength: 30, pattern: '^(|arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25})$' }
+        changes:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/AuditChange' }
+        summary:
+          type: object
+          additionalProperties: false
+          required: [changes]
+          properties:
+            changes: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/AuditChange' } }
+          description: Compatibility wrapper around the canonical value-free field-level changes.
+    AuditChange:
+      type: object
+      additionalProperties: false
+      required: [field, operation, classification, redacted]
+      properties:
+        field: { type: string, pattern: '^[a-z][a-z0-9_.]{0,63}$' }
+        operation: { type: string, enum: [set, clear, add, remove, rotate, consume, revoke] }
+        classification: { type: string, enum: [public, sensitive] }
+        redacted: { type: boolean, description: Always true for sensitive changes and false for public field markers. }
+    AuditReason:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-z][a-z0-9._-]{0,99}$'
+      not:
+        pattern: '(password|secret|token|credential|authorization|cookie|private[._]key|ciphertext|proof|evidence)'
+      description: Stable operational reason code. Free-form user text and secret-bearing labels are never copied into the audit ledger.
     AuditPage:
       type: object
       additionalProperties: false
@@ -2435,12 +3025,213 @@ components:
         role: { type: string, enum: [all, api, worker] }
         database_schema_version: { type: string }
         ready: { type: boolean }
+    DoctorCheck:
+      type: object
+      additionalProperties: false
+      required: [id, state, summary]
+      properties:
+        id: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
+        state: { type: string, enum: [passed, warning, failed, skipped] }
+        summary: { type: string, minLength: 1, maxLength: 512 }
+        remediation: { type: string, minLength: 1, maxLength: 512 }
+    DoctorDatabaseFacts:
+      type: object
+      additionalProperties: false
+      required: [reachable, latency_ms, schema_current, schema_available, pool_maximum, pool_total, pool_acquired, pool_idle, pool_utilization_ppm, size_bytes]
+      properties:
+        reachable: { type: boolean }
+        latency_ms: { type: integer, minimum: 0 }
+        schema_current: { type: integer, minimum: 0 }
+        schema_available: { type: integer, minimum: 0 }
+        pool_maximum: { type: integer, minimum: 0 }
+        pool_total: { type: integer, minimum: 0 }
+        pool_acquired: { type: integer, minimum: 0 }
+        pool_idle: { type: integer, minimum: 0 }
+        pool_utilization_ppm: { type: integer, minimum: 0, maximum: 1000000 }
+        size_bytes: { type: integer, minimum: 0 }
+    DoctorConfigurationFacts:
+      type: object
+      additionalProperties: false
+      required: [active_environments, active_configurations, missing_active_configuration, revisions, draft_revisions, invalid_revisions, highest_revision_number, cache]
+      properties:
+        active_environments: { type: integer, minimum: 0 }
+        active_configurations: { type: integer, minimum: 0 }
+        missing_active_configuration: { type: integer, minimum: 0 }
+        revisions: { type: integer, minimum: 0 }
+        draft_revisions: { type: integer, minimum: 0 }
+        invalid_revisions: { type: integer, minimum: 0 }
+        highest_revision_number: { type: integer, minimum: 0 }
+        cache: { $ref: '#/components/schemas/DoctorConfigurationCacheFacts' }
+    DoctorConfigurationCacheFacts:
+      type: object
+      additionalProperties: false
+      required: [available, entries, fresh_entries, stale_entries, refreshes_in_flight, estimated_bytes, maximum_entries, maximum_estimated_bytes, reconciliation_interval_seconds]
+      properties:
+        available: { type: boolean }
+        entries: { type: integer, minimum: 0, maximum: 1024 }
+        fresh_entries: { type: integer, minimum: 0, maximum: 1024 }
+        stale_entries: { type: integer, minimum: 0, maximum: 1024 }
+        refreshes_in_flight: { type: integer, minimum: 0, maximum: 1024 }
+        estimated_bytes: { type: integer, minimum: 0, maximum: 25165824 }
+        maximum_entries: { type: integer, minimum: 0, maximum: 1024 }
+        maximum_estimated_bytes: { type: integer, minimum: 0, maximum: 25165824 }
+        reconciliation_interval_seconds: { type: integer, minimum: 0, maximum: 3600 }
+        newest_loaded_at: { type: string, format: date-time }
+    DoctorVerificationDependencyFacts:
+      type: object
+      additionalProperties: false
+      required: [configured_selections, required_selections, external_network_selections, credential_backed_selections, resolved_credential_records, registered_active_keys]
+      properties:
+        configured_selections: { type: integer, minimum: 0 }
+        required_selections: { type: integer, minimum: 0 }
+        external_network_selections: { type: integer, minimum: 0 }
+        credential_backed_selections: { type: integer, minimum: 0 }
+        resolved_credential_records: { type: integer, minimum: 0 }
+        registered_active_keys: { type: integer, minimum: 0 }
+    DoctorSecurityFacts:
+      type: object
+      additionalProperties: false
+      required: [active_secret_records, active_signing_keys, pending_signing_keys, retiring_signing_keys, configured_external_jwks_providers, identity_providers, identity_provider_errors, stale_identity_provider_jwks, apple_verification, google_verification]
+      properties:
+        active_secret_records: { type: integer, minimum: 0 }
+        active_signing_keys: { type: integer, minimum: 0 }
+        pending_signing_keys: { type: integer, minimum: 0 }
+        retiring_signing_keys: { type: integer, minimum: 0 }
+        signing_key_expires_at: { type: string, format: date-time }
+        configured_external_jwks_providers: { type: integer, minimum: 0 }
+        identity_providers: { type: integer, minimum: 0 }
+        identity_provider_errors: { type: integer, minimum: 0 }
+        stale_identity_provider_jwks: { type: integer, minimum: 0 }
+        apple_verification: { $ref: '#/components/schemas/DoctorVerificationDependencyFacts' }
+        google_verification: { $ref: '#/components/schemas/DoctorVerificationDependencyFacts' }
+    DoctorJobFacts:
+      type: object
+      additionalProperties: false
+      required: [by_status, expired_locks, recent_self_tests, failed_self_tests, usage_settlement_backlog]
+      properties:
+        by_status:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            required: [status, count]
+            properties:
+              status: { type: string, enum: [pending, running, succeeded, failed, dead] }
+              count: { type: integer, minimum: 0 }
+        oldest_pending_at: { type: string, format: date-time }
+        expired_locks: { type: integer, minimum: 0 }
+        recent_self_tests: { type: integer, minimum: 0 }
+        failed_self_tests: { type: integer, minimum: 0 }
+        usage_settlement_backlog: { type: integer, minimum: 0 }
+        last_usage_rollup_at: { type: string, format: date-time }
+        last_retention_at: { type: string, format: date-time }
+        last_usage_reconciliation_at: { type: string, format: date-time }
+        last_signing_key_rotation_at: { type: string, format: date-time }
+        last_external_jwks_refresh_at: { type: string, format: date-time }
+    DoctorReplicaFacts:
+      type: object
+      additionalProperties: false
+      required: [fresh_by_role, fresh_apis, fresh_workers, stale_replicas]
+      properties:
+        fresh_by_role:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, count]
+            properties:
+              role: { type: string, enum: [all, api, worker] }
+              count: { type: integer, minimum: 0 }
+        fresh_apis: { type: integer, minimum: 0 }
+        fresh_workers: { type: integer, minimum: 0 }
+        stale_replicas: { type: integer, minimum: 0 }
+        newest_heartbeat_at: { type: string, format: date-time }
+    DoctorRuntimeFacts:
+      type: object
+      additionalProperties: false
+      required: [server_version, latest_compatible_version, compatibility_source, commit, build_date, contract_version, protocol_versions, role, clock_offset_ms]
+      properties:
+        server_version: { type: string }
+        latest_compatible_version: { type: string }
+        compatibility_source: { type: string, enum: [embedded_self] }
+        commit: { type: string }
+        build_date: { type: string }
+        contract_version: { type: string }
+        protocol_versions: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: integer, minimum: 1 } }
+        role: { type: string, enum: [all, api, worker] }
+        clock_offset_ms: { type: integer }
+    DoctorRetentionFacts:
+      type: object
+      additionalProperties: false
+      required: [policy_mode, admin_session_retention_hours, job_history_retention_hours, runtime_instance_retention_hours]
+      properties:
+        policy_mode: { type: string, enum: [fixed_operational_operator_tenant_data] }
+        admin_session_retention_hours: { type: integer, minimum: 1 }
+        job_history_retention_hours: { type: integer, minimum: 1 }
+        runtime_instance_retention_hours: { type: integer, minimum: 1 }
+        oldest_request_at: { type: string, format: date-time }
+        oldest_usage_at: { type: string, format: date-time }
+        oldest_audit_at: { type: string, format: date-time }
+    DoctorFacts:
+      type: object
+      additionalProperties: false
+      required: [runtime, database, configuration, security, jobs, replicas, retention, expired_quota_reservations]
+      properties:
+        runtime: { $ref: '#/components/schemas/DoctorRuntimeFacts' }
+        database: { $ref: '#/components/schemas/DoctorDatabaseFacts' }
+        configuration: { $ref: '#/components/schemas/DoctorConfigurationFacts' }
+        security: { $ref: '#/components/schemas/DoctorSecurityFacts' }
+        jobs: { $ref: '#/components/schemas/DoctorJobFacts' }
+        replicas: { $ref: '#/components/schemas/DoctorReplicaFacts' }
+        retention: { $ref: '#/components/schemas/DoctorRetentionFacts' }
+        expired_quota_reservations: { type: integer, minimum: 0 }
+    DoctorReport:
+      type: object
+      additionalProperties: false
+      required: [status, database, schema_version, role, report_schema, generated_at, overall_state, checks, facts]
+      properties:
+        status: { type: string, enum: [ok, error], description: Compatibility status for database/schema readiness. }
+        database: { type: string, enum: [reachable, unreachable] }
+        schema_version: { type: integer, minimum: 0 }
+        role: { type: string, enum: [all, api, worker] }
+        report_schema: { type: integer, const: 1 }
+        generated_at: { type: string, format: date-time }
+        overall_state: { type: string, enum: [healthy, degraded, unhealthy] }
+        checks: { type: array, minItems: 1, maxItems: 32, items: { $ref: '#/components/schemas/DoctorCheck' } }
+        facts: { $ref: '#/components/schemas/DoctorFacts' }
+    SupportBundle:
+      type: object
+      additionalProperties: false
+      required: [bundle_schema, generated_at, source, report, redaction]
+      properties:
+        bundle_schema: { type: integer, const: 1 }
+        generated_at: { type: string, format: date-time }
+        source: { type: string, enum: [admin_api, local_cli, unknown] }
+        report: { $ref: '#/components/schemas/DoctorReport' }
+        redaction:
+          type: object
+          additionalProperties: false
+          required: [mode, excluded]
+          properties:
+            mode: { type: string, const: structural_allowlist }
+            excluded:
+              type: array
+              minItems: 10
+              maxItems: 32
+              uniqueItems: true
+              items: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
     Problem:
       type: object
       additionalProperties: false
-      required: [type, title, status, detail, code, request_id, retryable]
+      required: [type, title, status, detail, code, request_id, retryable, documentation_url]
       properties:
         type: { type: string, format: uri }
+        documentation_url:
+          type: string
+          format: uri
+          pattern: '^https://docs\.latchway\.dev/errors/[a-z0-9-]+$'
         title: { type: string, minLength: 1, maxLength: 256 }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string, minLength: 1, maxLength: 2048 }

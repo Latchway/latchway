@@ -22,7 +22,7 @@ import (
 
 var integrationSchemaPattern = regexp.MustCompile(`\Alatchway_test_[0-9]+\z`)
 
-const latestTestSchemaVersion int64 = 25
+const latestTestSchemaVersion int64 = 27
 
 func TestGeneratedUpstreamAttemptAccountingShape(t *testing.T) {
 	t.Parallel()
@@ -1009,9 +1009,18 @@ func TestMigratorPostgreSQLAlignsIdentityProviderIdentifierBounds(t *testing.T) 
 	`, legacyProviderKey, providerStateID); err != nil {
 		t.Fatalf("repair legacy provider identifier: %v", err)
 	}
-	if err := migrator.Up(ctx); err != nil {
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire identifier-bounds migration connection: %v", err)
+	}
+	if err := migrator.apply(ctx, connection.Conn(), migrationEntry{
+		version: 7,
+		name:    "000007_identity_provider_identifier_bounds.sql",
+	}); err != nil {
+		connection.Release()
 		t.Fatalf("apply identifier bounds migration after repair: %v", err)
 	}
+	connection.Release()
 
 	targets := []struct {
 		tableName     string
@@ -1096,6 +1105,13 @@ func TestMigratorPostgreSQLAlignsIdentityProviderIdentifierBounds(t *testing.T) 
 				t.Fatalf("64-character identifier error = %v, want %s check violation", err, target.newConstraint)
 			}
 		})
+	}
+	if err := migrator.Up(ctx); err != nil {
+		t.Fatalf("apply migrations after identifier-bound assertions: %v", err)
+	}
+	current, available, err := migrator.Status(ctx)
+	if err != nil || current != latestTestSchemaVersion || available != latestTestSchemaVersion {
+		t.Fatalf("identifier-bounds final schema current=%d available=%d err=%v", current, available, err)
 	}
 }
 

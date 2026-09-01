@@ -29,6 +29,7 @@ type operationalQuota interface {
 	ReleaseExpiredUndispatchedBatch(context.Context, int) (int64, error)
 	ReleaseExpiredConcurrencyLeasesBatch(context.Context, int) (int64, error)
 	ReconcilePendingUsageBatch(context.Context, int) (int64, error)
+	RecoverStaleAuthenticatedRequestsBatch(context.Context, int) (int64, error)
 }
 
 // ReplayCleaner is the narrow DPoP replay-maintenance capability used by
@@ -311,7 +312,8 @@ func (runtime *Runtime) runDurablePass(ctx context.Context) {
 
 func scheduledDurableJobTypes() []string {
 	return []string{
-		"release_expired_reservations", "prune_dpop_replays", "prune_challenges",
+		"release_expired_reservations", "recover_stale_authenticated_requests",
+		"prune_dpop_replays", "prune_challenges",
 		"rotate_signing_keys", "refresh_jwks", "aggregate_hourly_usage", "aggregate_daily_usage",
 		"enforce_retention", "reconcile_pending_usage", "release_expired_concurrency_leases",
 	}
@@ -369,6 +371,10 @@ func (runtime *Runtime) executeJob(ctx context.Context, job Job) (int64, error) 
 	case "release_expired_concurrency_leases":
 		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
 			return quotaJobs.ReleaseExpiredConcurrencyLeasesBatch(ctx, runtime.quotaBatchSize)
+		})
+	case "recover_stale_authenticated_requests":
+		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {
+			return quotaJobs.RecoverStaleAuthenticatedRequestsBatch(ctx, runtime.quotaBatchSize)
 		})
 	case "reconcile_pending_usage":
 		return runBoundedBatches(ctx, runtime.maxBatches, runtime.quotaBatchSize, func() (int64, error) {

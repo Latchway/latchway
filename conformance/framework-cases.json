@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "cases": [
+    { "id": "FW-AUTH-001", "category": "authentication", "title": "binds the feature and exact framework version" },
+    { "id": "FW-REQ-001", "category": "request", "title": "preserves an OpenAI Responses request and response" },
+    { "id": "FW-REQ-002", "category": "request", "title": "preserves a Chat Completions request and response" },
+    { "id": "FW-REQ-003", "category": "request", "title": "preserves an embeddings request and response" },
+    { "id": "FW-REQ-004", "category": "request", "title": "preserves safe caller headers and request metadata" },
+    { "id": "FW-REQ-005", "category": "request", "title": "delivers streaming bytes and final usage" },
+    { "id": "FW-REQ-006", "category": "request", "title": "propagates cancellation to the authenticated request" },
+    { "id": "FW-REQ-007", "category": "request", "title": "propagates framework timeouts to the authenticated request" },
+    { "id": "FW-BEH-001", "category": "behavior", "title": "preserves tool definitions" },
+    { "id": "FW-BEH-002", "category": "behavior", "title": "preserves and parses structured output" },
+    { "id": "FW-BEH-003", "category": "behavior", "title": "maps quota denial with the Latchway request ID" },
+    { "id": "FW-BEH-004", "category": "behavior", "title": "preserves provider errors and correlation metadata" },
+    { "id": "FW-BEH-005", "category": "behavior", "title": "creates a fresh authenticated dispatch for framework retries" },
+    { "id": "FW-BEH-006", "category": "behavior", "title": "safely refreshes a pre-dispatch expired session" },
+    { "id": "FW-SEC-001", "category": "security", "title": "strips provider placeholder credentials before dispatch" },
+    { "id": "FW-SEC-002", "category": "security", "title": "rejects a mismatched origin and undeclared path before session work" },
+    { "id": "FW-SEC-003", "category": "security", "title": "does not expose credentials in framework errors" },
+    { "id": "FW-SEC-004", "category": "security", "title": "does not mutate or fall back to global fetch" },
+    { "id": "FW-OAI-001", "category": "openai", "title": "preserves Chat Completions tools and JSON schema output" },
+    { "id": "FW-OAI-002", "category": "openai", "title": "exposes Latchway success correlation through the official client" },
+    { "id": "FW-VAI-001", "category": "vercel-ai", "title": "composes AI SDK middleware around generate and stream calls" },
+    { "id": "FW-VAI-002", "category": "vercel-ai", "title": "delivers AI SDK stream chunks before completion" },
+    { "id": "FW-VAI-003", "category": "vercel-ai", "title": "propagates in-flight AI SDK stream cancellation" },
+    { "id": "FW-VAI-004", "category": "vercel-ai", "title": "preserves AI SDK telemetry lifecycle and recording flags" },
+    { "id": "FW-LC-001", "category": "langchain", "title": "bounds LangChain batch concurrency and preserves result order" },
+    { "id": "FW-LC-002", "category": "langchain", "title": "isolates LangChain batch errors when requested" },
+    { "id": "FW-LC-003", "category": "langchain", "title": "cancels active LangChain batch requests" }
+  ]
+}

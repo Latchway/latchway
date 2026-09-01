@@ -1102,6 +1102,7 @@ def validate_promotion_conformance(
         "release_ready",
         "contract",
         "repositories",
+        "documentation",
         "evidence_window",
         "evidence_domains",
         "checks",
@@ -1184,6 +1185,35 @@ def validate_promotion_conformance(
         or core["intended_tag"] != expected_tag
     ):
         raise SecurityEvidenceError("security_promotion_core_mismatch")
+    documentation = report.get("documentation")
+    if (
+        not isinstance(documentation, dict)
+        or set(documentation)
+        != {
+            "repository",
+            "commit",
+            "canonical_core_commit",
+            "source_commit",
+            "source_manifest_sha256",
+            "source_tree_sha256",
+            "owned_file_count",
+        }
+        or documentation.get("repository")
+        != "https://github.com/Latchway/latchway-docs.git"
+        or documentation.get("canonical_core_commit") != expected_commit
+        or not isinstance(documentation.get("commit"), str)
+        or COMMIT.fullmatch(documentation["commit"]) is None
+        or not isinstance(documentation.get("source_commit"), str)
+        or COMMIT.fullmatch(documentation["source_commit"]) is None
+        or not isinstance(documentation.get("source_manifest_sha256"), str)
+        or SHA256.fullmatch(documentation["source_manifest_sha256"]) is None
+        or not isinstance(documentation.get("source_tree_sha256"), str)
+        or SHA256.fullmatch(documentation["source_tree_sha256"]) is None
+        or not isinstance(documentation.get("owned_file_count"), int)
+        or isinstance(documentation.get("owned_file_count"), bool)
+        or not 1 <= documentation["owned_file_count"] <= 4096
+    ):
+        raise SecurityEvidenceError("security_promotion_documentation_invalid")
 
     evidence_window = report.get("evidence_window")
     if not isinstance(evidence_window, dict) or set(evidence_window) != {
@@ -1250,6 +1280,7 @@ def validate_promotion_conformance(
         "run_attempt": expected_run_attempt,
         "report_sha256": report_hash,
         "repositories": normalized_repositories,
+        "documentation": dict(documentation),
     }
     hashes = {
         PROMOTION_REPORT_NAME: report_hash,

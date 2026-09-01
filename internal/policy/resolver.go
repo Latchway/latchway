@@ -20,10 +20,13 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	celast "cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/limitscope"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
 	"github.com/latchway/latchway/internal/useroverride"
@@ -49,11 +52,17 @@ const (
 
 var policyIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
-// ProtocolRequestMetadata is the complete allowlist of request-derived values
-// that may enter feature CEL. In particular, model, plan, route and headers
-// have no representation here and therefore cannot be smuggled into policy.
+// ProtocolRequestMetadata is the complete allowlist of adapter-derived values
+// that may enter feature CEL. Feature and protocol are deliberately private:
+// ResolvePlan binds them from the immutable Feature after lookup, so a caller
+// cannot smuggle either server-owned value into policy. Model, plan, route,
+// headers, and trusted accounting proofs have no representation here.
 type ProtocolRequestMetadata struct {
-	Streaming bool
+	Streaming            bool
+	EstimatedInputTokens int64
+	MaximumOutputTokens  int64
+	feature              string
+	protocol             string
 }
 
 // EnvironmentFacts contains the allowlisted environment state supplied by the
@@ -114,6 +123,8 @@ type SimulationFacts struct {
 	EnvironmentID            string
 	EnvironmentKind          string
 	PolicyRevisionID         string
+	UserOverrideID           string
+	LimitPlanOverride        string
 	ApplicationUserID        string
 	InstallationID           string
 	InstallationFamilyID     string
@@ -131,6 +142,8 @@ type SimulationFacts struct {
 	Authenticated            bool
 	NormalizedClaims         map[string]any
 	Streaming                bool
+	EstimatedInputTokens     int64
+	MaximumOutputTokens      int64
 	EvaluatedAt              time.Time
 }
 
@@ -165,6 +178,7 @@ func NewSimulationInput(facts SimulationFacts) (Input, error) {
 		authorization: authorizationFacts{
 			organizationID: facts.OrganizationID, applicationID: facts.ApplicationID,
 			environmentID: facts.EnvironmentID, policyRevisionID: facts.PolicyRevisionID,
+			userOverrideID: facts.UserOverrideID, limitPlanOverride: facts.LimitPlanOverride,
 			userID: facts.ApplicationUserID, installationID: facts.InstallationID,
 			installationFamilyID:     facts.InstallationFamilyID,
 			installationFamilyStatus: facts.InstallationFamilyStatus,
@@ -176,7 +190,10 @@ func NewSimulationInput(facts SimulationFacts) (Input, error) {
 			claims: cloneClaims(facts.NormalizedClaims), identityExpiresAt: horizon,
 			attestedAt: evaluatedAt, attestationExpiresAt: horizon, accessExpiresAt: horizon,
 		},
-		request:          ProtocolRequestMetadata{Streaming: facts.Streaming},
+		request: ProtocolRequestMetadata{
+			Streaming: facts.Streaming, EstimatedInputTokens: facts.EstimatedInputTokens,
+			MaximumOutputTokens: facts.MaximumOutputTokens,
+		},
 		environment:      EnvironmentFacts{Kind: facts.EnvironmentKind},
 		logicalRequestID: facts.LogicalRequestID,
 		unauthenticated:  !facts.Authenticated,
@@ -316,9 +333,11 @@ type Snapshot interface {
 var _ Snapshot = configuration.ActiveSnapshot{}
 
 type compiledFeature struct {
-	access    cel.Program
-	limitPlan cel.Program
-	routes    []compiledRoute
+	access                    cel.Program
+	limitPlan                 cel.Program
+	accessNeedsRequestSize    bool
+	limitPlanNeedsRequestSize bool
+	routes                    []compiledRoute
 }
 
 type compiledRoute struct {
@@ -437,6 +456,10 @@ func (resolver *Resolver) ResolvePlan(
 	if !ok {
 		return DecisionPlan{}, ErrFeatureNotFound
 	}
+	input, err := bindRequestFeature(input, featureID, feature)
+	if err != nil {
+		return DecisionPlan{}, err
+	}
 	if err := enforceFeatureAttestation(snapshot, feature, input.authorization, now); err != nil {
 		return DecisionPlan{}, err
 	}
@@ -510,11 +533,11 @@ func (resolver *Resolver) ResolvePlan(
 	}, nil
 }
 
-// ResolveQuota evaluates the only request-derived policy value currently
-// available to feature CEL (streaming) in both states. A quota snapshot has no
-// request-mode discriminator, so access and the complete selected limit plan
-// must be identical before a projection can be returned. Physical routing is
-// deliberately neither evaluated nor selected here.
+// ResolveQuota binds the immutable feature/protocol and evaluates streaming in
+// both states. A quota snapshot has no concrete request body, so policy that
+// uses estimated input or requested output size cannot produce a truthful
+// projection. Access and the complete selected limit plan must otherwise be
+// identical before return. Physical routing is not evaluated or selected.
 func (resolver *Resolver) ResolveQuota(
 	ctx context.Context,
 	snapshot Snapshot,
@@ -548,16 +571,16 @@ func (resolver *Resolver) ResolveQuota(
 	if err != nil || !validInput(nonStreaming) {
 		return QuotaProjection{}, ErrInvalidInput
 	}
-	streaming := nonStreaming
-	streaming.request.Streaming = true
-
 	feature, ok := snapshot.Feature(featureID)
 	if !ok {
 		return QuotaProjection{}, ErrFeatureNotFound
 	}
-	if feature.ID != featureID || !policyIdentifierPattern.MatchString(feature.ID) {
-		return QuotaProjection{}, ErrConfiguration
+	nonStreaming, err = bindRequestFeature(nonStreaming, featureID, feature)
+	if err != nil {
+		return QuotaProjection{}, err
 	}
+	streaming := nonStreaming
+	streaming.request.Streaming = true
 	// Feature attestation is request-shape invariant. Enforce it once against
 	// the same validated authorization and instant shared by both activations.
 	if err := enforceFeatureAttestation(snapshot, feature, nonStreaming.authorization, now); err != nil {
@@ -566,6 +589,12 @@ func (resolver *Resolver) ResolveQuota(
 	compiled, err := resolver.compiled(snapshot, feature)
 	if err != nil {
 		return QuotaProjection{}, err
+	}
+	if compiled.accessNeedsRequestSize ||
+		(nonStreaming.authorization.limitPlanOverride == "" && compiled.limitPlanNeedsRequestSize) {
+		// A quota snapshot has no concrete request body. Never report access or a
+		// selected plan by silently substituting zero for unavailable token facts.
+		return QuotaProjection{}, ErrConfiguration
 	}
 	nonStreamingActivation, err := boundedActivation(nonStreaming)
 	if err != nil {
@@ -713,7 +742,31 @@ func validInput(input Input) bool {
 		(useroverride.Selection{
 			ID: input.authorization.userOverrideID, LimitPlan: input.authorization.limitPlanOverride,
 		}).Validate() == nil &&
-		validEnvironmentKind(input.environment.Kind) && input.authorization.claims != nil
+		validEnvironmentKind(input.environment.Kind) && input.authorization.claims != nil &&
+		validUnboundRequestMetadata(input.request)
+}
+
+func validUnboundRequestMetadata(request ProtocolRequestMetadata) bool {
+	return request.feature == "" && request.protocol == "" &&
+		request.EstimatedInputTokens >= 0 &&
+		request.EstimatedInputTokens <= protocol.MaximumPolicyRequestTokens &&
+		request.MaximumOutputTokens >= 0 &&
+		request.MaximumOutputTokens <= protocol.MaximumPolicyRequestTokens
+}
+
+func bindRequestFeature(
+	input Input,
+	requestedFeature string,
+	feature configuration.Feature,
+) (Input, error) {
+	if !validUnboundRequestMetadata(input.request) || feature.ID != requestedFeature ||
+		!policyIdentifierPattern.MatchString(feature.ID) ||
+		!protocol.ProtocolExecutable(feature.Protocol) {
+		return Input{}, ErrConfiguration
+	}
+	input.request.feature = feature.ID
+	input.request.protocol = feature.Protocol
+	return input, nil
 }
 
 func selectLimitPlanID(
@@ -924,17 +977,22 @@ func (resolver *Resolver) compiled(snapshot Snapshot, feature configuration.Feat
 	if cached != nil {
 		return cached, nil
 	}
-	access, err := resolver.compileProgram(feature.AccessExpression, cel.BoolType)
+	access, accessNeedsRequestSize, err := resolver.compileProgram(feature.AccessExpression, cel.BoolType)
 	if err != nil {
 		return nil, err
 	}
-	limitPlan, err := resolver.compileProgram(feature.LimitPlanExpression, cel.StringType)
+	limitPlan, limitPlanNeedsRequestSize, err := resolver.compileProgram(feature.LimitPlanExpression, cel.StringType)
 	if err != nil {
 		return nil, err
 	}
-	compiled := &compiledFeature{access: access, limitPlan: limitPlan, routes: make([]compiledRoute, 0, len(feature.Routes))}
+	compiled := &compiledFeature{
+		access: access, limitPlan: limitPlan,
+		accessNeedsRequestSize:    accessNeedsRequestSize,
+		limitPlanNeedsRequestSize: limitPlanNeedsRequestSize,
+		routes:                    make([]compiledRoute, 0, len(feature.Routes)),
+	}
 	for _, route := range feature.Routes {
-		when, compileErr := resolver.compileProgram(route.When, cel.BoolType)
+		when, _, compileErr := resolver.compileProgram(route.When, cel.BoolType)
 		if compileErr != nil {
 			return nil, compileErr
 		}
@@ -956,15 +1014,16 @@ func (resolver *Resolver) compiled(snapshot Snapshot, feature configuration.Feat
 	return compiled, nil
 }
 
-func (resolver *Resolver) compileProgram(expression string, expected *cel.Type) (cel.Program, error) {
+func (resolver *Resolver) compileProgram(expression string, expected *cel.Type) (cel.Program, bool, error) {
 	ast, issues := resolver.environment.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return nil, fmt.Errorf("%w: compile CEL expression", ErrConfiguration)
+		return nil, false, fmt.Errorf("%w: compile CEL expression", ErrConfiguration)
 	}
 	actual := ast.OutputType()
 	if actual == nil || (actual.Kind() != cel.DynKind && !expected.IsAssignableType(actual)) {
-		return nil, fmt.Errorf("%w: CEL result type", ErrConfiguration)
+		return nil, false, fmt.Errorf("%w: CEL result type", ErrConfiguration)
 	}
+	needsRequestSize := expressionNeedsRequestSize(ast)
 	program, err := resolver.environment.Program(
 		ast,
 		cel.CostLimit(maximumRuntimeCost),
@@ -972,9 +1031,63 @@ func (resolver *Resolver) compileProgram(expression string, expected *cel.Type) 
 		cel.EvalOptions(cel.OptOptimize),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: compile CEL program", ErrConfiguration)
+		return nil, false, fmt.Errorf("%w: compile CEL program", ErrConfiguration)
 	}
-	return program, nil
+	return program, needsRequestSize, nil
+}
+
+func expressionNeedsRequestSize(checked *cel.Ast) bool {
+	if checked == nil || checked.NativeRep() == nil {
+		return true
+	}
+	root := celast.NavigateAST(checked.NativeRep())
+	requestIdentifiers := celast.MatchDescendants(root, func(expression celast.NavigableExpr) bool {
+		return expression.Kind() == celast.IdentKind && expression.AsIdent() == "request"
+	})
+	for _, identifier := range requestIdentifiers {
+		parent, ok := identifier.Parent()
+		if !ok {
+			return true
+		}
+		if parent.Kind() == celast.SelectKind {
+			selection := parent.AsSelect()
+			if selection.Operand().ID() == identifier.ID() {
+				if requestFieldNeedsSize(selection.FieldName()) {
+					return true
+				}
+				continue
+			}
+		}
+		if parent.Kind() == celast.CallKind {
+			call := parent.AsCall()
+			arguments := call.Args()
+			if (call.FunctionName() == operators.Index || call.FunctionName() == operators.OptIndex) &&
+				len(arguments) == 2 && arguments[0].ID() == identifier.ID() {
+				if arguments[1].Kind() != celast.LiteralKind {
+					return true
+				}
+				field, stringKey := arguments[1].AsLiteral().(types.String)
+				if !stringKey || requestFieldNeedsSize(string(field)) {
+					return true
+				}
+				continue
+			}
+		}
+		// Whole-object and dynamic access can observe unavailable size facts.
+		return true
+	}
+	return false
+}
+
+func requestFieldNeedsSize(field string) bool {
+	switch field {
+	case "feature", "protocol", "streaming":
+		return false
+	case "estimated_input_tokens", "maximum_output_tokens":
+		return true
+	default:
+		return true
+	}
 }
 
 func evaluateBool(ctx context.Context, program cel.Program, activation map[string]any) (bool, error) {
@@ -1164,7 +1277,13 @@ func boundedActivation(input Input) (map[string]any, error) {
 		"platform":    input.authorization.installationPlatform,
 		"trust_level": input.authorization.trustLevel,
 	}
-	request := map[string]any{"streaming": input.request.Streaming}
+	request := map[string]any{
+		"feature":                input.request.feature,
+		"protocol":               input.request.protocol,
+		"streaming":              input.request.Streaming,
+		"estimated_input_tokens": input.request.EstimatedInputTokens,
+		"maximum_output_tokens":  input.request.MaximumOutputTokens,
+	}
 	environment := map[string]any{"kind": input.environment.Kind}
 	for name, value := range map[string]map[string]any{
 		"principal": principal, "client": client, "installation": installation,

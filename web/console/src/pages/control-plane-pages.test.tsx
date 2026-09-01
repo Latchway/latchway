@@ -1,26 +1,77 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { adminRequestMock } = vi.hoisted(() => ({ adminRequestMock: vi.fn() }));
+const {
+  adminRequestMock,
+  getRequestEffectiveConfigurationMock,
+  getUserEffectiveConfigurationMock,
+  getUserOperationImpactMock,
+  requireApplicationUserAppReverificationMock,
+  requireApplicationUserReauthenticationMock,
+  setApplicationUserBlockedMock
+} = vi.hoisted(() => ({
+  adminRequestMock: vi.fn(),
+  getRequestEffectiveConfigurationMock: vi.fn(),
+  getUserEffectiveConfigurationMock: vi.fn(),
+  getUserOperationImpactMock: vi.fn(),
+  requireApplicationUserAppReverificationMock: vi.fn(),
+  requireApplicationUserReauthenticationMock: vi.fn(),
+  setApplicationUserBlockedMock: vi.fn()
+}));
 
 vi.mock("../api/admin", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/admin")>()),
-  adminRequest: adminRequestMock
+  adminRequest: adminRequestMock,
+  getRequestEffectiveConfiguration: getRequestEffectiveConfigurationMock,
+  getUserEffectiveConfiguration: getUserEffectiveConfigurationMock,
+  getUserOperationImpact: getUserOperationImpactMock,
+  requireApplicationUserAppReverification: requireApplicationUserAppReverificationMock,
+  requireApplicationUserReauthentication: requireApplicationUserReauthenticationMock,
+  setApplicationUserBlocked: setApplicationUserBlockedMock
 }));
 
 vi.mock("../api/session", () => ({
   useConsoleSession: () => ({
     data: {
       mode: "configured",
-      session: { capabilities: ["inspect_users", "run_self_tests"], organization_id: "org_0123456789abcdef" }
+      session: { capabilities: ["inspect_users", "revoke_installations", "run_self_tests"], organization_id: "org_0123456789abcdef" }
     }
   })
 }));
 
-import { AttestationFailuresPage, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { AttestationFailuresPage, AuditPageView, CostPage, ErrorsPage, LatencyPage, RequestsPage, RouteSimulatorPage, SelfTestsPage, UsagePage, UsersPage } from "./control-plane-pages";
+import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceSearch } from "../app/workspace-context-value";
 
 const zeroValues = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
+const requestProvenance = {
+  config_revision_id: "rev_0123456789abcdef",
+  decision_stages: [],
+  selected_limit_plan: "subscriber"
+};
+
+function effectiveConfigurationFixture(mode: "current_user_projection" | "recorded_request" = "current_user_projection") {
+  const route = {
+    configured_priority: 0, configured_weight: 100, fallback_on: ["timeout"], match_expression: "true",
+    model: "gpt_mobile", observed: mode === "recorded_request", order: 1, physical_model: "gpt-5-mini",
+    retry_maximum_attempts: 2, retry_on: ["timeout"], route: "primary", source: mode === "recorded_request" ? "upstream_attempt" : "feature.routes[0]",
+    sticky_by: "user", upstream: "openai"
+  };
+  return {
+    decision_stages: [], environment_id: "env_0123456789abcdef", environment_kind: "production",
+    evaluation_mode: mode, feature: "assistant",
+    inputs: [{ availability: mode === "recorded_request" ? "unavailable" : "available", detail: mode === "recorded_request" ? "Historical claim values were not persisted and are not inferred." : "Only normalized claim keys are shown.", fact: "normalized_claims", ...(mode === "recorded_request" ? {} : { keys: ["plan"] }), source: mode === "recorded_request" ? "historical_request" : "current_application_user" }],
+    limit_plan: "subscriber", limit_plan_source: mode === "recorded_request" ? "durable_request_record" : "policy_expression",
+    limits: [{ algorithm: "per_request", hard: true, index: 0, metric: "input_tokens", per_request_maximum: 4096, scope: ["user", "feature"], source: "limit_plans.subscriber.limits[0]" }],
+    policy_outcome: "allowed", protocol: "openai_chat", revision_id: "rev_0123456789abcdef",
+    routes: [route], selected_route: route,
+    subject: mode === "recorded_request"
+      ? { id: "req_0123456789abcdef", kind: "request", user_id: "usr_0123456789abcdef" }
+      : { id: "usr_0123456789abcdef", kind: "user", user_id: "usr_0123456789abcdef" },
+    warnings: mode === "recorded_request" ? ["Historical claim values remain unavailable."] : []
+  };
+}
 
 function analyticsFixture() {
   return {
@@ -54,8 +105,8 @@ function routeSimulationFixture() {
   return {
     allowed: true, application_id: "app_0123456789abcdef", environment_id: "env_0123456789abcdef",
     environment_kind: "production", explanation: ["production policy allowed"],
-    facts: { application_id: "app_0123456789abcdef", authenticated: true, environment_id: "env_0123456789abcdef", environment_kind: "production", feature: "assistant", framing_unit_count: 1, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 99, requested_output_max: 100, revision_id: "rev_0123456789abcdef", rewritten_request_bytes: 1024, streaming: false, trust_level: "app_verified" },
-    fact_usage: [{ affects_cel: false, explanation: "Untrusted estimate only.", fact: "requested_input_tokens", role: "explanatory" }],
+    facts: { application_id: "app_0123456789abcdef", authenticated: true, environment_id: "env_0123456789abcdef", environment_kind: "production", feature: "assistant", framing_unit_count: 1, image_units: 0, normalized_claims: {}, platform: "react_native_ios", requested_input_tokens: 99, requested_output_max: 100, revision_id: "rev_0123456789abcdef", rewritten_request_bytes: 1024, streaming: false, tool_calls: 0, trust_level: "app_verified" },
+    fact_usage: [{ affects_cel: true, explanation: "Bounded untrusted CEL estimate; never accounting authority.", fact: "request.estimated_input_tokens", role: "policy" }],
     feature: "assistant", limit_plan: "subscriber",
     limits: [{ algorithm: "calendar", hard: true, maximum: 1000, metric: "total_tokens", scope: ["user", "feature"], timezone: "UTC", window: "1d" }],
     model: "gpt_mobile", physical_model: "gpt-5-mini", pricing_confidence: "configured", protocol: "openai_responses",
@@ -64,13 +115,245 @@ function routeSimulationFixture() {
   };
 }
 
+function renderInWorkspace(children: ReactNode, search: WorkspaceSearch) {
+  const organization = { created_at: "2026-08-29T00:00:00Z", display_name: "Example", id: "org_0123456789abcdef", slug: "example" };
+  const application = { created_at: "2026-08-29T00:00:00Z", display_name: "Mobile App", id: "app_0123456789abcdef", organization_id: organization.id, slug: "mobile-app" };
+  const environment = { application_id: application.id, created_at: "2026-08-29T00:00:00Z", display_name: "Production", id: "env_0123456789abcdef", kind: "production" as const, slug: "production" };
+  const updateSearch = vi.fn();
+  const value: WorkspaceContextValue = {
+    application,
+    applications: [application],
+    environment,
+    environments: [environment],
+    invalidApplication: false,
+    invalidEnvironment: false,
+    isLoading: false,
+    organization,
+    search,
+    selectApplication: vi.fn(),
+    selectEnvironment: vi.fn(),
+    updateSearch
+  };
+  return { updateSearch, ...render(<WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>) };
+}
+
 afterEach(cleanup);
 
 beforeEach(() => {
   adminRequestMock.mockReset();
+  getRequestEffectiveConfigurationMock.mockReset();
+  getUserEffectiveConfigurationMock.mockReset();
+  getUserOperationImpactMock.mockReset();
+  requireApplicationUserAppReverificationMock.mockReset();
+  requireApplicationUserReauthenticationMock.mockReset();
+  setApplicationUserBlockedMock.mockReset();
 });
 
 describe("rich usage and route-simulator views", () => {
+  it("restores every request-list filter from workspace URL state and sends it to the Admin API", async () => {
+    const search: WorkspaceSearch = {
+      application: "mobile-app",
+      component_kind: "main_app",
+      cost_max_nano_usd: "2000",
+      cost_min_nano_usd: "1000",
+      cursor: "next-request-page",
+      end: "2026-08-30T00:00:00Z",
+      environment: "production",
+      error_code: "upstream_timeout",
+      feature: "assistant",
+      latency_max_ms: "5000",
+      latency_min_ms: "50",
+      model: "openai/gpt-5-mini",
+      organization: "example",
+      platform: "react_native_ios",
+      request_id: "req_1123456789abcdef",
+      route: "primary",
+      sort: "started_at_asc",
+      start: "2026-08-29T00:00:00Z",
+      status: "failed",
+      tokens_max: "4096",
+      tokens_min: "10",
+      trust_source: "direct_attested",
+      upstream: "openrouter",
+      user_id: "usr_0123456789abcdef"
+    };
+    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
+
+    renderInWorkspace(<RequestsPage />, search);
+
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalled());
+    const listPath = String(adminRequestMock.mock.calls.find(([path]) => String(path).startsWith("/admin/v1/requests?"))?.[0]);
+    const query = new URLSearchParams(listPath.split("?")[1]);
+    expect(Object.fromEntries(query)).toEqual({
+      component_kind: "main_app",
+      cost_max_nano_usd: "2000",
+      cost_min_nano_usd: "1000",
+      cursor: "next-request-page",
+      end: "2026-08-30T00:00:00Z",
+      environment_id: "env_0123456789abcdef",
+      error_code: "upstream_timeout",
+      feature: "assistant",
+      latency_max_ms: "5000",
+      latency_min_ms: "50",
+      model: "openai/gpt-5-mini",
+      page_size: "50",
+      platform: "react_native_ios",
+      request_id: "req_1123456789abcdef",
+      route: "primary",
+      sort: "started_at_asc",
+      start: "2026-08-29T00:00:00Z",
+      status: "failed",
+      tokens_max: "4096",
+      tokens_min: "10",
+      trust_source: "direct_attested",
+      upstream: "openrouter",
+      user_id: "usr_0123456789abcdef"
+    });
+    expect(screen.getByLabelText("Status")).toHaveValue("failed");
+    expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-5-mini");
+  });
+
+  it("writes edited request filters back as validated shareable search state", async () => {
+    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<RequestsPage />, {
+      application: "mobile-app",
+      environment: "production",
+      organization: "example"
+    });
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalled());
+    await user.selectOptions(screen.getByLabelText("Status"), "denied");
+    await user.type(screen.getByLabelText("Feature"), "assistant");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(updateSearch).toHaveBeenLastCalledWith(expect.objectContaining({
+      cursor: undefined,
+      feature: "assistant",
+      request: undefined,
+      status: "denied"
+    }));
+  });
+
+  it("keeps request pagination server-side by writing only the returned cursor to URL state", async () => {
+    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: true, next_cursor: "next-request-page" } } });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<RequestsPage />, {
+      application: "mobile-app",
+      environment: "production",
+      feature: "assistant",
+      organization: "example",
+      status: "failed"
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Next page" }));
+
+    expect(updateSearch).toHaveBeenLastCalledWith({ cursor: "next-request-page", request: undefined });
+  });
+
+  it("restores every audit filter from workspace URL state and sends it to the Admin API", async () => {
+    const search: WorkspaceSearch = {
+      action: "admin.user_block",
+      actor_id: "tok_0123456789abcdef",
+      actor_kind: "admin_api_token",
+      application: "mobile-app",
+      cursor: "next-audit-page",
+      end: "2026-08-30T00:00:00Z",
+      environment: "production",
+      environment_id: "env_0123456789abcdef",
+      organization: "example",
+      reason: "security_response",
+      resource_id: "usr_0123456789abcdef",
+      resource_type: "application_user",
+      result: "succeeded",
+      source: "console",
+      start: "2026-08-29T00:00:00Z"
+    };
+    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: false } } });
+
+    renderInWorkspace(<AuditPageView />, search);
+
+    await waitFor(() => expect(adminRequestMock).toHaveBeenCalled());
+    const listPath = String(adminRequestMock.mock.calls.find(([path]) => String(path).startsWith("/admin/v1/audit-events?"))?.[0]);
+    const query = new URLSearchParams(listPath.split("?")[1]);
+    expect(Object.fromEntries(query)).toEqual({
+      action: "admin.user_block",
+      actor_id: "tok_0123456789abcdef",
+      actor_kind: "admin_api_token",
+      cursor: "next-audit-page",
+      end: "2026-08-30T00:00:00Z",
+      environment_id: "env_0123456789abcdef",
+      organization_id: "org_0123456789abcdef",
+      page_size: "50",
+      reason: "security_response",
+      resource_id: "usr_0123456789abcdef",
+      resource_type: "application_user",
+      result: "succeeded",
+      source: "console",
+      start: "2026-08-29T00:00:00Z"
+    });
+    expect(screen.getByLabelText("Reason code")).toHaveValue("security_response");
+    expect(screen.getByLabelText("Descriptive source")).toHaveValue("console");
+  });
+
+  it("keeps audit pagination server-side by writing the returned cursor to URL state", async () => {
+    adminRequestMock.mockResolvedValue({ data: { items: [], page: { has_more: true, next_cursor: "next-audit-page" } } });
+    const user = userEvent.setup();
+    const { updateSearch } = renderInWorkspace(<AuditPageView />, {
+      application: "mobile-app",
+      environment: "production",
+      organization: "example",
+      result: "failed"
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Next page" }));
+
+    expect(updateSearch).toHaveBeenLastCalledWith({ cursor: "next-audit-page" });
+  });
+
+  it("filters audit history and inspects its value-free field-level diff", async () => {
+    const event = {
+      action: "admin.user_block",
+      actor: "admin_api_token:tok_00000000000000000000000000",
+      actor_id: "tok_00000000000000000000000000",
+      actor_kind: "admin_api_token",
+      changes: [{ classification: "sensitive", field: "credential", operation: "revoke", redacted: true }],
+      environment_id: "env_0123456789abcdef",
+      id: "aud_00000000000000000000000000",
+      reason: "security_response",
+      request_id: "arq_00000000000000000000000000",
+      resource_id: "usr_00000000000000000000000000",
+      resource_type: "user",
+      result: "succeeded",
+      source: "api",
+      summary: { changes: [{ classification: "sensitive", field: "credential", operation: "revoke", redacted: true }] },
+      target: "user:usr_00000000000000000000000000",
+      timestamp: "2026-08-29T00:00:00Z"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => path.endsWith(event.id)
+      ? { data: event }
+      : { data: { items: [event], page: { has_more: false } } });
+    const user = userEvent.setup();
+    render(<AuditPageView />);
+    await user.type(screen.getByLabelText("Environment"), event.environment_id);
+    await user.selectOptions(screen.getByLabelText("Actor kind"), "admin_api_token");
+    await user.type(screen.getByLabelText("Resource ID"), event.resource_id);
+    await user.selectOptions(screen.getByLabelText("Descriptive source"), "api");
+    await user.type(screen.getByLabelText("Reason code"), "security_response");
+    await user.selectOptions(screen.getByLabelText("Result"), "succeeded");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(await screen.findByRole("button", { name: event.target })).toBeInTheDocument();
+    const listPath = String(adminRequestMock.mock.calls[0]?.[0]);
+    expect(listPath).toContain("actor_kind=admin_api_token");
+    expect(listPath).toContain("resource_id=usr_00000000000000000000000000");
+    expect(listPath).toContain("source=api");
+    expect(listPath).toContain("reason=security_response");
+    await user.click(screen.getByRole("button", { name: event.target }));
+    expect(await screen.findByRole("heading", { name: "Field-level diff" })).toBeInTheDocument();
+    expect(screen.getByText("Redacted by contract")).toBeInTheDocument();
+    expect(adminRequestMock).toHaveBeenLastCalledWith(`/admin/v1/audit-events/${event.id}`, expect.anything());
+  });
+
   it("links a selected pseudonymous user to an exact Installation Family filter", async () => {
     const environmentID = "env_0123456789abcdef";
     const userID = "usr_0123456789abcdef";
@@ -82,6 +365,69 @@ describe("rich usage and route-simulator views", () => {
     await user.click(await screen.findByRole("button", { name: userID }));
 
     expect(screen.getByRole("link", { name: "View this user's installation families" })).toHaveAttribute("href", `/installation-families?environment_id=${environmentID}&user_id=${userID}`);
+  });
+
+  it("explains a user's exact current policy and limits without exposing claim values", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const userID = "usr_0123456789abcdef";
+    adminRequestMock.mockResolvedValue({ data: { items: [{ created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: userID, identity_providers: ["firebase"], normalized_claims: {}, status: "active" }], page: { has_more: false } } });
+    getUserEffectiveConfigurationMock.mockResolvedValue({ data: effectiveConfigurationFixture() });
+    const user = userEvent.setup();
+    render(<UsersPage />);
+    await user.type(screen.getByLabelText("Environment ID"), environmentID);
+    await user.click(screen.getByRole("button", { name: "List users" }));
+    await user.click(await screen.findByRole("button", { name: userID }));
+    await user.type(screen.getByLabelText("Feature"), "assistant");
+    await user.type(screen.getByLabelText("Estimated input tokens"), "2048");
+    await user.click(screen.getByRole("button", { name: "Explain current state" }));
+
+    expect(getUserEffectiveConfigurationMock).toHaveBeenCalledWith(userID, expect.objectContaining({ environmentID, estimatedInputTokens: 2048, feature: "assistant" }));
+    expect(await screen.findByRole("heading", { name: "Current-state projection" })).toBeInTheDocument();
+    expect(screen.getByText("4,096 / request")).toBeInTheDocument();
+    expect(screen.getAllByText(/gpt-5-mini/).length).toBeGreaterThan(0);
+    expect(screen.getByText("keys: plan")).toBeInTheDocument();
+    expect(screen.getByText(/neither reserves quota nor sends an upstream request/i)).toBeInTheDocument();
+  });
+
+  it("requires a fresh impact review, typed user ID, reason, and acknowledgement before blocking", async () => {
+    const environmentID = "env_0123456789abcdef";
+    const userID = "usr_0123456789abcdef";
+    const activeUser = { created_at: "2026-08-29T00:00:00Z", environment_id: environmentID, id: userID, identity_providers: ["firebase"], normalized_claims: {}, status: "active" };
+    const blockedUser = { ...activeUser, status: "blocked" };
+    const impact = {
+      access_effect: "deny_and_revoke", action: "block", applicable: true,
+      counts: { active_client_components: 2, active_component_refresh_tokens: 2, active_component_sessions: 2, active_installation_families: 1, active_refresh_tokens: 1, active_session_grants: 1 },
+      current_status: "active", immediate: true, impact_token: "A".repeat(43), reversible: true,
+      summary: "Blocks access and revokes active credentials application-wide."
+    };
+    adminRequestMock.mockResolvedValue({ data: { items: [activeUser], page: { has_more: false } } });
+    getUserOperationImpactMock.mockResolvedValue({ data: impact });
+    setApplicationUserBlockedMock.mockResolvedValue({ data: blockedUser });
+    const user = userEvent.setup();
+    render(<UsersPage />);
+    await user.type(screen.getByLabelText("Environment ID"), environmentID);
+    await user.click(screen.getByRole("button", { name: "List users" }));
+    await user.click(await screen.findByRole("button", { name: userID }));
+
+    expect(setApplicationUserBlockedMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Review block" }));
+    expect(getUserOperationImpactMock).toHaveBeenCalledWith(userID, environmentID, "block");
+    expect(await screen.findByRole("heading", { name: "Block user impact" })).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm Block user" });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText("Operator reason"), "Confirmed compromised account");
+    await user.type(screen.getByLabelText("Type the exact user ID to confirm"), userID);
+    await user.click(screen.getByLabelText(/acknowledge the immediate application-wide effect/i));
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    expect(setApplicationUserBlockedMock).toHaveBeenCalledWith(userID, environmentID, true, {
+      acknowledge_immediate_effect: true,
+      impact_token: impact.impact_token,
+      reason: "Confirmed compromised account"
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Block user completed");
+    expect(screen.getAllByText("blocked")).toHaveLength(2);
   });
 
   it("renders bounded per-user, latency, rate, dimension, and provenance analytics", async () => {
@@ -126,7 +472,7 @@ describe("rich usage and route-simulator views", () => {
   });
 
   it("renders token and cost provenance independently for each attempt", async () => {
-	const request = { attempts: [{
+	const request = { ...requestProvenance, attempts: [{
 	  attempt_number: 1, completed_at: "2026-08-29T00:00:00.400Z", cost_provenance: "unknown",
 	  failure_code: "timeout", http_status: 504, id: "atm_0123456789abcdef", model: "openai/gpt",
 	  route: "primary", started_at: "2026-08-29T00:00:00Z", status: "failed",
@@ -167,8 +513,31 @@ describe("rich usage and route-simulator views", () => {
 	expect(screen.queryByText("upstream_timeout")).not.toBeInTheDocument();
   });
 
+  it("loads a recorded request explanation without reconstructing missing historical claims", async () => {
+    const request = {
+      ...requestProvenance, attempts: [], completed_at: "2026-08-29T00:00:01Z",
+      environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef",
+      installation_id: "ins_0123456789abcdef", protocol: "openai_chat",
+      started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef"
+    };
+    adminRequestMock.mockImplementation(async (path: string) => path.endsWith(request.id) ? { data: request } : { data: { items: [request], page: { has_more: false } } });
+    getRequestEffectiveConfigurationMock.mockResolvedValue({ data: effectiveConfigurationFixture("recorded_request") });
+    const user = userEvent.setup();
+    render(<RequestsPage />);
+    await user.type(screen.getByLabelText("Environment ID"), request.environment_id);
+    await user.click(screen.getByRole("button", { name: "List requests" }));
+    await user.click(await screen.findByRole("button", { name: request.id }));
+    expect(await screen.findByText(/does not reconstruct them from current state/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Explain recorded configuration" }));
+
+    expect(getRequestEffectiveConfigurationMock).toHaveBeenCalledWith(request.id);
+    expect(await screen.findByRole("heading", { name: "Recorded decision inputs" })).toBeInTheDocument();
+    expect(screen.getByText(/Historical claim values were not persisted and are not inferred/i)).toBeInTheDocument();
+    expect(screen.getByText("Historical claim values remain unavailable.")).toBeInTheDocument();
+  });
+
   it("rejects request detail that does not match the selected environment", async () => {
-    const listed = { attempts: [], completed_at: "2026-08-29T00:00:01Z", environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef" };
+    const listed = { ...requestProvenance, attempts: [], completed_at: "2026-08-29T00:00:01Z", environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded", user_id: "usr_0123456789abcdef" };
     adminRequestMock.mockImplementation(async (path: string) => path.endsWith(listed.id) ? { data: { ...listed, environment_id: "env_ffffffffffffffff" } } : { data: { items: [listed], page: { has_more: false } } });
     const user = userEvent.setup();
     render(<RequestsPage />);
@@ -209,8 +578,9 @@ describe("rich usage and route-simulator views", () => {
     expect(screen.getByText("app_0123456789abcdef")).toBeInTheDocument();
     expect(screen.getByText("rev_0123456789abcdef")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Applicable limits" })).toBeInTheDocument();
-    expect(screen.getAllByText("requested_input_tokens")).toHaveLength(2);
-    expect(screen.getByText("explanatory")).toBeInTheDocument();
+    expect(screen.getByText("requested_input_tokens")).toBeInTheDocument();
+    expect(screen.getByText("request.estimated_input_tokens")).toBeInTheDocument();
+    expect(screen.getByText("policy")).toBeInTheDocument();
   });
 
   it("loads exact active route context and rejects a cross-environment simulation result", async () => {

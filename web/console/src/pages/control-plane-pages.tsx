@@ -2,10 +2,16 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 
 import {
   adminRequest,
+  AuditEventSchema,
   AuditPageSchema,
   InstallationPageSchema,
   InstallationSchema,
+  getRequestEffectiveConfiguration,
+  getUserEffectiveConfiguration,
+  getUserOperationImpact,
   queryPath,
+  requireApplicationUserAppReverification,
+  requireApplicationUserReauthentication,
   RequestPageSchema,
   RequestSchema,
   RevisionSchema,
@@ -15,11 +21,13 @@ import {
   SelfTestScheduleSchema,
   UsageSummarySchema,
   UsageTimeseriesSchema,
+  setApplicationUserBlocked,
   UserPageSchema,
-  UserSchema,
   type ApplicationUser,
   type ApplicationUserPage,
   type AuditPage,
+  type AuditEvent,
+  type EffectiveConfiguration,
   type Installation,
   type InstallationPage,
   type LogicalRequest,
@@ -28,10 +36,18 @@ import {
   type SelfTestRun,
   type SelfTestSchedule,
   type UsageSummary,
-  type UsageTimeseries
+  type UsageTimeseries,
+  type UserOperationAction,
+  type UserOperationImpact
 } from "../api/admin";
 import { problemFromError, type AdminProblem } from "../api/auth";
 import { useConsoleSession } from "../api/session";
+import {
+  AuditRouteSearchSchema,
+  type AuditRouteSearch,
+  RequestRouteSearchSchema,
+  type RequestRouteSearch
+} from "../app/route-search";
 import { EnvironmentRequired } from "../app/workspace-context";
 import { useOptionalWorkspace } from "../app/workspace-context-value";
 
@@ -40,6 +56,181 @@ const environmentInputPattern = environmentPattern.source;
 const revisionPattern = "rev_[A-Za-z0-9_-]{16,128}";
 const identifierPattern = /^[a-z][a-z0-9_-]{0,62}$/;
 const identifierInputPattern = identifierPattern.source;
+
+type RequestFilterDraft = Record<
+  "component_kind" | "cost_max_nano_usd" | "cost_min_nano_usd" | "end" | "error_code" |
+  "feature" | "latency_max_ms" | "latency_min_ms" | "model" | "platform" | "request_id" |
+  "route" | "sort" | "start" | "status" | "tokens_max" | "tokens_min" | "trust_source" |
+  "upstream" | "user_id",
+  string
+>;
+
+type AuditFilterDraft = Record<
+  "action" | "actor_id" | "actor_kind" | "end" | "environment_id" | "reason" |
+  "resource_id" | "resource_type" | "result" | "source" | "start",
+  string
+>;
+
+function localDateTime(value?: string): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return "";
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 19);
+}
+
+function canonicalInstant(value: string): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+
+function requestFilterDraft(search: RequestRouteSearch = {}): RequestFilterDraft {
+  return {
+    component_kind: search.component_kind ?? "",
+    cost_max_nano_usd: search.cost_max_nano_usd ?? "",
+    cost_min_nano_usd: search.cost_min_nano_usd ?? "",
+    end: localDateTime(search.end),
+    error_code: search.error_code ?? "",
+    feature: search.feature ?? "",
+    latency_max_ms: search.latency_max_ms ?? "",
+    latency_min_ms: search.latency_min_ms ?? "",
+    model: search.model ?? "",
+    platform: search.platform ?? "",
+    request_id: search.request_id ?? "",
+    route: search.route ?? "",
+    sort: search.sort ?? "",
+    start: localDateTime(search.start),
+    status: search.status ?? "",
+    tokens_max: search.tokens_max ?? "",
+    tokens_min: search.tokens_min ?? "",
+    trust_source: search.trust_source ?? "",
+    upstream: search.upstream ?? "",
+    user_id: search.user_id ?? ""
+  };
+}
+
+function auditFilterDraft(search: AuditRouteSearch = {}): AuditFilterDraft {
+  return {
+    action: search.action ?? "",
+    actor_id: search.actor_id ?? "",
+    actor_kind: search.actor_kind ?? "",
+    end: localDateTime(search.end),
+    environment_id: search.environment_id ?? "",
+    reason: search.reason ?? "",
+    resource_id: search.resource_id ?? "",
+    resource_type: search.resource_type ?? "",
+    result: search.result ?? "",
+    source: search.source ?? "",
+    start: localDateTime(search.start)
+  };
+}
+
+function invalidFilterProblem(detail: string): AdminProblem {
+  return { code: "request_invalid", detail, retryable: false, status: 0, title: "Invalid filters" };
+}
+
+function present(value: string): string | undefined {
+  return value || undefined;
+}
+
+function requestSearchCandidate(base: RequestRouteSearch, draft: RequestFilterDraft) {
+  return RequestRouteSearchSchema.safeParse({
+    ...base,
+    component_kind: present(draft.component_kind),
+    cost_max_nano_usd: present(draft.cost_max_nano_usd),
+    cost_min_nano_usd: present(draft.cost_min_nano_usd),
+    cursor: undefined,
+    end: canonicalInstant(draft.end),
+    error_code: present(draft.error_code),
+    feature: present(draft.feature),
+    latency_max_ms: present(draft.latency_max_ms),
+    latency_min_ms: present(draft.latency_min_ms),
+    model: present(draft.model),
+    platform: present(draft.platform),
+    request: undefined,
+    request_id: present(draft.request_id),
+    route: present(draft.route),
+    sort: present(draft.sort),
+    start: canonicalInstant(draft.start),
+    status: present(draft.status),
+    tokens_max: present(draft.tokens_max),
+    tokens_min: present(draft.tokens_min),
+    trust_source: present(draft.trust_source),
+    upstream: present(draft.upstream),
+    user_id: present(draft.user_id)
+  });
+}
+
+function requestSearchPatch(search: RequestRouteSearch): Partial<RequestRouteSearch> {
+  return {
+    component_kind: search.component_kind,
+    cost_max_nano_usd: search.cost_max_nano_usd,
+    cost_min_nano_usd: search.cost_min_nano_usd,
+    cursor: search.cursor,
+    end: search.end,
+    error_code: search.error_code,
+    feature: search.feature,
+    latency_max_ms: search.latency_max_ms,
+    latency_min_ms: search.latency_min_ms,
+    model: search.model,
+    platform: search.platform,
+    request: search.request,
+    request_id: search.request_id,
+    route: search.route,
+    sort: search.sort,
+    start: search.start,
+    status: search.status,
+    tokens_max: search.tokens_max,
+    tokens_min: search.tokens_min,
+    trust_source: search.trust_source,
+    upstream: search.upstream,
+    user_id: search.user_id
+  };
+}
+
+function requestListKey(search: RequestRouteSearch): string {
+  return JSON.stringify({ ...requestSearchPatch(search), request: undefined });
+}
+
+function auditSearchCandidate(base: AuditRouteSearch, draft: AuditFilterDraft) {
+  return AuditRouteSearchSchema.safeParse({
+    ...base,
+    action: present(draft.action),
+    actor_id: present(draft.actor_id),
+    actor_kind: present(draft.actor_kind),
+    cursor: undefined,
+    end: canonicalInstant(draft.end),
+    environment_id: present(draft.environment_id),
+    reason: present(draft.reason),
+    resource_id: present(draft.resource_id),
+    resource_type: present(draft.resource_type),
+    result: present(draft.result),
+    source: present(draft.source),
+    start: canonicalInstant(draft.start)
+  });
+}
+
+function auditSearchPatch(search: AuditRouteSearch): Partial<AuditRouteSearch> {
+  return {
+    action: search.action,
+    actor_id: search.actor_id,
+    actor_kind: search.actor_kind,
+    cursor: search.cursor,
+    end: search.end,
+    environment_id: search.environment_id,
+    reason: search.reason,
+    resource_id: search.resource_id,
+    resource_type: search.resource_type,
+    result: search.result,
+    source: search.source,
+    start: search.start
+  };
+}
+
+function auditListKey(search: AuditRouteSearch): string {
+  return JSON.stringify(auditSearchPatch(search));
+}
 
 function PageHeading({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
@@ -59,6 +250,7 @@ function ProblemNotice({ problem }: { problem?: AdminProblem }) {
       <strong>{problem.title}</strong>
       <span>{problem.detail}</span>
       <small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>
+      {problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}
     </div>
   ) : null;
 }
@@ -119,11 +311,58 @@ function BreakdownLimitNotice({ label, limit, truncated }: { label: string; limi
   return truncated ? <p>Showing the first {limit.toLocaleString()} {label} rows.</p> : null;
 }
 
+function effectiveLimitValue(limit: EffectiveConfiguration["limits"][number]): string {
+  if (limit.algorithm === "calendar") return `${limit.maximum?.toLocaleString()} / ${limit.window} (${limit.timezone})`;
+  if (limit.algorithm === "token_bucket") return `${limit.capacity?.toLocaleString()} capacity · ${limit.refill_per_second}/s`;
+  if (limit.algorithm === "per_request") return `${limit.per_request_maximum?.toLocaleString()} / request`;
+  return `${limit.maximum?.toLocaleString()} concurrent`;
+}
+
+function EffectiveConfigurationPanel({ configuration }: { configuration: EffectiveConfiguration }) {
+  const selectedRoute = configuration.selected_route;
+  return <section className="request-explanation" aria-labelledby={`effective-${configuration.subject.id}`}>
+    <div className="detail-card__heading"><div><p className="eyebrow">Effective configuration</p><h3 id={`effective-${configuration.subject.id}`}>{configuration.evaluation_mode === "recorded_request" ? "Recorded decision inputs" : "Current-state projection"}</h3></div><span className={`state-badge ${configuration.policy_outcome === "allowed" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{configuration.policy_outcome}</span></div>
+    <p>{configuration.evaluation_mode === "recorded_request" ? "This view uses the immutable revision and durable decision provenance recorded for the request. Missing historical inputs remain unavailable." : "This read-only projection runs the active compiled revision through the production policy resolver. It neither reserves quota nor sends an upstream request."}</p>
+    <dl><div><dt>Revision</dt><dd>{configuration.revision_id}</dd></div><div><dt>Environment</dt><dd>{configuration.environment_kind} · {configuration.environment_id}</dd></div><div><dt>Feature / protocol</dt><dd>{configuration.feature}{configuration.protocol ? ` · ${configuration.protocol}` : ""}</dd></div><div><dt>Selected plan</dt><dd>{configuration.limit_plan ?? "Unavailable"}{configuration.limit_plan_source ? ` · ${configuration.limit_plan_source}` : ""}</dd></div><div><dt>Selected route</dt><dd>{selectedRoute ? `${selectedRoute.route} → ${selectedRoute.upstream} / ${selectedRoute.model} (${selectedRoute.physical_model})` : "Unavailable"}</dd></div><div><dt>Component policy</dt><dd>{configuration.component_definition_id ?? "Legacy surface"}{configuration.component_allowed === undefined ? "" : configuration.component_allowed ? " · allowed" : " · denied"}</dd></div></dl>
+    {configuration.denial_reason ? <p><strong>Denial reason:</strong> {configuration.denial_reason}</p> : null}
+    <h4>Redaction-safe inputs and provenance</h4>
+    <Table headers={["Fact", "Availability", "Source", "Visible values", "Explanation"]} rows={configuration.inputs.map((input) => [input.fact, input.availability, input.source, input.keys?.length ? `keys: ${input.keys.join(", ")}` : input.values ? Object.entries(input.values).map(([key, value]) => `${key}=${value}`).join(" · ") : "—", input.detail])} />
+    <h4>Effective limits</h4>
+    <Table headers={["#", "Metric", "Algorithm", "Scope", "Effective value", "Source"]} rows={configuration.limits.map((limit) => [limit.index + 1, limit.metric, limit.algorithm, limit.scope.join(" + "), effectiveLimitValue(limit), limit.source])} />
+    {configuration.output ? <><h4>Output-token clamps</h4><Table headers={["Configured default", "Configured absolute", "Effective default", "Effective maximum", "Requested", "Source"]} rows={[[configuration.output.configured_default_maximum_tokens ?? "—", configuration.output.configured_absolute_maximum_tokens ?? "—", configuration.output.effective_default_maximum_tokens ?? "—", configuration.output.effective_maximum_tokens ?? "—", configuration.output.requested_maximum_tokens ?? "—", configuration.output.source]]} /></> : null}
+    <h4>{configuration.evaluation_mode === "recorded_request" ? "Observed routes" : "Ordered eligible routes"}</h4>
+    <Table headers={["#", "Route", "Upstream / model", "Priority / weight", "Sticky", "Fallback on", "Retry", "Source"]} rows={configuration.routes.map((route) => [route.order, route.route, `${route.upstream} / ${route.model} → ${route.physical_model}`, `${route.configured_priority} / ${route.configured_weight}`, route.sticky_by ?? "—", route.fallback_on.join(", ") || "—", `${route.retry_maximum_attempts} on ${route.retry_on.join(", ") || "none"}`, route.source])} />
+    {configuration.decision_stages.length ? <><h4>Durable decision stages</h4><Table headers={["#", "Stage", "Outcome", "Plan / rule", "Route", "Duration", "Failure"]} rows={configuration.decision_stages.map((stage) => [stage.number, stage.stage, stage.outcome, stage.limit_plan_key ? `${stage.limit_plan_key}${stage.limit_metric ? ` · ${stage.limit_metric}` : ""}` : stage.policy_rule_key ?? "—", stage.route ? `${stage.route} → ${stage.upstream} / ${stage.model}` : "—", `${stage.duration_ms.toLocaleString()} ms`, stage.failure_code ?? "—"])} /></> : null}
+    {configuration.matched_access_expression || configuration.matched_limit_plan_expression ? <details><summary>Matched policy expressions</summary><dl><div><dt>Access</dt><dd><code>{configuration.matched_access_expression ?? "Unavailable"}</code></dd></div><div><dt>Limit plan</dt><dd><code>{configuration.matched_limit_plan_expression ?? "Unavailable"}</code></dd></div></dl></details> : null}
+    {configuration.warnings.length ? <div className="control-notice"><strong>Important limitations</strong><ul>{configuration.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
+    <p><small>Claim values, provider credentials, authorization headers, proofs, and request or response bodies are excluded from this view.</small></p>
+  </section>;
+}
+
+const operationLabels: Record<UserOperationAction, string> = {
+  block: "Block user",
+  require_app_reverification: "Require app reverification",
+  require_reauthentication: "Require reauthentication",
+  unblock: "Unblock user"
+};
+
 export function UsersPage() {
   const session = useConsoleSession();
   const [environment, setEnvironment] = useState("");
   const [page, setPage] = useState<ApplicationUserPage>();
   const [selected, setSelected] = useState<ApplicationUser>();
+  const [effective, setEffective] = useState<EffectiveConfiguration>();
+  const [effectiveFeature, setEffectiveFeature] = useState("");
+  const [effectiveSurface, setEffectiveSurface] = useState<"latest" | "installation" | "component">("latest");
+  const [effectiveSurfaceID, setEffectiveSurfaceID] = useState("");
+  const [estimatedInputTokens, setEstimatedInputTokens] = useState("");
+  const [maximumOutputTokens, setMaximumOutputTokens] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [impact, setImpact] = useState<UserOperationImpact>();
+  const [typedConfirmation, setTypedConfirmation] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [reason, setReason] = useState("");
+  const [completion, setCompletion] = useState("");
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   if (session.data?.mode !== "configured") return <AccessRequired />;
@@ -136,21 +375,56 @@ export function UsersPage() {
         queryPath("/admin/v1/users", { environment_id: environment, page_size: "50", cursor }),
         UserPageSchema
       );
-      setPage(result.data); setSelected(undefined);
+      setPage(result.data); setSelected(undefined); setEffective(undefined); setImpact(undefined);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
-  async function mutate(user: ApplicationUser): Promise<void> {
+  function selectUser(user: ApplicationUser): void {
+    setSelected(user); setEffective(undefined); setImpact(undefined); setCompletion("");
+    setTypedConfirmation(""); setAcknowledged(false); setReason("");
+  }
+
+  async function explain(user: ApplicationUser): Promise<void> {
     setBusy(true); setProblem(undefined);
-    const action = user.status === "blocked" ? "unblock" : "block";
     try {
-      const result = await adminRequest(
-        queryPath(`/admin/v1/users/${user.id}/${action}`, { environment_id: environment }),
-        UserSchema,
-        { method: "POST" }
-      );
-      setSelected(result.data);
-      setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === user.id ? result.data : item) } : current);
+      const result = await getUserEffectiveConfiguration(user.id, {
+        ...(effectiveSurface === "component" ? { componentID: effectiveSurfaceID } : {}),
+        environmentID: environment,
+        ...(estimatedInputTokens ? { estimatedInputTokens: Number(estimatedInputTokens) } : {}),
+        feature: effectiveFeature,
+        ...(effectiveSurface === "installation" ? { installationID: effectiveSurfaceID } : {}),
+        ...(maximumOutputTokens ? { maximumOutputTokens: Number(maximumOutputTokens) } : {}),
+        streaming
+      });
+      if (result.data.subject.id !== user.id || result.data.environment_id !== environment) throw new Error("effective_context");
+      setEffective(result.data);
+    } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
+
+  async function reviewOperation(user: ApplicationUser, action: UserOperationAction): Promise<void> {
+    setBusy(true); setProblem(undefined); setCompletion("");
+    try {
+      const result = await getUserOperationImpact(user.id, environment, action);
+      setImpact(result.data); setTypedConfirmation(""); setAcknowledged(false); setReason("");
+    } catch (error) { setImpact(undefined); setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
+
+  async function performOperation(user: ApplicationUser): Promise<void> {
+    if (!impact) return;
+    setBusy(true); setProblem(undefined); setCompletion("");
+    try {
+      const confirmation = { acknowledge_immediate_effect: true as const, impact_token: impact.impact_token, reason };
+      const result = impact.action === "block" || impact.action === "unblock"
+        ? await setApplicationUserBlocked(user.id, environment, impact.action === "block", confirmation)
+        : impact.action === "require_reauthentication"
+          ? await requireApplicationUserReauthentication(user.id, environment, confirmation)
+          : await requireApplicationUserAppReverification(user.id, environment, confirmation);
+      const updated = "operation_id" in result.data ? result.data.user : result.data;
+      const operationID = "operation_id" in result.data ? ` Operation ${result.data.operation_id}.` : "";
+      setSelected(updated);
+      setPage((current) => current ? { ...current, items: current.items.map((item) => item.id === user.id ? updated : item) } : current);
+      setCompletion(`${operationLabels[impact.action]} completed.${operationID}`);
+      setImpact(undefined); setTypedConfirmation(""); setAcknowledged(false); setReason("");
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
 
@@ -163,13 +437,32 @@ export function UsersPage() {
     <ProblemNotice problem={problem} />
     {page ? <>
       <Table headers={["User", "Status", "Providers", "Last seen", ""]} rows={page.items.map((user) => [
-        <button className="link-button" onClick={() => setSelected(user)} type="button">{user.id}</button>, user.status,
+        <button className="link-button" onClick={() => selectUser(user)} type="button">{user.id}</button>, user.status,
         user.identity_providers.join(", "), time(user.last_seen_at),
-        <button className="small-action" disabled={!canMutate || busy} onClick={() => void mutate(user)} type="button">{user.status === "blocked" ? "Unblock" : "Block"}</button>
+        <button className="small-action" onClick={() => selectUser(user)} type="button">Inspect</button>
       ])} />
       {page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}
     </> : null}
-    {selected ? <aside className="detail-card"><h2>User detail</h2><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div></dl><p><a className="secondary-action" href={queryPath("/installation-families", { environment_id: environment, user_id: selected.id })}>View this user's installation families</a></p><h3>Normalized safe claims</h3><pre>{JSON.stringify(selected.normalized_claims, null, 2)}</pre></aside> : null}
+    {selected ? <aside className="detail-card"><h2>User detail</h2><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div></dl><p><a className="secondary-action" href={queryPath("/installation-families", { environment_id: environment, user_id: selected.id })}>View this user's installation families</a></p><h3>Normalized safe claims</h3><pre>{JSON.stringify(selected.normalized_claims, null, 2)}</pre>
+      <h3>Explain effective access and limits</h3>
+      <form className="filter-bar filter-bar--wide" onSubmit={(event) => { event.preventDefault(); void explain(selected); }}>
+        <label>Feature<input pattern={identifierInputPattern} required value={effectiveFeature} onChange={(event) => setEffectiveFeature(event.target.value)} /></label>
+        <label>Client surface<select value={effectiveSurface} onChange={(event) => { setEffectiveSurface(event.target.value as typeof effectiveSurface); setEffectiveSurfaceID(""); }}><option value="latest">Latest active session</option><option value="installation">Installation</option><option value="component">Component</option></select></label>
+        {effectiveSurface !== "latest" ? <label>{effectiveSurface === "installation" ? "Installation ID" : "Component ID"}<input required value={effectiveSurfaceID} onChange={(event) => setEffectiveSurfaceID(event.target.value)} /></label> : null}
+        <label>Estimated input tokens<input min="0" max="2147483647" step="1" type="number" value={estimatedInputTokens} onChange={(event) => setEstimatedInputTokens(event.target.value)} /></label>
+        <label>Requested output tokens<input min="0" max="2147483647" step="1" type="number" value={maximumOutputTokens} onChange={(event) => setMaximumOutputTokens(event.target.value)} /></label>
+        <label><input checked={streaming} onChange={(event) => setStreaming(event.target.checked)} type="checkbox" /> Streaming request</label>
+        <FormActions busy={busy}>Explain current state</FormActions>
+      </form>
+      {effective ? <EffectiveConfigurationPanel configuration={effective} /> : null}
+      <h3>Sensitive user operations</h3>
+      <p>Every operation starts with a fresh application-wide impact preview. State changes between review and confirmation are rejected.</p>
+      <div className="button-row"><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, selected.status === "blocked" ? "unblock" : "block")} type="button">Review {selected.status === "blocked" ? "unblock" : "block"}</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_reauthentication")} type="button">Review reauthentication</button><button className="secondary-action" disabled={!canMutate || busy} onClick={() => void reviewOperation(selected, "require_app_reverification")} type="button">Review app reverification</button></div>
+      {impact ? <section className="request-explanation"><h4>{operationLabels[impact.action]} impact</h4><p>{impact.summary}</p><dl><div><dt>Immediate</dt><dd>{impact.immediate ? "Yes" : "No"}</dd></div><div><dt>Reversible</dt><dd>{impact.reversible ? "Yes" : "No"}</dd></div><div><dt>Current status</dt><dd>{impact.current_status}</dd></div><div><dt>Access effect</dt><dd>{impact.access_effect}</dd></div></dl><Table headers={["Active user sessions", "User refresh tokens", "Component sessions", "Component refresh tokens", "Installation families", "Client components"]} rows={[[impact.counts.active_session_grants, impact.counts.active_refresh_tokens, impact.counts.active_component_sessions, impact.counts.active_component_refresh_tokens, impact.counts.active_installation_families, impact.counts.active_client_components]]} />
+        {!impact.applicable ? <p role="status">This operation does not apply to the user's current state. Review a different action.</p> : <form onSubmit={(event) => { event.preventDefault(); void performOperation(selected); }}><label>Operator reason<textarea maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} /></label><label>Type the exact user ID to confirm<input required value={typedConfirmation} onChange={(event) => setTypedConfirmation(event.target.value)} /></label><label><input checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} type="checkbox" /> I acknowledge the immediate application-wide effect described above.</label><button className="primary-action" disabled={busy || !acknowledged || typedConfirmation !== selected.id || !reason.trim()} type="submit">Confirm {operationLabels[impact.action]}</button></form>}
+      </section> : null}
+      {completion ? <p className="control-notice" role="status">{completion}</p> : null}
+    </aside> : null}
   </div>;
 }
 
@@ -214,34 +507,71 @@ export function InstallationsPage() {
 
 function RequestTimeline({ request }: { request: LogicalRequest }) {
   const fallbackUsed = request.attempts.length > 1;
-  return <section className="request-explanation" aria-labelledby="execution-timeline-heading"><div className="detail-card__heading"><div><p className="eyebrow">Explain this request</p><h3 id="execution-timeline-heading">Execution timeline</h3></div><span className={`state-badge ${request.status === "succeeded" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{request.status}</span></div><ol className="execution-timeline"><li><span aria-hidden="true">✓</span><div><strong>Application user resolved</strong><small>{request.user_id}</small></div></li><li><span aria-hidden="true">✓</span><div><strong>Client trust recorded</strong><small>{request.trust_source ?? "Legacy installation trust"}{request.component_kind ? ` · ${request.component_kind}` : ""}</small></div></li><li><span aria-hidden="true">✓</span><div><strong>Feature request accepted</strong><small>{request.feature} · {request.protocol}</small></div></li>{request.attempts.map((attempt) => <li className={attempt.status === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={attempt.id}><span aria-hidden="true">{attempt.status === "succeeded" ? "✓" : "!"}</span><div><strong>{attempt.attempt_number === 1 ? "Primary" : "Fallback"} upstream {attempt.status}</strong><small>{attempt.route} → {attempt.upstream} / {attempt.model} · {duration(attempt.started_at, attempt.completed_at)}{attempt.failure_code ? ` · ${attempt.failure_code}` : ""}</small></div></li>)}{request.usage ? <li><span aria-hidden="true">✓</span><div><strong>Usage settled</strong><small>{request.usage.total_tokens.toLocaleString()} tokens · {request.usage.cost_nano_usd.toLocaleString()} nano-USD</small></div></li> : null}</ol><div className="why-grid"><article><strong>Why this outcome?</strong><p>{request.status === "succeeded" ? "Identity, trust, feature access, quota, and at least one upstream attempt completed successfully." : `The request ended ${request.status}; inspect the sanitized attempt failure below.`}</p></article><article><strong>Why this route?</strong><p>{fallbackUsed ? `The primary attempt did not complete successfully, so the configured fallback sequence used ${request.attempts.at(-1)?.route}.` : `The server selected ${request.attempts[0]?.route ?? "the configured route"} from the active revision.`}</p></article><article><strong>Cost confidence</strong><p>{request.attempts.some((attempt) => attempt.cost_provenance === "estimated") ? "At least one attempt uses estimated cost; do not treat the total as provider-reported." : "Attempt rows preserve independent usage and cost provenance."}</p></article></div></section>;
+  return <section className="request-explanation" aria-labelledby="execution-timeline-heading"><div className="detail-card__heading"><div><p className="eyebrow">Explain this request</p><h3 id="execution-timeline-heading">Durable execution timeline</h3></div><span className={`state-badge ${request.status === "succeeded" ? "state-badge--available" : "state-badge--unavailable"}`}><span className="state-badge__dot" aria-hidden="true" />{request.status}</span></div>
+    {request.decision_stages.length === 0 ? <p className="control-notice">This legacy request has no durable decision stages. The console does not reconstruct them from current state.</p> : <ol className="execution-timeline">{request.decision_stages.map((stage) => <li className={stage.outcome === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={stage.number}><span aria-hidden="true">{stage.outcome === "succeeded" ? "✓" : "!"}</span><div><strong>{stage.stage.replaceAll("_", " ")} {stage.outcome}</strong><small>{stage.duration_ms.toLocaleString()} ms · revision {stage.config_revision_id}{stage.limit_plan_key ? ` · plan ${stage.limit_plan_key}` : ""}{stage.limit_metric ? ` · ${stage.limit_metric} ${stage.limit_algorithm} ${stage.limit_maximum}` : ""}{stage.route ? ` · ${stage.route} → ${stage.upstream} / ${stage.model}` : ""}{stage.failure_code ? ` · ${stage.failure_code}` : ""}</small></div></li>)}</ol>}
+    {request.attempts.length ? <><h4>Upstream attempts</h4><ol className="execution-timeline">{request.attempts.map((attempt) => <li className={attempt.status === "succeeded" ? "execution-timeline__success" : "execution-timeline__warning"} key={attempt.id}><span aria-hidden="true">{attempt.status === "succeeded" ? "✓" : "!"}</span><div><strong>{attempt.attempt_number === 1 ? "Primary" : "Fallback"} upstream {attempt.status}</strong><small>{attempt.route} → {attempt.upstream} / {attempt.model} · {duration(attempt.started_at, attempt.completed_at)}{attempt.failure_code ? ` · ${attempt.failure_code}` : ""}</small></div></li>)}</ol></> : null}
+    <div className="why-grid"><article><strong>Why this outcome?</strong><p>{request.decision_stages.length ? `The durable lifecycle ended ${request.status}${request.failure_code ? ` with ${request.failure_code}` : ""}. Each stage above is recorded, not inferred.` : "Exact historical policy and quota inputs are unavailable for this legacy request."}</p></article><article><strong>Why this route?</strong><p>{request.selected_route ? `Pre-dispatch selection recorded ${request.selected_route} → ${request.selected_upstream} / ${request.selected_model}.` : "No durable pre-dispatch route selection was recorded."}{fallbackUsed ? ` The observed fallback sequence ended on ${request.attempts.at(-1)?.route}.` : ""}</p></article><article><strong>Cost confidence</strong><p>{request.attempts.some((attempt) => attempt.cost_provenance === "estimated") ? "At least one attempt uses estimated cost; do not treat the total as provider-reported." : "Attempt rows preserve independent usage and cost provenance."}</p></article></div>
+  </section>;
 }
 
 function RequestsWorkspacePage() {
   const session = useConsoleSession();
   const workspace = useOptionalWorkspace();
   const [environment, setEnvironment] = useState("");
+  const routeSearch = RequestRouteSearchSchema.parse(workspace?.search ?? {});
+  const [standaloneSearch, setStandaloneSearch] = useState<RequestRouteSearch>({});
+  const activeSearch = workspace ? routeSearch : standaloneSearch;
+  const [filters, setFilters] = useState<RequestFilterDraft>(() => requestFilterDraft(routeSearch));
   const [page, setPage] = useState<LogicalRequestPage>();
   const [selected, setSelected] = useState<LogicalRequest>();
+  const [effective, setEffective] = useState<EffectiveConfiguration>();
   const [problem, setProblem] = useState<AdminProblem>();
   const [busy, setBusy] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
   const effectiveEnvironment = workspace?.environment?.id ?? environment;
-  async function load(cursor?: string, selectedEnvironment = effectiveEnvironment): Promise<void> {
+  const canonicalListKey = requestListKey(routeSearch);
+  const canonicalFilterKey = JSON.stringify(requestFilterDraft(routeSearch));
+
+  async function load(search: RequestRouteSearch, selectedEnvironment = effectiveEnvironment): Promise<void> {
+    if (!selectedEnvironment) return;
     setBusy(true); setProblem(undefined);
     try {
-      const result = await adminRequest(queryPath("/admin/v1/requests", { environment_id: selectedEnvironment, page_size: "50", cursor }), RequestPageSchema);
-      setPage(result.data); setSelected(undefined);
-      workspace?.updateSearch({ cursor, request: undefined });
+      const result = await adminRequest(queryPath("/admin/v1/requests", {
+        component_kind: search.component_kind,
+        cost_max_nano_usd: search.cost_max_nano_usd,
+        cost_min_nano_usd: search.cost_min_nano_usd,
+        cursor: search.cursor,
+        end: search.end,
+        environment_id: selectedEnvironment,
+        error_code: search.error_code,
+        feature: search.feature,
+        latency_max_ms: search.latency_max_ms,
+        latency_min_ms: search.latency_min_ms,
+        model: search.model,
+        page_size: "50",
+        platform: search.platform,
+        request_id: search.request_id,
+        route: search.route,
+        sort: search.sort,
+        start: search.start,
+        status: search.status,
+        tokens_max: search.tokens_max,
+        tokens_min: search.tokens_min,
+        trust_source: search.trust_source,
+        upstream: search.upstream,
+        user_id: search.user_id
+      }), RequestPageSchema);
+      setPage(result.data);
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
+
   async function loadRequest(requestID: string, selectedEnvironment = effectiveEnvironment): Promise<void> {
+    if (!selectedEnvironment) return;
     setDetailBusy(true); setProblem(undefined);
     try {
       const response = await adminRequest(`/admin/v1/requests/${requestID}`, RequestSchema);
       if (response.data.id !== requestID || response.data.environment_id !== selectedEnvironment) throw new Error("request_context");
-      setSelected(response.data);
-      workspace?.updateSearch({ request: requestID });
+      setSelected(response.data); setEffective(undefined);
     }
     catch (error) {
       setSelected(undefined);
@@ -250,30 +580,140 @@ function RequestsWorkspacePage() {
     finally { setDetailBusy(false); }
   }
 
+  async function explainRequest(request: LogicalRequest): Promise<void> {
+    setDetailBusy(true); setProblem(undefined);
+    try {
+      const response = await getRequestEffectiveConfiguration(request.id);
+      if (response.data.subject.id !== request.id || response.data.environment_id !== request.environment_id || response.data.revision_id !== request.config_revision_id) throw new Error("request_context");
+      setEffective(response.data);
+    } catch (error) {
+      setEffective(undefined);
+      setProblem(error instanceof Error && error.message === "request_context" ? { code: "invalid_response", detail: "The recorded explanation did not match the selected request, environment, and revision.", retryable: true, status: 0, title: "Request explanation mismatch" } : problemFromError(error));
+    } finally { setDetailBusy(false); }
+  }
+
+  function updateFilter(name: keyof RequestFilterDraft, value: string): void {
+    setFilters((current) => ({ ...current, [name]: value }));
+  }
+
+  function applyFilters(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const candidate = requestSearchCandidate(activeSearch, filters);
+    if (!candidate.success) {
+      setProblem(invalidFilterProblem("Review the filter formats and ensure every maximum is at least its corresponding minimum."));
+      return;
+    }
+    setProblem(undefined);
+    if (workspace) {
+      const changed = requestListKey(candidate.data) !== canonicalListKey || routeSearch.request !== undefined;
+      workspace.updateSearch(requestSearchPatch(candidate.data));
+      if (!changed) void load(candidate.data, workspace.environment?.id);
+      return;
+    }
+    setStandaloneSearch(candidate.data);
+    void load(candidate.data);
+  }
+
+  function resetFilters(): void {
+    const cleared = RequestRouteSearchSchema.parse({
+      application: routeSearch.application,
+      environment: routeSearch.environment,
+      organization: routeSearch.organization
+    });
+    setFilters(requestFilterDraft());
+    setProblem(undefined);
+    if (workspace) {
+      workspace.updateSearch(requestSearchPatch(cleared));
+      return;
+    }
+    setStandaloneSearch(cleared);
+    void load(cleared);
+  }
+
+  function nextPage(cursor: string): void {
+    const next = RequestRouteSearchSchema.parse({ ...activeSearch, cursor, request: undefined });
+    if (workspace) workspace.updateSearch({ cursor: next.cursor, request: undefined });
+    else { setStandaloneSearch(next); void load(next); }
+  }
+
+  function selectRequest(requestID: string): void {
+    if (workspace) {
+      if (routeSearch.request === requestID) void loadRequest(requestID, workspace.environment?.id);
+      else workspace.updateSearch({ request: requestID });
+      return;
+    }
+    void loadRequest(requestID);
+  }
+
   useEffect(() => {
-    const selectedEnvironment = workspace?.environment?.id;
-    if (!selectedEnvironment) return;
-    const cursor = typeof workspace.search.cursor === "string" ? workspace.search.cursor : undefined;
-    const requestID = typeof workspace.search.request === "string" ? workspace.search.request : undefined;
-    void (async () => {
-      await load(cursor, selectedEnvironment);
-      if (requestID) await loadRequest(requestID, selectedEnvironment);
-    })();
-    // Workspace URL changes are the canonical trigger for this route.
+    if (session.data?.mode !== "configured" || !workspace?.environment?.id) return;
+    // URL navigation is the external signal that starts the server-side query.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load(routeSearch, workspace.environment.id);
+    // The validated URL is the canonical list trigger, including cursor changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.environment?.id]);
+  }, [workspace?.environment?.id, canonicalListKey, session.data?.mode]);
+
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace?.environment?.id) return;
+    if (!routeSearch.request) {
+      // Browser history can independently close the shareable request detail.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelected(undefined); setEffective(undefined);
+      return;
+    }
+    // URL navigation is the external signal that starts the detail query.
+    void loadRequest(routeSearch.request, workspace.environment.id);
+    // Request selection is independently shareable and must not reload the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.environment?.id, routeSearch.request, session.data?.mode]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    // Browser back/forward is an external state source for this editable draft.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFilters(requestFilterDraft(routeSearch));
+    // Keep the editable form synchronized with browser back/forward and reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalFilterKey]);
 
   if (session.data?.mode !== "configured") return <AccessRequired />;
 
   return <div className="control-page">
     <PageHeading eyebrow="Requests" title="Understand what happened.">Inspect identity, client trust, the selected feature, upstream attempts, usage, and cost provenance. Prompt and response bodies remain excluded.</PageHeading>
-    {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Server-side pagination · shareable request selection</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load(undefined, workspace.environment?.id)} type="button">Refresh requests</button></section> : <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); void load(); }}><label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label><FormActions busy={busy}>List requests</FormActions></form>}
+    {workspace?.environment ? <section className={`production-context production-context--${workspace.environment.kind}`}><strong>{workspace.application?.display_name} / {workspace.environment.display_name}</strong><span>Server-side filters and pagination · shareable URL state</span><code>{workspace.environment.id}</code><button className="secondary-action" disabled={busy} onClick={() => void load(routeSearch, workspace.environment?.id)} type="button">Refresh requests</button></section> : null}
+    <form className="filter-bar filter-bar--wide" onSubmit={applyFilters}>
+      {!workspace ? <label>Environment ID<input pattern={environmentInputPattern} required value={environment} onChange={(event) => setEnvironment(event.target.value)} /></label> : null}
+      <label>Status<select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}><option value="">All</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="denied">Denied</option><option value="canceled">Canceled</option><option value="unknown">Unknown</option></select></label>
+      <label>Feature<input pattern={identifierInputPattern} value={filters.feature} onChange={(event) => updateFilter("feature", event.target.value)} /></label>
+      <label>User ID<input pattern="usr_[A-Za-z0-9_-]{16,128}" value={filters.user_id} onChange={(event) => updateFilter("user_id", event.target.value)} /></label>
+      <label>Platform<select value={filters.platform} onChange={(event) => updateFilter("platform", event.target.value)}><option value="">All</option><option value="ios">iOS</option><option value="android">Android</option><option value="web">Web</option><option value="react_native_ios">React Native iOS</option><option value="react_native_android">React Native Android</option><option value="node">Node.js</option></select></label>
+      <label>Component kind<input pattern={identifierInputPattern} value={filters.component_kind} onChange={(event) => updateFilter("component_kind", event.target.value)} /></label>
+      <label>Trust source<input pattern={identifierInputPattern} value={filters.trust_source} onChange={(event) => updateFilter("trust_source", event.target.value)} /></label>
+      <label>Route<input pattern={identifierInputPattern} value={filters.route} onChange={(event) => updateFilter("route", event.target.value)} /></label>
+      <label>AI connection<input pattern={identifierInputPattern} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} /></label>
+      <label>Model<input maxLength={512} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} /></label>
+      <label>Error code<input pattern="[a-z][a-z0-9_]{0,99}" value={filters.error_code} onChange={(event) => updateFilter("error_code", event.target.value)} /></label>
+      <label>Request ID<input pattern="req_[A-Za-z0-9_-]{16,128}" value={filters.request_id} onChange={(event) => updateFilter("request_id", event.target.value)} /></label>
+      <label>Start<input step="1" type="datetime-local" value={filters.start} onChange={(event) => updateFilter("start", event.target.value)} /></label>
+      <label>End<input step="1" type="datetime-local" value={filters.end} onChange={(event) => updateFilter("end", event.target.value)} /></label>
+      <label>Latency minimum (ms)<input inputMode="numeric" min="0" type="number" value={filters.latency_min_ms} onChange={(event) => updateFilter("latency_min_ms", event.target.value)} /></label>
+      <label>Latency maximum (ms)<input inputMode="numeric" min="0" type="number" value={filters.latency_max_ms} onChange={(event) => updateFilter("latency_max_ms", event.target.value)} /></label>
+      <label>Token minimum<input inputMode="numeric" min="0" type="number" value={filters.tokens_min} onChange={(event) => updateFilter("tokens_min", event.target.value)} /></label>
+      <label>Token maximum<input inputMode="numeric" min="0" type="number" value={filters.tokens_max} onChange={(event) => updateFilter("tokens_max", event.target.value)} /></label>
+      <label>Cost minimum (nano-USD)<input inputMode="numeric" min="0" type="number" value={filters.cost_min_nano_usd} onChange={(event) => updateFilter("cost_min_nano_usd", event.target.value)} /></label>
+      <label>Cost maximum (nano-USD)<input inputMode="numeric" min="0" type="number" value={filters.cost_max_nano_usd} onChange={(event) => updateFilter("cost_max_nano_usd", event.target.value)} /></label>
+      <label>Sort<select value={filters.sort} onChange={(event) => updateFilter("sort", event.target.value)}><option value="">Newest first (default)</option><option value="started_at_desc">Newest first</option><option value="started_at_asc">Oldest first</option></select></label>
+      <FormActions busy={busy}>{workspace ? "Apply filters" : "List requests"}</FormActions><button className="secondary-action" disabled={busy} onClick={resetFilters} type="button">Reset filters</button>
+    </form>
     <ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Time", "Status", "Feature", "User", "Component / trust", "Route / model", "Latency", "Tokens", "Cost"]} rows={page.items.map((request) => { const attempt = request.attempts.at(-1); return [time(request.started_at), <button aria-label={request.id} className="link-button" disabled={detailBusy} onClick={() => void loadRequest(request.id)} type="button">{request.status}<br /><small>{request.id}</small></button>, request.feature, request.user_id, `${request.component_kind ?? "legacy"} · ${request.trust_source ?? "legacy trust"}`, attempt ? `${attempt.route} → ${attempt.model}` : "No attempt", duration(request.started_at, request.completed_at), request.usage?.total_tokens.toLocaleString() ?? "—", request.usage ? `${request.usage.cost_nano_usd.toLocaleString()} nUSD` : "—"]; })} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
+    {page ? <><Table headers={["Time", "Status", "Feature", "User", "Component / trust", "Selected route / model", "Latency", "Tokens", "Cost"]} rows={page.items.map((request) => { const attempt = request.attempts.at(-1); return [time(request.started_at), <button aria-label={request.id} className="link-button" disabled={detailBusy} onClick={() => selectRequest(request.id)} type="button">{request.status}<br /><small>{request.id}</small></button>, request.feature, request.user_id, `${request.component_kind ?? "legacy"} · ${request.trust_source ?? "legacy trust"}`, request.selected_route ? `${request.selected_route} → ${request.selected_model}` : attempt ? `${attempt.route} → ${attempt.model} (observed)` : "Unavailable", duration(request.started_at, request.completed_at), request.usage?.total_tokens.toLocaleString() ?? "—", request.usage ? `${request.usage.cost_nano_usd.toLocaleString()} nUSD` : "—"]; })} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => nextPage(page.page.next_cursor ?? "")} type="button">Next page</button> : null}</> : null}
     {detailBusy ? <p role="status">Loading exact request detail…</p> : null}
-    {selected ? <aside className="detail-card request-detail"><div className="detail-card__heading"><h2>Request detail</h2>{workspace ? <button className="small-action" onClick={() => { setSelected(undefined); workspace.updateSearch({ request: undefined }); }} type="button">Close detail</button> : null}</div>
-      <dl><div><dt>Request</dt><dd>{selected.id}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id}</dd></div><div><dt>Feature</dt><dd>{selected.feature}</dd></div><div><dt>Protocol</dt><dd>{selected.protocol}</dd></div><div><dt>Status</dt><dd>{selected.status}</dd></div><div><dt>Started</dt><dd>{time(selected.started_at)}</dd></div><div><dt>Completed</dt><dd>{time(selected.completed_at)}</dd></div><div><dt>Duration</dt><dd>{duration(selected.started_at, selected.completed_at)}</dd></div></dl>
+    {selected ? <aside className="detail-card request-detail"><div className="detail-card__heading"><h2>Request detail</h2><button className="small-action" onClick={() => { setSelected(undefined); setEffective(undefined); workspace?.updateSearch({ request: undefined }); }} type="button">Close detail</button></div>
+      <dl><div><dt>Request</dt><dd>{selected.id}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id}</dd></div><div><dt>Configuration revision</dt><dd>{selected.config_revision_id}</dd></div><div><dt>Selected limit plan</dt><dd>{selected.selected_limit_plan}</dd></div><div><dt>Pre-dispatch route</dt><dd>{selected.selected_route ? `${selected.selected_route} → ${selected.selected_upstream} / ${selected.selected_model} (${selected.selected_physical_model})` : "Unavailable"}</dd></div><div><dt>Feature</dt><dd>{selected.feature}</dd></div><div><dt>Protocol</dt><dd>{selected.protocol}</dd></div><div><dt>Status</dt><dd>{selected.status}{selected.failure_code ? ` · ${selected.failure_code}` : ""}</dd></div><div><dt>Started</dt><dd>{time(selected.started_at)}</dd></div><div><dt>Completed</dt><dd>{time(selected.completed_at)}</dd></div><div><dt>Duration</dt><dd>{duration(selected.started_at, selected.completed_at)}</dd></div></dl>
       <RequestTimeline request={selected} />
+      <p><button className="secondary-action" disabled={detailBusy} onClick={() => void explainRequest(selected)} type="button">Explain recorded configuration</button></p>
+      {effective ? <EffectiveConfigurationPanel configuration={effective} /> : null}
       <h3>Client attribution</h3><dl><div><dt>Installation</dt><dd>{selected.installation_id}</dd></div><div><dt>Installation Family</dt><dd>{selected.installation_family_id ?? "legacy request"}</dd></div><div><dt>Client component</dt><dd>{selected.client_component_id ?? "legacy request"}</dd></div><div><dt>Component definition</dt><dd>{selected.component_definition_id ?? "legacy request"}</dd></div><div><dt>Component kind</dt><dd>{selected.component_kind ?? "legacy request"}</dd></div><div><dt>Trust source</dt><dd>{selected.trust_source ?? "legacy request"}</dd></div><div><dt>Framework</dt><dd>{selected.framework ? `${selected.framework}${selected.framework_version ? ` ${selected.framework_version}` : ""}` : "raw transport"}</dd></div><div><dt>Framework version</dt><dd>{selected.framework_version ?? "—"}</dd></div></dl>
       <h3>Aggregate usage</h3><Table headers={["Logical requests", "Input tokens", "Output tokens", "Total tokens", "Cost nano-USD"]} rows={selected.usage ? [[selected.usage.logical_requests, selected.usage.input_tokens, selected.usage.output_tokens, selected.usage.total_tokens, selected.usage.cost_nano_usd]] : []} />
       <h3>Ordered upstream attempts</h3><Table headers={["#", "Attempt", "Route", "Started", "First byte", "First token", "TTFT", "Completed", "Duration", "Upstream", "Model", "Status", "HTTP", "Failure", "Input", "Output", "Total", "Cost nUSD", "Usage provenance", "Cost provenance", "Cost source"]} rows={selected.attempts.map((attempt) => [attempt.attempt_number, attempt.id, attempt.route, time(attempt.started_at), time(attempt.first_byte_at), time(attempt.first_token_at), duration(attempt.started_at, attempt.first_token_at), time(attempt.completed_at), duration(attempt.started_at, attempt.completed_at), attempt.upstream, attempt.model, attempt.status, attempt.http_status ?? "—", attempt.failure_code ?? "—", attempt.usage?.input_tokens ?? "—", attempt.usage?.output_tokens ?? "—", attempt.usage?.total_tokens ?? "—", attempt.usage?.cost_nano_usd ?? "—", attempt.usage_provenance, attempt.cost_provenance, attempt.cost_source ?? "—"])} />
@@ -371,17 +811,128 @@ export function ErrorsPage() { return <AnalyticsPage focus="errors" />; }
 export function AttestationFailuresPage() { return <AnalyticsPage focus="attestation" />; }
 
 export function AuditPageView() {
-  const session = useConsoleSession(); const organization = session.data?.session?.organization_id ?? "";
-  const [page, setPage] = useState<AuditPage>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
-  if (session.data?.mode !== "configured") return <AccessRequired />;
-  async function load(cursor?: string): Promise<void> {
+  const session = useConsoleSession(); const workspace = useOptionalWorkspace(); const organization = session.data?.session?.organization_id ?? "";
+  const routeSearch = AuditRouteSearchSchema.parse(workspace?.search ?? {});
+  const [standaloneSearch, setStandaloneSearch] = useState<AuditRouteSearch>({});
+  const activeSearch = workspace ? routeSearch : standaloneSearch;
+  const [filters, setFilters] = useState<AuditFilterDraft>(() => auditFilterDraft(routeSearch));
+  const [page, setPage] = useState<AuditPage>(); const [selected, setSelected] = useState<AuditEvent>(); const [problem, setProblem] = useState<AdminProblem>(); const [busy, setBusy] = useState(false);
+  const canonicalListKey = auditListKey(routeSearch);
+  const canonicalFilterKey = JSON.stringify(auditFilterDraft(routeSearch));
+
+  async function load(search: AuditRouteSearch): Promise<void> {
     setBusy(true); setProblem(undefined);
-    try { setPage((await adminRequest(queryPath("/admin/v1/audit-events", { organization_id: organization, page_size: "50", cursor }), AuditPageSchema)).data); }
+    try {
+      setPage((await adminRequest(queryPath("/admin/v1/audit-events", {
+        action: search.action,
+        actor_id: search.actor_id,
+        actor_kind: search.actor_kind,
+        cursor: search.cursor,
+        end: search.end,
+        environment_id: search.environment_id,
+        organization_id: organization,
+        page_size: "50",
+        reason: search.reason,
+        resource_id: search.resource_id,
+        resource_type: search.resource_type,
+        result: search.result,
+        source: search.source,
+        start: search.start
+      }), AuditPageSchema)).data);
+      setSelected(undefined);
+    }
     catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
-  return <div className="control-page"><PageHeading eyebrow="Operations" title="Audit log">Append-only, tenant-scoped administrative outcomes with sensitive changes represented only by redacted summaries.</PageHeading>
-    <button className="primary-action" disabled={busy} onClick={() => void load()} type="button">{busy ? "Loading…" : "Load audit events"}</button><ProblemNotice problem={problem} />
-    {page ? <><Table headers={["Time", "Actor", "Action", "Target", "Result", "Request"]} rows={page.items.map((event) => [time(event.timestamp), event.actor, event.action, event.target, event.result, event.request_id])} />{page.page.has_more ? <button className="secondary-action" disabled={busy} onClick={() => void load(page.page.next_cursor)} type="button">Next page</button> : null}</> : null}
+  async function inspect(eventID: string): Promise<void> {
+    setBusy(true); setProblem(undefined);
+    try { setSelected((await adminRequest(`/admin/v1/audit-events/${eventID}`, AuditEventSchema)).data); }
+    catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
+  }
+
+  function updateFilter(name: keyof AuditFilterDraft, value: string): void {
+    setFilters((current) => ({ ...current, [name]: value }));
+  }
+
+  function applyFilters(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const candidate = auditSearchCandidate(activeSearch, filters);
+    if (!candidate.success) {
+      setProblem(invalidFilterProblem("Review the audit filter formats and ensure the end time is later than the start time."));
+      return;
+    }
+    setProblem(undefined);
+    if (workspace) {
+      const changed = auditListKey(candidate.data) !== canonicalListKey;
+      workspace.updateSearch(auditSearchPatch(candidate.data));
+      if (!changed) void load(candidate.data);
+      return;
+    }
+    setStandaloneSearch(candidate.data);
+    void load(candidate.data);
+  }
+
+  function resetFilters(): void {
+    const cleared = AuditRouteSearchSchema.parse({
+      application: routeSearch.application,
+      environment: routeSearch.environment,
+      organization: routeSearch.organization
+    });
+    setFilters(auditFilterDraft());
+    setProblem(undefined);
+    if (workspace) {
+      workspace.updateSearch(auditSearchPatch(cleared));
+      return;
+    }
+    setStandaloneSearch(cleared);
+    void load(cleared);
+  }
+
+  function nextPage(cursor: string): void {
+    const next = AuditRouteSearchSchema.parse({ ...activeSearch, cursor });
+    if (workspace) workspace.updateSearch({ cursor: next.cursor });
+    else { setStandaloneSearch(next); void load(next); }
+  }
+
+  useEffect(() => {
+    if (session.data?.mode !== "configured" || !workspace) return;
+    // URL navigation is the external signal that starts the server-side query.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load(routeSearch);
+    // The validated URL is the canonical audit query and cursor trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalListKey, organization, session.data?.mode]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    // Browser back/forward is an external state source for this editable draft.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFilters(auditFilterDraft(routeSearch));
+    // Restore the editable form on navigation, reload, and browser history changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalFilterKey]);
+
+  if (session.data?.mode !== "configured") return <AccessRequired />;
+
+  return <div className="control-page"><PageHeading eyebrow="Operations" title="Audit log">Append-only, tenant-scoped administrative outcomes with explicit source, environment, reason code, and value-free field changes.</PageHeading>
+    <form className="filter-bar filter-bar--wide" onSubmit={applyFilters}>
+      <label>Environment<input pattern={environmentInputPattern} placeholder="All environments" value={filters.environment_id} onChange={(event) => updateFilter("environment_id", event.target.value)} /></label>
+      <label>Actor kind<select value={filters.actor_kind} onChange={(event) => updateFilter("actor_kind", event.target.value)}><option value="">All</option><option value="admin_user">Administrator</option><option value="admin_api_token">API token</option><option value="system">System</option></select></label>
+      <label>Administrator / token<input pattern="(adm|tok)_[A-Za-z0-9_-]{16,128}" placeholder="adm_… or tok_…" value={filters.actor_id} onChange={(event) => updateFilter("actor_id", event.target.value)} /></label>
+      <label>Action<input maxLength={100} pattern="[a-z][a-z0-9_.]{0,99}" placeholder="admin.secret_rotate" value={filters.action} onChange={(event) => updateFilter("action", event.target.value)} /></label>
+      <label>Resource type<input maxLength={64} pattern="[a-z][a-z0-9_.]{0,63}" placeholder="secret_record" value={filters.resource_type} onChange={(event) => updateFilter("resource_type", event.target.value)} /></label>
+      <label>Resource ID<input pattern="[a-z][a-z0-9]{1,15}_[A-Za-z0-9_-]{16,128}" placeholder="sec_…" value={filters.resource_id} onChange={(event) => updateFilter("resource_id", event.target.value)} /></label>
+      <label>Descriptive source<select value={filters.source} onChange={(event) => updateFilter("source", event.target.value)}><option value="">All</option><option value="console">Console session</option><option value="cli">CLI claim</option><option value="api">API token</option><option value="system">System</option></select></label>
+      <label>Reason code<input maxLength={100} pattern="[a-z][a-z0-9._-]{0,99}" placeholder="operator_reason_provided" value={filters.reason} onChange={(event) => updateFilter("reason", event.target.value)} /></label>
+      <label>Result<select value={filters.result} onChange={(event) => updateFilter("result", event.target.value)}><option value="">All</option><option value="succeeded">Succeeded</option><option value="denied">Denied</option><option value="failed">Failed</option><option value="indeterminate">Indeterminate</option></select></label>
+      <label>Start<input step="1" type="datetime-local" value={filters.start} onChange={(event) => updateFilter("start", event.target.value)} /></label><label>End<input step="1" type="datetime-local" value={filters.end} onChange={(event) => updateFilter("end", event.target.value)} /></label>
+      <FormActions busy={busy}>Apply filters</FormActions><button className="secondary-action" disabled={busy} onClick={resetFilters} type="button">Reset filters</button>
+    </form><ProblemNotice problem={problem} />
+    {page ? <><Table headers={["Time", "Actor", "Descriptive source", "Environment", "Action", "Target", "Reason", "Result", "Request"]} rows={page.items.map((event) => [time(event.timestamp), event.actor, event.source, event.environment_id ?? "Instance", event.action, <button className="link-button" disabled={busy} onClick={() => void inspect(event.id)} type="button">{event.target}</button>, event.reason ?? "—", event.result, event.request_id || "—"])} />{page.page.has_more && page.page.next_cursor ? <button className="secondary-action" disabled={busy} onClick={() => nextPage(page.page.next_cursor ?? "")} type="button">Next page</button> : null}</> : null}
+    {selected ? <aside className="detail-card"><div className="detail-card__heading"><div><p className="eyebrow">Immutable event</p><h2>Audit detail</h2></div><button className="small-action" onClick={() => setSelected(undefined)} type="button">Close</button></div>
+      <dl><div><dt>Event</dt><dd>{selected.id}</dd></div><div><dt>Occurred</dt><dd>{time(selected.timestamp)}</dd></div><div><dt>Actor</dt><dd>{selected.actor}</dd></div><div><dt>Descriptive source</dt><dd>{selected.source}</dd></div><div><dt>Environment</dt><dd>{selected.environment_id ?? "Instance"}</dd></div><div><dt>Reason</dt><dd>{selected.reason ?? "Not supplied"}</dd></div><div><dt>Result</dt><dd>{selected.result}</dd></div><div><dt>Request</dt><dd>{selected.request_id || "—"}</dd></div></dl>
+      <h3>Field-level diff</h3><Table headers={["Field", "Operation", "Classification", "Value"]} rows={selected.changes.map((change) => [change.field, change.operation, change.classification, change.redacted ? "Redacted by contract" : "Value not retained"])} />
+      <details><summary>Redaction-safe raw JSON</summary><pre>{JSON.stringify(selected, null, 2)}</pre></details>
+    </aside> : null}
   </div>;
 }
 
@@ -489,7 +1040,7 @@ export function SelfTestsPage() {
     } catch (error) { setProblem(problemFromError(error)); } finally { setBusy(false); }
   }
   return <div className="control-page"><PageHeading eyebrow="Operations" title="Self-tests">Local verification checks durable state. Credential-aware tests use only active server-owned targets and secrets, prove a configured cost ceiling before dispatch, and persist redaction-safe results.</PageHeading>
-    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the configured two-request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
+    <form className="control-form" onSubmit={(event) => void start(event)}><div className="form-field-grid"><label>Environment ID<input name="environment" pattern={environmentInputPattern} required /></label><label>Test kind<select name="kind" onChange={(event) => setKind(event.target.value)} value={kind}><option value="local">Local</option><option value="upstream">Configured upstream</option><option value="openrouter">OpenRouter conformance</option></select></label></div>{kind !== "local" ? <><div className="form-field-grid"><label>Upstream ID<input name="upstream" pattern={identifierInputPattern} required /></label><label>Model ID<input name="model" pattern={identifierInputPattern} required /></label></div><label>Maximum total cost (nano-USD)<input defaultValue={10_000_000} max={1_000_000_000} min={1} name="max_cost_nano_usd" required type="number" /><small>10,000,000 nano-USD = US$0.01. The server refuses dispatch when the complete protocol-specific request bound is higher.</small></label></> : null}<button className="primary-action" disabled={!canRun || busy} type="submit">{busy ? "Starting…" : "Run self-test"}</button></form><ProblemNotice problem={problem} />
     {run ? <section className="detail-card"><div className="detail-card__heading"><div><h2>{run.kind} self-test</h2><p>{run.id} · {run.state}</p></div><button className="secondary-action" disabled={busy} onClick={() => void refresh()} type="button">Refresh</button></div><Table headers={["Check", "State", "Safe detail"]} rows={run.checks.map((check) => [check.name, check.state, check.safe_detail ?? "—"])} /></section> : null}
     <section className="detail-card"><h2>Scheduled credential-aware self-tests</h2><p>Each schedule pins one active configuration revision and one durable API-token ID. Browser session values and provider secret values are never stored in the schedule.</p>
       <div className="filter-bar"><label>Scheduled environment ID<input pattern={environmentInputPattern} required value={scheduleEnvironment} onChange={(event) => { setScheduleEnvironment(event.target.value); setSchedules(undefined); setSelectedSchedule(undefined); }} /></label><button className="secondary-action" disabled={!canRun || busy || !environmentPattern.test(scheduleEnvironment)} onClick={() => void loadSchedules()} type="button">Load schedules</button></div>

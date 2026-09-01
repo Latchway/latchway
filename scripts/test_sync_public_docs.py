@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -57,6 +58,22 @@ class SourceFilesTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "source contains a symlink"):
                 SYNC.source_files(source)
+
+    def test_manifest_binds_source_revision_and_canonical_file_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            (source / "index.mdx").write_text("home\n", encoding="utf-8")
+            files = SYNC.source_files(source)
+
+            manifest = json.loads(SYNC.manifest_payload(files, "a" * 40))
+
+            self.assertEqual(manifest["format"], 1)
+            self.assertEqual(manifest["source"], "latchway/docs/public")
+            self.assertEqual(manifest["source_commit"], "a" * 40)
+            self.assertEqual(
+                manifest["source_tree_sha256"],
+                SYNC.file_table_sha256(manifest["files"]),
+            )
 
 
 if __name__ == "__main__":

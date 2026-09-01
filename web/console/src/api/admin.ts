@@ -421,6 +421,62 @@ const AttemptSchema = z
     }
   });
 
+const RequestDecisionStageName = z.enum([
+  "identity_verified",
+  "client_trust_verified",
+  "client_context_validated",
+  "configuration_loaded",
+  "request_inspected",
+  "policy_evaluated",
+  "route_selected",
+  "quota_rule_evaluated",
+  "quota_reserved",
+  "lifecycle_recovered"
+]);
+
+export const RequestDecisionStageSchema = z
+  .object({
+    completed_at: Instant,
+    config_revision_id: OpaqueID,
+    duration_ms: NonnegativeSafeInteger,
+    failure_code: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/).optional(),
+    limit_algorithm: z.enum(["calendar", "token_bucket", "per_request", "concurrency"]).optional(),
+    limit_maximum: NonnegativeSafeInteger.optional(),
+    limit_metric: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional(),
+    limit_plan_key: Identifier.optional(),
+    limit_rule_key: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
+    model: Identifier.optional(),
+    number: z.number().int().min(1).max(256),
+    outcome: z.enum(["succeeded", "denied", "failed", "cancelled"]),
+    physical_model: z.string().min(1).max(512).refine((value) => !/[\r\n\0]/.test(value)).optional(),
+    policy_rule_key: z.string().regex(/^([a-z][a-z0-9_-]{0,62}|[A-Za-z0-9_-]{43})$/).optional(),
+    route: Identifier.optional(),
+    stage: RequestDecisionStageName,
+    started_at: Instant,
+    upstream: Identifier.optional()
+  })
+  .strict()
+  .superRefine((stage, context) => {
+    const startedAt = Date.parse(stage.started_at);
+    const completedAt = Date.parse(stage.completed_at);
+    if (completedAt < startedAt || completedAt - startedAt !== stage.duration_ms) {
+      context.addIssue({ code: "custom", message: "Decision-stage timing is inconsistent.", path: ["duration_ms"] });
+    }
+    if ((stage.outcome === "succeeded") === Boolean(stage.failure_code)) {
+      context.addIssue({ code: "custom", message: "Only unsuccessful decision stages require a failure code.", path: ["failure_code"] });
+    }
+    const limitFields = [stage.limit_rule_key, stage.limit_metric, stage.limit_algorithm, stage.limit_maximum];
+    const limitFieldsPresent = limitFields.filter((value) => value !== undefined).length;
+    if (limitFieldsPresent !== 0 && limitFieldsPresent !== limitFields.length) {
+      context.addIssue({ code: "custom", message: "Decision-stage limit provenance must be complete.", path: ["limit_rule_key"] });
+    }
+    const routeFields = [stage.route, stage.upstream, stage.model, stage.physical_model];
+    const routeFieldsPresent = routeFields.filter((value) => value !== undefined).length;
+    if (routeFieldsPresent !== 0 && routeFieldsPresent !== routeFields.length) {
+      context.addIssue({ code: "custom", message: "Decision-stage route provenance must be complete.", path: ["route"] });
+    }
+  });
+
 export const RequestSchema = z
   .object({
     attempts: z.array(AttemptSchema).max(32),
@@ -428,7 +484,10 @@ export const RequestSchema = z
     completed_at: OptionalInstant,
     component_definition_id: Identifier.optional(),
     component_kind: ComponentKind.optional(),
+    config_revision_id: OpaqueID,
+    decision_stages: z.array(RequestDecisionStageSchema).max(256),
     environment_id: OpaqueID,
+    failure_code: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/).optional(),
     feature: Identifier,
     framework: Identifier.optional(),
     framework_version: z
@@ -449,8 +508,13 @@ export const RequestSchema = z
       "anthropic_messages",
       "opaque_http"
     ]),
+    selected_limit_plan: Identifier,
+    selected_model: Identifier.optional(),
+    selected_physical_model: z.string().min(1).max(512).refine((value) => !/[\r\n\0]/.test(value)).optional(),
+    selected_route: Identifier.optional(),
+    selected_upstream: Identifier.optional(),
     started_at: Instant,
-    status: z.enum(["succeeded", "failed", "canceled", "unknown"]),
+    status: z.enum(["succeeded", "failed", "denied", "canceled", "unknown"]),
     trust_source: TrustSource.optional(),
     usage: UsageValuesSchema.optional(),
     user_id: OpaqueID
@@ -471,6 +535,11 @@ export const RequestSchema = z
     if (Boolean(request.framework) !== Boolean(request.framework_version)) {
       context.addIssue({ code: "custom", message: "Framework identity and version must appear together.", path: ["framework"] });
     }
+    const selectedRouteFields = [request.selected_route, request.selected_upstream, request.selected_model, request.selected_physical_model];
+    const selectedRouteFieldsPresent = selectedRouteFields.filter(Boolean).length;
+    if (selectedRouteFieldsPresent !== 0 && selectedRouteFieldsPresent !== selectedRouteFields.length) {
+      context.addIssue({ code: "custom", message: "Selected-route provenance must be complete.", path: ["selected_route"] });
+    }
     const startedAt = Date.parse(request.started_at);
     const completedAt = request.completed_at ? Date.parse(request.completed_at) : undefined;
     if (completedAt !== undefined && completedAt < startedAt) {
@@ -482,6 +551,25 @@ export const RequestSchema = z
     if (request.status !== "unknown" && !request.completed_at) {
       context.addIssue({ code: "custom", message: "Terminal requests require completion time.", path: ["completed_at"] });
     }
+    let terminalStage = false;
+    request.decision_stages.forEach((stage, index) => {
+      if (stage.number !== index + 1) {
+        context.addIssue({ code: "custom", message: "Decision stages must be contiguous and ordered.", path: ["decision_stages", index, "number"] });
+      }
+      if (stage.config_revision_id !== request.config_revision_id) {
+        context.addIssue({ code: "custom", message: "Decision-stage revision must match its request.", path: ["decision_stages", index, "config_revision_id"] });
+      }
+      if (terminalStage) {
+        context.addIssue({ code: "custom", message: "No decision stage may follow a terminal stage.", path: ["decision_stages", index] });
+      }
+      terminalStage ||= stage.outcome !== "succeeded";
+      if (stage.limit_plan_key && stage.limit_plan_key !== request.selected_limit_plan) {
+        context.addIssue({ code: "custom", message: "Decision-stage plan must match its request.", path: ["decision_stages", index, "limit_plan_key"] });
+      }
+      if (stage.route && request.selected_route && stage.stage === "route_selected" && stage.route !== request.selected_route) {
+        context.addIssue({ code: "custom", message: "Route-selection stage must match the durable selected route.", path: ["decision_stages", index, "route"] });
+      }
+    });
     request.attempts.forEach((attempt, index) => {
       if (attempt.attempt_number !== index + 1) {
         context.addIssue({
@@ -496,6 +584,177 @@ export const RequestSchema = z
 export const RequestPageSchema = z
   .object({ items: z.array(RequestSchema).max(200), page: PageInfo })
   .strict();
+
+export const ConfirmedUserOperationRequestSchema = z
+  .object({
+    acknowledge_immediate_effect: z.literal(true),
+    impact_token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    reason: z.string().trim().min(1).max(500).refine((value) => !value.includes("\0"))
+  })
+  .strict();
+
+export const UserOperationCountsSchema = z
+  .object({
+    active_client_components: NonnegativeSafeInteger,
+    active_component_refresh_tokens: NonnegativeSafeInteger,
+    active_component_sessions: NonnegativeSafeInteger,
+    active_installation_families: NonnegativeSafeInteger,
+    active_refresh_tokens: NonnegativeSafeInteger,
+    active_session_grants: NonnegativeSafeInteger
+  })
+  .strict();
+
+export const UserOperationActionSchema = z.enum([
+  "block",
+  "unblock",
+  "require_reauthentication",
+  "require_app_reverification"
+]);
+
+export const UserOperationImpactSchema = z
+  .object({
+    access_effect: z.string().min(1).max(128),
+    action: UserOperationActionSchema,
+    applicable: z.boolean(),
+    counts: UserOperationCountsSchema,
+    current_status: z.enum(["active", "blocked"]),
+    immediate: z.boolean(),
+    impact_token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    reversible: z.boolean(),
+    summary: z.string().min(1).max(1024)
+  })
+  .strict();
+
+export const UserOperationResultSchema = z
+  .object({
+    impact: UserOperationImpactSchema,
+    operation_id: z.string().regex(/^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/),
+    user: UserSchema
+  })
+  .strict();
+
+export const EffectiveConfigurationSubjectSchema = z
+  .object({
+    component_id: ClientComponentID.optional(),
+    id: z.string().regex(/^(usr|req)_[A-Za-z0-9_-]{16,128}$/),
+    installation_id: z.string().regex(/^ins_[A-Za-z0-9_-]{16,128}$/).optional(),
+    kind: z.enum(["user", "request"]),
+    user_id: z.string().regex(/^usr_[A-Za-z0-9_-]{16,128}$/)
+  })
+  .strict()
+  .superRefine((subject, context) => {
+    const expectedPrefix = subject.kind === "user" ? "usr_" : "req_";
+    if (!subject.id.startsWith(expectedPrefix)) {
+      context.addIssue({ code: "custom", message: "Effective-configuration subject kind and identifier disagree.", path: ["id"] });
+    }
+  });
+
+export const EffectiveConfigurationInputSchema = z
+  .object({
+    availability: z.enum(["available", "unavailable"]),
+    detail: z.string().min(1).max(2048),
+    fact: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/),
+    keys: z.array(z.string().min(1).max(128)).max(64).refine((keys) => new Set(keys).size === keys.length).optional(),
+    source: z.string().min(1).max(512),
+    values: z.record(z.string(), z.string().max(512)).refine((values) => Object.keys(values).length <= 16).optional()
+  })
+  .strict();
+
+export const EffectiveLimitSchema = z
+  .object({
+    algorithm: z.enum(["calendar", "token_bucket", "per_request", "concurrency"]),
+    capacity: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    hard: z.literal(true),
+    index: z.number().int().min(0).max(63),
+    maximum: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    metric: Identifier,
+    per_request_maximum: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    refill_per_second: z.string().regex(/^[0-9]+(?:\.[0-9]+)?$/).optional(),
+    scope: z.array(Identifier).min(1).max(8).refine((scope) => new Set(scope).size === scope.length),
+    source: z.string().min(1).max(512),
+    timezone: z.string().min(1).max(128).optional(),
+    window: z.string().min(2).max(32).optional()
+  })
+  .strict()
+  .superRefine((limit, context) => {
+    const present = (value: unknown) => value !== undefined;
+    const valid =
+      (limit.algorithm === "calendar" && present(limit.maximum) && present(limit.window) && present(limit.timezone) && !present(limit.capacity) && !present(limit.refill_per_second) && !present(limit.per_request_maximum)) ||
+      (limit.algorithm === "token_bucket" && present(limit.capacity) && present(limit.refill_per_second) && !present(limit.maximum) && !present(limit.window) && !present(limit.timezone) && !present(limit.per_request_maximum)) ||
+      (limit.algorithm === "per_request" && present(limit.per_request_maximum) && !present(limit.maximum) && !present(limit.capacity) && !present(limit.refill_per_second) && !present(limit.window) && !present(limit.timezone)) ||
+      (limit.algorithm === "concurrency" && present(limit.maximum) && !present(limit.capacity) && !present(limit.refill_per_second) && !present(limit.per_request_maximum) && !present(limit.window) && !present(limit.timezone));
+    if (!valid) context.addIssue({ code: "custom", message: "Effective-limit parameters do not match the algorithm." });
+  });
+
+export const EffectiveRouteSchema = z
+  .object({
+    configured_priority: NonnegativeSafeInteger,
+    configured_weight: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    fallback_on: z.array(Identifier).max(32).refine((values) => new Set(values).size === values.length),
+    match_expression: z.string().min(1).max(4096),
+    model: Identifier,
+    observed: z.boolean(),
+    order: z.number().int().min(1).max(32),
+    physical_model: z.string().min(1).max(512),
+    retry_maximum_attempts: z.number().int().min(1).max(32),
+    retry_on: z.array(Identifier).max(32).refine((values) => new Set(values).size === values.length),
+    route: Identifier,
+    source: z.string().min(1).max(512),
+    sticky_by: z.string().min(1).max(256).optional(),
+    upstream: Identifier
+  })
+  .strict();
+
+export const EffectiveOutputSchema = z
+  .object({
+    configured_absolute_maximum_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    configured_default_maximum_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    effective_default_maximum_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    effective_maximum_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    requested_maximum_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    source: z.string().min(1).max(512)
+  })
+  .strict();
+
+export const EffectiveConfigurationSchema = z
+  .object({
+    component_allowed: z.boolean().optional(),
+    component_definition_id: Identifier.optional(),
+    decision_stages: z.array(RequestDecisionStageSchema).max(256),
+    denial_reason: z.string().min(1).max(128).optional(),
+    environment_id: OpaqueID,
+    environment_kind: z.enum(["development", "staging", "production"]),
+    evaluation_mode: z.enum(["current_user_projection", "recorded_request"]),
+    feature: Identifier,
+    inputs: z.array(EffectiveConfigurationInputSchema).max(16),
+    limit_plan: Identifier.optional(),
+    limit_plan_source: z.string().min(1).max(128).optional(),
+    limits: z.array(EffectiveLimitSchema).max(64),
+    matched_access_expression: z.string().min(1).max(4096).optional(),
+    matched_limit_plan_expression: z.string().min(1).max(4096).optional(),
+    output: EffectiveOutputSchema.optional(),
+    policy_outcome: z.enum(["allowed", "denied", "unavailable"]),
+    protocol: z.enum(["openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http"]).optional(),
+    request_status: z.enum(["succeeded", "failed", "denied", "canceled", "unknown"]).optional(),
+    revision_id: OpaqueID,
+    routes: z.array(EffectiveRouteSchema).max(32),
+    selected_route: EffectiveRouteSchema.optional(),
+    subject: EffectiveConfigurationSubjectSchema,
+    user_override_id: OpaqueID.optional(),
+    warnings: z.array(z.string().min(1).max(2048)).max(16)
+  })
+  .strict()
+  .superRefine((configuration, context) => {
+    const expectedKind = configuration.evaluation_mode === "current_user_projection" ? "user" : "request";
+    if (configuration.subject.kind !== expectedKind) {
+      context.addIssue({ code: "custom", message: "Evaluation mode and subject kind disagree.", path: ["subject", "kind"] });
+    }
+    configuration.routes.forEach((route, index) => {
+      if (route.order !== index + 1) {
+        context.addIssue({ code: "custom", message: "Effective routes must be contiguous and ordered.", path: ["routes", index, "order"] });
+      }
+    });
+  });
 
 export const UsageSummarySchema = z
   .object({
@@ -587,24 +846,63 @@ export const UsageTimeseriesSchema = z
   })
   .strict();
 
+export const AuditChangeSchema = z
+  .object({
+    classification: z.enum(["public", "sensitive"]),
+    field: z.string().regex(/^[a-z][a-z0-9_.]{0,63}$/),
+    operation: z.enum(["set", "clear", "add", "remove", "rotate", "consume", "revoke"]),
+    redacted: z.boolean()
+  })
+  .strict()
+  .refine((change) => change.redacted === (change.classification === "sensitive"), {
+    message: "Audit redaction marker and classification disagree."
+  });
+
+export const AuditEventSchema = z
+  .object({
+    action: z.string().regex(/^[a-z][a-z0-9_.]{0,99}$/),
+    actor: z.string().max(256),
+    actor_id: z.string().regex(/^(adm|tok)_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/).optional(),
+    actor_kind: z.enum(["admin_user", "admin_api_token", "system"]),
+    changes: z.array(AuditChangeSchema).max(100),
+    environment_id: OpaqueID.optional(),
+    id: z.string().regex(/^aud_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/),
+    reason: z.string().regex(/^[a-z][a-z0-9._-]{0,99}$/).refine(
+      (value) => !/(password|secret|token|credential|authorization|cookie|private_key|ciphertext|proof|evidence)/.test(value),
+      { message: "Audit reason code is not redaction-safe." }
+    ).optional(),
+    request_id: z.union([z.literal(""), z.string().regex(/^arq_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/)]),
+    resource_id: z.string().regex(/^[a-z][a-z0-9]{1,15}_[0-7][0-9A-HJKMNPQRSTVWXYZ]{25}$/),
+    resource_type: z.string().regex(/^[a-z][a-z0-9_.]{0,63}$/),
+    result: z.enum(["succeeded", "denied", "failed", "indeterminate"]),
+    source: z.enum(["console", "cli", "api", "system"]),
+    summary: z.object({ changes: z.array(AuditChangeSchema).max(100) }).strict(),
+    target: z.string().max(256),
+    timestamp: Instant
+  })
+  .strict()
+  .superRefine((event, context) => {
+    if (JSON.stringify(event.changes) !== JSON.stringify(event.summary.changes)) {
+      context.addIssue({ code: "custom", message: "Audit summary and canonical changes disagree." });
+    }
+    const expectedActor = event.actor_id ? `${event.actor_kind}:${event.actor_id}` : event.actor_kind;
+    if (event.actor !== expectedActor || (event.actor_kind === "system") !== (event.source === "system")) {
+      context.addIssue({ code: "custom", message: "Audit actor and source attribution disagree." });
+    }
+    if ((event.actor_kind === "admin_user" && !event.actor_id?.startsWith("adm_")) ||
+      (event.actor_kind === "admin_api_token" && !event.actor_id?.startsWith("tok_")) ||
+      (event.source === "console" && event.actor_kind !== "admin_user") ||
+      (event.source === "cli" && event.actor_kind !== "admin_api_token")) {
+      context.addIssue({ code: "custom", message: "Audit source is incompatible with the authenticated actor kind." });
+    }
+    if (event.target !== `${event.resource_type}:${event.resource_id}`) {
+      context.addIssue({ code: "custom", message: "Audit target and resource attribution disagree." });
+    }
+  });
+
 export const AuditPageSchema = z
   .object({
-    items: z
-      .array(
-        z
-          .object({
-            action: z.string().max(128),
-            actor: z.string().max(256),
-            id: OpaqueID,
-            request_id: z.string().max(256),
-            result: z.enum(["succeeded", "denied", "failed", "indeterminate"]),
-            summary: z.record(z.string(), z.unknown()),
-            target: z.string().max(256),
-            timestamp: Instant
-          })
-          .strict()
-      )
-      .max(200),
+    items: z.array(AuditEventSchema).max(200),
     page: PageInfo
   })
   .strict();
@@ -681,6 +979,163 @@ export const SystemStatusSchema = z
   })
   .strict();
 
+const DoctorCheckSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+    remediation: z.string().max(512).optional(),
+    state: z.enum(["passed", "warning", "failed", "skipped"]),
+    summary: z.string().min(1).max(512)
+  })
+  .strict();
+
+const Count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+const DoctorVerificationDependencyFactsSchema = z
+  .object({
+    configured_selections: Count,
+    credential_backed_selections: Count,
+    external_network_selections: Count,
+    registered_active_keys: Count,
+    required_selections: Count,
+    resolved_credential_records: Count
+  })
+  .strict();
+
+export const DoctorReportSchema = z
+  .object({
+    checks: z.array(DoctorCheckSchema).min(1).max(32),
+    database: z.enum(["reachable", "unreachable"]),
+    facts: z
+      .object({
+        configuration: z
+          .object({
+            active_configurations: Count,
+            active_environments: Count,
+            cache: z
+              .object({
+                available: z.boolean(),
+                entries: z.number().int().min(0).max(1024),
+                estimated_bytes: z.number().int().min(0).max(25_165_824),
+                fresh_entries: z.number().int().min(0).max(1024),
+                maximum_entries: z.number().int().min(0).max(1024),
+                maximum_estimated_bytes: z.number().int().min(0).max(25_165_824),
+                newest_loaded_at: OptionalInstant,
+                reconciliation_interval_seconds: z.number().int().min(0).max(3600),
+                refreshes_in_flight: z.number().int().min(0).max(1024),
+                stale_entries: z.number().int().min(0).max(1024)
+              })
+              .strict(),
+            draft_revisions: Count,
+            highest_revision_number: Count,
+            invalid_revisions: Count,
+            missing_active_configuration: Count,
+            revisions: Count
+          })
+          .strict(),
+        database: z
+          .object({
+            latency_ms: Count,
+            pool_acquired: Count,
+            pool_idle: Count,
+            pool_maximum: Count,
+            pool_total: Count,
+            pool_utilization_ppm: z.number().int().min(0).max(1_000_000),
+            reachable: z.boolean(),
+            schema_available: Count,
+            schema_current: Count,
+            size_bytes: Count
+          })
+          .strict(),
+        expired_quota_reservations: Count,
+        jobs: z
+          .object({
+            by_status: z.array(z.object({ count: Count, status: z.enum(["pending", "running", "succeeded", "failed", "dead"]) }).strict()).max(5),
+            expired_locks: Count,
+            failed_self_tests: Count,
+            last_external_jwks_refresh_at: OptionalInstant,
+            last_retention_at: OptionalInstant,
+            last_signing_key_rotation_at: OptionalInstant,
+            last_usage_reconciliation_at: OptionalInstant,
+            last_usage_rollup_at: OptionalInstant,
+            oldest_pending_at: OptionalInstant,
+            recent_self_tests: Count,
+            usage_settlement_backlog: Count
+          })
+          .strict(),
+        replicas: z
+          .object({
+            fresh_by_role: z.array(z.object({ count: Count, role: z.enum(["all", "api", "worker"]) }).strict()).max(3),
+            fresh_apis: Count,
+            fresh_workers: Count,
+            newest_heartbeat_at: OptionalInstant,
+            stale_replicas: Count
+          })
+          .strict(),
+        retention: z
+          .object({
+            admin_session_retention_hours: Count,
+            job_history_retention_hours: Count,
+            oldest_audit_at: OptionalInstant,
+            oldest_request_at: OptionalInstant,
+            oldest_usage_at: OptionalInstant,
+            policy_mode: z.literal("fixed_operational_operator_tenant_data"),
+            runtime_instance_retention_hours: Count
+          })
+          .strict(),
+        runtime: z
+          .object({
+            build_date: z.string().max(128),
+            clock_offset_ms: z.number().int(),
+            commit: z.string().max(128),
+            compatibility_source: z.literal("embedded_self"),
+            contract_version: z.string().max(64),
+            latest_compatible_version: z.string().min(1).max(128),
+            protocol_versions: z.array(z.number().int().positive()).min(1).max(32),
+            role: z.enum(["all", "api", "worker"]),
+            server_version: z.string().max(128)
+          })
+          .strict(),
+        security: z
+          .object({
+            active_secret_records: Count,
+            active_signing_keys: Count,
+            apple_verification: DoctorVerificationDependencyFactsSchema,
+            configured_external_jwks_providers: Count,
+            google_verification: DoctorVerificationDependencyFactsSchema,
+            identity_provider_errors: Count,
+            identity_providers: Count,
+            pending_signing_keys: Count,
+            retiring_signing_keys: Count,
+            signing_key_expires_at: OptionalInstant,
+            stale_identity_provider_jwks: Count
+          })
+          .strict()
+      })
+      .strict(),
+    generated_at: Instant,
+    overall_state: z.enum(["healthy", "degraded", "unhealthy"]),
+    report_schema: z.literal(1),
+    role: z.enum(["all", "api", "worker"]),
+    schema_version: Count,
+    status: z.enum(["ok", "error"])
+  })
+  .strict();
+
+export const SupportBundleSchema = z
+  .object({
+    bundle_schema: z.literal(1),
+    generated_at: Instant,
+    redaction: z
+      .object({
+        excluded: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).min(10).max(32),
+        mode: z.literal("structural_allowlist")
+      })
+      .strict(),
+    report: DoctorReportSchema,
+    source: z.enum(["admin_api", "local_cli", "unknown"])
+  })
+  .strict();
+
 const ValidationIssueSchema = z
   .object({
     code: z.string().max(128),
@@ -728,6 +1183,7 @@ export const RouteSimulationSchema = z
         environment_kind: z.enum(["development", "staging", "production"]),
         feature: Identifier,
         framing_unit_count: z.number().int().min(0).max(4096),
+        image_units: z.number().int().min(0).max(1_000_000),
         normalized_claims: z.record(z.string(), z.unknown()),
         platform: z.enum(["ios", "android", "web", "react_native_ios", "react_native_android", "node"]),
         requested_input_tokens: z.number().int().min(0).max(100_000_000),
@@ -735,6 +1191,7 @@ export const RouteSimulationSchema = z
         revision_id: OpaqueID,
         rewritten_request_bytes: z.number().int().min(0).max(104_857_600),
         streaming: z.boolean(),
+        tool_calls: z.number().int().min(0).max(1_000_000),
         trust_level: z.enum(["none", "identity_only", "web_risk_verified", "app_verified", "device_verified", "strong_device_verified", "debug"])
       })
       .strict(),
@@ -749,7 +1206,7 @@ export const RouteSimulationSchema = z
           })
           .strict()
       )
-      .max(16),
+      .max(20),
     fallback_sequence: z
       .array(
         z
@@ -881,9 +1338,18 @@ export type ClientComponent = z.infer<typeof ClientComponentSchema>;
 export type ClientComponentPage = z.infer<typeof ClientComponentPageSchema>;
 export type LogicalRequest = z.infer<typeof RequestSchema>;
 export type LogicalRequestPage = z.infer<typeof RequestPageSchema>;
+export type RequestDecisionStage = z.infer<typeof RequestDecisionStageSchema>;
+export type ConfirmedUserOperationRequest = z.infer<typeof ConfirmedUserOperationRequestSchema>;
+export type UserOperationAction = z.infer<typeof UserOperationActionSchema>;
+export type UserOperationImpact = z.infer<typeof UserOperationImpactSchema>;
+export type UserOperationResult = z.infer<typeof UserOperationResultSchema>;
+export type EffectiveConfiguration = z.infer<typeof EffectiveConfigurationSchema>;
 export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 export type UsageTimeseries = z.infer<typeof UsageTimeseriesSchema>;
 export type AuditPage = z.infer<typeof AuditPageSchema>;
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
+export type DoctorReport = z.infer<typeof DoctorReportSchema>;
+export type SupportBundle = z.infer<typeof SupportBundleSchema>;
 export type SelfTestRun = z.infer<typeof SelfTestSchema>;
 export type SelfTestSchedule = z.infer<typeof SelfTestScheduleSchema>;
 export type SelfTestSchedulePage = z.infer<typeof SelfTestSchedulePageSchema>;
@@ -898,6 +1364,7 @@ interface AdminRequestOptions {
   body?: unknown;
   etag?: string;
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+  reason?: string;
   signal?: AbortSignal;
 }
 
@@ -921,8 +1388,25 @@ export async function adminRequest<T>(
     throw new Error("Invalid transient Admin API token.");
   }
   const headers: Record<string, string> = {
-    Accept: "application/json, application/problem+json"
+    Accept: "application/json, application/problem+json",
+    "X-Latchway-Admin-Source": "console"
   };
+	if (options.reason !== undefined) {
+		if (!/^[a-z][a-z0-9._-]{0,99}$/.test(options.reason) || /(password|secret|token|credential|authorization|cookie|private_key|ciphertext|proof|evidence)/.test(options.reason)) {
+			throw new Error("Invalid redaction-safe audit reason code.");
+		}
+		headers["X-Latchway-Audit-Reason"] = options.reason;
+	}
+  if (
+    options.reason === undefined &&
+    options.body !== null &&
+    typeof options.body === "object" &&
+    !Array.isArray(options.body) &&
+    typeof (options.body as Record<string, unknown>).reason === "string" &&
+    ((options.body as Record<string, unknown>).reason as string).trim() !== ""
+  ) {
+    headers["X-Latchway-Audit-Reason"] = "operator_reason_provided";
+  }
   if (bearerToken) {
     headers.Authorization = `Bearer ${bearerToken}`;
   } else if (method !== "GET") {
@@ -1001,4 +1485,132 @@ export function queryPath(path: string, values: Record<string, string | undefine
   }
   const encoded = query.toString();
   return encoded ? `${path}?${encoded}` : path;
+}
+
+export interface EffectiveUserConfigurationQuery {
+  componentID?: string;
+  environmentID: string;
+  estimatedInputTokens?: number;
+  feature: string;
+  installationID?: string;
+  maximumOutputTokens?: number;
+  streaming?: boolean;
+}
+
+function parseOperationalPathID(value: string, prefix: "req_" | "usr_"): string {
+  const parsed = OpaqueID.parse(value);
+  if (!parsed.startsWith(prefix)) throw new Error(`Expected a ${prefix === "req_" ? "request" : "user"} identifier.`);
+  return parsed;
+}
+
+export function getUserEffectiveConfiguration(
+  userID: string,
+  query: EffectiveUserConfigurationQuery,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<EffectiveConfiguration>> {
+  const parsedUserID = parseOperationalPathID(userID, "usr_");
+  const environmentID = OpaqueID.parse(query.environmentID);
+  const feature = Identifier.parse(query.feature);
+  if (query.installationID && query.componentID) throw new Error("Choose either an installation or a component.");
+  const estimatedInputTokens = query.estimatedInputTokens === undefined
+    ? undefined
+    : z.number().int().min(0).max(2_147_483_647).parse(query.estimatedInputTokens).toString();
+  const maximumOutputTokens = query.maximumOutputTokens === undefined
+    ? undefined
+    : z.number().int().min(0).max(2_147_483_647).parse(query.maximumOutputTokens).toString();
+  return adminRequest(
+    queryPath(`/admin/v1/users/${parsedUserID}/effective-configuration`, {
+      component_id: query.componentID ? ClientComponentID.parse(query.componentID) : undefined,
+      environment_id: environmentID,
+      estimated_input_tokens: estimatedInputTokens,
+      feature,
+      installation_id: query.installationID ? z.string().regex(/^ins_[A-Za-z0-9_-]{16,128}$/).parse(query.installationID) : undefined,
+      maximum_output_tokens: maximumOutputTokens,
+      streaming: query.streaming === undefined ? undefined : String(query.streaming)
+    }),
+    EffectiveConfigurationSchema,
+    {},
+    fetcher
+  );
+}
+
+export function getRequestEffectiveConfiguration(
+  requestID: string,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<EffectiveConfiguration>> {
+  return adminRequest(
+    `/admin/v1/requests/${parseOperationalPathID(requestID, "req_")}/effective-configuration`,
+    EffectiveConfigurationSchema,
+    {},
+    fetcher
+  );
+}
+
+export function getUserOperationImpact(
+  userID: string,
+  environmentID: string,
+  action: UserOperationAction,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<UserOperationImpact>> {
+  return adminRequest(
+    queryPath(`/admin/v1/users/${parseOperationalPathID(userID, "usr_")}/operation-impact`, {
+      action: UserOperationActionSchema.parse(action),
+      environment_id: OpaqueID.parse(environmentID)
+    }),
+    UserOperationImpactSchema,
+    {},
+    fetcher
+  );
+}
+
+export function setApplicationUserBlocked(
+  userID: string,
+  environmentID: string,
+  blocked: boolean,
+  confirmation: ConfirmedUserOperationRequest,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<ApplicationUser>> {
+  return adminRequest(
+    queryPath(`/admin/v1/users/${parseOperationalPathID(userID, "usr_")}/${blocked ? "block" : "unblock"}`, {
+      environment_id: OpaqueID.parse(environmentID)
+    }),
+    UserSchema,
+    { body: ConfirmedUserOperationRequestSchema.parse(confirmation), method: "POST" },
+    fetcher
+  );
+}
+
+function requireApplicationUserOperation(
+  userID: string,
+  environmentID: string,
+  route: "require-reauthentication" | "require-app-reverification",
+  confirmation: ConfirmedUserOperationRequest,
+  fetcher: typeof fetch
+): Promise<AdminResponse<UserOperationResult>> {
+  return adminRequest(
+    queryPath(`/admin/v1/users/${parseOperationalPathID(userID, "usr_")}/${route}`, {
+      environment_id: OpaqueID.parse(environmentID)
+    }),
+    UserOperationResultSchema,
+    { body: ConfirmedUserOperationRequestSchema.parse(confirmation), method: "POST" },
+    fetcher
+  );
+}
+
+export function requireApplicationUserReauthentication(
+  userID: string,
+  environmentID: string,
+  confirmation: ConfirmedUserOperationRequest,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<UserOperationResult>> {
+  return requireApplicationUserOperation(userID, environmentID, "require-reauthentication", confirmation, fetcher);
+}
+
+export function requireApplicationUserAppReverification(
+  userID: string,
+  environmentID: string,
+  confirmation: ConfirmedUserOperationRequest,
+  fetcher: typeof fetch = globalThis.fetch
+): Promise<AdminResponse<UserOperationResult>> {
+  return requireApplicationUserOperation(userID, environmentID, "require-app-reverification", confirmation, fetcher);
 }

@@ -63,6 +63,7 @@ ANDROID_MODULES = (
 REQUIRED_CONFORMANCE_CHECKS = {
     "source.repository_layout": "local_source",
     "source.clean_worktrees": "local_source",
+    "source.documentation_mirror": "local_source",
     "source.core_contract": "local_source",
     "source.contract_bundle": "local_source",
     "source.contract_locks": "local_source",
@@ -1152,7 +1153,12 @@ def validate_conformance(
     tag: str,
     contract: Mapping[str, Any],
     image: Mapping[str, Any],
-) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+) -> tuple[
+    list[Mapping[str, Any]],
+    Mapping[str, Any],
+    list[Mapping[str, Any]],
+    list[Mapping[str, Any]],
+]:
     required_top = {
         "schema_version",
         "kind",
@@ -1163,6 +1169,7 @@ def validate_conformance(
         "release_ready",
         "contract",
         "repositories",
+        "documentation",
         "evidence_window",
         "evidence_domains",
         "checks",
@@ -1236,6 +1243,44 @@ def validate_conformance(
         by_id[identifier] = coordinate
     if tuple(by_id) != REPOSITORY_IDS or by_id["core"]["commit"] != commit or by_id["core"]["intended_tag"] != tag:
         raise ReportError("release_record_repository_coordinates_mismatch")
+    documentation = report.get("documentation")
+    documentation_fields = {
+        "repository",
+        "commit",
+        "canonical_core_commit",
+        "source_commit",
+        "source_manifest_sha256",
+        "source_tree_sha256",
+        "owned_file_count",
+    }
+    if not isinstance(documentation, dict):
+        raise ReportError("release_record_documentation_coordinate_invalid")
+    require_fields(
+        documentation,
+        documentation_fields,
+        "release_record_documentation_coordinate_invalid",
+    )
+    if (
+        documentation.get("repository")
+        != "https://github.com/Latchway/latchway-docs.git"
+        or documentation.get("canonical_core_commit") != commit
+        or not isinstance(documentation.get("owned_file_count"), int)
+        or isinstance(documentation.get("owned_file_count"), bool)
+        or not 1 <= documentation["owned_file_count"] <= 4096
+    ):
+        raise ReportError("release_record_documentation_coordinate_invalid")
+    for field in ("commit", "source_commit"):
+        require_string(
+            documentation.get(field),
+            COMMIT,
+            "release_record_documentation_coordinate_invalid",
+        )
+    for field in ("source_manifest_sha256", "source_tree_sha256"):
+        require_string(
+            documentation.get(field),
+            SHA256,
+            "release_record_documentation_coordinate_invalid",
+        )
     domains = report.get("evidence_domains")
     if not isinstance(domains, list):
         raise ReportError("release_record_domains_invalid")
@@ -1334,7 +1379,7 @@ def validate_conformance(
             raise ReportError("release_record_required_check_not_passed")
     if seen_checks != set(REQUIRED_CONFORMANCE_CHECKS):
         raise ReportError("release_record_checks_incomplete")
-    return repositories, domains, checks
+    return repositories, documentation, domains, checks
 
 
 def validate_security(
@@ -1876,7 +1921,7 @@ def render(
     conformance = read_json(conformance_path)
     publication = read_json(publication_path)
     contract, image = validate_candidate(candidate, commit, tag)
-    repositories, domains, checks = validate_conformance(
+    repositories, documentation, domains, checks = validate_conformance(
         conformance, commit, tag, contract, image
     )
     security_checks = validate_security(
@@ -1951,6 +1996,8 @@ def render(
         f"| Android repository commit and tag | `{by_repository['android']['commit']}` / `{by_repository['android']['intended_tag']}` |",
         f"| JavaScript repository commit and tag | `{by_repository['javascript']['commit']}` / `{by_repository['javascript']['intended_tag']}` |",
         f"| React Native repository commit and tag | `{by_repository['react_native']['commit']}` / `{by_repository['react_native']['intended_tag']}` |",
+        f"| Mintlify mirror commit | `{documentation['commit']}` |",
+        f"| Canonical documentation source | `{documentation['canonical_core_commit']}` / `{documentation['source_tree_sha256']}` |",
         f"| OCI image digest | `{oci}` |",
         f"| Contract bundle hash | `{contract['bundle_sha256']}` |",
         f"| Database schema version | `{schema_version}` |",
@@ -1978,6 +2025,18 @@ def render(
         )
     lines.extend(
         [
+            "",
+            "### Documentation deployment coordinate",
+            "",
+            "| Field | Exact value |",
+            "| --- | --- |",
+            f"| Repository | `{escape(documentation['repository'])}` |",
+            f"| Mirror commit | `{documentation['commit']}` |",
+            f"| Canonical core commit | `{documentation['canonical_core_commit']}` |",
+            f"| Canonical source revision | `{documentation['source_commit']}` |",
+            f"| Mirror manifest SHA-256 | `{documentation['source_manifest_sha256']}` |",
+            f"| Canonical source-tree SHA-256 | `{documentation['source_tree_sha256']}` |",
+            f"| Owned files | `{documentation['owned_file_count']}` |",
             "",
             "### Published package coordinates",
             "",

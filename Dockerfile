@@ -42,7 +42,7 @@ FROM scratch
 ARG VERSION=1.0.0-rc.1
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
-ARG SOURCE=https://github.com/latchway/latchway
+ARG SOURCE=https://github.com/Latchway/latchway
 LABEL org.opencontainers.image.title="Latchway" \
       org.opencontainers.image.description="Self-hosted AI gateway for untrusted applications" \
       org.opencontainers.image.source=${SOURCE} \

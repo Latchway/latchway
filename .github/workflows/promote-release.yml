@@ -168,6 +168,9 @@ jobs:
           diff --unified=0 \
             <(jq --sort-keys '.repositories' "$promotion") \
             <(jq --sort-keys '.promotion_conformance.repositories' "$root/latchway-security/security-summary.json")
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$root/latchway-security/security-summary.json")
           gh attestation verify "$nested" --bundle "$nested_bundle" \
             --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/cross-repository-conformance.yml" \
             --source-digest "$CANDIDATE_COMMIT" --signer-digest "$CANDIDATE_COMMIT" \
@@ -465,13 +468,21 @@ jobs:
           version=${INTENDED_TAG#v}
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
             --arg image "$oci_image_digest" '
-              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              (keys | sort) == ["checks","contract","documentation","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
               .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
               .scope == "promotion" and .verdict == "passed" and
               .source_conformance_passed == true and .promotion_ready == true and .release_ready == false and
               .contract.core_release == $tag and .contract.oci_image_digest == $image and
               ([.repositories[].id] | sort) == ["android","core","ios","javascript","react_native"] and
               ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+              (.documentation | keys | sort) == ["canonical_core_commit","commit","owned_file_count","repository","source_commit","source_manifest_sha256","source_tree_sha256"] and
+              .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+              .documentation.canonical_core_commit == $commit and
+              (.documentation.commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096) and
               all(.checks[]; (.required != true) or .status == "passed")
             ' "$promotion" >/dev/null
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
@@ -488,6 +499,9 @@ jobs:
           diff --unified=0 \
             <(jq --sort-keys '.repositories' "$promotion") \
             <(jq --sort-keys '.promotion_conformance.repositories' "$security")
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$security")
           echo "report_sha256=$report_sha256" >> "$GITHUB_OUTPUT"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "index_digest=$index_digest" >> "$GITHUB_OUTPUT"
@@ -779,13 +793,21 @@ jobs:
           test "$(sha256sum "$promotion" | cut -d ' ' -f 1)" = "$report_sha256"
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
             --arg image "$oci_image_digest" '
-              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              (keys | sort) == ["checks","contract","documentation","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
               .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
               .scope == "promotion" and .verdict == "passed" and
               .source_conformance_passed == true and .promotion_ready == true and .release_ready == false and
               .contract.core_release == $tag and .contract.oci_image_digest == $image and
               ([.repositories[].id] | sort) == ["android","core","ios","javascript","react_native"] and
               ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+              (.documentation | keys | sort) == ["canonical_core_commit","commit","owned_file_count","repository","source_commit","source_manifest_sha256","source_tree_sha256"] and
+              .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+              .documentation.canonical_core_commit == $commit and
+              (.documentation.commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096) and
               all(.checks[]; (.required != true) or .status == "passed")
             ' "$promotion" >/dev/null
           security="$assets/security-summary.json"
@@ -798,6 +820,9 @@ jobs:
               .promotion_conformance.scope == "promotion" and
               .promotion_conformance.report_sha256 == $report_sha256
             ' "$security" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$security")
           moving='[]'
           if [[ "$version" != *-* ]]; then
             IFS=. read -r major minor patch <<< "$version"
@@ -1155,7 +1180,14 @@ jobs:
             .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
             .scope == "promotion" and .verdict == "passed" and .promotion_ready == true and .release_ready == false and
             .contract.core_release == $tag and .contract.oci_image_digest == $image and
-            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1
+            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+            .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+            .documentation.canonical_core_commit == $commit and
+            (.documentation.commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096)
           ' "$promotion" >/dev/null
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
             --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
@@ -1165,6 +1197,9 @@ jobs:
               .candidate.image.index_digest == $digest and
               .promotion_conformance.report_sha256 == $report_sha256
             ' "$security" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$security")
           moving='[]'
           if [[ "$version" != *-* ]]; then
             IFS=. read -r major minor patch <<< "$version"
@@ -1723,7 +1758,14 @@ jobs:
             .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
             .scope == "promotion" and .verdict == "passed" and .promotion_ready == true and .release_ready == false and
             .contract.core_release == $tag and .contract.oci_image_digest == $image and
-            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1
+            ([.repositories[] | select(.id == "core" and .commit == $commit and .intended_tag == $tag)] | length) == 1 and
+            .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+            .documentation.canonical_core_commit == $commit and
+            (.documentation.commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+            (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+            (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096)
           ' "$promotion" >/dev/null
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" --arg tag "$INTENDED_TAG" \
             --arg digest "$index_digest" --arg report_sha256 "$report_sha256" '
@@ -1733,6 +1775,9 @@ jobs:
               .candidate.image.index_digest == $digest and
               .promotion_conformance.report_sha256 == $report_sha256
             ' "$security" >/dev/null
+          diff --unified=0 \
+            <(jq --sort-keys '.documentation' "$promotion") \
+            <(jq --sort-keys '.promotion_conformance.documentation' "$security")
           cli_version=$(gh --version | sed -nE '1s/^gh version ([0-9]+)\.([0-9]+)\.([0-9]+).*$/\1 \2 \3/p')
           read -r major minor patch <<< "$cli_version"
           [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]

@@ -84,7 +84,9 @@ func TestWriteRegisteredProblem(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["code"] != "rate_limited" || body["request_id"] != "req_test" || body["retryable"] != true {
+	if body["code"] != "rate_limited" || body["request_id"] != "req_test" || body["retryable"] != true ||
+		body["type"] != "https://docs.latchway.dev/errors/rate-limited" ||
+		body["documentation_url"] != "https://docs.latchway.dev/errors/rate-limited" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 	retryAfter, ok := body["retry_after"].(string)

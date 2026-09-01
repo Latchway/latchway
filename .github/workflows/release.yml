@@ -309,6 +309,10 @@ jobs:
           done
           docker save --output latchway-linux-amd64.image.tar latchway:candidate-amd64
           docker save --output latchway-linux-arm64.image.tar latchway:candidate-arm64
+          python3 scripts/verify-runtime-image.py \
+            latchway-linux-amd64.image.tar linux/amd64
+          python3 scripts/verify-runtime-image.py \
+            latchway-linux-arm64.image.tar linux/arm64
           amd64_archive_size=$(stat --format=%s latchway-linux-amd64.image.tar)
           arm64_archive_size=$(stat --format=%s latchway-linux-arm64.image.tar)
           (( amd64_archive_size >= 1024 && amd64_archive_size <= 2147483648 ))

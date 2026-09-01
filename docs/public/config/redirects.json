@@ -53,5 +53,60 @@
     "source": "/react-native",
     "destination": "/clients/react-native/quickstart",
     "permanent": true
+  },
+  {
+    "source": "/start",
+    "destination": "/index",
+    "permanent": true
+  },
+  {
+    "source": "/build/ios",
+    "destination": "/clients/ios/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/build/android",
+    "destination": "/clients/android/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/build/web",
+    "destination": "/clients/web/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/build/react-native",
+    "destination": "/clients/react-native/quickstart",
+    "permanent": true
+  },
+  {
+    "source": "/console",
+    "destination": "/administration/console",
+    "permanent": true
+  },
+  {
+    "source": "/client-api",
+    "destination": "/reference/client-api",
+    "permanent": true
+  },
+  {
+    "source": "/admin-api",
+    "destination": "/reference/admin-api",
+    "permanent": true
+  },
+  {
+    "source": "/errors",
+    "destination": "/reference/errors",
+    "permanent": true
+  },
+  {
+    "source": "/security",
+    "destination": "/concepts/security-boundary",
+    "permanent": true
+  },
+  {
+    "source": "/installation-families",
+    "destination": "/concepts/installation-families",
+    "permanent": true
   }
 ]

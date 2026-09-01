@@ -23,6 +23,7 @@ import (
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/controlplane"
+	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/id"
 	"github.com/latchway/latchway/internal/jsonsafe"
 	"github.com/latchway/latchway/internal/policy"
@@ -54,6 +55,7 @@ type API struct {
 	operations      *operationalStore
 	policyResolver  *policy.Resolver
 	role            string
+	diagnostics     diagnostics.Dependencies
 }
 
 // Option supplies process facts that are not persisted in PostgreSQL.
@@ -82,6 +84,18 @@ func WithConfigurationStore(store *configuration.Store) Option {
 			return errors.New("admin API configuration store is nil")
 		}
 		api.configurations = store
+		return nil
+	}
+}
+
+// WithDiagnosticDependencies supplies runtime-only checks whose secret
+// material must never enter the diagnostic document.
+func WithDiagnosticDependencies(dependencies diagnostics.Dependencies) Option {
+	return func(api *API) error {
+		if dependencies.MasterKey == nil {
+			return errors.New("admin API diagnostic master-key check is nil")
+		}
+		api.diagnostics = dependencies
 		return nil
 	}
 }
@@ -164,6 +178,7 @@ func (api *API) Handler() http.Handler {
 	router := chi.NewRouter()
 	router.Use(noStore)
 	router.Use(api.auditRejectedMutation)
+	router.Use(api.auditMetadata)
 	router.Post("/auth/bootstrap", api.bootstrap)
 	router.Post("/auth/login", api.login)
 	router.Group(func(protected chi.Router) {
@@ -201,8 +216,12 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/administrators/{adminUserID}/reset-password", api.resetAdministratorPassword)
 		protected.Get("/users", api.users)
 		protected.Get("/users/{userID}", api.user)
+		protected.Get("/users/{userID}/effective-configuration", api.effectiveUserConfiguration)
+		protected.Get("/users/{userID}/operation-impact", api.userOperationImpact)
 		protected.With(api.mutationProtection).Post("/users/{userID}/block", api.blockUser)
 		protected.With(api.mutationProtection).Post("/users/{userID}/unblock", api.unblockUser)
+		protected.With(api.mutationProtection).Post("/users/{userID}/require-reauthentication", api.requireUserReauthentication)
+		protected.With(api.mutationProtection).Post("/users/{userID}/require-app-reverification", api.requireUserAppReverification)
 		protected.With(api.mutationProtection).Put("/users/{userID}/limit-override", api.replaceUserLimitOverride)
 		protected.With(api.mutationProtection).Delete("/users/{userID}/limit-override", api.clearUserLimitOverride)
 		protected.Get("/installations", api.installations)
@@ -218,9 +237,11 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/client-components/{componentID}/revoke", api.revokeClientComponent)
 		protected.Get("/requests", api.requests)
 		protected.Get("/requests/{requestID}", api.request)
+		protected.Get("/requests/{requestID}/effective-configuration", api.effectiveRequestConfiguration)
 		protected.Get("/usage/summary", api.usageSummary)
 		protected.Get("/usage/timeseries", api.usageTimeseries)
 		protected.Get("/audit-events", api.auditEvents)
+		protected.Get("/audit-events/{auditEventID}", api.auditEvent)
 		protected.Get("/self-test-schedules", api.selfTestSchedules)
 		protected.With(api.mutationProtection).Post("/self-test-schedules", api.createSelfTestSchedule)
 		protected.Get("/self-test-schedules/{scheduleID}", api.selfTestSchedule)
@@ -228,6 +249,8 @@ func (api *API) Handler() http.Handler {
 		protected.With(api.mutationProtection).Post("/self-tests", api.startSelfTest)
 		protected.Get("/self-tests/{selfTestID}", api.selfTest)
 		protected.Get("/system", api.systemStatus)
+		protected.Get("/system/doctor", api.systemDoctor)
+		protected.Get("/system/support-bundle", api.systemSupportBundle)
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		api.writeProblem(w, r, problem.Error{Code: "resource_not_found", Detail: "The administrative endpoint was not found."})
@@ -888,9 +911,16 @@ func (api *API) authenticate(next http.Handler) http.Handler {
 			api.writeProblem(w, r, problem.Error{Code: "authentication_required", Detail: "Administrator authentication is required."})
 			return
 		}
+		auditContext, auditErr := adminauth.ResolveAuditMetadata(r.Context(), principal.Method)
+		if auditErr != nil {
+			api.internal(w, r, auditErr)
+			return
+		}
+		r = r.WithContext(auditContext)
 		if auditState, ok := r.Context().Value(rejectedMutationAuditContextKey{}).(*rejectedMutationAuditState); ok {
 			principalCopy := principal
 			auditState.principal = &principalCopy
+			auditState.auditContext = r.Context()
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal)))
 	})
@@ -1161,6 +1191,7 @@ func requestID(ctx context.Context) string {
 
 type rejectedMutationAuditState struct {
 	principal     *adminauth.Principal
+	auditContext  context.Context
 	operationID   string
 	indeterminate bool
 }
@@ -1188,6 +1219,11 @@ func (api *API) recordRejectedMutation(
 	actor := adminauth.SystemActor()
 	organizationID := ""
 	if principal != nil {
+		resolvedContext, resolveErr := adminauth.ResolveAuditMetadata(ctx, principal.Method)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		ctx = resolvedContext
 		organizationID = principal.OrganizationID
 		var actorErr error
 		if principal.Method == adminauth.AuthenticationAPIToken {
@@ -1225,7 +1261,11 @@ func (api *API) auditRejectedMutation(next http.Handler) http.Handler {
 		if wrapped.Status() >= http.StatusBadRequest {
 			action, resourceType := rejectedMutationDescriptor(r.Method, r.URL.Path)
 			outcome := rejectedMutationOutcome(wrapped.Status(), state.indeterminate)
-			auditContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+			baseContext := r.Context()
+			if state.auditContext != nil {
+				baseContext = state.auditContext
+			}
+			auditContext, cancel := context.WithTimeout(context.WithoutCancel(baseContext), 2*time.Second)
 			defer cancel()
 			if err := api.recordRejectedMutation(
 				auditContext, action, resourceType, state.principal, outcome, state.operationID,
@@ -1310,6 +1350,10 @@ func rejectedMutationDescriptor(method, path string) (string, string) {
 		return "admin.user_block", "admin_request"
 	case strings.HasSuffix(path, "/unblock") && strings.Contains(path, "/users/"):
 		return "admin.user_unblock", "admin_request"
+	case strings.HasSuffix(path, "/require-reauthentication") && strings.Contains(path, "/users/"):
+		return "admin.user_require_reauthentication", "admin_request"
+	case strings.HasSuffix(path, "/require-app-reverification") && strings.Contains(path, "/users/"):
+		return "admin.user_require_app_reverification", "admin_request"
 	case strings.HasSuffix(path, "/revoke") && strings.Contains(path, "/installations/"):
 		return "admin.installation_revoke", "admin_request"
 	case strings.HasSuffix(path, "/self-tests") && method == http.MethodPost:

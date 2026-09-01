@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -52,6 +54,49 @@ func TestOperationalDatabaseErrorClassification(t *testing.T) {
 	rollbackFailure := mapOperationalCommit("commit", pgx.ErrTxCommitRollback)
 	if errors.Is(rollbackFailure, errOperationalIndeterminate) {
 		t.Fatalf("commit rollback error=%v, want definite failure", rollbackFailure)
+	}
+}
+
+func TestParseRequestListFilter(t *testing.T) {
+	t.Parallel()
+	userID := id.Must(id.ApplicationUser)
+	requestID := id.Must(id.LogicalRequest)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/requests?"+url.Values{
+		"status": {"denied"}, "feature": {"assistant"}, "user_id": {userID},
+		"platform": {"react_native_ios"}, "component_kind": {"share_extension"},
+		"trust_source": {"parent_delegation"}, "route": {"primary"},
+		"upstream": {"openai"}, "model": {"provider/model version"},
+		"error_code": {"quota_exceeded"}, "request_id": {requestID},
+		"start": {"2026-09-01T00:00:00Z"}, "end": {"2026-09-02T00:00:00Z"},
+		"latency_min_ms": {"1"}, "latency_max_ms": {"2"},
+		"tokens_min": {"3"}, "tokens_max": {"4"},
+		"cost_min_nano_usd": {"5"}, "cost_max_nano_usd": {"6"},
+		"sort": {"started_at_asc"}, "page_size": {"17"},
+	}.Encode(), nil)
+	filter, ok := parseRequestListFilter(request)
+	if !ok || filter.status != "denied" || filter.userID != userID || filter.requestID != requestID ||
+		filter.model != "provider/model version" || filter.sort != "started_at_asc" || filter.page.size != 17 ||
+		filter.minimumLatencyMS == nil || *filter.minimumLatencyMS != 1 ||
+		filter.maximumCost == nil || *filter.maximumCost != 6 || filter.start.Location() != time.UTC {
+		t.Fatalf("parsed request filter ok=%t filter=%#v", ok, filter)
+	}
+
+	for name, query := range map[string]string{
+		"duplicate":         "status=failed&status=denied",
+		"negative":          "tokens_min=-1",
+		"range":             "latency_min_ms=2&latency_max_ms=1",
+		"time range":        "start=2026-09-02T00%3A00%3A00Z&end=2026-09-01T00%3A00%3A00Z",
+		"sort":              "sort=latency_desc",
+		"unregistered code": "error_code=dependency_secret_text",
+	} {
+		name, query := name, query
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			request := httptest.NewRequest(http.MethodGet, "/admin/v1/requests?"+query, nil)
+			if _, ok := parseRequestListFilter(request); ok {
+				t.Fatalf("parseRequestListFilter accepted %q", query)
+			}
+		})
 	}
 }
 
@@ -203,8 +248,37 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"client_component_id":"`+fixture.componentID+`"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework":"swift-openai"`)) ||
 		!bytes.Contains(requestList.Body.Bytes(), []byte(`"framework_version":"4.6.0"`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"selected_route":"primary"`)) ||
+		!bytes.Contains(requestList.Body.Bytes(), []byte(`"decision_stages":[`)) ||
 		requestList.Body.Len() > 16<<10 {
 		t.Fatalf("request list status/body=%d %s", requestList.Code, requestList.Body.String())
+	}
+	requestStart := fixture.recordedAt.Add(-2 * time.Minute).Format(time.RFC3339)
+	requestEnd := fixture.recordedAt.Add(time.Minute).Format(time.RFC3339)
+	filteredRequestQuery := baseQuery +
+		"&status=succeeded&feature=assistant&user_id=" + url.QueryEscape(fixture.userID) +
+		"&platform=ios&component_kind=main_app&trust_source=debug" +
+		"&route=primary&upstream=openai&model=" + url.QueryEscape("gpt-test") +
+		"&error_code=timeout&request_id=" + url.QueryEscape(fixture.requestID) +
+		"&start=" + url.QueryEscape(requestStart) + "&end=" + url.QueryEscape(requestEnd) +
+		"&latency_min_ms=59000&latency_max_ms=61000&tokens_min=12&tokens_max=12" +
+		"&cost_min_nano_usd=123&cost_max_nano_usd=123&sort=started_at_asc"
+	filteredRequests := performGET(handler, "/admin/v1/requests"+filteredRequestQuery, cookie)
+	if filteredRequests.Code != http.StatusOK ||
+		!bytes.Contains(filteredRequests.Body.Bytes(), []byte(fixture.requestID)) {
+		t.Fatalf("filtered request list status/body=%d %s", filteredRequests.Code, filteredRequests.Body.String())
+	}
+	nonMatchingRequests := performGET(handler, "/admin/v1/requests"+baseQuery+"&error_code=unavailable", cookie)
+	if nonMatchingRequests.Code != http.StatusOK || bytes.Contains(nonMatchingRequests.Body.Bytes(), []byte(fixture.requestID)) {
+		t.Fatalf("non-matching request list status/body=%d %s", nonMatchingRequests.Code, nonMatchingRequests.Body.String())
+	}
+	invalidRequestRange := performGET(handler, "/admin/v1/requests"+baseQuery+"&tokens_min=2&tokens_max=1", cookie)
+	if invalidRequestRange.Code != http.StatusBadRequest {
+		t.Fatalf("invalid request range status/body=%d %s", invalidRequestRange.Code, invalidRequestRange.Body.String())
+	}
+	duplicateRequestStatus := performGET(handler, "/admin/v1/requests"+baseQuery+"&status=succeeded&status=failed", cookie)
+	if duplicateRequestStatus.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate request status status/body=%d %s", duplicateRequestStatus.Code, duplicateRequestStatus.Body.String())
 	}
 	requestGet := performGET(handler, "/admin/v1/requests/"+fixture.requestID, cookie)
 	if requestGet.Code != http.StatusOK || !bytes.Contains(requestGet.Body.Bytes(), []byte(fixture.attemptID)) ||
@@ -225,6 +299,17 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		requestDocument.Attempts[1].FirstByteAt == nil || requestDocument.Attempts[1].FirstTokenAt == nil ||
 		requestDocument.Attempts[1].FailureCode != nil {
 		t.Fatalf("request attempt detail/order = %#v", requestDocument.Attempts)
+	}
+	if requestDocument.ConfigRevisionID != fixture.revisionID ||
+		requestDocument.SelectedLimitPlan != "legacy_unknown" ||
+		requestDocument.SelectedRoute == nil || *requestDocument.SelectedRoute != "primary" ||
+		len(requestDocument.DecisionStages) != 3 ||
+		requestDocument.DecisionStages[0].Number != 1 ||
+		requestDocument.DecisionStages[0].Stage != "identity_verified" ||
+		requestDocument.DecisionStages[2].Stage != "route_selected" ||
+		requestDocument.DecisionStages[2].Route == nil ||
+		*requestDocument.DecisionStages[2].Route != "primary" {
+		t.Fatalf("request lifecycle detail = %#v", requestDocument)
 	}
 	if bytes.Contains(requestGet.Body.Bytes(), []byte(`upstream_timeout`)) {
 		t.Fatalf("request detail exposed internal failure code: %s", requestGet.Body.String())
@@ -274,8 +359,11 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	if inspected := performBearerGET(handler, "/admin/v1/requests"+baseQuery, inspectToken); inspected.Code != http.StatusOK {
 		t.Fatalf("inspect-token request list status=%d body=%s", inspected.Code, inspected.Body.String())
 	}
-	inspectMutation := performBearerJSON(t, handler, http.MethodPost,
-		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, nil, inspectToken)
+	inspectMutation := performBearerJSONWithAuditMetadata(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, confirmedUserOperationRequest{
+			Reason: "permission-check", ImpactToken: strings.Repeat("A", 43),
+			AcknowledgeImmediateEffect: true,
+		}, inspectToken, "console", "permission_probe")
 	if inspectMutation.Code != http.StatusForbidden {
 		t.Fatalf("inspect-token mutation status=%d body=%s", inspectMutation.Code, inspectMutation.Body.String())
 	}
@@ -327,15 +415,46 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 			requiredRenewal.Code, requiredRenewal.Body.String())
 	}
 
+	blockImpact, blockConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationBlock, revokeToken,
+	)
+	if blockImpact.Counts.ActiveSessionGrants != 1 || !blockImpact.Applicable {
+		t.Fatalf("block impact = %+v", blockImpact)
+	}
 	blocked := performBearerJSON(t, handler, http.MethodPost,
-		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, nil, revokeToken)
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, blockConfirmation, revokeToken)
 	if blocked.Code != http.StatusOK || !bytes.Contains(blocked.Body.Bytes(), []byte(`"status":"blocked"`)) {
 		t.Fatalf("block user status/body=%d %s", blocked.Code, blocked.Body.String())
 	}
+	staleBlock := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, blockConfirmation, revokeToken)
+	if staleBlock.Code != http.StatusConflict || !bytes.Contains(staleBlock.Body.Bytes(), []byte(`"code":"conflict"`)) {
+		t.Fatalf("stale block status/body=%d %s", staleBlock.Code, staleBlock.Body.String())
+	}
+	_, unblockConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationUnblock, revokeToken,
+	)
 	unblocked := performBearerJSON(t, handler, http.MethodPost,
-		"/admin/v1/users/"+fixture.userID+"/unblock"+baseQuery, nil, revokeToken)
+		"/admin/v1/users/"+fixture.userID+"/unblock"+baseQuery, unblockConfirmation, revokeToken)
 	if unblocked.Code != http.StatusOK || !bytes.Contains(unblocked.Body.Bytes(), []byte(`"status":"active"`)) {
 		t.Fatalf("unblock user status/body=%d %s", unblocked.Code, unblocked.Body.String())
+	}
+	_, attributedBlockConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationBlock, revokeToken,
+	)
+	attributedBlock := performBearerJSONWithAuditMetadata(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, attributedBlockConfirmation, revokeToken,
+		"cli", "security_response")
+	if attributedBlock.Code != http.StatusOK || !bytes.Contains(attributedBlock.Body.Bytes(), []byte(`"status":"blocked"`)) {
+		t.Fatalf("attributed block status/body=%d %s", attributedBlock.Code, attributedBlock.Body.String())
+	}
+	_, attributedUnblockConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationUnblock, revokeToken,
+	)
+	attributedUnblock := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/unblock"+baseQuery, attributedUnblockConfirmation, revokeToken)
+	if attributedUnblock.Code != http.StatusOK || !bytes.Contains(attributedUnblock.Body.Bytes(), []byte(`"status":"active"`)) {
+		t.Fatalf("attributed unblock status/body=%d %s", attributedUnblock.Code, attributedUnblock.Body.String())
 	}
 	var grantRevoked bool
 	var refreshStatus string
@@ -347,6 +466,31 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 	}
 	if !grantRevoked || refreshStatus != "revoked" {
 		t.Fatalf("blocked-user credentials grant_revoked=%t refresh_status=%q", grantRevoked, refreshStatus)
+	}
+
+	_, reauthenticationConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationRequireReauthentication, revokeToken,
+	)
+	reauthentication := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/require-reauthentication"+baseQuery,
+		reauthenticationConfirmation, revokeToken)
+	if reauthentication.Code != http.StatusOK ||
+		!bytes.Contains(reauthentication.Body.Bytes(), []byte(`"operation_id":"arq_`)) ||
+		!bytes.Contains(reauthentication.Body.Bytes(), []byte(`"action":"require_reauthentication"`)) ||
+		bytes.Contains(reauthentication.Body.Bytes(), []byte(reauthenticationConfirmation.Reason)) {
+		t.Fatalf("require reauthentication status/body=%d %s", reauthentication.Code, reauthentication.Body.String())
+	}
+	_, reverificationConfirmation := previewUserOperationForTest(
+		t, handler, fixture.userID, environment.ID, userOperationRequireReverification, revokeToken,
+	)
+	reverification := performBearerJSON(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/require-app-reverification"+baseQuery,
+		reverificationConfirmation, revokeToken)
+	if reverification.Code != http.StatusOK ||
+		!bytes.Contains(reverification.Body.Bytes(), []byte(`"operation_id":"arq_`)) ||
+		!bytes.Contains(reverification.Body.Bytes(), []byte(`"action":"require_app_reverification"`)) ||
+		bytes.Contains(reverification.Body.Bytes(), []byte(reverificationConfirmation.Reason)) {
+		t.Fatalf("require app re-verification status/body=%d %s", reverification.Code, reverification.Body.String())
 	}
 
 	invalidComponentRevocation := performBearerJSON(t, handler, http.MethodPost,
@@ -642,7 +786,8 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 
 	audit := performGET(handler, "/admin/v1/audit-events?page_size=200", cookie)
 	for _, action := range []string{
-		"admin.user_block", "admin.user_unblock", "admin.client_component_require_reattestation",
+		"admin.user_block", "admin.user_unblock", "admin.user_require_reauthentication",
+		"admin.user_require_app_reverification", "admin.client_component_require_reattestation",
 		"admin.installation_family_require_renewal", "admin.client_component_revoke",
 		"admin.installation_family_revoke", "admin.installation_revoke", "admin.self_test_run",
 		"admin.self_test_schedule_create", "admin.self_test_schedule_disable",
@@ -681,12 +826,115 @@ func TestOperationalAdminAPIPostgreSQL(t *testing.T) {
 		auditSecond.Items[0].ID == auditFirst.Items[0].ID {
 		t.Fatalf("second audit page status/body=%d %s", auditSecondPage.Code, auditSecondPage.Body.String())
 	}
+	filteredAudit := performGET(handler, "/admin/v1/audit-events?environment_id="+
+		url.QueryEscape(environment.ID)+"&actor_kind=admin_api_token&resource_id="+url.QueryEscape(fixture.userID)+
+		"&source=cli&reason=security_response&action=admin.user_block&result=succeeded", cookie)
+	var filteredAuditDocument struct {
+		Items []auditEventDocument `json:"items"`
+	}
+	decodeResponse(t, filteredAudit, &filteredAuditDocument)
+	if filteredAudit.Code != http.StatusOK || len(filteredAuditDocument.Items) != 1 ||
+		filteredAuditDocument.Items[0].Source != "cli" ||
+		filteredAuditDocument.Items[0].Reason == nil || *filteredAuditDocument.Items[0].Reason != "security_response" ||
+		len(filteredAuditDocument.Items[0].Changes) == 0 {
+		t.Fatalf("filtered audit status/body=%d %s", filteredAudit.Code, filteredAudit.Body.String())
+	}
+	auditDetail := performGET(handler, "/admin/v1/audit-events/"+filteredAuditDocument.Items[0].ID, cookie)
+	if auditDetail.Code != http.StatusOK ||
+		!bytes.Contains(auditDetail.Body.Bytes(), []byte(`"source":"cli"`)) ||
+		!bytes.Contains(auditDetail.Body.Bytes(), []byte(`"field":"status"`)) ||
+		bytes.Contains(auditDetail.Body.Bytes(), []byte("operator-requested")) {
+		t.Fatalf("audit detail status/body=%d %s", auditDetail.Code, auditDetail.Body.String())
+	}
+	spoofedSourceAudit := performGET(handler, "/admin/v1/audit-events?actor_kind=admin_api_token&source=api&reason=permission_probe&action=admin.user_block&result=denied", cookie)
+	var spoofedSourceDocument struct {
+		Items []auditEventDocument `json:"items"`
+	}
+	decodeResponse(t, spoofedSourceAudit, &spoofedSourceDocument)
+	if spoofedSourceAudit.Code != http.StatusOK || len(spoofedSourceDocument.Items) != 1 ||
+		spoofedSourceDocument.Items[0].Source != "api" || spoofedSourceDocument.Items[0].ActorKind != "admin_api_token" {
+		t.Fatalf("spoofed source audit status/body=%d %s", spoofedSourceAudit.Code, spoofedSourceAudit.Body.String())
+	}
+	unsafeReason := performBearerJSONWithAuditMetadata(t, handler, http.MethodPost,
+		"/admin/v1/users/"+fixture.userID+"/block"+baseQuery, nil, revokeToken,
+		"console", "provider_token_rotation")
+	if unsafeReason.Code != http.StatusBadRequest || bytes.Contains(unsafeReason.Body.Bytes(), []byte(revokeToken)) {
+		t.Fatalf("unsafe audit reason status/body=%d %s", unsafeReason.Code, unsafeReason.Body.String())
+	}
 
 	system := performGET(handler, "/admin/v1/system", cookie)
 	if system.Code != http.StatusOK || !bytes.Contains(system.Body.Bytes(), []byte(`"role":"api"`)) ||
 		!bytes.Contains(system.Body.Bytes(), []byte(`"ready":true`)) {
 		t.Fatalf("system status/body=%d %s", system.Code, system.Body.String())
 	}
+	doctor := performGET(handler, "/admin/v1/system/doctor", cookie)
+	if doctor.Code != http.StatusOK ||
+		!bytes.Contains(doctor.Body.Bytes(), []byte(`"report_schema":1`)) ||
+		!bytes.Contains(doctor.Body.Bytes(), []byte(`"database_connectivity"`)) ||
+		bytes.Contains(doctor.Body.Bytes(), fixture.refreshHash) {
+		t.Fatalf("system doctor status/body=%d %s", doctor.Code, doctor.Body.String())
+	}
+	bundle := performGET(handler, "/admin/v1/system/support-bundle", cookie)
+	if bundle.Code != http.StatusOK || bundle.Header().Get("Content-Disposition") != `attachment; filename="latchway-support-bundle.json"` ||
+		!bytes.Contains(bundle.Body.Bytes(), []byte(`"mode":"structural_allowlist"`)) ||
+		!bytes.Contains(bundle.Body.Bytes(), []byte(`"request_content"`)) ||
+		bytes.Contains(bundle.Body.Bytes(), fixture.refreshHash) || bytes.Contains(bundle.Body.Bytes(), []byte(revokeToken)) {
+		t.Fatalf("support bundle status/body=%d %s", bundle.Code, bundle.Body.String())
+	}
+}
+
+func previewUserOperationForTest(
+	t *testing.T,
+	handler http.Handler,
+	userID string,
+	environmentID string,
+	action string,
+	token string,
+) (userOperationImpact, confirmedUserOperationRequest) {
+	t.Helper()
+	response := performBearerGET(handler,
+		"/admin/v1/users/"+userID+"/operation-impact?environment_id="+
+			url.QueryEscape(environmentID)+"&action="+url.QueryEscape(action), token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("preview user operation %s status/body=%d %s", action, response.Code, response.Body.String())
+	}
+	var impact userOperationImpact
+	decodeResponse(t, response, &impact)
+	return impact, confirmedUserOperationRequest{
+		Reason: "reviewed-" + action, ImpactToken: impact.ImpactToken,
+		AcknowledgeImmediateEffect: true,
+	}
+}
+
+func performBearerJSONWithAuditMetadata(
+	t *testing.T,
+	handler http.Handler,
+	method string,
+	path string,
+	body any,
+	token string,
+	source string,
+	reason string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	request := httptest.NewRequest(method, path, reader)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set(adminSourceHeader, source)
+	request.Header.Set(auditReasonHeader, reason)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
 type operationalFixture struct {
@@ -916,14 +1164,35 @@ func seedOperationalFixture(
 		    application_user_id, installation_id, session_grant_id, config_revision_id,
 		    feature_key, protocol, status, requested_at, dispatched_at, completed_at,
 		    installation_family_id, client_component_id, component_definition_id,
-		    component_kind, trust_source, framework, framework_version
+		    component_kind, trust_source, framework, framework_version,
+		    selected_route_key, selected_upstream_key, selected_model_key,
+		    selected_physical_model
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
 		          'assistant', 'openai_chat', 'succeeded', $9, $10, $11,
-		          $12, $13, 'ios-main', 'main_app', 'debug', 'swift-openai', '4.6.0')
+		          $12, $13, 'ios-main', 'main_app', 'debug', 'swift-openai', '4.6.0',
+		          'primary', 'openai', 'assistant_primary', 'gpt-test')
 	`, fixture.requestID, organizationID, applicationID, environmentID, fixture.userID,
 		fixture.installationID, fixture.grantID, revisionID, fixture.recordedAt.Add(-time.Minute),
 		fixture.recordedAt.Add(-50*time.Second), fixture.recordedAt,
 		fixture.familyID, fixture.componentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO logical_request_decision_stages (
+		    organization_id, application_id, environment_id, logical_request_id,
+		    stage_number, stage, outcome, config_revision_id, policy_rule_key,
+		    limit_plan_key, route_key, upstream_key, model_key, physical_model,
+		    started_at, completed_at
+		) VALUES
+		    ($1, $2, $3, $4, 1, 'identity_verified', 'succeeded', $5, NULL,
+		     NULL, NULL, NULL, NULL, NULL, $6, $6),
+		    ($1, $2, $3, $4, 2, 'policy_evaluated', 'succeeded', $5, 'feature_access',
+		     'legacy_unknown', NULL, NULL, NULL, NULL, $7, $7),
+		    ($1, $2, $3, $4, 3, 'route_selected', 'succeeded', $5, NULL,
+		     'legacy_unknown', 'primary', 'openai', 'assistant_primary', 'gpt-test', $8, $8)
+	`, organizationID, applicationID, environmentID, fixture.requestID, revisionID,
+		fixture.recordedAt.Add(-time.Minute), fixture.recordedAt.Add(-55*time.Second),
+		fixture.recordedAt.Add(-52*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `

@@ -20,7 +20,7 @@ const (
 	simulationUserID         = "usr_00000000000000000000000000"
 	simulationInstallationID = "ins_00000000000000000000000000"
 	simulationRequestID      = "req_00000000000000000000000000"
-	maximumSimulatedTokens   = int64(100_000_000)
+	maximumSimulatedTokens   = protocol.MaximumPolicyRequestTokens
 	maximumSimulatedBytes    = protocol.MaximumMeasuredRequestBytes
 	maximumSimulatedUnits    = protocol.MaximumRequestStructuredUnits
 )
@@ -212,7 +212,10 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 		LogicalRequestID: simulationRequestID, InstallationPlatform: request.Platform,
 		IdentityProvider: "simulator", TrustLevel: request.TrustLevel,
 		AttestationProvider: attestation.Provider, Authenticated: true,
-		NormalizedClaims: request.Principal.Claims, Streaming: request.Request.Streaming, EvaluatedAt: now,
+		NormalizedClaims: request.Principal.Claims, Streaming: request.Request.Streaming,
+		EstimatedInputTokens: request.Request.RequestedInputTokens,
+		MaximumOutputTokens:  request.Request.RequestedOutputMax,
+		EvaluatedAt:          now,
 	})
 	if err != nil {
 		api.writeProblem(w, r, invalidRequest("The route-simulation facts are invalid or exceed their safety bound."))
@@ -271,7 +274,9 @@ func (api *API) simulateConfigurationRevision(w http.ResponseWriter, r *http.Req
 	warnings := []string{
 		"Simulation performs no quota reservation and no upstream dispatch.",
 		"Weighted and sticky selection uses stable synthetic opaque identities for repeatable explanations.",
-		"App version and requested input-token estimates are explanatory only; request shape and output maximum affect reservation, not CEL.",
+		"The input-token estimate is untrusted CEL policy/scheduling context and never quota or accounting authority.",
+		"The requested output maximum is exposed to CEL while the independent server-owned clamp remains authoritative for reservation.",
+		"App version is explanatory only and request-shape proofs affect reservation, not CEL.",
 	}
 	pricingConfidence := "unknown"
 	if primary.Model.PricingRef != "" {
@@ -339,19 +344,20 @@ func baseSimulationResult(
 			{Fact: "application_id", Role: "scope", Explanation: "Authoritative revision scope; it cannot be overridden by simulated facts."},
 			{Fact: "environment_id", Role: "scope", Explanation: "Authoritative revision scope; it cannot be overridden by simulated facts."},
 			{Fact: "revision_id", Role: "scope", Explanation: "Selects the immutable compiled snapshot."},
-			{Fact: "feature", Role: "policy", AffectsCEL: true, Explanation: "Selects the compiled feature and its CEL programs."},
+			{Fact: "request.feature", Role: "policy", AffectsCEL: true, Explanation: "Bound from the exact immutable Feature after lookup; the request cannot override it."},
+			{Fact: "request.protocol", Role: "policy", AffectsCEL: true, Explanation: "Bound from the immutable Feature's server-owned protocol after lookup."},
 			{Fact: "platform", Role: "policy", AffectsCEL: true, Explanation: "Selects the platform attestation requirement and is exposed to CEL."},
 			{Fact: "trust_level", Role: "policy", AffectsCEL: true, Explanation: "Checked by attestation policy and exposed to CEL."},
 			{Fact: "authenticated", Role: "authentication", Explanation: "Authentication is checked before CEL."},
 			{Fact: "normalized_claims", Role: "policy", AffectsCEL: true, Explanation: "Bounded normalized claims are exposed to CEL."},
-			{Fact: "streaming", Role: "policy", AffectsCEL: true, Explanation: "The normalized streaming flag is exposed to CEL and stream concurrency."},
-			{Fact: "requested_output_max", Role: "reservation", Explanation: "Applies the production default and absolute output clamp; it does not alter CEL."},
+			{Fact: "request.streaming", Role: "policy", AffectsCEL: true, Explanation: "The normalized streaming flag is exposed to CEL and stream concurrency."},
+			{Fact: "request.estimated_input_tokens", Role: "policy", AffectsCEL: true, Explanation: "Bounded untrusted estimate for conservative policy and scheduling only; never quota, accounting, pricing, or context authority."},
+			{Fact: "request.maximum_output_tokens", Role: "policy", AffectsCEL: true, Explanation: "Exact normalized requested maximum (zero when omitted); the independent server-owned clamp controls reservation and dispatch."},
 			{Fact: "rewritten_request_bytes", Role: "reservation", Explanation: "Models the adapter-proved rewritten body size used by trusted input accounting."},
 			{Fact: "framing_unit_count", Role: "reservation", Explanation: "Models the adapter-proved message, item, or input count used by trusted input accounting."},
 			{Fact: "image_units", Role: "reservation", Explanation: "Models the adapter-proved structured image count used by a hard per-request guard; it does not alter CEL."},
 			{Fact: "tool_calls", Role: "reservation", Explanation: "Models the adapter-proved structured tool-call count used by a hard per-request guard; it does not alter CEL."},
 			{Fact: "app_version", Role: "explanatory", Explanation: "Returned for context only; it is not currently exposed to production CEL."},
-			{Fact: "requested_input_tokens", Role: "explanatory", Explanation: "Untrusted estimate returned for comparison only; it never affects reservation or CEL."},
 		},
 		Explanation: []string{},
 	}

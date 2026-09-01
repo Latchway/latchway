@@ -36,12 +36,14 @@ MAXIMUM_EVIDENCE_AGE = timedelta(days=7)
 MAXIMUM_EVIDENCE_SECONDS = int(MAXIMUM_EVIDENCE_AGE.total_seconds())
 
 REPOSITORY_IDS = ("core", "javascript", "ios", "android", "react_native")
+SOURCE_REPOSITORY_IDS = (*REPOSITORY_IDS, "documentation")
 DEFAULT_REPOSITORY_NAMES = {
     "core": "latchway",
     "javascript": "latchway-js",
     "ios": "latchway-ios-sdk",
     "android": "latchway-android",
     "react_native": "latchway-react-native-sdk",
+    "documentation": "latchway-docs",
 }
 SDK_FIXTURES = {
     "javascript": "test/fixtures/contract",
@@ -160,8 +162,9 @@ PROMOTION_DOMAINS = tuple(
 RELEASE_DOMAINS = tuple(EXTERNAL_DOMAINS)
 
 CHECK_SUMMARIES = {
-    "source.repository_layout": "All five explicit repository roots are distinct local Git checkouts.",
-    "source.clean_worktrees": "All five source worktrees are clean, including untracked files.",
+    "source.repository_layout": "All five product repositories and the generated documentation mirror are distinct local Git checkouts.",
+    "source.clean_worktrees": "All six coordinated worktrees are clean, including untracked files.",
+    "source.documentation_mirror": "The documentation mirror is byte-identical to canonical public docs and bound to an unchanged core source revision.",
     "source.core_contract": "Core contract and build declarations are internally consistent.",
     "source.contract_bundle": "Two core contract bundles are byte-identical and internally complete.",
     "source.contract_locks": "Every SDK lock names one immutable ancestor contract checkpoint, contract, wire version, server range, and bundle hash.",
@@ -227,6 +230,7 @@ class Evaluator:
     def evaluate(self) -> dict[str, Any]:
         self._run("source.repository_layout", "local_source", True, self._repository_layout)
         self._run("source.clean_worktrees", "local_source", True, self._clean_worktrees)
+        self._run("source.documentation_mirror", "local_source", True, self._documentation_mirror)
         self._run("source.core_contract", "local_source", True, self._core_contract)
         self._run("source.contract_bundle", "local_source", True, self._contract_bundle)
         self._run("source.contract_locks", "local_source", True, self._contract_locks)
@@ -324,6 +328,7 @@ class Evaluator:
             "release_ready": release_ready,
             "contract": self._contract_summary(),
             "repositories": self._repository_summary(),
+            "documentation": self._documentation_summary(),
             "evidence_window": self.state.get("evidence_window"),
             "evidence_domains": self._domain_summary(),
             "checks": [check.as_json() for check in self.checks],
@@ -397,7 +402,7 @@ class Evaluator:
     def _repository_layout(self) -> Mapping[str, Any]:
         resolved: dict[str, Path] = {}
         commits: dict[str, str] = {}
-        for repository_id in REPOSITORY_IDS:
+        for repository_id in SOURCE_REPOSITORY_IDS:
             root = self.configuration.repositories[repository_id]
             try:
                 metadata = root.lstat()
@@ -432,7 +437,7 @@ class Evaluator:
     def _clean_worktrees(self) -> Mapping[str, Any]:
         repositories = self._required_state("repositories")
         dirty: dict[str, int] = {}
-        for repository_id in REPOSITORY_IDS:
+        for repository_id in SOURCE_REPOSITORY_IDS:
             output = git(
                 repositories[repository_id],
                 "status",
@@ -449,7 +454,95 @@ class Evaluator:
                     "entry_counts": {key: dirty[key] for key in sorted(dirty)},
                 },
             )
-        return {"clean_repository_count": len(REPOSITORY_IDS)}
+        return {"clean_repository_count": len(SOURCE_REPOSITORY_IDS)}
+
+    def _documentation_mirror(self) -> Mapping[str, Any]:
+        repositories = self._required_state("repositories")
+        commits = self._required_state("commits")
+        core = repositories["core"]
+        documentation = repositories["documentation"]
+        manifest_path = documentation / ".latchway-docs-source.json"
+        manifest = read_json(manifest_path)
+        expected_fields = {
+            "format",
+            "source",
+            "source_commit",
+            "source_tree_sha256",
+            "files",
+        }
+        if set(manifest) != expected_fields or manifest.get("format") != 1 or manifest.get("source") != "latchway/docs/public":
+            raise VerificationError("documentation_manifest_invalid")
+        source_commit = manifest.get("source_commit")
+        source_tree_sha256 = manifest.get("source_tree_sha256")
+        files = manifest.get("files")
+        if (
+            not isinstance(source_commit, str)
+            or COMMIT.fullmatch(source_commit) is None
+            or not isinstance(source_tree_sha256, str)
+            or SHA256.fullmatch(source_tree_sha256) is None
+            or not isinstance(files, dict)
+            or not 1 <= len(files) <= MAX_BUNDLE_ENTRIES
+        ):
+            raise VerificationError("documentation_manifest_invalid")
+        for relative, digest in files.items():
+            if (
+                not isinstance(relative, str)
+                or not safe_relative_path(relative)
+                or not isinstance(digest, str)
+                or SHA256.fullmatch(digest) is None
+            ):
+                raise VerificationError("documentation_manifest_invalid")
+        canonical_table = (json.dumps(files, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        if sha256_bytes(canonical_table) != source_tree_sha256:
+            raise VerificationError("documentation_manifest_tree_digest_mismatch")
+        try:
+            git(core, "cat-file", "-e", f"{source_commit}^{{commit}}")
+            git(core, "merge-base", "--is-ancestor", source_commit, commits["core"])
+            git(
+                core,
+                "diff",
+                "--exit-code",
+                "--no-ext-diff",
+                source_commit,
+                commits["core"],
+                "--",
+                "docs/public",
+            )
+        except VerificationError:
+            raise VerificationError("documentation_source_revision_drift") from None
+        checker = core / "scripts/sync-public-docs.py"
+        if not is_real_file(checker):
+            raise VerificationError("documentation_mirror_checker_missing")
+        try:
+            result = subprocess.run(
+                [sys.executable, str(checker), "--target", str(documentation), "--check"],
+                cwd=core,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "LANG": "C",
+                    "LC_ALL": "C",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise VerificationError("documentation_mirror_check_failed") from None
+        if result.returncode != 0:
+            raise VerificationError("documentation_mirror_mismatch")
+        summary = {
+            "repository": "https://github.com/Latchway/latchway-docs.git",
+            "commit": commits["documentation"],
+            "canonical_core_commit": commits["core"],
+            "source_commit": source_commit,
+            "source_manifest_sha256": sha256_bytes(read_bytes(manifest_path)),
+            "source_tree_sha256": source_tree_sha256,
+            "owned_file_count": len(files),
+        }
+        self.state["documentation"] = summary
+        return summary
 
     def _core_contract(self) -> Mapping[str, Any]:
         repositories = self._required_state("repositories")
@@ -1212,6 +1305,20 @@ class Evaluator:
             }
             for repository_id in REPOSITORY_IDS
         ]
+
+    def _documentation_summary(self) -> Mapping[str, Any]:
+        return self.state.get(
+            "documentation",
+            {
+                "repository": "https://github.com/Latchway/latchway-docs.git",
+                "commit": None,
+                "canonical_core_commit": None,
+                "source_commit": None,
+                "source_manifest_sha256": None,
+                "source_tree_sha256": None,
+                "owned_file_count": None,
+            },
+        )
 
     def _domain_summary(self) -> list[Mapping[str, Any]]:
         order = [
@@ -2021,6 +2128,7 @@ def repository_paths(arguments: argparse.Namespace) -> dict[str, Path]:
         "ios": arguments.ios_repo,
         "android": arguments.android_repo,
         "react_native": arguments.react_native_repo,
+        "documentation": arguments.documentation_repo,
     }
     return {
         repository_id: (
@@ -2028,7 +2136,7 @@ def repository_paths(arguments: argparse.Namespace) -> dict[str, Path]:
             if configured[repository_id] is not None
             else workspace / DEFAULT_REPOSITORY_NAMES[repository_id]
         ).absolute()
-        for repository_id in REPOSITORY_IDS
+        for repository_id in SOURCE_REPOSITORY_IDS
     }
 
 
@@ -2041,13 +2149,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-root",
         type=Path,
         default=SCRIPT_ROOT.parent,
-        help="directory containing the five repositories",
+        help="directory containing the five product repositories and generated documentation mirror",
     )
     parser.add_argument("--core-repo", type=Path)
     parser.add_argument("--javascript-repo", type=Path)
     parser.add_argument("--ios-repo", type=Path)
     parser.add_argument("--android-repo", type=Path)
     parser.add_argument("--react-native-repo", type=Path)
+    parser.add_argument("--documentation-repo", type=Path)
     parser.add_argument(
         "--release-tag",
         help="intended core tag; required in promotion/release scope and verified as annotated in release scope",

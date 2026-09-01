@@ -2,7 +2,7 @@ registry_version: 1
 contract_version: 1.0.0
 problem_media_type: application/problem+json
 fields:
-  required: [type, title, status, detail, code, request_id, retryable]
+  required: [type, title, status, detail, code, request_id, retryable, documentation_url]
   optional: [instance, retry_after, operation_id, feature, supported_protocol_versions, errors]
   conditional: { operation_id: { required_for: [operation_indeterminate], forbidden_otherwise: true } }
 codes:

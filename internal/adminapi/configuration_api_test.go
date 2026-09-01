@@ -73,6 +73,9 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 	decodeResponse(t, environmentResponse, &environment)
 
 	initialDocument := configurationObjectForAPI(t, "initial")
+	initialFeature := initialDocument["spec"].(map[string]any)["features"].([]any)[0].(map[string]any)
+	initialFeature["access"].(map[string]any)["expression"] =
+		`principal.authenticated && request.feature == "assistant" && request.protocol == "openai_chat" && request.streaming && request.estimated_input_tokens == 1200 && request.maximum_output_tokens == 800`
 	create := performConfigurationJSON(t, handler, http.MethodPost,
 		"/admin/v1/environments/"+environment.ID+"/config-revisions",
 		map[string]any{"document": initialDocument, "description": "initial"}, cookie, csrf, "")
@@ -96,6 +99,7 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 			"principal": map[string]any{"authenticated": authenticated, "claims": map[string]any{}},
 			"request": map[string]any{
 				"streaming": true, "rewritten_request_bytes": 1024,
+				"requested_input_tokens": 1200, "requested_output_max": 800,
 				"image_units": 1, "tool_calls": 2,
 			},
 		}, cookie, csrf, "")
@@ -111,7 +115,9 @@ func TestConfigurationAdminAPIPostgreSQL(t *testing.T) {
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"image_units","algorithm":"per_request","units":1,"applicable":true,"durable":false`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"metric":"tool_calls","algorithm":"per_request","units":2,"applicable":true,"durable":false`)) ||
 		!bytes.Contains(simulation.Body.Bytes(), []byte(`"image_units":1,"tool_calls":2`)) ||
-		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"requested_input_tokens","role":"explanatory","affects_cel":false`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"request.protocol","role":"policy","affects_cel":true`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"request.estimated_input_tokens","role":"policy","affects_cel":true`)) ||
+		!bytes.Contains(simulation.Body.Bytes(), []byte(`"fact":"request.maximum_output_tokens","role":"policy","affects_cel":true`)) ||
 		bytes.Contains(simulation.Body.Bytes(), []byte("api.example.test")) {
 		t.Fatalf("route simulation status=%d body=%s", simulation.Code, simulation.Body.String())
 	}

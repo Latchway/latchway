@@ -408,7 +408,8 @@ def validate_admin_secret_contract(path: Path, spec: dict[str, Any]) -> None:
 def validate_problem_operation_id_contract(path: Path, spec: dict[str, Any]) -> None:
     problem = spec.get("components", {}).get("schemas", {}).get("Problem", {})
     base = {
-        "type": "https://latchway.dev/problems/conflict",
+        "type": "https://docs.latchway.dev/errors/conflict",
+        "documentation_url": "https://docs.latchway.dev/errors/conflict",
         "title": "Resource conflict",
         "status": 409,
         "detail": "The operation conflicts with current state.",
@@ -424,7 +425,8 @@ def validate_problem_operation_id_contract(path: Path, spec: dict[str, Any]) -> 
             "indeterminate without operation ID",
             {
                 **base,
-                "type": "https://latchway.dev/problems/operation_indeterminate",
+                "type": "https://docs.latchway.dev/errors/operation-indeterminate",
+                "documentation_url": "https://docs.latchway.dev/errors/operation-indeterminate",
                 "title": "Operation outcome indeterminate",
                 "status": 503,
                 "code": "operation_indeterminate",
@@ -436,7 +438,8 @@ def validate_problem_operation_id_contract(path: Path, spec: dict[str, Any]) -> 
             "indeterminate with operation ID",
             {
                 **base,
-                "type": "https://latchway.dev/problems/operation_indeterminate",
+                "type": "https://docs.latchway.dev/errors/operation-indeterminate",
+                "documentation_url": "https://docs.latchway.dev/errors/operation-indeterminate",
                 "title": "Operation outcome indeterminate",
                 "status": 503,
                 "code": "operation_indeterminate",

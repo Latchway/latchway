@@ -395,12 +395,15 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 			installation_family_id, client_component_id, component_definition_id,
 			component_kind, trust_source, session_grant_id,
 			config_revision_id, feature_key, selected_limit_plan_key,
+			selected_route_key, selected_upstream_key, selected_model_key,
+			selected_physical_model,
 			protocol, client_request_id, framework, framework_version,
 			trusted_decision_fingerprint, status, requested_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			$12, $13, $14, $15, $16, $17, $18, $19, $20,
-			'reserved', $21
+			$12, $13, $14, $15, $16, $17, $18, $19,
+			$20, $21, $22, $23, $24,
+			'reserved', $25
 		)
 		ON CONFLICT DO NOTHING
 	`, logicalRequestID, prepared.OrganizationID, prepared.ApplicationID,
@@ -408,22 +411,35 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		nullableString(prepared.InstallationFamilyID), nullableString(prepared.ClientComponentID),
 		nullableString(prepared.ComponentDefinitionID), nullableString(prepared.ComponentKind),
 		nullableString(prepared.TrustSource), prepared.SessionGrantID, prepared.ConfigRevisionID,
-		prepared.FeatureKey, prepared.LimitPlanKey, prepared.Protocol,
+		prepared.FeatureKey, prepared.LimitPlanKey, prepared.RouteKey, prepared.UpstreamKey,
+		prepared.ModelKey, prepared.PhysicalModel, prepared.Protocol,
 		nullableString(prepared.ClientRequestID), nullableString(prepared.Framework),
 		nullableString(prepared.FrameworkVersion), fingerprint, requestedAt)
 	if err != nil {
 		return Reservation{}, mapWriteError("insert logical request", err)
 	}
 	if command.RowsAffected() == 0 {
-		return loadExistingReserve(ctx, tx, prepared, fingerprint)
-	}
-	if command.RowsAffected() != 1 {
+		claimed, claimErr := claimAuthenticatedRequest(ctx, tx, prepared, fingerprint)
+		if claimErr != nil {
+			return Reservation{}, claimErr
+		}
+		if !claimed {
+			return loadExistingReserve(ctx, tx, prepared, fingerprint)
+		}
+	} else if command.RowsAffected() != 1 {
 		return Reservation{}, ErrInvalidState
 	}
 	if len(requestBoundsExceeded) != 0 {
 		decisionAt, timeErr := statementTime(ctx, tx)
 		if timeErr != nil {
 			return Reservation{}, timeErr
+		}
+		if stageErr := appendQuotaDecisionStages(
+			ctx, tx, prepared, requestedAt, decisionAt,
+			requestBoundEvaluatedRuleKeySet(prepared.rules),
+			deniedRuleKeySet(requestBoundsExceeded), "quota_exceeded",
+		); stageErr != nil {
+			return Reservation{}, stageErr
 		}
 		command, updateErr := tx.Exec(ctx, `
 			UPDATE logical_requests
@@ -558,6 +574,16 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		if len(quotaExceeded) != 0 {
 			failureCode = "quota_exceeded"
 		}
+		deniedKeys, stageErr := deniedPlanRuleKeySet(plans, quotaExceeded, concurrencyExceeded)
+		if stageErr != nil {
+			return Reservation{}, stageErr
+		}
+		if stageErr := appendQuotaDecisionStages(
+			ctx, tx, prepared, requestedAt, decisionAt,
+			evaluatedReservationRuleKeySet(prepared.rules, plans), deniedKeys, failureCode,
+		); stageErr != nil {
+			return Reservation{}, stageErr
+		}
 		command, updateErr := tx.Exec(ctx, `
 			UPDATE logical_requests
 			SET status = 'denied', completed_at = GREATEST(requested_at, $2),
@@ -586,6 +612,12 @@ func (store *Store) Reserve(ctx context.Context, input ReserveInput) (Reservatio
 		return Reservation{}, concurrencyExceededError(logicalRequestID, plans, concurrencyExceeded)
 	}
 
+	if err := appendQuotaDecisionStages(
+		ctx, tx, prepared, requestedAt, decisionAt,
+		evaluatedReservationRuleKeySet(prepared.rules, plans), nil, "",
+	); err != nil {
+		return Reservation{}, err
+	}
 	if err := persistAcceptedReservation(
 		ctx, tx, prepared, plans, identifiers.reservation, logicalRequestID,
 		reservationKey, decisionAt, expiresAt,

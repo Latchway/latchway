@@ -151,7 +151,8 @@ func runtimeComponentDefinition(raw compiledComponentDefinition) (ComponentDefin
 	}
 	if raw.Delegation == nil || len(raw.Delegation.AllowedParents) == 0 ||
 		len(raw.Delegation.AllowedParents) > 32 ||
-		!runtimeIdentifierStrings(raw.Delegation.AllowedParents) {
+		!runtimeIdentifierStrings(raw.Delegation.AllowedParents) ||
+		raw.Delegation.AllowChildDelegation {
 		return ComponentDefinition{}, ErrInvalid
 	}
 	lifetime, err := parseConfigDuration(raw.Delegation.MaximumLifetime)
@@ -183,8 +184,7 @@ func runtimeComponentDefinitionGraph(definitions map[string]ComponentDefinition)
 		}
 		for _, parentID := range definition.Delegation.AllowedParents {
 			parent, ok := definitions[parentID]
-			if !ok || parentID == definitionID ||
-				(parent.FamilyRole != "root" && (parent.Delegation == nil || !parent.Delegation.AllowChildDelegation)) {
+			if !ok || parentID == definitionID || parent.FamilyRole != "root" {
 				return false
 			}
 		}

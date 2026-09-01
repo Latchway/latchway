@@ -25,6 +25,8 @@ jobs:
         run: make check-workflows
       - name: Validate normative contracts
         run: python3 scripts/validate-contracts.py
+      - name: Validate the canonical framework case and registry gate
+        run: python3 scripts/framework_conformance.py
       - name: Validate repository script tooling offline
         run: make test-scripts
       - name: Prove deterministic contract bundle
@@ -275,6 +277,12 @@ jobs:
       - name: Verify both release platforms are present
         run: >-
           python3 scripts/verify-oci-platforms.py
+          /tmp/latchway-multiarch.tar
+          linux/amd64
+          linux/arm64
+      - name: Verify the exact minimal runtime filesystem on both platforms
+        run: >-
+          python3 scripts/verify-runtime-image.py
           /tmp/latchway-multiarch.tar
           linux/amd64
           linux/arm64

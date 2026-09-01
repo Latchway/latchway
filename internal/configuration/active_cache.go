@@ -54,6 +54,55 @@ type activeSnapshotCache struct {
 	estimatedBytes int64
 }
 
+// ActiveSnapshotCacheStatus is a redaction-safe, process-local summary used
+// by the canonical system doctor. It deliberately exposes neither tenant
+// identifiers nor configuration documents.
+type ActiveSnapshotCacheStatus struct {
+	Available                     bool       `json:"available"`
+	Entries                       int64      `json:"entries"`
+	FreshEntries                  int64      `json:"fresh_entries"`
+	StaleEntries                  int64      `json:"stale_entries"`
+	RefreshesInFlight             int64      `json:"refreshes_in_flight"`
+	EstimatedBytes                int64      `json:"estimated_bytes"`
+	MaximumEntries                int64      `json:"maximum_entries"`
+	MaximumEstimatedBytes         int64      `json:"maximum_estimated_bytes"`
+	ReconciliationIntervalSeconds int64      `json:"reconciliation_interval_seconds"`
+	NewestLoadedAt                *time.Time `json:"newest_loaded_at,omitempty"`
+}
+
+// ActiveSnapshotCacheStatus returns a bounded snapshot of this Store's lazy
+// active-configuration cache. An empty cache is valid: entries are populated
+// only when an environment first serves traffic or is activated locally.
+func (store *Store) ActiveSnapshotCacheStatus(now time.Time) ActiveSnapshotCacheStatus {
+	status := ActiveSnapshotCacheStatus{
+		MaximumEntries:                activeSnapshotCacheCapacity,
+		MaximumEstimatedBytes:         activeSnapshotCacheMaximumEstimatedBytes,
+		ReconciliationIntervalSeconds: int64(activeSnapshotFullReconciliationInterval / time.Second),
+	}
+	if store == nil || now.IsZero() {
+		return status
+	}
+	status.Available = true
+	now = now.UTC()
+	store.activeSnapshots.mu.RLock()
+	defer store.activeSnapshots.mu.RUnlock()
+	status.Entries = int64(len(store.activeSnapshots.entries))
+	status.RefreshesInFlight = int64(len(store.activeSnapshots.refreshes))
+	status.EstimatedBytes = store.activeSnapshots.estimatedBytes
+	for _, entry := range store.activeSnapshots.entries {
+		if activeSnapshotCacheEntryIsFresh(entry, now) {
+			status.FreshEntries++
+		} else {
+			status.StaleEntries++
+		}
+		if status.NewestLoadedAt == nil || entry.loadedAt.After(*status.NewestLoadedAt) {
+			loadedAt := entry.loadedAt.UTC()
+			status.NewestLoadedAt = &loadedAt
+		}
+	}
+	return status
+}
+
 func (cache *activeSnapshotCache) get(key activeSnapshotCacheKey) (activeSnapshotCacheEntry, bool) {
 	cache.mu.RLock()
 	defer cache.mu.RUnlock()

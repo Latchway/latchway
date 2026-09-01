@@ -13,6 +13,7 @@ owner: "react-native-sdk"
 import ReactNativeCreateClient from "/snippets/generated/react-native/quickstart/create-client.tsx.mdx";
 import ReactNativeStreamingFetch from "/snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx";
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+import { SetupCoordinates } from "/components/SetupPath.jsx";
 
 <Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">React Native 0.82</Badge>
 
@@ -50,6 +51,14 @@ own component keys, DPoP, session rotation, and platform attestation.
   been physically invoked. Android physical, protected extension-matrix, and
   protected distribution evidence remain release gates.
 </Warning>
+
+### Use one public coordinate set on both hosts
+
+<SetupCoordinates platform="react-native" />
+
+The TypeScript configuration is shared. Signing, package identity, App Attest,
+Play Integrity, key storage, and distribution proof remain native-platform
+steps. Passing the iOS path does not mark the Android path complete.
 
 ## What you will build
 

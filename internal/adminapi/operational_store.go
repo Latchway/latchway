@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +20,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/problem"
 	"github.com/latchway/latchway/internal/useroverride"
 )
 
@@ -35,9 +38,14 @@ const (
 	maximumUsagePoints           = 10_000
 	maximumSummaryRange          = 366 * 24 * time.Hour
 	maximumUpstreamAttempts      = 32
+	maximumRequestDecisionStages = 256
 )
 
-var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+var (
+	operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	operationalRuleKeyPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	operationalFailurePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+)
 
 type operationalStore struct {
 	pool          *pgxpool.Pool
@@ -59,6 +67,32 @@ type operationalPage struct {
 	size    int32
 }
 
+type requestListFilter struct {
+	page operationalPage
+
+	status        string
+	feature       string
+	userID        string
+	platform      string
+	componentKind string
+	trustSource   string
+	route         string
+	upstream      string
+	model         string
+	errorCode     string
+	requestID     string
+	start         time.Time
+	end           time.Time
+	sort          string
+
+	minimumLatencyMS *int64
+	maximumLatencyMS *int64
+	minimumTokens    *int64
+	maximumTokens    *int64
+	minimumCost      *int64
+	maximumCost      *int64
+}
+
 func (page operationalPage) validate(prefix id.Prefix) error {
 	if page.size < 1 || page.size > 200 || page.after.IsZero() != (page.afterID == "") {
 		return errOperationalInvalid
@@ -67,6 +101,44 @@ func (page operationalPage) validate(prefix id.Prefix) error {
 		return errOperationalInvalid
 	}
 	return nil
+}
+
+func (filter requestListFilter) validate() error {
+	if filter.page.validate(id.LogicalRequest) != nil ||
+		!slices.Contains([]string{"", "succeeded", "failed", "denied", "canceled", "unknown"}, filter.status) ||
+		!slices.Contains([]string{"started_at_asc", "started_at_desc"}, filter.sort) ||
+		(filter.feature != "" && !operationalIdentifierPattern.MatchString(filter.feature)) ||
+		(filter.userID != "" && id.Validate(filter.userID, id.ApplicationUser) != nil) ||
+		(filter.platform != "" && !operationalIdentifierPattern.MatchString(filter.platform)) ||
+		(filter.componentKind != "" && !operationalIdentifierPattern.MatchString(filter.componentKind)) ||
+		(filter.trustSource != "" && !operationalIdentifierPattern.MatchString(filter.trustSource)) ||
+		(filter.route != "" && !operationalIdentifierPattern.MatchString(filter.route)) ||
+		(filter.upstream != "" && !operationalIdentifierPattern.MatchString(filter.upstream)) ||
+		(filter.model != "" && !validOperationalText(filter.model, 512)) ||
+		(filter.requestID != "" && id.Validate(filter.requestID, id.LogicalRequest) != nil) ||
+		(!filter.start.IsZero() && !filter.end.IsZero() && !filter.start.Before(filter.end)) ||
+		!validOptionalRange(filter.minimumLatencyMS, filter.maximumLatencyMS) ||
+		!validOptionalRange(filter.minimumTokens, filter.maximumTokens) ||
+		!validOptionalRange(filter.minimumCost, filter.maximumCost) {
+		return errOperationalInvalid
+	}
+	if filter.errorCode != "" {
+		if _, ok := problem.Registry[filter.errorCode]; !ok &&
+			!slices.Contains([]string{
+				"canceled", "gateway_error", "protocol_error", "timeout",
+				"unavailable", "upstream_rejected", "unknown",
+			}, filter.errorCode) {
+			return errOperationalInvalid
+		}
+	}
+	return nil
+}
+
+func validOptionalRange(minimum, maximum *int64) bool {
+	if minimum != nil && *minimum < 0 || maximum != nil && *maximum < 0 {
+		return false
+	}
+	return minimum == nil || maximum == nil || *minimum <= *maximum
 }
 
 type installationDocument struct {
@@ -111,25 +183,54 @@ type upstreamAttemptDocument struct {
 	CostSource      *string      `json:"cost_source,omitempty"`
 }
 
+type requestDecisionStageDocument struct {
+	Number           int32     `json:"number"`
+	Stage            string    `json:"stage"`
+	Outcome          string    `json:"outcome"`
+	FailureCode      *string   `json:"failure_code,omitempty"`
+	ConfigRevisionID string    `json:"config_revision_id"`
+	PolicyRuleKey    *string   `json:"policy_rule_key,omitempty"`
+	LimitPlanKey     *string   `json:"limit_plan_key,omitempty"`
+	LimitRuleKey     *string   `json:"limit_rule_key,omitempty"`
+	LimitMetric      *string   `json:"limit_metric,omitempty"`
+	LimitAlgorithm   *string   `json:"limit_algorithm,omitempty"`
+	LimitMaximum     *int64    `json:"limit_maximum,omitempty"`
+	Route            *string   `json:"route,omitempty"`
+	Upstream         *string   `json:"upstream,omitempty"`
+	Model            *string   `json:"model,omitempty"`
+	PhysicalModel    *string   `json:"physical_model,omitempty"`
+	StartedAt        time.Time `json:"started_at"`
+	CompletedAt      time.Time `json:"completed_at"`
+	DurationMS       int64     `json:"duration_ms"`
+}
+
 type logicalRequestDocument struct {
-	ID                    string                    `json:"id"`
-	EnvironmentID         string                    `json:"environment_id"`
-	UserID                string                    `json:"user_id"`
-	InstallationID        string                    `json:"installation_id"`
-	InstallationFamilyID  *string                   `json:"installation_family_id,omitempty"`
-	ClientComponentID     *string                   `json:"client_component_id,omitempty"`
-	ComponentDefinitionID *string                   `json:"component_definition_id,omitempty"`
-	ComponentKind         *string                   `json:"component_kind,omitempty"`
-	TrustSource           *string                   `json:"trust_source,omitempty"`
-	Framework             *string                   `json:"framework,omitempty"`
-	FrameworkVersion      *string                   `json:"framework_version,omitempty"`
-	Feature               string                    `json:"feature"`
-	Protocol              string                    `json:"protocol"`
-	StartedAt             time.Time                 `json:"started_at"`
-	CompletedAt           *time.Time                `json:"completed_at,omitempty"`
-	Status                string                    `json:"status"`
-	Usage                 *usageValues              `json:"usage,omitempty"`
-	Attempts              []upstreamAttemptDocument `json:"attempts"`
+	ID                    string                         `json:"id"`
+	EnvironmentID         string                         `json:"environment_id"`
+	UserID                string                         `json:"user_id"`
+	InstallationID        string                         `json:"installation_id"`
+	InstallationFamilyID  *string                        `json:"installation_family_id,omitempty"`
+	ClientComponentID     *string                        `json:"client_component_id,omitempty"`
+	ComponentDefinitionID *string                        `json:"component_definition_id,omitempty"`
+	ComponentKind         *string                        `json:"component_kind,omitempty"`
+	TrustSource           *string                        `json:"trust_source,omitempty"`
+	Framework             *string                        `json:"framework,omitempty"`
+	FrameworkVersion      *string                        `json:"framework_version,omitempty"`
+	ConfigRevisionID      string                         `json:"config_revision_id"`
+	SelectedLimitPlan     string                         `json:"selected_limit_plan"`
+	SelectedRoute         *string                        `json:"selected_route,omitempty"`
+	SelectedUpstream      *string                        `json:"selected_upstream,omitempty"`
+	SelectedModel         *string                        `json:"selected_model,omitempty"`
+	SelectedPhysicalModel *string                        `json:"selected_physical_model,omitempty"`
+	Feature               string                         `json:"feature"`
+	Protocol              string                         `json:"protocol"`
+	StartedAt             time.Time                      `json:"started_at"`
+	CompletedAt           *time.Time                     `json:"completed_at,omitempty"`
+	Status                string                         `json:"status"`
+	FailureCode           *string                        `json:"failure_code,omitempty"`
+	Usage                 *usageValues                   `json:"usage,omitempty"`
+	DecisionStages        []requestDecisionStageDocument `json:"decision_stages"`
+	Attempts              []upstreamAttemptDocument      `json:"attempts"`
 }
 
 type usageSummaryDocument struct {
@@ -150,15 +251,46 @@ type usageTimeseriesDocument struct {
 	Points   []usagePoint `json:"points"`
 }
 
+type auditChangeDocument struct {
+	Field          string `json:"field"`
+	Operation      string `json:"operation"`
+	Classification string `json:"classification"`
+	Redacted       bool   `json:"redacted"`
+}
+
 type auditEventDocument struct {
-	ID        string         `json:"id"`
-	Timestamp time.Time      `json:"timestamp"`
-	Actor     string         `json:"actor"`
-	Action    string         `json:"action"`
-	Target    string         `json:"target"`
-	Result    string         `json:"result"`
-	RequestID string         `json:"request_id"`
-	Summary   map[string]any `json:"summary"`
+	ID            string                `json:"id"`
+	Timestamp     time.Time             `json:"timestamp"`
+	Actor         string                `json:"actor"`
+	ActorKind     string                `json:"actor_kind"`
+	ActorID       *string               `json:"actor_id,omitempty"`
+	Action        string                `json:"action"`
+	Target        string                `json:"target"`
+	ResourceType  string                `json:"resource_type"`
+	ResourceID    string                `json:"resource_id"`
+	EnvironmentID *string               `json:"environment_id,omitempty"`
+	Source        string                `json:"source"`
+	Reason        *string               `json:"reason,omitempty"`
+	Result        string                `json:"result"`
+	RequestID     string                `json:"request_id"`
+	Changes       []auditChangeDocument `json:"changes"`
+	Summary       map[string]any        `json:"summary"`
+}
+
+type auditFilter struct {
+	OrganizationID string
+	EventID        string
+	EnvironmentID  string
+	ActorKind      string
+	ActorID        string
+	Action         string
+	ResourceType   string
+	ResourceID     string
+	Source         string
+	Reason         string
+	Result         string
+	Start          time.Time
+	End            time.Time
 }
 
 type selfTestCheck struct {
@@ -387,6 +519,7 @@ func (store *operationalStore) setUserBlocked(
 	environmentID string,
 	userID string,
 	blocked bool,
+	confirmation confirmedUserOperationRequest,
 	requestID string,
 ) (useroverride.ApplicationUser, error) {
 	if id.Validate(environmentID, id.Environment) != nil || id.Validate(userID, id.ApplicationUser) != nil ||
@@ -432,6 +565,23 @@ func (store *operationalStore) setUserBlocked(
 	}
 	if storedStatus != "active" && storedStatus != "blocked" {
 		return useroverride.ApplicationUser{}, errOperationalCorrupt
+	}
+	impactAction := userOperationUnblock
+	if blocked {
+		impactAction = userOperationBlock
+	}
+	counts, err := loadUserOperationCounts(
+		ctx, tx, principal.OrganizationID, applicationID, userID,
+	)
+	if err != nil {
+		return useroverride.ApplicationUser{}, err
+	}
+	impact := describeUserOperation(
+		impactAction, storedStatus, counts,
+		principal.OrganizationID, environmentID, userID,
+	)
+	if !impact.Applicable || impact.ImpactToken != confirmation.ImpactToken {
+		return useroverride.ApplicationUser{}, errOperationalConflict
 	}
 	var now time.Time
 	if err := tx.QueryRow(ctx, "SELECT transaction_timestamp()").Scan(&now); err != nil {
@@ -509,6 +659,11 @@ func (store *operationalStore) setUserBlocked(
 	if err != nil {
 		return useroverride.ApplicationUser{}, err
 	}
+	reason, err := adminauth.NewPublicAuditChange("reason_provided", adminauth.AuditSet)
+	if err != nil {
+		return useroverride.ApplicationUser{}, err
+	}
+	changes = append(changes, reason)
 	if err := store.audit(ctx, tx, principal, environmentID, action, "application_user", userID, requestID, now, changes); err != nil {
 		return useroverride.ApplicationUser{}, err
 	}
@@ -826,30 +981,190 @@ func (store *operationalStore) listRequests(
 	ctx context.Context,
 	principal adminauth.Principal,
 	environmentID string,
-	page operationalPage,
+	filter requestListFilter,
 ) ([]logicalRequestDocument, error) {
-	if id.Validate(environmentID, id.Environment) != nil || page.validate(id.LogicalRequest) != nil {
+	if id.Validate(environmentID, id.Environment) != nil || filter.validate() != nil {
 		return nil, errOperationalInvalid
 	}
 	if !validOperationalRead(principal) {
 		return nil, errOperationalForbidden
 	}
-	rows, err := store.pool.Query(ctx, `
+	arguments := []any{principal.OrganizationID, environmentID}
+	where := []string{
+		"request.organization_id = $1",
+		"request.environment_id = $2",
+	}
+	add := func(template string, value any) {
+		arguments = append(arguments, value)
+		where = append(where, strings.ReplaceAll(template, "%d", fmt.Sprint(len(arguments))))
+	}
+	if filter.status != "" {
+		stored := filter.status
+		switch stored {
+		case "canceled":
+			stored = "cancelled"
+		case "unknown":
+			where = append(where, "request.status IN ('authenticated', 'reserved', 'dispatched', 'streaming')")
+			stored = ""
+		}
+		if stored != "" {
+			add("request.status = $%d", stored)
+		}
+	}
+	if filter.feature != "" {
+		add("request.feature_key = $%d", filter.feature)
+	}
+	if filter.userID != "" {
+		add("request.application_user_id = $%d", filter.userID)
+	}
+	if filter.platform != "" {
+		add(`EXISTS (
+			SELECT 1 FROM installations AS installation
+			WHERE installation.organization_id = request.organization_id
+			  AND installation.application_id = request.application_id
+			  AND installation.environment_id = request.environment_id
+			  AND installation.installation_id = request.installation_id
+			  AND installation.platform = $%d
+		)`, filter.platform)
+	}
+	if filter.componentKind != "" {
+		add("request.component_kind = $%d", filter.componentKind)
+	}
+	if filter.trustSource != "" {
+		add("request.trust_source = $%d", filter.trustSource)
+	}
+	if filter.route != "" {
+		add(`(request.selected_route_key = $%d OR EXISTS (
+			SELECT 1 FROM upstream_attempts AS attempt
+			WHERE attempt.logical_request_id = request.logical_request_id
+			  AND attempt.route_key = $%d
+		))`, filter.route)
+	}
+	if filter.upstream != "" {
+		add(`(request.selected_upstream_key = $%d OR EXISTS (
+			SELECT 1 FROM upstream_attempts AS attempt
+			WHERE attempt.logical_request_id = request.logical_request_id
+			  AND attempt.upstream_key = $%d
+		))`, filter.upstream)
+	}
+	if filter.model != "" {
+		add(`(request.selected_model_key = $%d OR request.selected_physical_model = $%d
+			OR EXISTS (
+				SELECT 1 FROM upstream_attempts AS attempt
+				WHERE attempt.logical_request_id = request.logical_request_id
+				  AND (attempt.model_key = $%d OR attempt.physical_model = $%d)
+			))`, filter.model)
+	}
+	if filter.errorCode != "" {
+		knownCodes := registeredProblemCodes()
+		arguments = append(arguments, filter.errorCode)
+		codeArgument := len(arguments)
+		arguments = append(arguments, knownCodes)
+		knownArgument := len(arguments)
+		where = append(where, fmt.Sprintf(`(
+			CASE
+				WHEN request.failure_code IS NULL THEN NULL
+				WHEN request.failure_code IN ('client_cancelled', 'request_cancelled') THEN 'canceled'
+				WHEN request.failure_code = ANY($%d::text[]) THEN request.failure_code
+				ELSE 'unknown'
+			END = $%d
+			OR EXISTS (
+				SELECT 1 FROM logical_request_decision_stages AS stage
+				WHERE stage.logical_request_id = request.logical_request_id
+				  AND CASE
+				      WHEN stage.failure_code IS NULL THEN NULL
+				      WHEN stage.failure_code IN ('client_cancelled', 'request_cancelled') THEN 'canceled'
+				      WHEN stage.failure_code = ANY($%d::text[]) THEN stage.failure_code
+				      ELSE 'unknown'
+				  END = $%d
+			)
+			OR EXISTS (
+				SELECT 1 FROM upstream_attempts AS attempt
+				WHERE attempt.logical_request_id = request.logical_request_id
+				  AND %s = $%d
+			)
+		)`, knownArgument, codeArgument, knownArgument, codeArgument,
+			publicAttemptFailureSQL("attempt.failure_code"), codeArgument))
+	}
+	if filter.requestID != "" {
+		add("request.logical_request_id = $%d", filter.requestID)
+	}
+	if !filter.start.IsZero() {
+		add("request.requested_at >= $%d", filter.start)
+	}
+	if !filter.end.IsZero() {
+		add("request.requested_at < $%d", filter.end)
+	}
+	if filter.minimumLatencyMS != nil {
+		add("request.completed_at IS NOT NULL AND extract(epoch FROM (request.completed_at - request.requested_at)) * 1000 >= $%d", *filter.minimumLatencyMS)
+	}
+	if filter.maximumLatencyMS != nil {
+		add("request.completed_at IS NOT NULL AND extract(epoch FROM (request.completed_at - request.requested_at)) * 1000 <= $%d", *filter.maximumLatencyMS)
+	}
+	if filter.minimumTokens != nil {
+		add(`COALESCE((
+			SELECT sum(usage.units) FROM usage_records AS usage
+			WHERE usage.logical_request_id = request.logical_request_id
+			  AND usage.metric = 'total_tokens'
+		), 0) >= $%d`, *filter.minimumTokens)
+	}
+	if filter.maximumTokens != nil {
+		add(`COALESCE((
+			SELECT sum(usage.units) FROM usage_records AS usage
+			WHERE usage.logical_request_id = request.logical_request_id
+			  AND usage.metric = 'total_tokens'
+		), 0) <= $%d`, *filter.maximumTokens)
+	}
+	if filter.minimumCost != nil {
+		add(`COALESCE((
+			SELECT sum(usage.units) FROM usage_records AS usage
+			WHERE usage.logical_request_id = request.logical_request_id
+			  AND usage.metric = 'cost_nano_usd'
+		), 0) >= $%d`, *filter.minimumCost)
+	}
+	if filter.maximumCost != nil {
+		add(`COALESCE((
+			SELECT sum(usage.units) FROM usage_records AS usage
+			WHERE usage.logical_request_id = request.logical_request_id
+			  AND usage.metric = 'cost_nano_usd'
+		), 0) <= $%d`, *filter.maximumCost)
+	}
+	descending := filter.sort == "started_at_desc"
+	if !filter.page.after.IsZero() {
+		arguments = append(arguments, filter.page.after, filter.page.afterID)
+		operator := ">"
+		if descending {
+			operator = "<"
+		}
+		where = append(where, fmt.Sprintf(
+			"(request.requested_at, request.logical_request_id) %s ($%d, $%d)",
+			operator, len(arguments)-1, len(arguments),
+		))
+	}
+	arguments = append(arguments, filter.page.size+1)
+	direction := "ASC"
+	if descending {
+		direction = "DESC"
+	}
+	query := fmt.Sprintf(`
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
 		       installation_family_id, client_component_id, component_definition_id,
 		       component_kind, trust_source, framework, framework_version,
-		       feature_key, protocol, requested_at, completed_at, status
-		FROM logical_requests
-		WHERE organization_id = $1 AND environment_id = $2
-		  AND ($3::timestamptz IS NULL OR (requested_at, logical_request_id) > ($3, $4))
-		ORDER BY requested_at, logical_request_id
-		LIMIT $5
-	`, principal.OrganizationID, environmentID, nullableTime(page.after), nullableString(page.afterID), page.size+1)
+		       config_revision_id, selected_limit_plan_key,
+		       selected_route_key, selected_upstream_key, selected_model_key,
+		       selected_physical_model, feature_key, protocol, requested_at,
+		       completed_at, status, failure_code
+		FROM logical_requests AS request
+		WHERE %s
+		ORDER BY request.requested_at %s, request.logical_request_id %s
+		LIMIT $%d
+	`, strings.Join(where, " AND "), direction, direction, len(arguments))
+	rows, err := store.pool.Query(ctx, query, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("list logical requests: %w", err)
 	}
 	defer rows.Close()
-	items := make([]logicalRequestDocument, 0, page.size+1)
+	items := make([]logicalRequestDocument, 0, filter.page.size+1)
 	for rows.Next() {
 		item, scanErr := scanLogicalRequestSummary(rows)
 		if scanErr != nil {
@@ -882,7 +1197,10 @@ func (store *operationalStore) getRequest(
 		SELECT logical_request_id, environment_id, application_user_id, installation_id,
 		       installation_family_id, client_component_id, component_definition_id,
 		       component_kind, trust_source, framework, framework_version,
-		       feature_key, protocol, requested_at, completed_at, status
+		       config_revision_id, selected_limit_plan_key,
+		       selected_route_key, selected_upstream_key, selected_model_key,
+		       selected_physical_model, feature_key, protocol, requested_at,
+		       completed_at, status, failure_code
 		FROM logical_requests
 		WHERE organization_id = $1 AND logical_request_id = $2
 	`, principal.OrganizationID, requestID)
@@ -904,12 +1222,17 @@ func (store *operationalStore) getRequest(
 func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 	var item logicalRequestDocument
 	var status string
+	var failureCode *string
 	if err := row.Scan(
 		&item.ID, &item.EnvironmentID, &item.UserID, &item.InstallationID,
 		&item.InstallationFamilyID, &item.ClientComponentID,
 		&item.ComponentDefinitionID, &item.ComponentKind, &item.TrustSource,
 		&item.Framework, &item.FrameworkVersion,
+		&item.ConfigRevisionID, &item.SelectedLimitPlan,
+		&item.SelectedRoute, &item.SelectedUpstream, &item.SelectedModel,
+		&item.SelectedPhysicalModel,
 		&item.Feature, &item.Protocol, &item.StartedAt, &item.CompletedAt, &status,
+		&failureCode,
 	); err != nil {
 		return logicalRequestDocument{}, err
 	}
@@ -917,10 +1240,34 @@ func scanLogicalRequestSummary(row rowScanner) (logicalRequestDocument, error) {
 		return logicalRequestDocument{}, errOperationalCorrupt
 	}
 	item.Status = publicLogicalRequestStatus(status)
+	item.FailureCode = publicLogicalFailureCode(failureCode)
+	item.DecisionStages = make([]requestDecisionStageDocument, 0)
 	return item, nil
 }
 
 func validRequestAttribution(item logicalRequestDocument) bool {
+	if id.Validate(item.ConfigRevisionID, id.ConfigRevision) != nil ||
+		!operationalIdentifierPattern.MatchString(item.SelectedLimitPlan) {
+		return false
+	}
+	selectedRouteValues := []bool{
+		item.SelectedRoute != nil,
+		item.SelectedUpstream != nil,
+		item.SelectedModel != nil,
+		item.SelectedPhysicalModel != nil,
+	}
+	for _, present := range selectedRouteValues[1:] {
+		if present != selectedRouteValues[0] {
+			return false
+		}
+	}
+	if item.SelectedRoute != nil &&
+		(!operationalIdentifierPattern.MatchString(*item.SelectedRoute) ||
+			!operationalIdentifierPattern.MatchString(*item.SelectedUpstream) ||
+			!operationalIdentifierPattern.MatchString(*item.SelectedModel) ||
+			!validOperationalText(*item.SelectedPhysicalModel, 512)) {
+		return false
+	}
 	componentValues := []bool{
 		item.InstallationFamilyID != nil,
 		item.ClientComponentID != nil,
@@ -955,16 +1302,22 @@ func validRequestAttribution(item logicalRequestDocument) bool {
 }
 
 func validOperationalVersion(value string) bool {
-	return value != "" && len(value) <= 128 && utf8.ValidString(value) &&
-		!strings.ContainsAny(value, "\r\n\x00")
+	return validOperationalText(value, 128)
+}
+
+func validOperationalText(value string, maximum int) bool {
+	return value != "" && len(value) <= maximum && utf8.ValidString(value) &&
+		strings.TrimSpace(value) == value && strings.IndexFunc(value, unicode.IsControl) == -1
 }
 
 func publicLogicalRequestStatus(status string) string {
 	switch status {
 	case "succeeded":
 		return "succeeded"
-	case "failed", "denied":
+	case "failed":
 		return "failed"
+	case "denied":
+		return "denied"
 	case "cancelled":
 		return "canceled"
 	case "reserved", "dispatched", "streaming":
@@ -972,6 +1325,48 @@ func publicLogicalRequestStatus(status string) string {
 	default:
 		return "unknown"
 	}
+}
+
+func registeredProblemCodes() []string {
+	result := make([]string, 0, len(problem.Registry))
+	for code := range problem.Registry {
+		result = append(result, code)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func publicLogicalFailureCode(code *string) *string {
+	if code == nil {
+		return nil
+	}
+	if *code == "client_cancelled" || *code == "request_cancelled" {
+		value := "canceled"
+		return &value
+	}
+	if _, ok := problem.Registry[*code]; ok {
+		value := *code
+		return &value
+	}
+	value := "unknown"
+	return &value
+}
+
+func publicDecisionFailureCode(code *string) *string {
+	return publicLogicalFailureCode(code)
+}
+
+func publicAttemptFailureSQL(column string) string {
+	return `CASE
+		WHEN ` + column + ` IS NULL THEN NULL
+		WHEN ` + column + ` IN ('client_cancelled', 'request_cancelled') THEN 'canceled'
+		WHEN ` + column + ` IN ('pricing_unavailable', 'quota_state_unavailable', 'configuration_invalid') THEN 'gateway_error'
+		WHEN ` + column + ` = 'upstream_protocol_error' THEN 'protocol_error'
+		WHEN ` + column + ` IN ('upstream_timeout', 'upstream_timed_out') THEN 'timeout'
+		WHEN ` + column + ` = 'upstream_unavailable' THEN 'unavailable'
+		WHEN ` + column + ` = 'upstream_non_success' THEN 'upstream_rejected'
+		ELSE 'unknown'
+	END`
 }
 
 func publicAttemptStatus(status string) string {
@@ -1056,6 +1451,82 @@ func validateUpstreamAttempt(
 	return nil
 }
 
+func validateRequestDecisionStage(
+	stage requestDecisionStageDocument,
+	storedFailureCode *string,
+	request logicalRequestDocument,
+	expectedNumber int32,
+) error {
+	if stage.Number != expectedNumber || stage.Number < 1 || stage.Number > maximumRequestDecisionStages ||
+		!slices.Contains([]string{
+			"identity_verified", "client_trust_verified", "client_context_validated",
+			"configuration_loaded", "request_inspected", "policy_evaluated",
+			"route_selected", "quota_rule_evaluated", "quota_reserved",
+			"lifecycle_recovered",
+		}, stage.Stage) ||
+		!slices.Contains([]string{"succeeded", "denied", "failed", "cancelled"}, stage.Outcome) ||
+		stage.StartedAt.IsZero() || stage.CompletedAt.Before(stage.StartedAt) ||
+		stage.ConfigRevisionID != request.ConfigRevisionID ||
+		(stage.Outcome == "succeeded") != (storedFailureCode == nil) {
+		return errOperationalCorrupt
+	}
+	if storedFailureCode != nil && !operationalFailurePattern.MatchString(*storedFailureCode) {
+		return errOperationalCorrupt
+	}
+	if stage.PolicyRuleKey != nil &&
+		!operationalIdentifierPattern.MatchString(*stage.PolicyRuleKey) &&
+		!operationalRuleKeyPattern.MatchString(*stage.PolicyRuleKey) {
+		return errOperationalCorrupt
+	}
+	if stage.PolicyRuleKey != nil && stage.Stage != "policy_evaluated" {
+		return errOperationalCorrupt
+	}
+	if stage.LimitPlanKey != nil &&
+		(!operationalIdentifierPattern.MatchString(*stage.LimitPlanKey) ||
+			*stage.LimitPlanKey != request.SelectedLimitPlan ||
+			!slices.Contains([]string{
+				"policy_evaluated", "route_selected", "quota_rule_evaluated", "quota_reserved",
+			}, stage.Stage)) {
+		return errOperationalCorrupt
+	}
+	limitValues := []bool{
+		stage.LimitRuleKey != nil, stage.LimitMetric != nil,
+		stage.LimitAlgorithm != nil, stage.LimitMaximum != nil,
+	}
+	for _, present := range limitValues[1:] {
+		if present != limitValues[0] {
+			return errOperationalCorrupt
+		}
+	}
+	if stage.LimitRuleKey != nil &&
+		(!operationalRuleKeyPattern.MatchString(*stage.LimitRuleKey) ||
+			!operationalFailurePattern.MatchString(*stage.LimitMetric) ||
+			!slices.Contains([]string{"calendar", "token_bucket", "per_request", "concurrency"}, *stage.LimitAlgorithm) ||
+			*stage.LimitMaximum < 0 || stage.Stage != "quota_rule_evaluated") {
+		return errOperationalCorrupt
+	}
+	routeValues := []bool{
+		stage.Route != nil, stage.Upstream != nil, stage.Model != nil, stage.PhysicalModel != nil,
+	}
+	for _, present := range routeValues[1:] {
+		if present != routeValues[0] {
+			return errOperationalCorrupt
+		}
+	}
+	if stage.Route != nil &&
+		(!operationalIdentifierPattern.MatchString(*stage.Route) ||
+			!operationalIdentifierPattern.MatchString(*stage.Upstream) ||
+			!operationalIdentifierPattern.MatchString(*stage.Model) ||
+			!validOperationalText(*stage.PhysicalModel, 512) ||
+			request.SelectedRoute == nil || *stage.Route != *request.SelectedRoute ||
+			*stage.Upstream != *request.SelectedUpstream || *stage.Model != *request.SelectedModel ||
+			*stage.PhysicalModel != *request.SelectedPhysicalModel ||
+			!slices.Contains([]string{"route_selected", "quota_reserved"}, stage.Stage)) {
+		return errOperationalCorrupt
+	}
+	return nil
+}
+
 func (store *operationalStore) populateRequestDetails(
 	ctx context.Context,
 	organizationID string,
@@ -1070,6 +1541,69 @@ func (store *operationalStore) populateRequestDetails(
 		requestIDs[index] = items[index].ID
 		requestIndexes[items[index].ID] = index
 	}
+	stageRows, err := store.pool.Query(ctx, `
+		SELECT logical_request_id, stage_number, stage, outcome, failure_code,
+		       config_revision_id, policy_rule_key, limit_plan_key, limit_rule_key,
+		       limit_metric, limit_algorithm, limit_maximum, route_key, upstream_key,
+		       model_key, physical_model, started_at, completed_at
+		FROM logical_request_decision_stages
+		WHERE organization_id = $1 AND logical_request_id = ANY($2::text[])
+		ORDER BY logical_request_id, stage_number
+	`, organizationID, requestIDs)
+	if err != nil {
+		return fmt.Errorf("list request decision stages: %w", err)
+	}
+	terminalStages := make(map[string]bool, len(items))
+	for stageRows.Next() {
+		var requestID string
+		var storedFailureCode *string
+		var stage requestDecisionStageDocument
+		if err := stageRows.Scan(
+			&requestID, &stage.Number, &stage.Stage, &stage.Outcome, &storedFailureCode,
+			&stage.ConfigRevisionID, &stage.PolicyRuleKey, &stage.LimitPlanKey,
+			&stage.LimitRuleKey, &stage.LimitMetric, &stage.LimitAlgorithm,
+			&stage.LimitMaximum, &stage.Route, &stage.Upstream, &stage.Model,
+			&stage.PhysicalModel, &stage.StartedAt, &stage.CompletedAt,
+		); err != nil {
+			stageRows.Close()
+			return fmt.Errorf("scan request decision stage: %w", err)
+		}
+		requestIndex, ok := requestIndexes[requestID]
+		if !ok || terminalStages[requestID] || validateRequestDecisionStage(
+			stage, storedFailureCode, items[requestIndex], int32(len(items[requestIndex].DecisionStages)+1),
+		) != nil {
+			stageRows.Close()
+			return errOperationalCorrupt
+		}
+		stage.FailureCode = publicDecisionFailureCode(storedFailureCode)
+		stage.DurationMS = stage.CompletedAt.Sub(stage.StartedAt).Milliseconds()
+		items[requestIndex].DecisionStages = append(items[requestIndex].DecisionStages, stage)
+		terminalStages[requestID] = stage.Outcome != "succeeded"
+	}
+	if err := stageRows.Err(); err != nil {
+		stageRows.Close()
+		return fmt.Errorf("iterate request decision stages: %w", err)
+	}
+	stageRows.Close()
+	for index := range items {
+		if len(items[index].DecisionStages) == 0 {
+			continue
+		}
+		last := items[index].DecisionStages[len(items[index].DecisionStages)-1]
+		if last.Outcome == "succeeded" {
+			continue
+		}
+		expectedStatus := last.Outcome
+		if expectedStatus == "cancelled" {
+			expectedStatus = "canceled"
+		}
+		if items[index].Status != expectedStatus ||
+			(items[index].FailureCode == nil) != (last.FailureCode == nil) ||
+			(items[index].FailureCode != nil && *items[index].FailureCode != *last.FailureCode) {
+			return errOperationalCorrupt
+		}
+	}
+
 	attemptRows, err := store.pool.Query(ctx, `
 		SELECT logical_request_id, upstream_attempt_id, attempt_number, route_key,
 		       upstream_key, COALESCE(physical_model, ''), started_at, first_byte_at, first_token_at,
@@ -1415,29 +1949,30 @@ func (store *operationalStore) ensureEnvironment(ctx context.Context, organizati
 func (store *operationalStore) listAuditEvents(
 	ctx context.Context,
 	principal adminauth.Principal,
-	organizationID string,
+	filter auditFilter,
 	page operationalPage,
 ) ([]auditEventDocument, error) {
-	if organizationID == "" {
-		organizationID = principal.OrganizationID
+	if filter.OrganizationID == "" {
+		filter.OrganizationID = principal.OrganizationID
 	}
-	if id.Validate(organizationID, id.Organization) != nil || page.validate(id.AuditEvent) != nil {
+	if validateAuditFilter(filter) != nil || page.validate(id.AuditEvent) != nil {
 		return nil, errOperationalInvalid
 	}
-	if organizationID != principal.OrganizationID || !validOperationalRead(principal) {
+	if filter.OrganizationID != principal.OrganizationID || !validOperationalRead(principal) {
 		return nil, errOperationalForbidden
 	}
 	rows, err := store.pool.Query(ctx, `
 		SELECT event.audit_event_id, event.occurred_at,
 		       event.actor_kind, event.actor_id, event.action,
-		       event.resource_type, event.resource_id, event.outcome,
-		       event.request_id,
+		       event.resource_type, event.resource_id, event.environment_id,
+		       event.source, event.reason, event.outcome, event.request_id,
 		       COALESCE((
 		           SELECT jsonb_agg(
 		               jsonb_build_object(
 		                   'field', change.field_name,
 		                   'operation', change.operation,
-		                   'classification', change.classification
+		                   'classification', change.classification,
+		                   'redacted', change.classification = 'sensitive'
 		               ) ORDER BY change.ordinal
 		           )
 		           FROM audit_event_changes AS change
@@ -1445,10 +1980,26 @@ func (store *operationalStore) listAuditEvents(
 		       ), '[]'::jsonb) AS changes
 		FROM audit_events AS event
 		WHERE event.organization_id = $1
-		  AND ($2::timestamptz IS NULL OR (event.occurred_at, event.audit_event_id) < ($2, $3))
+		  AND ($2::text IS NULL OR event.audit_event_id = $2)
+		  AND ($3::text IS NULL OR event.environment_id = $3)
+		  AND ($4::text IS NULL OR event.actor_kind = $4)
+		  AND ($5::text IS NULL OR event.actor_id = $5)
+		  AND ($6::text IS NULL OR event.action = $6)
+		  AND ($7::text IS NULL OR event.resource_type = $7)
+		  AND ($8::text IS NULL OR event.resource_id = $8)
+		  AND ($9::text IS NULL OR event.source = $9)
+		  AND ($10::text IS NULL OR event.reason = $10)
+		  AND ($11::text IS NULL OR event.outcome = $11)
+		  AND ($12::timestamptz IS NULL OR event.occurred_at >= $12)
+		  AND ($13::timestamptz IS NULL OR event.occurred_at < $13)
+		  AND ($14::timestamptz IS NULL OR (event.occurred_at, event.audit_event_id) < ($14, $15))
 		ORDER BY event.occurred_at DESC, event.audit_event_id DESC
-		LIMIT $4
-	`, organizationID, nullableTime(page.after), nullableString(page.afterID), page.size+1)
+		LIMIT $16
+	`, filter.OrganizationID, nullableString(filter.EventID), nullableString(filter.EnvironmentID), nullableString(filter.ActorKind),
+		nullableString(filter.ActorID), nullableString(filter.Action), nullableString(filter.ResourceType),
+		nullableString(filter.ResourceID), nullableString(filter.Source), nullableString(filter.Reason),
+		nullableString(filter.Result), nullableTime(filter.Start), nullableTime(filter.End),
+		nullableTime(page.after), nullableString(page.afterID), page.size+1)
 	if err != nil {
 		return nil, fmt.Errorf("list audit events: %w", err)
 	}
@@ -1456,35 +2007,183 @@ func (store *operationalStore) listAuditEvents(
 	items := make([]auditEventDocument, 0, page.size+1)
 	for rows.Next() {
 		var item auditEventDocument
-		var actorKind, resourceType string
-		var actorID, requestID *string
+		var requestID *string
 		var changesJSON []byte
 		if err := rows.Scan(
-			&item.ID, &item.Timestamp, &actorKind, &actorID, &item.Action,
-			&resourceType, &item.Target, &item.Result, &requestID, &changesJSON,
+			&item.ID, &item.Timestamp, &item.ActorKind, &item.ActorID, &item.Action,
+			&item.ResourceType, &item.ResourceID, &item.EnvironmentID, &item.Source,
+			&item.Reason, &item.Result, &requestID, &changesJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan audit event: %w", err)
 		}
-		resourceID := item.Target
-		item.Target = resourceType + ":" + resourceID
-		item.Actor = actorKind
-		if actorID != nil {
-			item.Actor += ":" + *actorID
+		item.Target = item.ResourceType + ":" + item.ResourceID
+		item.Actor = item.ActorKind
+		if item.ActorID != nil {
+			item.Actor += ":" + *item.ActorID
 		}
 		if requestID != nil {
 			item.RequestID = *requestID
 		}
-		var changes []map[string]any
-		if len(changesJSON) > 64<<10 || json.Unmarshal(changesJSON, &changes) != nil || len(changes) > 100 {
+		if len(changesJSON) > 64<<10 || json.Unmarshal(changesJSON, &item.Changes) != nil || len(item.Changes) > 100 || !validAuditEventDocument(item) {
 			return nil, errOperationalCorrupt
 		}
-		item.Summary = map[string]any{"changes": changes}
+		item.Summary = map[string]any{"changes": item.Changes}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate audit events: %w", err)
 	}
 	return items, nil
+}
+
+func (store *operationalStore) getAuditEvent(
+	ctx context.Context,
+	principal adminauth.Principal,
+	auditEventID string,
+) (auditEventDocument, error) {
+	if id.Validate(auditEventID, id.AuditEvent) != nil {
+		return auditEventDocument{}, errOperationalInvalid
+	}
+	items, err := store.listAuditEvents(ctx, principal, auditFilter{
+		OrganizationID: principal.OrganizationID, EventID: auditEventID,
+	}, operationalPage{size: 1})
+	if err != nil {
+		return auditEventDocument{}, err
+	}
+	if len(items) == 1 && items[0].ID == auditEventID {
+		return items[0], nil
+	}
+	return auditEventDocument{}, errOperationalNotFound
+}
+
+func validateAuditFilter(filter auditFilter) error {
+	if id.Validate(filter.OrganizationID, id.Organization) != nil {
+		return errOperationalInvalid
+	}
+	if filter.EventID != "" && id.Validate(filter.EventID, id.AuditEvent) != nil {
+		return errOperationalInvalid
+	}
+	if filter.EnvironmentID != "" && id.Validate(filter.EnvironmentID, id.Environment) != nil {
+		return errOperationalInvalid
+	}
+	if filter.ActorID != "" {
+		parsed, err := id.Parse(filter.ActorID)
+		if err != nil || (parsed.Prefix != id.AdminUser && parsed.Prefix != id.AdminAPIToken) {
+			return errOperationalInvalid
+		}
+	}
+	switch filter.ActorKind {
+	case "", "admin_user", "admin_api_token", "system":
+	default:
+		return errOperationalInvalid
+	}
+	if (filter.Action != "" && !operationalAuditName(filter.Action, 100)) ||
+		(filter.ResourceType != "" && !operationalAuditName(filter.ResourceType, 64)) {
+		return errOperationalInvalid
+	}
+	if filter.ResourceID != "" {
+		parsed, err := id.Parse(filter.ResourceID)
+		if err != nil || parsed.Prefix == "" {
+			return errOperationalInvalid
+		}
+	}
+	switch filter.Source {
+	case "", "console", "cli", "api", "system":
+	default:
+		return errOperationalInvalid
+	}
+	if adminauth.ValidateAuditReason(filter.Reason) != nil {
+		return errOperationalInvalid
+	}
+	switch filter.Result {
+	case "", "succeeded", "denied", "failed", "indeterminate":
+	default:
+		return errOperationalInvalid
+	}
+	if !filter.Start.IsZero() && !filter.End.IsZero() && !filter.Start.Before(filter.End) {
+		return errOperationalInvalid
+	}
+	return nil
+}
+
+func operationalAuditName(value string, maximum int) bool {
+	if value == "" || len(value) > maximum {
+		return false
+	}
+	for index, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' && character != '.' {
+			return false
+		}
+		if index == 0 && character >= '0' && character <= '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validAuditEventDocument(item auditEventDocument) bool {
+	if id.Validate(item.ID, id.AuditEvent) != nil || item.Timestamp.IsZero() ||
+		!operationalAuditName(item.Action, 100) || !operationalAuditName(item.ResourceType, 64) {
+		return false
+	}
+	if parsed, err := id.Parse(item.ResourceID); err != nil || parsed.Prefix == "" {
+		return false
+	}
+	if item.EnvironmentID != nil && id.Validate(*item.EnvironmentID, id.Environment) != nil {
+		return false
+	}
+	switch item.ActorKind {
+	case "system":
+		if item.ActorID != nil || item.Source != "system" {
+			return false
+		}
+	case "admin_user":
+		if item.ActorID == nil || id.Validate(*item.ActorID, id.AdminUser) != nil ||
+			item.Source == "system" || item.Source == "cli" {
+			return false
+		}
+	case "admin_api_token":
+		if item.ActorID == nil || id.Validate(*item.ActorID, id.AdminAPIToken) != nil ||
+			item.Source == "system" || item.Source == "console" {
+			return false
+		}
+	default:
+		return false
+	}
+	switch item.Source {
+	case "console", "cli", "api", "system":
+	default:
+		return false
+	}
+	if item.Reason != nil && adminauth.ValidateAuditReason(*item.Reason) != nil {
+		return false
+	}
+	switch item.Result {
+	case "succeeded", "denied", "failed", "indeterminate":
+	default:
+		return false
+	}
+	if item.RequestID != "" && id.Validate(item.RequestID, id.AdminRequest) != nil {
+		return false
+	}
+	for _, change := range item.Changes {
+		if !operationalAuditName(change.Field, 64) ||
+			(change.Classification != "public" && change.Classification != "sensitive") ||
+			!validAuditChangeOperation(change.Operation) ||
+			(change.Redacted != (change.Classification == "sensitive")) {
+			return false
+		}
+	}
+	return true
+}
+
+func validAuditChangeOperation(operation string) bool {
+	switch operation {
+	case "set", "clear", "add", "remove", "rotate", "consume", "revoke":
+		return true
+	default:
+		return false
+	}
 }
 
 type startSelfTestInput struct {

@@ -25,7 +25,7 @@ import {
 const environmentPattern = /^env_[A-Za-z0-9_-]{16,128}$/;
 
 function ProblemNotice({ problem }: { problem?: AdminProblem }) {
-  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}</small></div> : null;
+  return problem ? <div className="control-notice control-notice--error" role="alert"><strong>{problem.title}</strong><span>{problem.detail}</span><small>Code: {problem.code}{problem.requestId ? ` · Request: ${problem.requestId}` : ""}</small>{problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">View troubleshooting</a> : null}</div> : null;
 }
 
 function localProblem(detail: string, title = "Resource edit is invalid"): AdminProblem {

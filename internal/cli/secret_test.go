@@ -14,6 +14,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	problemcontract "github.com/latchway/latchway/internal/problem"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,8 @@ func TestSecretSetReadsStdinAndUsesCanonicalAPI(t *testing.T) {
 		if request.Method != http.MethodPost || request.URL.Path != "/admin/v1/secrets" || request.URL.RawQuery != "" {
 			t.Fatalf("request = %s %s", request.Method, request.URL.String())
 		}
-		if request.Header.Get("Authorization") != "Bearer "+token {
+		if request.Header.Get("Authorization") != "Bearer "+token ||
+			request.Header.Get("X-Latchway-Admin-Source") != "cli" {
 			t.Fatal("secret request did not use the named Admin API token")
 		}
 		if request.Header.Get("Origin") != "" || request.Header.Get("Content-Type") != "application/json" {
@@ -99,7 +101,8 @@ func TestSecretListAndDeleteUseMetadataOnlyEndpoints(t *testing.T) {
 	requests := 0
 	client := &http.Client{Transport: secretRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests++
-		if request.Header.Get("Authorization") != "Bearer "+token {
+		if request.Header.Get("Authorization") != "Bearer "+token ||
+			request.Header.Get("X-Latchway-Admin-Source") != "cli" {
 			t.Fatal("missing list/delete bearer token")
 		}
 		switch request.Method {
@@ -612,7 +615,11 @@ func TestSecretOneByteValuesRedactWholeMaliciousProblemField(t *testing.T) {
 				"--server", "http://127.0.0.1:8080", "secret", "rotate", secretTestID,
 				"--value-env", "TEST_LATCHWAY_ONE_BYTE_PROBLEM_VALUE", "--api-token-env", "TEST_LATCHWAY_ONE_BYTE_PROBLEM_TOKEN",
 			}, opts)
-			want := "secret API failed: HTTP 400 Invalid request (request_invalid): [redacted] [request_id=" + requestID + " retryable=false]"
+			documentationURL := problemcontract.DocumentationURL("request_invalid")
+			if strings.Contains(documentationURL, test.value) {
+				documentationURL = "[redacted]"
+			}
+			want := "secret API failed: HTTP 400 Invalid request (request_invalid): [redacted] [request_id=" + requestID + " retryable=false docs=" + documentationURL + "]"
 			if err == nil || err.Error() != want {
 				t.Fatalf("one-byte Problem diagnostic = %v, want %q", err, want)
 			}
@@ -1000,13 +1007,14 @@ func secretMetadataJSON(secretID, environmentID, name string, version int) strin
 func secretProblemJSON(t *testing.T, status int, code, title, detail, requestID string, retryable bool, optional map[string]any) string {
 	t.Helper()
 	document := map[string]any{
-		"type":       "https://latchway.dev/problems/" + code,
-		"title":      title,
-		"status":     status,
-		"detail":     detail,
-		"code":       code,
-		"request_id": requestID,
-		"retryable":  retryable,
+		"type":              problemcontract.DocumentationURL(code),
+		"documentation_url": problemcontract.DocumentationURL(code),
+		"title":             title,
+		"status":            status,
+		"detail":            detail,
+		"code":              code,
+		"request_id":        requestID,
+		"retryable":         retryable,
 	}
 	for key, value := range optional {
 		document[key] = value

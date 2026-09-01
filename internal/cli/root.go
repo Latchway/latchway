@@ -146,30 +146,7 @@ func newMigrateCommand(opts *options) *cobra.Command {
 }
 
 func newDoctorCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
-		Short: "Validate bootstrap configuration, database access, and schema state",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			pool, err := database.Open(cmd.Context(), cfg.DatabaseURL, cfg.DBMaxConnections)
-			if err != nil {
-				return err
-			}
-			defer pool.Close()
-			current, available, err := database.NewMigrator(pool).Status(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if current != available {
-				return fmt.Errorf("database schema is behind: current %d, available %d", current, available)
-			}
-			return opts.print(map[string]any{"status": "ok", "database": "reachable", "schema_version": current, "role": cfg.Role})
-		},
-	}
+	return doctorCommand(opts)
 }
 
 func newVersionCommand(opts *options) *cobra.Command {

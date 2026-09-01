@@ -60,6 +60,7 @@ SOURCE_CHECK_IDS = frozenset(
         "source.generated_fixtures",
         "source.package_versions",
         "source.react_native_pins",
+        "source.documentation_mirror",
     )
 )
 SOURCE_UNVERIFIED_CHECKS = {
@@ -781,6 +782,7 @@ def validate_source(path: Path, now: datetime) -> dict[str, Any]:
         "release_ready",
         "contract",
         "repositories",
+        "documentation",
         "evidence_window",
         "evidence_domains",
         "checks",
@@ -938,10 +940,42 @@ def validate_source(path: Path, now: datetime) -> dict[str, Any]:
         raise EvidenceError("source_repositories_invalid")
     if repositories["core"]["tag"] != contract["core_release"]:
         raise EvidenceError("source_contract_invalid")
+    documentation = value["documentation"]
+    documentation = require_fields(
+        documentation,
+        (
+            "repository",
+            "commit",
+            "canonical_core_commit",
+            "source_commit",
+            "source_manifest_sha256",
+            "source_tree_sha256",
+            "owned_file_count",
+        ),
+        "source_documentation_invalid",
+    )
+    if (
+        documentation["repository"]
+        != "https://github.com/Latchway/latchway-docs.git"
+        or documentation["canonical_core_commit"] != repositories["core"]["commit"]
+        or not isinstance(documentation["commit"], str)
+        or COMMIT.fullmatch(documentation["commit"]) is None
+        or not isinstance(documentation["source_commit"], str)
+        or COMMIT.fullmatch(documentation["source_commit"]) is None
+        or not isinstance(documentation["source_manifest_sha256"], str)
+        or SHA256.fullmatch(documentation["source_manifest_sha256"]) is None
+        or not isinstance(documentation["source_tree_sha256"], str)
+        or SHA256.fullmatch(documentation["source_tree_sha256"]) is None
+        or not isinstance(documentation["owned_file_count"], int)
+        or isinstance(documentation["owned_file_count"], bool)
+        or not 1 <= documentation["owned_file_count"] <= 4096
+    ):
+        raise EvidenceError("source_documentation_invalid")
     return {
         "document": value,
         "contract": contract,
         "repositories": repositories,
+        "documentation": documentation,
         "released_at": released_at,
     }
 

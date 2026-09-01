@@ -75,6 +75,15 @@ class VerifyPromotionTests(unittest.TestCase):
                 "oci_image_digest": "ghcr.io/latchway/latchway@sha256:" + "c" * 64,
             },
             "repositories": repositories,
+            "documentation": {
+                "repository": "https://github.com/Latchway/latchway-docs.git",
+                "commit": "f" * 40,
+                "canonical_core_commit": self.commit,
+                "source_commit": self.commit,
+                "source_manifest_sha256": "1" * 64,
+                "source_tree_sha256": "2" * 64,
+                "owned_file_count": 308,
+            },
             "evidence_window": {
                 "started_at": "2026-08-29T10:40:00Z",
                 "finished_at": "2026-08-29T11:40:00Z",
@@ -111,6 +120,7 @@ class VerifyPromotionTests(unittest.TestCase):
             "ghcr.io/latchway/latchway@sha256:" + "c" * 64,
         )
         self.assertEqual(result["react_native_intended_tag"], "v1.0.4")
+        self.assertEqual(result["documentation_commit"], "f" * 40)
 
     def test_rejects_not_ready_or_failed_required_check(self) -> None:
         for mutation, code in (

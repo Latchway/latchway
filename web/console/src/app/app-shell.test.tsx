@@ -36,7 +36,8 @@ function signedOutResponse() {
       retryable: false,
       status: 401,
       title: "Authentication required",
-      type: "https://latchway.dev/problems/authentication_required"
+      type: "https://docs.latchway.dev/errors/authentication-required",
+      documentation_url: "https://docs.latchway.dev/errors/authentication-required"
     }),
     {
       headers: { "Content-Type": "application/problem+json" },
@@ -269,7 +270,8 @@ describe("AppShell", () => {
             retryable: false,
             status: 401,
             title: "Authentication required",
-            type: "https://latchway.dev/problems/authentication_required"
+            type: "https://docs.latchway.dev/errors/authentication-required",
+            documentation_url: "https://docs.latchway.dev/errors/authentication-required"
           }),
           {
             headers: { "Content-Type": "application/problem+json" },

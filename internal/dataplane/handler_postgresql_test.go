@@ -1270,13 +1270,16 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		concurrencyBody("malicious-underbound-proof-must-not-dispatch", false),
 	)
 	assertDataPlaneE2EProblem(t, underboundResponse, http.StatusUnprocessableEntity, "configuration_invalid")
+	assertDataPlaneE2EPreReservationFailure(
+		t, ctx, pool, dataPlaneE2EUnderboundRequestID, revisionID,
+	)
 	if countingSecrets.calls.Load() != 0 || targets.acquisitions.Load() != 10 ||
 		targets.releases.Load() != 10 || len(mock.Observations()) != 10 {
 		t.Fatalf("underbound proof reached secret/target/provider: secret=%d acquisitions=%d releases=%d observations=%d",
 			countingSecrets.calls.Load(), targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 15, reservations: 10, reservationEntries: 13,
+		logicalRequests: 16, reservations: 10, reservationEntries: 13,
 		buckets: 7, attempts: 10, usageRecords: 50, deniedRequests: 5,
 	})
 
@@ -1315,7 +1318,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			replayingQuotaStore.rejectedTrustedMutations.Load())
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 16, reservations: 11, reservationEntries: 19,
+		logicalRequests: 17, reservations: 11, reservationEntries: 19,
 		buckets: 13, attempts: 11, usageRecords: 55, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETrustedInputPrompt)
@@ -1377,7 +1380,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 		t.Fatalf("post-reserve tamper durable state = %q/%q", tamperedStatus, tamperedFailure)
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 17, reservations: 12, reservationEntries: 25,
+		logicalRequests: 18, reservations: 12, reservationEntries: 25,
 		buckets: 13, attempts: 11, usageRecords: 55, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool, dataPlaneE2ETamperedInputPrompt)
@@ -1454,7 +1457,7 @@ func TestAuthenticatedChatCompletionsPostgreSQL(t *testing.T) {
 			targets.acquisitions.Load(), targets.releases.Load(), len(mock.Observations()))
 	}
 	assertDataPlaneE2EDurableCounts(t, ctx, pool, dataPlaneE2EDurableCounts{
-		logicalRequests: 20, reservations: 15, reservationEntries: 31,
+		logicalRequests: 21, reservations: 15, reservationEntries: 31,
 		buckets: 19, attempts: 14, usageRecords: 70, deniedRequests: 5,
 	})
 	assertDataPlaneE2EMarkersNotPersisted(t, ctx, pool,
@@ -3774,6 +3777,65 @@ func backdateDataPlaneE2EOutputTokenBucket(
 			before, after, want)
 	}
 	return after
+}
+
+func assertDataPlaneE2EPreReservationFailure(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	clientRequestID string,
+	revisionID string,
+) {
+	t.Helper()
+	var requestID, storedRevisionID, selectedPlan, status, failureCode string
+	var selectedRoute *string
+	if err := pool.QueryRow(ctx, `
+		SELECT logical_request_id, config_revision_id, selected_limit_plan_key,
+		       selected_route_key, status, failure_code
+		FROM logical_requests
+		WHERE client_request_id = $1
+	`, clientRequestID).Scan(
+		&requestID, &storedRevisionID, &selectedPlan, &selectedRoute, &status, &failureCode,
+	); err != nil {
+		t.Fatalf("read pre-reservation logical request: %v", err)
+	}
+	if id.Validate(requestID, id.LogicalRequest) != nil || storedRevisionID != revisionID ||
+		selectedPlan == "" || selectedPlan == "legacy_unknown" || selectedRoute != nil ||
+		status != "failed" || failureCode != "configuration_invalid" {
+		t.Fatalf("pre-reservation request = id:%q revision:%q plan:%q route:%v status:%q failure:%q",
+			requestID, storedRevisionID, selectedPlan, selectedRoute, status, failureCode)
+	}
+	var stageCount, reservationCount, attemptCount int64
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		    (SELECT count(*) FROM logical_request_decision_stages WHERE logical_request_id = $1),
+		    (SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1),
+		    (SELECT count(*) FROM upstream_attempts WHERE logical_request_id = $1)
+	`, requestID).Scan(&stageCount, &reservationCount, &attemptCount); err != nil {
+		t.Fatalf("count pre-reservation lifecycle rows: %v", err)
+	}
+	if stageCount != 7 || reservationCount != 0 || attemptCount != 0 {
+		t.Fatalf("pre-reservation stages/reservations/attempts = %d/%d/%d, want 7/0/0",
+			stageCount, reservationCount, attemptCount)
+	}
+	var stageNumber int32
+	var stage, outcome, stageFailureCode, stageRevisionID string
+	if err := pool.QueryRow(ctx, `
+		SELECT stage_number, stage, outcome, failure_code, config_revision_id
+		FROM logical_request_decision_stages
+		WHERE logical_request_id = $1
+		ORDER BY stage_number DESC
+		LIMIT 1
+	`, requestID).Scan(
+		&stageNumber, &stage, &outcome, &stageFailureCode, &stageRevisionID,
+	); err != nil {
+		t.Fatalf("read terminal pre-reservation decision: %v", err)
+	}
+	if stageNumber != 7 || stage != quota.DecisionRouteSelected || outcome != quota.DecisionFailed ||
+		stageFailureCode != "configuration_invalid" || stageRevisionID != revisionID {
+		t.Fatalf("terminal pre-reservation stage = %d/%q/%q/%q/%q",
+			stageNumber, stage, outcome, stageFailureCode, stageRevisionID)
+	}
 }
 
 func readDataPlaneE2ECostBucketState(

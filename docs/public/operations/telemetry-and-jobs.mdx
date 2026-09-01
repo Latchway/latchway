@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
@@ -21,6 +21,28 @@ authoritative quota, replay, configuration, or audit store.
 | `GET /healthz` | Process liveness |
 | `GET /readyz` | Database, migrations, active configuration, key material, and required worker-heartbeat readiness |
 | `GET /metrics` | Prometheus exposition backed by OpenTelemetry metrics |
+
+Authenticated operators can run the canonical extended diagnostic through the
+Console Health center, `GET /admin/v1/system/doctor`, or `latchway doctor`.
+These surfaces share fixed check IDs, safe summaries, remediation text, and
+bounded facts. `GET /admin/v1/system/support-bundle` and
+`latchway doctor --support-bundle PATH` produce the same versioned,
+structurally allowlisted evidence envelope. It contains no credentials, tokens,
+cookies, authorization headers, proofs, master-key material, raw attestation
+evidence, or request/response content. The CLI refuses to overwrite a bundle
+path and creates the file with mode `0600`.
+
+Doctor facts are snapshots of durable state plus the reporting process. In
+particular, external JWKS health is the last-known persisted refresh outcome,
+Apple and Google checks cover configured dependency inventories rather than live
+provider calls, replica coverage comes from 90-second heartbeats, and cache
+facts describe only the reporting API process. Job timestamps establish bounded
+rollup, reconciliation, rotation, JWKS-refresh, and operational-retention
+freshness; they do not certify every individual request. The reported
+`latest_compatible_version` is embedded in the running binary with source
+`embedded_self`, not fetched from a release service. See
+[Operational views](/administration/observability#system-health) for the exact
+claim made by each check.
 
 `/metrics` is unauthenticated at the application router. Restrict it at the
 private network, service mesh, load balancer, or scrape identity boundary; its
@@ -108,10 +130,14 @@ slots. A connection pooler does not replace this end-to-end budget.
 
 ## Alert baseline
 
-Alert on sustained readiness failure, missing worker heartbeat, migration drift,
-signing/JWKS refresh failure, reservation recovery, self-test rejection or
-recovery, attestation failure-rate shifts, quota-denial anomalies, upstream
-failure/latency, stream saturation, database pool exhaustion, and backup age.
+Alert on sustained readiness failure, missing worker or role coverage,
+migration drift, process-local configuration-cache warnings, signing/JWKS
+refresh failure, stale usage/retention/reconciliation jobs, settlement backlog,
+reservation recovery, self-test rejection or recovery, attestation failure-rate
+shifts, quota-denial anomalies, upstream failure/latency, stream saturation,
+database pool exhaustion, and backup age. Alert on the stated doctor check; do
+not relabel a durable JWKS refresh observation as a live provider probe or a
+dependency-inventory check as physical-device verification.
 
 Tie alerts to immutable image, configuration revision, application,
 environment, and safe request IDs—not to secret values or user content.

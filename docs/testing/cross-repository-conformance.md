@@ -1,7 +1,8 @@
 # Cross-repository conformance and release evidence
 
 `scripts/cross-repo-conformance.py` is the offline, fail-closed evidence
-orchestrator for the core repository and all four SDK repositories. It reads
+orchestrator for the core repository, all four SDK repositories, and the
+generated Mintlify documentation repository. It reads
 only local Git checkouts and an optional directory of independently produced
 external evidence. It never fetches a default branch, queries a registry,
 creates a tag, contacts a device or cloud, or publishes an artifact.
@@ -10,7 +11,7 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 
 `source` scope proves local source alignment. It requires:
 
-- five explicit, distinct, clean Git worktrees;
+- six explicit, distinct, clean Git worktrees;
 - every SDK `contract.lock` to name the same immutable core contract checkpoint,
   contract version, wire version, server range, core release label, and
   generated bundle SHA-256. The checkpoint must exist, be an ancestor of the
@@ -22,7 +23,9 @@ creates a tag, contacts a device or cloud, or publishes an artifact.
 - core, JavaScript, Swift/CocoaPods, Android/Maven, and React Native package
   version declarations to agree with their public source constants; and
 - React Native's compatibility manifest and native/JavaScript coordinates to
-  pin the exact local dependency commits and versions.
+  pin the exact local dependency commits and versions; and
+- the `latchway-docs` mirror manifest to bind every generated file byte to an
+  unchanged canonical `docs/public` tree and an exact core source commit.
 
 A passing source report deliberately records release tags, public artifacts,
 live SDK/server behavior, physical devices, a live provider, and cloud
@@ -57,7 +60,7 @@ document is `failed`. The command never upgrades either result to a pass.
 
 ## Repository discovery and source run
 
-The default workspace layout is the five sibling directories from the project
+The default workspace layout is the six sibling directories from the project
 plan. Discovery is local and deterministic; no remote URL is followed:
 
 ```text
@@ -66,6 +69,7 @@ plan. Discovery is local and deterministic; no remote URL is followed:
 <workspace>/latchway-ios-sdk
 <workspace>/latchway-android
 <workspace>/latchway-react-native-sdk
+<workspace>/latchway-docs
 ```
 
 Run from any directory, naming the workspace and an output outside every source
@@ -81,10 +85,11 @@ python3 latchway/scripts/cross-repo-conformance.py \
 The JUnit report defaults to
 `/tmp/latchway-cross-repo-source.json.junit.xml`. Use `--junit-output` to choose
 another path. `--core-repo`, `--javascript-repo`, `--ios-repo`,
-`--android-repo`, and `--react-native-repo` can replace individual defaults.
+`--android-repo`, `--react-native-repo`, and `--documentation-repo` can replace
+individual defaults.
 Absolute developer paths are never written to either report.
 
-The output must be outside all five repositories. This prevents evidence
+The output must be outside all six repositories. This prevents evidence
 creation from making a previously clean candidate dirty after the clean-tree
 check.
 
@@ -242,7 +247,8 @@ hashes, and the common evidence window.
 ## Report safety and determinism
 
 Reports contain repository IDs, public package versions, commits, release tags,
-contract hashes, fixed reason codes, claim names, artifact hashes, and counts.
+contract hashes, the generated documentation commit and canonical tree hashes,
+fixed reason codes, claim names, artifact hashes, and counts.
 They do not contain absolute paths, environment values, Git stderr, registry
 credentials, attestation payloads, provider responses, device identifiers, or
 cloud secrets. Dirty trees report only the repository ID and entry count, not
@@ -256,7 +262,7 @@ atomically written with mode `0600`.
 
 `.github/workflows/cross-repository-conformance.yml` is a read-only manual
 workflow. Supply `scope` plus immutable `core_ref`, `javascript_ref`, `ios_ref`,
-`android_ref`, and `react_native_ref` values. Promotion and release scopes also
+`android_ref`, `react_native_ref`, and `documentation_ref` values. Promotion and release scopes also
 require `core_release_tag`, `candidate_oci_image_digest`, and the exact
 `external_evidence_run_id` plus `external_evidence_run_attempt` of the protected
 aggregate producer. The artifact name is derived from that run identity; it is
@@ -274,7 +280,7 @@ registry, release, or deployment-environment mutation permission.
 
 Configure `LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN` in the protected
 `private-sibling-read` environment as a fine-grained credential with Contents:
-read access only to the four SDK repositories. The authority job fails closed
+read access only to the four SDK repositories and the documentation mirror. The authority job fails closed
 when that credential is absent, never checks out or executes repository code,
 and does not pass the credential to the conformance or attestation jobs.
 Configure required reviewers on `release-evidence-signing`; it contains no
@@ -289,7 +295,7 @@ separate, explicitly authorized operations after a passing evidence report.
 python3 -m unittest -v scripts/test_cross_repo_conformance.py
 ```
 
-The tests create five isolated Git repositories and cover a complete source
+The tests create six isolated Git repositories and cover a complete source
 pass, byte determinism, dirty-tree redaction, lock/fixture drift, pre-tag
 promotion, the six-versus-eight domain split, valid hash-bound release
 evidence, artifact tamper, coordinate and OCI digest substitution,

@@ -985,9 +985,9 @@ func (store *Store) RevokeCurrentFamily(ctx context.Context, access AccessReques
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO audit_events (
 				audit_event_id, organization_id, environment_id, actor_kind, actor_id,
-				action, resource_type, resource_id, outcome, occurred_at
+				action, resource_type, resource_id, outcome, occurred_at, source
 			) VALUES ($1, $2, $3, 'system', NULL, 'client.family.revoked',
-			          'installation_family', $4, 'succeeded', $5)
+			          'installation_family', $4, 'succeeded', $5, 'system')
 		`, auditEventID, state.OrganizationID, state.EnvironmentID,
 			state.InstallationFamilyID, now); err != nil {
 			return fmt.Errorf("record family lifecycle audit event: %w", err)
@@ -1002,8 +1002,8 @@ func insertComponentLifecycleAudit(ctx context.Context, tx pgx.Tx, eventID, orga
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (
 			audit_event_id, organization_id, environment_id, actor_kind, actor_id,
-			action, resource_type, resource_id, outcome, occurred_at
-		) VALUES ($1, $2, $3, 'system', NULL, $4, 'client_component', $5, 'succeeded', $6)
+			action, resource_type, resource_id, outcome, occurred_at, source
+		) VALUES ($1, $2, $3, 'system', NULL, $4, 'client_component', $5, 'succeeded', $6, 'system')
 	`, eventID, organizationID, environmentID, action, componentID, now); err != nil {
 		return fmt.Errorf("record component lifecycle audit event: %w", err)
 	}

@@ -194,6 +194,11 @@ attestation policy, output policy, and routes unchanged:
 }
 ```
 
+Latchway v1 accepts only one delegation edge: a root component provisions a
+delegated component. Although the schema retains `allowChildDelegation` as a
+forward-compatible field, semantic validation rejects `true`; a delegated
+component cannot provision another child.
+
 The CEL activation is built from the sealed session and durable component, not
 from application headers. Missing fields, unknown values, type errors, cost
 exhaustion, or an absent selected plan fail closed.

@@ -1,60 +1,69 @@
 # Latchway public documentation
 
-Latchway is a self-hosted gateway for feature-bound, DPoP-authorized access from
-untrusted applications to server-selected AI or HTTP upstreams.
+> Latchway is a self-hosted gateway for feature-bound, DPoP-authorized access from untrusted client applications to server-selected AI or HTTP upstreams. Version 1 remains a source candidate until its release evidence is published.
 
-Important: version 1 remains a source candidate. Named AI framework adapters,
-Installation Families, Client Components, and app-extension provisioning are
-pre-release target contracts until exact compatibility and conformance evidence
-is published.
+## Start here
 
-Start:
-- /index
-- /quickstart
-- /operate/quickstart
-- /release-status
-- /start/architecture-at-a-glance
-- /start/choose-an-integration
+- [Overview](https://docs.latchway.dev/index.md): Understand the product boundary and choose a task-oriented path.
+- [Local quickstart](https://docs.latchway.dev/operate/quickstart.md): Start the source candidate with PostgreSQL and pass local verification.
+- [Choose an SDK](https://docs.latchway.dev/clients/choose-an-sdk.md): Select iOS, Android, Web, or React Native without conflating their trust models.
+- [Architecture at a glance](https://docs.latchway.dev/start/architecture-at-a-glance.md): See the control plane, data plane, PostgreSQL, and upstream boundaries.
+- [Release status](https://docs.latchway.dev/release-status.md): Separate tested source behavior from pending publication and production evidence.
 
-Security and runtime model:
-- /concepts/security-boundary
-- /concepts/installation-families
-- /concepts/client-components
-- /concepts/trust-provenance
-- /security/delegated-components
+## Native client journeys
 
-Client journeys:
-- /clients/choose-an-sdk
-- /clients/authentication-providers
-- /clients/ios/index
-- /clients/ios/quickstart
-- /clients/ios/app-attest
-- /clients/ios/production-checklist
-- /clients/android/index
-- /clients/android/quickstart
-- /clients/android/play-integrity
-- /clients/android/production-checklist
-- /clients/web/quickstart
-- /clients/web/browser-trust
-- /clients/web/browser-vs-node
-- /clients/web/production-checklist
-- /clients/react-native/index
-- /clients/react-native/quickstart
-- /clients/react-native/ios-native-setup
-- /clients/react-native/android-native-setup
-- /clients/react-native/production-checklist
+- [iOS quickstart](https://docs.latchway.dev/clients/ios/quickstart.md): Send and correlate a feature-bound request from a signed iOS host.
+- [iOS App Attest](https://docs.latchway.dev/clients/ios/app-attest.md): Configure App Attest and understand what its evidence does and does not establish.
+- [iOS production checklist](https://docs.latchway.dev/clients/ios/production-checklist.md): Review release signing, policy, observability, and device-proof gates.
+- [Android quickstart](https://docs.latchway.dev/clients/android/quickstart.md): Build the source client and prepare an OkHttp request for platform trust.
+- [Android Play Integrity](https://docs.latchway.dev/clients/android/play-integrity.md): Distinguish local, Play internal-testing, and production verdicts.
+- [Android production checklist](https://docs.latchway.dev/clients/android/production-checklist.md): Review package, certificate, track, policy, and device-proof gates.
+- [React Native quickstart](https://docs.latchway.dev/clients/react-native/quickstart.md): Use one TypeScript surface backed by native iOS and Android security modules.
+- [React Native iOS setup](https://docs.latchway.dev/clients/react-native/ios-native-setup.md): Configure bundle identity, App Attest, CocoaPods, and Keychain groups.
+- [React Native Android setup](https://docs.latchway.dev/clients/react-native/android-native-setup.md): Configure the Gradle composite, package identity, certificate, and Play project.
+- [React Native production checklist](https://docs.latchway.dev/clients/react-native/production-checklist.md): Track the two native release proofs independently.
 
-Integrations and reference:
-- /integrations/overview
-- /integrations/swift-openai
-- /integrations/koog-android
-- /reference/client-api
-- /reference/admin-api
-- /reference/compatibility
-- /reference/errors
+## Web client journey
 
-Never recommend an upstream provider API key in a client. Distinguish
-authentication, attestation, authorization, and DPoP. Prefer feature IDs over
-physical model names. State exact Latchway and framework versions.
-Treat Web and React Native as distinct security models. WebCrypto and App Check
-or Turnstile are browser controls, not native hardware-backed attestation.
+- [Web quickstart](https://docs.latchway.dev/clients/web/quickstart.md): Use vanilla TypeScript, WebCrypto, existing identity, and a feature-bound fetch.
+- [Browser trust](https://docs.latchway.dev/clients/web/browser-trust.md): Understand identity, WebCrypto possession, origin policy, App Check, and Turnstile.
+- [Browser versus Node.js](https://docs.latchway.dev/clients/web/browser-vs-node.md): Keep browser and server runtime trust claims separate.
+- [Origins and CORS](https://docs.latchway.dev/clients/web/origins-and-cors.md): Configure exact browser origins and preflight behavior.
+- [Content Security Policy](https://docs.latchway.dev/clients/web/content-security-policy.md): Add the gateway origin to a bounded browser CSP.
+- [Web production checklist](https://docs.latchway.dev/clients/web/production-checklist.md): Review identity, origin, risk-signal, XSS, and storage controls.
+
+## Security and Installation Families
+
+- [Security boundary](https://docs.latchway.dev/concepts/security-boundary.md): Review the complete protected-request lifecycle and remaining threats.
+- [Identity and attestation](https://docs.latchway.dev/concepts/identity-and-attestation.md): Distinguish authentication, attestation, authorization, and DPoP.
+- [Installation Families](https://docs.latchway.dev/concepts/installation-families.md): Group related components while preserving independent keys and sessions.
+- [Client Components](https://docs.latchway.dev/concepts/client-components.md): Understand root, delegated, identity-only, and browser-risk trust.
+- [Trust provenance](https://docs.latchway.dev/concepts/trust-provenance.md): Follow trust sources, expiry, and revocation through a component graph.
+- [Delegated component security](https://docs.latchway.dev/security/delegated-components.md): Understand why delegated trust is not independent App Attest.
+- [Physical-device proof](https://docs.latchway.dev/mobile/device-proof.md): Bind an exact signed artifact and source coordinate to device evidence.
+
+## Operate and investigate
+
+- [Admin console](https://docs.latchway.dev/administration/console.md): Use capability-scoped, same-origin control-plane workflows.
+- [Configuration](https://docs.latchway.dev/administration/configuration.md): Create, validate, plan, simulate, activate, and roll back immutable revisions.
+- [Operational observability](https://docs.latchway.dev/administration/observability.md): Inspect request, usage, cost, latency, trust, and audit metadata.
+- [Production readiness](https://docs.latchway.dev/operations/production-readiness.md): Review the complete deployment and release checklist.
+- [Deployment](https://docs.latchway.dev/operations/deployment.md): Deploy API, worker, and migration roles with PostgreSQL as the required external service.
+- [Backup and restore](https://docs.latchway.dev/operations/backup-restore.md): Capture, restore, and verify recoverable PostgreSQL state.
+- [Upgrades](https://docs.latchway.dev/operations/upgrades.md): Upgrade with compatibility checks and a documented rollback boundary.
+- [Troubleshooting](https://docs.latchway.dev/troubleshooting.md): Start from stable error codes and redaction-safe request identifiers.
+
+## Contracts and agent resources
+
+- [Client API](https://docs.latchway.dev/reference/client-api.md): Inspect the generated DPoP-bound client wire operations without a misleading playground.
+- [Admin API](https://docs.latchway.dev/reference/admin-api.md): Inspect the generated control-plane operations and safe local request policy.
+- [Error registry](https://docs.latchway.dev/reference/errors.md): Map stable gateway and SDK-local errors to bounded remediation.
+- [Compatibility matrix](https://docs.latchway.dev/reference/compatibility.md): Read support claims generated from the canonical compatibility registry.
+- [Configuration schema](https://docs.latchway.dev/reference/config-schema.md): Inspect the generated immutable configuration contract.
+- [CLI reference](https://docs.latchway.dev/reference/cli.md): Use credential-safe administrative commands and verification workflows.
+- [Agent resources](https://docs.latchway.dev/community/agent-resources.md): Use Latchway instructions and skills without inventing fields or security claims.
+- [Latchway skill](https://docs.latchway.dev/skill.md): Integrate, operate, and troubleshoot Latchway with explicit trust boundaries.
+
+## Usage boundaries
+
+Never recommend an upstream provider credential in a client application. Distinguish authentication, attestation, authorization, and DPoP. Prefer feature IDs over physical model names. State exact Latchway and framework versions. Treat Web and React Native as distinct security models: browser WebCrypto and risk signals are not native hardware-backed attestation.

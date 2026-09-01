@@ -3,12 +3,332 @@
   "generator": "scripts/public_reference.py",
   "outputs": [
     {
+      "path": "errors/attestation-invalid.mdx",
+      "sha256": "6dbd23c5cfa26df37e032ce05054cf92a0d65e0fa650a1b7e1d179abc19f903a"
+    },
+    {
+      "path": "errors/attestation-provider-missing.mdx",
+      "sha256": "7ab876c294b244f2a254845e661718d7aa17e481d7fc08dc2e6237f3c5016653"
+    },
+    {
+      "path": "errors/attestation-required.mdx",
+      "sha256": "18ce6e8370967e7d474751573362eb7dc026a766b82daeb88540ae4ea0d4b6a5"
+    },
+    {
+      "path": "errors/attestation-stale.mdx",
+      "sha256": "b50f3a539b748093cb334a7e09f8be47ea121452414db85ace5468d468f1f560"
+    },
+    {
+      "path": "errors/attestation-step-up-required.mdx",
+      "sha256": "98da5dd2153049af54434ac6450a8414a51dd863a97cc09ae8738e6567d11110"
+    },
+    {
+      "path": "errors/attestation-unsupported.mdx",
+      "sha256": "69047058dba9734b95ab0d5f31c11dc819618f99fdc2e8a83b481dbd513100a5"
+    },
+    {
+      "path": "errors/authentication-required.mdx",
+      "sha256": "243bb78a15a2fc81ff8e04a5179bda54dfe0bb6678675be609d48b224c575142"
+    },
+    {
+      "path": "errors/bootstrap-disabled.mdx",
+      "sha256": "8265d472aee8d234af143dd624b3561b2d9cf2e311a62998c6f47d09a5f25b4d"
+    },
+    {
+      "path": "errors/cancelled.mdx",
+      "sha256": "474f63637039159e110e798befdf0f7b137ecbd4f5efce5efd69b21f77ed19c2"
+    },
+    {
+      "path": "errors/client-configuration-invalid.mdx",
+      "sha256": "472b2d2d500eecdde0befb95567e24ff0bfe117209f1ebf963b00bf66ae94ba4"
+    },
+    {
+      "path": "errors/component-definition-not-found.mdx",
+      "sha256": "e31138ca6365f5a3cf1b2a10717a46ff531be6326143b0c4afc73b17312f0a7e"
+    },
+    {
+      "path": "errors/component-delegation-expired.mdx",
+      "sha256": "4e03ca67cb54368c18083ec04ab0a9d9fab56eb7520865d9b4dde6a3289310b5"
+    },
+    {
+      "path": "errors/component-direct-attestation-required.mdx",
+      "sha256": "1a89c7a4e9f6bb393b92db69b56b99513e945f90563f522136cf2713eebfeef6"
+    },
+    {
+      "path": "errors/component-feature-not-granted.mdx",
+      "sha256": "d576307c7f0198b322dfb2b484fad5e06fcbe20fcbf9aaf80c04d8ea8095ec49"
+    },
+    {
+      "path": "errors/component-key-invalid.mdx",
+      "sha256": "902d31f04294ad17921b0c9cc8c43811cc5ce28348e34ed285496aa344a3108b"
+    },
+    {
+      "path": "errors/component-key-replaced.mdx",
+      "sha256": "ce88319675401fe3f5108c0330c884ca9552c43c19b07b2e022053b67239d6c3"
+    },
+    {
+      "path": "errors/component-not-configured.mdx",
+      "sha256": "424f7f225655c627142dccb83c863698402b2bacc05cd318a4d0680526fa7d3e"
+    },
+    {
+      "path": "errors/component-not-provisioned.mdx",
+      "sha256": "c061070e9a1ba95c769169dd05eb319a7da4f08294f7746e471f5ed289fd399c"
+    },
+    {
+      "path": "errors/component-parent-trust-expired.mdx",
+      "sha256": "5801341b3102cde0f58785e07241a8228f4aade987d89651477f65cff9dc4bcc"
+    },
+    {
+      "path": "errors/component-revoked.mdx",
+      "sha256": "eefda959ec61f6e5093f48301af17d86c6c6cbc450f0bc5d6aa41dffd9153f42"
+    },
+    {
+      "path": "errors/concurrency-exceeded.mdx",
+      "sha256": "fb83d1cb27efd082beed9a898ced13801623334e9ceff65f65f1c14addaafbdb"
+    },
+    {
+      "path": "errors/configuration-invalid.mdx",
+      "sha256": "b7b61980a2e64e93bc0b7a6f471677ef0df03379e57e7b8fa5cb2d4cdc270711"
+    },
+    {
+      "path": "errors/conflict.mdx",
+      "sha256": "d7cadc83899c9f73f2649952c7fe5e8ffec1b3e668281454b0f018cddf378932"
+    },
+    {
+      "path": "errors/containing-app-setup-required.mdx",
+      "sha256": "08fd2211f4dac4f377d465ed76d34f079e550b0fb1f4d2265fe640623a69832b"
+    },
+    {
+      "path": "errors/crypto-unavailable.mdx",
+      "sha256": "75dacc41be817d579ad5028ae8cc68dc55a620a2e7ca622848bb895dea2fcaf2"
+    },
+    {
+      "path": "errors/dpop-invalid.mdx",
+      "sha256": "33364a9c64bddf277dc9549a0e4aeba2c890ad06a81114a18db4bed033e7ad9a"
+    },
+    {
+      "path": "errors/dpop-missing.mdx",
+      "sha256": "f4008517ae0363866b865d7b855ccf2d337a8a7e69a415075f43940433cd6bea"
+    },
+    {
+      "path": "errors/dpop-nonce-required.mdx",
+      "sha256": "3009969065b6d25c6a0873850247ba367ed5bc4cf0b62ea4fa898a56bcd7040b"
+    },
+    {
+      "path": "errors/dpop-replayed.mdx",
+      "sha256": "fac8de2ea3bcc495e28634042ef6bfd66777b259c25ed4014f3ef05d84c1c956"
+    },
+    {
+      "path": "errors/etag-mismatch.mdx",
+      "sha256": "116a70d9981169b03f128cd2485c01fa66318bbbc18c40e45de9a7c54b8f6926"
+    },
+    {
+      "path": "errors/etag-required.mdx",
+      "sha256": "965a286b3e1f3ef82ce46efc55823ee48c8d4c079ee489efc8e2be6982780f42"
+    },
+    {
+      "path": "errors/feature-not-allowed.mdx",
+      "sha256": "1aa667357818dfb323d0c5cf4de48a62c88b601ca9132bf603c854495b146983"
+    },
+    {
+      "path": "errors/feature-not-found.mdx",
+      "sha256": "1dbcf3d3cc0f8b6dbb4a5fefdb4c65f5e1b8d7aa9d48e4eeb8d4d90d8d747f7e"
+    },
+    {
+      "path": "errors/foundation-models-gateway-error.mdx",
+      "sha256": "9b7e72872bbd5bdaba8754356b9a1740132164896b11fb63f6b8a961a430eb99"
+    },
+    {
+      "path": "errors/foundation-models-gateway-stream-invalid.mdx",
+      "sha256": "ddf65fe1d1fbbaae25e3013ce82f5456664f2996de64fca75ee25a26f006e5d9"
+    },
+    {
+      "path": "errors/foundation-models-invalid-transcript.mdx",
+      "sha256": "058a45ddd6d8da1cf16126cccf5ff9cf5813916e3fc029a2c1d31958959d963f"
+    },
+    {
+      "path": "errors/foundation-models-sampling-unsupported.mdx",
+      "sha256": "9135f9526d5ca228842804541ae356cf6a41314ed1018784796379c38b99ac81"
+    },
+    {
+      "path": "errors/framework-integration-unsupported.mdx",
+      "sha256": "bc4bb8cafa55855108bdc85892699e44032f1a1d49d064c588ef1a978933b41b"
+    },
+    {
+      "path": "errors/framework-version-unsupported.mdx",
+      "sha256": "88c546b636a50115f50dfbf35f9ca43f849222da189f7e2e4cfe91667140485c"
+    },
+    {
+      "path": "errors/identity-reauthentication-required.mdx",
+      "sha256": "66bb613730e9b2ee6e56ad978a27e77b94785854d3575d62d93e1b3443de0707"
+    },
+    {
+      "path": "errors/identity-token-expired.mdx",
+      "sha256": "a8e8450896388bac12d8d98703ba178e40b4d1b1487eed3b17d3fd321259f641"
+    },
+    {
+      "path": "errors/identity-token-invalid.mdx",
+      "sha256": "a8b64c0b7e54233801e3c555ffe318ee2ff1255ab7cdcb6dc4ec7bf5a660045e"
+    },
+    {
+      "path": "errors/identity-token-missing.mdx",
+      "sha256": "040ab236022031a691130341e9a9e94d7bb1c5b5a543e83271dbe627eaeadfd2"
+    },
+    {
+      "path": "errors/installation-family-not-found.mdx",
+      "sha256": "27ffeabeede786353a0a9da21c5410cc4d4160884f349451c9cb3496516e3b63"
+    },
+    {
+      "path": "errors/installation-family-revoked.mdx",
+      "sha256": "f9978ad4dba9b825756c4b758c76453431afb6c7fa64f1091ebee9c4d3eada66"
+    },
+    {
+      "path": "errors/installation-revoked.mdx",
+      "sha256": "9f37971f25e9afd716fa044bf05520d42aa4e1c1aa1bace847f0764f0ace14b0"
+    },
+    {
+      "path": "errors/internal-error.mdx",
+      "sha256": "173db0d7fc31644b29a991dda8cc94c1e62e340e37ebee33884edf4d901598b2"
+    },
+    {
+      "path": "errors/key-unavailable.mdx",
+      "sha256": "775476eea8b3c55e51fb5fd472ac02465776aad2adf247980feec0d23cbecd27"
+    },
+    {
+      "path": "errors/keychain-access-group-unavailable.mdx",
+      "sha256": "8cedbf8122c5e69066e0fea372842a41405933a4c7d67fe8d3d1554d270827ad"
+    },
+    {
+      "path": "errors/model-not-allowed.mdx",
+      "sha256": "b74f1eace0bbf1dc97de445022e42db8006b6a4aa9577b9cb61fc68997665769"
+    },
+    {
+      "path": "errors/network-error.mdx",
+      "sha256": "52002d22cacb495c0bbe0f5f6f9285ddadf557344371cf4a4d3e52e15188f605"
+    },
+    {
+      "path": "errors/network-unavailable.mdx",
+      "sha256": "be9f1bb2fb0b0d81c19e106b404bfbe7edab3be8162b1138656418e22b5d69bc"
+    },
+    {
+      "path": "errors/operation-indeterminate.mdx",
+      "sha256": "ad92e72fd225a5c1ab59813db942ed3d720a5afb89f5c7741ffe44f7b8c716e6"
+    },
+    {
+      "path": "errors/output-limit-exceeded.mdx",
+      "sha256": "0ecdeefac1e77d764969ec14fb4fdfd255c3c89e75cb22e1ac2a27501ff94655"
+    },
+    {
+      "path": "errors/permission-denied.mdx",
+      "sha256": "c1e8a8666f1a2fe16bf8e8b8e4332505961caea401627cd96a9a2af2c9567a75"
+    },
+    {
+      "path": "errors/pricing-unavailable.mdx",
+      "sha256": "6f6a1fa969806cdde15d50a3b6d786b95d72fe04c8c5d20e6cf92dbb91fe42cc"
+    },
+    {
+      "path": "errors/protocol-response-invalid.mdx",
+      "sha256": "8cfe8bb338b13aff3d458ec074481400adad3771916ce5c23b503ee14ab73520"
+    },
+    {
+      "path": "errors/protocol-version-unsupported.mdx",
+      "sha256": "45c1896e753a87d99d42031bf0f54f3f41cec0b121725b42ac5064ae0c208317"
+    },
+    {
+      "path": "errors/quota-exceeded.mdx",
+      "sha256": "52dd3b661b2f54103680c1b791117b4446bd15c043a215414485a2c883cc2546"
+    },
+    {
+      "path": "errors/rate-limited.mdx",
+      "sha256": "d8902296d821621b1577702084db0ea970ec617b3cf0c83452a971e25c8f4d96"
+    },
+    {
+      "path": "errors/refresh-token-reused.mdx",
+      "sha256": "7a236d56983a98a804fae22c5e71f33c56cb06d64ab9bbc54e2b69e164415e4f"
+    },
+    {
+      "path": "errors/request-invalid.mdx",
+      "sha256": "c21bfb184a6c685dc586c43b2a05158e037383ff007073e0cfc48ffbbd1bb723"
+    },
+    {
+      "path": "errors/request-not-replayable.mdx",
+      "sha256": "94d88803d132d8280b80a516af004f1bd38de9c26d1909c71e4870825f73c7f4"
+    },
+    {
+      "path": "errors/resource-not-found.mdx",
+      "sha256": "a729246ae958d962a6e0b524fd4284163af6cf990844cfaa93688114760819b1"
+    },
+    {
+      "path": "errors/response-invalid.mdx",
+      "sha256": "5acbb2d8e683a67d5dc37549b7dc99cd993f5614d03b53a623a032af955094c8"
+    },
+    {
+      "path": "errors/root-keychain-migration-required.mdx",
+      "sha256": "900a3802f248bb684902b00cccba3d382f188deac557b6e6544339ded8820c8e"
+    },
+    {
+      "path": "errors/route-not-found.mdx",
+      "sha256": "7dc24a9a2989182c8cbd98f1de17777138bd90e63e02d12745b6435036993337"
+    },
+    {
+      "path": "errors/secure-state-unavailable.mdx",
+      "sha256": "8ccb1082bea6fed67125747ca322ed7b8ccbd719ecd8a010df4d7626de09d6bf"
+    },
+    {
+      "path": "errors/server-not-ready.mdx",
+      "sha256": "13bb3ad603de500123a15cd3ab349dea8c1e2276ef2009661f08e7eb7f40fd63"
+    },
+    {
+      "path": "errors/server-response-invalid.mdx",
+      "sha256": "6d30c80e894335b2faaeab6a03e40cda278f0551d69d552ca194c2ff82b36c4d"
+    },
+    {
+      "path": "errors/session-expired.mdx",
+      "sha256": "2066fc36c699f99841c6d0bbf855c265a7fff5f44c0288317b2bdf94174c9f88"
+    },
+    {
+      "path": "errors/session-revoked.mdx",
+      "sha256": "faaec4288f52a2d85d06cf77cace11079ed916937e9d2419f007e3d2feec2219"
+    },
+    {
+      "path": "errors/session-unavailable.mdx",
+      "sha256": "cc804ea0b6aee506ce97fa8066d87d3d15d19888df83131238129e671edb5fb8"
+    },
+    {
+      "path": "errors/storage-unavailable.mdx",
+      "sha256": "13f7cb5a796d6fa0338e3615cb5a13fb25b9ef1530bf830569b9c111b4a08c83"
+    },
+    {
+      "path": "errors/transport-destination-not-allowed.mdx",
+      "sha256": "8e03152f744739255c9f7a49ad73cf43b0219f6b1ba1cc6a520a73f128a28587"
+    },
+    {
+      "path": "errors/transport-failure.mdx",
+      "sha256": "d9a97d2b2536d08653e2af6ce597b427d830aa87bc6f1be29580193fb73887e7"
+    },
+    {
+      "path": "errors/transport-request-not-replayable.mdx",
+      "sha256": "dd70643b55aab181639517a7a0c176e5d5935932518d972e80e5d93586b75b89"
+    },
+    {
+      "path": "errors/upstream-protocol-error.mdx",
+      "sha256": "072dd982391b2660795c3969bbbfddf37cb3f35dec621b62ec18611a73c743be"
+    },
+    {
+      "path": "errors/upstream-timeout.mdx",
+      "sha256": "c712b5cd7026961ca6539a60a806097aeb93eb27b2ab9dcdd62b6e62a753bd68"
+    },
+    {
+      "path": "errors/upstream-unavailable.mdx",
+      "sha256": "f2bb5947351ec175652c134794c6d37c570e86aecc1a7a1c40d86346431e3c83"
+    },
+    {
       "path": "reference/admin-api.mdx",
-      "sha256": "0f78830f6bb93bfcb4c9b9c5a19f2eb7f0c3fc45aadcb33e1461f47ee69d6727"
+      "sha256": "d265e6c1f95229f078ebb0d922c15fbe37c882ee6f397c2cc7ff0fee5cc6372d"
     },
     {
       "path": "reference/client-api.mdx",
-      "sha256": "f5f86c95c3ed6856da8d39fda4ef9245c11618520aa780dfc643d805a88e4b51"
+      "sha256": "34cd2c4f7101f87d382ce1ea21400a73c964516cf1a2004b16060fd7ef9751a6"
     },
     {
       "path": "reference/compatibility.mdx",
@@ -20,17 +340,17 @@
     },
     {
       "path": "reference/errors.mdx",
-      "sha256": "91eb0bdbe2100f6350f5f93204ab7ac95d37e7160f37ceec0712cfb9fdeca1c7"
+      "sha256": "0b63a77b73984a2f37bcbdf93263b18deee4c42959cbe04f6651c75693634f13"
     }
   ],
   "sources": [
     {
       "path": "api/admin.openapi.yaml",
-      "sha256": "16ef99251467fa50fc8fab33afe3792177a9e196014bfff8b702aa1e1e1d0eb6"
+      "sha256": "ef88f8c560ae9891815f403b9a1e805493a8f2a7b5f61936776a630f46edbfda"
     },
     {
       "path": "api/client.openapi.yaml",
-      "sha256": "ef102daf073d55f9ff40780e675f96395ce1e8b99c5b39fcf694d92b037a798a"
+      "sha256": "9590f8113cdc358ac17c781b0bb7ff57c56ae470ca75dded7ab9093f3685987f"
     },
     {
       "path": "api/config.schema.json",
@@ -38,7 +358,11 @@
     },
     {
       "path": "api/error-codes.yaml",
-      "sha256": "55ae0a7b5df02ca668303346fdc2c73535db9922778eb1c1e6aa11cf2b0f8e15"
+      "sha256": "270a6f60383e02cd312074a4b604768510bfa3588259f439e0d8bd663a3e7202"
+    },
+    {
+      "path": "api/sdk-error-codes.yaml",
+      "sha256": "d9a068be22be19eb04accce926759e21a8e4e2725d4a4b26e92afde327b033b1"
     },
     {
       "path": "compatibility/frameworks.schema.json",

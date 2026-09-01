@@ -355,6 +355,37 @@ func TestComponentDefinitionDelegationCycleFails(t *testing.T) {
 	}
 }
 
+func TestNestedComponentDelegationFailsClosedForV1(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := configurationObject(t)
+	definitions := validComponentDefinitions()
+	delegatedParent := definitions[1].(map[string]any)
+	delegatedParent["delegation"].(map[string]any)["allowChildDelegation"] = true
+	definitions = append(definitions, map[string]any{
+		"id": "ios-share", "platform": "ios", "kind": "share_extension",
+		"identifiers":     map[string]any{"bundleIdentifiers": []any{"com.example.habits.share"}},
+		"familyRole":      "delegated",
+		"delegation":      map[string]any{"allowedParents": []any{"ios-widget"}, "maximumLifetime": "1h"},
+		"attestation":     map[string]any{"strategy": "delegated"},
+		"allowedFeatures": []any{"assistant"},
+	})
+	objectValue(document, "spec")["componentDefinitions"] = definitions
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ := validator.Validate(encoded, testEnvironment(), time.Now())
+	if report.Valid || !hasIssue(report.Issues, "component_child_delegation_unsupported") ||
+		!hasIssue(report.Issues, "component_parent_delegation_forbidden") {
+		t.Fatalf("issues = %+v, want unsupported nested delegation errors", report.Issues)
+	}
+}
+
 func validComponentDefinitions() []any {
 	return []any{
 		map[string]any{

@@ -54,7 +54,7 @@ All three use the same activation:
 | `client.component` | `id`, `definition_id`, `kind`, `is_root`, `platform` |
 | `client.trust` | `source`, `attestation_provider`, `delegated`, `direct_attestation`, `verified_at`, `expires_at` |
 | `installation` | `platform`, `trust_level` |
-| `request` | `streaming` |
+| `request` | `feature`, `protocol`, `streaming`, `estimated_input_tokens`, `maximum_output_tokens` |
 | `environment` | `kind` (`development`, `staging`, or `production`) |
 
 For example:
@@ -82,18 +82,25 @@ For example:
 
 <Warning>
   Feature policy does not expose request headers, a client-selected model,
-  route, plan, application version, or the client's input-token estimate.
-  Trusted input accounting and quota reservation run outside CEL. Do not use
-  a claim mapping to treat unverified client input as an authorization fact.
+  route, plan, or application version. `request.feature` and
+  `request.protocol` are bound from the immutable server-owned Feature after
+  lookup. `request.estimated_input_tokens` is a bounded but explicitly
+  untrusted adapter estimate: use it only for conservative rejection or route
+  scheduling, never as quota, accounting, pricing, context-window, or identity
+  authority. `request.maximum_output_tokens` is the normalized requested value
+  (zero when omitted); the independent server-owned output clamp remains
+  authoritative for dispatch and reservation. Trusted input accounting and
+  quota reservation run outside CEL.
 </Warning>
 
 ## Evaluation order
 
 The server loads one immutable revision, validates the sealed session and
-attestation freshness, builds the bounded activation, evaluates feature access,
-selects a logical limit plan, and then evaluates route predicates. Matching
-routes still resolve to server-configured upstreams and physical models; the
-client never chooses those credentials or destinations.
+attestation freshness, resolves the immutable Feature, binds its exact ID and
+protocol into the bounded request activation, evaluates feature access, selects
+a logical limit plan, and then evaluates route predicates. Matching routes
+still resolve to server-configured upstreams and physical models; the client
+never chooses those credentials or destinations.
 
 An operator override can replace the selected limit-plan ID, but it does not
 change access policy, attestation, route predicates, or the CEL activation.
@@ -120,8 +127,17 @@ latchway routes simulate rev_... \
 
 Simulation uses the same compiled policy and deterministic route resolver but
 does not create a session, reserve quota, or dispatch upstream. Its
-`requested_input_tokens` and application-version fields are explanatory only
-and cannot influence CEL or production reservation.
+`requested_input_tokens` value maps to the same untrusted
+`request.estimated_input_tokens` CEL fact used by production and never affects
+reservation. `requested_output_max` maps to
+`request.maximum_output_tokens`; the reservation explanation separately uses
+the production output clamp. Application version remains explanatory only.
+
+The public quota snapshot has no concrete request body. If feature access or
+limit-plan selection references either request-size fact, snapshot resolution
+fails closed instead of evaluating an invented zero and claiming a policy
+result. Feature/protocol remain known from configuration, and streaming is
+checked in both states as before.
 
 See [Configuration schema](/reference/config-schema) for field bounds and
 [Routing and quotas](/concepts/routing-and-quotas) for the policy-to-dispatch

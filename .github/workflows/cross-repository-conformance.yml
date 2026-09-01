@@ -34,6 +34,11 @@ on:
         required: true
         default: main
         type: string
+      documentation_ref:
+        description: Immutable generated Mintlify documentation commit or annotated tag
+        required: true
+        default: main
+        type: string
       core_release_tag:
         description: Intended core tag for promotion; existing annotated tag for release
         required: false
@@ -73,6 +78,7 @@ jobs:
       ios_commit: ${{ steps.sources.outputs.ios_commit }}
       android_commit: ${{ steps.sources.outputs.android_commit }}
       react_native_commit: ${{ steps.sources.outputs.react_native_commit }}
+      documentation_commit: ${{ steps.sources.outputs.documentation_commit }}
     steps:
       - name: Validate immutable inputs and fixed GitHub CLI without a checkout
         shell: bash
@@ -109,6 +115,7 @@ jobs:
           IOS_REF: ${{ inputs.ios_ref }}
           ANDROID_REF: ${{ inputs.android_ref }}
           REACT_NATIVE_REF: ${{ inputs.react_native_ref }}
+          DOCUMENTATION_REF: ${{ inputs.documentation_ref }}
           CORE_TOKEN: ${{ github.token }}
           SIBLING_TOKEN: ${{ secrets.LATCHWAY_SIBLING_REPOSITORIES_READ_TOKEN }}
           EVIDENCE_SCOPE: ${{ inputs.scope }}
@@ -159,6 +166,7 @@ jobs:
           package_repository ios Latchway/latchway-ios-sdk "$IOS_REF" "$SIBLING_TOKEN"
           package_repository android Latchway/latchway-android "$ANDROID_REF" "$SIBLING_TOKEN"
           package_repository react_native Latchway/latchway-react-native-sdk "$REACT_NATIVE_REF" "$SIBLING_TOKEN"
+          package_repository documentation Latchway/latchway-docs "$DOCUMENTATION_REF" "$SIBLING_TOKEN"
           core_commit=$(jq --raw-output '.sha' "$RUNNER_TEMP/core-commit.json")
           if [[ "$EVIDENCE_SCOPE" != release ]]; then
             test "$GITHUB_SHA" = "$core_commit"
@@ -281,6 +289,7 @@ jobs:
           IOS_COMMIT: ${{ needs.authenticate-inputs.outputs.ios_commit }}
           ANDROID_COMMIT: ${{ needs.authenticate-inputs.outputs.android_commit }}
           REACT_NATIVE_COMMIT: ${{ needs.authenticate-inputs.outputs.react_native_commit }}
+          DOCUMENTATION_COMMIT: ${{ needs.authenticate-inputs.outputs.documentation_commit }}
         run: |
           set -Eeuo pipefail
           (cd "$RUNNER_TEMP/authenticated-inputs" && sha256sum --check source-archives.sha256)
@@ -299,6 +308,7 @@ jobs:
           materialize ios "$GITHUB_WORKSPACE/latchway-ios-sdk" "$IOS_COMMIT"
           materialize android "$GITHUB_WORKSPACE/latchway-android" "$ANDROID_COMMIT"
           materialize react_native "$GITHUB_WORKSPACE/latchway-react-native-sdk" "$REACT_NATIVE_COMMIT"
+          materialize documentation "$GITHUB_WORKSPACE/latchway-docs" "$DOCUMENTATION_COMMIT"
       - name: Produce source or release evidence
         shell: bash
         env:
@@ -317,6 +327,7 @@ jobs:
             --ios-repo "$GITHUB_WORKSPACE/latchway-ios-sdk"
             --android-repo "$GITHUB_WORKSPACE/latchway-android"
             --react-native-repo "$GITHUB_WORKSPACE/latchway-react-native-sdk"
+            --documentation-repo "$GITHUB_WORKSPACE/latchway-docs"
             --scope "$EVIDENCE_SCOPE"
             --output "$RUNNER_TEMP/latchway-cross-repository.json"
           )
@@ -324,6 +335,12 @@ jobs:
             arguments+=(--release-tag "$CORE_RELEASE_TAG" --oci-image-digest "$CANDIDATE_OCI_IMAGE_DIGEST" \
               --external-evidence-dir "$RUNNER_TEMP/authenticated-inputs/latchway-external-evidence")
           fi
+          python3 latchway/scripts/framework_conformance.py \
+            --aggregate \
+            --report latchway-js/conformance/framework-report.json \
+            --report latchway-ios-sdk/Conformance/framework-report.json \
+            --report latchway-android/Conformance/framework-report.json \
+            --report latchway-react-native-sdk/Conformance/framework-report.json
           python3 latchway/scripts/cross-repo-conformance.py "${arguments[@]}"
       - name: Retain unsigned conformance output for a fresh attestor
         if: always()
@@ -370,6 +387,7 @@ jobs:
           IOS_COMMIT: ${{ needs.authenticate-inputs.outputs.ios_commit }}
           ANDROID_COMMIT: ${{ needs.authenticate-inputs.outputs.android_commit }}
           REACT_NATIVE_COMMIT: ${{ needs.authenticate-inputs.outputs.react_native_commit }}
+          DOCUMENTATION_COMMIT: ${{ needs.authenticate-inputs.outputs.documentation_commit }}
         run: |
           set -Eeuo pipefail
           report="$RUNNER_TEMP/unsigned/latchway-cross-repository.json"
@@ -383,7 +401,8 @@ jobs:
             --arg javascript "$JAVASCRIPT_COMMIT" \
             --arg ios "$IOS_COMMIT" \
             --arg android "$ANDROID_COMMIT" \
-            --arg react_native "$REACT_NATIVE_COMMIT" '
+            --arg react_native "$REACT_NATIVE_COMMIT" \
+            --arg documentation "$DOCUMENTATION_COMMIT" '
               .schema_version == 1 and
               .kind == "latchway_cross_repository_conformance_evidence" and
               .scope == $scope and .verdict == "passed" and
@@ -395,6 +414,19 @@ jobs:
               ([.repositories[] | select(.id == "ios" and .commit == $ios)] | length == 1) and
               ([.repositories[] | select(.id == "android" and .commit == $android)] | length == 1) and
               ([.repositories[] | select(.id == "react_native" and .commit == $react_native)] | length == 1) and
+              .documentation == {
+                "repository": "https://github.com/Latchway/latchway-docs.git",
+                "commit": $documentation,
+                "canonical_core_commit": $core,
+                "source_commit": .documentation.source_commit,
+                "source_manifest_sha256": .documentation.source_manifest_sha256,
+                "source_tree_sha256": .documentation.source_tree_sha256,
+                "owned_file_count": .documentation.owned_file_count
+              } and
+              (.documentation.source_commit | type == "string" and test("^[0-9a-f]{40}$")) and
+              (.documentation.source_manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              (.documentation.source_tree_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096) and
               ([.checks[] | select(.required == true and .status != "passed")] | length == 0)
             ' "$report" >/dev/null
           if [[ "$EVIDENCE_SCOPE" == source ]]; then

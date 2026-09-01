@@ -13,12 +13,241 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	problemcontract "github.com/latchway/latchway/internal/problem"
 )
 
 const (
 	controlTestEnvironment = "env_00000000000000000000000000"
 	controlTestRevision    = "rev_00000000000000000000000000"
+	controlTestAuditEvent  = "aud_00000000000000000000000000"
+	controlTestUser        = "usr_00000000000000000000000000"
 )
+
+func TestUserEffectiveConfigurationAndReviewedMutationUseCanonicalAPI(t *testing.T) {
+	token := strings.Repeat("effective-user-token-", 2)
+	t.Setenv("TEST_LATCHWAY_EFFECTIVE_TOKEN", token)
+	impactToken := strings.Repeat("A", 43)
+	requests := make([]string, 0, 3)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Authorization") != "Bearer "+token || request.Header.Get("X-Latchway-Admin-Source") != "cli" {
+			t.Fatal("effective-user request authentication or attribution is invalid")
+		}
+		requests = append(requests, request.Method+" "+request.URL.Path)
+		switch {
+		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/effective-configuration"):
+			if request.URL.Query().Get("environment_id") != controlTestEnvironment ||
+				request.URL.Query().Get("feature") != "assistant" ||
+				request.URL.Query().Get("estimated_input_tokens") != "120" {
+				t.Fatalf("effective query = %s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{
+				"subject":{"kind":"user","id":"`+controlTestUser+`","user_id":"`+controlTestUser+`"},
+				"evaluation_mode":"current_user_projection","environment_id":"`+controlTestEnvironment+`",
+				"environment_kind":"production","revision_id":"`+controlTestRevision+`",
+				"feature":"assistant","protocol":"openai_chat","policy_outcome":"allowed",
+				"limit_plan":"paid","limit_plan_source":"feature_limit_plan_expression",
+				"inputs":[{"fact":"normalized_claims","source":"current_application_user","availability":"available","keys":["tier"],"detail":"values omitted"}],
+				"limits":[],"routes":[],"decision_stages":[],"warnings":[]
+			}`, nil), nil
+		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/operation-impact"):
+			if request.URL.Query().Get("action") != "block" || request.URL.Query().Get("environment_id") != controlTestEnvironment {
+				t.Fatalf("impact query = %s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{
+				"action":"block","immediate":true,"reversible":false,"applicable":true,
+				"current_status":"active","access_effect":"existing_sessions_revoked_and_future_sessions_denied",
+				"summary":"Application-wide credentials are revoked.",
+				"counts":{"active_session_grants":2,"active_refresh_tokens":1,"active_component_sessions":1,"active_component_refresh_tokens":1,"active_installation_families":1,"active_client_components":1},
+				"impact_token":"`+impactToken+`"
+			}`, nil), nil
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/block"):
+			if request.Header.Get("X-Latchway-Audit-Reason") != "operator_reason_provided" {
+				t.Fatalf("block audit reason attribution = %q", request.Header.Get("X-Latchway-Audit-Reason"))
+			}
+			var body confirmedUserOperationCLI
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode block body: %v", err)
+			}
+			if body.Reason != "account-compromised" || body.ImpactToken != impactToken || !body.AcknowledgeImmediateEffect {
+				t.Fatalf("confirmed block body = %+v", body)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{
+				"id":"`+controlTestUser+`","environment_id":"`+controlTestEnvironment+`","status":"blocked",
+				"identity_providers":["firebase"],"normalized_claims":{},"created_at":"2026-08-29T00:00:00Z"
+			}`, nil), nil
+		default:
+			t.Fatalf("unexpected user request: %s %s", request.Method, request.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	var effectiveOutput bytes.Buffer
+	effectiveOptions := &options{output: "json", stdout: &effectiveOutput, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "users", "effective", controlTestUser,
+		"--environment", controlTestEnvironment, "--feature", "assistant", "--estimated-input-tokens", "120",
+		"--api-token-env", "TEST_LATCHWAY_EFFECTIVE_TOKEN",
+	}, effectiveOptions); err != nil {
+		t.Fatalf("users effective error = %v", err)
+	}
+	if !strings.Contains(effectiveOutput.String(), `"limit_plan": "paid"`) || strings.Contains(effectiveOutput.String(), token) {
+		t.Fatalf("effective output = %q", effectiveOutput.String())
+	}
+
+	var mutationOutput bytes.Buffer
+	mutationOptions := &options{output: "json", stdout: &mutationOutput, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "users", "block", controlTestUser,
+		"--environment", controlTestEnvironment, "--confirm", controlTestUser, "--impact-token", impactToken,
+		"--reason", "account-compromised",
+		"--api-token-env", "TEST_LATCHWAY_EFFECTIVE_TOKEN",
+	}, mutationOptions); err != nil {
+		t.Fatalf("users block error = %v", err)
+	}
+	if !strings.Contains(mutationOutput.String(), `"status": "blocked"`) ||
+		strings.Contains(mutationOutput.String(), token) || strings.Contains(mutationOutput.String(), "account-compromised") {
+		t.Fatalf("block output = %q", mutationOutput.String())
+	}
+	if len(requests) != 3 {
+		t.Fatalf("canonical user request sequence = %#v", requests)
+	}
+
+	noRequestClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Fatalf("unconfirmed mutation made a request: %s", request.URL)
+		return nil, nil
+	})}
+	err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "users", "block", controlTestUser,
+		"--environment", controlTestEnvironment, "--reason", "account-compromised",
+		"--api-token-env", "TEST_LATCHWAY_EFFECTIVE_TOKEN",
+	}, &options{output: "table", stdout: io.Discard, stderr: io.Discard, adminHTTPClient: noRequestClient})
+	if err == nil || !strings.Contains(err.Error(), "--confirm") {
+		t.Fatalf("unconfirmed mutation error = %v", err)
+	}
+
+	staleClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || !strings.HasSuffix(request.URL.Path, "/operation-impact") {
+			t.Fatalf("stale reviewed impact attempted mutation: %s %s", request.Method, request.URL.Path)
+		}
+		return controlHTTPResponse(request, http.StatusOK, `{
+			"action":"block","immediate":true,"reversible":false,"applicable":true,
+			"current_status":"active","access_effect":"existing_sessions_revoked_and_future_sessions_denied",
+			"summary":"Application-wide credentials are revoked.",
+			"counts":{"active_session_grants":3,"active_refresh_tokens":1,"active_component_sessions":1,"active_component_refresh_tokens":1,"active_installation_families":1,"active_client_components":1},
+			"impact_token":"`+impactToken+`"
+		}`, nil), nil
+	})}
+	err = executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "users", "block", controlTestUser,
+		"--environment", controlTestEnvironment, "--confirm", controlTestUser,
+		"--impact-token", strings.Repeat("B", 43), "--reason", "account-compromised",
+		"--api-token-env", "TEST_LATCHWAY_EFFECTIVE_TOKEN",
+	}, &options{output: "table", stdout: io.Discard, stderr: io.Discard, adminHTTPClient: staleClient})
+	if err == nil || !strings.Contains(err.Error(), "impact changed") {
+		t.Fatalf("stale impact error = %v", err)
+	}
+}
+
+func TestRequestEffectiveConfigurationUsesRecordedRevisionWithoutCurrentClaims(t *testing.T) {
+	token := strings.Repeat("effective-request-token-", 2)
+	t.Setenv("TEST_LATCHWAY_EFFECTIVE_REQUEST_TOKEN", token)
+	requestID := "req_00000000000000000000000000"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.Path != "/admin/v1/requests/"+requestID+"/effective-configuration" ||
+			request.Header.Get("Authorization") != "Bearer "+token || request.Header.Get("X-Latchway-Admin-Source") != "cli" {
+			t.Fatalf("request effective call = %s %s", request.Method, request.URL.Path)
+		}
+		return controlHTTPResponse(request, http.StatusOK, `{
+			"subject":{"kind":"request","id":"`+requestID+`","user_id":"`+controlTestUser+`"},
+			"evaluation_mode":"recorded_request","environment_id":"`+controlTestEnvironment+`",
+			"environment_kind":"production","revision_id":"`+controlTestRevision+`",
+			"feature":"assistant","protocol":"openai_chat","request_status":"succeeded","policy_outcome":"allowed",
+			"limit_plan":"paid","limit_plan_source":"durable_request_record",
+			"inputs":[{"fact":"normalized_claims","source":"historical_request","availability":"unavailable","detail":"Historical values were not persisted and are not inferred."}],
+			"limits":[],"routes":[],"decision_stages":[],
+			"warnings":["Historical claim values and override identity remain unavailable."]
+		}`, nil), nil
+	})}
+	var output bytes.Buffer
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "requests", "effective", requestID,
+		"--api-token-env", "TEST_LATCHWAY_EFFECTIVE_REQUEST_TOKEN",
+	}, &options{output: "json", stdout: &output, stderr: io.Discard, adminHTTPClient: client}); err != nil {
+		t.Fatalf("requests effective error = %v", err)
+	}
+	if !strings.Contains(output.String(), `"evaluation_mode": "recorded_request"`) ||
+		!strings.Contains(output.String(), `"availability": "unavailable"`) ||
+		strings.Contains(output.String(), token) || strings.Contains(output.String(), "current_application_user") {
+		t.Fatalf("request effective output = %q", output.String())
+	}
+}
+
+func TestAuditBrowseAndInspectUseCanonicalRedactionSafeContract(t *testing.T) {
+	token := strings.Repeat("audit-control-token-", 2)
+	t.Setenv("TEST_LATCHWAY_AUDIT_TOKEN", token)
+	organizationID := "org_00000000000000000000000000"
+	eventJSON := `{
+		"id":"` + controlTestAuditEvent + `","timestamp":"2026-08-29T00:00:00Z",
+		"actor":"admin_user:adm_00000000000000000000000000","actor_kind":"admin_user",
+		"actor_id":"adm_00000000000000000000000000","action":"configuration.activate",
+		"target":"config_revision:` + controlTestRevision + `","resource_type":"config_revision",
+		"resource_id":"` + controlTestRevision + `","environment_id":"` + controlTestEnvironment + `",
+		"source":"console","reason":"planned_release","result":"succeeded",
+		"request_id":"arq_00000000000000000000000000",
+		"changes":[{"field":"status","operation":"set","classification":"public","redacted":false}],
+		"summary":{"changes":[{"field":"status","operation":"set","classification":"public","redacted":false}]}
+	}`
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("X-Latchway-Admin-Source") != "cli" || request.Header.Get("Authorization") != "Bearer "+token {
+			t.Fatal("audit request attribution or authorization header is invalid")
+		}
+		switch request.URL.Path {
+		case "/admin/v1/audit-events":
+			query := request.URL.Query()
+			if query.Get("organization_id") != organizationID || query.Get("environment_id") != controlTestEnvironment ||
+				query.Get("actor_kind") != "admin_user" || query.Get("resource_id") != controlTestRevision ||
+				query.Get("source") != "console" || query.Get("reason") != "planned_release" ||
+				query.Get("result") != "succeeded" || query.Get("page_size") != "25" {
+				t.Fatalf("audit filters = %s", request.URL.RawQuery)
+			}
+			return controlHTTPResponse(request, http.StatusOK, `{"items":[`+eventJSON+`],"page":{"has_more":false}}`, nil), nil
+		case "/admin/v1/audit-events/" + controlTestAuditEvent:
+			return controlHTTPResponse(request, http.StatusOK, eventJSON, nil), nil
+		default:
+			t.Fatalf("unexpected audit request: %s %s", request.Method, request.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	var browse bytes.Buffer
+	browseOptions := &options{output: "json", stdout: &browse, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "audit",
+		"--organization", organizationID, "--environment", controlTestEnvironment,
+		"--actor-kind", "admin_user", "--resource", controlTestRevision,
+		"--source", "console", "--reason", "planned_release", "--result", "succeeded",
+		"--page-size", "25", "--api-token-env", "TEST_LATCHWAY_AUDIT_TOKEN",
+	}, browseOptions); err != nil {
+		t.Fatalf("audit browse error = %v", err)
+	}
+	if strings.Contains(browse.String(), token) || !strings.Contains(browse.String(), `"reason": "planned_release"`) ||
+		!strings.Contains(browse.String(), `"redacted": false`) {
+		t.Fatalf("audit browse output = %q", browse.String())
+	}
+
+	var inspect bytes.Buffer
+	inspectOptions := &options{output: "json", stdout: &inspect, stderr: io.Discard, adminHTTPClient: client}
+	if err := executeWithOptions(context.Background(), []string{
+		"--server", "http://127.0.0.1:8080", "--output", "json", "audit", "inspect",
+		controlTestAuditEvent, "--api-token-env", "TEST_LATCHWAY_AUDIT_TOKEN",
+	}, inspectOptions); err != nil {
+		t.Fatalf("audit inspect error = %v", err)
+	}
+	if strings.Contains(inspect.String(), token) || !strings.Contains(inspect.String(), `"field": "status"`) {
+		t.Fatalf("audit inspect output = %q", inspect.String())
+	}
+}
 
 func TestConfigApplyDryRunUsesCanonicalAPIAndDoesNotActivate(t *testing.T) {
 	token := strings.Repeat("config-control-token-", 2)
@@ -106,7 +335,8 @@ func TestControlProblemPreservesRedactionSafeConfigurationIssues(t *testing.T) {
 	token := strings.Repeat("validation-control-token-", 2)
 	client := &controlAPIClient{token: token, tokenSensitive: secretSensitiveVariants(token)}
 	body := []byte(`{
-		"type":"https://latchway.dev/problems/configuration_invalid",
+		"type":"https://docs.latchway.dev/errors/configuration-invalid",
+		"documentation_url":"https://docs.latchway.dev/errors/configuration-invalid",
 		"title":"Configuration invalid",
 		"status":422,
 		"detail":"The configuration has validation errors and cannot be used.",
@@ -452,8 +682,10 @@ func TestRequestsInspectJSONIncludesSanitizedAttemptLifecycle(t *testing.T) {
 			"environment_id":"env_00000000000000000000000000",
 			"user_id":"usr_00000000000000000000000000",
 			"installation_id":"ins_00000000000000000000000000",
+			"config_revision_id":"`+controlTestRevision+`","selected_limit_plan":"paid",
 			"feature":"assistant","protocol":"openai_chat",
 			"started_at":"2026-08-29T00:00:00Z","completed_at":"2026-08-29T00:00:03Z","status":"failed",
+			"decision_stages":[],
 			"attempts":[{
 				"id":"atm_00000000000000000000000000","attempt_number":1,"route":"primary",
 				"upstream":"openrouter","model":"openai/gpt","started_at":"2026-08-29T00:00:00Z",
@@ -490,6 +722,7 @@ func TestRequestDocumentValidationRejectsRawFailureAndCorruptOrdering(t *testing
 	request := logicalRequestCLI{
 		ID: "req_00000000000000000000000000", EnvironmentID: controlTestEnvironment,
 		UserID: "usr_00000000000000000000000000", InstallationID: "ins_00000000000000000000000000",
+		ConfigRevisionID: controlTestRevision, SelectedLimitPlan: "paid",
 		Feature: "assistant", Protocol: "openai_chat", Status: "failed",
 		StartedAt: "2026-08-29T00:00:00Z", CompletedAt: "2026-08-29T00:00:03Z",
 		Attempts: []upstreamAttemptCLI{{
@@ -552,5 +785,6 @@ func revisionJSON(state string) string {
 
 func problemJSONForControl(code string, status int) string {
 	title := "Resource not found"
-	return `{"type":"https://latchway.dev/problems/` + code + `","title":"` + title + `","status":` + strconv.Itoa(status) + `,"detail":"The resource does not exist.","code":"` + code + `","request_id":"request_test_123456","retryable":false}`
+	documentationURL := problemcontract.DocumentationURL(code)
+	return `{"type":"` + documentationURL + `","documentation_url":"` + documentationURL + `","title":"` + title + `","status":` + strconv.Itoa(status) + `,"detail":"The resource does not exist.","code":"` + code + `","request_id":"request_test_123456","retryable":false}`
 }

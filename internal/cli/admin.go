@@ -304,8 +304,10 @@ func callAdminUserOverride(cmd *cobra.Command, opts *options, method, userID, en
 	}
 	request.Header.Set("Accept", "application/json, application/problem+json")
 	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set(cliAdminSourceHeader, cliAuditSource)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(cliAuditReasonHeader, cliReasonProvided)
 	}
 	client := opts.adminHTTPClient
 	if client == nil {

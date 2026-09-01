@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -72,11 +73,46 @@ def read_manifest(target: Path) -> dict[str, str] | None:
     return files
 
 
-def manifest_payload(files: dict[str, Path]) -> str:
+def source_commit(source: Path) -> str | None:
+    """Return the local source revision without contacting a remote."""
+    repository = Path(__file__).resolve().parents[1]
+    try:
+        source.resolve().relative_to(repository.resolve())
+        result = subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    value = result.stdout.strip()
+    if result.returncode != 0 or len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+        return None
+    return value
+
+
+def file_table(files: dict[str, Path]) -> dict[str, str]:
+    return {relative: sha256(path) for relative, path in files.items()}
+
+
+def file_table_sha256(files: dict[str, str]) -> str:
+    encoded = (json.dumps(files, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def manifest_payload(files: dict[str, Path], commit: str | None) -> str:
+    hashes = file_table(files)
     payload = {
         "format": 1,
         "source": "latchway/docs/public",
-        "files": {relative: sha256(path) for relative, path in files.items()},
+        "source_commit": commit,
+        "source_tree_sha256": file_table_sha256(hashes),
+        "files": hashes,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -114,7 +150,7 @@ def initialize(source: Path, target: Path, files: dict[str, Path]) -> int:
             print(f"conflict: mirror is missing canonical source file: {relative}", file=sys.stderr)
         print("initialization is non-mutating unless the existing mirror already matches", file=sys.stderr)
         return 2
-    write_manifest(target, manifest_payload(files))
+    write_manifest(target, manifest_payload(files, source_commit(source)))
     print(f"initialized {target / MANIFEST_NAME} with {len(files)} owned files")
     return 0
 
@@ -175,7 +211,7 @@ def write(source: Path, target: Path, files: dict[str, Path], old_files: dict[st
         while parent != target and not any(parent.iterdir()):
             parent.rmdir()
             parent = parent.parent
-    write_manifest(target, manifest_payload(files))
+    write_manifest(target, manifest_payload(files, source_commit(source)))
     print(f"synchronized {len(files)} files ({len(copies)} copied, {len(removals)} removed)")
     return 0
 

@@ -225,6 +225,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
             step.get("run", "") for step in image["steps"] if isinstance(step, dict)
         )
         self.assertIn('test -z "${GH_TOKEN:-}"', image_runs)
+        self.assertEqual(image_runs.count("python3 scripts/verify-runtime-image.py"), 2)
+        self.assertIn("latchway-linux-amd64.image.tar linux/amd64", image_runs)
+        self.assertIn("latchway-linux-arm64.image.tar linux/arm64", image_runs)
         publisher_names = [step.get("name", "") for step in publisher["steps"]]
         handoff_validation = publisher_names.index(
             "Validate the exact closed handoff before registry authentication"

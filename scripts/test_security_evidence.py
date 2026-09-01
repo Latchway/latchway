@@ -235,6 +235,15 @@ class SecurityEvidenceTests(unittest.TestCase):
                 ),
             },
             "repositories": repositories,
+            "documentation": {
+                "repository": "https://github.com/Latchway/latchway-docs.git",
+                "commit": "5" * 40,
+                "canonical_core_commit": self.commit,
+                "source_commit": self.commit,
+                "source_manifest_sha256": "6" * 64,
+                "source_tree_sha256": "7" * 64,
+                "owned_file_count": 308,
+            },
             "evidence_window": {
                 "started_at": MODULE.canonical_time(
                     self.created_at + timedelta(minutes=10)
@@ -293,6 +302,7 @@ class SecurityEvidenceTests(unittest.TestCase):
             "run_attempt": self.promotion_run_attempt,
             "report_sha256": MODULE.sha256_file(report_path),
             "repositories": report["repositories"],
+            "documentation": report["documentation"],
         }
 
     def write_promotion_report(self, report: dict[str, object]) -> None:
@@ -662,7 +672,7 @@ class SecurityEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.SecurityEvidenceError, "candidate_mismatch"):
             self.derive()
 
-    def test_review_is_bound_to_the_exact_five_repository_promotion(self) -> None:
+    def test_review_is_bound_to_the_exact_source_promotion(self) -> None:
         report = self.review_report()
         report["candidate"]["promotion_conformance"]["repositories"][1][
             "commit"
@@ -676,6 +686,16 @@ class SecurityEvidenceTests(unittest.TestCase):
             (self.promotion / MODULE.PROMOTION_REPORT_NAME).read_text(encoding="utf-8")
         )
         promotion["repositories"][1]["commit"] = "e" * 40
+        self.write_promotion_report(promotion)
+        with self.assertRaisesRegex(MODULE.SecurityEvidenceError, "candidate_mismatch"):
+            self.derive()
+
+        self.build_promotion()
+        self.build_review()
+        promotion = json.loads(
+            (self.promotion / MODULE.PROMOTION_REPORT_NAME).read_text(encoding="utf-8")
+        )
+        promotion["documentation"]["source_tree_sha256"] = "f" * 64
         self.write_promotion_report(promotion)
         with self.assertRaisesRegex(MODULE.SecurityEvidenceError, "candidate_mismatch"):
             self.derive()

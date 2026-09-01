@@ -6,12 +6,13 @@ audience: "client-android"
 pageType: "tutorial"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "android-sdk"
 ---
 
 import AndroidBasicClient from "/snippets/generated/android/quickstart/basic-client.kt.mdx";
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+import { SetupCoordinates } from "/components/SetupPath.jsx";
 
 <Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">Android API 23+</Badge>
 
@@ -42,6 +43,15 @@ DPoP and correlate the request with its Play Integrity result and usage.
   sideloaded APK can test source behavior but is not production Play Integrity
   evidence.
 </Warning>
+
+### Use the operator-provided coordinates
+
+<SetupCoordinates platform="android" />
+
+Use the local gateway for deterministic server verification. Treat host
+compilation and emulator tests as source checks. Only the configured signed
+application installed through the required Play track can complete the
+production Play Integrity stage.
 
 ## What you will build
 

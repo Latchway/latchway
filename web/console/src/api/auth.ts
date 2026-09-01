@@ -52,6 +52,7 @@ export interface AdministratorLoginInput {
 export interface AdminProblem {
   code: string;
   detail: string;
+  documentationURL?: string;
   requestId?: string;
   retryable: boolean;
   status: number;
@@ -60,15 +61,25 @@ export interface AdminProblem {
 
 const ProblemSchema = z
   .object({
-    code: z.string().min(1).max(128),
+    code: z.string().regex(/^[a-z][a-z0-9_]{0,127}$/),
     detail: z.string().min(1).max(2048),
+    documentation_url: z.url(),
     request_id: z.string().min(8).max(128),
     retryable: z.boolean(),
     status: z.number().int().min(400).max(599),
     title: z.string().min(1).max(256),
     type: z.url()
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((problem, context) => {
+    const expected = `https://docs.latchway.dev/errors/${problem.code.replaceAll("_", "-")}`;
+    if (problem.type !== expected || problem.documentation_url !== expected) {
+      context.addIssue({
+        code: "custom",
+        message: "Problem documentation URLs must match the canonical error code."
+      });
+    }
+  });
 
 export class AdminRequestError extends Error {
   readonly problem: AdminProblem;
@@ -202,19 +213,35 @@ function fallbackProblem(status: number): AdminProblem {
   };
 }
 
+function invalidStructuredProblem(status: number): AdminProblem {
+  return {
+    code: "request_failed",
+    detail: "The console could not complete this request.",
+    documentationURL: undefined,
+    retryable: false,
+    status,
+    title: "Request failed"
+  };
+}
+
 export function responseProblem(response: Response, payload: unknown): AdminProblem {
   const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
-  const parsed = contentType.includes("application/problem+json")
+  const isStructuredProblem = contentType.includes("application/problem+json");
+  const parsed = isStructuredProblem
     ? ProblemSchema.safeParse(payload)
     : undefined;
 
   if (!parsed?.success || parsed.data.status !== response.status) {
+    if (isStructuredProblem) {
+      return invalidStructuredProblem(response.status);
+    }
     return fallbackProblem(response.status);
   }
 
   return {
     code: safeText(parsed.data.code, 128),
     detail: safeText(parsed.data.detail, 2048),
+    documentationURL: parsed.data.documentation_url,
     requestId: safeText(parsed.data.request_id, 128),
     retryable: parsed.data.retryable,
     status: response.status,

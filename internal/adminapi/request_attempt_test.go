@@ -40,6 +40,54 @@ func TestPublicAttemptFailureCodeUsesClosedVocabulary(t *testing.T) {
 	}
 }
 
+func TestPublicLogicalDecisionFailureCodeUsesRegisteredOrClosedValues(t *testing.T) {
+	t.Parallel()
+	for stored, want := range map[string]string{
+		"quota_exceeded":       "quota_exceeded",
+		"request_cancelled":    "canceled",
+		"provider_secret_hint": "unknown",
+	} {
+		stored, want := stored, want
+		t.Run(stored, func(t *testing.T) {
+			t.Parallel()
+			got := publicDecisionFailureCode(&stored)
+			if got == nil || *got != want {
+				t.Fatalf("publicDecisionFailureCode(%q)=%v, want %q", stored, got, want)
+			}
+		})
+	}
+	if publicDecisionFailureCode(nil) != nil {
+		t.Fatal("nil decision failure became present")
+	}
+}
+
+func TestValidateRequestDecisionStageAcceptsOnlyClosedStageProvenance(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	request := logicalRequestDocument{
+		ConfigRevisionID: id.Must(id.ConfigRevision), SelectedLimitPlan: "legacy_unknown",
+	}
+	failureCode := "internal_error"
+	valid := requestDecisionStageDocument{
+		Number: 1, Stage: "lifecycle_recovered", Outcome: "failed",
+		ConfigRevisionID: request.ConfigRevisionID, StartedAt: now, CompletedAt: now,
+	}
+	if err := validateRequestDecisionStage(valid, &failureCode, request, 1); err != nil {
+		t.Fatalf("valid recovery stage: %v", err)
+	}
+	invalid := valid
+	invalid.Stage = "dependency_private_stage"
+	if err := validateRequestDecisionStage(invalid, &failureCode, request, 1); !errors.Is(err, errOperationalCorrupt) {
+		t.Fatalf("unknown decision stage validation=%v", err)
+	}
+	invalid = valid
+	route := "primary"
+	invalid.Route = &route
+	if err := validateRequestDecisionStage(invalid, &failureCode, request, 1); !errors.Is(err, errOperationalCorrupt) {
+		t.Fatalf("partial recovery route validation=%v", err)
+	}
+}
+
 func TestValidateUpstreamAttemptRejectsCorruptLifecycle(t *testing.T) {
 	t.Parallel()
 	started := time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC)

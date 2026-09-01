@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/latchway/latchway/internal/id"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +22,9 @@ type controlCommandOptions struct {
 }
 
 var operationalIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+var operationalFailurePatternCLI = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+var operationalImpactTokenPatternCLI = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+var operationalDecimalPatternCLI = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
 
 type pageInfoCLI struct {
 	HasMore    bool   `json:"has_more"`
@@ -40,6 +45,97 @@ type applicationUserCLI struct {
 type applicationUserPageCLI struct {
 	Items []applicationUserCLI `json:"items"`
 	Page  pageInfoCLI          `json:"page"`
+}
+
+type userOperationCountsCLI struct {
+	ActiveSessionGrants          int64 `json:"active_session_grants"`
+	ActiveRefreshTokens          int64 `json:"active_refresh_tokens"`
+	ActiveComponentSessions      int64 `json:"active_component_sessions"`
+	ActiveComponentRefreshTokens int64 `json:"active_component_refresh_tokens"`
+	ActiveInstallationFamilies   int64 `json:"active_installation_families"`
+	ActiveClientComponents       int64 `json:"active_client_components"`
+}
+
+type userOperationImpactCLI struct {
+	Action        string                 `json:"action"`
+	Immediate     bool                   `json:"immediate"`
+	Reversible    bool                   `json:"reversible"`
+	Applicable    bool                   `json:"applicable"`
+	CurrentStatus string                 `json:"current_status"`
+	AccessEffect  string                 `json:"access_effect"`
+	Summary       string                 `json:"summary"`
+	Counts        userOperationCountsCLI `json:"counts"`
+	ImpactToken   string                 `json:"impact_token"`
+}
+
+type confirmedUserOperationCLI struct {
+	Reason                     string `json:"reason"`
+	ImpactToken                string `json:"impact_token"`
+	AcknowledgeImmediateEffect bool   `json:"acknowledge_immediate_effect"`
+}
+
+type userOperationResultCLI struct {
+	OperationID string                 `json:"operation_id"`
+	Impact      userOperationImpactCLI `json:"impact"`
+	User        applicationUserCLI     `json:"user"`
+}
+
+type effectiveInputCLI struct {
+	Fact         string            `json:"fact"`
+	Source       string            `json:"source"`
+	Availability string            `json:"availability"`
+	Keys         []string          `json:"keys,omitempty"`
+	Values       map[string]string `json:"values,omitempty"`
+	Detail       string            `json:"detail"`
+}
+
+type effectiveLimitCLI struct {
+	Index             int      `json:"index"`
+	Metric            string   `json:"metric"`
+	Algorithm         string   `json:"algorithm"`
+	Scope             []string `json:"scope"`
+	Window            string   `json:"window,omitempty"`
+	Timezone          string   `json:"timezone,omitempty"`
+	Maximum           int64    `json:"maximum,omitempty"`
+	PerRequestMaximum int64    `json:"per_request_maximum,omitempty"`
+	Capacity          int64    `json:"capacity,omitempty"`
+	RefillPerSecond   string   `json:"refill_per_second,omitempty"`
+	Hard              bool     `json:"hard"`
+	Source            string   `json:"source"`
+}
+
+type effectiveRouteCLI struct {
+	Order                int      `json:"order"`
+	Route                string   `json:"route"`
+	Upstream             string   `json:"upstream"`
+	Model                string   `json:"model"`
+	PhysicalModel        string   `json:"physical_model"`
+	MatchExpression      string   `json:"match_expression"`
+	ConfiguredPriority   int64    `json:"configured_priority"`
+	ConfiguredWeight     int64    `json:"configured_weight"`
+	StickyBy             string   `json:"sticky_by,omitempty"`
+	FallbackOn           []string `json:"fallback_on"`
+	RetryMaximumAttempts int64    `json:"retry_maximum_attempts"`
+	RetryOn              []string `json:"retry_on"`
+	Source               string   `json:"source"`
+	Observed             bool     `json:"observed"`
+}
+
+type effectiveOutputCLI struct {
+	ConfiguredDefaultMaximumTokens  int64  `json:"configured_default_maximum_tokens,omitempty"`
+	ConfiguredAbsoluteMaximumTokens int64  `json:"configured_absolute_maximum_tokens,omitempty"`
+	EffectiveDefaultMaximumTokens   int64  `json:"effective_default_maximum_tokens,omitempty"`
+	EffectiveMaximumTokens          int64  `json:"effective_maximum_tokens,omitempty"`
+	RequestedMaximumTokens          int64  `json:"requested_maximum_tokens,omitempty"`
+	Source                          string `json:"source"`
+}
+
+type effectiveSubjectCLI struct {
+	Kind           string `json:"kind"`
+	ID             string `json:"id"`
+	UserID         string `json:"user_id"`
+	InstallationID string `json:"installation_id,omitempty"`
+	ComponentID    string `json:"component_id,omitempty"`
 }
 
 type installationCLI struct {
@@ -89,25 +185,81 @@ type upstreamAttemptCLI struct {
 	CostSource      string          `json:"cost_source,omitempty"`
 }
 
+type requestDecisionStageCLI struct {
+	Number           int32  `json:"number"`
+	Stage            string `json:"stage"`
+	Outcome          string `json:"outcome"`
+	FailureCode      string `json:"failure_code,omitempty"`
+	ConfigRevisionID string `json:"config_revision_id"`
+	PolicyRuleKey    string `json:"policy_rule_key,omitempty"`
+	LimitPlanKey     string `json:"limit_plan_key,omitempty"`
+	LimitRuleKey     string `json:"limit_rule_key,omitempty"`
+	LimitMetric      string `json:"limit_metric,omitempty"`
+	LimitAlgorithm   string `json:"limit_algorithm,omitempty"`
+	LimitMaximum     *int64 `json:"limit_maximum,omitempty"`
+	Route            string `json:"route,omitempty"`
+	Upstream         string `json:"upstream,omitempty"`
+	Model            string `json:"model,omitempty"`
+	PhysicalModel    string `json:"physical_model,omitempty"`
+	StartedAt        string `json:"started_at"`
+	CompletedAt      string `json:"completed_at"`
+	DurationMS       int64  `json:"duration_ms"`
+}
+
 type logicalRequestCLI struct {
-	ID                    string               `json:"id"`
-	EnvironmentID         string               `json:"environment_id"`
-	UserID                string               `json:"user_id"`
-	InstallationID        string               `json:"installation_id"`
-	InstallationFamilyID  string               `json:"installation_family_id,omitempty"`
-	ClientComponentID     string               `json:"client_component_id,omitempty"`
-	ComponentDefinitionID string               `json:"component_definition_id,omitempty"`
-	ComponentKind         string               `json:"component_kind,omitempty"`
-	TrustSource           string               `json:"trust_source,omitempty"`
-	Framework             string               `json:"framework,omitempty"`
-	FrameworkVersion      string               `json:"framework_version,omitempty"`
-	Feature               string               `json:"feature"`
-	Protocol              string               `json:"protocol"`
-	StartedAt             string               `json:"started_at"`
-	CompletedAt           string               `json:"completed_at,omitempty"`
-	Status                string               `json:"status"`
-	Usage                 *usageValuesCLI      `json:"usage,omitempty"`
-	Attempts              []upstreamAttemptCLI `json:"attempts"`
+	ID                    string                    `json:"id"`
+	EnvironmentID         string                    `json:"environment_id"`
+	UserID                string                    `json:"user_id"`
+	InstallationID        string                    `json:"installation_id"`
+	InstallationFamilyID  string                    `json:"installation_family_id,omitempty"`
+	ClientComponentID     string                    `json:"client_component_id,omitempty"`
+	ComponentDefinitionID string                    `json:"component_definition_id,omitempty"`
+	ComponentKind         string                    `json:"component_kind,omitempty"`
+	TrustSource           string                    `json:"trust_source,omitempty"`
+	Framework             string                    `json:"framework,omitempty"`
+	FrameworkVersion      string                    `json:"framework_version,omitempty"`
+	ConfigRevisionID      string                    `json:"config_revision_id"`
+	SelectedLimitPlan     string                    `json:"selected_limit_plan"`
+	SelectedRoute         string                    `json:"selected_route,omitempty"`
+	SelectedUpstream      string                    `json:"selected_upstream,omitempty"`
+	SelectedModel         string                    `json:"selected_model,omitempty"`
+	SelectedPhysicalModel string                    `json:"selected_physical_model,omitempty"`
+	Feature               string                    `json:"feature"`
+	Protocol              string                    `json:"protocol"`
+	StartedAt             string                    `json:"started_at"`
+	CompletedAt           string                    `json:"completed_at,omitempty"`
+	Status                string                    `json:"status"`
+	FailureCode           string                    `json:"failure_code,omitempty"`
+	Usage                 *usageValuesCLI           `json:"usage,omitempty"`
+	DecisionStages        []requestDecisionStageCLI `json:"decision_stages"`
+	Attempts              []upstreamAttemptCLI      `json:"attempts"`
+}
+
+type effectiveConfigurationCLI struct {
+	Subject                 effectiveSubjectCLI       `json:"subject"`
+	EvaluationMode          string                    `json:"evaluation_mode"`
+	EnvironmentID           string                    `json:"environment_id"`
+	EnvironmentKind         string                    `json:"environment_kind"`
+	RevisionID              string                    `json:"revision_id"`
+	Feature                 string                    `json:"feature"`
+	Protocol                string                    `json:"protocol,omitempty"`
+	RequestStatus           string                    `json:"request_status,omitempty"`
+	PolicyOutcome           string                    `json:"policy_outcome"`
+	DenialReason            string                    `json:"denial_reason,omitempty"`
+	MatchedAccessExpression string                    `json:"matched_access_expression,omitempty"`
+	MatchedLimitExpression  string                    `json:"matched_limit_plan_expression,omitempty"`
+	LimitPlan               string                    `json:"limit_plan,omitempty"`
+	LimitPlanSource         string                    `json:"limit_plan_source,omitempty"`
+	UserOverrideID          string                    `json:"user_override_id,omitempty"`
+	ComponentDefinitionID   string                    `json:"component_definition_id,omitempty"`
+	ComponentAllowed        *bool                     `json:"component_allowed,omitempty"`
+	Inputs                  []effectiveInputCLI       `json:"inputs"`
+	Output                  *effectiveOutputCLI       `json:"output,omitempty"`
+	Limits                  []effectiveLimitCLI       `json:"limits"`
+	SelectedRoute           *effectiveRouteCLI        `json:"selected_route,omitempty"`
+	Routes                  []effectiveRouteCLI       `json:"routes"`
+	DecisionStages          []requestDecisionStageCLI `json:"decision_stages"`
+	Warnings                []string                  `json:"warnings"`
 }
 
 type logicalRequestPageCLI struct {
@@ -188,14 +340,29 @@ type usageTimeseriesCLI struct {
 }
 
 type auditEventCLI struct {
-	ID        string         `json:"id"`
-	Timestamp string         `json:"timestamp"`
-	Actor     string         `json:"actor"`
-	Action    string         `json:"action"`
-	Target    string         `json:"target"`
-	Result    string         `json:"result"`
-	RequestID string         `json:"request_id"`
-	Summary   map[string]any `json:"summary"`
+	ID            string           `json:"id"`
+	Timestamp     string           `json:"timestamp"`
+	Actor         string           `json:"actor"`
+	ActorKind     string           `json:"actor_kind"`
+	ActorID       string           `json:"actor_id,omitempty"`
+	Action        string           `json:"action"`
+	Target        string           `json:"target"`
+	ResourceType  string           `json:"resource_type"`
+	ResourceID    string           `json:"resource_id"`
+	EnvironmentID string           `json:"environment_id,omitempty"`
+	Source        string           `json:"source"`
+	Reason        string           `json:"reason,omitempty"`
+	Result        string           `json:"result"`
+	RequestID     string           `json:"request_id"`
+	Changes       []auditChangeCLI `json:"changes"`
+	Summary       map[string]any   `json:"summary"`
+}
+
+type auditChangeCLI struct {
+	Field          string `json:"field"`
+	Operation      string `json:"operation"`
+	Classification string `json:"classification"`
+	Redacted       bool   `json:"redacted"`
 }
 
 type auditPageCLI struct {
@@ -265,11 +432,15 @@ func addControlTokenFlag(command *cobra.Command, values *controlCommandOptions) 
 
 func newUsersCommand(opts *options) *cobra.Command {
 	values := &controlCommandOptions{}
-	command := &cobra.Command{Use: "users", Short: "Inspect and block pseudonymous application users through the Admin API"}
+	command := &cobra.Command{Use: "users", Short: "Inspect, explain, and safely operate on pseudonymous application users"}
 	addControlTokenFlag(command, values)
 	command.AddCommand(
 		newUsersListCommand(opts, values), newUsersInspectCommand(opts, values),
-		newUsersMutationCommand(opts, values, "block"), newUsersMutationCommand(opts, values, "unblock"),
+		newUsersEffectiveCommand(opts, values), newUsersImpactCommand(opts, values),
+		newUsersMutationCommand(opts, values, "block", "block", false),
+		newUsersMutationCommand(opts, values, "unblock", "unblock", false),
+		newUsersMutationCommand(opts, values, "require-reauthentication", "require_reauthentication", true),
+		newUsersMutationCommand(opts, values, "require-app-reverification", "require_app_reverification", true),
 	)
 	return command
 }
@@ -330,29 +501,178 @@ func newUsersInspectCommand(opts *options, root *controlCommandOptions) *cobra.C
 	return command
 }
 
-func newUsersMutationCommand(opts *options, root *controlCommandOptions, action string) *cobra.Command {
-	var environmentID string
+func newUsersEffectiveCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	var environmentID, feature, installationID, componentID string
+	var streaming bool
+	var estimatedInputTokens, maximumOutputTokens int64
 	command := &cobra.Command{
-		Use: action + " USER_ID", Short: strings.ToUpper(action[:1]) + action[1:] + " a user through the canonical Admin API", Args: cobra.ExactArgs(1),
+		Use: "effective USER_ID", Short: "Explain a user's exact current policy, limits, and route projection", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if id.Validate(args[0], id.ApplicationUser) != nil || id.Validate(environmentID, id.Environment) != nil {
-				return errors.New("user or environment ID is invalid")
+			if id.Validate(args[0], id.ApplicationUser) != nil || id.Validate(environmentID, id.Environment) != nil ||
+				!operationalIdentifierPattern.MatchString(feature) ||
+				(installationID != "" && id.Validate(installationID, id.Installation) != nil) ||
+				(componentID != "" && id.Validate(componentID, id.ClientComponent) != nil) ||
+				(installationID != "" && componentID != "") ||
+				estimatedInputTokens < 0 || estimatedInputTokens > protocol.MaximumPolicyRequestTokens ||
+				maximumOutputTokens < 0 || maximumOutputTokens > protocol.MaximumPolicyRequestTokens {
+				return errors.New("effective-configuration user, environment, feature, surface, or request facts are invalid")
 			}
 			client, err := newControlAPIClient(opts, root.tokenEnvironment)
 			if err != nil {
 				return err
 			}
-			var user applicationUserCLI
+			query := url.Values{"environment_id": {environmentID}, "feature": {feature}}
+			if installationID != "" {
+				query.Set("installation_id", installationID)
+			}
+			if componentID != "" {
+				query.Set("component_id", componentID)
+			}
+			if streaming {
+				query.Set("streaming", "true")
+			}
+			if estimatedInputTokens != 0 {
+				query.Set("estimated_input_tokens", strconv.FormatInt(estimatedInputTokens, 10))
+			}
+			if maximumOutputTokens != 0 {
+				query.Set("maximum_output_tokens", strconv.FormatInt(maximumOutputTokens, 10))
+			}
+			var document effectiveConfigurationCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet,
+				"/admin/v1/users/"+args[0]+"/effective-configuration", query, nil, http.StatusOK, &document); err != nil {
+				return err
+			}
+			if !validEffectiveConfigurationCLI(document) || document.EvaluationMode != "current_user_projection" ||
+				document.Subject.ID != args[0] || document.EnvironmentID != environmentID || document.Feature != feature {
+				return errors.New("admin API returned a non-conforming effective-configuration document")
+			}
+			return printEffectiveConfiguration(opts, document)
+		},
+	}
+	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&feature, "feature", "", "feature identifier to evaluate")
+	command.Flags().StringVar(&installationID, "installation", "", "optional installation surface")
+	command.Flags().StringVar(&componentID, "component", "", "optional component surface (exclusive with --installation)")
+	command.Flags().BoolVar(&streaming, "streaming", false, "evaluate a streaming request")
+	command.Flags().Int64Var(&estimatedInputTokens, "estimated-input-tokens", 0, "bounded untrusted input-token estimate assumed by policy")
+	command.Flags().Int64Var(&maximumOutputTokens, "maximum-output-tokens", 0, "requested output-token maximum assumed by policy")
+	_ = command.MarkFlagRequired("environment")
+	_ = command.MarkFlagRequired("feature")
+	return command
+}
+
+func newUsersImpactCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	var environmentID, action string
+	command := &cobra.Command{
+		Use: "impact USER_ID", Short: "Review application-wide credential impact before a sensitive user operation", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.ApplicationUser) != nil || id.Validate(environmentID, id.Environment) != nil ||
+				!validUserOperationCLI(action) {
+				return errors.New("user, environment, or operation action is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			impact, err := loadUserOperationImpactCLI(cmd, client, args[0], environmentID, action)
+			if err != nil {
+				return err
+			}
+			return printUserOperationImpact(opts, impact)
+		},
+	}
+	command.Flags().StringVar(&environmentID, "environment", "", "environment used to resolve the application-wide user")
+	command.Flags().StringVar(&action, "action", "", "block, unblock, require_reauthentication, or require_app_reverification")
+	_ = command.MarkFlagRequired("environment")
+	_ = command.MarkFlagRequired("action")
+	return command
+}
+
+func newUsersMutationCommand(
+	opts *options,
+	root *controlCommandOptions,
+	commandName string,
+	action string,
+	returnsResult bool,
+) *cobra.Command {
+	var environmentID, reason, confirmation, reviewedImpactToken string
+	command := &cobra.Command{
+		Use: commandName + " USER_ID", Short: "Perform a reviewed " + strings.ReplaceAll(action, "_", " ") + " operation", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.ApplicationUser) != nil || id.Validate(environmentID, id.Environment) != nil {
+				return errors.New("user or environment ID is invalid")
+			}
+			reason = strings.TrimSpace(reason)
+			if confirmation != args[0] || !operationalImpactTokenPatternCLI.MatchString(reviewedImpactToken) ||
+				!utf8.ValidString(reason) || strings.ContainsRune(reason, '\x00') ||
+				utf8.RuneCountInString(reason) < 1 || utf8.RuneCountInString(reason) > 500 {
+				return errors.New("set --confirm to the exact user ID, provide the reviewed --impact-token, and provide a 1-500 character --reason")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			impact, err := loadUserOperationImpactCLI(cmd, client, args[0], environmentID, action)
+			if err != nil {
+				return err
+			}
+			if !impact.Applicable {
+				return fmt.Errorf("operation %s is not applicable while the user is %s", action, impact.CurrentStatus)
+			}
+			if impact.ImpactToken != reviewedImpactToken {
+				return errors.New("user-operation impact changed; run users impact again and review the new token")
+			}
 			query := url.Values{"environment_id": []string{environmentID}}
-			if _, err := client.do(cmd.Context(), http.MethodPost, "/admin/v1/users/"+args[0]+"/"+action, query, nil, http.StatusOK, &user); err != nil {
+			body := confirmedUserOperationCLI{
+				Reason: reason, ImpactToken: reviewedImpactToken, AcknowledgeImmediateEffect: true,
+			}
+			path := "/admin/v1/users/" + args[0] + "/" + commandName
+			if returnsResult {
+				var result userOperationResultCLI
+				if _, err := client.do(cmd.Context(), http.MethodPost, path, query, body, http.StatusOK, &result); err != nil {
+					return err
+				}
+				return printUserOperationResult(opts, result)
+			}
+			var user applicationUserCLI
+			if _, err := client.do(cmd.Context(), http.MethodPost, path, query, body, http.StatusOK, &user); err != nil {
 				return err
 			}
 			return printUser(opts, user)
 		},
 	}
-	command.Flags().StringVar(&environmentID, "environment", "", "target environment ID")
+	command.Flags().StringVar(&environmentID, "environment", "", "environment used to resolve the application-wide user")
+	command.Flags().StringVar(&reason, "reason", "", "operator justification (not copied into audit metadata)")
+	command.Flags().StringVar(&confirmation, "confirm", "", "exact user ID acknowledging the reviewed immediate effect")
+	command.Flags().StringVar(&reviewedImpactToken, "impact-token", "", "exact optimistic token printed by users impact")
 	_ = command.MarkFlagRequired("environment")
 	return command
+}
+
+func validUserOperationCLI(action string) bool {
+	switch action {
+	case "block", "unblock", "require_reauthentication", "require_app_reverification":
+		return true
+	default:
+		return false
+	}
+}
+
+func loadUserOperationImpactCLI(
+	cmd *cobra.Command,
+	client *controlAPIClient,
+	userID, environmentID, action string,
+) (userOperationImpactCLI, error) {
+	var impact userOperationImpactCLI
+	query := url.Values{"environment_id": {environmentID}, "action": {action}}
+	if _, err := client.do(cmd.Context(), http.MethodGet,
+		"/admin/v1/users/"+userID+"/operation-impact", query, nil, http.StatusOK, &impact); err != nil {
+		return userOperationImpactCLI{}, err
+	}
+	if impact.Action != action || !operationalImpactTokenPatternCLI.MatchString(impact.ImpactToken) || impact.CurrentStatus == "" || impact.Summary == "" {
+		return userOperationImpactCLI{}, errors.New("admin API returned a non-conforming user-operation impact")
+	}
+	return impact, nil
 }
 
 func newInstallationsCommand(opts *options) *cobra.Command {
@@ -445,7 +765,10 @@ func newRequestsCommand(opts *options) *cobra.Command {
 	values := &controlCommandOptions{}
 	command := &cobra.Command{Use: "requests", Short: "Explore redaction-safe logical request metadata"}
 	addControlTokenFlag(command, values)
-	command.AddCommand(newRequestsListCommand(opts, values), newRequestsInspectCommand(opts, values))
+	command.AddCommand(
+		newRequestsListCommand(opts, values), newRequestsInspectCommand(opts, values),
+		newRequestsEffectiveCommand(opts, values),
+	)
 	return command
 }
 
@@ -504,6 +827,30 @@ func newRequestsInspectCommand(opts *options, root *controlCommandOptions) *cobr
 				return errors.New("admin API returned a non-conforming request document")
 			}
 			return printRequest(opts, request)
+		},
+	}
+}
+
+func newRequestsEffectiveCommand(opts *options, root *controlCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use: "effective REQUEST_ID", Short: "Explain a request from its immutable revision and durable decision stages", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.LogicalRequest) != nil {
+				return errors.New("request ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, root.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var document effectiveConfigurationCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet,
+				"/admin/v1/requests/"+args[0]+"/effective-configuration", nil, nil, http.StatusOK, &document); err != nil {
+				return err
+			}
+			if !validEffectiveConfigurationCLI(document) || document.EvaluationMode != "recorded_request" || document.Subject.ID != args[0] {
+				return errors.New("admin API returned a non-conforming effective-configuration document")
+			}
+			return printEffectiveConfiguration(opts, document)
 		},
 	}
 }
@@ -580,7 +927,7 @@ func usageRangeFlags(command *cobra.Command, environmentID, start, end *string) 
 
 func newAuditCommand(opts *options) *cobra.Command {
 	values := &controlCommandOptions{}
-	var organizationID, cursor string
+	var organizationID, environmentID, actorKind, actorID, action, resourceType, resourceID, source, reason, result, start, end, cursor string
 	var pageSize int
 	command := &cobra.Command{
 		Use: "audit", Short: "Inspect append-only redaction-safe administrative audit events", Args: cobra.NoArgs,
@@ -589,8 +936,14 @@ func newAuditCommand(opts *options) *cobra.Command {
 				return errors.New("organization ID or page size is invalid")
 			}
 			query := url.Values{"organization_id": []string{organizationID}, "page_size": []string{strconv.Itoa(pageSize)}}
-			if cursor != "" {
-				query.Set("cursor", cursor)
+			for name, value := range map[string]string{
+				"environment_id": environmentID, "actor_kind": actorKind, "actor_id": actorID, "action": action,
+				"resource_type": resourceType, "resource_id": resourceID, "source": source, "reason": reason, "result": result,
+				"start": start, "end": end, "cursor": cursor,
+			} {
+				if value != "" {
+					query.Set(name, value)
+				}
 			}
 			client, err := newControlAPIClient(opts, values.tokenEnvironment)
 			if err != nil {
@@ -605,9 +958,44 @@ func newAuditCommand(opts *options) *cobra.Command {
 	}
 	addControlTokenFlag(command, values)
 	command.Flags().StringVar(&organizationID, "organization", "", "organization ID")
+	command.Flags().StringVar(&environmentID, "environment", "", "filter by environment ID")
+	command.Flags().StringVar(&actorKind, "actor-kind", "", "filter by actor kind: admin_user, admin_api_token, or system")
+	command.Flags().StringVar(&actorID, "actor", "", "filter by administrator or API-token actor ID")
+	command.Flags().StringVar(&action, "action", "", "filter by exact audit action")
+	command.Flags().StringVar(&resourceType, "resource-type", "", "filter by exact resource type")
+	command.Flags().StringVar(&resourceID, "resource", "", "filter by exact resource ID")
+	command.Flags().StringVar(&source, "source", "", "filter by descriptive source: console, cli, api, or system")
+	command.Flags().StringVar(&reason, "reason", "", "filter by stable redaction-safe reason code")
+	command.Flags().StringVar(&result, "result", "", "filter by result: succeeded, denied, failed, or indeterminate")
+	command.Flags().StringVar(&start, "start", "", "inclusive RFC 3339 start")
+	command.Flags().StringVar(&end, "end", "", "exclusive RFC 3339 end")
 	command.Flags().StringVar(&cursor, "cursor", "", "opaque next-page cursor")
 	command.Flags().IntVar(&pageSize, "page-size", 50, "number of events to return (1-200)")
 	_ = command.MarkFlagRequired("organization")
+	command.AddCommand(newAuditInspectCommand(opts))
+	return command
+}
+
+func newAuditInspectCommand(opts *options) *cobra.Command {
+	values := &controlCommandOptions{}
+	command := &cobra.Command{
+		Use: "inspect AUDIT_EVENT_ID", Short: "Inspect one redaction-safe audit event and its field-level changes", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id.Validate(args[0], id.AuditEvent) != nil {
+				return errors.New("audit event ID is invalid")
+			}
+			client, err := newControlAPIClient(opts, values.tokenEnvironment)
+			if err != nil {
+				return err
+			}
+			var event auditEventCLI
+			if _, err := client.do(cmd.Context(), http.MethodGet, "/admin/v1/audit-events/"+args[0], nil, nil, http.StatusOK, &event); err != nil {
+				return err
+			}
+			return printAuditEvent(opts, event)
+		},
+	}
+	addControlTokenFlag(command, values)
 	return command
 }
 
@@ -867,6 +1255,131 @@ func printUser(opts *options, user applicationUserCLI) error {
 	}})
 }
 
+func printUserOperationImpact(opts *options, impact userOperationImpactCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, impact)
+	}
+	if err := printControlTable(opts,
+		[]string{"ACTION", "STATUS", "APPLICABLE", "IMMEDIATE", "REVERSIBLE", "ACCESS EFFECT", "IMPACT TOKEN"},
+		[][]string{{
+			impact.Action, impact.CurrentStatus, boolLabel(impact.Applicable), boolLabel(impact.Immediate),
+			boolLabel(impact.Reversible), impact.AccessEffect, impact.ImpactToken,
+		}},
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(opts.stdout, impact.Summary); err != nil {
+		return err
+	}
+	return printControlTable(opts,
+		[]string{"SESSIONS", "REFRESH", "COMPONENT SESSIONS", "COMPONENT REFRESH", "FAMILIES", "COMPONENTS"},
+		[][]string{{
+			strconv.FormatInt(impact.Counts.ActiveSessionGrants, 10),
+			strconv.FormatInt(impact.Counts.ActiveRefreshTokens, 10),
+			strconv.FormatInt(impact.Counts.ActiveComponentSessions, 10),
+			strconv.FormatInt(impact.Counts.ActiveComponentRefreshTokens, 10),
+			strconv.FormatInt(impact.Counts.ActiveInstallationFamilies, 10),
+			strconv.FormatInt(impact.Counts.ActiveClientComponents, 10),
+		}},
+	)
+}
+
+func printUserOperationResult(opts *options, result userOperationResultCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, result)
+	}
+	if err := printControlTable(opts, []string{"OPERATION", "ACTION", "USER", "STATUS"}, [][]string{{
+		result.OperationID, result.Impact.Action, result.User.ID, result.User.Status,
+	}}); err != nil {
+		return err
+	}
+	return printUserOperationImpact(opts, result.Impact)
+}
+
+func printEffectiveConfiguration(opts *options, document effectiveConfigurationCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, document)
+	}
+	if err := printControlTable(opts,
+		[]string{"SUBJECT", "MODE", "ENVIRONMENT", "REVISION", "FEATURE", "PROTOCOL", "POLICY", "PLAN", "PLAN SOURCE"},
+		[][]string{{
+			document.Subject.ID, document.EvaluationMode, document.EnvironmentID, document.RevisionID,
+			document.Feature, document.Protocol, document.PolicyOutcome, document.LimitPlan, document.LimitPlanSource,
+		}},
+	); err != nil {
+		return err
+	}
+	inputRows := make([][]string, 0, len(document.Inputs))
+	for _, input := range document.Inputs {
+		values, _ := json.Marshal(input.Values)
+		inputRows = append(inputRows, []string{
+			input.Fact, input.Availability, input.Source, strings.Join(input.Keys, ","), string(values), input.Detail,
+		})
+	}
+	if err := printControlTable(opts, []string{"FACT", "AVAILABLE", "SOURCE", "KEYS", "VALUES", "DETAIL"}, inputRows); err != nil {
+		return err
+	}
+	limitRows := make([][]string, 0, len(document.Limits))
+	for _, limit := range document.Limits {
+		limitRows = append(limitRows, []string{
+			strconv.Itoa(limit.Index), limit.Metric, limit.Algorithm, effectiveLimitValueCLI(limit),
+			strings.Join(limit.Scope, ","), limit.Source,
+		})
+	}
+	if err := printControlTable(opts, []string{"#", "METRIC", "ALGORITHM", "EFFECTIVE LIMIT", "SCOPE", "SOURCE"}, limitRows); err != nil {
+		return err
+	}
+	routeRows := make([][]string, 0, len(document.Routes))
+	for _, route := range document.Routes {
+		routeRows = append(routeRows, []string{
+			strconv.Itoa(route.Order), route.Route, route.Upstream, route.Model, route.PhysicalModel,
+			strconv.FormatInt(route.ConfiguredPriority, 10), strconv.FormatInt(route.ConfiguredWeight, 10),
+			route.StickyBy, strconv.FormatInt(route.RetryMaximumAttempts, 10),
+			strings.Join(route.FallbackOn, ","), boolLabel(route.Observed), route.Source,
+		})
+	}
+	if err := printControlTable(opts, []string{
+		"#", "ROUTE", "UPSTREAM", "MODEL", "PHYSICAL", "PRIORITY", "WEIGHT", "STICKY", "ATTEMPTS", "FALLBACK", "OBSERVED", "SOURCE",
+	}, routeRows); err != nil {
+		return err
+	}
+	stageRows := make([][]string, 0, len(document.DecisionStages))
+	for _, stage := range document.DecisionStages {
+		limitMaximum := ""
+		if stage.LimitMaximum != nil {
+			limitMaximum = strconv.FormatInt(*stage.LimitMaximum, 10)
+		}
+		stageRows = append(stageRows, []string{
+			strconv.Itoa(int(stage.Number)), stage.Stage, stage.Outcome, stage.FailureCode,
+			stage.LimitMetric, limitMaximum, stage.Route, strconv.FormatInt(stage.DurationMS, 10),
+		})
+	}
+	if err := printControlTable(opts, []string{"#", "STAGE", "OUTCOME", "FAILURE", "LIMIT", "MAX", "ROUTE", "MS"}, stageRows); err != nil {
+		return err
+	}
+	for _, warning := range document.Warnings {
+		if _, err := fmt.Fprintf(opts.stdout, "warning: %s\n", warning); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func effectiveLimitValueCLI(limit effectiveLimitCLI) string {
+	switch limit.Algorithm {
+	case "calendar":
+		return strconv.FormatInt(limit.Maximum, 10) + "/" + limit.Window + " " + limit.Timezone
+	case "token_bucket":
+		return "capacity=" + strconv.FormatInt(limit.Capacity, 10) + " refill=" + limit.RefillPerSecond + "/s"
+	case "per_request":
+		return strconv.FormatInt(limit.PerRequestMaximum, 10) + "/request"
+	case "concurrency":
+		return strconv.FormatInt(limit.Maximum, 10) + " concurrent"
+	default:
+		return "unknown"
+	}
+}
+
 func printInstallations(opts *options, page installationPageCLI) error {
 	if opts.output == "json" {
 		return printControlJSON(opts, page)
@@ -904,7 +1417,218 @@ func validPublicAttemptFailureCode(value string) bool {
 	}
 }
 
+func validEffectiveConfigurationCLI(document effectiveConfigurationCLI) bool {
+	expectedSubjectPrefix := id.ApplicationUser
+	expectedSubjectKind := "user"
+	if document.EvaluationMode == "recorded_request" {
+		expectedSubjectPrefix = id.LogicalRequest
+		expectedSubjectKind = "request"
+	} else if document.EvaluationMode != "current_user_projection" {
+		return false
+	}
+	if document.Subject.Kind != expectedSubjectKind || id.Validate(document.Subject.ID, expectedSubjectPrefix) != nil ||
+		id.Validate(document.Subject.UserID, id.ApplicationUser) != nil ||
+		(document.Subject.InstallationID != "" && id.Validate(document.Subject.InstallationID, id.Installation) != nil) ||
+		(document.Subject.ComponentID != "" && id.Validate(document.Subject.ComponentID, id.ClientComponent) != nil) ||
+		id.Validate(document.EnvironmentID, id.Environment) != nil ||
+		id.Validate(document.RevisionID, id.ConfigRevision) != nil ||
+		!containsEffectiveValueCLI([]string{"development", "staging", "production"}, document.EnvironmentKind) ||
+		!operationalIdentifierPattern.MatchString(document.Feature) || !validEffectiveProtocolCLI(document.Protocol) ||
+		!containsEffectiveValueCLI([]string{"allowed", "denied", "unavailable"}, document.PolicyOutcome) ||
+		(document.DenialReason != "" && !operationalFailurePatternCLI.MatchString(document.DenialReason)) ||
+		(document.LimitPlan == "") != (document.LimitPlanSource == "") ||
+		(document.LimitPlan != "" && !operationalIdentifierPattern.MatchString(document.LimitPlan)) ||
+		!validEffectiveOptionalTextCLI(document.LimitPlanSource, 128) ||
+		(document.UserOverrideID != "" && id.Validate(document.UserOverrideID, id.UserOverride) != nil) ||
+		(document.ComponentDefinitionID != "" && !operationalIdentifierPattern.MatchString(document.ComponentDefinitionID)) ||
+		!validEffectiveOptionalTextCLI(document.MatchedAccessExpression, 4096) ||
+		!validEffectiveOptionalTextCLI(document.MatchedLimitExpression, 4096) ||
+		len(document.Inputs) > 16 || len(document.Limits) > 64 || len(document.Routes) > 32 ||
+		len(document.DecisionStages) > 256 || len(document.Warnings) > 16 {
+		return false
+	}
+	if document.EvaluationMode == "recorded_request" {
+		if !containsEffectiveValueCLI([]string{"succeeded", "failed", "denied", "canceled", "unknown"}, document.RequestStatus) {
+			return false
+		}
+	} else if document.RequestStatus != "" || len(document.DecisionStages) != 0 {
+		return false
+	}
+	for _, input := range document.Inputs {
+		if !operationalIdentifierPattern.MatchString(input.Fact) ||
+			!containsEffectiveValueCLI([]string{"available", "unavailable"}, input.Availability) ||
+			!validEffectiveRequiredTextCLI(input.Source, 512) || !validEffectiveRequiredTextCLI(input.Detail, 2048) ||
+			len(input.Keys) > 64 || len(input.Values) > 16 || !validEffectiveTextListCLI(input.Keys, 64, false) {
+			return false
+		}
+		for key, value := range input.Values {
+			if !validEffectiveRequiredTextCLI(key, 128) || !validEffectiveOptionalTextCLI(value, 512) {
+				return false
+			}
+		}
+	}
+	for index, limit := range document.Limits {
+		if !validEffectiveLimitCLI(limit, index) {
+			return false
+		}
+	}
+	selectedRoute := ""
+	if document.SelectedRoute != nil {
+		if !validEffectiveRouteCLI(*document.SelectedRoute, 0) || document.SelectedRoute.Observed {
+			return false
+		}
+		selectedRoute = document.SelectedRoute.Route
+	}
+	for index, route := range document.Routes {
+		if !validEffectiveRouteCLI(route, index+1) ||
+			(document.EvaluationMode == "current_user_projection" && route.Observed) ||
+			(document.EvaluationMode == "recorded_request" && !route.Observed) {
+			return false
+		}
+	}
+	if document.Output != nil {
+		output := document.Output
+		if !validEffectiveRequiredTextCLI(output.Source, 512) || output.ConfiguredDefaultMaximumTokens < 0 ||
+			output.ConfiguredAbsoluteMaximumTokens < 0 || output.EffectiveDefaultMaximumTokens < 0 ||
+			output.EffectiveMaximumTokens < 0 || output.RequestedMaximumTokens < 0 {
+			return false
+		}
+	}
+	terminalStage := false
+	for index, stage := range document.DecisionStages {
+		if terminalStage || !validRequestDecisionStageCLI(stage, int32(index+1), document.RevisionID, document.LimitPlan, selectedRoute) {
+			return false
+		}
+		terminalStage = stage.Outcome != "succeeded"
+	}
+	for _, warning := range document.Warnings {
+		if !validEffectiveRequiredTextCLI(warning, 2048) {
+			return false
+		}
+	}
+	return true
+}
+
+func validEffectiveProtocolCLI(value string) bool {
+	return containsEffectiveValueCLI([]string{
+		"openai_responses", "openai_chat", "openai_embeddings", "anthropic_messages", "opaque_http",
+	}, value)
+}
+
+func validEffectiveLimitCLI(limit effectiveLimitCLI, expectedIndex int) bool {
+	if limit.Index != expectedIndex || !operationalIdentifierPattern.MatchString(limit.Metric) || !limit.Hard ||
+		!validEffectiveIdentifierListCLI(limit.Scope, 1, 8) || !validEffectiveRequiredTextCLI(limit.Source, 512) {
+		return false
+	}
+	switch limit.Algorithm {
+	case "calendar":
+		return limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 && limit.RefillPerSecond == "" &&
+			validEffectiveRequiredTextCLI(limit.Window, 32) && len(limit.Window) >= 2 && validEffectiveRequiredTextCLI(limit.Timezone, 128)
+	case "token_bucket":
+		return limit.Maximum == 0 && limit.PerRequestMaximum == 0 && limit.Capacity > 0 &&
+			operationalDecimalPatternCLI.MatchString(limit.RefillPerSecond) && limit.Window == "" && limit.Timezone == ""
+	case "per_request":
+		return limit.Maximum == 0 && limit.PerRequestMaximum > 0 && limit.Capacity == 0 &&
+			limit.RefillPerSecond == "" && limit.Window == "" && limit.Timezone == ""
+	case "concurrency":
+		return limit.Maximum > 0 && limit.PerRequestMaximum == 0 && limit.Capacity == 0 &&
+			limit.RefillPerSecond == "" && limit.Window == "" && limit.Timezone == ""
+	default:
+		return false
+	}
+}
+
+func validEffectiveRouteCLI(route effectiveRouteCLI, expectedOrder int) bool {
+	if route.Order < 1 || route.Order > 32 || expectedOrder > 0 && route.Order != expectedOrder ||
+		!operationalIdentifierPattern.MatchString(route.Route) || !operationalIdentifierPattern.MatchString(route.Upstream) ||
+		!operationalIdentifierPattern.MatchString(route.Model) || !validEffectiveRequiredTextCLI(route.PhysicalModel, 512) ||
+		!validEffectiveRequiredTextCLI(route.MatchExpression, 4096) || route.ConfiguredPriority < 0 || route.ConfiguredWeight < 1 ||
+		!validEffectiveOptionalTextCLI(route.StickyBy, 256) || !validEffectiveIdentifierListCLI(route.FallbackOn, 0, 32) ||
+		route.RetryMaximumAttempts < 1 || route.RetryMaximumAttempts > 32 ||
+		!validEffectiveIdentifierListCLI(route.RetryOn, 0, 32) || !validEffectiveRequiredTextCLI(route.Source, 512) {
+		return false
+	}
+	return true
+}
+
+func validEffectiveIdentifierListCLI(values []string, minimum, maximum int) bool {
+	if len(values) < minimum || len(values) > maximum {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !operationalIdentifierPattern.MatchString(value) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
+
+func validEffectiveTextListCLI(values []string, maximum int, identifiers bool) bool {
+	if len(values) > maximum {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if identifiers && !operationalIdentifierPattern.MatchString(value) ||
+			!identifiers && !validEffectiveRequiredTextCLI(value, 128) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
+
+func validEffectiveRequiredTextCLI(value string, maximum int) bool {
+	return value != "" && validEffectiveOptionalTextCLI(value, maximum)
+}
+
+func validEffectiveOptionalTextCLI(value string, maximum int) bool {
+	return len(value) <= maximum && !strings.ContainsAny(value, "\r\n\x00")
+}
+
+func containsEffectiveValueCLI(values []string, value string) bool {
+	for _, candidate := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 func validLogicalRequestCLI(request logicalRequestCLI) bool {
+	if id.Validate(request.ID, id.LogicalRequest) != nil ||
+		id.Validate(request.EnvironmentID, id.Environment) != nil ||
+		id.Validate(request.UserID, id.ApplicationUser) != nil ||
+		id.Validate(request.InstallationID, id.Installation) != nil ||
+		id.Validate(request.ConfigRevisionID, id.ConfigRevision) != nil ||
+		!operationalIdentifierPattern.MatchString(request.SelectedLimitPlan) ||
+		!operationalIdentifierPattern.MatchString(request.Feature) {
+		return false
+	}
+	selectedRouteFields := []string{
+		request.SelectedRoute, request.SelectedUpstream,
+		request.SelectedModel, request.SelectedPhysicalModel,
+	}
+	selectedRoutePresent := selectedRouteFields[0] != ""
+	for _, value := range selectedRouteFields[1:] {
+		if (value != "") != selectedRoutePresent {
+			return false
+		}
+	}
+	if selectedRoutePresent && (!operationalIdentifierPattern.MatchString(request.SelectedRoute) ||
+		!operationalIdentifierPattern.MatchString(request.SelectedUpstream) ||
+		!operationalIdentifierPattern.MatchString(request.SelectedModel) ||
+		len(request.SelectedPhysicalModel) > 512 || strings.ContainsAny(request.SelectedPhysicalModel, "\r\n\x00")) {
+		return false
+	}
 	componentFields := []string{
 		request.InstallationFamilyID, request.ClientComponentID,
 		request.ComponentDefinitionID, request.ComponentKind, request.TrustSource,
@@ -928,7 +1652,7 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 		return false
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, request.StartedAt)
-	if err != nil || len(request.Attempts) > 32 {
+	if err != nil || len(request.Attempts) > 32 || len(request.DecisionStages) > 256 {
 		return false
 	}
 	var completedAt *time.Time
@@ -944,12 +1668,22 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 		if completedAt != nil {
 			return false
 		}
-	case "succeeded", "failed", "canceled":
+	case "succeeded", "failed", "denied", "canceled":
 		if completedAt == nil {
 			return false
 		}
 	default:
 		return false
+	}
+	terminalStage := false
+	for index, stage := range request.DecisionStages {
+		if terminalStage || !validRequestDecisionStageCLI(
+			stage, int32(index+1), request.ConfigRevisionID,
+			request.SelectedLimitPlan, request.SelectedRoute,
+		) {
+			return false
+		}
+		terminalStage = stage.Outcome != "succeeded"
 	}
 	for index, attempt := range request.Attempts {
 		if !validUpstreamAttemptCLI(attempt, int32(index+1)) {
@@ -957,6 +1691,64 @@ func validLogicalRequestCLI(request logicalRequestCLI) bool {
 		}
 	}
 	return true
+}
+
+func validRequestDecisionStageCLI(
+	stage requestDecisionStageCLI,
+	expectedNumber int32,
+	revisionID, selectedLimitPlan, selectedRoute string,
+) bool {
+	if stage.Number != expectedNumber || stage.Number < 1 || stage.Number > 256 ||
+		stage.ConfigRevisionID != revisionID || stage.DurationMS < 0 {
+		return false
+	}
+	switch stage.Stage {
+	case "identity_verified", "client_trust_verified", "client_context_validated",
+		"configuration_loaded", "request_inspected", "policy_evaluated",
+		"route_selected", "quota_rule_evaluated", "quota_reserved", "lifecycle_recovered":
+	default:
+		return false
+	}
+	switch stage.Outcome {
+	case "succeeded":
+		if stage.FailureCode != "" {
+			return false
+		}
+	case "denied", "failed", "cancelled":
+		if stage.FailureCode == "" || !operationalFailurePatternCLI.MatchString(stage.FailureCode) {
+			return false
+		}
+	default:
+		return false
+	}
+	started, err := time.Parse(time.RFC3339Nano, stage.StartedAt)
+	if err != nil {
+		return false
+	}
+	completed, err := time.Parse(time.RFC3339Nano, stage.CompletedAt)
+	if err != nil || completed.Before(started) || completed.Sub(started).Milliseconds() != stage.DurationMS {
+		return false
+	}
+	if stage.LimitPlanKey != "" && stage.LimitPlanKey != selectedLimitPlan {
+		return false
+	}
+	limitFields := []bool{
+		stage.LimitRuleKey != "", stage.LimitMetric != "",
+		stage.LimitAlgorithm != "", stage.LimitMaximum != nil,
+	}
+	for _, present := range limitFields[1:] {
+		if present != limitFields[0] {
+			return false
+		}
+	}
+	routeFields := []string{stage.Route, stage.Upstream, stage.Model, stage.PhysicalModel}
+	routePresent := routeFields[0] != ""
+	for _, value := range routeFields[1:] {
+		if (value != "") != routePresent {
+			return false
+		}
+	}
+	return !routePresent || selectedRoute != "" && stage.Route == selectedRoute
 }
 
 func validUpstreamAttemptCLI(attempt upstreamAttemptCLI, expectedNumber int32) bool {
@@ -1014,12 +1806,12 @@ func printRequests(opts *options, page logicalRequestPageCLI) error {
 	for _, request := range page.Items {
 		rows = append(rows, []string{
 			request.ID, request.ClientComponentID, request.Framework, request.FrameworkVersion,
-			request.Feature, request.Protocol, request.Status,
+			request.Feature, request.Protocol, request.SelectedLimitPlan, request.SelectedRoute, request.Status,
 			strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
 		})
 	}
 	if err := printControlTable(opts, []string{
-		"REQUEST", "COMPONENT", "FRAMEWORK", "VERSION", "FEATURE", "PROTOCOL", "STATUS", "ATTEMPTS", "STARTED",
+		"REQUEST", "COMPONENT", "FRAMEWORK", "VERSION", "FEATURE", "PROTOCOL", "PLAN", "ROUTE", "STATUS", "ATTEMPTS", "STARTED",
 	}, rows); err != nil {
 		return err
 	}
@@ -1037,11 +1829,26 @@ func printRequest(opts *options, request logicalRequestCLI) error {
 	rows := [][]string{{
 		request.ID, request.InstallationFamilyID, request.ClientComponentID,
 		request.TrustSource, request.Framework, request.FrameworkVersion,
-		request.Feature, request.Status, strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
+		request.ConfigRevisionID, request.Feature, request.SelectedLimitPlan, request.SelectedRoute,
+		request.Status, strconv.Itoa(len(request.DecisionStages)), strconv.Itoa(len(request.Attempts)), formatControlTime(request.StartedAt),
 	}}
 	if err := printControlTable(opts, []string{
-		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "FEATURE", "STATUS", "ATTEMPTS", "STARTED",
+		"REQUEST", "FAMILY", "COMPONENT", "TRUST", "FRAMEWORK", "VERSION", "REVISION", "FEATURE", "PLAN", "ROUTE", "STATUS", "STAGES", "ATTEMPTS", "STARTED",
 	}, rows); err != nil {
+		return err
+	}
+	stageRows := make([][]string, 0, len(request.DecisionStages))
+	for _, stage := range request.DecisionStages {
+		limitMaximum := ""
+		if stage.LimitMaximum != nil {
+			limitMaximum = strconv.FormatInt(*stage.LimitMaximum, 10)
+		}
+		stageRows = append(stageRows, []string{
+			strconv.Itoa(int(stage.Number)), stage.Stage, stage.Outcome, stage.FailureCode,
+			stage.LimitMetric, limitMaximum, stage.Route, strconv.FormatInt(stage.DurationMS, 10),
+		})
+	}
+	if err := printControlTable(opts, []string{"#", "STAGE", "OUTCOME", "FAILURE", "LIMIT", "MAX", "ROUTE", "MS"}, stageRows); err != nil {
 		return err
 	}
 	if len(request.Attempts) == 0 {
@@ -1148,9 +1955,9 @@ func printAudit(opts *options, page auditPageCLI) error {
 	}
 	rows := make([][]string, 0, len(page.Items))
 	for _, event := range page.Items {
-		rows = append(rows, []string{formatControlTime(event.Timestamp), event.Actor, event.Action, event.Target, event.Result, event.RequestID})
+		rows = append(rows, []string{formatControlTime(event.Timestamp), event.Actor, event.Source, event.EnvironmentID, event.Action, event.Target, event.Result, event.Reason, event.RequestID})
 	}
-	if err := printControlTable(opts, []string{"TIME", "ACTOR", "ACTION", "TARGET", "RESULT", "REQUEST"}, rows); err != nil {
+	if err := printControlTable(opts, []string{"TIME", "ACTOR", "SOURCE", "ENVIRONMENT", "ACTION", "TARGET", "RESULT", "REASON", "REQUEST"}, rows); err != nil {
 		return err
 	}
 	if page.Page.HasMore {
@@ -1158,6 +1965,24 @@ func printAudit(opts *options, page auditPageCLI) error {
 		return err
 	}
 	return nil
+}
+
+func printAuditEvent(opts *options, event auditEventCLI) error {
+	if opts.output == "json" {
+		return printControlJSON(opts, event)
+	}
+	if _, err := fmt.Fprintf(opts.stdout,
+		"event: %s\ntime: %s\nactor: %s\nsource: %s\nenvironment: %s\naction: %s\ntarget: %s\nresult: %s\nreason: %s\nrequest: %s\n",
+		event.ID, formatControlTime(event.Timestamp), event.Actor, event.Source, event.EnvironmentID,
+		event.Action, event.Target, event.Result, event.Reason, event.RequestID,
+	); err != nil {
+		return err
+	}
+	rows := make([][]string, 0, len(event.Changes))
+	for _, change := range event.Changes {
+		rows = append(rows, []string{change.Field, change.Operation, change.Classification, boolLabel(change.Redacted)})
+	}
+	return printControlTable(opts, []string{"FIELD", "OPERATION", "CLASSIFICATION", "REDACTED"}, rows)
 }
 
 func printSelfTest(opts *options, run selfTestRunCLI) error {

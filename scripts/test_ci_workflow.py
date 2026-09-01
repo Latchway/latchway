@@ -139,6 +139,28 @@ class CIWorkflowTests(unittest.TestCase):
         self.assertIn('docker logs "$gateway" >&2 || true', script)
         self.assertIn('docker logs "$postgres" >&2 || true', script)
 
+    def test_multiarch_image_gate_enforces_the_minimal_runtime_filesystem(self) -> None:
+        workflow = load_workflow(WORKFLOWS / "ci.yml")
+        image = workflow["jobs"]["image"]
+        steps = [step for step in image["steps"] if isinstance(step, dict)]
+        platforms = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Verify both release platforms are present"
+        )
+        runtime = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name")
+            == "Verify the exact minimal runtime filesystem on both platforms"
+        )
+        self.assertLess(platforms, runtime)
+        self.assertEqual(
+            steps[runtime]["run"],
+            "python3 scripts/verify-runtime-image.py "
+            "/tmp/latchway-multiarch.tar linux/amd64 linux/arm64",
+        )
+
     def test_workflows_have_one_pinned_pnpm_bootstrap(self) -> None:
         for path in sorted(WORKFLOWS.glob("*.yml")):
             self.assertNotIn(

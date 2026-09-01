@@ -9,6 +9,8 @@ Latchway's normative APIs are OpenAPI 3.1 documents, not duplicated prose:
   requests, usage, audit, self-tests, and system health
 - `api/error-codes.yaml` — stable RFC 9457 problem codes, status, title, and
   retry semantics
+- `api/sdk-error-codes.yaml` — stable SDK-local error codes, affected client
+  surfaces, and remediation guidance without inventing an HTTP status
 - `api/config.schema.json` — the complete immutable environment configuration
 - `api/protocol-version.json` — contract and supported wire versions
 

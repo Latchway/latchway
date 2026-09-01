@@ -91,7 +91,7 @@ describe("Installation Family console", () => {
     expect(screen.queryByText("secure_enclave")).not.toBeInTheDocument();
     expect(screen.getByText("keychain")).toBeInTheDocument();
     expect(screen.getByText("Refresh reuse events").parentElement).toHaveTextContent("2");
-    expect(screen.getByText("Session failures").parentElement).toHaveTextContent("3");
+    expect(screen.getByText("Closed session families").parentElement).toHaveTextContent("3");
     await user.click(screen.getByRole("button", { name: "Require re-attestation" }));
     expect(adminRequestMock).toHaveBeenCalledWith(`/admin/v1/client-components/${childID}/require-reattestation`, expect.anything(), { body: { reason: "console operator revocation" }, method: "POST" });
     expect((await screen.findByText("Session status")).parentElement).toHaveTextContent("revoked");

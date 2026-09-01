@@ -19,6 +19,25 @@ owner: "core-api"
   playground; run administrative calls only against an environment you own.
 </Warning>
 
+## Playground policy
+
+The public site disables request submission and never prefills a token.
+For a local installation or an owned sandbox, create the minimum-scoped,
+short-lived Admin API token, keep it in a private shell environment variable,
+and send the request directly to that deployment:
+
+```bash
+export LATCHWAY_ADMIN_TOKEN='<short-lived scoped token>'
+curl --fail-with-body \
+  --header "Authorization: Bearer ${LATCHWAY_ADMIN_TOKEN}" \
+  http://127.0.0.1:8080/admin/v1/system
+unset LATCHWAY_ADMIN_TOKEN
+```
+
+Do not paste a production administrator token into a public documentation
+origin. Cookie-authenticated mutations belong in the same-origin Console
+because they also require its session-bound CSRF contract.
+
 Canonical control-plane API used by the dashboard and CLI.
 
 Normative draft for administrative bootstrap, tenancy, immutable configuration, secrets, users, installations, usage, audit and self-tests. Cookie-authenticated mutations also require origin validation and `X-CSRF-Token`; scoped bearer API tokens are not subject to browser CSRF but receive the same capability checks. Browser sessions receive the CSRF value in both the login/bootstrap response header and a Secure, SameSite=Strict, non-HttpOnly `__Host-latchway_csrf` cookie so a same-origin console reload can recover without persisting it. Every successful or rejected mutation produces a redaction-safe audit event.
@@ -38,7 +57,7 @@ problem contract in [Errors](/reference/errors).
 
 ## Operation index
 
-The normative OpenAPI document currently declares 62 operations.
+The normative OpenAPI document currently declares 70 operations.
 Each row below is generated; a source change without this page changing fails CI.
 
 ### Authentication
@@ -120,8 +139,12 @@ Each row below is generated; a source change without this page changing fails CI
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/admin/v1/users` | `listApplicationUsers` | `AdminCookie` or `AdminToken` | `environment_id` (query, required); `cursor` (query); `page_size` (query) | None | `200` `application/json` `UserPage` | List pseudonymous application users. |
 | `GET` | `/admin/v1/users/{userId}` | `getApplicationUser` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required) | None | `200` `application/json` `ApplicationUser` | Inspect one pseudonymous user and safe normalized claims. |
-| `POST` | `/admin/v1/users/{userId}/block` | `blockApplicationUser` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | None | `200` `application/json` `ApplicationUser` | Block a user and revoke active sessions. |
-| `POST` | `/admin/v1/users/{userId}/unblock` | `unblockApplicationUser` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | None | `200` `application/json` `ApplicationUser` | Restore future session eligibility without restoring revoked sessions. |
+| `GET` | `/admin/v1/users/{userId}/effective-configuration` | `getUserEffectiveConfiguration` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `feature` (query, required); `installation_id` (query); `component_id` (query); `streaming` (query); `estimated_input_tokens` (query); `maximum_output_tokens` (query) | None | `200` `application/json` `EffectiveConfiguration` | Explain the policy, effective limits, and ordered routes for a user's current server state. Evaluates the exact active compiled revision through the production policy resolver without reserving quota or dispatching upstream. Normalized-claim values, provider credentials, authorization headers, and request or response bodies are never returned. When no matching active session exists, the result is explicitly unavailable instead of inventing trust facts. |
+| `GET` | `/admin/v1/users/{userId}/operation-impact` | `getUserOperationImpact` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `action` (query, required) | None | `200` `application/json` `UserOperationImpact` | Preview the exact credential impact of a sensitive user operation. The user identity is application-wide, so counts cover all environments in that application. Returns bounded affected-resource counts and an optimistic impact token. The corresponding mutation must acknowledge the immediate effect and present the same token; stale previews fail with conflict and must be reviewed again. |
+| `POST` | `/admin/v1/users/{userId}/block` | `blockApplicationUser` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | `application/json` `ConfirmedUserOperationRequest` (required) | `200` `application/json` `ApplicationUser` | Block a user and revoke active sessions. |
+| `POST` | `/admin/v1/users/{userId}/unblock` | `unblockApplicationUser` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | `application/json` `ConfirmedUserOperationRequest` (required) | `200` `application/json` `ApplicationUser` | Restore future session eligibility without restoring revoked sessions. |
+| `POST` | `/admin/v1/users/{userId}/require-reauthentication` | `requireApplicationUserReauthentication` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | `application/json` `ConfirmedUserOperationRequest` (required) | `200` `application/json` `UserOperationResult` | Revoke current user and component sessions so a fresh identity exchange is required. |
+| `POST` | `/admin/v1/users/{userId}/require-app-reverification` | `requireApplicationUserAppReverification` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | `application/json` `ConfirmedUserOperationRequest` (required) | `200` `application/json` `UserOperationResult` | Expire app trust and refresh credentials so platform proof must be established again. Existing access grants are not silently extended; they expire at their normal bound. |
 | `PUT` | `/admin/v1/users/{userId}/limit-override` | `putUserLimitOverride` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | `application/json` object (required) | `200` `application/json` `ApplicationUser` | Replace the user's explicit limit-plan override. |
 | `DELETE` | `/admin/v1/users/{userId}/limit-override` | `clearUserLimitOverride` | `AdminCookie` or `AdminToken` | `userId` (path, required); `environment_id` (query, required); `X-CSRF-Token` (header) | None | `204` no body | Clear the user's explicit limit-plan override. |
 
@@ -155,8 +178,9 @@ Each row below is generated; a source change without this page changing fails CI
 
 | Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/admin/v1/requests` | `listLogicalRequests` | `AdminCookie` or `AdminToken` | `environment_id` (query, required); `cursor` (query); `page_size` (query) | None | `200` `application/json` `RequestPage` | List redaction-safe logical request metadata. |
-| `GET` | `/admin/v1/requests/{requestId}` | `getLogicalRequest` | `AdminCookie` or `AdminToken` | `requestId` (path, required) | None | `200` `application/json` `LogicalRequest` | Inspect one logical request and its upstream attempts. |
+| `GET` | `/admin/v1/requests` | `listLogicalRequests` | `AdminCookie` or `AdminToken` | `environment_id` (query, required); `cursor` (query); `page_size` (query); `status` (query); `feature` (query); `user_id` (query); `platform` (query); `component_kind` (query); `trust_source` (query); `route` (query); `upstream` (query); `model` (query); `error_code` (query); `request_id` (query); `start` (query); `end` (query); `latency_min_ms` (query); `latency_max_ms` (query); `tokens_min` (query); `tokens_max` (query); `cost_min_nano_usd` (query); `cost_max_nano_usd` (query); `sort` (query) | None | `200` `application/json` `RequestPage` | List redaction-safe logical request metadata. Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned. |
+| `GET` | `/admin/v1/requests/{requestId}` | `getLogicalRequest` | `AdminCookie` or `AdminToken` | `requestId` (path, required) | None | `200` `application/json` `LogicalRequest` | Inspect one logical request, its decisions, and upstream attempts. |
+| `GET` | `/admin/v1/requests/{requestId}/effective-configuration` | `getRequestEffectiveConfiguration` | `AdminCookie` or `AdminToken` | `requestId` (path, required) | None | `200` `application/json` `EffectiveConfiguration` | Explain one request from its immutable revision and recorded decision provenance. Returns the exact recorded limit plan and observed attempts against the historical compiled revision. Historical normalized claims and override identity were not persisted in v1 and are explicitly marked unavailable; current user state is never substituted. Provider secrets, headers, and bodies are excluded. |
 
 ### Usage
 
@@ -169,7 +193,8 @@ Each row below is generated; a source change without this page changing fails CI
 
 | Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/admin/v1/audit-events` | `listAuditEvents` | `AdminCookie` or `AdminToken` | `organization_id` (query); `cursor` (query); `page_size` (query) | None | `200` `application/json` `AuditPage` | List append-only redacted administrative audit events. |
+| `GET` | `/admin/v1/audit-events` | `listAuditEvents` | `AdminCookie` or `AdminToken` | `organization_id` (query); `environment_id` (query); `actor_kind` (query); `actor_id` (query); `action` (query); `resource_type` (query); `resource_id` (query); `source` (query); `reason` (query); `result` (query); `start` (query); `end` (query); `cursor` (query); `page_size` (query) | None | `200` `application/json` `AuditPage` | List append-only redacted administrative audit events. |
+| `GET` | `/admin/v1/audit-events/{auditEventId}` | `getAuditEvent` | `AdminCookie` or `AdminToken` | `auditEventId` (path, required) | None | `200` `application/json` `AuditEvent` | Return one append-only redaction-safe audit event and its field-level diff. |
 
 ### Self-tests
 
@@ -179,7 +204,7 @@ Each row below is generated; a source change without this page changing fails CI
 | `POST` | `/admin/v1/self-test-schedules` | `createSelfTestSchedule` | `AdminToken` | None | `application/json` `CreateSelfTestScheduleRequest` (required) | `201` `application/json` `SelfTestSchedule` | Create a bounded schedule using the authenticating durable API token. This operation rejects browser sessions. The scoped Admin API bearer token authenticating this request is bound by stable token ID and active administrator membership; its plaintext is never accepted in the document or persisted. The active configuration revision and exact current provider secret record versions are pinned at creation. Any later token revocation, configuration replacement, or secret rotation disables the schedule instead of silently rebinding it. |
 | `GET` | `/admin/v1/self-test-schedules/{scheduleId}` | `getSelfTestSchedule` | `AdminCookie` or `AdminToken` | `scheduleId` (path, required) | None | `200` `application/json` `SelfTestSchedule` | Return one redaction-safe self-test schedule. |
 | `DELETE` | `/admin/v1/self-test-schedules/{scheduleId}` | `disableSelfTestSchedule` | `AdminCookie` or `AdminToken` | `scheduleId` (path, required); `X-CSRF-Token` (header) | None | `200` `application/json` `SelfTestSchedule` | Permanently disable a self-test schedule. Soft-disables future runs while preserving run and audit evidence. |
-| `POST` | `/admin/v1/self-tests` | `startSelfTest` | `AdminCookie` or `AdminToken` | `X-CSRF-Token` (header) | `application/json` `StartSelfTestRequest` (required) | `202` `application/json` `SelfTestRun` | Start a bounded diagnostic or conformance test. `local` runs durable PostgreSQL, schema and active-configuration checks. `upstream` and `openrouter` resolve one upstream and model from the active compiled revision, require an exact trusted-input profile plus active USD pricing, prove the two-request worst-case cost is no greater than the caller's ceiling, and only then use the server-held credential through the protected dispatcher. OpenRouter additionally verifies key access/credit, final streaming usage, output clamping, and body-free error normalization. No provider credential, prompt, response, URL, or provider error body is returned or written to the durable result. |
+| `POST` | `/admin/v1/self-tests` | `startSelfTest` | `AdminCookie` or `AdminToken` | `X-CSRF-Token` (header) | `application/json` `StartSelfTestRequest` (required) | `202` `application/json` `SelfTestRun` | Start a bounded diagnostic or conformance test. `local` runs durable PostgreSQL, schema and active-configuration checks. `upstream` and `openrouter` resolve one upstream and model from the active compiled revision, require an exact trusted-input profile plus active USD pricing, prove the complete protocol-specific request set's worst-case cost is no greater than the caller's ceiling, and only then use the server-held credential through the protected dispatcher. Responses, Chat, and Anthropic Messages exercise non-streaming and streaming requests with output clamping. Embeddings exercises one non-streaming request with a zero generated-output bound and explicit skipped streaming/clamp checks. OpenRouter remains Chat-only and additionally verifies key access/credit. Every supported protocol verifies usage and body-free error normalization. No provider credential, prompt, response, URL, or provider error body is returned or written to the durable result. |
 | `GET` | `/admin/v1/self-tests/{selfTestId}` | `getSelfTest` | `AdminCookie` or `AdminToken` | `selfTestId` (path, required) | None | `200` `application/json` `SelfTestRun` | Return a redacted self-test result. |
 
 ### System
@@ -187,6 +212,8 @@ Each row below is generated; a source change without this page changing fails CI
 | Method | Path | Operation ID | Authentication | Parameters | Request body | Success response | Contract details |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/admin/v1/system` | `getSystemStatus` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `SystemStatus` | Return redacted build, protocol, database and role status. |
+| `GET` | `/admin/v1/system/doctor` | `runSystemDoctor` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `DoctorReport` | Run the canonical bounded, redaction-safe deployment diagnostics. Returns the same structured checks and facts used by `latchway doctor` and the Console Health center. |
+| `GET` | `/admin/v1/system/support-bundle` | `downloadSystemSupportBundle` | `AdminCookie` or `AdminToken` | None | None | `200` `application/json` `SupportBundle` | Download a structurally allowlisted support bundle. Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key. |
 
 ## Mutation safety
 

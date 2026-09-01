@@ -61,6 +61,20 @@ Authored pages carry those fields physically. The five generated SDK-bundle
 routes receive the same fields from a strictly validated deterministic overlay;
 tests fail when any route or field is absent.
 
+The setup-path chooser may persist only its explicit non-secret allowlist:
+public gateway and Console origins, application resource ID, Console
+application slug, environment, feature and Component Definition IDs, version
+coordinates, and reader-path selections. URL values pass the same validation
+before use. The chooser never accepts a token, credential, proof, attestation
+evidence, request body, or provider key. Anonymous placeholders and every
+navigation path remain usable when browser storage is unavailable.
+
+The public Mintlify API playground is disabled and proxying is off. Protected
+Client API operations require live DPoP and platform trust, so a static token
+form would be misleading. Admin API examples target localhost or an owned
+sandbox with a short-lived scoped token held in a private shell environment;
+the documentation site never receives or prefills that token.
+
 ## Source and mirror ownership
 
 Internal implementation plans, evidence ledgers, ADRs, and maintainer notes are

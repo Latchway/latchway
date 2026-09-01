@@ -548,7 +548,7 @@ func printClientComponents(opts *options, page clientComponentPageCLI) error {
 	}
 	if err := printControlTable(opts, []string{
 		"COMPONENT", "FAMILY", "DEFINITION", "KIND", "PARENT", "STATUS", "TRUST",
-		"FEATURES", "SESSION", "SESSION FAILURES", "REQUESTS", "COST NANO-USD",
+		"FEATURES", "SESSION", "CLOSED SESSIONS", "REQUESTS", "COST NANO-USD",
 	}, rows); err != nil {
 		return err
 	}
@@ -565,7 +565,7 @@ func printClientComponent(opts *options, component clientComponentCLI) error {
 	}
 	if err := printControlTable(opts, []string{
 		"COMPONENT", "FAMILY", "DEFINITION", "KIND", "STATUS", "TRUST", "PROVIDER",
-		"PARENT", "KEY STORAGE", "FEATURES", "SESSION", "SESSION FAILURES", "REUSE", "REQUESTS",
+		"PARENT", "KEY STORAGE", "FEATURES", "SESSION", "CLOSED SESSIONS", "REUSE", "REQUESTS",
 		"TOTAL TOKENS", "COST NANO-USD",
 	}, [][]string{{
 		component.ID, component.InstallationFamilyID, component.DefinitionID,

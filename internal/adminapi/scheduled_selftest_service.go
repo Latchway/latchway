@@ -92,15 +92,11 @@ func (service *productionScheduledSelfTestService) Prepare(
 	if err != nil {
 		return preparedScheduledSelfTest{}, errOperationalInvalid
 	}
-	nonStreaming, err := prepareCredentialRequest(ctx, protocolID, model.UpstreamModel, profile, rates, source, false)
+	requests, err := prepareCredentialRequests(ctx, protocolID, model.UpstreamModel, profile, rates, source)
 	if err != nil {
 		return preparedScheduledSelfTest{}, errOperationalInvalid
 	}
-	streaming, err := prepareCredentialRequest(ctx, protocolID, model.UpstreamModel, profile, rates, source, true)
-	if err != nil {
-		return preparedScheduledSelfTest{}, errOperationalInvalid
-	}
-	worstCase, ok := checkedSelfTestAdd(nonStreaming.maximumCostNano, streaming.maximumCostNano)
+	worstCase, ok := credentialSelfTestWorstCaseCost(requests)
 	if !ok || worstCase > input.MaxCostNano {
 		return preparedScheduledSelfTest{}, errOperationalInvalid
 	}

@@ -67,6 +67,13 @@ and feature list and cross-checks the response.
 Every mutation uses `/admin/v1/*`; browser code has no database client,
 connection string, or local policy evaluator.
 
+First-run setup is resumable from server-owned state. The console reloads the
+selected application/environment, latest revision, and write-only secret
+metadata; it never stores or restores the secret value. Exact repeated slugs
+reuse matching resources, mismatched scope fails closed, and an unchanged
+configuration resumes the latest draft/valid revision or reuses the active
+revision instead of creating duplicate setup history.
+
 The Features workspace is the first task-level configuration editor. It reads
 the active environment revision, renders access/plan/route summaries, and
 provides a bounded wizard for client feature ID, protocol, access preset, plan,

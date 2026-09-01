@@ -428,6 +428,21 @@ func TestRuntimeExecutesDistinctBoundedConcurrencyRecoveryLane(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutesStaleAuthenticatedRequestRecoveryLane(t *testing.T) {
+	t.Parallel()
+	quota := &recordingDurableQuota{}
+	runtime := &Runtime{quotas: quota, maxBatches: 2, quotaBatchSize: 3}
+	processed, err := runtime.executeJob(context.Background(), Job{Type: "recover_stale_authenticated_requests"})
+	if err != nil || processed != 0 {
+		t.Fatalf("authenticated recovery processed=%d err=%v, want 0 nil", processed, err)
+	}
+	if quota.authenticatedCalls != 1 || quota.concurrencyCalls != 0 ||
+		quota.undispatchedCalls != 0 || quota.reconcileCalls != 0 {
+		t.Fatalf("authenticated recovery calls=%d concurrency=%d undispatched=%d reconcile=%d",
+			quota.authenticatedCalls, quota.concurrencyCalls, quota.undispatchedCalls, quota.reconcileCalls)
+	}
+}
+
 func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	t.Parallel()
 	types := scheduledDurableJobTypes()
@@ -446,6 +461,9 @@ func TestScheduledDurableJobInventoryIsClosedAndExecutable(t *testing.T) {
 	}
 	if _, ok := seen["release_expired_concurrency_leases"]; !ok {
 		t.Fatal("concurrency recovery lane is absent")
+	}
+	if _, ok := seen["recover_stale_authenticated_requests"]; !ok {
+		t.Fatal("stale authenticated-request recovery lane is absent")
 	}
 	if _, periodic := seen["run_scheduled_self_test"]; periodic {
 		t.Fatal("per-schedule self-test entered the global periodic scheduler")
@@ -559,12 +577,16 @@ func (durableQuotaStub) ReleaseExpiredConcurrencyLeasesBatch(context.Context, in
 func (durableQuotaStub) ReconcilePendingUsageBatch(context.Context, int) (int64, error) {
 	return 0, nil
 }
+func (durableQuotaStub) RecoverStaleAuthenticatedRequestsBatch(context.Context, int) (int64, error) {
+	return 0, nil
+}
 
 type recordingDurableQuota struct {
 	concurrencyResults []batchResult
 	concurrencyCalls   int
 	undispatchedCalls  int
 	reconcileCalls     int
+	authenticatedCalls int
 }
 
 func (quota *recordingDurableQuota) ExpirePendingBatch(context.Context, int) (int64, error) {
@@ -588,6 +610,11 @@ func (quota *recordingDurableQuota) ReleaseExpiredConcurrencyLeasesBatch(context
 
 func (quota *recordingDurableQuota) ReconcilePendingUsageBatch(context.Context, int) (int64, error) {
 	quota.reconcileCalls++
+	return 0, nil
+}
+
+func (quota *recordingDurableQuota) RecoverStaleAuthenticatedRequestsBatch(context.Context, int) (int64, error) {
+	quota.authenticatedCalls++
 	return 0, nil
 }
 

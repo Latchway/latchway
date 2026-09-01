@@ -6,12 +6,13 @@ audience: "client-ios"
 pageType: "tutorial"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "ios-sdk"
 ---
 
 import IOSURLSessionQuickstart from "/snippets/generated/ios/quickstart/url-session.swift.mdx";
 import { SecurityGuarantee } from "/components/SecurityGuarantee.jsx";
+import { SetupCoordinates } from "/components/SetupPath.jsx";
 
 <Badge color="yellow">Source candidate 1.0.0</Badge> <Badge color="blue">iOS 15+</Badge>
 
@@ -44,6 +45,15 @@ component, feature, and metered usage.
   contract tests are deterministic; an end-to-end App Attest request requires
   a correctly signed application on a supported physical device.
 </Warning>
+
+### Use the operator-provided coordinates
+
+<SetupCoordinates platform="ios" />
+
+The local gateway and production client trust are separate stages. You may run
+the gateway and PostgreSQL locally, but this production SDK path still requires
+the signed iOS host to produce App Attest evidence. Unit-test providers are not
+an application-facing debug-attestation mechanism.
 
 ## What you will build
 

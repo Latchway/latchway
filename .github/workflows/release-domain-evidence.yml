@@ -355,7 +355,7 @@ jobs:
             *) exit 1 ;;
           esac
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
-              (keys | sort) == ["checks","contract","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
+              (keys | sort) == ["checks","contract","documentation","evidence_domains","evidence_window","kind","promotion_ready","release_ready","repositories","schema_version","scope","source_conformance_passed","verdict"] and
               .schema_version == 1 and .kind == "latchway_cross_repository_conformance_evidence" and
               .scope == "source" and .verdict == "passed" and .source_conformance_passed == true and
               .promotion_ready == false and .release_ready == false and .evidence_window == null and
@@ -363,7 +363,15 @@ jobs:
               .contract.oci_image_digest == null and
               (.contract.bundle_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
               (.repositories | map(.id) | sort) == ["android","core","ios","javascript","react_native"] and
-              (.repositories[] | select(.id == "core") | .commit) == $commit
+              (.repositories[] | select(.id == "core") | .commit) == $commit and
+              (.documentation | keys | sort) == ["canonical_core_commit","commit","owned_file_count","repository","source_commit","source_manifest_sha256","source_tree_sha256"] and
+              .documentation.repository == "https://github.com/Latchway/latchway-docs.git" and
+              .documentation.canonical_core_commit == $commit and
+              (.documentation.commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_commit | test("^[0-9a-f]{40}$")) and
+              (.documentation.source_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.source_tree_sha256 | test("^[0-9a-f]{64}$")) and
+              (.documentation.owned_file_count | type == "number" and floor == . and . >= 1 and . <= 4096)
             ' "$source" >/dev/null
           jq --exit-status --arg commit "$CANDIDATE_COMMIT" '
               (keys | sort) == ["artifacts","candidate_commit","contract","created_at","image","intended_tag","kind","schema_version","status","version"] and

@@ -41,6 +41,171 @@ type quotaPostgreSQLFixture struct {
 func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 	fixture := newQuotaPostgreSQLFixture(t)
 
+	t.Run("authenticated lifecycle persists pre-reservation denial and immutable stages", func(t *testing.T) {
+		input := fixture.input(t, "prequota-denial", 5)
+		authenticated, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input))
+		if err != nil {
+			t.Fatalf("begin authenticated request: %v", err)
+		}
+		startedAt := time.Now().UTC().Add(-time.Millisecond)
+		if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, DecisionStage{
+			Stage: DecisionIdentityVerified, Outcome: DecisionSucceeded,
+			StartedAt: startedAt, CompletedAt: startedAt.Add(time.Millisecond),
+		}); err != nil {
+			t.Fatalf("record identity decision: %v", err)
+		}
+		if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, DecisionStage{
+			Stage: DecisionPolicyEvaluated, Outcome: DecisionDenied,
+			FailureCode: "feature_not_allowed", PolicyRuleKey: "feature_access",
+			StartedAt: startedAt.Add(time.Millisecond), CompletedAt: startedAt.Add(2 * time.Millisecond),
+		}); err != nil {
+			t.Fatalf("record policy denial: %v", err)
+		}
+		var status, failureCode string
+		var completedAt time.Time
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT status, failure_code, completed_at
+			FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&status, &failureCode, &completedAt); err != nil {
+			t.Fatalf("read pre-reservation denial: %v", err)
+		}
+		if status != "denied" || failureCode != "feature_not_allowed" || completedAt.IsZero() {
+			t.Fatalf("pre-reservation denial = status %q code %q completed %s", status, failureCode, completedAt)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM logical_request_decision_stages WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 2 {
+			t.Fatalf("decision stages = %d, want 2", got)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM quota_reservations WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("pre-reservation denial created %d reservations", got)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE logical_request_decision_stages SET outcome = 'failed'
+			WHERE logical_request_id = $1 AND stage_number = 1
+		`, input.LogicalRequestID.String()); err == nil {
+			t.Fatal("append-only decision stage accepted an update")
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			DELETE FROM logical_request_decision_stages
+			WHERE logical_request_id = $1 AND stage_number = 1
+		`, input.LogicalRequestID.String()); err == nil {
+			t.Fatal("append-only decision stage accepted a direct delete")
+		}
+		result, err := fixture.pool.Exec(fixture.ctx, `
+			DELETE FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String())
+		if err != nil || result.RowsAffected() != 1 {
+			t.Fatalf("parent retention delete = %d, %v", result.RowsAffected(), err)
+		}
+		if got := fixture.count(t, `SELECT count(*) FROM logical_request_decision_stages WHERE logical_request_id = $1`, input.LogicalRequestID.String()); got != 0 {
+			t.Fatalf("parent retention left %d decision stages", got)
+		}
+	})
+
+	t.Run("reservation claims authenticated row and appends exact quota provenance", func(t *testing.T) {
+		input := fixture.input(t, "authenticated-reserve", 5)
+		authenticated, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input))
+		if err != nil {
+			t.Fatalf("begin authenticated request: %v", err)
+		}
+		at := time.Now().UTC()
+		for _, stage := range []DecisionStage{
+			{
+				Stage: DecisionPolicyEvaluated, Outcome: DecisionSucceeded,
+				PolicyRuleKey: "feature_access", LimitPlanKey: input.LimitPlanKey,
+				StartedAt: at, CompletedAt: at,
+			},
+			{
+				Stage: DecisionRouteSelected, Outcome: DecisionSucceeded,
+				LimitPlanKey: input.LimitPlanKey,
+				RouteKey:     input.RouteKey, UpstreamKey: input.UpstreamKey,
+				ModelKey: input.ModelKey, PhysicalModel: input.PhysicalModel,
+				StartedAt: at, CompletedAt: at,
+			},
+		} {
+			if err := fixture.store.RecordDecisionStage(fixture.ctx, authenticated, stage); err != nil {
+				t.Fatalf("record pre-reservation stage %q: %v", stage.Stage, err)
+			}
+		}
+		reservation, err := fixture.store.Reserve(fixture.ctx, input)
+		if err != nil {
+			t.Fatalf("claim and reserve authenticated request: %v", err)
+		}
+		if reservation.LogicalRequestID() != input.LogicalRequestID.String() {
+			t.Fatalf("reservation request = %q", reservation.LogicalRequestID())
+		}
+		var status, route, upstream, model, physical string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT status, selected_route_key, selected_upstream_key,
+			       selected_model_key, selected_physical_model
+			FROM logical_requests WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()).Scan(&status, &route, &upstream, &model, &physical); err != nil {
+			t.Fatalf("read claimed logical request: %v", err)
+		}
+		if status != "reserved" || route != input.RouteKey || upstream != input.UpstreamKey ||
+			model != input.ModelKey || physical != input.PhysicalModel {
+			t.Fatalf("claimed request projection = %q %q %q %q %q", status, route, upstream, model, physical)
+		}
+		var metric, algorithm string
+		var maximum int64
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT limit_metric, limit_algorithm, limit_maximum
+			FROM logical_request_decision_stages
+			WHERE logical_request_id = $1 AND stage = 'quota_rule_evaluated'
+		`, input.LogicalRequestID.String()).Scan(&metric, &algorithm, &maximum); err != nil {
+			t.Fatalf("read quota-rule provenance: %v", err)
+		}
+		if metric != LogicalRequestsMetric || algorithm != CalendarAlgorithm || maximum != 5 {
+			t.Fatalf("quota provenance = %q %q %d", metric, algorithm, maximum)
+		}
+	})
+
+	t.Run("worker terminally recovers a stale authenticated lifecycle", func(t *testing.T) {
+		input := fixture.input(t, "stale-authenticated", 5)
+		if _, err := fixture.store.BeginAuthenticatedRequest(fixture.ctx, authenticatedInputFromReserve(input)); err != nil {
+			t.Fatalf("begin stale authenticated request: %v", err)
+		}
+		processed, err := fixture.store.RecoverStaleAuthenticatedRequestsBatch(fixture.ctx, 10)
+		if err != nil || processed != 0 {
+			t.Fatalf("fresh authenticated request recovery = %d, %v", processed, err)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, `
+			UPDATE logical_requests
+			SET requested_at = statement_timestamp() - interval '25 hours'
+			WHERE logical_request_id = $1
+		`, input.LogicalRequestID.String()); err != nil {
+			t.Fatalf("age authenticated request fixture: %v", err)
+		}
+		processed, err = fixture.store.RecoverStaleAuthenticatedRequestsBatch(fixture.ctx, 10)
+		if err != nil || processed != 1 {
+			t.Fatalf("recover stale authenticated requests = %d, %v", processed, err)
+		}
+		var status, failureCode, stage, outcome, stageFailureCode string
+		if err := fixture.pool.QueryRow(fixture.ctx, `
+			SELECT request.status, request.failure_code, decision.stage,
+			       decision.outcome, decision.failure_code
+			FROM logical_requests AS request
+			JOIN logical_request_decision_stages AS decision
+			  ON decision.logical_request_id = request.logical_request_id
+			WHERE request.logical_request_id = $1
+			ORDER BY decision.stage_number DESC
+			LIMIT 1
+		`, input.LogicalRequestID.String()).Scan(
+			&status, &failureCode, &stage, &outcome, &stageFailureCode,
+		); err != nil {
+			t.Fatalf("read recovered authenticated request: %v", err)
+		}
+		if status != "failed" || failureCode != "internal_error" ||
+			stage != DecisionLifecycleRecovered || outcome != DecisionFailed ||
+			stageFailureCode != "internal_error" {
+			t.Fatalf("recovered lifecycle = %q/%q/%q/%q/%q",
+				status, failureCode, stage, outcome, stageFailureCode)
+		}
+		processed, err = fixture.store.RecoverStaleAuthenticatedRequestsBatch(fixture.ctx, 10)
+		if err != nil || processed != 0 {
+			t.Fatalf("idempotent stale authenticated recovery = %d, %v", processed, err)
+		}
+	})
+
 	t.Run("reserve attempt settle denial and duplicate client hint", func(t *testing.T) {
 		var observationMu sync.Mutex
 		var denialObservations []DenialObservation
@@ -1463,6 +1628,21 @@ func TestStorePostgreSQLQuotaLifecycle(t *testing.T) {
 			t.Fatalf("settle one-connection attempt: %v", err)
 		}
 	})
+}
+
+func authenticatedInputFromReserve(input ReserveInput) AuthenticatedRequestInput {
+	return AuthenticatedRequestInput{
+		LogicalRequestID: input.LogicalRequestID,
+		OrganizationID:   input.OrganizationID, ApplicationID: input.ApplicationID,
+		EnvironmentID: input.EnvironmentID, ApplicationUserID: input.ApplicationUserID,
+		InstallationID: input.InstallationID, InstallationFamilyID: input.InstallationFamilyID,
+		ClientComponentID: input.ClientComponentID, ComponentDefinitionID: input.ComponentDefinitionID,
+		ComponentKind: input.ComponentKind, TrustSource: input.TrustSource,
+		SessionGrantID: input.SessionGrantID, ConfigRevisionID: input.ConfigRevisionID,
+		FeatureKey: input.FeatureKey, Protocol: input.Protocol,
+		ClientRequestID: input.ClientRequestID, Framework: input.Framework,
+		FrameworkVersion: input.FrameworkVersion,
+	}
 }
 
 func TestStorePostgreSQLPersistsComponentFrameworkAndScopeAttribution(t *testing.T) {

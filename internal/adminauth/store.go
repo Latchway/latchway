@@ -1155,6 +1155,7 @@ func insertAuditMutation(ctx context.Context, tx pgx.Tx, mutation AuditMutation)
 		return err
 	}
 	actor := mutation.Actor()
+	metadata := auditMetadataFromContext(ctx, actor)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (
 			audit_event_id,
@@ -1167,12 +1168,14 @@ func insertAuditMutation(ctx context.Context, tx pgx.Tx, mutation AuditMutation)
 			resource_id,
 			outcome,
 			request_id,
-			occurred_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			occurred_at,
+			source,
+			reason
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''))
 	`, mutation.EventID(), nullableString(mutation.OrganizationID()),
 		nullableString(mutation.EnvironmentID()), actor.Kind(), nullableString(actor.ID()),
 		mutation.Action(), mutation.ResourceType(), mutation.ResourceID(), mutation.Outcome(),
-		nullableString(mutation.RequestID()), mutation.OccurredAt()); err != nil {
+		nullableString(mutation.RequestID()), mutation.OccurredAt(), metadata.source, metadata.reason); err != nil {
 		return fmt.Errorf("insert audit event: %w", err)
 	}
 	for index, change := range mutation.Changes() {

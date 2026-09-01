@@ -48,6 +48,10 @@ import {
   SecretsPage,
   UserOverridesPage
 } from "../pages/resource-management-pages";
+import {
+  parseAuditRouteSearch,
+  parseRequestRouteSearch
+} from "./route-search";
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -87,7 +91,12 @@ const accessPoliciesRoute = createRoute({ component: AccessPoliciesConfiguration
 const limitPlansRoute = createRoute({ component: LimitPlansConfigurationPage, getParentRoute: () => rootRoute, path: "/limit-plans" });
 const userOverridesRoute = createRoute({ component: UserOverridesPage, getParentRoute: () => rootRoute, path: "/user-overrides" });
 const abuseControlsRoute = createRoute({ component: AbuseControlsConfigurationPage, getParentRoute: () => rootRoute, path: "/abuse-controls" });
-const requestsRoute = createRoute({ component: RequestsPage, getParentRoute: () => rootRoute, path: "/requests" });
+const requestsRoute = createRoute({
+  component: RequestsPage,
+  getParentRoute: () => rootRoute,
+  path: "/requests",
+  validateSearch: parseRequestRouteSearch
+});
 const usageRoute = createRoute({ component: UsagePage, getParentRoute: () => rootRoute, path: "/usage" });
 const costRoute = createRoute({ component: CostPage, getParentRoute: () => rootRoute, path: "/cost" });
 const latencyRoute = createRoute({ component: LatencyPage, getParentRoute: () => rootRoute, path: "/latency" });
@@ -96,7 +105,12 @@ const attestationFailuresRoute = createRoute({ component: AttestationFailuresPag
 const configurationRevisionsRoute = createRoute({ component: ConfigurationRevisionsPage, getParentRoute: () => rootRoute, path: "/configuration-revisions" });
 const routeSimulatorRoute = createRoute({ component: RouteSimulatorPage, getParentRoute: () => rootRoute, path: "/route-simulator" });
 const selfTestsRoute = createRoute({ component: SelfTestsPage, getParentRoute: () => rootRoute, path: "/self-tests" });
-const auditRoute = createRoute({ component: AuditPageView, getParentRoute: () => rootRoute, path: "/audit" });
+const auditRoute = createRoute({
+  component: AuditPageView,
+  getParentRoute: () => rootRoute,
+  path: "/audit",
+  validateSearch: parseAuditRouteSearch
+});
 
 const routeTree = rootRoute.addChildren([
   indexRoute, applicationsRoute, environmentsRoute, setupRoute, administratorsRoute, apiTokensRoute,

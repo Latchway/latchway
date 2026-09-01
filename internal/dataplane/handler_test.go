@@ -1356,6 +1356,16 @@ func TestHandlerRejectsUngrantComponentFeatureBeforePolicyQuotaAndUpstream(t *te
 		t.Fatalf("ungranted feature reached snapshot/policy/quota/upstream=%d/%d/%d/%d",
 			fixture.snapshots.calls, fixture.policies.calls, fixture.quotas.reserveCalls, fixture.targets.calls)
 	}
+	if fixture.quotas.authenticatedCalls != 1 || len(fixture.quotas.decisionStages) != 3 {
+		t.Fatalf("authenticated lifecycle calls/stages = %d/%d, want 1/3",
+			fixture.quotas.authenticatedCalls, len(fixture.quotas.decisionStages))
+	}
+	terminal := fixture.quotas.decisionStages[2]
+	if terminal.Stage != quota.DecisionClientContextValidated ||
+		terminal.Outcome != quota.DecisionDenied ||
+		terminal.FailureCode != "component_feature_not_granted" {
+		t.Fatalf("component denial stage = %#v", terminal)
+	}
 }
 
 func TestValidSemVer(t *testing.T) {
@@ -4129,6 +4139,12 @@ func (fake *fakePolicyEngine) ResolvePlan(
 }
 
 type fakeQuotaStore struct {
+	authenticatedCalls int
+	authenticatedInput quota.AuthenticatedRequestInput
+	authenticated      quota.AuthenticatedRequest
+	authenticatedErr   error
+	decisionStages     []quota.DecisionStage
+	decisionStageErr   error
 	reserveCalls       int
 	reserveInput       quota.ReserveInput
 	reserveErr         error
@@ -4172,6 +4188,24 @@ type retryQuotaExceededError struct {
 func (retryQuotaExceededError) Error() string              { return quota.ErrExceeded.Error() }
 func (retryQuotaExceededError) Unwrap() error              { return quota.ErrExceeded }
 func (failure retryQuotaExceededError) RetryAt() time.Time { return failure.retryAt }
+
+func (fake *fakeQuotaStore) BeginAuthenticatedRequest(
+	_ context.Context,
+	input quota.AuthenticatedRequestInput,
+) (quota.AuthenticatedRequest, error) {
+	fake.authenticatedCalls++
+	fake.authenticatedInput = input
+	return fake.authenticated, fake.authenticatedErr
+}
+
+func (fake *fakeQuotaStore) RecordDecisionStage(
+	_ context.Context,
+	_ quota.AuthenticatedRequest,
+	stage quota.DecisionStage,
+) error {
+	fake.decisionStages = append(fake.decisionStages, stage)
+	return fake.decisionStageErr
+}
 
 func (fake *fakeQuotaStore) Reserve(_ context.Context, input quota.ReserveInput) (quota.Reservation, error) {
 	fake.reserveCalls++

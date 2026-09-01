@@ -9,6 +9,7 @@ import (
 
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/limitscope"
+	"github.com/latchway/latchway/internal/protocol"
 	"github.com/latchway/latchway/internal/requestidentity"
 	"github.com/latchway/latchway/internal/session"
 )
@@ -137,14 +138,18 @@ func TestNewSimulationInputUsesTheProductionResolverBoundary(t *testing.T) {
 		LogicalRequestID: "req_00000000000000000000000000", InstallationPlatform: "ios",
 		IdentityProvider: "simulator", TrustLevel: "app_verified", AttestationProvider: "app_attest",
 		Authenticated: true, NormalizedClaims: map[string]any{"plan": "premium"}, Streaming: true,
-		EvaluatedAt: policyTestNow,
+		EstimatedInputTokens: 1200, MaximumOutputTokens: 800, EvaluatedAt: policyTestNow,
 	}
 	input, err := NewSimulationInput(facts)
 	if err != nil {
 		t.Fatalf("NewSimulationInput() error = %v", err)
 	}
 	facts.NormalizedClaims["plan"] = "blocked"
-	plan, err := resolver.ResolvePlan(context.Background(), policySnapshot(), "assistant", input)
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.AccessExpression += ` && request.feature == "assistant" && request.protocol == "openai_chat" && request.streaming && request.estimated_input_tokens == 1200 && request.maximum_output_tokens == 800`
+	snapshot.features["assistant"] = feature
+	plan, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
 	if err != nil {
 		t.Fatalf("ResolvePlan(simulation) error = %v", err)
 	}
@@ -167,9 +172,82 @@ func TestNewSimulationInputUsesTheProductionResolverBoundary(t *testing.T) {
 		t.Fatalf("invalid simulation scope error = %v", err)
 	}
 	facts.EnvironmentID = "env_00000000000000000000000000"
+	facts.EstimatedInputTokens = protocol.MaximumPolicyRequestTokens + 1
+	if _, err := NewSimulationInput(facts); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unbounded simulated estimate error = %v", err)
+	}
+	facts.EstimatedInputTokens = 1200
 	facts.NormalizedClaims = map[string]any{"oversized": strings.Repeat("x", maximumActivationBytes+1)}
 	if _, err := NewSimulationInput(facts); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("oversized simulation claims error = %v", err)
+	}
+}
+
+func TestResolverBindsImmutableFeatureAndBoundedRequestContext(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := policySnapshot()
+	feature := snapshot.features["assistant"]
+	feature.AccessExpression = `request.feature == "assistant" &&
+		request.protocol == "openai_chat" && request.streaming &&
+		request.estimated_input_tokens == 1200 &&
+		request.maximum_output_tokens == 800`
+	feature.LimitPlanExpression = `request.maximum_output_tokens <= 800 ? "premium" : "free"`
+	feature.Routes[0].When = `request.estimated_input_tokens < 2000`
+	snapshot.features["assistant"] = feature
+	input := policyInput("premium")
+	input.request = ProtocolRequestMetadata{
+		Streaming: true, EstimatedInputTokens: 1200, MaximumOutputTokens: 800,
+	}
+
+	plan, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", input)
+	if err != nil {
+		t.Fatalf("ResolvePlan() error = %v", err)
+	}
+	if plan.Feature.ID != "assistant" || plan.Feature.Protocol != "openai_chat" ||
+		plan.LimitPlan.ID != "premium" || len(plan.Candidates) == 0 {
+		t.Fatalf("request-context plan = %+v", plan)
+	}
+}
+
+func TestResolverRejectsUnboundedRequestContextAndCorruptFeatureBinding(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := newResolver(func() time.Time { return policyTestNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidMetadata := []ProtocolRequestMetadata{
+		{EstimatedInputTokens: -1},
+		{EstimatedInputTokens: protocol.MaximumPolicyRequestTokens + 1},
+		{MaximumOutputTokens: -1},
+		{MaximumOutputTokens: protocol.MaximumPolicyRequestTokens + 1},
+	}
+	for _, metadata := range invalidMetadata {
+		input := policyInput("premium")
+		input.request = metadata
+		if _, err := resolver.ResolvePlan(context.Background(), policySnapshot(), "assistant", input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("metadata %+v error = %v, want ErrInvalidInput", metadata, err)
+		}
+	}
+
+	for name, mutate := range map[string]func(*configuration.Feature){
+		"mismatched id":    func(feature *configuration.Feature) { feature.ID = "other" },
+		"unknown protocol": func(feature *configuration.Feature) { feature.Protocol = "custom_protocol" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			snapshot := policySnapshot()
+			feature := snapshot.features["assistant"]
+			mutate(&feature)
+			snapshot.features["assistant"] = feature
+			if _, err := resolver.ResolvePlan(context.Background(), snapshot, "assistant", policyInput("premium")); !errors.Is(err, ErrConfiguration) {
+				t.Fatalf("ResolvePlan() error = %v, want ErrConfiguration", err)
+			}
+		})
 	}
 }
 
@@ -976,6 +1054,7 @@ func TestResolverResolveQuotaReturnsStableDetachedProjectionWithoutRouting(t *te
 	}
 	snapshot := policySnapshot()
 	feature := snapshot.features["assistant"]
+	feature.AccessExpression = `request.feature == "assistant" && request.protocol == "openai_chat"`
 	feature.Routes = []configuration.Route{
 		{ID: "one", When: "true", ModelID: "missing-one", Priority: 1, Weight: 0, StickyBy: "user", FallbackOn: []string{"status_503"}},
 		{ID: "two", When: "true", ModelID: "missing-two", Priority: 1, Weight: 0, StickyBy: "installation", FallbackOn: []string{"status_502"}},
@@ -1080,8 +1159,11 @@ func TestResolverResolveQuotaRejectsRequestDependentPolicy(t *testing.T) {
 		want      error
 	}{
 		{name: "stream-dependent access", access: "!request.streaming", want: ErrConfiguration},
+		{name: "estimated-input-dependent access", access: "request.estimated_input_tokens < 1000", want: ErrConfiguration},
+		{name: "whole-request-dependent access", access: "request == request", want: ErrConfiguration},
 		{name: "both denied", access: "false", want: ErrFeatureNotAllowed},
 		{name: "stream-dependent plan", access: "true", limitPlan: "request.streaming ? 'premium' : 'free'", want: ErrConfiguration},
+		{name: "indexed-output-dependent plan", access: "true", limitPlan: "request['maximum_output_tokens'] > 0 ? 'premium' : 'free'", want: ErrConfiguration},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1130,13 +1212,23 @@ func TestResolverResolveQuotaOverrideStabilizesRequestDependentBasePlan(t *testi
 		t.Fatalf("override quota projection = %+v", projection)
 	}
 
-	feature.AccessExpression = "!request.streaming"
+	feature.LimitPlanExpression = "request.estimated_input_tokens > 1000 ? 'premium' : 'free'"
+	snapshot.features["assistant"] = feature
+	projection, err = resolver.ResolveQuota(
+		context.Background(), snapshot, "assistant", authorization,
+		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
+	)
+	if err != nil || projection.LimitPlan.ID != "free" {
+		t.Fatalf("override did not stabilize unavailable request-size plan: projection=%+v err=%v", projection, err)
+	}
+
+	feature.AccessExpression = "request.estimated_input_tokens <= 1000"
 	snapshot.features["assistant"] = feature
 	if _, err := resolver.ResolveQuota(
 		context.Background(), snapshot, "assistant", authorization,
 		quotaLogicalID(t), EnvironmentFacts{Kind: "production"},
 	); !errors.Is(err, ErrConfiguration) {
-		t.Fatalf("override stabilized request-dependent access: %v", err)
+		t.Fatalf("override stabilized request-size-dependent access: %v", err)
 	}
 }
 

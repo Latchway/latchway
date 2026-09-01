@@ -50,6 +50,7 @@ type ValidationIssue struct {
 
 type document struct {
 	Type                      string  `json:"type"`
+	DocumentationURL          string  `json:"documentation_url"`
 	Title                     string  `json:"title"`
 	Status                    int     `json:"status"`
 	Detail                    string  `json:"detail"`
@@ -61,6 +62,13 @@ type document struct {
 	Feature                   string  `json:"feature,omitempty"`
 	SupportedProtocolVersions []int   `json:"supported_protocol_versions,omitempty"`
 	Errors                    any     `json:"errors,omitempty"`
+}
+
+// DocumentationURL returns the stable public remediation page for one
+// canonical error code. Public pages use readable hyphenated slugs while the
+// machine code remains underscore-delimited.
+func DocumentationURL(code string) string {
+	return "https://docs.latchway.dev/errors/" + strings.ReplaceAll(code, "_", "-")
 }
 
 // Write emits one registered problem. Unknown codes become internal_error.
@@ -97,8 +105,10 @@ func Write(w http.ResponseWriter, requestID string, value Error) {
 	} else if len(value.ValidationIssues) > 0 {
 		responseErrors = value.ValidationIssues
 	}
+	documentationURL := DocumentationURL(value.Code)
 	_ = json.NewEncoder(w).Encode(document{
-		Type:                      "https://latchway.dev/problems/" + value.Code,
+		Type:                      documentationURL,
+		DocumentationURL:          documentationURL,
 		Title:                     definition.Title,
 		Status:                    definition.Status,
 		Detail:                    detail,

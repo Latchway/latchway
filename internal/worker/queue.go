@@ -25,16 +25,17 @@ var (
 )
 
 var periodicJobTypes = map[string]time.Duration{
-	"release_expired_reservations":       time.Minute,
-	"release_expired_concurrency_leases": time.Minute,
-	"prune_dpop_replays":                 time.Minute,
-	"prune_challenges":                   time.Minute,
-	"rotate_signing_keys":                time.Minute,
-	"refresh_jwks":                       5 * time.Minute,
-	"aggregate_hourly_usage":             time.Hour,
-	"aggregate_daily_usage":              24 * time.Hour,
-	"enforce_retention":                  time.Hour,
-	"reconcile_pending_usage":            time.Minute,
+	"release_expired_reservations":         time.Minute,
+	"release_expired_concurrency_leases":   time.Minute,
+	"recover_stale_authenticated_requests": time.Minute,
+	"prune_dpop_replays":                   time.Minute,
+	"prune_challenges":                     time.Minute,
+	"rotate_signing_keys":                  time.Minute,
+	"refresh_jwks":                         5 * time.Minute,
+	"aggregate_hourly_usage":               time.Hour,
+	"aggregate_daily_usage":                24 * time.Hour,
+	"enforce_retention":                    time.Hour,
+	"reconcile_pending_usage":              time.Minute,
 }
 
 var supportedJobTypes = func() map[string]time.Duration {

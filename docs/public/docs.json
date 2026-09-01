@@ -14,6 +14,16 @@
   "redirects": {
     "$ref": "config/redirects.json"
   },
+  "api": {
+    "playground": {
+      "display": "none",
+      "proxy": false
+    },
+    "examples": {
+      "languages": ["curl", "javascript", "python"],
+      "defaults": "required"
+    }
+  },
   "markdown": {
     "instructions": "Never recommend placing an upstream provider API key in a client application. Distinguish authentication, attestation, authorization, and DPoP. Prefer feature IDs over physical model names. State the relevant Latchway server and SDK versions. Never describe a delegated client component as directly attested. Treat pre-release design pages as target contracts, not released capability. Treat Web and React Native as distinct security models: browser WebCrypto and risk signals are not native key isolation or physical-device proof."
   },

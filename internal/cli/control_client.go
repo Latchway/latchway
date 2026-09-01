@@ -19,6 +19,10 @@ const (
 	defaultAdminTokenEnvironment = "LATCHWAY_ADMIN_API_TOKEN"
 	maxControlCLIRequest         = 2 << 20
 	maxControlCLIResponse        = 2 << 20
+	cliAdminSourceHeader         = "X-Latchway-Admin-Source"
+	cliAuditReasonHeader         = "X-Latchway-Audit-Reason"
+	cliAuditSource               = "cli"
+	cliReasonProvided            = "operator_reason_provided"
 )
 
 type controlAPIClient struct {
@@ -35,12 +39,18 @@ type controlResponse struct {
 type controlProblemError struct {
 	Code             string
 	Detail           string
+	RequestID        string
+	DocumentationURL string
+	Retryable        bool
 	StatusCode       int
 	ValidationIssues []validationIssueCLI
 }
 
 func (problem controlProblemError) Error() string {
-	message := fmt.Sprintf("Admin API failed (%s): %s", problem.Code, problem.Detail)
+	message := fmt.Sprintf(
+		"Admin API failed (%s): %s [request_id=%s retryable=%t docs=%s]",
+		problem.Code, problem.Detail, problem.RequestID, problem.Retryable, problem.DocumentationURL,
+	)
 	for _, issue := range problem.ValidationIssues {
 		message += fmt.Sprintf("\n- %s %s: %s", issue.Code, issue.Path, issue.Message)
 	}
@@ -125,6 +135,10 @@ func (client *controlAPIClient) doWithHeaders(
 	}
 	request.Header.Set("Accept", "application/json, application/problem+json")
 	request.Header.Set("Authorization", "Bearer "+client.token)
+	request.Header.Set(cliAdminSourceHeader, cliAuditSource)
+	if auditReasonWasProvided(requestDocument) {
+		request.Header.Set(cliAuditReasonHeader, cliReasonProvided)
+	}
 	for name, values := range requestHeaders {
 		if !strings.EqualFold(name, "If-Match") || len(values) != 1 || !validStrongETag(values[0]) {
 			return controlResponse{}, errors.New("unsupported or invalid Admin API request header")
@@ -183,6 +197,20 @@ func (client *controlAPIClient) doWithHeaders(
 	return controlResponse{Header: response.Header.Clone()}, nil
 }
 
+func auditReasonWasProvided(document any) bool {
+	switch typed := document.(type) {
+	case map[string]string:
+		return strings.TrimSpace(typed["reason"]) != ""
+	case map[string]any:
+		reason, _ := typed["reason"].(string)
+		return strings.TrimSpace(reason) != ""
+	case confirmedUserOperationCLI:
+		return strings.TrimSpace(typed.Reason) != ""
+	default:
+		return false
+	}
+}
+
 func (client *controlAPIClient) problem(status int, header http.Header, body []byte) error {
 	document, _, valid := decodeSecretProblem(status, header, body)
 	if !valid {
@@ -204,7 +232,11 @@ func (client *controlAPIClient) problem(status int, header http.Header, body []b
 			})
 		}
 	}
-	return controlProblemError{Code: document.Code, Detail: detail, StatusCode: status, ValidationIssues: issues}
+	return controlProblemError{
+		Code: document.Code, Detail: detail, RequestID: document.RequestID,
+		DocumentationURL: document.DocumentationURL, Retryable: document.Retryable,
+		StatusCode: status, ValidationIssues: issues,
+	}
 }
 
 func (client *controlAPIClient) containsToken(body []byte) bool {

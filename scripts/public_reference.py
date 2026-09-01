@@ -22,16 +22,20 @@ ROOT = Path(__file__).resolve().parents[1]
 ADMIN_SOURCE = ROOT / "api/admin.openapi.yaml"
 CLIENT_SOURCE = ROOT / "api/client.openapi.yaml"
 ERROR_SOURCE = ROOT / "api/error-codes.yaml"
+SDK_ERROR_SOURCE = ROOT / "api/sdk-error-codes.yaml"
 CONFIG_SOURCE = ROOT / "api/config.schema.json"
 ADMIN_OUTPUT = ROOT / "docs/public/reference/admin-api.mdx"
 CLIENT_OUTPUT = ROOT / "docs/public/reference/client-api.mdx"
 ERROR_OUTPUT = ROOT / "docs/public/reference/errors.mdx"
+ERROR_PAGE_ROOT = ROOT / "docs/public/errors"
 CONFIG_OUTPUT = ROOT / "docs/public/reference/config-schema.mdx"
 COMPATIBILITY_OUTPUT = ROOT / "docs/public/reference/compatibility.mdx"
 MANIFEST_OUTPUT = ROOT / "docs/public/config/generated-reference.json"
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 EXPECTED_ERROR_FIELDS = {"status", "title", "retryable", "guidance"}
+EXPECTED_SDK_ERROR_FIELDS = {"title", "surfaces", "guidance"}
+SDK_ERROR_SURFACES = {"javascript", "ios", "android", "react_native"}
 WHITESPACE = re.compile(r"\s+")
 
 
@@ -399,6 +403,14 @@ def render_client_reference(document: Mapping[str, Any]) -> str:
         "  playground: client applications should use a platform Latchway SDK.",
         "</Warning>",
         "",
+        "## Playground policy",
+        "",
+        "The public documentation config disables its request playground for every",
+        "Client API operation. Session creation and protected requests require a",
+        "method-and-URL-bound RFC 9449 proof, a component key, current identity, and",
+        "policy-selected attestation. A static bearer field cannot reproduce that",
+        "contract. Use a version-matched SDK or the signed sample application.",
+        "",
         _text(info.get("summary"), "client.info.summary"),
         "",
         _text(info.get("description"), "client.info.description"),
@@ -564,6 +576,25 @@ def render_admin_reference(document: Mapping[str, Any]) -> str:
         "  playground; run administrative calls only against an environment you own.",
         "</Warning>",
         "",
+        "## Playground policy",
+        "",
+        "The public site disables request submission and never prefills a token.",
+        "For a local installation or an owned sandbox, create the minimum-scoped,",
+        "short-lived Admin API token, keep it in a private shell environment variable,",
+        "and send the request directly to that deployment:",
+        "",
+        "```bash",
+        "export LATCHWAY_ADMIN_TOKEN='<short-lived scoped token>'",
+        "curl --fail-with-body \\",
+        "  --header \"Authorization: Bearer ${LATCHWAY_ADMIN_TOKEN}\" \\",
+        "  http://127.0.0.1:8080/admin/v1/system",
+        "unset LATCHWAY_ADMIN_TOKEN",
+        "```",
+        "",
+        "Do not paste a production administrator token into a public documentation",
+        "origin. Cookie-authenticated mutations belong in the same-origin Console",
+        "because they also require its session-bound CSRF contract.",
+        "",
         _text(info.get("summary"), "admin.info.summary"),
         "",
         _text(info.get("description"), "admin.info.description"),
@@ -667,7 +698,39 @@ def load_error_registry(path: Path = ERROR_SOURCE) -> Mapping[str, Any]:
     return registry
 
 
-def render_error_reference(registry: Mapping[str, Any]) -> str:
+def load_sdk_error_registry(path: Path = SDK_ERROR_SOURCE) -> Mapping[str, Any]:
+    registry = _load_yaml(path)
+    if registry.get("registry_version") != 1 or registry.get("contract_version") != "1.0.0":
+        raise ReferenceError("unexpected SDK error registry coordinate")
+    codes = registry.get("codes")
+    if not isinstance(codes, dict) or not codes:
+        raise ReferenceError("SDK error registry codes are missing")
+    for code, definition in codes.items():
+        if not isinstance(code, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,127}", code) is None:
+            raise ReferenceError(f"invalid SDK error code: {code}")
+        if not isinstance(definition, dict) or set(definition) != EXPECTED_SDK_ERROR_FIELDS:
+            raise ReferenceError(f"invalid SDK error definition: {code}")
+        surfaces = definition["surfaces"]
+        if (
+            not isinstance(surfaces, list)
+            or not surfaces
+            or len(surfaces) != len(set(surfaces))
+            or any(surface not in SDK_ERROR_SURFACES for surface in surfaces)
+        ):
+            raise ReferenceError(f"invalid SDK error surfaces for {code}")
+        _text(definition["title"], f"sdk_errors.{code}.title")
+        _text(definition["guidance"], f"sdk_errors.{code}.guidance")
+    return registry
+
+
+def render_error_reference(
+    registry: Mapping[str, Any], sdk_registry: Mapping[str, Any] | None = None
+) -> str:
+    if sdk_registry is None:
+        sdk_registry = load_sdk_error_registry()
+    collisions = set(registry["codes"]) & set(sdk_registry["codes"])
+    if collisions:
+        raise ReferenceError(f"server and SDK error code collision: {sorted(collisions)}")
     fields = registry["fields"]
     required = fields.get("required", [])
     optional = fields.get("optional", [])
@@ -678,7 +741,7 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
     lines = [
         "---",
         'title: "Errors"',
-        'description: "Handle every generated stable RFC 9457 problem code with its exact HTTP status, retryability, and operator guidance."',
+        'description: "Handle every generated gateway Problem and SDK-local error with exact retry boundaries and remediation guidance."',
         'icon: "circle-alert"',
         'audience: "reference"',
         'pageType: "reference"',
@@ -689,7 +752,7 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
         "---",
         "",
         "{/* Generated by scripts/public_reference.py. Do not edit. */}",
-        f"{{/* Canonical source: api/error-codes.yaml; registry {registry['registry_version']}; contract {registry['contract_version']}. */}}",
+        f"{{/* Canonical sources: api/error-codes.yaml and api/sdk-error-codes.yaml; registry {registry['registry_version']}; contract {registry['contract_version']}. */}}",
         "",
         f"Latchway returns `{registry['problem_media_type']}`. The registry currently",
         f"defines {len(registry['codes'])} stable codes. Provider payloads, credentials,",
@@ -721,7 +784,7 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
             "  contract. Reconcile indeterminate mutations from durable state.",
             "</Warning>",
             "",
-            "## Stable code registry",
+            "## Gateway Problem registry",
             "",
             "| Code | HTTP | Retryable | Title | Required action |",
             "| --- | --- | --- | --- | --- |",
@@ -729,11 +792,32 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
     )
     for code, definition in registry["codes"].items():
         values = (
-            f"`{code}`",
+            f"[`{code}`](/errors/{error_slug(code)})",
             definition["status"],
             "Yes" if definition["retryable"] else "No",
             _text(definition["title"], f"errors.{code}.title"),
             _text(definition["guidance"], f"errors.{code}.guidance"),
+        )
+        lines.append("| " + " | ".join(_cell(value) for value in values) + " |")
+    lines.extend(
+        [
+            "",
+            "## SDK-local error registry",
+            "",
+            "SDK-local errors are not HTTP Problems and therefore have no canonical",
+            "HTTP status or global retryable flag. Honor the concrete error instance",
+            "and the bounded guidance below.",
+            "",
+            "| Code | SDKs | Title | Required action |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for code, definition in sdk_registry["codes"].items():
+        values = (
+            f"[`{code}`](/errors/{error_slug(code)})",
+            ", ".join(surface.replace("_", " ").title() for surface in definition["surfaces"]),
+            _text(definition["title"], f"sdk_errors.{code}.title"),
+            _text(definition["guidance"], f"sdk_errors.{code}.guidance"),
         )
         lines.append("| " + " | ".join(_cell(value) for value in values) + " |")
     lines.extend(
@@ -759,6 +843,20 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
                 "",
             ]
         )
+    for code, definition in sdk_registry["codes"].items():
+        surfaces = ", ".join(
+            surface.replace("_", " ").title() for surface in definition["surfaces"]
+        )
+        lines.extend(
+            [
+                f"### `{code}`",
+                "",
+                f"**SDK-local · {surfaces}**",
+                "",
+                _text(definition["guidance"], f"sdk_errors.{code}.guidance"),
+                "",
+            ]
+        )
     lines.extend(
         [
             "For `operation_indeterminate`, retain the operation ID and request ID,",
@@ -769,6 +867,128 @@ def render_error_reference(registry: Mapping[str, Any]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def error_slug(code: str) -> str:
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,127}", code) is None:
+        raise ReferenceError(f"invalid error code for documentation URL: {code}")
+    return code.replace("_", "-")
+
+
+def render_error_page(code: str, definition: Mapping[str, Any]) -> str:
+    slug = error_slug(code)
+    title = _text(definition["title"], f"errors.{code}.title")
+    guidance = _text(definition["guidance"], f"errors.{code}.guidance")
+    status = definition["status"]
+    retryable = definition["retryable"]
+    documentation_url = f"https://docs.latchway.dev/errors/{slug}"
+    example = json.dumps(
+        {
+            "type": documentation_url,
+            "documentation_url": documentation_url,
+            "title": title,
+            "status": status,
+            "detail": title + ".",
+            "code": code,
+            "request_id": "req_...",
+            "retryable": retryable,
+        },
+        indent=2,
+    )
+    return "\n".join(
+        [
+            "---",
+            f"title: {json.dumps(title)}",
+            f"description: {json.dumps(guidance)}",
+            'icon: "circle-alert"',
+            'audience: "reference"',
+            'pageType: "troubleshooting"',
+            'serverVersion: "1.0.0"',
+            'sdkVersion: "1.0.0"',
+            'lastVerified: "2026-09-01"',
+            'owner: "core-api"',
+            "---",
+            "",
+            "{/* Generated by scripts/public_reference.py. Do not edit. */}",
+            f"{{/* Canonical source: api/error-codes.yaml code {code}. */}}",
+            "",
+            f"`{code}` is a stable Latchway error code. It maps to HTTP `{status}` and",
+            "is " + ("retryable only under the bounded guidance below." if retryable else "not automatically retryable."),
+            "",
+            "## What to do",
+            "",
+            guidance,
+            "",
+            "## Correlate the request",
+            "",
+            "Preserve the response `request_id` and use it in the Latchway Console or",
+            "CLI request view. Do not log identity tokens, DPoP proofs, attestation",
+            "objects, refresh credentials, provider keys, or raw upstream bodies.",
+            "",
+            "## Problem response",
+            "",
+            "```json",
+            example,
+            "```",
+            "",
+            "See the [complete error registry](/reference/errors) for retry boundaries",
+            "and every other stable code.",
+            "",
+        ]
+    )
+
+
+def render_sdk_error_page(code: str, definition: Mapping[str, Any]) -> str:
+    slug = error_slug(code)
+    title = _text(definition["title"], f"sdk_errors.{code}.title")
+    guidance = _text(definition["guidance"], f"sdk_errors.{code}.guidance")
+    surfaces = ", ".join(
+        surface.replace("_", " ").title() for surface in definition["surfaces"]
+    )
+    documentation_url = f"https://docs.latchway.dev/errors/{slug}"
+    return "\n".join(
+        [
+            "---",
+            f"title: {json.dumps(title)}",
+            f"description: {json.dumps(guidance)}",
+            'icon: "circle-alert"',
+            'audience: "reference"',
+            'pageType: "troubleshooting"',
+            'serverVersion: "1.0.0"',
+            'sdkVersion: "1.0.0"',
+            'lastVerified: "2026-09-01"',
+            'owner: "client-sdks"',
+            "---",
+            "",
+            "{/* Generated by scripts/public_reference.py. Do not edit. */}",
+            f"{{/* Canonical source: api/sdk-error-codes.yaml code {code}. */}}",
+            "",
+            f"`{code}` is a stable SDK-local Latchway error code for {surfaces}.",
+            "It is not an HTTP Problem and has no canonical HTTP status or global",
+            "retryable value.",
+            "",
+            "## What to do",
+            "",
+            guidance,
+            "",
+            "## Retry boundary",
+            "",
+            "Honor the concrete error instance and SDK contract. Never infer that a",
+            "local transport failure happened before dispatch, and never replay a",
+            "consumed body or an operation with an indeterminate outcome.",
+            "",
+            "## Diagnostic identity",
+            "",
+            f"The deterministic documentation URL is `{documentation_url}`. Preserve",
+            "only redaction-safe request identifiers and error metadata. Do not log",
+            "identity tokens, DPoP proofs, attestation objects, refresh credentials,",
+            "provider keys, Keychain contents, or request/response bodies.",
+            "",
+            "See the [complete error registry](/reference/errors) for gateway and SDK",
+            "error boundaries.",
+            "",
+        ]
+    )
 
 
 def load_config_schema(path: Path = CONFIG_SOURCE) -> Mapping[str, Any]:
@@ -929,17 +1149,27 @@ def render_all() -> Mapping[Path, str]:
         framework_compatibility.DEFAULT_REGISTRY,
         framework_compatibility.DEFAULT_SCHEMA,
     )
+    error_registry = load_error_registry()
+    sdk_error_registry = load_sdk_error_registry()
+    collisions = set(error_registry["codes"]) & set(sdk_error_registry["codes"])
+    if collisions:
+        raise ReferenceError(f"server and SDK error code collision: {sorted(collisions)}")
     documents = {
         ADMIN_OUTPUT: render_admin_reference(load_admin_contract()),
         CLIENT_OUTPUT: render_client_reference(load_client_contract()),
-        ERROR_OUTPUT: render_error_reference(load_error_registry()),
+        ERROR_OUTPUT: render_error_reference(error_registry, sdk_error_registry),
         CONFIG_OUTPUT: render_config_reference(load_config_schema()),
         COMPATIBILITY_OUTPUT: framework_compatibility.render_markdown(registry),
     }
+    for code, definition in error_registry["codes"].items():
+        documents[ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx"] = render_error_page(code, definition)
+    for code, definition in sdk_error_registry["codes"].items():
+        documents[ERROR_PAGE_ROOT / f"{error_slug(code)}.mdx"] = render_sdk_error_page(code, definition)
     sources = (
         ADMIN_SOURCE,
         CLIENT_SOURCE,
         ERROR_SOURCE,
+        SDK_ERROR_SOURCE,
         CONFIG_SOURCE,
         framework_compatibility.DEFAULT_REGISTRY,
         framework_compatibility.DEFAULT_SCHEMA,
@@ -1021,7 +1251,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "public references valid: "
         f"{len(load_client_contract()['paths'])} client paths, "
         f"{len(load_admin_contract()['paths'])} admin paths, "
-        f"{len(load_error_registry()['codes'])} errors, "
+        f"{len(load_error_registry()['codes'])} server errors, "
+        f"{len(load_sdk_error_registry()['codes'])} SDK errors, "
         f"{len(load_config_schema()['$defs'])} config definitions, "
         f"{len(framework_compatibility.load_registry(framework_compatibility.DEFAULT_REGISTRY, framework_compatibility.DEFAULT_SCHEMA)['frameworks'])} compatibility entries"
     )

@@ -112,6 +112,15 @@ class EvidenceFixture:
                     "oci_image_digest": None,
                 },
                 "repositories": repositories,
+                "documentation": {
+                    "repository": "https://github.com/Latchway/latchway-docs.git",
+                    "commit": "8" * 40,
+                    "canonical_core_commit": self.commit,
+                    "source_commit": self.commit,
+                    "source_manifest_sha256": "9" * 64,
+                    "source_tree_sha256": "a" * 64,
+                    "owned_file_count": 308,
+                },
                 "evidence_window": None,
                 "evidence_domains": [
                     {

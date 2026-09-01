@@ -87,6 +87,7 @@ type secretPageCLI struct {
 
 type secretProblemCLI struct {
 	Type                      string                             `json:"type"`
+	DocumentationURL          string                             `json:"documentation_url"`
 	Title                     string                             `json:"title"`
 	Status                    int                                `json:"status"`
 	Detail                    string                             `json:"detail"`
@@ -527,6 +528,7 @@ func (client *secretAPIClient) do(ctx context.Context, method, path string, quer
 	}
 	request.Header.Set("Accept", "application/json, application/problem+json")
 	request.Header.Set("Authorization", "Bearer "+client.token)
+	request.Header.Set(cliAdminSourceHeader, cliAuditSource)
 	if requestBody != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -599,6 +601,7 @@ func (client *secretAPIClient) problem(httpStatus int, header http.Header, body 
 	if document.OperationID != nil {
 		_, _ = fmt.Fprintf(&diagnostic, " operation_id=%s", client.safeTokenField(*document.OperationID))
 	}
+	_, _ = fmt.Fprintf(&diagnostic, " docs=%s", client.safeUntrustedText(document.DocumentationURL))
 	diagnostic.WriteByte(']')
 	return errors.New(safeSecretProblemDetail(diagnostic.String()))
 }
@@ -642,7 +645,7 @@ func secretProblemContentType(value string) bool {
 }
 
 func secretProblemFieldPresenceValid(object map[string]any) bool {
-	for _, field := range []string{"type", "title", "status", "detail", "code", "request_id", "retryable"} {
+	for _, field := range []string{"type", "title", "status", "detail", "code", "request_id", "retryable", "documentation_url"} {
 		value, present := object[field]
 		if !present || value == nil {
 			return false
@@ -659,7 +662,9 @@ func secretProblemFieldPresenceValid(object map[string]any) bool {
 func validateSecretProblem(httpStatus int, document secretProblemCLI) bool {
 	definition, registered := problemcontract.Registry[document.Code]
 	if !registered || httpStatus < 400 || httpStatus > 599 || document.Status != httpStatus || definition.Status != httpStatus ||
-		document.Type != "https://latchway.dev/problems/"+document.Code || document.Title != definition.Title ||
+		document.Type != problemcontract.DocumentationURL(document.Code) ||
+		document.DocumentationURL != problemcontract.DocumentationURL(document.Code) ||
+		document.Title != definition.Title ||
 		document.Retryable != definition.Retryable || !boundedSecretProblemString(document.Detail, 1, 2048) ||
 		safeSecretProblemDetail(document.Detail) == "" || !secretProblemRequestIDPattern.MatchString(document.RequestID) {
 		return false

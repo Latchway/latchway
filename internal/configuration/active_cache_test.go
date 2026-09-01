@@ -193,6 +193,32 @@ func TestActiveSnapshotCacheFreshnessIsClockSafe(t *testing.T) {
 	}
 }
 
+func TestActiveSnapshotCacheStatusIsBoundedAndRedactionSafe(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	store := &Store{}
+	store.activeSnapshots.put(
+		activeSnapshotCacheKey{organizationID: "secret-org", environmentID: "fresh-environment"},
+		ActiveSnapshot{RevisionID: "fresh-revision", document: []byte(`{"secret":"must-not-escape"}`)},
+		now.Add(-time.Second),
+	)
+	store.activeSnapshots.put(
+		activeSnapshotCacheKey{organizationID: "secret-org", environmentID: "stale-environment"},
+		ActiveSnapshot{RevisionID: "stale-revision"},
+		now.Add(-activeSnapshotFullReconciliationInterval),
+	)
+
+	status := store.ActiveSnapshotCacheStatus(now)
+	if !status.Available || status.Entries != 2 || status.FreshEntries != 1 || status.StaleEntries != 1 ||
+		status.RefreshesInFlight != 0 || status.EstimatedBytes <= 0 ||
+		status.MaximumEntries != activeSnapshotCacheCapacity ||
+		status.MaximumEstimatedBytes != activeSnapshotCacheMaximumEstimatedBytes ||
+		status.ReconciliationIntervalSeconds != int64(activeSnapshotFullReconciliationInterval/time.Second) ||
+		status.NewestLoadedAt == nil || !status.NewestLoadedAt.Equal(now.Add(-time.Second)) {
+		t.Fatalf("cache status = %+v", status)
+	}
+}
+
 func TestRequestActiveSnapshotCacheIsBoundToStoreAndScope(t *testing.T) {
 	t.Parallel()
 	ctx := WithActiveSnapshotCache(context.Background())

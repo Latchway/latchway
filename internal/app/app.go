@@ -18,6 +18,7 @@ import (
 	"github.com/latchway/latchway/internal/configuration"
 	"github.com/latchway/latchway/internal/database"
 	"github.com/latchway/latchway/internal/dataplane"
+	"github.com/latchway/latchway/internal/diagnostics"
 	"github.com/latchway/latchway/internal/identity"
 	"github.com/latchway/latchway/internal/policy"
 	"github.com/latchway/latchway/internal/quota"
@@ -160,6 +161,12 @@ func newAPIRuntime(
 		adminapi.WithRole(string(cfg.Role)),
 		adminapi.WithConfigurationStore(configurationStore),
 		adminapi.WithCredentialSelfTests(secretStore, targetCache),
+		adminapi.WithDiagnosticDependencies(diagnostics.Dependencies{
+			MasterKey: func(checkCtx context.Context) error {
+				return secrets.CheckMasterKeyConsistency(checkCtx, pool, envelope)
+			},
+			ConfigurationCache: configurationStore.ActiveSnapshotCacheStatus,
+		}),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct administrative API: %w", err)

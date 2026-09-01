@@ -253,6 +253,9 @@ DIAGRAM_CAPTIONS = (
     "What causes the relationship to expire",
 )
 MERMAID_BLOCK = re.compile(r"```mermaid\s*\n(?P<body>.*?)\n```", re.DOTALL)
+LLMS_LINK = re.compile(
+    r"\[[^\]]+\]\(https://docs\.latchway\.dev/(?P<route>[a-z0-9][a-z0-9_./-]*)\.md\)"
+)
 PRE_RELEASE_PAGES = {
     page
     for page in REQUIRED_PAGES
@@ -435,9 +438,56 @@ def main() -> int:
             'firebase: ["Firebase", "/clients/authentication-providers#firebase"]',
             '"cloud-run": ["Google Cloud Run source template (provider proof open)"',
             "[role, platform, authentication, integration, deployment, webFramework, webTrust]",
+            'const STORAGE_KEY = "latchway.docs.setup-preferences.v1"',
+            "new URLSearchParams(window.location.search)",
+            "window.localStorage.setItem(STORAGE_KEY",
+            "navigator.clipboard.writeText",
+            'consoleHref("/requests"',
+            'consoleHref("/features"',
+            'consoleHref("/limit-plans"',
+            'consoleHref("/route-simulator"',
         ):
             if phrase not in setup_text:
                 errors.append(f"SetupPath selector is not wired to a truthful result: {phrase}")
+        allowlist_match = re.search(
+            r"const SAFE_URL_FIELDS = \{(?P<body>.*?)\n\};",
+            setup_text,
+            re.DOTALL,
+        )
+        if not allowlist_match:
+            errors.append("SetupPath lacks an explicit URL-personalization allowlist")
+        else:
+            allowlist = allowlist_match.group("body")
+            for parameter in (
+                "lw_gateway",
+                "lw_console",
+                "lw_application_id",
+                "lw_application_slug",
+                "lw_environment",
+                "lw_feature",
+                "lw_component_definition",
+                "lw_sdk_version",
+                "lw_server_version",
+            ):
+                if f'"{parameter}"' not in allowlist:
+                    errors.append(f"SetupPath safe URL allowlist lacks {parameter}")
+            for forbidden in ("token", "secret", "credential", "proof", "evidence", "requestBody"):
+                if re.search(rf"(?m)^\s*[A-Za-z0-9_]*{forbidden}[A-Za-z0-9_]*\s*:", allowlist, re.IGNORECASE):
+                    errors.append(f"SetupPath URL allowlist contains forbidden field class: {forbidden}")
+        for guard in ("url.username", "url.password", "url.search", "url.hash"):
+            if guard not in setup_text:
+                errors.append(f"SetupPath public-origin validation lacks guard: {guard}")
+
+    for route, platform in (
+        ("clients/ios/quickstart", "ios"),
+        ("clients/android/quickstart", "android"),
+        ("clients/react-native/quickstart", "react-native"),
+    ):
+        page = files_by_route.get(route)
+        if page is not None:
+            text = page.read_text(encoding="utf-8")
+            if f'<SetupCoordinates platform="{platform}" />' not in text:
+                errors.append(f"native first-run path lacks safe coordinates: {route}")
 
     homepage = files_by_route.get("index")
     if homepage is not None:
@@ -512,6 +562,40 @@ def main() -> int:
         if phrase not in instruction_text:
             errors.append(f"markdown instructions are missing required guidance: {phrase}")
 
+    api = resolved_docs.get("api", {})
+    playground = api.get("playground", {}) if isinstance(api, dict) else {}
+    if playground != {"display": "none", "proxy": False}:
+        errors.append(
+            "public API playground must be disabled with proxying off; "
+            "Client API DPoP and production Admin credentials cannot use a public request builder"
+        )
+
+    llms_path = root / "llms.txt"
+    if llms_path.is_file():
+        llms_text = llms_path.read_text(encoding="utf-8")
+        if not llms_text.startswith("# Latchway public documentation\n\n> "):
+            errors.append("llms.txt must start with a title and blockquote outcome summary")
+        llms_routes = [match.group("route") for match in LLMS_LINK.finditer(llms_text)]
+        duplicate_llms_routes = sorted(
+            {route for route in llms_routes if llms_routes.count(route) > 1}
+        )
+        if duplicate_llms_routes:
+            errors.append(f"llms.txt repeats routes: {', '.join(duplicate_llms_routes)}")
+        llms_required = GOLDEN_PAGES | {
+            "index",
+            "release-status",
+            "reference/client-api",
+            "reference/admin-api",
+            "reference/errors",
+            "community/agent-resources",
+        }
+        for route in sorted(llms_required - set(llms_routes)):
+            errors.append(f"llms.txt omits required retrieval route: {route}")
+        for route in sorted(set(llms_routes) - files_by_route.keys() - {"skill"}):
+            errors.append(f"llms.txt references a missing Markdown route: {route}")
+        if re.search(r"(?m)^\s*-\s+/(?!/)\S+", llms_text):
+            errors.append("llms.txt contains a bare route instead of a descriptive Markdown link")
+
     versions = navigation.get("global", {}).get("versions", []) if isinstance(navigation, dict) else []
     if not (
         isinstance(versions, list)
@@ -533,9 +617,13 @@ def main() -> int:
                 continue
             source = redirect.get("source")
             destination = redirect.get("destination")
+            if not isinstance(source, str) or not source.startswith("/") or "?" in source or "#" in source:
+                errors.append(f"redirect source is not a canonical path: {source}")
             if source in redirect_sources:
                 errors.append(f"duplicate redirect source: {source}")
             redirect_sources.add(source)
+            if redirect.get("permanent") is not True:
+                errors.append(f"redirect must be permanent: {source}")
             if not isinstance(destination, str) or destination.lstrip("/") not in files_by_route:
                 errors.append(f"redirect destination is not a public page: {destination}")
 

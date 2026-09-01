@@ -1154,9 +1154,13 @@ components:
     Problem:
       type: object
       additionalProperties: false
-      required: [type, title, status, detail, code, request_id, retryable]
+      required: [type, title, status, detail, code, request_id, retryable, documentation_url]
       properties:
         type: { type: string, format: uri }
+        documentation_url:
+          type: string
+          format: uri
+          pattern: '^https://docs\.latchway\.dev/errors/[a-z0-9-]+$'
         title: { type: string, minLength: 1, maxLength: 256 }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string, minLength: 1, maxLength: 2048 }

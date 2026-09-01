@@ -1,0 +1,87 @@
+registry_version: 1
+contract_version: 1.0.0
+codes:
+  client_configuration_invalid:
+    title: Client configuration invalid
+    surfaces: [javascript, react_native]
+    guidance: Correct the SDK configuration before creating another client or request. Never weaken exact-origin, identity, attestation, or key-storage checks to bypass this error.
+  storage_unavailable:
+    title: Secure client storage unavailable
+    surfaces: [javascript, react_native]
+    guidance: Restore the platform storage capability required by the configured persistence mode, or choose an explicitly supported non-persistent mode when the application threat model permits it.
+  crypto_unavailable:
+    title: Client cryptography unavailable
+    surfaces: [javascript, react_native]
+    guidance: Use a supported runtime with the required P-256 signing and secure-random capabilities. Do not replace the installation key with an exportable application secret.
+  attestation_provider_missing:
+    title: Attestation provider missing
+    surfaces: [javascript, react_native]
+    guidance: Configure the platform attestation adapter required by the environment and obtain fresh evidence for the active challenge.
+  protocol_response_invalid:
+    title: Protocol response invalid
+    surfaces: [javascript, react_native]
+    guidance: Preserve redaction-safe request metadata and upgrade or repair the gateway or SDK contract mismatch. Do not consume credentials or payload fields from the rejected response.
+  request_not_replayable:
+    title: Client request not replayable
+    surfaces: [javascript, react_native]
+    guidance: Recreate the request with a fresh body before an explicit retry. The SDK will not replay a body that was consumed or cannot be safely buffered.
+  network_error:
+    title: Client network error
+    surfaces: [javascript, react_native]
+    guidance: Check connectivity and the exact configured Latchway origin. Retry only when the error instance marks the operation retryable and the request body remains replayable.
+  root_keychain_migration_required:
+    title: Root Keychain migration required
+    surfaces: [ios]
+    guidance: On a disposable development device, reset the stale Latchway Keychain state or use a new test bundle identifier, then reinstall with the private root access group. Production migrations require an explicit reviewed migration path.
+  key_unavailable:
+    title: Installation key unavailable
+    surfaces: [ios, android]
+    guidance: Restore the required hardware-backed key capability or apply the environment's explicit fallback policy. Never export or substitute a provider credential.
+  session_unavailable:
+    title: Client session unavailable
+    surfaces: [ios]
+    guidance: Re-establish identity and attestation, then create a fresh Latchway session. Do not continue with stale access or refresh credentials.
+  transport_failure:
+    title: Client transport failure
+    surfaces: [ios]
+    guidance: Check connectivity and the exact configured gateway origin. Retry only across the SDK's documented pre-dispatch boundary with a replayable request.
+  server_response_invalid:
+    title: Server response invalid
+    surfaces: [ios]
+    guidance: Treat the response as untrusted, preserve its redaction-safe request identifier when available, and repair the gateway or SDK contract mismatch before retrying.
+  cancelled:
+    title: Client operation cancelled
+    surfaces: [ios]
+    guidance: Treat cancellation as a caller-controlled terminal result. Start a new operation only if the application still needs it; never infer whether an already-dispatched mutation committed.
+  keychain_access_group_unavailable:
+    title: Keychain access group unavailable
+    surfaces: [ios]
+    guidance: Add the required containing-app and extension Keychain Sharing entitlements, use the exact application-prefix-qualified group, and regenerate signing profiles before provisioning the component again.
+  foundation_models_invalid_transcript:
+    title: Foundation Models transcript invalid
+    surfaces: [ios]
+    guidance: Supply a transcript with translatable text input. Unsupported or empty transcript content is rejected instead of being silently changed.
+  foundation_models_sampling_unsupported:
+    title: Foundation Models sampling unsupported
+    surfaces: [ios]
+    guidance: Use the adapter's declared sampling capabilities. The adapter does not silently translate unsupported Foundation Models sampling modes.
+  foundation_models_gateway_error:
+    title: Foundation Models gateway error
+    surfaces: [ios]
+    guidance: Inspect the associated HTTP status and redaction-safe request identifier, then follow the canonical gateway error and replay guidance for that request.
+  foundation_models_gateway_stream_invalid:
+    title: Foundation Models gateway stream invalid
+    surfaces: [ios]
+    guidance: Discard the incomplete output and repair the Responses streaming contract mismatch. Do not treat a partial stream as a completed model response.
+  secure_state_unavailable:
+    title: Secure client state unavailable
+    surfaces: [android]
+    guidance: Restore the configured Android secure-state and keystore capabilities before creating another session. Do not persist Latchway credentials in ordinary application storage.
+  network_unavailable:
+    title: Native network unavailable
+    surfaces: [android]
+    guidance: Check connectivity and the exact configured Latchway origin. Retry only when the exception is explicitly retryable and the request remains replayable.
+  response_invalid:
+    title: Native response invalid
+    surfaces: [android]
+    guidance: Treat the native or gateway response as untrusted and repair the contract mismatch before retrying or consuming any response data.

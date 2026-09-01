@@ -115,6 +115,18 @@ func TestQueueSchedulesEveryExecutableJobExactlyOnceAcrossReplicasPostgreSQL(t *
 	}
 	now := time.Now().UTC()
 	jobTypes := scheduledDurableJobTypes()
+	var recoveryJobAllowed bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM pg_constraint
+		    WHERE conrelid = 'jobs'::regclass
+		      AND conname = 'jobs_job_type_check'
+		      AND conrelid = 'jobs'::regclass
+		      AND pg_get_constraintdef(oid) LIKE '%recover_stale_authenticated_requests%'
+		)
+	`).Scan(&recoveryJobAllowed); err != nil || !recoveryJobAllowed {
+		t.Fatalf("stale-authenticated recovery job constraint allowed=%t err=%v", recoveryJobAllowed, err)
+	}
 	if err := first.Schedule(ctx, now, jobTypes); err != nil {
 		t.Fatal(err)
 	}

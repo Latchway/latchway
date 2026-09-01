@@ -283,9 +283,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
+	identityStartedAt := handler.now().UTC()
 	identityCtx, finishIdentity := handler.startStage(request.Context(), "identity verification", telemetry.Labels{})
 	principal, err := handler.accessTokens.Verify(identityCtx, declaration.accessToken)
 	finishIdentity(handler.telemetryOutcome(err))
+	identityCompletedAt := handler.decisionCompletedAt(identityStartedAt)
 	if err != nil {
 		if handler.telemetry != nil {
 			handler.telemetry.RecordIdentityFailure(request.Context(), telemetry.Labels{Outcome: handler.telemetryOutcome(err)})
@@ -293,6 +295,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	trustStartedAt := handler.now().UTC()
 	dpopCtx, finishDPoP := handler.startStage(request.Context(), "DPoP verification", telemetry.Labels{})
 	authorization, err := handler.sessions.AuthorizeAccess(dpopCtx, session.AccessRequestInput{
 		AccessToken: declaration.accessToken,
@@ -303,6 +306,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		Origin:      browserOrigin,
 	})
 	finishDPoP(handler.telemetryOutcome(err))
+	trustCompletedAt := handler.decisionCompletedAt(trustStartedAt)
 	if err != nil {
 		if handler.telemetry != nil && isDPoPFailure(err) {
 			handler.telemetry.RecordDPoPFailure(request.Context(), telemetry.Labels{Outcome: handler.telemetryOutcome(err)})
@@ -310,42 +314,143 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	lifecycle, err := handler.beginAuthenticatedRequest(request.Context(), quota.AuthenticatedRequestInput{
+		LogicalRequestID: logicalID,
+		OrganizationID:   authorization.OrganizationID, ApplicationID: authorization.ApplicationID,
+		EnvironmentID: authorization.EnvironmentID, ApplicationUserID: authorization.ApplicationUserID,
+		InstallationID: authorization.InstallationID, SessionGrantID: authorization.SessionGrantID,
+		InstallationFamilyID:  authorization.InstallationFamilyID,
+		ClientComponentID:     authorization.ComponentID,
+		ComponentDefinitionID: authorization.ComponentDefinitionID,
+		ComponentKind:         authorization.ComponentKind,
+		TrustSource:           authorization.TrustSource,
+		ConfigRevisionID:      authorization.PolicyRevisionID,
+		FeatureKey:            declaration.feature, Protocol: endpoint.protocolID,
+		ClientRequestID: declaration.clientRequestID,
+		Framework:       declaration.framework, FrameworkVersion: declaration.frameworkVersion,
+	})
+	if err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
+	for _, stage := range []quota.DecisionStage{
+		{
+			Stage: quota.DecisionIdentityVerified, Outcome: quota.DecisionSucceeded,
+			StartedAt: identityStartedAt, CompletedAt: identityCompletedAt,
+		},
+		{
+			Stage: quota.DecisionClientTrustVerified, Outcome: quota.DecisionSucceeded,
+			StartedAt: trustStartedAt, CompletedAt: trustCompletedAt,
+		},
+	} {
+		if err := handler.recordDecisionStage(request.Context(), lifecycle, stage); err != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, err)
+			return
+		}
+	}
+	clientContextStartedAt := handler.now().UTC()
 	if !sdkMatchesPlatform(declaration.sdk, authorization.InstallationPlatform) {
+		if err := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionClientContextValidated,
+			clientContextStartedAt, errors.New("request_invalid"), "request_invalid",
+		); err != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, err)
+			return
+		}
 		handler.writeViolation(writer, requestID, requestViolation(
 			"header.X-Latchway-SDK", "The SDK identifier is incompatible with the authorized installation.",
 		))
 		return
 	}
 	if authorization.ComponentID != "" && !slices.Contains(authorization.GrantedFeatures, declaration.feature) {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionClientContextValidated,
+			clientContextStartedAt, session.ErrComponentFeatureNotGranted, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, session.ErrComponentFeatureNotGranted)
 		return
 	}
+	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+		Stage: quota.DecisionClientContextValidated, Outcome: quota.DecisionSucceeded,
+		StartedAt: clientContextStartedAt, CompletedAt: handler.decisionCompletedAt(clientContextStartedAt),
+	}); err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
 
+	configurationStartedAt := handler.now().UTC()
 	snapshot, err := handler.configuration.ActiveSnapshot(request.Context(), configuration.TenantScope{
 		OrganizationID: authorization.OrganizationID,
 		ApplicationID:  authorization.ApplicationID,
 		EnvironmentID:  authorization.EnvironmentID,
 	})
 	if err != nil {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionConfigurationLoaded,
+			configurationStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
 	if snapshot.PolicyRevision() != authorization.PolicyRevisionID ||
 		snapshot.PolicyEnvironment() != authorization.EnvironmentID {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionConfigurationLoaded,
+			configurationStartedAt, policy.ErrConfiguration, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, policy.ErrConfiguration)
 		return
 	}
+	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+		Stage: quota.DecisionConfigurationLoaded, Outcome: quota.DecisionSucceeded,
+		StartedAt: configurationStartedAt, CompletedAt: handler.decisionCompletedAt(configurationStartedAt),
+	}); err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
 
+	inspectionStartedAt := handler.now().UTC()
 	metadata, err := endpoint.adapter.InspectRequest(request.Context(), request)
 	if err != nil {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionRequestInspected,
+			inspectionStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
 	replay, err := captureReplayableRequest(request)
 	if err != nil {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionRequestInspected,
+			inspectionStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+		Stage: quota.DecisionRequestInspected, Outcome: quota.DecisionSucceeded,
+		StartedAt: inspectionStartedAt, CompletedAt: handler.decisionCompletedAt(inspectionStartedAt),
+	}); err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
+	policyStartedAt := handler.now().UTC()
 	policyCtx, finishPolicy := handler.startStage(request.Context(), "policy evaluation", telemetry.Labels{
 		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
 		Feature: declaration.feature, Platform: authorization.InstallationPlatform,
@@ -356,9 +461,25 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	finishPolicy(handler.telemetryOutcome(err))
 	if err != nil {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionPolicyEvaluated,
+			policyStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
+	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+		Stage: quota.DecisionPolicyEvaluated, Outcome: quota.DecisionSucceeded,
+		StartedAt: policyStartedAt, CompletedAt: handler.decisionCompletedAt(policyStartedAt),
+		LimitPlanKey: plan.LimitPlan.ID,
+	}); err != nil {
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
+	routeStartedAt := handler.now().UTC()
 	routeCtx, finishRoute := handler.startStage(request.Context(), "route selection", telemetry.Labels{
 		Application: authorization.ApplicationID, Environment: authorization.EnvironmentID,
 		Feature: declaration.feature, Platform: authorization.InstallationPlatform,
@@ -367,6 +488,13 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	validatedPlan, err := validateDecisionPlan(declaration.feature, plan, endpoint.protocolID)
 	if err != nil {
 		finishRoute(handler.telemetryOutcome(err))
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionRouteSelected,
+			routeStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
@@ -377,6 +505,23 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	finishRoute(handler.telemetryOutcome(err))
 	if err != nil {
+		if lifecycleErr := handler.recordDecisionFailure(
+			request.Context(), lifecycle, quota.DecisionRouteSelected,
+			routeStartedAt, err, "",
+		); lifecycleErr != nil {
+			handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+			return
+		}
+		handler.writeMappedError(writer, requestID, declaration.feature, err)
+		return
+	}
+	if err := handler.recordDecisionStage(request.Context(), lifecycle, quota.DecisionStage{
+		Stage: quota.DecisionRouteSelected, Outcome: quota.DecisionSucceeded,
+		StartedAt: routeStartedAt, CompletedAt: handler.decisionCompletedAt(routeStartedAt),
+		LimitPlanKey: plan.LimitPlan.ID,
+		RouteKey:     primary.decision.Route.ID, UpstreamKey: primary.decision.Upstream.ID,
+		ModelKey: primary.decision.Model.ID, PhysicalModel: primary.decision.Model.UpstreamModel,
+	}); err != nil {
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
@@ -388,6 +533,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		Platform: authorization.InstallationPlatform, AttestationLevel: authorization.TrustLevel,
 		Plan: prepared.decision.LimitPlan.ID,
 	}
+	quotaStartedAt := handler.now().UTC()
 	quotaCtx, finishQuota := handler.startStage(request.Context(), "quota reservation", requestLabels)
 	reservation, err := handler.quotas.Reserve(quotaCtx, quota.ReserveInput{
 		LogicalRequestID: logicalID,
@@ -413,6 +559,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	})
 	finishQuota(handler.telemetryOutcome(err))
 	if err != nil {
+		if !errors.Is(err, quota.ErrExceeded) && !errors.Is(err, quota.ErrConcurrencyExceeded) {
+			if lifecycleErr := handler.recordDecisionFailure(
+				request.Context(), lifecycle, quota.DecisionQuotaReserved,
+				quotaStartedAt, err, "",
+			); lifecycleErr != nil && !errors.Is(lifecycleErr, quota.ErrInvalidState) {
+				handler.writeMappedError(writer, requestID, declaration.feature, lifecycleErr)
+				return
+			}
+		}
 		handler.writeMappedError(writer, requestID, declaration.feature, err)
 		return
 	}
@@ -2262,6 +2417,61 @@ func (handler *Handler) recordAttempt(
 func isDPoPFailure(err error) bool {
 	return dpop.IsCode(err, "dpop_nonce_required") || dpop.IsCode(err, "dpop_invalid") ||
 		errors.Is(err, session.ErrDPoPReplayed) || errors.Is(err, session.ErrReplayInvalid)
+}
+
+func (handler *Handler) beginAuthenticatedRequest(
+	parent context.Context,
+	input quota.AuthenticatedRequestInput,
+) (quota.AuthenticatedRequest, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
+	defer cancel()
+	return handler.quotas.BeginAuthenticatedRequest(ctx, input)
+}
+
+func (handler *Handler) recordDecisionStage(
+	parent context.Context,
+	request quota.AuthenticatedRequest,
+	stage quota.DecisionStage,
+) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), handler.persistenceTimeout)
+	defer cancel()
+	return handler.quotas.RecordDecisionStage(ctx, request, stage)
+}
+
+func (handler *Handler) recordDecisionFailure(
+	parent context.Context,
+	request quota.AuthenticatedRequest,
+	stage string,
+	startedAt time.Time,
+	failure error,
+	explicitCode string,
+) error {
+	code := explicitCode
+	if code == "" {
+		code, _ = errorCode(failure, handler.now())
+	}
+	outcome := quota.DecisionFailed
+	switch code {
+	case "request_invalid", "feature_not_found", "feature_not_allowed",
+		"component_feature_not_granted", "quota_exceeded", "concurrency_exceeded":
+		outcome = quota.DecisionDenied
+	}
+	if errors.Is(failure, context.Canceled) {
+		outcome = quota.DecisionCancelled
+		code = "request_cancelled"
+	}
+	return handler.recordDecisionStage(parent, request, quota.DecisionStage{
+		Stage: stage, Outcome: outcome, FailureCode: code,
+		StartedAt: startedAt, CompletedAt: handler.decisionCompletedAt(startedAt),
+	})
+}
+
+func (handler *Handler) decisionCompletedAt(startedAt time.Time) time.Time {
+	completedAt := handler.now().UTC()
+	if completedAt.Before(startedAt) {
+		return startedAt
+	}
+	return completedAt
 }
 
 func (handler *Handler) releaseReservation(parent context.Context, reservation quota.Reservation, failure string) error {

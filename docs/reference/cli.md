@@ -149,8 +149,15 @@ diagnostic.
 ```bash
 latchway users list --environment env_...
 latchway users inspect usr_... --environment env_...
-latchway users block usr_... --environment env_...
-latchway users unblock usr_... --environment env_...
+latchway users effective usr_... --environment env_... --feature assistant \
+  --estimated-input-tokens 1200 --maximum-output-tokens 800 --streaming
+latchway users impact usr_... --environment env_... --action block
+latchway users block usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... --reason 'reviewed response'
+latchway users require-reauthentication usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... --reason 'identity refresh'
+latchway users require-app-reverification usr_... --environment env_... \
+  --impact-token TOKEN_FROM_PREVIEW --confirm usr_... --reason 'trust refresh'
 
 latchway installations list --environment env_...
 latchway installations inspect ins_...
@@ -158,9 +165,13 @@ latchway installations revoke ins_... --reason 'operator-approved response'
 
 latchway requests list --environment env_...
 latchway requests inspect req_...
+latchway requests effective req_...
 latchway usage summary --environment env_...
 latchway usage timeseries --environment env_... --interval hour
 latchway audit --organization org_...
+latchway audit --organization org_... --environment env_... \
+  --source cli --reason planned_release --result succeeded
+latchway audit inspect aud_...
 ```
 
 List commands use bounded keyset pages. Pass the printed opaque cursor back via
@@ -172,6 +183,62 @@ bodies, provider error text, or raw internal errors; unrecognized durable
 failure values appear only as `unknown`. An opted-in OpenRouter report is
 labeled `upstream_reported` with source `openrouter_usage_cost`; see
 [Provider-reported cost](provider-reported-cost.md).
+
+`users effective` runs the exact active compiled revision through the
+production policy resolver for the selected feature and optional installation
+or component. It prints the selected plan, algorithm-specific hard limits,
+output clamps, component decision, eligible routes, priority/weight/sticky/
+fallback/retry inputs, and a source for every visible fact. It neither reserves
+quota nor dispatches upstream. The input-token estimate is a bounded untrusted
+policy fact, never accounting authority. Claim keys can be shown; claim values,
+proofs, credentials, headers, and bodies cannot.
+
+`requests effective` instead opens the immutable revision named by a logical
+request and validates the durable selected plan, pre-dispatch route, decision
+stages, and observed attempts against it. Historical claim values and override
+identity were not persisted in v1. They are reported as unavailable, never
+inferred from current user state.
+
+Sensitive user mutations are explicitly review-bound. Run `users impact` for
+the intended action, review its application-wide credential/resource counts,
+then pass the printed token with an exact `--confirm USER_ID` and a bounded
+`--reason`. The mutation re-reads the preview and refuses to send the POST if
+the token changed; the server independently recomputes it under lock and
+returns `409 Conflict` for stale state. A free-form reason is not copied into
+audit metadata. Unblocking restores future eligibility but never resurrects
+revoked sessions. Reauthentication revokes user and component sessions/refresh
+credentials; app reverification expires platform trust and refresh credentials
+without extending existing access grants.
+
+Audit pages support exact actor kind/ID, action, resource type/ID,
+environment, descriptive source, stable reason code, outcome, and half-open
+time filters. Detail output contains ordered field/operation/classification
+markers only. It never contains before/after values. `console` is derived from
+an authenticated browser session and `system` is server-owned; `cli` versus
+`api` is a bounded API-token client claim and is never authorization evidence.
+
+## Deployment diagnostics and support bundles
+
+`latchway doctor` runs the same structured, body-free deployment checks shown
+by the Admin API and Console Health center. It inspects database connectivity
+and schema, active revisions, signing-key rotation, master-key consistency,
+JWKS state, worker heartbeats, job backlog, scheduled connection tests, clock
+skew, database pool pressure, storage size, expired quota reservations, and
+SDK contract metadata. A failed check returns a non-zero status; warnings are
+reported without making an otherwise compatible deployment fail.
+
+```bash
+latchway doctor
+latchway --output json doctor
+latchway doctor --support-bundle ./latchway-support-bundle.json
+```
+
+The support-bundle path must not exist. The CLI creates it with mode `0600`
+and refuses to overwrite it. The JSON document is structurally allowlisted:
+it contains the same counts, revisions, bounded states, and build facts as the
+doctor report, but never credentials, tokens, cookies, authorization headers,
+DPoP proofs, identity tokens, the master key, provider secret values, raw
+attestation evidence, or request/response content.
 
 ## Exact route simulation
 
@@ -203,9 +270,13 @@ uses the image/tool flags as hypothetical exact structured counts for
 `per_request` guards. Their allocations are displayed with `durable: false`
 because request-local guards create no quota bucket. Opaque HTTP can project
 request bytes but cannot safely project image or tool counts. Simulation
-performs no durable reservation and no upstream dispatch. App version and the
-requested-input-token estimate are explicitly explanatory: they are returned
-for comparison but cannot influence CEL or reservation.
+performs no durable reservation and no upstream dispatch. The requested-input
+value maps to the bounded, explicitly untrusted
+`request.estimated_input_tokens` CEL fact for conservative policy or
+scheduling, but it can never influence reservation, accounting, pricing, or
+context enforcement. The requested output maximum maps to
+`request.maximum_output_tokens`; the independent production clamp still owns
+reservation. App version remains explanatory only.
 
 ## Secrets and verification
 

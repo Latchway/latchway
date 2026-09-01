@@ -182,6 +182,13 @@ func componentDefinitionSemanticIssues(
 			))
 		}
 		if role == "delegated" {
+			allowChildDelegation, _ := delegation["allowChildDelegation"].(bool)
+			if allowChildDelegation {
+				issues = append(issues, errorIssue(
+					"component_child_delegation_unsupported", base+"/delegation/allowChildDelegation",
+					"Nested component delegation is not supported in the v1 runtime; delegated components must not allow child delegation.",
+				))
+			}
 			lifetime, err := parseConfigDuration(stringValue(delegation, "maximumLifetime"))
 			if err != nil || lifetime < time.Minute || lifetime > 30*24*time.Hour {
 				issues = append(issues, errorIssue(
@@ -207,12 +214,10 @@ func componentDefinitionSemanticIssues(
 					continue
 				}
 				parentRole := stringValue(parent, "familyRole")
-				parentDelegation := objectValue(parent, "delegation")
-				allowChild, _ := parentDelegation["allowChildDelegation"].(bool)
-				if parentRole != "root" && !allowChild {
+				if parentRole != "root" {
 					issues = append(issues, errorIssue(
 						"component_parent_delegation_forbidden", path,
-						"A delegated parent must explicitly allow child delegation.",
+						"A v1 delegated component parent must be a root Component Definition.",
 					))
 				}
 			}

@@ -67,6 +67,15 @@ class RenderCompletionReportTests(unittest.TestCase):
             }
             for identifier in MODULE.REPOSITORY_IDS
         ]
+        self.documentation = {
+            "repository": "https://github.com/Latchway/latchway-docs.git",
+            "commit": "5" * 40,
+            "canonical_core_commit": COMMIT,
+            "source_commit": COMMIT,
+            "source_manifest_sha256": "6" * 64,
+            "source_tree_sha256": "8" * 64,
+            "owned_file_count": 308,
+        }
         self.candidate = {
             "schema_version": 1,
             "kind": "latchway_release_candidate",
@@ -390,6 +399,7 @@ class RenderCompletionReportTests(unittest.TestCase):
                 "oci_image_digest": OCI,
             },
             "repositories": self.repositories,
+            "documentation": self.documentation,
             "evidence_window": {
                 "started_at": "2026-08-29T01:00:00Z",
                 "finished_at": "2026-08-29T02:02:00Z",

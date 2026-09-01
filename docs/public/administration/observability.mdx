@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
@@ -74,11 +74,20 @@ latchway usage timeseries --environment env_... --interval hour
 Audit events are append-only, tenant-scoped, and redaction-safe. They contain
 opaque actor and target IDs plus ordered field, operation, and classification
 markers. They do not contain before/after values, free-form mutation reasons,
-passwords, tokens, secret values, or request bodies.
+passwords, tokens, secret values, or request bodies. Lists support exact actor
+kind/ID, action, resource type/ID, environment, descriptive source, stable
+reason code, outcome, and time filters; detail preserves the same value-free
+contract.
 
 ```bash
 latchway audit --organization org_...
+latchway audit --organization org_... --environment env_... --source cli
+latchway audit inspect aud_...
 ```
+
+`console` is derived from authenticated session transport and `system` is
+server-owned. `cli` versus `api` is a bounded client claim by an authenticated
+API token. Treat it as descriptive metadata, never authorization evidence.
 
 If a mutation returns `operation_indeterminate`, preserve its operation ID and
 request ID and reconcile the audit record before deciding whether to retry.
@@ -88,6 +97,26 @@ request ID and reconcile the audit record before deciding whether to retry.
 `GET /admin/v1/system` and `latchway status` report build, contract, protocol,
 process role, migration version, and readiness. Dependency detail is reduced to
 a readiness bit; database addresses and raw errors are not returned.
+
+The Console Health center, `GET /admin/v1/system/doctor`, and `latchway doctor`
+share one structured check contract for database/schema, active revisions,
+keys, JWKS, worker/job state, scheduled connection tests, quota cleanup, clock,
+storage, pool pressure, and SDK compatibility. Downloaded support bundles are
+structurally allowlisted and exclude credentials, tokens, cookies, proofs,
+master-key material, attestation evidence, and request/response content.
+
+Read each check as a bounded observation, not as a broader certification:
+
+| Check | What a pass actually establishes |
+| --- | --- |
+| `configuration_cache_state` | The API process that produced the report has a bounded, internally consistent cache with no entry beyond its reconciliation interval. A surface without process-local cache access reports `skipped`. |
+| `external_jwks_reachability` | Durable identity-provider state includes a recent successful JWKS refresh with no retained bounded error or stale provider. The doctor does not make a live request to the provider. |
+| `apple_verification_dependencies` | Active App Attest selections compile and the PostgreSQL-backed registered-key inventory is readable. It does not call Apple or prove a fresh physical-device assertion. |
+| `google_verification_dependencies` | Active Play Integrity and Firebase App Check selections compile, and every credential-backed selection resolves to an active server-owned record. It does not call Google or prove a fresh device verdict. |
+| `replica_coverage` | Durable heartbeats observed in the last 90 seconds cover the roles required by the diagnostic surface. A worker-only report cannot prove API coverage. |
+| `usage_rollup_freshness`, `retention_job_freshness`, and `usage_reconciliation_freshness` | The latest retained successful job falls within its fixed freshness window while a worker heartbeat is fresh. This is job-history evidence, not proof about an arbitrary request. |
+| `storage_retention` | Fixed operational retention is being maintained and the oldest retained request, usage, and audit timestamps can be inspected without content. Tenant-data retention remains deployment-policy owned. |
+| `sdk_compatibility` | The current binary has complete embedded contract metadata. `latest_compatible_version` uses the `embedded_self` source and is not a registry lookup or remote update claim. |
 
 For process-level metrics, traces, worker jobs, and alerting, continue with
 [Telemetry and jobs](/operations/telemetry-and-jobs).

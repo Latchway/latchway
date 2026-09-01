@@ -23,6 +23,10 @@ const (
 	// administrative projection. They are server limits, never client claims.
 	MaximumMeasuredRequestBytes   int64 = 100 << 20
 	MaximumRequestStructuredUnits int64 = 1_000_000
+	// MaximumPolicyRequestTokens bounds request-derived token context before it
+	// enters CEL. The input estimate remains untrusted and this bound does not
+	// make it suitable for quota, accounting, pricing, or context enforcement.
+	MaximumPolicyRequestTokens int64 = 100_000_000
 
 	trustedInputProfileDigestDomain = "latchway/trusted-input-profile/v1\x00"
 )
@@ -48,12 +52,17 @@ func IsCode(err error, code string) bool {
 
 // RequestMetadata is the policy-safe interpretation of a client request.
 type RequestMetadata struct {
-	ClientModel          string
-	Streaming            bool
+	ClientModel string
+	Streaming   bool
+	// RequestedOutputLimit is the exact normalized client request value. Zero
+	// means omitted (or not applicable for a non-generative protocol). Policy
+	// may use it as bounded request context, but the server-owned feature clamp
+	// and trusted quota projection remain authoritative.
 	RequestedOutputLimit int64
 	// EstimatedInputTokens is an untrusted scheduling hint derived before
-	// physical-model selection and provider rewriting. It MUST NOT be used for
-	// quota, cost, or context-window enforcement.
+	// physical-model selection and provider rewriting. Policy may use the
+	// bounded value for conservative denial or scheduling, but it MUST NOT be
+	// used for quota, accounting, cost, or context-window enforcement.
 	EstimatedInputTokens int64
 	RequestBytes         int64
 }

@@ -6,7 +6,7 @@ audience: "operator"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "not-applicable"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "core-operations"
 ---
 
@@ -63,10 +63,20 @@ latchway verify openrouter --server-owned \
   --max-cost-nano-usd 10000000
 ```
 
-The generic upstream diagnostic selects OpenAI Responses capability first and
-then Chat. The OpenRouter diagnostic requires Chat. Both require model-bound
-trusted input accounting, active USD pricing, and a positive maximum cost that
-proves the complete worst case before target acquisition.
+The generic upstream diagnostic selects the first supported capability in this
+order: OpenAI Responses, OpenAI Chat, OpenAI Embeddings, then Anthropic
+Messages. Responses, Chat, and Anthropic each send one non-streaming and one
+streaming request with a one-token server-owned output clamp. Anthropic requests
+also carry the adapter-owned canonical `Anthropic-Version` header. Embeddings
+sends exactly one non-streaming request; its generated-output bound is zero, so
+the durable `streaming` and `output_clamp` checks are explicitly `skipped`
+instead of reporting work that did not occur.
+
+The OpenRouter diagnostic remains Chat-only. Every supported protocol requires
+model-bound trusted input accounting, active USD pricing, and a positive maximum
+cost that proves the complete protocol-specific request set before target
+acquisition. Provider-reported usage is reconciled against every corresponding
+input, output, total-token, and configured-cost bound.
 
 Results are durable and redaction-safe. They include fixed check names and safe
 details, not prompt/response bodies, provider error text, URLs, tokens,

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latchway.dev/schemas/framework-conformance-report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_sha256", "repository", "integrations"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "repository": { "type": "string", "pattern": "^latchway(?:-[a-z0-9-]+)?$" },
+    "integrations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "support", "pass", "not_applicable"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
+          "support": { "type": "string", "enum": ["experimental", "unsupported"] },
+          "unsupported_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+          },
+          "pass": {
+            "type": "object",
+            "propertyNames": { "pattern": "^FW-[A-Z]+-[0-9]{3}$" },
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+            }
+          },
+          "not_applicable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["case_ids", "reason"],
+              "properties": {
+                "case_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "pattern": "^FW-[A-Z]+-[0-9]{3}$" }
+                },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "evidence": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "support": { "const": "unsupported" } } },
+            "then": { "required": ["unsupported_evidence"] }
+          }
+        ]
+      }
+    }
+  }
+}

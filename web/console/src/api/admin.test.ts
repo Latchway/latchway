@@ -3,15 +3,23 @@ import { z } from "zod";
 
 import {
   adminRequest,
+  AuditEventSchema,
   APITokenMetadataSchema,
   CreatedAPITokenSchema,
   AdministratorSchema,
   ClientComponentSchema,
+  DoctorReportSchema,
+  EffectiveConfigurationSchema,
+  getRequestEffectiveConfiguration,
+  getUserEffectiveConfiguration,
+  getUserOperationImpact,
   InstallationFamilySchema,
   RequestSchema,
   RevisionSchema,
   SelfTestScheduleSchema,
+  SupportBundleSchema,
   UsageSummarySchema,
+  setApplicationUserBlocked,
   UserSchema
 } from "./admin";
 import { loginAdministrator } from "./auth";
@@ -40,10 +48,11 @@ describe("canonical Admin API browser client", () => {
       normalized_claims: { plan: "standard" }, status: "blocked"
     }), { headers: { "Content-Type": "application/json" }, status: 200 })) as unknown as typeof fetch;
 
-    await adminRequest(
-      "/admin/v1/users/usr_0123456789abcdef/block?environment_id=env_0123456789abcdef",
-      UserSchema,
-      { method: "POST" },
+    await setApplicationUserBlocked(
+      "usr_0123456789abcdef",
+      "env_0123456789abcdef",
+      true,
+      { acknowledge_immediate_effect: true, impact_token: "A".repeat(43), reason: "security response" },
       fetcher
     );
 
@@ -53,9 +62,84 @@ describe("canonical Admin API browser client", () => {
         credentials: "same-origin",
         method: "POST",
         redirect: "error",
-        headers: expect.objectContaining({ "X-CSRF-Token": csrf })
+        headers: expect.objectContaining({
+          "X-CSRF-Token": csrf,
+          "X-Latchway-Admin-Source": "console",
+          "X-Latchway-Audit-Reason": "operator_reason_provided"
+        }),
+        body: JSON.stringify({ acknowledge_immediate_effect: true, impact_token: "A".repeat(43), reason: "security response" })
       })
     );
+  });
+
+  it("rejects unsafe audit attribution before sending a mutation", async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    await expect(adminRequest(
+      "/admin/v1/users/usr_0123456789abcdef/block?environment_id=env_0123456789abcdef",
+      UserSchema,
+      { method: "POST", reason: "provider_token_rotation" },
+      fetcher
+    )).rejects.toThrow("Invalid redaction-safe audit reason code.");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("accepts only value-free audit changes and structurally allowlisted support bundles", () => {
+    const change = { classification: "sensitive", field: "credential", operation: "rotate", redacted: true };
+    const audit = {
+      action: "admin.secret_rotate", actor: "admin_user:adm_00000000000000000000000000",
+      actor_id: "adm_00000000000000000000000000", actor_kind: "admin_user", changes: [change],
+      environment_id: "env_0123456789abcdef", id: "aud_00000000000000000000000000",
+      reason: "planned_rotation", request_id: "arq_00000000000000000000000000",
+      resource_id: "sec_00000000000000000000000000", resource_type: "secret", result: "succeeded",
+      source: "console", summary: { changes: [change] }, target: "secret:sec_00000000000000000000000000",
+      timestamp: "2026-08-29T00:00:00Z"
+    };
+    expect(AuditEventSchema.parse(audit).changes[0]?.redacted).toBe(true);
+    expect(() => AuditEventSchema.parse({ ...audit, before: { credential: "plaintext" } })).toThrow();
+    expect(() => AuditEventSchema.parse({
+      ...audit,
+      actor: "admin_api_token:tok_00000000000000000000000000",
+      actor_id: "tok_00000000000000000000000000",
+      actor_kind: "admin_api_token",
+      source: "console"
+    })).toThrow();
+
+    const report = {
+      checks: [{ id: "database_connectivity", state: "passed", summary: "PostgreSQL accepted a bounded probe." }],
+      database: "reachable",
+      facts: {
+        configuration: {
+          active_configurations: 1, active_environments: 1,
+          cache: { available: true, entries: 1, estimated_bytes: 16384, fresh_entries: 1, maximum_entries: 1024, maximum_estimated_bytes: 25165824, newest_loaded_at: "2026-08-29T00:00:00Z", reconciliation_interval_seconds: 30, refreshes_in_flight: 0, stale_entries: 0 },
+          draft_revisions: 0, highest_revision_number: 1, invalid_revisions: 0,
+          missing_active_configuration: 0, revisions: 1
+        },
+        database: { latency_ms: 1, pool_acquired: 1, pool_idle: 1, pool_maximum: 4, pool_total: 2, pool_utilization_ppm: 250000, reachable: true, schema_available: 27, schema_current: 27, size_bytes: 1024 },
+        expired_quota_reservations: 0,
+        jobs: { by_status: [], expired_locks: 0, failed_self_tests: 0, recent_self_tests: 0, usage_settlement_backlog: 0 },
+        replicas: { fresh_apis: 1, fresh_by_role: [{ count: 1, role: "all" }], fresh_workers: 1, stale_replicas: 0 },
+        retention: { admin_session_retention_hours: 168, job_history_retention_hours: 720, policy_mode: "fixed_operational_operator_tenant_data", runtime_instance_retention_hours: 24 },
+        runtime: { build_date: "2026-08-29", clock_offset_ms: 0, commit: "abc123", compatibility_source: "embedded_self", contract_version: "1.0.0", latest_compatible_version: "1.0.0", protocol_versions: [1, 2], role: "all", server_version: "1.0.0" },
+        security: {
+          active_secret_records: 1, active_signing_keys: 1,
+          apple_verification: { configured_selections: 1, credential_backed_selections: 0, external_network_selections: 0, registered_active_keys: 1, required_selections: 1, resolved_credential_records: 0 },
+          configured_external_jwks_providers: 1,
+          google_verification: { configured_selections: 1, credential_backed_selections: 0, external_network_selections: 1, registered_active_keys: 0, required_selections: 1, resolved_credential_records: 0 },
+          identity_provider_errors: 0, identity_providers: 1, pending_signing_keys: 0,
+          retiring_signing_keys: 0, stale_identity_provider_jwks: 0
+        }
+      },
+      generated_at: "2026-08-29T00:00:00Z", overall_state: "healthy", report_schema: 1,
+      role: "all", schema_version: 27, status: "ok"
+    };
+    expect(DoctorReportSchema.parse(report).facts.database.schema_current).toBe(27);
+    const bundle = {
+      bundle_schema: 1, generated_at: report.generated_at,
+      redaction: { excluded: ["access_tokens", "admin_sessions", "api_tokens", "authorization_headers", "cookies", "dpop_proofs", "identity_tokens", "master_key", "provider_credentials", "raw_attestation_evidence", "request_content", "response_content", "secret_values"], mode: "structural_allowlist" },
+      report, source: "admin_api"
+    };
+    expect(SupportBundleSchema.parse(bundle).redaction.mode).toBe("structural_allowlist");
+    expect(() => SupportBundleSchema.parse({ ...bundle, provider_credentials: "plaintext" })).toThrow();
   });
 
   it("sends a transient bearer without cookies or CSRF and never returns token material", async () => {
@@ -86,7 +170,8 @@ describe("canonical Admin API browser client", () => {
         { bearerToken, body: { kind: "upstream" }, method: "POST" },
         vi.fn(async () => new Response(JSON.stringify({
           code: "permission_denied", detail: "The durable credential is not authorized.", retryable: false,
-          status: 403, title: "Permission denied", type: "https://latchway.dev/problems/permission_denied"
+          status: 403, title: "Permission denied", type: "https://docs.latchway.dev/errors/permission-denied",
+          documentation_url: "https://docs.latchway.dev/errors/permission-denied"
         }), { headers: { "Content-Type": "application/problem+json" }, status: 403 })) as unknown as typeof fetch
       );
     } catch (error) {
@@ -118,6 +203,56 @@ describe("canonical Admin API browser client", () => {
     await expect(adminRequest("/admin/v1/users/usr_0123456789abcdef", UserSchema, {}, fetcher)).rejects.toMatchObject({
       problem: { code: "invalid_response" }
     });
+  });
+
+  it("uses canonical redaction-safe effective-configuration and impact endpoints", async () => {
+    const route = {
+      configured_priority: 0, configured_weight: 100, fallback_on: ["timeout"], match_expression: "true",
+      model: "gpt_mobile", observed: false, order: 1, physical_model: "gpt-5-mini",
+      retry_maximum_attempts: 2, retry_on: ["timeout"], route: "primary", source: "feature.routes[0]",
+      sticky_by: "user", upstream: "openai"
+    };
+    const effective = {
+      decision_stages: [], environment_id: "env_0123456789abcdef", environment_kind: "production",
+      evaluation_mode: "current_user_projection", feature: "assistant",
+      inputs: [{ availability: "available", detail: "Claim values are omitted.", fact: "normalized_claims", keys: ["plan"], source: "current_application_user" }],
+      limit_plan: "subscriber", limit_plan_source: "policy_expression",
+      limits: [{ algorithm: "per_request", hard: true, index: 0, metric: "input_tokens", per_request_maximum: 4096, scope: ["user", "feature"], source: "limit_plans.subscriber.limits[0]" }],
+      policy_outcome: "allowed", protocol: "openai_responses", revision_id: "rev_0123456789abcdef",
+      routes: [route], selected_route: route,
+      subject: { id: "usr_0123456789abcdef", kind: "user", user_id: "usr_0123456789abcdef" }, warnings: []
+    };
+    const requestEffective = {
+      ...effective, evaluation_mode: "recorded_request", request_status: "succeeded",
+      subject: { id: "req_0123456789abcdef", kind: "request", user_id: "usr_0123456789abcdef" }
+    };
+    const impact = {
+      access_effect: "deny_and_revoke", action: "block", applicable: true,
+      counts: { active_client_components: 1, active_component_refresh_tokens: 1, active_component_sessions: 1, active_installation_families: 1, active_refresh_tokens: 1, active_session_grants: 1 },
+      current_status: "active", immediate: true, impact_token: "A".repeat(43), reversible: true,
+      summary: "Blocks future access and revokes active credentials application-wide."
+    };
+    const fetcherMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const body = path.includes("operation-impact") ? impact : path.includes("/requests/") ? requestEffective : effective;
+      return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" }, status: 200 });
+    });
+    const fetcher = fetcherMock as unknown as typeof fetch;
+
+    await getUserEffectiveConfiguration("usr_0123456789abcdef", {
+      environmentID: "env_0123456789abcdef", estimatedInputTokens: 0, feature: "assistant",
+      maximumOutputTokens: 0, streaming: false
+    }, fetcher);
+    await getRequestEffectiveConfiguration("req_0123456789abcdef", fetcher);
+    await getUserOperationImpact("usr_0123456789abcdef", "env_0123456789abcdef", "block", fetcher);
+
+    expect(fetcherMock.mock.calls.map(([path]) => String(path))).toEqual([
+      "/admin/v1/users/usr_0123456789abcdef/effective-configuration?environment_id=env_0123456789abcdef&estimated_input_tokens=0&feature=assistant&maximum_output_tokens=0&streaming=false",
+      "/admin/v1/requests/req_0123456789abcdef/effective-configuration",
+      "/admin/v1/users/usr_0123456789abcdef/operation-impact?action=block&environment_id=env_0123456789abcdef"
+    ]);
+    expect(EffectiveConfigurationSchema.parse(effective).inputs[0]?.keys).toEqual(["plan"]);
+    expect(() => EffectiveConfigurationSchema.parse({ ...effective, provider_secret: "must-not-render" })).toThrow();
   });
 
   it("accepts only redaction-safe administrator metadata", () => {
@@ -201,6 +336,9 @@ describe("canonical Admin API browser client", () => {
   });
 
   it("keeps provider cost provenance and its fixed report source distinct", () => {
+	const requestProvenance = {
+	  config_revision_id: "rev_0123456789abcdef", decision_stages: [], selected_limit_plan: "subscriber"
+	};
 	const attempt = {
 	  attempt_number: 1, completed_at: "2026-08-29T00:00:02Z",
 	  cost_provenance: "upstream_reported", cost_source: "openrouter_usage_cost", http_status: 200,
@@ -209,14 +347,14 @@ describe("canonical Admin API browser client", () => {
 	  route: "primary", status: "succeeded", upstream: "openrouter", usage_provenance: "unknown"
 	};
 	expect(RequestSchema.parse({
-	  attempts: [attempt], environment_id: "env_0123456789abcdef", feature: "assistant",
+	  ...requestProvenance, attempts: [attempt], environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
 	  completed_at: "2026-08-29T00:00:03Z", protocol: "openai_chat",
 	  started_at: "2026-08-29T00:00:00Z", status: "succeeded",
 	  user_id: "usr_0123456789abcdef"
 	}).attempts[0]).toEqual(attempt);
 	expect(RequestSchema.parse({
-	  attempts: [attempt], client_component_id: "cmp_0123456789abcdef",
+	  ...requestProvenance, attempts: [attempt], client_component_id: "cmp_0123456789abcdef",
 	  completed_at: "2026-08-29T00:00:03Z", component_definition_id: "ios-main", component_kind: "main_app",
 	  environment_id: "env_0123456789abcdef", feature: "assistant", framework: "swift-openai",
 	  framework_version: "4.6.0", id: "req_0123456789abcdef", installation_family_id: "fam_0123456789abcdef",
@@ -224,13 +362,13 @@ describe("canonical Admin API browser client", () => {
 	  status: "succeeded", trust_source: "direct_attested", user_id: "usr_0123456789abcdef"
 	}).framework).toBe("swift-openai");
 	expect(() => RequestSchema.parse({
-	  attempts: [attempt], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z",
+	  ...requestProvenance, attempts: [attempt], client_component_id: "cmp_0123456789abcdef", completed_at: "2026-08-29T00:00:03Z",
 	  environment_id: "env_0123456789abcdef", feature: "assistant", id: "req_0123456789abcdef",
 	  installation_id: "ins_0123456789abcdef", protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z",
 	  status: "succeeded", user_id: "usr_0123456789abcdef"
 	})).toThrow();
 	expect(() => RequestSchema.parse({
-	  attempts: [{ ...attempt, cost_source: "secret source\n" }],
+	  ...requestProvenance, attempts: [{ ...attempt, cost_source: "secret source\n" }],
 	  environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
 	  completed_at: "2026-08-29T00:00:03Z", protocol: "openai_chat",
@@ -238,7 +376,7 @@ describe("canonical Admin API browser client", () => {
 	  user_id: "usr_0123456789abcdef"
 	})).toThrow();
 	const request = {
-	  attempts: [attempt], completed_at: "2026-08-29T00:00:03Z",
+	  ...requestProvenance, attempts: [attempt], completed_at: "2026-08-29T00:00:03Z",
 	  environment_id: "env_0123456789abcdef", feature: "assistant",
 	  id: "req_0123456789abcdef", installation_id: "ins_0123456789abcdef",
 	  protocol: "openai_chat", started_at: "2026-08-29T00:00:00Z", status: "succeeded",
@@ -260,6 +398,20 @@ describe("canonical Admin API browser client", () => {
 	expect(() => RequestSchema.parse({
 	  ...request, attempts: [{ ...attempt, failure_code: "timeout", status: "failed" }]
 	})).not.toThrow();
+	const recovered = {
+	  ...request, attempts: [], failure_code: "internal_error", status: "failed",
+	  decision_stages: [{
+	    completed_at: "2026-08-29T00:00:01Z", config_revision_id: requestProvenance.config_revision_id,
+	    duration_ms: 1000, limit_plan_key: "subscriber", number: 1, outcome: "succeeded",
+	    stage: "policy_evaluated", started_at: "2026-08-29T00:00:00Z"
+	  }, {
+	    completed_at: "2026-08-29T00:00:03Z", config_revision_id: requestProvenance.config_revision_id,
+	    duration_ms: 1000, failure_code: "internal_error", number: 2, outcome: "failed",
+	    stage: "lifecycle_recovered", started_at: "2026-08-29T00:00:02Z"
+	  }]
+	};
+	expect(RequestSchema.parse(recovered).decision_stages.at(-1)?.stage).toBe("lifecycle_recovered");
+	expect(() => RequestSchema.parse({ ...recovered, decision_stages: recovered.decision_stages.map((stage, index) => index === 1 ? { ...stage, stage: "unregistered_stage" } : stage) })).toThrow();
 	const values = { cost_nano_usd: 0, input_tokens: 0, logical_requests: 0, output_tokens: 0, total_tokens: 0 };
 	const analytics = {
 	  active_users: 0, attestation_failure_rate: { denominator: 0, numerator: 0, parts_per_million: 0 },

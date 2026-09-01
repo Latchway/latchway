@@ -14,21 +14,28 @@ class PublicReferenceTests(unittest.TestCase):
         self.admin = reference.load_admin_contract()
         self.client = reference.load_client_contract()
         self.errors = reference.load_error_registry()
+        self.sdk_errors = reference.load_sdk_error_registry()
         self.config = reference.load_config_schema()
 
     def test_repository_generated_references_are_current(self) -> None:
         rendered = reference.validate_repository(check_generated=True)
-        self.assertEqual(
-            set(rendered),
-            {
-                reference.ADMIN_OUTPUT,
-                reference.CLIENT_OUTPUT,
-                reference.ERROR_OUTPUT,
-                reference.CONFIG_OUTPUT,
-                reference.COMPATIBILITY_OUTPUT,
-                reference.MANIFEST_OUTPUT,
-            },
+        expected = {
+            reference.ADMIN_OUTPUT,
+            reference.CLIENT_OUTPUT,
+            reference.ERROR_OUTPUT,
+            reference.CONFIG_OUTPUT,
+            reference.COMPATIBILITY_OUTPUT,
+            reference.MANIFEST_OUTPUT,
+        }
+        expected.update(
+            reference.ERROR_PAGE_ROOT / f"{reference.error_slug(code)}.mdx"
+            for code in self.errors["codes"]
         )
+        expected.update(
+            reference.ERROR_PAGE_ROOT / f"{reference.error_slug(code)}.mdx"
+            for code in self.sdk_errors["codes"]
+        )
+        self.assertEqual(set(rendered), expected)
 
     def test_generated_manifest_binds_normative_sources_and_outputs(self) -> None:
         rendered = reference.render_all()
@@ -42,20 +49,21 @@ class PublicReferenceTests(unittest.TestCase):
                 "api/client.openapi.yaml",
                 "api/config.schema.json",
                 "api/error-codes.yaml",
+                "api/sdk-error-codes.yaml",
                 "compatibility/frameworks.schema.json",
                 "compatibility/frameworks.yaml",
             ],
         )
+        output_paths = [entry["path"] for entry in manifest["outputs"]]
         self.assertEqual(
-            [entry["path"] for entry in manifest["outputs"]],
-            [
-                "reference/admin-api.mdx",
-                "reference/client-api.mdx",
-                "reference/compatibility.mdx",
-                "reference/config-schema.mdx",
-                "reference/errors.mdx",
-            ],
+            len(output_paths),
+            5 + len(self.errors["codes"]) + len(self.sdk_errors["codes"]),
         )
+        self.assertIn("reference/errors.mdx", output_paths)
+        self.assertIn("errors/quota-exceeded.mdx", output_paths)
+        self.assertIn("errors/component-parent-trust-expired.mdx", output_paths)
+        self.assertIn("errors/root-keychain-migration-required.mdx", output_paths)
+        self.assertIn("errors/response-invalid.mdx", output_paths)
 
     def test_rendering_is_deterministic(self) -> None:
         self.assertEqual(
@@ -70,6 +78,16 @@ class PublicReferenceTests(unittest.TestCase):
             reference.render_error_reference(self.errors),
             reference.render_error_reference(self.errors),
         )
+        for code, definition in self.errors["codes"].items():
+            self.assertEqual(
+                reference.render_error_page(code, definition),
+                reference.render_error_page(code, definition),
+            )
+        for code, definition in self.sdk_errors["codes"].items():
+            self.assertEqual(
+                reference.render_sdk_error_page(code, definition),
+                reference.render_sdk_error_page(code, definition),
+            )
         self.assertEqual(
             reference.render_config_reference(self.config),
             reference.render_config_reference(self.config),
@@ -83,7 +101,7 @@ class PublicReferenceTests(unittest.TestCase):
                 operation = path_item.get(method)
                 if isinstance(operation, dict):
                     operations.append(operation["operationId"])
-        self.assertEqual(len(operations), 62)
+        self.assertEqual(len(operations), 70)
         for operation_id in operations:
             self.assertEqual(rendered.count(f"`{operation_id}`"), 1, operation_id)
         for exact_path in (
@@ -98,6 +116,9 @@ class PublicReferenceTests(unittest.TestCase):
         ):
             self.assertIn(f"`{exact_path}`", rendered)
         self.assertIn("intentionally embeds no interactive API", rendered)
+        self.assertIn("The public site disables request submission", rendered)
+        self.assertIn("LATCHWAY_ADMIN_TOKEN", rendered)
+        self.assertIn("Do not paste a production administrator token", rendered)
         self.assertIn("without changing siblings or revoking already-issued access", rendered)
 
     def test_client_reference_contains_every_operation_once(self) -> None:
@@ -125,15 +146,59 @@ class PublicReferenceTests(unittest.TestCase):
             self.assertIn(f"`{exact_path}`", rendered)
         self.assertIn("Canonical source: api/client.openapi.yaml", rendered)
         self.assertIn("intentionally embeds no interactive API", rendered)
+        self.assertIn("static bearer field cannot reproduce", rendered)
+        self.assertIn("version-matched SDK or the signed sample application", rendered)
         self.assertIn("`DPoPAccessToken` + `DPoPProof`", rendered)
 
     def test_error_reference_contains_every_stable_code_once(self) -> None:
         rendered = reference.render_error_reference(self.errors)
         self.assertEqual(len(self.errors["codes"]), 59)
         for code in self.errors["codes"]:
-            self.assertEqual(rendered.count(f"| `{code}` |"), 1, code)
+            self.assertEqual(
+                rendered.count(f"| [`{code}`](/errors/{reference.error_slug(code)}) |"),
+                1,
+                code,
+            )
             self.assertEqual(rendered.count(f"### `{code}`\n"), 1, code)
         self.assertIn("`operation_id` is required only for `operation_indeterminate`", rendered)
+        self.assertEqual(
+            set(self.sdk_errors["codes"]),
+            {
+                "attestation_provider_missing",
+                "cancelled",
+                "client_configuration_invalid",
+                "crypto_unavailable",
+                "foundation_models_gateway_error",
+                "foundation_models_gateway_stream_invalid",
+                "foundation_models_invalid_transcript",
+                "foundation_models_sampling_unsupported",
+                "key_unavailable",
+                "keychain_access_group_unavailable",
+                "network_error",
+                "network_unavailable",
+                "protocol_response_invalid",
+                "request_not_replayable",
+                "response_invalid",
+                "root_keychain_migration_required",
+                "secure_state_unavailable",
+                "server_response_invalid",
+                "session_unavailable",
+                "storage_unavailable",
+                "transport_failure",
+            },
+        )
+        for code in self.sdk_errors["codes"]:
+            self.assertEqual(
+                rendered.count(f"| [`{code}`](/errors/{reference.error_slug(code)}) |"),
+                1,
+                code,
+            )
+            self.assertEqual(rendered.count(f"### `{code}`\n"), 1, code)
+        sdk_page = reference.render_sdk_error_page(
+            "network_error", self.sdk_errors["codes"]["network_error"]
+        )
+        self.assertIn("not an HTTP Problem", sdk_page)
+        self.assertNotIn('"status":', sdk_page)
 
     def test_config_reference_contains_every_definition(self) -> None:
         rendered = reference.render_config_reference(self.config)

@@ -1015,7 +1015,7 @@ func TestClientCoordinatorAppAttestChallengePostgreSQL(t *testing.T) {
 		map[string]any{
 			"provider": "app_attest", "mode": "required", "minimumTrustLevel": "app_verified",
 			"appAttest": map[string]any{
-				"appIdPrefix": "TEAM1234", "bundleId": "com.example.challenge",
+				"appIdPrefix": "TEAM1234", "bundleId": "com.example.latchway",
 				"environment": "development", "allowedValidationCategories": []any{1},
 				"allowedBundleVersions": []any{"1.0"},
 			},

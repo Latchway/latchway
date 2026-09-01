@@ -194,6 +194,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/audit-events/{auditEventId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return one append-only redaction-safe audit event and its field-level diff. */
+        get: operations["getAuditEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/auth/bootstrap": {
         parameters: {
             query?: never;
@@ -627,7 +644,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List redaction-safe logical request metadata. */
+        /**
+         * List redaction-safe logical request metadata.
+         * @description Returns authenticated logical requests using deterministic server-side filtering, sorting, and cursor pagination. Request and response bodies, credentials, proofs, raw claims, and provider error text are never returned.
+         */
         get: operations["listLogicalRequests"];
         put?: never;
         post?: never;
@@ -644,8 +664,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Inspect one logical request and its upstream attempts. */
+        /** Inspect one logical request, its decisions, and upstream attempts. */
         get: operations["getLogicalRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/requests/{requestId}/effective-configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain one request from its immutable revision and recorded decision provenance.
+         * @description Returns the exact recorded limit plan and observed attempts against the historical compiled
+         *     revision. Historical normalized claims and override identity were not persisted in v1 and are
+         *     explicitly marked unavailable; current user state is never substituted. Provider secrets,
+         *     headers, and bodies are excluded.
+         */
+        get: operations["getRequestEffectiveConfiguration"];
         put?: never;
         post?: never;
         delete?: never;
@@ -777,10 +820,14 @@ export interface paths {
          * @description `local` runs durable PostgreSQL, schema and active-configuration checks.
          *     `upstream` and `openrouter` resolve one upstream and model from the active
          *     compiled revision, require an exact trusted-input profile plus active USD
-         *     pricing, prove the two-request worst-case cost is no greater than the
-         *     caller's ceiling, and only then use the server-held credential through the
-         *     protected dispatcher. OpenRouter additionally verifies key access/credit,
-         *     final streaming usage, output clamping, and body-free error normalization.
+         *     pricing, prove the complete protocol-specific request set's worst-case
+         *     cost is no greater than the caller's ceiling, and only then use the
+         *     server-held credential through the protected dispatcher. Responses, Chat,
+         *     and Anthropic Messages exercise non-streaming and streaming requests with
+         *     output clamping. Embeddings exercises one non-streaming request with a zero
+         *     generated-output bound and explicit skipped streaming/clamp checks.
+         *     OpenRouter remains Chat-only and additionally verifies key access/credit.
+         *     Every supported protocol verifies usage and body-free error normalization.
          *     No provider credential, prompt, response, URL, or provider error body is
          *     returned or written to the durable result.
          */
@@ -817,6 +864,46 @@ export interface paths {
         };
         /** Return redacted build, protocol, database and role status. */
         get: operations["getSystemStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/system/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run the canonical bounded, redaction-safe deployment diagnostics.
+         * @description Returns the same structured checks and facts used by `latchway doctor` and the Console Health center.
+         */
+        get: operations["runSystemDoctor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/system/support-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a structurally allowlisted support bundle.
+         * @description Never includes credentials, tokens, request or response content, raw attestation evidence, proofs, cookies, or the master key.
+         */
+        get: operations["downloadSystemSupportBundle"];
         put?: never;
         post?: never;
         delete?: never;
@@ -916,6 +1003,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{userId}/effective-configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain the policy, effective limits, and ordered routes for a user's current server state.
+         * @description Evaluates the exact active compiled revision through the production policy resolver without
+         *     reserving quota or dispatching upstream. Normalized-claim values, provider credentials,
+         *     authorization headers, and request or response bodies are never returned. When no matching
+         *     active session exists, the result is explicitly unavailable instead of inventing trust facts.
+         */
+        get: operations["getUserEffectiveConfiguration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users/{userId}/limit-override": {
         parameters: {
             query?: never;
@@ -929,6 +1039,66 @@ export interface paths {
         post?: never;
         /** Clear the user's explicit limit-plan override. */
         delete: operations["clearUserLimitOverride"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{userId}/operation-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview the exact credential impact of a sensitive user operation.
+         * @description The user identity is application-wide, so counts cover all environments in that application.
+         *     Returns bounded affected-resource counts and an optimistic impact token. The corresponding
+         *     mutation must acknowledge the immediate effect and present the same token; stale previews
+         *     fail with conflict and must be reviewed again.
+         */
+        get: operations["getUserOperationImpact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{userId}/require-app-reverification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Expire app trust and refresh credentials so platform proof must be established again.
+         * @description Existing access grants are not silently extended; they expire at their normal bound.
+         */
+        post: operations["requireApplicationUserAppReverification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{userId}/require-reauthentication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke current user and component sessions so a fresh identity exchange is required. */
+        post: operations["requireApplicationUserReauthentication"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1060,16 +1230,38 @@ export interface components {
         };
         /** @enum {string} */
         AttestationProvider: "app_attest" | "play_integrity" | "firebase_app_check" | "turnstile" | "debug";
+        AuditChange: {
+            /** @enum {string} */
+            classification: "public" | "sensitive";
+            field: string;
+            /** @enum {string} */
+            operation: "set" | "clear" | "add" | "remove" | "rotate" | "consume" | "revoke";
+            /** @description Always true for sensitive changes and false for public field markers. */
+            redacted: boolean;
+        };
         AuditEvent: {
             action: string;
             actor: string;
+            actor_id?: string;
+            /** @enum {string} */
+            actor_kind: "admin_user" | "admin_api_token" | "system";
+            changes: components["schemas"]["AuditChange"][];
+            environment_id?: components["schemas"]["EnvironmentID"];
             id: string;
+            reason?: components["schemas"]["AuditReason"];
             request_id: string;
+            resource_id: string;
+            resource_type: string;
             /** @enum {string} */
             result: "succeeded" | "denied" | "failed" | "indeterminate";
-            /** @description Redaction-safe structured change summary. */
+            /**
+             * @description Descriptive transport source, never an authorization fact. Console and system are server-derived; CLI versus API is client-claimed by an authenticated API token.
+             * @enum {string}
+             */
+            source: "console" | "cli" | "api" | "system";
+            /** @description Compatibility wrapper around the canonical value-free field-level changes. */
             summary: {
-                [key: string]: unknown;
+                changes: components["schemas"]["AuditChange"][];
             };
             target: string;
             /** Format: date-time */
@@ -1079,6 +1271,8 @@ export interface components {
             items: components["schemas"]["AuditEvent"][];
             page: components["schemas"]["PageInfo"];
         };
+        /** @description Stable operational reason code. Free-form user text and secret-bearing labels are never copied into the audit ledger. */
+        AuditReason: string;
         BootstrapRequest: {
             bootstrap_token: string;
             display_name: string;
@@ -1125,7 +1319,7 @@ export interface components {
             sdk_version?: string;
             /** Format: date-time */
             session_expires_at?: string;
-            /** @description Count of this component's non-active revoked or expired session families. */
+            /** @description Historical wire name for the count of this component's non-active revoked or expired session families; it is not a failed-request count. */
             session_failure_count: number;
             session_family_id?: components["schemas"]["ComponentSessionFamilyID"];
             /** @enum {string} */
@@ -1782,6 +1976,14 @@ export interface components {
             items: components["schemas"]["ConfigurationRevision"][];
             page: components["schemas"]["PageInfo"];
         };
+        ConfirmedUserOperationRequest: {
+            /** @constant */
+            acknowledge_immediate_effect: true;
+            /** @description Optimistic token from the immediately preceding operation-impact preview. */
+            impact_token: string;
+            /** @description Required operator justification. Only a reason-present audit marker is persisted; free-form text is not copied into audit metadata. */
+            reason: string;
+        };
         CreateAdministratorRequest: {
             display_name: string;
             /** Format: email */
@@ -1847,7 +2049,253 @@ export interface components {
             /** @default true */
             dnsPinning: boolean;
         } & unknown;
+        DoctorCheck: {
+            id: string;
+            remediation?: string;
+            /** @enum {string} */
+            state: "passed" | "warning" | "failed" | "skipped";
+            summary: string;
+        };
+        DoctorConfigurationCacheFacts: {
+            available: boolean;
+            entries: number;
+            estimated_bytes: number;
+            fresh_entries: number;
+            maximum_entries: number;
+            maximum_estimated_bytes: number;
+            /** Format: date-time */
+            newest_loaded_at?: string;
+            reconciliation_interval_seconds: number;
+            refreshes_in_flight: number;
+            stale_entries: number;
+        };
+        DoctorConfigurationFacts: {
+            active_configurations: number;
+            active_environments: number;
+            cache: components["schemas"]["DoctorConfigurationCacheFacts"];
+            draft_revisions: number;
+            highest_revision_number: number;
+            invalid_revisions: number;
+            missing_active_configuration: number;
+            revisions: number;
+        };
+        DoctorDatabaseFacts: {
+            latency_ms: number;
+            pool_acquired: number;
+            pool_idle: number;
+            pool_maximum: number;
+            pool_total: number;
+            pool_utilization_ppm: number;
+            reachable: boolean;
+            schema_available: number;
+            schema_current: number;
+            size_bytes: number;
+        };
+        DoctorFacts: {
+            configuration: components["schemas"]["DoctorConfigurationFacts"];
+            database: components["schemas"]["DoctorDatabaseFacts"];
+            expired_quota_reservations: number;
+            jobs: components["schemas"]["DoctorJobFacts"];
+            replicas: components["schemas"]["DoctorReplicaFacts"];
+            retention: components["schemas"]["DoctorRetentionFacts"];
+            runtime: components["schemas"]["DoctorRuntimeFacts"];
+            security: components["schemas"]["DoctorSecurityFacts"];
+        };
+        DoctorJobFacts: {
+            by_status: {
+                count: number;
+                /** @enum {string} */
+                status: "pending" | "running" | "succeeded" | "failed" | "dead";
+            }[];
+            expired_locks: number;
+            failed_self_tests: number;
+            /** Format: date-time */
+            last_external_jwks_refresh_at?: string;
+            /** Format: date-time */
+            last_retention_at?: string;
+            /** Format: date-time */
+            last_signing_key_rotation_at?: string;
+            /** Format: date-time */
+            last_usage_reconciliation_at?: string;
+            /** Format: date-time */
+            last_usage_rollup_at?: string;
+            /** Format: date-time */
+            oldest_pending_at?: string;
+            recent_self_tests: number;
+            usage_settlement_backlog: number;
+        };
+        DoctorReplicaFacts: {
+            fresh_apis: number;
+            fresh_by_role: {
+                count: number;
+                /** @enum {string} */
+                role: "all" | "api" | "worker";
+            }[];
+            fresh_workers: number;
+            /** Format: date-time */
+            newest_heartbeat_at?: string;
+            stale_replicas: number;
+        };
+        DoctorReport: {
+            checks: components["schemas"]["DoctorCheck"][];
+            /** @enum {string} */
+            database: "reachable" | "unreachable";
+            facts: components["schemas"]["DoctorFacts"];
+            /** Format: date-time */
+            generated_at: string;
+            /** @enum {string} */
+            overall_state: "healthy" | "degraded" | "unhealthy";
+            /** @constant */
+            report_schema: 1;
+            /** @enum {string} */
+            role: "all" | "api" | "worker";
+            schema_version: number;
+            /**
+             * @description Compatibility status for database/schema readiness.
+             * @enum {string}
+             */
+            status: "ok" | "error";
+        };
+        DoctorRetentionFacts: {
+            admin_session_retention_hours: number;
+            job_history_retention_hours: number;
+            /** Format: date-time */
+            oldest_audit_at?: string;
+            /** Format: date-time */
+            oldest_request_at?: string;
+            /** Format: date-time */
+            oldest_usage_at?: string;
+            /** @enum {string} */
+            policy_mode: "fixed_operational_operator_tenant_data";
+            runtime_instance_retention_hours: number;
+        };
+        DoctorRuntimeFacts: {
+            build_date: string;
+            clock_offset_ms: number;
+            commit: string;
+            /** @enum {string} */
+            compatibility_source: "embedded_self";
+            contract_version: string;
+            latest_compatible_version: string;
+            protocol_versions: number[];
+            /** @enum {string} */
+            role: "all" | "api" | "worker";
+            server_version: string;
+        };
+        DoctorSecurityFacts: {
+            active_secret_records: number;
+            active_signing_keys: number;
+            apple_verification: components["schemas"]["DoctorVerificationDependencyFacts"];
+            configured_external_jwks_providers: number;
+            google_verification: components["schemas"]["DoctorVerificationDependencyFacts"];
+            identity_provider_errors: number;
+            identity_providers: number;
+            pending_signing_keys: number;
+            retiring_signing_keys: number;
+            /** Format: date-time */
+            signing_key_expires_at?: string;
+            stale_identity_provider_jwks: number;
+        };
+        DoctorVerificationDependencyFacts: {
+            configured_selections: number;
+            credential_backed_selections: number;
+            external_network_selections: number;
+            registered_active_keys: number;
+            required_selections: number;
+            resolved_credential_records: number;
+        };
         Duration: string;
+        EffectiveConfiguration: {
+            component_allowed?: boolean;
+            component_definition_id?: components["schemas"]["Identifier"];
+            /** @description Exact append-only stages for recorded requests; empty for current-state projections and legacy requests. */
+            decision_stages: components["schemas"]["RequestDecisionStage"][];
+            denial_reason?: string;
+            environment_id: components["schemas"]["EnvironmentID"];
+            /** @enum {string} */
+            environment_kind: "development" | "staging" | "production";
+            /** @enum {string} */
+            evaluation_mode: "current_user_projection" | "recorded_request";
+            feature: components["schemas"]["Identifier"];
+            inputs: components["schemas"]["EffectiveConfigurationInput"][];
+            limit_plan?: components["schemas"]["Identifier"];
+            limit_plan_source?: string;
+            limits: components["schemas"]["EffectiveLimit"][];
+            matched_access_expression?: string;
+            matched_limit_plan_expression?: string;
+            output?: components["schemas"]["EffectiveOutput"];
+            /** @enum {string} */
+            policy_outcome: "allowed" | "denied" | "unavailable";
+            /** @enum {string} */
+            protocol?: "openai_responses" | "openai_chat" | "openai_embeddings" | "anthropic_messages" | "opaque_http";
+            /** @enum {string} */
+            request_status?: "succeeded" | "failed" | "denied" | "canceled" | "unknown";
+            revision_id: components["schemas"]["RevisionID"];
+            routes: components["schemas"]["EffectiveRoute"][];
+            selected_route?: components["schemas"]["EffectiveRoute"];
+            subject: components["schemas"]["EffectiveConfigurationSubject"];
+            user_override_id?: components["schemas"]["UserOverrideID"];
+            warnings: string[];
+        };
+        EffectiveConfigurationInput: {
+            /** @enum {string} */
+            availability: "available" | "unavailable";
+            detail: string;
+            fact: string;
+            keys?: string[];
+            source: string;
+            values?: {
+                [key: string]: string;
+            };
+        };
+        EffectiveConfigurationSubject: {
+            component_id?: components["schemas"]["ClientComponentID"];
+            id: string;
+            installation_id?: components["schemas"]["InstallationID"];
+            /** @enum {string} */
+            kind: "user" | "request";
+            user_id: components["schemas"]["UserID"];
+        };
+        EffectiveLimit: {
+            /** @enum {string} */
+            algorithm: "calendar" | "token_bucket" | "per_request" | "concurrency";
+            capacity?: number;
+            /** @constant */
+            hard: true;
+            index: number;
+            maximum?: number;
+            metric: components["schemas"]["Identifier"];
+            per_request_maximum?: number;
+            refill_per_second?: string;
+            scope: components["schemas"]["Identifier"][];
+            source: string;
+            timezone?: string;
+            window?: string;
+        };
+        EffectiveOutput: {
+            configured_absolute_maximum_tokens?: number;
+            configured_default_maximum_tokens?: number;
+            effective_default_maximum_tokens?: number;
+            effective_maximum_tokens?: number;
+            requested_maximum_tokens?: number;
+            source: string;
+        };
+        EffectiveRoute: {
+            configured_priority: number;
+            configured_weight: number;
+            fallback_on: components["schemas"]["Identifier"][];
+            match_expression: string;
+            model: components["schemas"]["Identifier"];
+            observed: boolean;
+            order: number;
+            physical_model: string;
+            retry_maximum_attempts: number;
+            retry_on: components["schemas"]["Identifier"][];
+            route: components["schemas"]["Identifier"];
+            source: string;
+            sticky_by?: string;
+            upstream: components["schemas"]["Identifier"];
+        };
         Environment: {
             active_revision_id?: components["schemas"]["RevisionID"];
             application_id: components["schemas"]["ApplicationID"];
@@ -2006,7 +2454,12 @@ export interface components {
             completed_at?: string;
             component_definition_id?: components["schemas"]["Identifier"];
             component_kind?: components["schemas"]["ClientComponentKind"];
+            config_revision_id: components["schemas"]["RevisionID"];
+            /** @description Redaction-safe append-only lifecycle ordered by contiguous stage number beginning at one. Legacy pre-schema-26 requests can have no stages. */
+            decision_stages: components["schemas"]["RequestDecisionStage"][];
             environment_id: components["schemas"]["EnvironmentID"];
+            /** @description Stable registered problem code or `unknown`; omitted when the logical request has no terminal failure. */
+            failure_code?: string;
             feature: components["schemas"]["Identifier"];
             framework?: components["schemas"]["Identifier"];
             framework_version?: string;
@@ -2015,10 +2468,15 @@ export interface components {
             installation_id: components["schemas"]["InstallationID"];
             /** @enum {string} */
             protocol: "openai_responses" | "openai_chat" | "openai_embeddings" | "anthropic_messages" | "opaque_http";
+            selected_limit_plan: components["schemas"]["Identifier"];
+            selected_model?: components["schemas"]["Identifier"];
+            selected_physical_model?: string;
+            selected_route?: components["schemas"]["Identifier"];
+            selected_upstream?: components["schemas"]["Identifier"];
             /** Format: date-time */
             started_at: string;
             /** @enum {string} */
-            status: "succeeded" | "failed" | "canceled" | "unknown";
+            status: "succeeded" | "failed" | "denied" | "canceled" | "unknown";
             trust_source?: components["schemas"]["ComponentTrustSource"];
             usage?: components["schemas"]["UsageValues"];
             user_id: components["schemas"]["UserID"];
@@ -2138,6 +2596,8 @@ export interface components {
         Problem: {
             code: components["schemas"]["code"];
             detail: string;
+            /** Format: uri */
+            documentation_url: string;
             errors?: components["schemas"]["ValidationIssue"][];
             /** Format: uri-reference */
             instance?: string;
@@ -2157,6 +2617,34 @@ export interface components {
             currency: "USD";
             /** @constant */
             source: "openrouter_usage_cost";
+        };
+        RequestDecisionStage: {
+            /** Format: date-time */
+            completed_at: string;
+            config_revision_id: components["schemas"]["RevisionID"];
+            /** Format: int64 */
+            duration_ms: number;
+            /** @description Stable registered problem code or `unknown`; omitted for a successful stage. Raw dependency or provider errors are never returned. */
+            failure_code?: string;
+            /** @enum {string} */
+            limit_algorithm?: "calendar" | "token_bucket" | "per_request" | "concurrency";
+            /** Format: int64 */
+            limit_maximum?: number;
+            limit_metric?: string;
+            limit_plan_key?: components["schemas"]["Identifier"];
+            limit_rule_key?: string;
+            model?: components["schemas"]["Identifier"];
+            number: number;
+            /** @enum {string} */
+            outcome: "succeeded" | "denied" | "failed" | "cancelled";
+            physical_model?: string;
+            policy_rule_key?: string;
+            route?: components["schemas"]["Identifier"];
+            /** @enum {string} */
+            stage: "identity_verified" | "client_trust_verified" | "client_context_validated" | "configuration_loaded" | "request_inspected" | "policy_evaluated" | "route_selected" | "quota_rule_evaluated" | "quota_reserved" | "lifecycle_recovered";
+            /** Format: date-time */
+            started_at: string;
+            upstream?: components["schemas"]["Identifier"];
         };
         RequestID: string;
         RequestPage: {
@@ -2233,8 +2721,9 @@ export interface components {
                 framing_unit_count?: number;
                 /** @description Hypothetical exact structured image count used by a hard per-request guard. */
                 image_units?: number;
-                /** @description Explanatory untrusted estimate; never used by CEL or reservation. */
+                /** @description Bounded untrusted simulation value exposed to CEL as request.estimated_input_tokens; never reservation, quota, accounting, pricing, or context-window authority. */
                 requested_input_tokens?: number;
+                /** @description Exact normalized requested maximum exposed to CEL as request.maximum_output_tokens; the independent server-owned feature clamp remains authoritative. */
                 requested_output_max?: number;
                 /** @description Hypothetical exact post-rewrite body size used for conservative trusted-input projection. */
                 rewritten_request_bytes?: number;
@@ -2275,7 +2764,9 @@ export interface components {
                 };
                 /** @enum {string} */
                 platform: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
+                /** @description Simulation input mapped to request.estimated_input_tokens; untrusted and never accounting authority. */
                 requested_input_tokens: number;
+                /** @description Simulation input mapped to request.maximum_output_tokens before the independent server-owned clamp. */
                 requested_output_max: number;
                 revision_id: components["schemas"]["RevisionID"];
                 rewritten_request_bytes: number;
@@ -2316,7 +2807,10 @@ export interface components {
             physical_model?: string;
             /** @enum {string} */
             pricing_confidence?: "configured" | "unknown";
-            /** @enum {string} */
+            /**
+             * @description Server-owned protocol bound from the immutable selected feature.
+             * @enum {string}
+             */
             protocol?: "openai_responses" | "openai_chat" | "openai_embeddings" | "anthropic_messages" | "opaque_http";
             reservation?: {
                 allocations: {
@@ -2479,6 +2973,20 @@ export interface components {
             kind?: "upstream" | "openrouter";
             max_cost_nano_usd: number;
         });
+        SupportBundle: {
+            /** @constant */
+            bundle_schema: 1;
+            /** Format: date-time */
+            generated_at: string;
+            redaction: {
+                excluded: string[];
+                /** @constant */
+                mode: "structural_allowlist";
+            };
+            report: components["schemas"]["DoctorReport"];
+            /** @enum {string} */
+            source: "admin_api" | "local_cli" | "unknown";
+        };
         SystemStatus: {
             /** @constant */
             contract_version: "1.0.0";
@@ -2671,6 +3179,32 @@ export interface components {
             limit_plan: components["schemas"]["Identifier"];
             reason: string;
         };
+        UserOperationCounts: {
+            active_client_components: number;
+            active_component_refresh_tokens: number;
+            active_component_sessions: number;
+            active_installation_families: number;
+            active_refresh_tokens: number;
+            active_session_grants: number;
+        };
+        UserOperationImpact: {
+            access_effect: string;
+            /** @enum {string} */
+            action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+            applicable: boolean;
+            counts: components["schemas"]["UserOperationCounts"];
+            /** @enum {string} */
+            current_status: "active" | "blocked";
+            immediate: boolean;
+            impact_token: string;
+            reversible: boolean;
+            summary: string;
+        };
+        UserOperationResult: {
+            impact: components["schemas"]["UserOperationImpact"];
+            operation_id: string;
+            user: components["schemas"]["ApplicationUser"];
+        };
         UserOverrideID: string;
         UserPage: {
             items: components["schemas"]["ApplicationUser"][];
@@ -2718,6 +3252,7 @@ export interface components {
         Cursor: string;
         EndTime: string;
         EnvironmentFilter: components["schemas"]["EnvironmentID"];
+        EnvironmentFilterOptional: components["schemas"]["EnvironmentID"];
         EnvironmentID: components["schemas"]["EnvironmentID"];
         IfMatch: string;
         InstallationFamilyFilter: components["schemas"]["InstallationFamilyID"];
@@ -3102,9 +3637,24 @@ export interface operations {
     listAuditEvents: {
         parameters: {
             query?: {
+                action?: string;
+                actor_id?: string;
+                actor_kind?: "admin_user" | "admin_api_token" | "system";
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Exclusive UTC occurrence-time bound. */
+                end?: string;
+                environment_id?: components["parameters"]["EnvironmentFilterOptional"];
                 organization_id?: components["parameters"]["OrganizationFilter"];
                 page_size?: components["parameters"]["PageSize"];
+                /** @description Exact stable operational reason code; arbitrary free-form text is not stored in audit events. */
+                reason?: components["schemas"]["AuditReason"];
+                resource_id?: string;
+                resource_type?: string;
+                result?: "succeeded" | "denied" | "failed" | "indeterminate";
+                /** @description Descriptive transport source. Console is derived from authenticated session transport; CLI versus API is a bounded API-token client claim and is not authorization evidence. */
+                source?: "console" | "cli" | "api" | "system";
+                /** @description Inclusive UTC occurrence-time bound. */
+                start?: string;
             };
             header?: never;
             path?: never;
@@ -3119,6 +3669,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAuditEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auditEventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit event detail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEvent"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -3862,9 +4435,33 @@ export interface operations {
     listLogicalRequests: {
         parameters: {
             query: {
+                component_kind?: components["schemas"]["Identifier"];
+                cost_max_nano_usd?: number;
+                cost_min_nano_usd?: number;
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Exclusive upper bound for request start time. */
+                end?: string;
                 environment_id: components["parameters"]["EnvironmentFilter"];
+                /** @description Matches a stable registered problem code, a public upstream-failure category, or `unknown`. */
+                error_code?: string;
+                feature?: components["schemas"]["Identifier"];
+                latency_max_ms?: number;
+                latency_min_ms?: number;
+                /** @description Matches the configured model key or exact redaction-safe physical-model identifier. */
+                model?: string;
                 page_size?: components["parameters"]["PageSize"];
+                platform?: "ios" | "android" | "web" | "react_native_ios" | "react_native_android" | "node";
+                request_id?: components["schemas"]["RequestID"];
+                route?: components["schemas"]["Identifier"];
+                sort?: "started_at_desc" | "started_at_asc";
+                /** @description Inclusive lower bound for request start time. */
+                start?: string;
+                status?: "succeeded" | "failed" | "denied" | "canceled" | "unknown";
+                tokens_max?: number;
+                tokens_min?: number;
+                trust_source?: components["schemas"]["Identifier"];
+                upstream?: components["schemas"]["Identifier"];
+                user_id?: components["schemas"]["UserID"];
             };
             header?: never;
             path?: never;
@@ -3895,13 +4492,36 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Request metadata, attempts and usage provenance; no bodies by default. */
+            /** @description Request metadata, append-only decision provenance, attempts, and usage provenance; no bodies. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["LogicalRequest"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getRequestEffectiveConfiguration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: components["parameters"]["RequestResourceID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redaction-safe historical effective configuration and provenance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveConfiguration"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4189,6 +4809,49 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    runSystemDoctor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current diagnostic report, including degraded or failed checks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DoctorReport"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    downloadSystemSupportBundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redacted JSON support bundle. */
+            200: {
+                headers: {
+                    "Content-Disposition"?: "attachment; filename=\"latchway-support-bundle.json\"";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportBundle"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getUsageSummary: {
         parameters: {
             query: {
@@ -4306,7 +4969,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmedUserOperationRequest"];
+            };
+        };
         responses: {
             /** @description Updated user. */
             200: {
@@ -4315,6 +4982,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationUser"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getUserEffectiveConfiguration: {
+        parameters: {
+            query: {
+                /** @description Mutually exclusive with installation_id. */
+                component_id?: components["schemas"]["ClientComponentID"];
+                environment_id: components["parameters"]["EnvironmentFilter"];
+                estimated_input_tokens?: number;
+                feature: components["schemas"]["Identifier"];
+                installation_id?: components["schemas"]["InstallationID"];
+                maximum_output_tokens?: number;
+                streaming?: boolean;
+            };
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redaction-safe current-state projection with source provenance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveConfiguration"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4383,6 +5083,98 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getUserOperationImpact: {
+        parameters: {
+            query: {
+                action: "block" | "unblock" | "require_reauthentication" | "require_app_reverification";
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current operation impact and optimistic confirmation token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOperationImpact"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    requireApplicationUserAppReverification: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmedUserOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Completed operation, reviewed impact, and current user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOperationResult"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    requireApplicationUserReauthentication: {
+        parameters: {
+            query: {
+                environment_id: components["parameters"]["EnvironmentFilter"];
+            };
+            header?: {
+                /** @description Required and verified for every cookie-authenticated mutation; ignored for bearer-token auth. */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmedUserOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Completed operation, reviewed impact, and current user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOperationResult"];
+                };
+            };
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     unblockApplicationUser: {
         parameters: {
             query: {
@@ -4397,7 +5189,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmedUserOperationRequest"];
+            };
+        };
         responses: {
             /** @description Updated user. */
             200: {
@@ -4408,6 +5204,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApplicationUser"];
                 };
             };
+            409: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };

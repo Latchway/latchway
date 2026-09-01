@@ -18,7 +18,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/latchway/latchway/adapters/protocol/anthropicmessages"
 	"github.com/latchway/latchway/adapters/protocol/openaichat"
+	"github.com/latchway/latchway/adapters/protocol/openaiembeddings"
 	"github.com/latchway/latchway/adapters/protocol/openairesponses"
 	"github.com/latchway/latchway/internal/adminauth"
 	"github.com/latchway/latchway/internal/configuration"
@@ -159,7 +161,12 @@ func credentialSelfTestProtocol(model configuration.Model, kind string) (string,
 		_, ok := capabilities[protocol.OpenAIChatID]
 		return protocol.OpenAIChatID, ok
 	}
-	for _, candidate := range []string{protocol.OpenAIResponsesID, protocol.OpenAIChatID} {
+	for _, candidate := range []string{
+		protocol.OpenAIResponsesID,
+		protocol.OpenAIChatID,
+		protocol.OpenAIEmbeddingsID,
+		protocol.AnthropicMessagesID,
+	} {
 		if _, ok := capabilities[candidate]; ok {
 			return candidate, true
 		}
@@ -198,7 +205,7 @@ func (runner *productionCredentialSelfTests) Run(
 	}
 	protocolID, ok := credentialSelfTestProtocol(model, input.Kind)
 	if !ok {
-		return failedCredentialSelfTest(checks, "selection", "The configured model does not support a bounded OpenAI Responses or Chat self-test.")
+		return failedCredentialSelfTest(checks, "selection", "The configured model does not support a bounded credential self-test protocol.")
 	}
 	if input.Kind == "openrouter" && !validOpenRouterTarget(configuredUpstream) {
 		return failedCredentialSelfTest(checks, "selection", "The selected target is not the canonical HTTPS OpenRouter API.")
@@ -209,19 +216,17 @@ func (runner *productionCredentialSelfTests) Run(
 	if err != nil {
 		return failedCredentialSelfTest(checks, "budget", "Trusted input accounting and active configured pricing are required.")
 	}
-	nonStreaming, err := prepareCredentialRequest(runCtx, protocolID, model.UpstreamModel, profile, rates, source, false)
+	preparedRequests, err := prepareCredentialRequests(
+		runCtx, protocolID, model.UpstreamModel, profile, rates, source,
+	)
 	if err != nil {
-		return failedCredentialSelfTest(checks, "budget", "The non-streaming request could not be bounded before dispatch.")
+		return failedCredentialSelfTest(checks, "budget", "The protocol-specific diagnostic request set could not be bounded before dispatch.")
 	}
-	streaming, err := prepareCredentialRequest(runCtx, protocolID, model.UpstreamModel, profile, rates, source, true)
-	if err != nil {
-		return failedCredentialSelfTest(checks, "budget", "The streaming request could not be bounded before dispatch.")
-	}
-	worstCaseCost, ok := checkedSelfTestAdd(nonStreaming.maximumCostNano, streaming.maximumCostNano)
+	worstCaseCost, ok := credentialSelfTestWorstCaseCost(preparedRequests)
 	if !ok || worstCaseCost > input.MaxCostNano {
-		return failedCredentialSelfTest(checks, "budget", "The configured two-request worst-case cost exceeds the operator ceiling.")
+		return failedCredentialSelfTest(checks, "budget", "The configured diagnostic worst-case cost exceeds the operator ceiling.")
 	}
-	checks = append(checks, passedSelfTestCheck("budget", "Both requests are bounded by trusted input accounting and configured pricing before dispatch."))
+	checks = append(checks, passedSelfTestCheck("budget", "Every protocol-applicable request is bounded by trusted input accounting and configured pricing before dispatch."))
 
 	if input.Kind == "openrouter" {
 		if err := runner.verifyOpenRouterKey(runCtx, input.Scope, configuredUpstream, worstCaseCost); err != nil {
@@ -230,35 +235,40 @@ func (runner *productionCredentialSelfTests) Run(
 		checks = append(checks, passedSelfTestCheck("key", "OpenRouter accepted the server-held credential and reported sufficient access."))
 	}
 
-	nonStreamingUsage, err := runner.dispatchCredentialRequest(runCtx, input.Scope, configuredUpstream, nonStreaming)
-	if err != nil {
-		return failedCredentialSelfTest(checks, "non_streaming", "The bounded non-streaming provider request failed.")
+	usages := make([]protocol.Usage, 0, len(preparedRequests))
+	for _, prepared := range preparedRequests {
+		usage, dispatchErr := runner.dispatchCredentialRequest(runCtx, input.Scope, configuredUpstream, prepared)
+		if dispatchErr != nil {
+			if prepared.streaming {
+				return failedCredentialSelfTest(checks, "streaming", "The bounded streaming provider request or final usage frame failed.")
+			}
+			return failedCredentialSelfTest(checks, "non_streaming", "The bounded non-streaming provider request failed.")
+		}
+		usages = append(usages, usage)
+		if prepared.streaming {
+			checks = append(checks, passedSelfTestCheck("streaming", "A bounded stream completed and final-frame usage was extracted."))
+		} else {
+			checks = append(checks, passedSelfTestCheck("non_streaming", "A bounded non-streaming request completed with provider usage."))
+		}
 	}
-	checks = append(checks, passedSelfTestCheck("non_streaming", "A bounded non-streaming request completed with provider usage."))
-
-	streamingUsage, err := runner.dispatchCredentialRequest(runCtx, input.Scope, configuredUpstream, streaming)
-	if err != nil {
-		return failedCredentialSelfTest(checks, "streaming", "The bounded streaming provider request or final usage frame failed.")
+	if protocolID == protocol.OpenAIEmbeddingsID {
+		checks = append(checks, skippedSelfTestCheck("streaming", "OpenAI Embeddings is non-streaming; no streaming request was sent."))
 	}
-	checks = append(checks, passedSelfTestCheck("streaming", "A bounded stream completed and final-frame usage was extracted."))
 
-	actualCost, ok := reportedCredentialSelfTestCost(rates, source, nonStreamingUsage, streamingUsage)
+	actualCost, ok := reportedCredentialSelfTestCost(rates, source, usages...)
 	if !ok || actualCost > worstCaseCost || actualCost > input.MaxCostNano ||
-		nonStreamingUsage.OutputTokens > nonStreaming.outputMaximum ||
-		streamingUsage.OutputTokens > streaming.outputMaximum ||
-		nonStreamingUsage.InputTokens > nonStreaming.inputMaximum ||
-		nonStreamingUsage.TotalTokens > nonStreaming.totalMaximum ||
-		streamingUsage.InputTokens > streaming.inputMaximum ||
-		streamingUsage.TotalTokens > streaming.totalMaximum {
+		!credentialSelfTestUsagesWithinBounds(preparedRequests, usages) {
 		return failedCredentialSelfTest(checks, "usage", "Reported usage exceeded a trusted token or cost bound.")
 	}
-	checks = append(checks,
-		passedSelfTestCheck("usage", "Input, output, total-token, and configured-cost reconciliation passed."),
-		passedSelfTestCheck("output_clamp", "Both provider requests honored the one-token server clamp."),
-	)
+	checks = append(checks, passedSelfTestCheck("usage", "Input, output, total-token, and configured-cost reconciliation passed."))
+	if protocolID == protocol.OpenAIEmbeddingsID {
+		checks = append(checks, skippedSelfTestCheck("output_clamp", "OpenAI Embeddings has no generated-token output, so an output clamp does not apply."))
+	} else {
+		checks = append(checks, passedSelfTestCheck("output_clamp", "Both provider requests honored the one-token server clamp."))
+	}
 
 	if err := runner.verifyProviderErrorNormalization(
-		runCtx, input.Scope, configuredUpstream, nonStreaming.publicPath, nonStreaming.providerPath,
+		runCtx, input.Scope, configuredUpstream, preparedRequests[0],
 	); err != nil {
 		return failedCredentialSelfTest(checks, "error_normalization", "The provider error normalization probe failed.")
 	}
@@ -267,14 +277,73 @@ func (runner *productionCredentialSelfTests) Run(
 }
 
 type preparedCredentialRequest struct {
-	request         *http.Request
-	adapter         protocol.Adapter
-	providerPath    string
-	publicPath      string
-	maximumCostNano int64
-	inputMaximum    int64
-	outputMaximum   int64
-	totalMaximum    int64
+	request          *http.Request
+	adapter          protocol.Adapter
+	providerPath     string
+	publicPath       string
+	forwardedHeaders []string
+	streaming        bool
+	maximumCostNano  int64
+	inputMaximum     int64
+	outputMaximum    int64
+	totalMaximum     int64
+}
+
+func prepareCredentialRequests(
+	ctx context.Context,
+	protocolID string,
+	physicalModel string,
+	profile protocol.TrustedInputProfile,
+	rates pricing.Rates,
+	source pricing.Source,
+) ([]preparedCredentialRequest, error) {
+	streamModes := []bool{false, true}
+	if protocolID == protocol.OpenAIEmbeddingsID {
+		streamModes = []bool{false}
+	}
+	requests := make([]preparedCredentialRequest, 0, len(streamModes))
+	for _, stream := range streamModes {
+		prepared, err := prepareCredentialRequest(
+			ctx, protocolID, physicalModel, profile, rates, source, stream,
+		)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, prepared)
+	}
+	return requests, nil
+}
+
+func credentialSelfTestWorstCaseCost(requests []preparedCredentialRequest) (int64, bool) {
+	if len(requests) == 0 || len(requests) > 2 {
+		return 0, false
+	}
+	var total int64
+	for _, request := range requests {
+		var ok bool
+		total, ok = checkedSelfTestAdd(total, request.maximumCostNano)
+		if !ok {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func credentialSelfTestUsagesWithinBounds(
+	requests []preparedCredentialRequest,
+	usages []protocol.Usage,
+) bool {
+	if len(requests) == 0 || len(requests) != len(usages) {
+		return false
+	}
+	for index, request := range requests {
+		usage := usages[index]
+		if usage.InputTokens > request.inputMaximum || usage.OutputTokens > request.outputMaximum ||
+			usage.TotalTokens > request.totalMaximum {
+			return false
+		}
+	}
+	return true
 }
 
 func prepareCredentialRequest(
@@ -290,6 +359,8 @@ func prepareCredentialRequest(
 	var adapter protocol.Adapter
 	var preflighter protocol.InputPreflighter
 	var publicPath, providerPath string
+	forwardedHeaders := []string{"Content-Type"}
+	outputMaximum := int64(1)
 	switch protocolID {
 	case protocol.OpenAIResponsesID:
 		value := openairesponses.Adapter{MaximumBodyBytes: 64 << 10}
@@ -303,6 +374,27 @@ func prepareCredentialRequest(
 		value := openaichat.Adapter{MaximumBodyBytes: 64 << 10}
 		adapter, preflighter = value, value
 		publicPath, providerPath = protocol.OpenAIChatPublicPath, protocol.OpenAIChatProviderPath
+		bodyValue = map[string]any{
+			"model":    physicalModel,
+			"messages": []map[string]string{{"role": "user", "content": "Reply with OK."}},
+			"stream":   stream, "max_tokens": 1,
+		}
+	case protocol.OpenAIEmbeddingsID:
+		if stream {
+			return preparedCredentialRequest{}, errors.New("OpenAI Embeddings streaming self-test is unavailable")
+		}
+		value := openaiembeddings.Adapter{MaximumBodyBytes: 64 << 10}
+		adapter, preflighter = value, value
+		publicPath, providerPath = protocol.OpenAIEmbeddingsPublicPath, protocol.OpenAIEmbeddingsProviderPath
+		outputMaximum = 0
+		bodyValue = map[string]any{
+			"model": physicalModel, "input": "Latchway credential diagnostic.",
+		}
+	case protocol.AnthropicMessagesID:
+		value := anthropicmessages.Adapter{MaximumBodyBytes: 64 << 10}
+		adapter, preflighter = value, value
+		publicPath, providerPath = protocol.AnthropicMessagesPublicPath, protocol.AnthropicMessagesProviderPath
+		forwardedHeaders = append(forwardedHeaders, "Anthropic-Version")
 		bodyValue = map[string]any{
 			"model":    physicalModel,
 			"messages": []map[string]string{{"role": "user", "content": "Reply with OK."}},
@@ -323,9 +415,9 @@ func prepareCredentialRequest(
 	}
 	request.Header.Set("Content-Type", "application/json")
 	applied, err := adapter.ApplyFeature(ctx, request, protocol.FeatureDecision{
-		PhysicalModel: physicalModel, DefaultOutputTokens: 1, MaximumOutputTokens: 1,
+		PhysicalModel: physicalModel, DefaultOutputTokens: outputMaximum, MaximumOutputTokens: outputMaximum,
 	})
-	if err != nil || applied != 1 {
+	if err != nil || applied != outputMaximum {
 		return preparedCredentialRequest{}, errors.New("self-test output clamp is unavailable")
 	}
 	preflight, err := preflighter.PreflightInput(ctx, request, profile)
@@ -340,7 +432,8 @@ func prepareCredentialRequest(
 	}
 	return preparedCredentialRequest{
 		request: request, adapter: adapter, maximumCostNano: worst.CostNanoUSD(),
-		providerPath: providerPath, publicPath: publicPath,
+		providerPath: providerPath, publicPath: publicPath, forwardedHeaders: forwardedHeaders,
+		streaming:    stream,
 		inputMaximum: preflight.InputTokenBound, outputMaximum: applied,
 		totalMaximum: preflight.TotalTokenBound,
 	}, nil
@@ -410,7 +503,7 @@ func (runner *productionCredentialSelfTests) dispatchCredentialRequest(
 ) (protocol.Usage, error) {
 	var usage protocol.Usage
 	err := runner.dispatch(ctx, scope, configured, prepared.request,
-		prepared.providerPath, []string{"Content-Type"}, func(response *upstream.DispatchedResponse) error {
+		prepared.providerPath, prepared.forwardedHeaders, func(response *upstream.DispatchedResponse) error {
 			observed, observeErr := observeCredentialResponse(ctx, prepared.adapter, response)
 			usage = observed
 			return observeErr
@@ -561,21 +654,31 @@ func (runner *productionCredentialSelfTests) verifyProviderErrorNormalization(
 	ctx context.Context,
 	scope configuration.TenantScope,
 	configured configuration.Upstream,
-	publicPath string,
-	providerPath string,
+	prepared preparedCredentialRequest,
 ) error {
-	if publicPath == "" || providerPath == "" {
+	if prepared.publicPath == "" || prepared.providerPath == "" || prepared.request == nil ||
+		len(prepared.forwardedHeaders) == 0 {
 		return errors.New("provider error normalization path is unavailable")
 	}
 	request, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, "https://latchway.invalid"+publicPath, strings.NewReader(`{"model":}`),
+		ctx, http.MethodPost, "https://latchway.invalid"+prepared.publicPath, strings.NewReader(`{"model":}`),
 	)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	return runner.dispatch(ctx, scope, configured, request, providerPath,
-		[]string{"Content-Type"}, func(response *upstream.DispatchedResponse) (resultErr error) {
+	for _, name := range prepared.forwardedHeaders {
+		if strings.EqualFold(name, "Content-Type") {
+			continue
+		}
+		values := prepared.request.Header.Values(name)
+		if len(values) != 1 {
+			return errors.New("provider error normalization header is unavailable")
+		}
+		request.Header.Set(name, values[0])
+	}
+	return runner.dispatch(ctx, scope, configured, request, prepared.providerPath,
+		prepared.forwardedHeaders, func(response *upstream.DispatchedResponse) (resultErr error) {
 			if response == nil || response.Response == nil || response.Body == nil {
 				return errors.New("provider error response is unavailable")
 			}
@@ -749,6 +852,10 @@ func failedCredentialSelfTest(checks []selfTestCheck, name, detail string) crede
 
 func passedSelfTestCheck(name, detail string) selfTestCheck {
 	return selfTestCheck{Name: name, State: "passed", SafeDetail: detail}
+}
+
+func skippedSelfTestCheck(name, detail string) selfTestCheck {
+	return selfTestCheck{Name: name, State: "skipped", SafeDetail: detail}
 }
 
 func checkedSelfTestAdd(left, right int64) (int64, bool) {

@@ -139,7 +139,11 @@ func policyEngineInput(
 	return policy.NewInput(
 		authorization,
 		logicalID,
-		policy.ProtocolRequestMetadata{Streaming: metadata.Streaming},
+		policy.ProtocolRequestMetadata{
+			Streaming:            metadata.Streaming,
+			EstimatedInputTokens: metadata.EstimatedInputTokens,
+			MaximumOutputTokens:  metadata.RequestedOutputLimit,
+		},
 		policy.EnvironmentFacts{Kind: authorization.EnvironmentKind},
 	)
 }
@@ -147,6 +151,8 @@ func policyEngineInput(
 // QuotaStore owns the durable reserve/execute/settle lifecycle. The concrete
 // opaque handles prevent the data plane from inventing persisted state.
 type QuotaStore interface {
+	BeginAuthenticatedRequest(context.Context, quota.AuthenticatedRequestInput) (quota.AuthenticatedRequest, error)
+	RecordDecisionStage(context.Context, quota.AuthenticatedRequest, quota.DecisionStage) error
 	Reserve(context.Context, quota.ReserveInput) (quota.Reservation, error)
 	BeginAttempt(context.Context, quota.Reservation) (quota.Attempt, bool, error)
 	BeginRetryAttempt(context.Context, quota.Attempt, quota.RetryAttemptInput) (quota.Attempt, bool, error)

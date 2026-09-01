@@ -152,6 +152,159 @@ func TestProductionCredentialSelfTestsOpenAIResponses(t *testing.T) {
 	}
 }
 
+func TestProductionCredentialSelfTestsOpenAIEmbeddings(t *testing.T) {
+	t.Parallel()
+	scope := configuration.TenantScope{
+		OrganizationID: id.Must(id.Organization),
+		ApplicationID:  id.Must(id.Application),
+		EnvironmentID:  id.Must(id.Environment),
+	}
+	snapshot := credentialSelfTestSnapshotFixture{
+		revision: id.Must(id.ConfigRevision),
+		upstream: configuration.Upstream{
+			ID: "embeddings", Type: "openai_compatible", BaseURL: "https://api.openai.com/v1",
+			Authentication: configuration.UpstreamAuthentication{Type: "none"},
+		},
+		model: configuration.Model{
+			ID: "search_vectors", UpstreamID: "embeddings", UpstreamModel: "text-embedding-3-small",
+			PricingRef: "embedding_prices", InputAccountingRef: "embedding_input",
+			Capabilities: []string{protocol.OpenAIEmbeddingsID},
+		},
+		profile: configuration.InputAccountingProfile{
+			ID: "embedding_input", Protocol: protocol.OpenAIEmbeddingsID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "text-embedding-3-small", MaximumFramingTokensPerRequest: 2,
+			MaximumFramingTokensPerMessage: 2, MaximumContextTokens: 8192,
+		},
+		catalog: configuration.PricingCatalog{
+			ID: "embedding_prices", Currency: "USD",
+			Entries: []configuration.PricingEntry{{
+				ModelID: "search_vectors", InputNanoUSDPerMillion: 20_000,
+				OutputNanoUSDPerMillion: 0, RequestNanoUSD: 5_000_000,
+			}},
+		},
+	}
+	targets := &credentialSelfTestTargetFixture{responses: []credentialSelfTestResponseFixture{
+		{path: "/embeddings", status: http.StatusOK, contentType: "application/json", body: `{"object":"list","data":[{"object":"embedding","embedding":[0.125,-0.25],"index":0}],"model":"text-embedding-3-small","usage":{"prompt_tokens":7,"total_tokens":7}}`},
+		{path: "/embeddings", status: http.StatusBadRequest, contentType: "application/json", body: `{"error":{"message":"must never enter the result"}}`},
+	}}
+	runner, err := newProductionCredentialSelfTests(
+		credentialSelfTestSnapshotLoaderFixture{snapshot: snapshot},
+		&credentialSelfTestSecretFixture{}, targets,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
+	result := runner.Run(context.Background(), credentialSelfTestInput{
+		Scope: scope, Kind: "upstream", UpstreamID: "embeddings", ModelID: "search_vectors",
+		// One Embeddings request fits; an incorrectly doubled request charge would not.
+		MaxCostNano: 6_000_000,
+	})
+	if result.State != "passed" || len(result.Checks) != 8 {
+		t.Fatalf("Run() = %+v", result)
+	}
+	states := make(map[string]string, len(result.Checks))
+	for _, check := range result.Checks {
+		states[check.Name] = check.State
+		if check.SafeDetail == "" || strings.Contains(check.SafeDetail, "must never") {
+			t.Fatalf("unsafe or empty check: %+v", check)
+		}
+	}
+	if states["streaming"] != "skipped" || states["output_clamp"] != "skipped" ||
+		states["non_streaming"] != "passed" || states["usage"] != "passed" {
+		t.Fatalf("protocol-specific check states = %v", states)
+	}
+	if targets.acquisitions != 2 || targets.remaining() != 0 {
+		t.Fatalf("target acquisitions=%d remaining=%d", targets.acquisitions, targets.remaining())
+	}
+	if len(targets.requestBodies) != 2 || strings.Contains(targets.requestBodies[0], `"stream"`) ||
+		strings.Contains(targets.requestBodies[0], "max_tokens") ||
+		!strings.Contains(targets.requestBodies[0], `"input":"Latchway credential diagnostic."`) {
+		t.Fatalf("Embeddings diagnostic requests = %q", targets.requestBodies)
+	}
+}
+
+func TestProductionCredentialSelfTestsAnthropicMessages(t *testing.T) {
+	t.Parallel()
+	scope := configuration.TenantScope{
+		OrganizationID: id.Must(id.Organization),
+		ApplicationID:  id.Must(id.Application),
+		EnvironmentID:  id.Must(id.Environment),
+	}
+	snapshot := credentialSelfTestSnapshotFixture{
+		revision: id.Must(id.ConfigRevision),
+		upstream: configuration.Upstream{
+			ID: "anthropic", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
+			Authentication: configuration.UpstreamAuthentication{
+				Type: "header", HeaderName: "X-Api-Key", SecretRef: "secret/anthropic",
+			},
+		},
+		model: configuration.Model{
+			ID: "assistant", UpstreamID: "anthropic", UpstreamModel: "claude-sonnet-4-20250514",
+			PricingRef: "anthropic_prices", InputAccountingRef: "anthropic_input",
+			Capabilities: []string{protocol.AnthropicMessagesID},
+		},
+		profile: configuration.InputAccountingProfile{
+			ID: "anthropic_input", Protocol: protocol.AnthropicMessagesID,
+			Method:        protocol.TrustedInputMethodUTF8ByteBPEDeclaredFramingV1,
+			PhysicalModel: "claude-sonnet-4-20250514", MaximumFramingTokensPerRequest: 2,
+			MaximumFramingTokensPerMessage: 2, MaximumContextTokens: 4096,
+		},
+		catalog: configuration.PricingCatalog{
+			ID: "anthropic_prices", Currency: "USD",
+			Entries: []configuration.PricingEntry{{
+				ModelID: "assistant", InputNanoUSDPerMillion: 3_000_000,
+				OutputNanoUSDPerMillion: 15_000_000, RequestNanoUSD: 3,
+			}},
+		},
+	}
+	secretStore := &credentialSelfTestSecretFixture{
+		scope: scope, reference: "secret/anthropic", value: []byte("test-only-anthropic-key"),
+	}
+	targets := &credentialSelfTestTargetFixture{responses: []credentialSelfTestResponseFixture{
+		{path: "/messages", status: http.StatusOK, contentType: "application/json", body: `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":7,"output_tokens":1}}`},
+		{path: "/messages", status: http.StatusOK, contentType: "text/event-stream", body: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"},
+		{path: "/messages", status: http.StatusBadRequest, contentType: "application/json", body: `{"type":"error","error":{"message":"must never enter the result"}}`},
+	}}
+	runner, err := newProductionCredentialSelfTests(
+		credentialSelfTestSnapshotLoaderFixture{snapshot: snapshot}, secretStore, targets,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.now = func() time.Time { return time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC) }
+	result := runner.Run(context.Background(), credentialSelfTestInput{
+		Scope: scope, Kind: "upstream", UpstreamID: "anthropic", ModelID: "assistant",
+		MaxCostNano: 10_000_000,
+	})
+	if result.State != "passed" || len(result.Checks) != 8 {
+		t.Fatalf("Run() = %+v", result)
+	}
+	for _, check := range result.Checks {
+		if check.State != "passed" || check.SafeDetail == "" || strings.Contains(check.SafeDetail, "must never") {
+			t.Fatalf("unsafe or failed check: %+v", check)
+		}
+	}
+	if secretStore.uses != 3 || targets.acquisitions != 3 || targets.remaining() != 0 {
+		t.Fatalf("secret uses/acquisitions/remaining=%d/%d/%d", secretStore.uses, targets.acquisitions, targets.remaining())
+	}
+	if len(targets.requestHeaders) != 3 || len(targets.forwardedHeaders) != 3 {
+		t.Fatalf("captured Anthropic requests=%d/%d", len(targets.requestHeaders), len(targets.forwardedHeaders))
+	}
+	for index := range targets.requestHeaders {
+		if targets.requestHeaders[index].Get("Anthropic-Version") != "2023-06-01" ||
+			!slices.Equal(targets.forwardedHeaders[index], []string{"Content-Type", "Anthropic-Version"}) {
+			t.Fatalf("Anthropic request %d headers=%v forwarded=%v", index, targets.requestHeaders[index], targets.forwardedHeaders[index])
+		}
+	}
+	if !strings.Contains(targets.requestBodies[0], `"stream":false`) ||
+		!strings.Contains(targets.requestBodies[1], `"stream":true`) ||
+		!strings.Contains(targets.requestBodies[0], `"max_tokens":1`) {
+		t.Fatalf("Anthropic diagnostic request bodies = %q", targets.requestBodies)
+	}
+}
+
 func TestProductionCredentialSelfTestsFailBeforeDispatch(t *testing.T) {
 	t.Parallel()
 	snapshot := credentialSelfTestSnapshotFixture{
@@ -407,12 +560,15 @@ type credentialSelfTestResponseFixture struct {
 }
 
 type credentialSelfTestTargetFixture struct {
-	mu              sync.Mutex
-	responses       []credentialSelfTestResponseFixture
-	acquisitions    int
-	authentications []string
-	usernames       []string
-	headerNames     [][]string
+	mu               sync.Mutex
+	responses        []credentialSelfTestResponseFixture
+	acquisitions     int
+	authentications  []string
+	usernames        []string
+	headerNames      [][]string
+	requestHeaders   []http.Header
+	requestBodies    []string
+	forwardedHeaders [][]string
 }
 
 func (factory *credentialSelfTestTargetFixture) Acquire(configuration.Upstream) (dataplane.TargetLease, error) {
@@ -454,19 +610,28 @@ func (lease *credentialSelfTestLeaseFixture) recordAuthentication(kind, username
 func (lease *credentialSelfTestLeaseFixture) Prepare(
 	incoming *http.Request,
 	path string,
-	_ []string,
+	forwardedHeaders []string,
 	_ map[string]string,
 ) (dataplane.ProviderRequest, error) {
 	if incoming == nil || path != lease.response.path || incoming.Header.Get("Authorization") != "" {
 		return dataplane.ProviderRequest{}, errors.New("unexpected prepared request")
 	}
+	requestBody := ""
 	if incoming.Body != nil {
 		body, err := io.ReadAll(incoming.Body)
 		if err != nil {
 			return dataplane.ProviderRequest{}, err
 		}
 		incoming.Body = io.NopCloser(bytes.NewReader(body))
+		requestBody = string(body)
 	}
+	lease.factory.mu.Lock()
+	lease.factory.requestHeaders = append(lease.factory.requestHeaders, incoming.Header.Clone())
+	lease.factory.requestBodies = append(lease.factory.requestBodies, requestBody)
+	lease.factory.forwardedHeaders = append(
+		lease.factory.forwardedHeaders, append([]string(nil), forwardedHeaders...),
+	)
+	lease.factory.mu.Unlock()
 	lease.request = incoming
 	return dataplane.ProviderRequest{}, nil
 }

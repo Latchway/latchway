@@ -5,12 +5,12 @@ import type {
   EnvironmentResource,
   OrganizationResource
 } from "../api/resources";
+import type { AuditRouteSearch, RequestRouteSearch } from "./route-search";
 
-export interface WorkspaceSearch {
+export interface WorkspaceSearch extends Partial<AuditRouteSearch>, Partial<RequestRouteSearch> {
   application?: string;
   environment?: string;
   organization?: string;
-  [key: string]: unknown;
 }
 
 export interface WorkspaceContextValue {
@@ -25,7 +25,7 @@ export interface WorkspaceContextValue {
   search: WorkspaceSearch;
   selectApplication: (slug: string) => void;
   selectEnvironment: (slug: string) => void;
-  updateSearch: (patch: Record<string, string | undefined>) => void;
+  updateSearch: (patch: Partial<WorkspaceSearch>) => void;
 }
 
 export const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined);

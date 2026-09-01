@@ -35,6 +35,7 @@ function SubmissionProblem({ problem }: { problem: AdminProblem }) {
       <p className="auth-problem__meta">
         <span>Code: {problem.code}</span>
         {problem.requestId ? <span>Request: {problem.requestId}</span> : null}
+        {problem.documentationURL ? <a href={problem.documentationURL} rel="noreferrer" target="_blank">Troubleshooting</a> : null}
       </p>
     </div>
   );
