@@ -998,6 +998,17 @@ class CrossRepositoryConformanceTests(unittest.TestCase):
             check["details"]["contract_source_commit"], contract_source_commit
         )
 
+        core_repository = next(
+            repository
+            for repository in report["repositories"]
+            if repository["id"] == "core"
+        )
+        self.assertEqual(core_repository["commit"], contract_source_commit)
+        self.assertEqual(
+            report["documentation"]["canonical_core_commit"],
+            self.workspace.commits["core"],
+        )
+
     def test_contract_source_checkpoint_rejects_later_api_drift(self) -> None:
         core = self.workspace.repositories["core"]
         SyntheticWorkspace.write(
