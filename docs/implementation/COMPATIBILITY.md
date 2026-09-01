@@ -10,7 +10,7 @@ packages, live providers, physical devices, or production support.
 | --- | --- | --- |
 | Contract | Historical `0.5.1`, status `released` | `1.0.0`, status `draft`, `released_at: null` |
 | Wire | `1`, retained for compatible legacy routes | `2` current; Installation Family and Client Component operations require it |
-| Database | Historical schema `20` | Schema `24`, including family/component state, component-scoped quota state, direct component-attestation linkage, and protocol-aware first-token timing |
+| Database | Historical schema `20` | Schema `27`, including family/component state, component-scoped quota state, direct component-attestation linkage, protocol-aware first-token timing, hardened challenge Origin binding, logical-request decision stages, and bounded audit attribution/browse indexes |
 | Client parent | Legacy installation (`ins_`) | Installation Family (`fam_`) and Client Component (`cmp_`) |
 | Sessions | One installation key/session family | Independent component keys/session families |
 | Refresh reuse | Terminal legacy reuse under ADR 0032 | 30-second exact-tuple idempotency under ADR 0024 |
@@ -21,9 +21,15 @@ The released `0.5.1` bundle and SDK locks remain byte-frozen historical
 coordinates at their normative commits. The current source emits a distinct,
 deterministic draft `1.0.0` bundle; it must not overwrite or silently amend the
 historical coordinate. The component-attestation additions invalidated earlier
-intermediate draft hashes. The current SDK locks now converge on core checkpoint
-`b07a4762f08e6b68d5829cda500bae9d79e5f16c` and bundle SHA-256
-`397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a`.
+intermediate draft hashes. The current SDK locks now converge on contract source
+checkpoint `a59a2c1c807aec50093ae6346492a05148c72899` and bundle SHA-256
+`3a88fb69b911724da849229f34f735608e829bcfb0658087313c8d31441e9927`.
+The clean core implementation checkpoint is
+`82c9d3663a0532210d6a99ebecaa179f05797115`. Its canonical SDK-bundle and
+public-documentation checkpoint is
+`7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3`, synchronized to the branch-source
+Mintlify mirror at `ce4ea1e1cf56404da7146b98ca2744b194050fd5`; none of these
+coordinates is a released package or production documentation deployment.
 
 ## Framework registry
 
@@ -80,14 +86,15 @@ across all four SDK locks. The clean local source-conformance gate passes.
 ## Current SDK source checkpoints
 
 These coordinates record the source-converged version 1 implementations. They
-are not package-publication or production-support claims.
+are pushed branch source candidates, not package-publication,
+production-support, or released-coordinate claims.
 
 | SDK | Version 1 source checkpoint | Minimum runtime | Source status |
 | --- | --- | --- | --- |
-| JavaScript `@latchway/client` | `379a6d20bed9cbda9af6210f5511250fbbe9b571` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, three-browser conformance, bundler consumers, and tested vanilla-Web documentation sources implemented and locked |
-| Swift `Latchway` | `ab38ae00838a81be071f53740c624dc4f0558dcb` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, a compiled Firebase/App Attest golden journey, and the narrow Foundation Models 27 adapter are implemented; simulator gates and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
-| Android `dev.latchway:latchway-*` | `17c108706998f2c30fe511fd92ed049c024c8e85` | Android API 23+, Java 17 | Component/OkHttp transport plus a compiled Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
-| React Native `@latchway/react-native` | `af3860cbf39ab6a8d1d76da392cb699b9e019e42` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-owned component descriptor lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and a Debug-only native App Intent delegated-request path are implemented, fully checked, and source-pinned. The Release App Intent fixture has no Latchway request path and fails closed. Predecessor `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a development-signed iPad root-app App Attest/Firebase/real-upstream run; the current Debug App Intent still requires physical invocation, and protected Apple distribution/extension-matrix plus physical Android evidence remain required. |
+| JavaScript `@latchway/client` | `6b0c08ded377011044462d1ba6aa46cb34d7ee8f` | Node 24.19 or standards-based browser WebCrypto/fetch | Transport, component sessions, adapters, framework-version conformance, composite-trust decoding, three-browser conformance, bundler consumers, and tested vanilla-Web documentation sources implemented and locked |
+| Swift `Latchway` | `af87b4454e4b6a159b9da7bd50550865c74684a2` | iOS 15+, macOS 12+ supported surfaces | Root-app App Attest, delegated-only extension transport, a compiled Firebase/App Attest golden journey, and the narrow Foundation Models 27 adapter are implemented; simulator gates and a development-signed physical root-app App Attest run pass, while protected distribution and physical Foundation Models evidence remain required |
+| Android `dev.latchway:latchway-*` | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` | Android API 23+, Java 17 | Component/OkHttp transport plus a compiled Firebase/Play golden journey, Retrofit, Aallam OpenAI Kotlin, LangChain4j, and exact Koog 1.1.1 fixtures are implemented; Koog full streaming is limited to the tested OkHttp 5.3.0 tuple, and physical Play evidence remains required |
+| React Native `@latchway/react-native` | `111e7841f81e87ab471c18d381fed18ec8335760` | RN 0.82.x, iOS 15+, Android API 24+ | Native-backed transport, framework compatibility, root-owned component descriptor lifecycle, private root-Keychain propagation, delegated-only iOS extensions, and a Debug-only native App Intent delegated-request path are implemented, fully checked, and source-pinned. The Release App Intent fixture has no Latchway request path and fails closed. Predecessor `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a development-signed iPad root-app App Attest/Firebase/real-upstream run; the current Debug App Intent still requires physical invocation, and protected Apple distribution/extension-matrix plus physical Android evidence remain required. |
 
 The historical wire-1 locks remain recoverable from their immutable repository
 history. Current locks all point to the draft version 1 checkpoint named above.

@@ -30,16 +30,19 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract freeze | Core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
-| Bundle SHA-256 | `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` |
+| Contract source checkpoint | Core checkpoint `a59a2c1c807aec50093ae6346492a05148c72899` |
+| Bundle SHA-256 | `3a88fb69b911724da849229f34f735608e829bcfb0658087313c8d31441e9927` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
-| Database | Schema `25` in the current working source; the recorded clean checkpoint predates this hardening |
+| Clean core implementation checkpoint | `82c9d3663a0532210d6a99ebecaa179f05797115` |
+| Canonical SDK-bundle/public-doc checkpoint | `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3` |
+| Database | Schema `27` at the clean implementation checkpoint above |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
-| JavaScript source | `379a6d20bed9cbda9af6210f5511250fbbe9b571` |
-| Swift source | `ab38ae00838a81be071f53740c624dc4f0558dcb` |
-| Android source | `17c108706998f2c30fe511fd92ed049c024c8e85` |
-| React Native source | `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
-| Release state | `unreleased` |
+| JavaScript source | `6b0c08ded377011044462d1ba6aa46cb34d7ee8f` |
+| Swift source | `af87b4454e4b6a159b9da7bd50550865c74684a2` |
+| Android source | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` |
+| React Native source | `111e7841f81e87ab471c18d381fed18ec8335760` |
+| Mintlify mirror source | `ce4ea1e1cf56404da7146b98ca2744b194050fd5` |
+| Release state | `unreleased`; pushed branch source candidates only |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
 checkpoint. It is not rewritten by this plan.
@@ -113,7 +116,7 @@ generation from iOS app extensions.
   challenges, binding-version-2 verification, retry-safe assertion handling,
   component-only session rotation, provider binding, key cleanup on
   replacement/revocation, and preserved delegation ancestry; retain it through
-  schema 25.
+  schema 27.
 - [x] Persist the exact canonical browser Origin on every schema-25 session
   challenge and require the exchange to present that same Origin. The migration
   invalidates only preexisting ephemeral challenge rows because they have no
@@ -216,7 +219,8 @@ to apply to supported Android application trust surfaces.
 - [x] Pass the local 127-page Mintlify validation suite.
 - [x] Synchronize the final authored pages to the generated mirror and rerun
   the mirror's complete local suite at the exact final source coordinate;
-  mirror commit `a0c3559b11353a8196bde800d4b7484726e9f76a` passed.
+  core checkpoint `7bdf9cb6da312ea5f4282ae2caf686bcc1122fa3` and mirror commit
+  `ce4ea1e1cf56404da7146b98ca2744b194050fd5` passed.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
   and validate the production URL after the branch merges.
 
