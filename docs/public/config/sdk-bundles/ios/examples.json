@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Native App Attest golden journey",
       "source": {
-        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
+        "commit": "8acd72a7fbbff019ffeb1c7be0264f671c636168",
         "file": "Examples/BasicURLSession/BasicURLSession.swift",
         "region": {
           "end_line": 247,
@@ -20,13 +20,13 @@
       "kind": "physical_device",
       "name": "App Attest physical-device application",
       "source": {
-        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
+        "commit": "8acd72a7fbbff019ffeb1c7be0264f671c636168",
         "file": "Examples/AppAttestConformance/Sources/AppAttestConformanceApp.swift",
         "region": {
-          "end_line": 109,
+          "end_line": 1115,
           "start_line": 1
         },
-        "region_sha256": "b2d8f33354f5d4adcce45518bf3dd4bd137f3841f73d82a393de539cbd26533e",
+        "region_sha256": "17fe012401aa3ddde1e385082f14ba36941b65aa4388f14154db101644156c66",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
         "source_sha256": "17fe012401aa3ddde1e385082f14ba36941b65aa4388f14154db101644156c66"
@@ -36,7 +36,7 @@
       "kind": "component",
       "name": "App-extension component host",
       "source": {
-        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
+        "commit": "8acd72a7fbbff019ffeb1c7be0264f671c636168",
         "file": "Examples/AppExtensionComponents/Host/ComponentHostApp.swift",
         "region": {
           "end_line": 121,
@@ -52,7 +52,7 @@
       "kind": "framework",
       "name": "SwiftOpenAI adapter",
       "source": {
-        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
+        "commit": "8acd72a7fbbff019ffeb1c7be0264f671c636168",
         "file": "Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift",
         "region": {
           "end_line": 153,
@@ -68,13 +68,13 @@
       "kind": "framework",
       "name": "Apple Foundation Models adapter",
       "source": {
-        "commit": "af87b4454e4b6a159b9da7bd50550865c74684a2",
+        "commit": "8acd72a7fbbff019ffeb1c7be0264f671c636168",
         "file": "Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift",
         "region": {
-          "end_line": 315,
+          "end_line": 330,
           "start_line": 1
         },
-        "region_sha256": "914c1342265b8ea51cb770a83776871528470579813f1ea0e127e6535bc0450e",
+        "region_sha256": "c4fb5df75aab9648290e625644a7df257098b9a8e6ecb08f59fa103e0697f502",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-ios-sdk",
         "source_sha256": "c4fb5df75aab9648290e625644a7df257098b9a8e6ecb08f59fa103e0697f502"

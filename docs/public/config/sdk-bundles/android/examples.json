@@ -4,7 +4,7 @@
       "kind": "quickstart",
       "name": "Basic Android client",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt",
         "region": {
           "end_line": 39,
@@ -20,7 +20,7 @@
       "kind": "physical_device",
       "name": "Firebase and Play Integrity golden journey",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt",
         "region": {
           "end_line": 301,
@@ -36,13 +36,13 @@
       "kind": "framework",
       "name": "Retrofit conformance consumer",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt",
         "region": {
-          "end_line": 288,
+          "end_line": 333,
           "start_line": 1
         },
-        "region_sha256": "95d1d5bd9a1ffe9f75341d43540b9cce981079d887ac7ed2393374cd68cf279b",
+        "region_sha256": "22c348981d34db6720091c025536cf82a80de5803907853efeb6686324da5f49",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "22c348981d34db6720091c025536cf82a80de5803907853efeb6686324da5f49"
@@ -52,13 +52,13 @@
       "kind": "framework",
       "name": "OpenAI Kotlin conformance consumer",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt",
         "region": {
-          "end_line": 197,
+          "end_line": 198,
           "start_line": 1
         },
-        "region_sha256": "a2f6d1f38ed83f74476ea6231cf404cf84a50a624238e7970373b7212d170aaf",
+        "region_sha256": "3b5d612e9a8772786064920f5f0940c0a80fd22c0881357237ef2b79a5591025",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "3b5d612e9a8772786064920f5f0940c0a80fd22c0881357237ef2b79a5591025"
@@ -68,13 +68,13 @@
       "kind": "framework",
       "name": "LangChain4j conformance consumer",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt",
         "region": {
-          "end_line": 215,
+          "end_line": 216,
           "start_line": 1
         },
-        "region_sha256": "28ede638dc460a54842b606333c07018ff27f68efb4a1dc810cedb0d4982e9b2",
+        "region_sha256": "587d218215bb24a2655be02c8b270506bf6985d19d7af5b48cd2e2ddff8fa553",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "587d218215bb24a2655be02c8b270506bf6985d19d7af5b48cd2e2ddff8fa553"
@@ -84,13 +84,13 @@
       "kind": "framework",
       "name": "Koog conformance consumer",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt",
         "region": {
-          "end_line": 372,
+          "end_line": 437,
           "start_line": 1
         },
-        "region_sha256": "5e6a82bf1ca5bbe47d6a6c58c17b7e3369097f584be4a83960da5b0d9fcb6c2f",
+        "region_sha256": "7cf3818bf3d82ac68f2f477e0e6b10692060697d4548084344f6bea15bf664a4",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "7cf3818bf3d82ac68f2f477e0e6b10692060697d4548084344f6bea15bf664a4"

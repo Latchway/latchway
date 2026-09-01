@@ -4,7 +4,7 @@
     {
       "name": "AndroidEncryptedComponentSessionStateStore",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 115,
@@ -19,7 +19,7 @@
     {
       "name": "AndroidEncryptedSessionStateStore",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 82,
@@ -34,7 +34,7 @@
     {
       "name": "AndroidKeystoreInstallationSigner",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
         "region": {
           "end_line": 22,
@@ -49,13 +49,13 @@
     {
       "name": "AttestationChallenge",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 243,
-          "start_line": 243
+          "end_line": 244,
+          "start_line": 244
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "60fbf33fd22bc6737d20e4145a1b533cf7c93a53e443aa63bbc659efcae98195",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -64,13 +64,13 @@
     {
       "name": "AttestationEvidence",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 269,
-          "start_line": 269
+          "end_line": 270,
+          "start_line": 270
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "d5804c6df8457f13a58a0645bb7dd539394ccdd049836841645b12b53a3a7d60",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -79,13 +79,13 @@
     {
       "name": "AttestationMode",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 238,
-          "start_line": 238
+          "end_line": 239,
+          "start_line": 239
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "1428042547881273576792cdfa91cf4a2a631bef0531ecd20d641a4d2d4d6b57",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -94,13 +94,13 @@
     {
       "name": "AttestationProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 281,
-          "start_line": 281
+          "end_line": 282,
+          "start_line": 282
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "254e5d9999842b7924d9a7ef17bd88f29fb065e0dc37357c790c585e2dd4fe92",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -109,13 +109,13 @@
     {
       "name": "AuthorizedHeaders",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 367,
-          "start_line": 367
+          "end_line": 368,
+          "start_line": 368
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "59430d9b65b6deaa2515e02ba8621b6f180571621464425eeb14423350b57e22",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -124,13 +124,13 @@
     {
       "name": "Base64Url",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 129,
-          "start_line": 129
+          "end_line": 130,
+          "start_line": 130
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "0c68f18649afc0b76f099f741395fd18bd4cb471ce4b93b368cb8f4432328a28",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -139,13 +139,13 @@
     {
       "name": "ClientComponentSummary",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 29,
-          "start_line": 29
+          "end_line": 30,
+          "start_line": 30
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "b82578cbd95e2ff05129abb9d33e5b6a3ed1684ab34148660e2627ec1b1792ca",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -154,7 +154,7 @@
     {
       "name": "ComponentSessionSnapshot",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 78,
@@ -169,13 +169,13 @@
     {
       "name": "ComponentSessionStateStore",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 104,
-          "start_line": 104
+          "end_line": 105,
+          "start_line": 105
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "2d0265a50335a9bda195a449842b90bf9a3664b3e05cd1f88e8dee3edc16d549",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -184,13 +184,13 @@
     {
       "name": "ComponentTrustSummary",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 51,
-          "start_line": 51
+          "end_line": 52,
+          "start_line": 52
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5d51fac0b43fe7ff8592223582d4d6fbb393bec3d4264318eb8aff9c85ab55c1",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -199,13 +199,13 @@
     {
       "name": "CoreConfiguration",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 31,
-          "start_line": 31
+          "end_line": 32,
+          "start_line": 32
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "08824e0b4e3689e860f86f0f64793455212a0cccde0b4b5c5e17219e36b0f227",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -214,13 +214,13 @@
     {
       "name": "DpopProofFactory",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 96,
-          "start_line": 96
+          "end_line": 97,
+          "start_line": 97
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "f45d37c95abe54d500fd98ba6e0c5a9051b11eb4d3ce40910fdcac2dafa4465f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -229,13 +229,13 @@
     {
       "name": "DpopProofRequest",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 74,
-          "start_line": 74
+          "end_line": 75,
+          "start_line": 75
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "255be3c0c08cdda89b0329661098fd546b8695f897b01a1da95c72bfd34b96e2",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -244,13 +244,13 @@
     {
       "name": "FirebaseIdentityTokenProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-firebase-auth/src/main/kotlin/dev/latchway/firebaseauth/FirebaseIdentityTokenProvider.kt",
         "region": {
-          "end_line": 9,
-          "start_line": 9
+          "end_line": 10,
+          "start_line": 10
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "d2d2707d2756042ef812f9c5169aecec28160eeadfa99505f026e8eea65ed09e",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "27a5ee8cd6ae4810b3c9f9be758a0fbff248ceb1b93b829f3900dfd83b06a66d"
@@ -259,13 +259,13 @@
     {
       "name": "IdentityTokenProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 27,
-          "start_line": 27
+          "end_line": 28,
+          "start_line": 28
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "4afce3cb627db4c4efa6b4195c697eafbf25dfbd4daab9ebb664f2ed7dca6fb0",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -274,13 +274,13 @@
     {
       "name": "InstallationFamilySummary",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 19,
-          "start_line": 19
+          "end_line": 20,
+          "start_line": 20
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5de060fc85f01ed73ed5815b8e8c9635308640d665a375e042facdbc7a9e42e2",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -289,13 +289,13 @@
     {
       "name": "InstallationMetadata",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 347,
-          "start_line": 347
+          "end_line": 348,
+          "start_line": 348
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "eace1c9e4eadd2870cb33cf2496f7774d40fcdce955227366782821951248723",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -304,13 +304,13 @@
     {
       "name": "InstallationSigner",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 49,
-          "start_line": 49
+          "end_line": 50,
+          "start_line": 50
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ab4c21a87af2dd6ae413d1c0c9578f3453afd4b161cd758d411c61fde27e2fa1",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -319,13 +319,13 @@
     {
       "name": "InstallationSummary",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
-          "end_line": 19,
-          "start_line": 19
+          "end_line": 20,
+          "start_line": 20
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ce00acbc85d22f3e4d1fdcb41d42b019b54aec031da042205f15465f79149905",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
@@ -334,13 +334,13 @@
     {
       "name": "KeyBacking",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 297,
-          "start_line": 297
+          "end_line": 298,
+          "start_line": 298
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "efffee062616bfd1aa552eb030d76b7cc878547d6802a1868ef4489d342d9ced",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -349,13 +349,13 @@
     {
       "name": "KeyDiagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 309,
-          "start_line": 309
+          "end_line": 310,
+          "start_line": 310
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "d381c39d27fca5692811ff68234fa5404a30798a8233deb93e23d40e0415c1fe",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -364,13 +364,13 @@
     {
       "name": "KeyPolicy",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 304,
-          "start_line": 304
+          "end_line": 305,
+          "start_line": 305
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "c476aff6369577d7f5232fd690f088b4afe97932dab73f542064d85e6561c139",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -379,7 +379,7 @@
     {
       "name": "LATCHWAY_CONTRACT_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 9,
@@ -394,7 +394,7 @@
     {
       "name": "LATCHWAY_KOOG_FRAMEWORK_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 66,
@@ -409,7 +409,7 @@
     {
       "name": "LATCHWAY_OKHTTP_FRAMEWORK_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 56,
@@ -424,7 +424,7 @@
     {
       "name": "LATCHWAY_PROTOCOL_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 10,
@@ -439,7 +439,7 @@
     {
       "name": "LATCHWAY_REACT_NATIVE_FRAMEWORK_ID",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 60,
@@ -454,7 +454,7 @@
     {
       "name": "LATCHWAY_REACT_NATIVE_FRAMEWORK_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 63,
@@ -469,13 +469,13 @@
     {
       "name": "LATCHWAY_SDK_VERSION",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 7,
-          "start_line": 7
+          "end_line": 8,
+          "start_line": 8
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "55fcbf779374fd71a7c3474e8beb31ed1ab89f8fe39ccde51cc59cf6d2df4385",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -484,13 +484,13 @@
     {
       "name": "LatchwayClient",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 129,
-          "start_line": 129
+          "end_line": 130,
+          "start_line": 130
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "08d8ce95717867848665c4107a25c4fd0ca4be547c866986f387ef05d413acd8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -499,13 +499,13 @@
     {
       "name": "LatchwayClientPlatform",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 19,
-          "start_line": 19
+          "end_line": 20,
+          "start_line": 20
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "c44ed87f51ad2e7c710598490d72ab46b8cf1c349dc525d7a7fe9512baf76482",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -514,13 +514,13 @@
     {
       "name": "LatchwayClock",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 359,
-          "start_line": 359
+          "end_line": 360,
+          "start_line": 360
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "c62bcd2e4c97fbff541d11bcd597eb872d80065fe2b188fe2dbf27e2ee3603f3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -529,13 +529,13 @@
     {
       "name": "LatchwayComponentClient",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 254,
-          "start_line": 254
+          "end_line": 255,
+          "start_line": 255
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ea60b53799f8508ee20c4dd58c80b37733c661ade4d6c0fc7bcb755d744f6c41",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -544,13 +544,13 @@
     {
       "name": "LatchwayComponentDiagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 241,
-          "start_line": 241
+          "end_line": 242,
+          "start_line": 242
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "af84954e7e28759b5b6097bd638e1eb992338c8842e94d7ace445513e552c72c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -559,13 +559,13 @@
     {
       "name": "LatchwayConfiguration",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 78,
-          "start_line": 78
+          "end_line": 79,
+          "start_line": 79
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "e81eda2d0367ec228b7ebf0860a7ea1debc90d0ddba8db123fd146ecb78ffdc3",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -574,13 +574,13 @@
     {
       "name": "LatchwayContextProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 422,
-          "start_line": 422
+          "end_line": 423,
+          "start_line": 423
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ea44754cb31f4713e81fc2f764a412e5aba8be27f7a732ed45c1670a86ede4ec",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -589,13 +589,13 @@
     {
       "name": "LatchwayCoreClient",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 379,
-          "start_line": 379
+          "end_line": 380,
+          "start_line": 380
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "cfa3381e850e4e061f0a5af0595dc4d90dfb9403297fa4c294ebd56c2e318e44",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -604,13 +604,13 @@
     {
       "name": "LatchwayDiagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 332,
-          "start_line": 332
+          "end_line": 333,
+          "start_line": 333
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "d4cd9febf17b815930c7fbb86f699463c64009ac8cbd4c6ae5ae6c37205bc1ed",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -619,13 +619,13 @@
     {
       "name": "LatchwayErrorCode",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 80,
-          "start_line": 80
+          "end_line": 81,
+          "start_line": 81
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "10235b6a5301953841ea57156a6761fbcde58c77e93f4cdf019dc415904833df",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -634,13 +634,13 @@
     {
       "name": "LatchwayException",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 164,
-          "start_line": 164
+          "end_line": 165,
+          "start_line": 165
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "9605c8591ff925a744ca38e9a35e86e160b5569b82a8dba0ff7925f11301a708",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -649,13 +649,13 @@
     {
       "name": "LatchwayFeature",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 122,
-          "start_line": 122
+          "end_line": 123,
+          "start_line": 123
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "cb9985eef4783bbc99d6d2e7184c1064553e32cf145aa3774744f3c6c4739896",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -664,7 +664,7 @@
     {
       "name": "LatchwayFramework",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 76,
@@ -679,7 +679,7 @@
     {
       "name": "LatchwayFrameworkIntegration",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 69,
@@ -694,13 +694,13 @@
     {
       "name": "LatchwayQuotaLimit",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 316,
-          "start_line": 316
+          "end_line": 317,
+          "start_line": 317
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "4466034475c66d1fdaa0c5994c86ebfcbfba73497878c7dc147aaccb88180b6f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -709,13 +709,13 @@
     {
       "name": "LatchwayQuotaSnapshot",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 326,
-          "start_line": 326
+          "end_line": 327,
+          "start_line": 327
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "110c18377817a6ab168b561c32748ffc8ca6c57f8d76c0698f1cf3ec8c398c64",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -724,13 +724,13 @@
     {
       "name": "LatchwayRecoveryAction",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 155,
-          "start_line": 155
+          "end_line": 156,
+          "start_line": 156
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "1760d0b1ca436dcd03c01f49435687840f2836fe52036406e0adbfb5c495330d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -739,13 +739,13 @@
     {
       "name": "LatchwayTransport",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
-          "end_line": 50,
-          "start_line": 50
+          "end_line": 51,
+          "start_line": 51
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "4ebf2bb4440378c1eba737acc7d687031b4f737e4fd1552d4ae4a9b5fcdb4684",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "707cac688696bee0181a2dec00f7bf0186ddb76b290046c5fdcbd861b80cf69e"
@@ -754,13 +754,13 @@
     {
       "name": "LatchwayTransportRequest",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
-          "end_line": 5,
-          "start_line": 5
+          "end_line": 6,
+          "start_line": 6
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "4fa2353320b1b37dab6f9cdde002e8776152e7eb5508a66feb73ca881b79d092",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "707cac688696bee0181a2dec00f7bf0186ddb76b290046c5fdcbd861b80cf69e"
@@ -769,13 +769,13 @@
     {
       "name": "LatchwayTransportResponse",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
-          "end_line": 25,
-          "start_line": 25
+          "end_line": 26,
+          "start_line": 26
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "0b80fbf0bfda8f28ed2f65aa34e4daabbc40640acfeddfec1635984c55b4a71e",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "707cac688696bee0181a2dec00f7bf0186ddb76b290046c5fdcbd861b80cf69e"
@@ -784,13 +784,13 @@
     {
       "name": "OkHttpLatchwayTransport",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/OkHttpLatchwayTransport.kt",
         "region": {
-          "end_line": 20,
-          "start_line": 20
+          "end_line": 21,
+          "start_line": 21
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "bc27a5e068bc52ea9353108cef35346dff7262981f75ae120d0620f123240c08",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "d77cdb3c18d42b6099336b9a10dc93a8e15e419038b0317a43320dfb3e99ff98"
@@ -799,7 +799,7 @@
     {
       "name": "PlayIntegrityAttestationProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
         "region": {
           "end_line": 37,
@@ -814,13 +814,13 @@
     {
       "name": "PlayIntegrityRetryPolicy",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
         "region": {
-          "end_line": 19,
-          "start_line": 19
+          "end_line": 20,
+          "start_line": 20
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "55509a9d50d651ddc0fe06b5f75e025cbd9b82b12d3fa01e3a87f13061564821",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
@@ -829,13 +829,13 @@
     {
       "name": "PublicJwk",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 20,
-          "start_line": 20
+          "end_line": 21,
+          "start_line": 21
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "33c2dfe71e676dac75e8c1126c33fa2526c31dc15c041184b03748a4b96f265a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -844,7 +844,7 @@
     {
       "name": "ResettableInstallationSigner",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 63,
@@ -859,13 +859,13 @@
     {
       "name": "SecretValue",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 8,
-          "start_line": 8
+          "end_line": 9,
+          "start_line": 9
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "3a1d868cd4d3937b4819a820c6c8e2a1fbd151b78e04d5d142737988a5b03e79",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -874,13 +874,13 @@
     {
       "name": "SessionSnapshot",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
-          "end_line": 33,
-          "start_line": 33
+          "end_line": 34,
+          "start_line": 34
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "6be7a27306ec414a4bc103508a548876ba50d5bebcafcd90e70a8e8c0d13dacf",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
@@ -889,13 +889,13 @@
     {
       "name": "SessionStateStore",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
-          "end_line": 59,
-          "start_line": 59
+          "end_line": 60,
+          "start_line": 60
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "f0082bdd1f1997d103ca40ce5ddd9031afc06bf0e84ed7c886dd6b39dbb59d4d",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
@@ -904,13 +904,13 @@
     {
       "name": "SystemLatchwayClock",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 363,
-          "start_line": 363
+          "end_line": 364,
+          "start_line": 364
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ff7b6dbbfbe0c0d1665ba32f48bd1a930fce83c1cfab584201e5db830addb39a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -919,13 +919,13 @@
     {
       "name": "TrustSummary",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
-          "end_line": 26,
-          "start_line": 26
+          "end_line": 27,
+          "start_line": 27
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "0dd6aa3373f48c8a3a57e944f0556932be31fdc2e027268a5a1e33b81265722f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
@@ -934,13 +934,13 @@
     {
       "name": "UnsupportedAttestationProvider",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 286,
-          "start_line": 286
+          "end_line": 287,
+          "start_line": 287
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "ebd2bf9a9551039d8564191a1577cdd5c25f297ae01bd8abe2d8b6aaad606a56",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -949,7 +949,7 @@
     {
       "name": "accessExpiresAtEpochSeconds",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 81,
@@ -964,7 +964,7 @@
     {
       "name": "accessExpiresAtEpochSeconds",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 37,
@@ -979,7 +979,7 @@
     {
       "name": "accessToken",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 79,
@@ -994,7 +994,22 @@
     {
       "name": "accessToken",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 78,
+          "start_line": 78
+        },
+        "region_sha256": "ab1b386446d190835c2e740b905247cc8a2bd67ad9259406763d570c2f0e612a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
+      }
+    },
+    {
+      "name": "accessToken",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 35,
@@ -1007,9 +1022,99 @@
       }
     },
     {
+      "name": "allowInsecureLoopback",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 42,
+          "start_line": 42
+        },
+        "region_sha256": "4476dfec6b6488759fa3cee8f33b67b113cf332c79b7248914d589726e3f5154",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "allowInsecureLoopback",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 88,
+          "start_line": 88
+        },
+        "region_sha256": "4476dfec6b6488759fa3cee8f33b67b113cf332c79b7248914d589726e3f5154",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "allowSoftwareBacked",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 307,
+          "start_line": 307
+        },
+        "region_sha256": "9563651887040295d5b9a2640c4948b19ca83c48f6954a9608adfd7a0b324a37",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "appVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 349,
+          "start_line": 349
+        },
+        "region_sha256": "994e020ab201fac48dba0289de1dcab7cadaed35ad492261ed62dbe62805c019",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "applicationId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 34,
+          "start_line": 34
+        },
+        "region_sha256": "49542c9754c2448ecf17edd2705091bf3190ad39ef97ae910afdd1768398bdc8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "applicationId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 81,
+          "start_line": 81
+        },
+        "region_sha256": "49542c9754c2448ecf17edd2705091bf3190ad39ef97ae910afdd1768398bdc8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "attest",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 284,
@@ -1022,15 +1127,45 @@
       }
     },
     {
+      "name": "attest",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 290,
+          "start_line": 290
+        },
+        "region_sha256": "13f57ffe2759527dc884cc6f92e3f891a5ae2dc17d563beae6d29682f6ae4706",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "attest",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
+        "region": {
+          "end_line": 75,
+          "start_line": 75
+        },
+        "region_sha256": "13f57ffe2759527dc884cc6f92e3f891a5ae2dc17d563beae6d29682f6ae4706",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
+      }
+    },
+    {
       "name": "authenticator",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 176,
-          "start_line": 176
+          "end_line": 177,
+          "start_line": 177
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "50322807493b5fb1334d286ede13f9c13e1485ad7c833a1b0574a095408afb89",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1039,13 +1174,13 @@
     {
       "name": "authorizationHeader",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 374,
-          "start_line": 374
+          "end_line": 375,
+          "start_line": 375
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "95a0fe4d8fc04b61b1ea38b735b6967d4eaf33c9c39df5dc6f3d5841957486b4",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -1054,7 +1189,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 258,
@@ -1069,7 +1204,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 383,
@@ -1084,13 +1219,13 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 178,
-          "start_line": 178
+          "end_line": 179,
+          "start_line": 179
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5ec5f530323f7f8726c2aeae05e07cefec1c4b6f20b635e72b49df887ddc840a",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1099,7 +1234,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 183,
@@ -1114,7 +1249,7 @@
     {
       "name": "authorize",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 187,
@@ -1127,9 +1262,54 @@
       }
     },
     {
+      "name": "backing",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 311,
+          "start_line": 311
+        },
+        "region_sha256": "b3a3e57fc2cbadecf29d552a6af6afb6fb320ae7db69ba0812d0de3f82cb529b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "baseUrl",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 33,
+          "start_line": 33
+        },
+        "region_sha256": "20ace8cbc8b876e5a907b9ac6c02dd794d29e91ed944b3a5b102d1bd4d7556c6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "baseUrl",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 80,
+          "start_line": 80
+        },
+        "region_sha256": "c8ebc0f9949ecbaf833ca7981cc1a49e4dff915cf94bf624c959330a005ec7c8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "body",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 10,
@@ -1144,7 +1324,7 @@
     {
       "name": "body",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 29,
@@ -1157,9 +1337,24 @@
       }
     },
     {
+      "name": "challengeId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 245,
+          "start_line": 245
+        },
+        "region_sha256": "e0fb4495cf9b9b5ba22ea0d3882057e02b5d9d3384b983a98c65661af54b3762",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "clear",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 108,
@@ -1174,7 +1369,22 @@
     {
       "name": "clear",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 163,
+          "start_line": 163
+        },
+        "region_sha256": "e88816ea76c82adb5d96f945549df87e04a6f483c8105912dcabdae0dee6f5c1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "clear",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 63,
@@ -1187,9 +1397,24 @@
       }
     },
     {
+      "name": "clear",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 130,
+          "start_line": 130
+        },
+        "region_sha256": "17924e253cd465321c796b8ffbb62ace23f63200fb17705ede839664ee4d8012",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
       "name": "clearSession",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 266,
@@ -1204,7 +1429,7 @@
     {
       "name": "clearSession",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 419,
@@ -1219,13 +1444,13 @@
     {
       "name": "clearSession",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 316,
-          "start_line": 316
+          "end_line": 317,
+          "start_line": 317
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "edb5f74b41143fd7e2f498b86db81c98f8ffbd4374c126cc01f4fd820e6209df",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1234,7 +1459,7 @@
     {
       "name": "clearSessionIfCurrent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 268,
@@ -1249,7 +1474,7 @@
     {
       "name": "clearSessionIfCurrent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 421,
@@ -1262,9 +1487,99 @@
       }
     },
     {
+      "name": "clientDataHash",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 248,
+          "start_line": 248
+        },
+        "region_sha256": "fa64fe178945ab9622781ac5f9b480b93cd70b2c1d373e85ab895fcd26d56ee1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "clientPlatform",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 37,
+          "start_line": 37
+        },
+        "region_sha256": "447b1353e28b72d46df197093e20310c59098afbce3bed5d0df52d2bd5e1f581",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "clientPlatform",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 84,
+          "start_line": 84
+        },
+        "region_sha256": "447b1353e28b72d46df197093e20310c59098afbce3bed5d0df52d2bd5e1f581",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "close",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 274,
+          "start_line": 274
+        },
+        "region_sha256": "1026812d3d3aa429aeb0cf7a3871d6164ab588808362738aa36deae60b56dcb6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "close",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 423,
+          "start_line": 423
+        },
+        "region_sha256": "e4b82a6a64c8006fa6ae0cf56a2e420acc2cbafe5285934f9e66f0335d12e255",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "close",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 319,
+          "start_line": 319
+        },
+        "region_sha256": "0f3aeb890a11074cafedf2dffc635c323eee4f50bd10a0653dde271b7656fb1e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "code",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 166,
@@ -1279,7 +1594,7 @@
     {
       "name": "component",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 85,
@@ -1292,9 +1607,24 @@
       }
     },
     {
+      "name": "componentId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 244,
+          "start_line": 244
+        },
+        "region_sha256": "bb94a32c5b8aef4c2180fe87094099a7cdc7e4f2484c87d0177954e007374fcb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
       "name": "constructor",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-firebase-auth/src/main/kotlin/dev/latchway/firebaseauth/FirebaseIdentityTokenProvider.kt",
         "region": {
           "end_line": 14,
@@ -1309,22 +1639,37 @@
     {
       "name": "constructor",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
         "region": {
-          "end_line": 57,
-          "start_line": 57
+          "end_line": 58,
+          "start_line": 58
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "e44f5c71cf2adb5ea69063f75ca534827df5a4ead5628a815959cce90e1fa8ee",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
       }
     },
     {
+      "name": "containingAppActionRequired",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 252,
+          "start_line": 252
+        },
+        "region_sha256": "586b202e36de27da2c8a51c3b73c6a6ad0822c13dfad14e741617a27520e1cfe",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
       "name": "containingAppCanResolve",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 177,
@@ -1337,15 +1682,30 @@
       }
     },
     {
+      "name": "contractVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 336,
+          "start_line": 336
+        },
+        "region_sha256": "ac527a7ec81333da197d1ec3aca88b63fe857c2a868fffad815e1906cec3e51b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "create",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
         "region": {
-          "end_line": 90,
-          "start_line": 90
+          "end_line": 91,
+          "start_line": 91
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "c589d6b9278266c2eb57609f4b09ef4ef707c757f9261c4007f312cff12f5281",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
@@ -1354,7 +1714,7 @@
     {
       "name": "create",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 102,
@@ -1369,7 +1729,7 @@
     {
       "name": "create",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 426,
@@ -1384,7 +1744,7 @@
     {
       "name": "crv",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 26,
@@ -1399,22 +1759,82 @@
     {
       "name": "decode",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 160,
-          "start_line": 160
+          "end_line": 161,
+          "start_line": 161
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "244b6fcf8e50f00592e4421c08f9adf663340335ee701efebf212cfe2cb03700",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
       }
     },
     {
+      "name": "defaultFeature",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 86,
+          "start_line": 86
+        },
+        "region_sha256": "b89f73c6e29ca8ea1a252ae0992a42adedb8230ec787e8ff37874c0ad3ab450a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "definitionId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 32,
+          "start_line": 32
+        },
+        "region_sha256": "c7db01a54dbf466fc179f2c519f5d962473cbe03e69bbdb0666fbf3f98a372ee",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "definitionId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 245,
+          "start_line": 245
+        },
+        "region_sha256": "c7db01a54dbf466fc179f2c519f5d962473cbe03e69bbdb0666fbf3f98a372ee",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "delegationId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 58,
+          "start_line": 58
+        },
+        "region_sha256": "6dc3b031c4d1459ebaec1ff4a3ba6427054951776abe03e6afe8ef4575ef2aca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
       "name": "destroy",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
         "region": {
           "end_line": 107,
@@ -1429,7 +1849,7 @@
     {
       "name": "destroy",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 111,
@@ -1442,9 +1862,54 @@
       }
     },
     {
+      "name": "destroy",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 175,
+          "start_line": 175
+        },
+        "region_sha256": "ad76b9886e11cc8d6916e461a20448aaf0c802a55bf8312f1bc6042214283bc0",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "deviceModel",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 351,
+          "start_line": 351
+        },
+        "region_sha256": "6360b0a0645d58f8e3c403ff88e5b3ab6a753192caee0291dc6d5a37a27252bb",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "diagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
+        "region": {
+          "end_line": 25,
+          "start_line": 25
+        },
+        "region_sha256": "61c0aee9209e650b7d4c42ea24326bff8bcdd2c71ed63d2c53b991bc93950675",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
+      }
+    },
+    {
+      "name": "diagnostics",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 271,
@@ -1459,7 +1924,7 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 52,
@@ -1474,7 +1939,7 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 417,
@@ -1489,13 +1954,13 @@
     {
       "name": "diagnostics",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 312,
-          "start_line": 312
+          "end_line": 313,
+          "start_line": 313
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "b7c9afd5cf703dcfb8fe75060062969a69320190f65abb1f7fea2af68edf6d6c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1504,7 +1969,7 @@
     {
       "name": "documentationUrl",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 147,
@@ -1519,7 +1984,7 @@
     {
       "name": "documentationUrl",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 185,
@@ -1534,7 +1999,7 @@
     {
       "name": "dpopHeader",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 376,
@@ -1547,24 +2012,84 @@
       }
     },
     {
+      "name": "dpopJkt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 37,
+          "start_line": 37
+        },
+        "region_sha256": "cfce221f11e306e9812a2426c592f687f0ea54b633fd593d952ad5760d67d7b4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "dpopJkt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "cfce221f11e306e9812a2426c592f687f0ea54b633fd593d952ad5760d67d7b4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
       "name": "encode",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 132,
-          "start_line": 132
+          "end_line": 133,
+          "start_line": 133
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "8f17913e59ca3afb256af3235244de9e987583b2de47493afc8dc9a38bee9e8f",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
       }
     },
     {
+      "name": "environment",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 35,
+          "start_line": 35
+        },
+        "region_sha256": "950aca4b69f533875091227daaba3347ca006d359e4f98c60e7409e67a4bff7b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "environment",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 82,
+          "start_line": 82
+        },
+        "region_sha256": "950aca4b69f533875091227daaba3347ca006d359e4f98c60e7409e67a4bff7b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "epochSeconds",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 361,
@@ -1577,9 +2102,39 @@
       }
     },
     {
+      "name": "epochSeconds",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 365,
+          "start_line": 365
+        },
+        "region_sha256": "9b1a1ba9cc2ea028967856827593b544d143c05a8945a02217eed5b12837da91",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "evidence",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 272,
+          "start_line": 272
+        },
+        "region_sha256": "7676642f1b5cd19c601cfce62ff0942c0ebb53613eed9434dda8dd1608471130",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "execute",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 52,
@@ -1592,9 +2147,129 @@
       }
     },
     {
+      "name": "execute",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/OkHttpLatchwayTransport.kt",
+        "region": {
+          "end_line": 24,
+          "start_line": 24
+        },
+        "region_sha256": "7baf2cb62df1efc544203abebe27f702bfa4123463d99cdc4fa2fbe7d4741028",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "d77cdb3c18d42b6099336b9a10dc93a8e15e419038b0317a43320dfb3e99ff98"
+      }
+    },
+    {
+      "name": "expiresAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 60,
+          "start_line": 60
+        },
+        "region_sha256": "939e2614a0ad5747a211682bc4842fd2d9f5281d4827b7001477ae928f5524f3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "expiresAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 31,
+          "start_line": 31
+        },
+        "region_sha256": "939e2614a0ad5747a211682bc4842fd2d9f5281d4827b7001477ae928f5524f3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "expiresAtEpochSeconds",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 251,
+          "start_line": 251
+        },
+        "region_sha256": "93942f19e5786bac92287176bc383a8bcd1fa0d52a1c9a88ad7b1d2e00ee2d24",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "familyId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 243,
+          "start_line": 243
+        },
+        "region_sha256": "a9734a5d9381a8943d964029510658657864f8dc8cb38bfe7d815f05daafa041",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "feature",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 328,
+          "start_line": 328
+        },
+        "region_sha256": "855795dc1cac26d7cdf57e23a020ac469352bce9a525e49b172ec4e641e35a80",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "framework",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 39,
+          "start_line": 39
+        },
+        "region_sha256": "3c2f33315205a973d3d130fefb5ad6e13fa2501fe5f3a6da3a4b18a6f2963c6b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "frameworkIntegration",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 89,
+          "start_line": 89
+        },
+        "region_sha256": "6b30390cb38a9bc3ab09e7b7d12d1ab16316a74602a4e06df28d0204b19ee24c",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "fromWire",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 151,
@@ -1607,15 +2282,60 @@
       }
     },
     {
+      "name": "grantAvailable",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 248,
+          "start_line": 248
+        },
+        "region_sha256": "1e51e7c9c46d089fd672862612df537ab4d88e49a451bf1691c04a5b45d8bcff",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "grantedFeatures",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 38,
+          "start_line": 38
+        },
+        "region_sha256": "31c902541fe292a03f8de6bb5d6a818b88f6ae7e173ec3d7816993e7b76f08c6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "hard",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 324,
+          "start_line": 324
+        },
+        "region_sha256": "667745e21727138d527268070bcd123c0b275604fb7290fc222cc1680a8ca851",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "header",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
-          "end_line": 35,
-          "start_line": 35
+          "end_line": 36,
+          "start_line": 36
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "aaf0bbc6ab67631b6115bb14bcb9389291e9eb092a0ab683bcee7e91b98b7642",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "707cac688696bee0181a2dec00f7bf0186ddb76b290046c5fdcbd861b80cf69e"
@@ -1624,7 +2344,7 @@
     {
       "name": "headers",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 9,
@@ -1639,7 +2359,7 @@
     {
       "name": "headers",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 28,
@@ -1654,7 +2374,7 @@
     {
       "name": "httpStatus",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 169,
@@ -1667,9 +2387,99 @@
       }
     },
     {
+      "name": "id",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 21,
+          "start_line": 21
+        },
+        "region_sha256": "73d104c9e79d8b3562cde69f36dc61192c1a1734d82489fcad517727c40bbbca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 31,
+          "start_line": 31
+        },
+        "region_sha256": "73d104c9e79d8b3562cde69f36dc61192c1a1734d82489fcad517727c40bbbca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 77,
+          "start_line": 77
+        },
+        "region_sha256": "73d104c9e79d8b3562cde69f36dc61192c1a1734d82489fcad517727c40bbbca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "id",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 21,
+          "start_line": 21
+        },
+        "region_sha256": "73d104c9e79d8b3562cde69f36dc61192c1a1734d82489fcad517727c40bbbca",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "identityProvider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 36,
+          "start_line": 36
+        },
+        "region_sha256": "5e4a2486f9da67c6828cfd6e3c314bce7877b74722ccdcb56b033d929a6f94e9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "identityProvider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 83,
+          "start_line": 83
+        },
+        "region_sha256": "59ecb86bbef742e221b1a0746cd83bd3dc17f5f2fc854681f3059dd7ff0aa0b8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
       "name": "identityToken",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 29,
@@ -1682,9 +2492,39 @@
       }
     },
     {
+      "name": "identityToken",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-firebase-auth/src/main/kotlin/dev/latchway/firebaseauth/FirebaseIdentityTokenProvider.kt",
+        "region": {
+          "end_line": 19,
+          "start_line": 19
+        },
+        "region_sha256": "2a1a901f164dc5e196c19608f1522b0444396c3e714ae2374b436c3cb90adff7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "27a5ee8cd6ae4810b3c9f9be758a0fbff248ceb1b93b829f3900dfd83b06a66d"
+      }
+    },
+    {
+      "name": "initialDelayMillis",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
+        "region": {
+          "end_line": 22,
+          "start_line": 22
+        },
+        "region_sha256": "0f2564bfd045cdc5a274044c3adbbc9d3fb0ed27aedd250fe01047a1e7f0de8e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
+      }
+    },
+    {
       "name": "installation",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 83,
@@ -1699,7 +2539,7 @@
     {
       "name": "installation",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 39,
@@ -1714,7 +2554,7 @@
     {
       "name": "installationFamily",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 84,
@@ -1727,15 +2567,45 @@
       }
     },
     {
+      "name": "installationId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 338,
+          "start_line": 338
+        },
+        "region_sha256": "2a65ea54e824ebd534db1a04837e215e215608e6b4eb0ac2a0261d0685b6300b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "installationStatus",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 339,
+          "start_line": 339
+        },
+        "region_sha256": "61ff8c7689071a337e8dc0bd78c55f01f40905259ff5f84a8a9969aba37059ef",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "interceptor",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 164,
-          "start_line": 164
+          "end_line": 165,
+          "start_line": 165
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "7a28d6111f92b8a74830974d4cc1203150ebee7301d892183749f311d94242b7",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1744,7 +2614,7 @@
     {
       "name": "interceptor",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 168,
@@ -1757,54 +2627,24 @@
       }
     },
     {
-      "name": "interface",
+      "name": "isCurrent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
-        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
         "region": {
-          "end_line": 27,
-          "start_line": 27
+          "end_line": 56,
+          "start_line": 56
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "8e127469ddf4afa0507beb0646e981f9a05991d53251a11dea166ef91e0c1861",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
-      }
-    },
-    {
-      "name": "interface",
-      "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
-        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
-        "region": {
-          "end_line": 359,
-          "start_line": 359
-        },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-        "release": "v1.0.0",
-        "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
-      }
-    },
-    {
-      "name": "interface",
-      "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
-        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
-        "region": {
-          "end_line": 50,
-          "start_line": 50
-        },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-        "release": "v1.0.0",
-        "repository": "https://github.com/Latchway/latchway-android",
-        "source_sha256": "707cac688696bee0181a2dec00f7bf0186ddb76b290046c5fdcbd861b80cf69e"
+        "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
       }
     },
     {
       "name": "isCurrent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 65,
@@ -1817,9 +2657,114 @@
       }
     },
     {
+      "name": "isRoot",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 35,
+          "start_line": 35
+        },
+        "region_sha256": "a9f93663ed10dd9f1dcdfa29510fb43abf6972c7a9f87541ab9a2951c19cfa21",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "issuedAtEpochSeconds",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 250,
+          "start_line": 250
+        },
+        "region_sha256": "9323380b380d36acd14eca871eb05d0ee034898f385b85e4ca74acc0d0e42963",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "key",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 340,
+          "start_line": 340
+        },
+        "region_sha256": "dc6f377d0447a8eb98be7dd2cbc40cbcb8436f31c79e8a80e37664a83827e03a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "keyAvailable",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 246,
+          "start_line": 246
+        },
+        "region_sha256": "939bf970b614753c352d4006682da426871cebfcc29b3652ce2937b40e401012",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "keyBacking",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 247,
+          "start_line": 247
+        },
+        "region_sha256": "2d273067185ed381ea8383d25b6d2c0a5af437cacbe578a99f776f0e59d367ba",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "keyPolicy",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 87,
+          "start_line": 87
+        },
+        "region_sha256": "7d997540761a2a5c643283581f34f969d74cc45b127bcf703b53c426ce250b9f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "kind",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 33,
+          "start_line": 33
+        },
+        "region_sha256": "0456b4b26c1dce6438ab332b0f52c74553d5903183438310279be7a5cd97a8e3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
       "name": "kty",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 25,
@@ -1834,22 +2779,67 @@
     {
       "name": "latchwayFeature",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 126,
-          "start_line": 126
+          "end_line": 127,
+          "start_line": 127
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "113517daa179cbf4344e2b6da98e4ca5d36f3eb0dcd7e2db30b7b5863c631953",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
       }
     },
     {
+      "name": "level",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 54,
+          "start_line": 54
+        },
+        "region_sha256": "b0bda164f3e594f3f51cd5dd7d71c8d6a9347c36cf1ddf8ea2e8e80df7442157",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "level",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 29,
+          "start_line": 29
+        },
+        "region_sha256": "b0bda164f3e594f3f51cd5dd7d71c8d6a9347c36cf1ddf8ea2e8e80df7442157",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "limits",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 330,
+          "start_line": 330
+        },
+        "region_sha256": "cd0e3b782cd22ebc1d1f1d047f4b43716cac77e3ced8692415f6d6b12524e1c6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "load",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 106,
@@ -1864,7 +2854,22 @@
     {
       "name": "load",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 131,
+          "start_line": 131
+        },
+        "region_sha256": "040b650ee6f75534f0c4dc78469558282855ca75d1e06f79335113b437fbdf9f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "load",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 61,
@@ -1877,9 +2882,24 @@
       }
     },
     {
+      "name": "load",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 98,
+          "start_line": 98
+        },
+        "region_sha256": "3a34a091c4d04fda632810f315a9aed9d528c203cc1d6a6fa28d4d893c474672",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
       "name": "markCurrentInstallationRevoked",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 416,
@@ -1894,7 +2914,7 @@
     {
       "name": "markTerminal",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 273,
@@ -1907,9 +2927,84 @@
       }
     },
     {
+      "name": "maximum",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 319,
+          "start_line": 319
+        },
+        "region_sha256": "3162ea197074c19d73ecf6abe76d0b077051add765f2f5ff0582d16ef9598bc6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "maximumAttempts",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
+        "region": {
+          "end_line": 21,
+          "start_line": 21
+        },
+        "region_sha256": "da4aab6cecbad0ccb95c498460da22651a2c1d0250ff8ce0ad4a7256c06a00ce",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
+      }
+    },
+    {
+      "name": "maximumClockSkewSeconds",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 41,
+          "start_line": 41
+        },
+        "region_sha256": "d378bf1c1adeee220b36b2b0ea70b0eea68922c1cdfcfb6906e3adebcd8e372f",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "maximumDelayMillis",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "3a6aa78830f2323b649b9d6999b46cd9f8193b6096382648a1d94401b938d332",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
+      }
+    },
+    {
       "name": "method",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 76,
+          "start_line": 76
+        },
+        "region_sha256": "89fa11e98733bfe21e4a701d77332d00dfbe292f2deda39cf03c64448dc06be4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
+      }
+    },
+    {
+      "name": "method",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 7,
@@ -1922,9 +3017,69 @@
       }
     },
     {
+      "name": "metric",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 318,
+          "start_line": 318
+        },
+        "region_sha256": "f5649df9712ebce7ea731fbd11b4ae0d3e33fba5cc3df1bd18b0b6b1792395e1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "mode",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 247,
+          "start_line": 247
+        },
+        "region_sha256": "bf6828ef5b2688d0c01261f4619f17a46f9bf03d5d1c9e6f525f4907c4a31417",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "nonce",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 79,
+          "start_line": 79
+        },
+        "region_sha256": "e098f51afef7ce9ab9d302474b097ade2e0f47fb788d9ce0e073cbc0176ca26a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
+      }
+    },
+    {
+      "name": "observedAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 329,
+          "start_line": 329
+        },
+        "region_sha256": "6c3e6fcb378113dcbb76ca9ab2b92c7fd54d952b9799bf2bd7f7feac59e59c24",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "of",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 14,
@@ -1939,13 +3094,13 @@
     {
       "name": "openComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 405,
-          "start_line": 405
+          "end_line": 406,
+          "start_line": 406
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "b2133e21803a0d275622564f254718511fdc715c884bfdfbaf09b52b822b2fe9",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -1954,13 +3109,13 @@
     {
       "name": "openComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 244,
-          "start_line": 244
+          "end_line": 245,
+          "start_line": 245
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "dac9a790b2f35b206412b64314cdb76308b1e166fb0415503d33600eb75aefcb",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -1969,7 +3124,7 @@
     {
       "name": "operationId",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 175,
@@ -1984,7 +3139,7 @@
     {
       "name": "originGuard",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
           "end_line": 175,
@@ -1997,9 +3152,189 @@
       }
     },
     {
+      "name": "osVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 350,
+          "start_line": 350
+        },
+        "region_sha256": "f61804f56d52f68a244f3deb150ac82d28e44cc844afa7b136cf3cae5dc9a202",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "parentAttestationProvider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 57,
+          "start_line": 57
+        },
+        "region_sha256": "2d9603e68c5b5c8feca84c286c236e59d05186a9ddd7b6d74f9a543fdef81616",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "parentComponentId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 56,
+          "start_line": 56
+        },
+        "region_sha256": "dbad803bf990f91acf18724d3b1d904d7ce58203820338ca76d89c4c25c882f7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "platform",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 34,
+          "start_line": 34
+        },
+        "region_sha256": "af1d80b4d4c800647f9a5cd65ae3c308ab7294827be326fa9c0616cb8aef7a53",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "platform",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 22,
+          "start_line": 22
+        },
+        "region_sha256": "af1d80b4d4c800647f9a5cd65ae3c308ab7294827be326fa9c0616cb8aef7a53",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "preferStrongBox",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 306,
+          "start_line": 306
+        },
+        "region_sha256": "caf1f6b6905d7bf925ef0bb895a87edb5c1547731c7160941cf392aacaa35131",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "protocolVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 337,
+          "start_line": 337
+        },
+        "region_sha256": "6963c073ab3792d257ca52c4ec9c4659356d3ac43293c6d4b3aa2efea75e4cd8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 53,
+          "start_line": 53
+        },
+        "region_sha256": "11b36b53ecbdaf25ad9f58f8097928ef6ed0b180bd2c38d4c721ac75d0a40bb6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 246,
+          "start_line": 246
+        },
+        "region_sha256": "11b36b53ecbdaf25ad9f58f8097928ef6ed0b180bd2c38d4c721ac75d0a40bb6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 271,
+          "start_line": 271
+        },
+        "region_sha256": "11b36b53ecbdaf25ad9f58f8097928ef6ed0b180bd2c38d4c721ac75d0a40bb6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "provider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 28,
+          "start_line": 28
+        },
+        "region_sha256": "11b36b53ecbdaf25ad9f58f8097928ef6ed0b180bd2c38d4c721ac75d0a40bb6",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "providerOptions",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 249,
+          "start_line": 249
+        },
+        "region_sha256": "d6520ff068004e54416b63b27d79fb03affa2a3b1e705f14304ee659346de1f4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "provisionComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 394,
@@ -2014,13 +3349,13 @@
     {
       "name": "provisionComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 197,
-          "start_line": 197
+          "end_line": 198,
+          "start_line": 198
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "7ae10ef7192bd7c244e80c3c5e5224aca4517351112a385f727a739247990c11",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -2029,7 +3364,22 @@
     {
       "name": "publicJwk",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
+        "region": {
+          "end_line": 24,
+          "start_line": 24
+        },
+        "region_sha256": "795f18c9b40d0721ab8bebabe9e57d70bf29697b94cc4d539a33c12e0afc3541",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
+      }
+    },
+    {
+      "name": "publicJwk",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 51,
@@ -2042,15 +3392,15 @@
       }
     },
     {
-      "name": "quota",
+      "name": "publicJwkThumbprint",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
-          "end_line": 389,
-          "start_line": 389
+          "end_line": 314,
+          "start_line": 314
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5c353a9a9af0909164a1b0a5f8fa79e17a5920e31b1d183a8ba1d92c40c6a458",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
@@ -2059,13 +3409,28 @@
     {
       "name": "quota",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 390,
+          "start_line": 390
+        },
+        "region_sha256": "f3d684484ab782e123c41466de60997b05acee677439e6f1f3e7a8f8fccb1833",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "quota",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 193,
-          "start_line": 193
+          "end_line": 194,
+          "start_line": 194
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "9f7341c7aa1cf3300ef231d06637ec058e4ddf6d312a7a6409440c984124a5cd",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -2074,7 +3439,7 @@
     {
       "name": "recoveryAction",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 176,
@@ -2089,13 +3454,13 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
-          "end_line": 264,
-          "start_line": 264
+          "end_line": 265,
+          "start_line": 265
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "1bf52aa173815025f712c4807ee344b717bbee4d913818ae3223f9238d159d86",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
@@ -2104,7 +3469,7 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 418,
@@ -2119,22 +3484,37 @@
     {
       "name": "refresh",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 314,
-          "start_line": 314
+          "end_line": 315,
+          "start_line": 315
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5be74f7d388e75d04f448f9e0b7c4bcfaf101d7546a6465b60c90b48e5dd2e29",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
       }
     },
     {
+      "name": "refreshAvailable",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 342,
+          "start_line": 342
+        },
+        "region_sha256": "6262042661cc47fa7c1fc310170ee010c7fcc35f68bdb1f23a799663085fddd9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "refreshExpiresAtEpochSeconds",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 82,
@@ -2149,7 +3529,7 @@
     {
       "name": "refreshExpiresAtEpochSeconds",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 38,
@@ -2162,9 +3542,24 @@
       }
     },
     {
+      "name": "refreshLeewaySeconds",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 40,
+          "start_line": 40
+        },
+        "region_sha256": "13c1984ac15594ae218b5ed0ba423c7fbab30bedf5e0b62b66c4248122e4be59",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "refreshToken",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 80,
@@ -2179,7 +3574,7 @@
     {
       "name": "refreshToken",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 36,
@@ -2192,9 +3587,24 @@
       }
     },
     {
+      "name": "remaining",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 322,
+          "start_line": 322
+        },
+        "region_sha256": "ca3675075e9d70c57f768320bbd5045e1ea118a9364ef08b55b58d798d0f5773",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "requestId",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 173,
@@ -2209,7 +3619,22 @@
     {
       "name": "requestId",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 334,
+          "start_line": 334
+        },
+        "region_sha256": "ac77b7d1dfccd2d7b41cecd85205b9378e05f44840a16121b4dfffb2d3df760e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "requestId",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 371,
@@ -2222,9 +3647,39 @@
       }
     },
     {
+      "name": "reserved",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 321,
+          "start_line": 321
+        },
+        "region_sha256": "437e5ace1951e1d8fb049e5185e56024781e207eceaf3c75df53c18cb565f26b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "reset",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
+        "region": {
+          "end_line": 66,
+          "start_line": 66
+        },
+        "region_sha256": "8636c0a254b15d199ce6073ab841285c9a75d44687a7708a3a44c0417e82e56b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
+      }
+    },
+    {
+      "name": "reset",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 72,
@@ -2237,9 +3692,24 @@
       }
     },
     {
+      "name": "resetsAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 323,
+          "start_line": 323
+        },
+        "region_sha256": "55614bc6f2c5f5ee78f949de727369e00076a45776737b8f46b6c374fd244247",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "retryable",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 168,
@@ -2254,7 +3724,7 @@
     {
       "name": "retryingImmediatelyUseful",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 183,
@@ -2269,7 +3739,7 @@
     {
       "name": "reveal",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 10,
@@ -2284,7 +3754,7 @@
     {
       "name": "revoke",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 270,
@@ -2299,7 +3769,7 @@
     {
       "name": "revokeComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 393,
@@ -2314,13 +3784,13 @@
     {
       "name": "revokeComponent",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 285,
-          "start_line": 285
+          "end_line": 286,
+          "start_line": 286
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "5d6d5d1506d6d0d8d8613c88ea26044e127ff4a318b88217ff604e44f95544f8",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -2329,7 +3799,7 @@
     {
       "name": "revokeCurrentInstallation",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 391,
@@ -2344,13 +3814,13 @@
     {
       "name": "revokeCurrentInstallation",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 195,
-          "start_line": 195
+          "end_line": 196,
+          "start_line": 196
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "57041d58c359b3326beb8426edee777af9d3723968a780aadc3c035815de4f2b",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -2359,7 +3829,7 @@
     {
       "name": "revokeCurrentInstallationFamily",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 392,
@@ -2374,13 +3844,13 @@
     {
       "name": "revokeCurrentInstallationFamily",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
         "region": {
-          "end_line": 298,
-          "start_line": 298
+          "end_line": 299,
+          "start_line": 299
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "429ff9fc5f0ca288eabb47dd308e3c43c71df71737087d94855687a3fb844d37",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
@@ -2389,7 +3859,7 @@
     {
       "name": "save",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 107,
@@ -2404,7 +3874,22 @@
     {
       "name": "save",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 133,
+          "start_line": 133
+        },
+        "region_sha256": "de3db762466d7143bb4d8e6c21acc93989970f6b17b234d3577ba483f030413d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "save",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 62,
@@ -2417,9 +3902,24 @@
       }
     },
     {
+      "name": "save",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 100,
+          "start_line": 100
+        },
+        "region_sha256": "23b8f060a8f9f00936c77b011eb2fd6a75d01805de600debeeed89cc540fdb50",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
       "name": "sdkHeaderValue",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 22,
@@ -2432,9 +3932,99 @@
       }
     },
     {
+      "name": "sdkVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 38,
+          "start_line": 38
+        },
+        "region_sha256": "3f3ccb690fec6c179905102e1fc8a4d15ddb5cc5b1114c2b0113f4d4db2c178b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "sdkVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 85,
+          "start_line": 85
+        },
+        "region_sha256": "3f3ccb690fec6c179905102e1fc8a4d15ddb5cc5b1114c2b0113f4d4db2c178b",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "serverVersion",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 335,
+          "start_line": 335
+        },
+        "region_sha256": "b93f357420d4347626ca1bef1b3182a592d549691fb2fb3b7e95e4404bf637b7",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "sessionAvailable",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 249,
+          "start_line": 249
+        },
+        "region_sha256": "89c9959496a5fd0575610168a7ab8a4f75f8e6a4d7662a982f27f5e9ef653514",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "sessionExpiresAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 341,
+          "start_line": 341
+        },
+        "region_sha256": "a2ef852387ea57a4168043513e5350208b388035606ee35492d2ae7a6fe227d4",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "sign",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/AndroidKeystoreInstallationSigner.kt",
+        "region": {
+          "end_line": 29,
+          "start_line": 29
+        },
+        "region_sha256": "7a8c8b4868dcfe1424fb33f50dba9ab86fcb315c8c820dff48b5958cbb4ae76e",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "fbd4703ec3be8678b6b069f6d2b671d605fbc892f0c998c925dee4c66035f08d"
+      }
+    },
+    {
+      "name": "sign",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
           "end_line": 55,
@@ -2447,9 +4037,69 @@
       }
     },
     {
+      "name": "source",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 55,
+          "start_line": 55
+        },
+        "region_sha256": "9d040f7ae1824e0924123fb4f063ff51845cbab3dbbf7c681284fea3bd1a0247",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 22,
+          "start_line": 22
+        },
+        "region_sha256": "09ef3dfb1071483004c43984faf44250a19ae99870bd248f3769cc24bb9f48c3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 36,
+          "start_line": 36
+        },
+        "region_sha256": "09ef3dfb1071483004c43984faf44250a19ae99870bd248f3769cc24bb9f48c3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "status",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 24,
+          "start_line": 24
+        },
+        "region_sha256": "09ef3dfb1071483004c43984faf44250a19ae99870bd248f3769cc24bb9f48c3",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
       "name": "statusCode",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 27,
@@ -2462,15 +4112,45 @@
       }
     },
     {
+      "name": "strongBoxRequested",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 312,
+          "start_line": 312
+        },
+        "region_sha256": "9301c43d85bee09744a399939ffc6d15c55d3649959324ed02d33978694c2642",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "strongBoxUnavailable",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 313,
+          "start_line": 313
+        },
+        "region_sha256": "302f9318bb3e15b5a8936206b6ec23ec0538bc4fc3335d7973e464cbf119227a",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "thumbprint",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
         "region": {
-          "end_line": 36,
-          "start_line": 36
+          "end_line": 37,
+          "start_line": 37
         },
-        "region_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "region_sha256": "09c4869a7ab340a5fd78dec55ae183b2802f5b60288e13f06b938b53fe460c5c",
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
@@ -2479,7 +4159,7 @@
     {
       "name": "trust",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
         "region": {
           "end_line": 86,
@@ -2494,7 +4174,7 @@
     {
       "name": "trust",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
         "region": {
           "end_line": 40,
@@ -2507,9 +4187,99 @@
       }
     },
     {
+      "name": "trustExpiresAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 251,
+          "start_line": 251
+        },
+        "region_sha256": "617fc94ced6b28dcff4bd93fdffcc633e0af41ac582b67a1ed83c3fc418ec4e9",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "trustExpiresAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 345,
+          "start_line": 345
+        },
+        "region_sha256": "4df25644a3b3828134bc66cdf9df4712bc6843f28a0e414723efac5e117504f1",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "trustLevel",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 344,
+          "start_line": 344
+        },
+        "region_sha256": "723f24643bde61c7aa96ef31f069a64161641c18fd01d4b10daefda9eb1c5c58",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "trustProvider",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 343,
+          "start_line": 343
+        },
+        "region_sha256": "a077b52f2966f51110203d34f7137f504467559a90b16e662b3c7a4274a10d50",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "trustSource",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 250,
+          "start_line": 250
+        },
+        "region_sha256": "55c3c02466f05039a1ef2c7bfe1852798d6ef345a8568584324fabde96e5d119",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
       "name": "uri",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 77,
+          "start_line": 77
+        },
+        "region_sha256": "5c7065a45c383200d3c3a727dbbc13bd026f0240b864d50df14e35eacd9eb4ae",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
+      }
+    },
+    {
+      "name": "uri",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/Transport.kt",
         "region": {
           "end_line": 8,
@@ -2522,9 +4292,24 @@
       }
     },
     {
+      "name": "used",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 320,
+          "start_line": 320
+        },
+        "region_sha256": "24a4950b787e46689fd93d7ad6ec350d3c685fdd0208218d7b39b6ac472838ee",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "userAuthenticationRequired",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 181,
@@ -2537,9 +4322,69 @@
       }
     },
     {
+      "name": "value",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt",
+        "region": {
+          "end_line": 123,
+          "start_line": 123
+        },
+        "region_sha256": "cb9985eef4783bbc99d6d2e7184c1064553e32cf145aa3774744f3c6c4739896",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "85aa1f6c0f4496594712185c88bdc247c0679094e0f91aa17616e5bc93609246"
+      }
+    },
+    {
+      "name": "verifiedAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/ComponentSession.kt",
+        "region": {
+          "end_line": 59,
+          "start_line": 59
+        },
+        "region_sha256": "de2305b42d9a8688bef0cfe0d0e34fd8cbc589affa1cd6117b023645abdcc9f8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "97810891f32614308f85179096e005cfd46a3efc603b9ce643698613f876e6f0"
+      }
+    },
+    {
+      "name": "verifiedAt",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/SessionState.kt",
+        "region": {
+          "end_line": 30,
+          "start_line": 30
+        },
+        "region_sha256": "de2305b42d9a8688bef0cfe0d0e34fd8cbc589affa1cd6117b023645abdcc9f8",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "4b266f750e39def6cd22c56c03ca6559378fcc1b0633a7acad7ab8a64b21874e"
+      }
+    },
+    {
+      "name": "version",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 78,
+          "start_line": 78
+        },
+        "region_sha256": "896e39b7c5609d83f0b3385a67a0d26e71308839018b8d5517fcdad4eee540a5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
       "name": "warmUp",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 283,
@@ -2552,9 +4397,39 @@
       }
     },
     {
+      "name": "warmUp",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 288,
+          "start_line": 288
+        },
+        "region_sha256": "735c73f40605e4df5886a28f4a7ade1a5603d16ce9fa807a9be040d5fd9178f5",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "warmUp",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-play-integrity/src/main/kotlin/dev/latchway/playintegrity/PlayIntegrityAttestationProvider.kt",
+        "region": {
+          "end_line": 73,
+          "start_line": 73
+        },
+        "region_sha256": "030f9d911a827732d02732090df9ecfe8bc911730e56cc2d0e6978ce53c85c3d",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "9b2acbb33b72f7d394bcfe789c21efffded58233d1f94218ceb66275abd7cd71"
+      }
+    },
+    {
       "name": "wireValue",
       "source": {
-        "commit": "9d83a635fc0e5f1a79582c73f0fb61acc9e24471",
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
         "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
         "region": {
           "end_line": 21,
@@ -2564,6 +4439,51 @@
         "release": "v1.0.0",
         "repository": "https://github.com/Latchway/latchway-android",
         "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "wireValue",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt",
+        "region": {
+          "end_line": 81,
+          "start_line": 81
+        },
+        "region_sha256": "10235b6a5301953841ea57156a6761fbcde58c77e93f4cdf019dc415904833df",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "53eb008f378c80dee71e8298b7986dc557d5a45cb3a80ed6f3f14a8b92a92794"
+      }
+    },
+    {
+      "name": "x",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 22,
+          "start_line": 22
+        },
+        "region_sha256": "a99b85ff416aaa15a8d1e55681b9b3a8d993e24663e6ca0430568540b79368d2",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
+      }
+    },
+    {
+      "name": "y",
+      "source": {
+        "commit": "349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7",
+        "file": "latchway-core/src/main/kotlin/dev/latchway/core/Dpop.kt",
+        "region": {
+          "end_line": 23,
+          "start_line": 23
+        },
+        "region_sha256": "f5a7180025db44b0b0464ea0474df29a03943c05b46765a1d1be47629a48fb27",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-android",
+        "source_sha256": "daa8e2e97f65a18a8ed2f7af7c42be5496b9aec3c0da0663dd6975c6f7ed3863"
       }
     }
   ]

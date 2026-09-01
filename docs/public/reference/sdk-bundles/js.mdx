@@ -14,31 +14,34 @@ description: "Generated, version-bound examples and compatibility metadata for J
 | --- | --- |
 | Package | `@latchway/client` |
 | Release | `v1.0.0` |
-| Commit | `6b0c08ded377011044462d1ba6aa46cb34d7ee8f` |
+| Commit | `f9439bdeb56d93218cd63008f7c0f2b2d14821bf` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `51b477ec6db174745098fba3fda4b3c1acd05a994259182984621038c0172669` |
+| Bundle SHA-256 | `c6694523a471a7b54ecf84b8c31b1cf49a794c56f1269cba635b26e3e534a625` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| @latchway/client | `1.0.0` | `package.json:L1-L13` |
+| `@latchway/client` | `1.0.0` | `package.json:L1-L13` |
+| `@latchway/openai` | `1.0.0` | `packages/openai/package.json:L1-L4` |
+| `@latchway/vercel-ai` | `1.0.0` | `packages/vercel-ai/package.json:L1-L4` |
+| `@latchway/langchain` | `1.0.0` | `packages/langchain/package.json:L1-L4` |
 | Node.js | `24.19.0` | `package.json:L10-L14` |
 | Web browser matrix | `1.56.0` | `package.json:L88-L95` |
 | openai minimum | `7.8.0` | `conformance/framework-versions.json:L5-L11` |
 | openai latest | `7.8.0` | `conformance/framework-versions.json:L12-L18` |
 | ai minimum | `7.0.85` | `conformance/framework-versions.json:L5-L11` |
 | ai latest | `7.0.85` | `conformance/framework-versions.json:L12-L18` |
-| @ai-sdk/openai minimum | `4.0.52` | `conformance/framework-versions.json:L5-L11` |
-| @ai-sdk/openai latest | `4.0.52` | `conformance/framework-versions.json:L12-L18` |
-| @langchain/openai minimum | `1.5.10` | `conformance/framework-versions.json:L5-L11` |
-| @langchain/openai latest | `1.5.10` | `conformance/framework-versions.json:L12-L18` |
+| `@ai-sdk/openai` minimum | `4.0.52` | `conformance/framework-versions.json:L5-L11` |
+| `@ai-sdk/openai` latest | `4.0.52` | `conformance/framework-versions.json:L12-L18` |
+| `@langchain/openai` minimum | `1.5.10` | `conformance/framework-versions.json:L5-L11` |
+| `@langchain/openai` latest | `1.5.10` | `conformance/framework-versions.json:L12-L18` |
 
 ## Version-bound examples
 
 ### `frameworks/langchain.ts`
 
-Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/packages/langchain/src/index.ts#L1-L103)
+Source: [packages/langchain/src/index.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/packages/langchain/src/index.ts#L1-L103)
 
 ```typescript
 import {
@@ -148,7 +151,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/openai.ts`
 
-Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/packages/openai/src/index.ts#L1-L71)
+Source: [packages/openai/src/index.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/packages/openai/src/index.ts#L1-L71)
 
 ```typescript
 import OpenAI, { type ClientOptions } from "openai";
@@ -226,7 +229,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `frameworks/vercel-ai.ts`
 
-Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/packages/vercel-ai/src/index.ts#L1-L78)
+Source: [packages/vercel-ai/src/index.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/packages/vercel-ai/src/index.ts#L1-L78)
 
 ```typescript
 import { createOpenAI, type OpenAIProvider } from "@ai-sdk/openai";
@@ -311,7 +314,7 @@ function preserveResponseLocation(target: Response, source: Response): void {
 
 ### `quickstart/firebase-app-check.ts`
 
-Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/examples/firebase/client.ts#L1-L23)
+Source: [examples/firebase/client.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/examples/firebase/client.ts#L1-L23)
 
 ```typescript
 import { createLatchwayClient } from "@latchway/client";
@@ -341,7 +344,7 @@ export function createFirebaseClient(dependencies: FirebaseDependencies) {
 
 ### `quickstart/vanilla-development-client.ts`
 
-Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/examples/vanilla/development-client.ts#L1-L82)
+Source: [examples/vanilla/development-client.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/examples/vanilla/development-client.ts#L1-L82)
 
 ```typescript
 import {
@@ -430,7 +433,7 @@ export async function safeBrowserDiagnostics(
 
 ### `quickstart/vanilla-development-helper.ts`
 
-Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/examples/vanilla/development-helper.ts#L1-L142)
+Source: [examples/vanilla/development-helper.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/examples/vanilla/development-helper.ts#L1-L142)
 
 ```typescript
 import type { AttestationContext } from "@latchway/client";
@@ -579,7 +582,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 
 ### `quickstart/vanilla-streaming-fetch.ts`
 
-Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/6b0c08ded377011044462d1ba6aa46cb34d7ee8f/examples/vanilla/streaming-fetch.ts#L1-L93)
+Source: [examples/vanilla/streaming-fetch.ts](https://github.com/Latchway/latchway-js/blob/f9439bdeb56d93218cd63008f7c0f2b2d14821bf/examples/vanilla/streaming-fetch.ts#L1-L93)
 
 ```typescript
 import {

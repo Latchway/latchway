@@ -14,30 +14,44 @@ description: "Generated, version-bound examples and compatibility metadata for A
 | --- | --- |
 | Package | `dev.latchway` |
 | Release | `v1.0.0` |
-| Commit | `9d83a635fc0e5f1a79582c73f0fb61acc9e24471` |
+| Commit | `349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `b4fa68217afc453182d95c345f8d9920a965ce00aab0b1160f2c063c83f93eb0` |
+| Bundle SHA-256 | `48fb3cff4d427ebd5e578ae1d82ff09ae54c9644bd2d3ac63d4f0e1bd7bec831` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| dev.latchway | `1.0.0` | `latchway-core/src/main/kotlin/dev/latchway/core/LatchwayApi.kt:L1-L10` |
+| dev.latchway:latchway-core | `1.0.0` | `docs/publishing.md:L3-L36` |
+| dev.latchway:latchway-okhttp | `1.0.0` | `docs/publishing.md:L3-L36` |
+| dev.latchway:latchway-play-integrity | `1.0.0` | `docs/publishing.md:L3-L36` |
+| dev.latchway:latchway-firebase-auth | `1.0.0` | `docs/publishing.md:L3-L36` |
+| dev.latchway:latchway-bom | `1.0.0` | `docs/publishing.md:L3-L36` |
 | Android API | `23` | `README.md:L27-L29` |
+| Android compile SDK | `37` | `latchway-core/build.gradle.kts:L7-L12` |
+| Android Gradle Plugin | `9.3.2` | `gradle/libs.versions.toml:L1-L3` |
+| Gradle | `9.5.0` | `gradle/wrapper/gradle-wrapper.properties:L3-L3` |
+| Kotlin | `2.3.21` | `build.gradle.kts:L12-L16` |
+| Java bytecode | `17` | `latchway-core/build.gradle.kts:L16-L19` |
 | OkHttp minimum | `4.9.2` | `README.md:L27-L31` |
 | OkHttp latest | `5.3.0` | `gradle/libs.versions.toml:L1-L15` |
 | Retrofit minimum | `2.11.0` | `README.md:L32-L35` |
 | Retrofit latest | `3.0.0` | `gradle/libs.versions.toml:L1-L15` |
 | OpenAI Kotlin minimum | `4.0.1` | `README.md:L32-L35` |
 | OpenAI Kotlin latest | `4.1.0` | `gradle/libs.versions.toml:L1-L15` |
+| Ktor OkHttp | `3.3.3` | `gradle/libs.versions.toml:L1-L15` |
 | LangChain4j | `1.19.0` | `gradle/libs.versions.toml:L1-L15` |
+| LangChain4j OkHttp SPI | `1.19.0-beta29` | `gradle/libs.versions.toml:L1-L15` |
 | Koog | `1.1.1` | `gradle/libs.versions.toml:L1-L15` |
+| Play Integrity | `1.6.0` | `gradle/libs.versions.toml:L1-L15` |
+| Firebase BOM | `34.18.0` | `gradle/libs.versions.toml:L1-L15` |
+| React Native bridge | `0.82.0` | `latchway-okhttp/src/main/kotlin/dev/latchway/okhttp/LatchwayClient.kt:L59-L66` |
 
 ## Version-bound examples
 
 ### `frameworks/koog.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L42-L91)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConformanceTest.kt#L42-L91)
 
 ```kotlin
     @Test
@@ -94,7 +108,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/KoogFrameworkConfor
 
 ### `frameworks/langchain4j.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/LangChain4jFrameworkConformanceTest.kt#L21-L56)
 
 ```kotlin
 class LangChain4jFrameworkConformanceTest {
@@ -137,7 +151,7 @@ class LangChain4jFrameworkConformanceTest {
 
 ### `frameworks/openai-kotlin.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/OpenAiKotlinFrameworkConformanceTest.kt#L28-L56)
 
 ```kotlin
 class OpenAiKotlinFrameworkConformanceTest {
@@ -173,7 +187,7 @@ class OpenAiKotlinFrameworkConformanceTest {
 
 ### `frameworks/retrofit.kt`
 
-Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L30-L104)
+Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkConformanceTest.kt#L30-L104)
 
 ```kotlin
     @Test
@@ -255,7 +269,7 @@ Source: [latchway-okhttp/src/test/kotlin/dev/latchway/okhttp/RetrofitFrameworkCo
 
 ### `quickstart/basic-client.kt`
 
-Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
+Source: [sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/sample-basic/src/main/kotlin/dev/latchway/sample/basic/MainActivity.kt#L1-L39)
 
 ```kotlin
 package dev.latchway.sample.basic
@@ -301,7 +315,7 @@ public object BasicLatchwayFactory {
 
 ### `quickstart/firebase-auth.kt`
 
-Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/9d83a635fc0e5f1a79582c73f0fb61acc9e24471/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L301)
+Source: [sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt](https://github.com/Latchway/latchway-android/blob/349f2effe8f9abe2f07b59fafc47b1bf70b1a1c7/sample-firebase/src/main/kotlin/dev/latchway/sample/firebase/MainActivity.kt#L1-L301)
 
 ```kotlin
 package dev.latchway.sample.firebase

@@ -4,7 +4,7 @@
     {
       "name": "@latchway/client",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "package.json",
         "region": {
           "end_line": 13,
@@ -18,9 +18,57 @@
       "version": "1.0.0"
     },
     {
+      "name": "@latchway/openai",
+      "source": {
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "file": "packages/openai/package.json",
+        "region": {
+          "end_line": 4,
+          "start_line": 1
+        },
+        "region_sha256": "22d90428481dd661b2faac7acdb143b0f416bc41a629c4ed879c7fba20bcb805",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "25801edb429ddc4c820abb12c5949535fc56ee01affa27adac48fd820cc7b4e8"
+      },
+      "version": "1.0.0"
+    },
+    {
+      "name": "@latchway/vercel-ai",
+      "source": {
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "file": "packages/vercel-ai/package.json",
+        "region": {
+          "end_line": 4,
+          "start_line": 1
+        },
+        "region_sha256": "d2f0eb5d7532f04b146d8da4ef0035cd0d3107dadaf0495c098a9c6108865799",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "69ff2a2aaff51aa28afdd0e42831715342b3046cf0fc70d1b241c1472c6443b4"
+      },
+      "version": "1.0.0"
+    },
+    {
+      "name": "@latchway/langchain",
+      "source": {
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
+        "file": "packages/langchain/package.json",
+        "region": {
+          "end_line": 4,
+          "start_line": 1
+        },
+        "region_sha256": "b4fe256793bf2b1830c1012f80efc53dab6e933b274dc87969b491a927de8bef",
+        "release": "v1.0.0",
+        "repository": "https://github.com/Latchway/latchway-js",
+        "source_sha256": "131da696f9211a0b1ff3121194a33923d38ccb2de99dbd9781e8230114dc3b9f"
+      },
+      "version": "1.0.0"
+    },
+    {
       "name": "Node.js",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "package.json",
         "region": {
           "end_line": 14,
@@ -36,7 +84,7 @@
     {
       "name": "Web browser matrix",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "package.json",
         "region": {
           "end_line": 95,
@@ -52,7 +100,7 @@
     {
       "name": "openai minimum",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -68,7 +116,7 @@
     {
       "name": "openai latest",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -84,7 +132,7 @@
     {
       "name": "ai minimum",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -100,7 +148,7 @@
     {
       "name": "ai latest",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -116,7 +164,7 @@
     {
       "name": "@ai-sdk/openai minimum",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -132,7 +180,7 @@
     {
       "name": "@ai-sdk/openai latest",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,
@@ -148,7 +196,7 @@
     {
       "name": "@langchain/openai minimum",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 11,
@@ -164,7 +212,7 @@
     {
       "name": "@langchain/openai latest",
       "source": {
-        "commit": "6b0c08ded377011044462d1ba6aa46cb34d7ee8f",
+        "commit": "f9439bdeb56d93218cd63008f7c0f2b2d14821bf",
         "file": "conformance/framework-versions.json",
         "region": {
           "end_line": 18,

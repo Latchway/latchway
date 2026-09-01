@@ -14,29 +14,50 @@ description: "Generated, version-bound examples and compatibility metadata for R
 | --- | --- |
 | Package | `@latchway/react-native` |
 | Release | `v1.0.0` |
-| Commit | `111e7841f81e87ab471c18d381fed18ec8335760` |
+| Commit | `2d78f588671d35512c6d0d244c89ec61e6a48cfa` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `8d2aee2db48ec1a5dbd363f2cc40fbb22a55c2bb9bea0bee740e3361b76ff283` |
+| Bundle SHA-256 | `6ae13b40d97a4e92e3c994a6460dc3542cca1f4af50c390cece5a025342058b2` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
-| @latchway/react-native | `1.0.0` | `package.json:L1-L16` |
+| `@latchway/react-native` | `1.0.0` | `package.json:L1-L16` |
+| `@latchway/react-native/testing` | `1.0.0` | `package.json:L1-L54` |
+| `@latchway/react-native/package.json` | `1.0.0` | `package.json:L1-L54` |
+| Node.js | `>=24.19.0` | `package.json:L12-L16` |
+| pnpm | `10.15.0` | `package.json:L12-L16` |
+| `@latchway/client` | `1.0.0` | `package.json:L79-L82` |
+| web-streams-polyfill | `4.3.0` | `package.json:L79-L82` |
+| React peer | `19.1.x` | `package.json:L83-L86` |
+| React Native peer | `0.82.x` | `package.json:L83-L86` |
 | React Native minimum | `0.82.0` | `Conformance/framework/react-native-fetch.json:L1-L16` |
 | React Native latest | `0.82.0` | `Conformance/framework/react-native-fetch.json:L1-L16` |
 | iOS | `15.0` | `LatchwayReactNative.podspec:L5-L21` |
+| Swift language | `6.0` | `LatchwayReactNative.podspec:L20-L24` |
+| C++ language standard | `20` | `LatchwayReactNative.podspec:L21-L25` |
+| Latchway iOS App Attest | `1.0.0` | `LatchwayReactNative.podspec:L27-L27` |
 | Android API | `24` | `android/build.gradle.kts:L24-L32` |
+| Android compile SDK | `37` | `android/build.gradle.kts:L24-L32` |
+| Java bytecode | `17` | `android/build.gradle.kts:L34-L37` |
+| Android Gradle Plugin | `8.12.0` | `android/settings.gradle.kts:L1-L7` |
+| Gradle | `8.13` | `android/gradle/wrapper/gradle-wrapper.properties:L3-L3` |
+| Kotlin | `2.3.21` | `android/settings.gradle.kts:L1-L7` |
+| Latchway Android OkHttp | `1.0.0` | `android/build.gradle.kts:L48-L54` |
+| Latchway Android Play Integrity | `1.0.0` | `android/build.gradle.kts:L48-L54` |
 | OpenAI JavaScript | `7.8.0` | `Conformance/framework/react-native-fetch.json:L12-L20` |
 | Vercel AI SDK | `7.0.85` | `Conformance/framework/react-native-fetch.json:L12-L20` |
+| Vercel AI OpenAI | `4.0.52` | `package.json:L87-L100` |
 | LangChain JavaScript | `1.5.10` | `Conformance/framework/react-native-fetch.json:L12-L20` |
+| LangChain core | `1.2.9` | `package.json:L87-L100` |
 | Vercel AI Anthropic | `4.0.46` | `Conformance/framework/react-native-fetch.json:L17-L20` |
+| TypeScript | `6.0.3` | `package.json:L97-L105` |
 
 ## Version-bound examples
 
 ### `frameworks/react-native-consumers.ts`
 
-Source: [example/src/framework-consumers.ts](https://github.com/Latchway/latchway-react-native-sdk/blob/111e7841f81e87ab471c18d381fed18ec8335760/example/src/framework-consumers.ts#L1-L153)
+Source: [example/src/framework-consumers.ts](https://github.com/Latchway/latchway-react-native-sdk/blob/2d78f588671d35512c6d0d244c89ec61e6a48cfa/example/src/framework-consumers.ts#L1-L153)
 
 ```typescript
 import { createAnthropic, type AnthropicProvider } from "@ai-sdk/anthropic";
@@ -196,7 +217,7 @@ export async function streamOpenAIChat(
 
 ### `quickstart/create-client.tsx`
 
-Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/111e7841f81e87ab471c18d381fed18ec8335760/example/src/App.tsx#L57-L78)
+Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/2d78f588671d35512c6d0d244c89ec61e6a48cfa/example/src/App.tsx#L57-L78)
 
 ```tsx
 function makeClient(): LatchwayClient {
@@ -225,7 +246,7 @@ function makeClient(): LatchwayClient {
 
 ### `quickstart/streaming-fetch.tsx`
 
-Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/111e7841f81e87ab471c18d381fed18ec8335760/example/src/App.tsx#L92-L118)
+Source: [example/src/App.tsx](https://github.com/Latchway/latchway-react-native-sdk/blob/2d78f588671d35512c6d0d244c89ec61e6a48cfa/example/src/App.tsx#L92-L118)
 
 ```tsx
   const send = async (): Promise<void> => {

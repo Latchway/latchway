@@ -14,26 +14,43 @@ description: "Generated, version-bound examples and compatibility metadata for i
 | --- | --- |
 | Package | `Latchway` |
 | Release | `v1.0.0` |
-| Commit | `af87b4454e4b6a159b9da7bd50550865c74684a2` |
+| Commit | `8acd72a7fbbff019ffeb1c7be0264f671c636168` |
 | Source tree clean | `yes` |
-| Bundle SHA-256 | `c93ad07cbedc188b1e43a155946ab5c833a5c5d192116caf1aa890f3b46e8f7f` |
+| Bundle SHA-256 | `a16571b4b103a0e313fa83eed3aaaff97e25fa2bd98bf4fb9af6f2c393881b56` |
 
 ## Supported versions
 
 | Dependency or platform | Tested version | Source |
 | --- | --- | --- |
 | Latchway | `1.0.0` | `Latchway.podspec:L1-L20` |
+| SwiftPM product Latchway | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwayAppAttest | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwayAppExtensions | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwayFirebaseAuth | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwaySwiftOpenAI | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwayFoundationModels | `1.0.0` | `README.md:L26-L58` |
+| SwiftPM product LatchwayTesting | `1.0.0` | `README.md:L26-L58` |
+| CocoaPods `Latchway/Core` | `1.0.0` | `README.md:L26-L58` |
+| CocoaPods `Latchway/AppAttest` | `1.0.0` | `README.md:L26-L58` |
+| CocoaPods `Latchway/AppExtensions` | `1.0.0` | `README.md:L26-L58` |
+| CocoaPods `Latchway/FirebaseAuth` | `1.0.0` | `README.md:L26-L58` |
 | iOS | `15.0` | `Latchway.podspec:L19-L20` |
-| Swift | `6.0` | `Latchway.podspec:L19-L20` |
-| SwiftOpenAI minimum | `4.6.0` | `Package.swift:L20-L24` |
-| SwiftOpenAI latest | `4.6.0` | `Package.swift:L20-L24` |
-| Apple Foundation Models OS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+| macOS minimum (Swift Package) | `12` | `Package.swift:L5-L10` |
+| Swift language | `6.0` | `Latchway.podspec:L19-L20` |
+| Swift tools | `6.2` | `Package.swift:L1-L1` |
+| SwiftOpenAI exact | `4.6.0` | `Package.swift:L20-L24` |
+| Foundation Models compiler minimum | `6.4` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L1` |
+| Foundation Models iOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+| Foundation Models macOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+| Foundation Models visionOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+| Foundation Models watchOS availability | `27.0` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L1-L8` |
+| Foundation Models tvOS availability | `unavailable` | `Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift:L6-L8` |
 
 ## Version-bound examples
 
 ### `frameworks/foundation-models.swift`
 
-Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/af87b4454e4b6a159b9da7bd50550865c74684a2/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L43-L204)
+Source: [Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift](https://github.com/Latchway/latchway-ios-sdk/blob/8acd72a7fbbff019ffeb1c7be0264f671c636168/Sources/LatchwayFoundationModels/LatchwayFoundationModels.swift#L43-L204)
 
 ```swift
 /// A Foundation Models custom provider backed by a feature-bound Latchway
@@ -202,7 +219,7 @@ public struct LatchwayLanguageModelExecutor: LanguageModelExecutor, Sendable {
 
 ### `frameworks/swift-openai.swift`
 
-Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/af87b4454e4b6a159b9da7bd50550865c74684a2/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
+Source: [Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift](https://github.com/Latchway/latchway-ios-sdk/blob/8acd72a7fbbff019ffeb1c7be0264f671c636168/Sources/LatchwaySwiftOpenAI/LatchwaySwiftOpenAIHTTPClient.swift#L11-L99)
 
 ```swift
 public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
@@ -298,7 +315,7 @@ public struct LatchwaySwiftOpenAIHTTPClient: HTTPClient, Sendable {
 
 ### `quickstart/app-extension-component.swift`
 
-Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/af87b4454e4b6a159b9da7bd50550865c74684a2/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L37-L89)
+Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://github.com/Latchway/latchway-ios-sdk/blob/8acd72a7fbbff019ffeb1c7be0264f671c636168/Examples/AppExtensionComponents/Host/ComponentHostApp.swift#L37-L89)
 
 ```swift
     func prepareWidget() async {
@@ -358,7 +375,7 @@ Source: [Examples/AppExtensionComponents/Host/ComponentHostApp.swift](https://gi
 
 ### `quickstart/url-session.swift`
 
-Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/af87b4454e4b6a159b9da7bd50550865c74684a2/Examples/BasicURLSession/BasicURLSession.swift#L1-L247)
+Source: [Examples/BasicURLSession/BasicURLSession.swift](https://github.com/Latchway/latchway-ios-sdk/blob/8acd72a7fbbff019ffeb1c7be0264f671c636168/Examples/BasicURLSession/BasicURLSession.swift#L1-L247)
 
 ```swift
 @preconcurrency import Foundation

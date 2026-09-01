@@ -109,6 +109,28 @@ class SDKDocumentationBundleTests(unittest.TestCase):
             self.assertEqual(result["manifest"]["release"]["commit"], entry["commit"])
             self.assertEqual(hashlib.sha256(self.archive(entry["id"])).hexdigest(), entry["archive_sha256"])
 
+    def test_supported_version_labels_preserve_coordinates_and_canonicalize_product_terms(self) -> None:
+        self.assertEqual(
+            MODULE.render_supported_name("CocoaPods Latchway/AppAttest"),
+            "CocoaPods `Latchway/AppAttest`",
+        )
+        self.assertEqual(
+            MODULE.render_supported_name("Latchway iOS AppAttest"),
+            "Latchway iOS App Attest",
+        )
+        self.assertEqual(
+            MODULE.render_supported_name("SwiftPM product LatchwayAppAttest"),
+            "SwiftPM product LatchwayAppAttest",
+        )
+        for unsafe in (" leading", "trailing ", "two  spaces", "bad|cell", "bad`code", "bad\nrow"):
+            with self.subTest(unsafe=unsafe):
+                with self.assertRaises(MODULE.BundleError):
+                    MODULE.render_supported_name(unsafe)
+        for unsafe in (" leading", "trailing ", "bad|cell", "bad`code", "bad\nrow"):
+            with self.subTest(inline=unsafe):
+                with self.assertRaises(MODULE.BundleError):
+                    MODULE.render_inline_code(unsafe, "fixture")
+
     def test_traversal_links_checksum_tampering_duplicate_json_and_trailing_gzip_are_rejected(self) -> None:
         raw = self.archive()
         members, epoch = MODULE.archive_members(raw, MODULE.VERSION)

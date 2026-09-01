@@ -720,6 +720,43 @@ def render_mdx_snippet(
     ).encode("utf-8")
 
 
+def render_supported_name(value: Any) -> str:
+    """Render an SDK-owned dependency label without changing literal coordinates."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        or "|" in value
+        or "`" in value
+    ):
+        raise BundleError("supported-version name is unsafe for the generated MDX table")
+    rendered: list[str] = []
+    for token in value.split(" "):
+        if not token:
+            raise BundleError("supported-version name is not canonically spaced")
+        if token == "AppAttest":
+            rendered.extend(("App", "Attest"))
+        elif "/" in token:
+            rendered.append(f"`{token}`")
+        else:
+            rendered.append(token)
+    return " ".join(rendered)
+
+
+def render_inline_code(value: Any, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        or "`" in value
+        or "|" in value
+    ):
+        raise BundleError(f"{label} is unsafe for generated inline code")
+    return f"`{value}`"
+
+
 def render_sdk_page(sdk: str, entry: Mapping[str, Any], result: Mapping[str, Any]) -> bytes:
     manifest, members = result["manifest"], result["members"]
     title = {"js": "JavaScript SDK", "ios": "iOS SDK", "android": "Android SDK", "react-native": "React Native SDK"}[sdk]
@@ -742,7 +779,9 @@ def render_sdk_page(sdk: str, entry: Mapping[str, Any], result: Mapping[str, Any
     for item in versions:
         source = item["source"]
         lines.append(
-            f"| {item['name']} | `{item['version']}` | `{source['file']}:L{source['region']['start_line']}-L{source['region']['end_line']}` |"
+            f"| {render_supported_name(item['name'])} | "
+            f"{render_inline_code(item['version'], 'supported-version value')} | "
+            f"`{source['file']}:L{source['region']['start_line']}-L{source['region']['end_line']}` |"
         )
     record_by_path = {record["path"]: record for record in manifest["files"]}
     lines.extend(["", "## Version-bound examples", ""])
