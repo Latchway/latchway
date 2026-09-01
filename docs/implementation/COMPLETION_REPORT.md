@@ -16,7 +16,8 @@ deployments, or protected evidence that does not exist.
 | Contract | Draft `1.0.0`; `released_at: null` |
 | Wire | Current `2`; discovery range `[1, 2]` |
 | Database | Schema `24` |
-| Contract bundle | SHA-256 `33c57d9dfeb227ca2472a4a4a964e6df37f4932699cacb423dee11ce15e8824e` at core checkpoint `1fa6b2bf67906390e7af9be81fc946dedae71741` |
+| Contract bundle | SHA-256 `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` at core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
+| SDK source tuple | JavaScript `379a6d20bed9cbda9af6210f5511250fbbe9b571`; Swift `ab38ae00838a81be071f53740c624dc4f0558dcb`; Android `17c108706998f2c30fe511fd92ed049c024c8e85`; React Native `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
 | SDK locks | All four locks, four vector families, and the copied `protocol-version.json` manifest converge; clean source conformance passes |
 | Public release | None; no version 1 tag, package, image, or production-docs publication is authorized |
 
@@ -32,11 +33,11 @@ authorize version 1.
 | Trust and sessions | Identity/native/web verification, DPoP, independent component sessions, exact-tuple refresh idempotency, delegation, generic direct-component protocol support, composite provenance, scoped revocation; development-signed physical iOS registration and same-key assertion passed | Protected Apple distribution-derived and Android trust/lifecycle observations; iOS extensions remain delegated-only |
 | Gateway | Trusted input-token preflight, input/total quotas, Responses, Chat, Embeddings, Anthropic, restricted opaque routes, deterministic weighted/sticky routing, fallback/retry/accounting; bounded OpenRouter checks pass against the current source gateway | Immutable-image provider and load/failure evidence |
 | Admin/operator | Family/component Admin API, CLI, dashboard, wizard, trust graph, request/usage/audit/failure views, and scoped actions | Deployment operator acceptance on the final image |
-| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate; React Native commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a real iPadOS 26.5 Debug run with automatic Apple Development signing | Protected Apple distribution candidate, physical Android and delegated-extension runtime proof, and publication |
+| SDKs | Swift, Android, JavaScript, and React Native transports, component sessions, replay-safe retry, streaming/cancellation, adapters, composite-trust decoding, final locks, and clean cross-repository gate. React Native `af3860cbf39ab6a8d1d76da392cb699b9e019e42` adds root-owned component lifecycle and a Debug-only native App Intent delegated request while keeping the Release fixture fail-closed; historical root-app commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` passed a real iPadOS 26.5 Debug run with automatic Apple Development signing. | Physical invocation of the current Debug App Intent, protected Apple distribution/extension-matrix proof, physical Android proof, and publication |
 | Frameworks | Eight exact, locally tested integrations recorded as `experimental`; unsupported seams remain explicit | Hosted common conformance and release evidence before any `supported` claim |
 | Operations | Telemetry, jobs, key rotation, recovery, upgrades, replicas, cloud definitions, load/failure tooling, and release workflows | Protected exact-image cloud/resilience runs |
 | Supply chain | Multi-architecture build, scan, SBOM, signing, provenance, and finalizer workflows implemented and statically/dry-run checked | Registry-built artifacts, per-architecture observations, attestations, and independent review |
-| Documentation | Canonical Mintlify source, synchronized generated mirror, tested snippets, validation, and credential-free checkpoint workflow | Merge, production deployment, and post-deploy validation |
+| Documentation | Canonical Mintlify source, exact SDK bundles, tested snippets, validation, and credential-free checkpoint workflow pass locally | Final authored mirror synchronization and local mirror suite, then merge, production deployment, and post-deploy validation |
 
 ## Schema-23 direct component App Attest step-up
 
@@ -86,6 +87,14 @@ input/output/total usage, production quota settlement, and terminal session and
 installation revocation all passed. This is development-signed physical
 evidence, not a protected immutable-candidate or distribution receipt.
 
+Current React Native source `af3860cbf39ab6a8d1d76da392cb699b9e019e42`
+materially extends that predecessor with root-owned descriptor lifecycle and a
+Debug App Intent that uses the native extension client for an independently
+keyed delegated request with exact-run challenge/receipt binding. Its full
+local checks plus generic iOS and isolated Debug/Release App Intent build gates
+pass. The App Intent has not yet been physically invoked, and the Release
+target deliberately contains no executable Latchway request path.
+
 Those results establish implementation confidence; they are not release
 receipts. The final convergence run has:
 
@@ -107,9 +116,10 @@ One immutable candidate still requires all of the following:
    immutable iOS candidate that repeats root-app App Attest, plus delegated
    Widget/Share/Action execution and isolation, with candidate-bound
    identities, independent keys/sessions, sibling denial, no-host, background,
-   termination, and no-user-presence behavior, plus App Intents signed-binary
-   and entitlement isolation while its non-executing fixture remains
-   fail-closed;
+   termination, and no-user-presence behavior. The current React Native Debug
+   App Intent must execute its native delegated request on-device; the Release
+   fixture must retain no Latchway dependency or executable request path and
+   remain fail-closed;
 2. Play-distributed Play Integrity and physical React Native Android flows, a
    protected immutable-candidate rerun of the already-passing Firebase App
    Check flow, and a configured Turnstile observation;
@@ -129,11 +139,13 @@ One immutable candidate still requires all of the following:
    and AI-readable-output validation.
 
 The connected iPad and Xcode-managed `dev.latchway` profile supported
-automatic Apple Development signing and the supplemental physical observation.
+automatic Apple Development signing and the supplemental historical root-app
+observation.
 No physical result closes the release gate until the protected collector and
 finalizer bind an Apple distribution-derived candidate to the exact repository,
 contract, application identity, signing, entitlement, package, and image
-coordinates. The root-app observation did not execute the delegated extension.
+coordinates. The recorded root-app observation did not execute the delegated
+extension, and the current Debug App Intent still requires physical invocation.
 Play Integrity additionally requires a Play-distributed signed application and
 is deferred until an Android device is available. The CocoaPods lint passed
 with the beta Xcode toolchain; the stable Xcode installation on this host lacks

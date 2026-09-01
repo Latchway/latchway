@@ -6,7 +6,7 @@ audience: "security"
 pageType: "runbook"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "release-engineering"
 ---
 
@@ -15,11 +15,12 @@ simulators, emulators, debug evidence, and locally sideloaded builds prove
 development behavior only.
 
 <Warning>
-  The current version 1 source candidate has a development-signed physical iOS
-  observation, but it has not completed a protected Apple distribution-derived
-  App Attest run or a physical Play Integrity run. Do not describe it as
-  release-qualified or production-deployed until those exact-candidate receipts
-  exist.
+  Version 1 history has a development-signed physical iOS root-application
+  observation. The current React Native source adds a Debug native App Intent
+  path that has not yet been physically invoked. No source has completed a
+  protected Apple distribution-derived App Attest run or a physical Play
+  Integrity run. Do not describe the candidate as release-qualified or
+  production-deployed until those exact-candidate receipts exist.
 </Warning>
 
 ## Current development-signed iOS observation
@@ -39,6 +40,18 @@ TestFlight, or App Store distribution; it was not bound to a protected
 immutable candidate; and it did not execute the delegated extension runtime.
 It is useful device evidence for development, but it does not close the release
 gate.
+
+## Current source delta awaiting device invocation
+
+React Native source `af3860cbf39ab6a8d1d76da392cb699b9e019e42` adds
+root-owned component descriptor lifecycle and a Debug App Intent that calls the
+native extension client for one independently keyed delegated request. The
+containing app publishes a nonsecret exact-run Keychain challenge, and the
+intent writes a matching bounded receipt only after fully consuming the
+response body. Local tests plus generic iOS and isolated Debug/Release App
+Intent build gates pass. The intent has not yet been invoked on the connected
+iPad, so it is not part of the historical physical observation above. The
+Release target has no Latchway request path and fails closed.
 
 ## iOS and React Native iOS
 

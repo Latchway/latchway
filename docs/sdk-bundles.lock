@@ -48,16 +48,16 @@
     },
     {
       "archive": "docs/sdk-bundles/react-native/docs-bundle-1.0.0.tar.gz",
-      "archive_bytes": 26567,
-      "archive_sha256": "b5db9a3e9dd65e1de00b1d978cd3078a2ba2208f2700310eee2bc91ca632500b",
-      "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
+      "archive_bytes": 26570,
+      "archive_sha256": "fcb501227de707db90d3c7802d90124161f20b3211a5075256b68bc67ae892c6",
+      "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
       "generator_sha256": "a49f8a7cf28c4456d4c86efd01986915c5756347408f195d8f946db957dc3964",
       "id": "react-native",
-      "manifest_sha256": "70670a2e8f31ef16c0ad062aff6a0ba11bf4e228a36609e90aa5bcf014339c38",
+      "manifest_sha256": "b7e4b1b8746b60673613c9cca276e73774fc9e2cfc7e774365b6aa858db1da5b",
       "package": "@latchway/react-native",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-      "source_date_epoch": 1788220712,
+      "source_date_epoch": 1788224057,
       "source_tree_clean": true,
       "version": "1.0.0"
     }

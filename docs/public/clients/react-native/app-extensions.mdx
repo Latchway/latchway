@@ -1,23 +1,26 @@
 ---
 title: "Use React Native with iOS app extensions"
-description: "Understand the current delegated component diagnostic boundary for React Native extension targets without claiming unsupported requests."
+description: "Understand the delegated JavaScript boundary and Debug-only native App Intent request path."
 icon: "boxes"
 audience: "client-react-native"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "react-native-sdk"
 ---
 
-<Badge color="purple">Delegated component</Badge> <Badge color="yellow">Request operation unavailable</Badge>
+<Badge color="purple">Delegated component</Badge> <Badge color="blue">Debug native request path</Badge>
 
 ## Outcome
 
 An independently executing signed iOS extension can construct the separate
 component client for redacted delegated-session diagnostics after the
-containing app provisions its component key. It cannot use the root client or
-move root credentials through JavaScript.
+containing app provisions its component key. The React Native JavaScript API
+does not expose a component request operation. The example's Debug App Intent
+instead calls the native extension client directly for one bounded delegated
+request; it cannot use the root client or move root credentials through
+JavaScript.
 
 ## Current version 1 boundary
 
@@ -26,12 +29,17 @@ move root credentials through JavaScript.
   shared Keychain group, and requested feature IDs;
 - the extension owns an independent component key and delegated session;
 - it has no root identity callback or App Attest provider;
-- only redacted diagnostics cross the bridge; and
-- React Native version 1 exposes no component request operation.
+- only redacted diagnostics cross the React Native bridge; and
+- React Native version 1 exposes no JavaScript component request operation.
 
-The example App Intents extension is a signing, bundle, and Keychain fixture.
-It does not host a React Native runtime and fails closed rather than sending a
-delegated request. Building or invoking it is not extension execution evidence.
+The example App Intents extension does not host a React Native runtime. In
+Debug it links `Latchway/AppExtensions`, constructs a native
+`LatchwayExtensionClient`, fully consumes one bounded Responses request, and
+writes a nonsecret receipt bound to the containing app's current exact-run
+Keychain challenge. In Release it has no Latchway dependency or executable
+request path and fails closed. Local tests plus generic iOS and isolated
+Debug/Release App Intent build gates prove the source boundary; the current
+Debug intent has not yet been physically invoked.
 
 <Warning>
   The containing application cannot attest on behalf of the extension. A
@@ -50,5 +58,7 @@ identity tokens, or App Attest evidence into the extension.
 
 Confirm diagnostics report the extension's independent component ID and key,
 delegated provenance, sealed feature scope, and no root or credential fields.
-Leave request execution unclaimed until a released API and physical extension
-conformance result exist.
+For the Debug App Intent, also confirm that the exact-run receipt appears only
+after the native delegated response body is fully consumed. Do not claim
+physical extension execution until that intent runs on the exact signed source,
+and do not treat Debug evidence as protected distribution evidence.

@@ -6,7 +6,7 @@ audience: "client-ios"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "ios-sdk"
 ---
 
@@ -49,5 +49,6 @@ extension.
 
 Inspect the extension request and confirm its component ID differs from the
 root, its trust provenance is delegated, its DPoP key belongs to the extension,
-and its feature and quota attribution are component-scoped. A signed extension
-fixture that cannot send a request is provisioning evidence only.
+and its feature and quota attribution are component-scoped. Signing and
+embedding an extension without observing an executed delegated request proves
+provisioning only.

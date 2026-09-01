@@ -6,7 +6,7 @@ audience: "client-react-native"
 pageType: "tutorial"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "react-native-sdk"
 ---
 
@@ -44,7 +44,11 @@ own component keys, DPoP, session rotation, and platform attestation.
   the prepublication integration path. Current evidence covers React Native
   commit `6de46e1c7264e1d45cdd31174e4ea040a8c24acf` on a real iPad running
   iPadOS 26.5 in Debug configuration with automatic Apple Development signing.
-  Android physical and protected distribution evidence remain release gates.
+  Current source `af3860cbf39ab6a8d1d76da392cb699b9e019e42` passes the full
+  local suite plus generic iOS and isolated Debug/Release App Intent build gates
+  and adds a Debug native delegated-request path, but that intent has not yet
+  been physically invoked. Android physical, protected extension-matrix, and
+  protected distribution evidence remain release gates.
 </Warning>
 
 ## What you will build

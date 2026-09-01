@@ -6,7 +6,7 @@ audience: "client-react-native"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "react-native-sdk"
 ---
 
@@ -35,10 +35,12 @@ not pin the current gateway implementation commit. Its local native overrides
 are development-only and must not appear in a published package.
 
 <Warning>
-  The example's App Intents extension is currently a signing, provisioning,
-  and Keychain-entitlement fixture. It deliberately fails closed instead of
-  sending a delegated Latchway request, so including or launching that target
-  is not delegated-component execution evidence.
+  The JavaScript extension client remains diagnostics-only. The example's
+  Debug App Intent instead links the native AppExtensions SDK and implements
+  one independently keyed delegated request with an exact-run Keychain
+  challenge and receipt. The Release target has no Latchway request path and
+  fails closed. Local source and build checks are not physical App Intent
+  execution evidence.
 </Warning>
 
 <Info>
@@ -48,8 +50,12 @@ are development-only and must not appear in a published package.
   same-key assertion, Secure Enclave DPoP, upstream non-streaming and streaming
   requests, quota, typed component denial, bridge behavior, and cleanup passed
   against the current source gateway. This is development-signed iOS evidence,
-  not an Apple distribution-derived protected release receipt; Android and
-  delegated-extension runtime proof remain open.
+  not an Apple distribution-derived protected release receipt. Current React
+  Native source `af3860cbf39ab6a8d1d76da392cb699b9e019e42` adds root-owned
+  component lifecycle and the Debug native App Intent path; its full local
+  check plus generic iOS and isolated Debug/Release App Intent build gates
+  pass, but that intent has not yet been physically invoked. Android and the
+  protected extension runtime matrix remain open.
 </Info>
 
 ## Create a client

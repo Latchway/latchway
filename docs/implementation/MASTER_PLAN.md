@@ -1,6 +1,6 @@
 # Latchway version 1 master plan
 
-This is the canonical merged implementation plan as of 2026-08-31. It combines
+This is the canonical merged implementation plan as of 2026-09-01. It combines
 the original A-to-Z plan with the framework-integration, Installation Family,
 and Mintlify addendum. The version 1 source candidate is implemented and
 locally source-converged; release promotion remains blocked on protected
@@ -30,11 +30,15 @@ mirror.
 | Field | Version 1 source coordinate |
 | --- | --- |
 | Contract | `1.0.0`, status `draft`, `released_at: null` |
-| Contract freeze | Core checkpoint `1fa6b2bf67906390e7af9be81fc946dedae71741` |
-| Bundle SHA-256 | `33c57d9dfeb227ca2472a4a4a964e6df37f4932699cacb423dee11ce15e8824e` |
+| Contract freeze | Core checkpoint `b07a4762f08e6b68d5829cda500bae9d79e5f16c` |
+| Bundle SHA-256 | `397a3920aaa2ed0438a96156cd8a51f0fa85ac2e3fb9266b4fe79618812a3d9a` |
 | Wire protocol | Current `2`; supported discovery range `[1, 2]` |
 | Database | Schema `24` |
 | Server compatibility | Minimum `1.0.0`; maximum locally tested `1.0.x` |
+| JavaScript source | `379a6d20bed9cbda9af6210f5511250fbbe9b571` |
+| Swift source | `ab38ae00838a81be071f53740c624dc4f0558dcb` |
+| Android source | `17c108706998f2c30fe511fd92ed049c024c8e85` |
+| React Native source | `af3860cbf39ab6a8d1d76da392cb699b9e019e42` |
 | Release state | `unreleased` |
 
 The historical `0.5.1`/wire-1 bundle remains immutable at its historical
@@ -74,10 +78,11 @@ checkpoint. It is not rewritten by this plan.
 - [x] Implement Swift component-specific Keychain access groups and containing-
   app preparation APIs with unsigned host/extension consumer evidence.
 
-Physical Apple entitlement, sibling-denial, background execution, and root-app
-App Attest evidence remain external gates, not missing source. iOS extensions
-are delegated-only because Apple's App Attest runtime rejects key generation
-from iOS app extensions.
+Protected Apple distribution, sibling-denial, background execution, and
+candidate-bound root-app App Attest evidence remain external gates, not missing
+source. A historical development-signed root-app observation exists. iOS
+extensions are delegated-only because Apple's App Attest runtime rejects key
+generation from iOS app extensions.
 
 ### Phase 2: Contract and schema — source complete and frozen
 
@@ -143,17 +148,19 @@ parent mismatch.
   disposable sentinel, and scan every explicit extension-shared group only at
   known legacy root-record coordinates. Stale shared-first root state fails
   closed and requires an explicit migration.
-- [x] Include the React Native App Intents extension as a fail-closed signing,
-  provisioning, and Keychain-isolation fixture; it is not delegated-request
-  execution evidence.
+- [x] Include a Debug-only React Native App Intents native integration that
+  executes an independently keyed delegated request with an exact-run
+  Keychain challenge/receipt, while keeping the Release target free of a
+  Latchway request path and fail-closed.
 - [x] Pass Swift package, CocoaPods, Tuist, unsigned extension-host, adapter,
   conformance, and reproducibility gates locally.
 - [ ] Capture protected physical root-app App Attest and
   containing-app/widget/share/action isolation, App Intents signed-binary and
   entitlement isolation, component identity and sibling denial,
   no-host/background/termination/no-user-presence behavior, and signing
-  evidence for the exact candidate. The App Intents fixture must continue to
-  fail closed and cannot count as delegated-request execution evidence.
+  evidence for the exact candidate. The Debug App Intent must be physically
+  invoked before it counts as development execution evidence; the Release
+  fixture must continue to fail closed without a Latchway request path.
 
 The server contract retains generic direct-component routes and can represent
 an eligible watchOS component, but the current Swift package does not claim a
@@ -195,6 +202,8 @@ to apply to supported Android application trust surfaces.
 - [x] Pin Mintlify, Vale, and the MDX parser; enforce product terminology and
   verifiable-language rules.
 - [x] Pass the local 127-page Mintlify validation suite.
+- [ ] Synchronize the final authored pages to the generated mirror and rerun
+  the mirror's complete local suite at the exact final source coordinate.
 - [ ] Deploy the synchronized mirror through the authorized Mintlify GitHub App
   and validate the production URL after the branch merges.
 

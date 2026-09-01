@@ -6,7 +6,7 @@ audience: "mixed"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "framework-integrations"
 ---
 
@@ -33,6 +33,14 @@ streaming requests, quota, typed component denial, bridge behavior, and cleanup
 against the current source gateway. It is not a published supported
 integration, and the named JavaScript framework rows do not automatically
 apply to React Native.
+
+Current React Native source
+`af3860cbf39ab6a8d1d76da392cb699b9e019e42` passes the full local suite plus
+generic iOS and isolated Debug/Release App Intent build gates. It materially
+adds root-owned component lifecycle and a Debug native App Intent
+delegated-request path. That intent has not yet been physically invoked, so the
+historical root-app run above does not establish extension execution for the
+current source.
 
 ## 3. Supported Latchway versions
 
@@ -115,8 +123,9 @@ pre-dispatch retry. JavaScript never reads the refresh credential.
 
 Browser-only streams, uploads, or framework hooks may not exist in React
 Native. The iPadOS 26.5 Debug observation used automatic Apple Development
-signing, not an Apple distribution-derived protected immutable candidate.
-Android and delegated-extension runtime evidence remain open.
+signing, not an Apple distribution-derived protected immutable candidate. The
+current Debug App Intent still requires physical invocation, and the broader
+protected extension matrix remains open. Android evidence also remains open.
 
 ## 17. Verify the integration
 

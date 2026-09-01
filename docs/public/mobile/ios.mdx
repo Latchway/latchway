@@ -6,7 +6,7 @@ audience: "client-ios"
 pageType: "how-to"
 serverVersion: "1.0.0"
 sdkVersion: "1.0.0"
-lastVerified: "2026-08-31"
+lastVerified: "2026-09-01"
 owner: "ios-sdk"
 ---
 
@@ -61,6 +61,14 @@ device. A simulator or fixture cannot produce release evidence.
   a published standalone Swift/CocoaPods consumer. CocoaPods lint passed with
   the beta Xcode toolchain; the stable Xcode installation on the verification
   host lacks its required platform component.
+
+  Current React Native source
+  `af3860cbf39ab6a8d1d76da392cb699b9e019e42` also integrates the native Swift
+  extension client into a Debug App Intent for one independently keyed
+  delegated request. Its local checks plus generic iOS and isolated
+  Debug/Release App Intent build gates pass, but the intent has not yet been
+  physically invoked. Its Release target has no executable Latchway request
+  path and fails closed.
 </Info>
 
 The provider single-flights first-use key creation, persists a generated key

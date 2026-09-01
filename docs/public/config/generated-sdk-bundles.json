@@ -435,18 +435,18 @@
     },
     {
       "archive": "docs/sdk-bundles/react-native/docs-bundle-1.0.0.tar.gz",
-      "archive_sha256": "b5db9a3e9dd65e1de00b1d978cd3078a2ba2208f2700310eee2bc91ca632500b",
-      "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
+      "archive_sha256": "fcb501227de707db90d3c7802d90124161f20b3211a5075256b68bc67ae892c6",
+      "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
       "files": [
         {
           "generated_path": "snippets/generated/react-native/frameworks/react-native-consumers.ts",
-          "generated_sha256": "811a33bcef79ba4465fadf53714bd5aee80b44ee3cc7032dc877afc046390255",
+          "generated_sha256": "3c4cee17f244d1e619ada5105fe465a34d02d4b66713c183f0aa57a28ba9ffa4",
           "kind": "framework",
           "payload_path": "frameworks/react-native-consumers.ts",
           "payload_sha256": "fa5c16fbab58e0c42bf43bf9058d36b6e65655c717a20c9b75aad3cc0c0bd270",
           "provenance": [
             {
-              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
+              "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
               "file": "example/src/framework-consumers.ts",
               "region": {
                 "end_line": 153,
@@ -459,17 +459,17 @@
             }
           ],
           "snippet_path": "snippets/generated/react-native/frameworks/react-native-consumers.ts.mdx",
-          "snippet_sha256": "5b85b762decea75f424cd98b5975e9609d53dc9feaa4dda0920d0b09a9b563cd"
+          "snippet_sha256": "805e38fd8fcee86e81ce2e50d3794c247831234c08cc7cd0bc8370cd6d395c6e"
         },
         {
           "generated_path": "snippets/generated/react-native/quickstart/create-client.tsx",
-          "generated_sha256": "85b60fe9e35cf26059fb99b7bf495fc59d1d7469ad6e72a63df7b9bceddf1e85",
+          "generated_sha256": "c76735145e6b501ea2d8a45f45304f67c467a5521645bec972803135990e6791",
           "kind": "quickstart",
           "payload_path": "quickstart/create-client.tsx",
           "payload_sha256": "d20e36f01bb766c8f12965865794f2d2910ae17ceaa4816514acdd5ef834b3c7",
           "provenance": [
             {
-              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
+              "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
               "file": "example/src/App.tsx",
               "region": {
                 "end_line": 78,
@@ -482,17 +482,17 @@
             }
           ],
           "snippet_path": "snippets/generated/react-native/quickstart/create-client.tsx.mdx",
-          "snippet_sha256": "734ef35101eb2cfc13a11d05415dffa55c5382c5de0cc109035d141fc31fafa0"
+          "snippet_sha256": "6d167f1cf31c5bfc8d56e428cb57fc405bfa0ccbc781365c5cf8b783d3bfaa7c"
         },
         {
           "generated_path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx",
-          "generated_sha256": "91df708ed782b38a4ef529bce2312d3984bcd853c621afc7948afda035d4c7cf",
+          "generated_sha256": "68307781e377e878ffe9cebea339eabd44e898f1e9b7d7e699f033e3f8938fb7",
           "kind": "quickstart",
           "payload_path": "quickstart/streaming-fetch.tsx",
           "payload_sha256": "a1c3d6dec94814057492793c06fc7fbbf1bed2dd2b325e53aa03e264feeeeb19",
           "provenance": [
             {
-              "commit": "b96bbbe12540776feed4d80dbf974909e690277a",
+              "commit": "af3860cbf39ab6a8d1d76da392cb699b9e019e42",
               "file": "example/src/App.tsx",
               "region": {
                 "end_line": 118,
@@ -505,20 +505,20 @@
             }
           ],
           "snippet_path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx",
-          "snippet_sha256": "92933cdf43939b814596aadd92c68aa4d9d530976b84ee31b605e0479db45303"
+          "snippet_sha256": "d79d3718a2f07e7322d6d82fa1f48b6f16f56e0f3d821aa8d2c7cce6a0789caa"
         }
       ],
       "id": "react-native",
       "package": "@latchway/react-native",
       "release": "v1.0.0",
       "repository": "https://github.com/Latchway/latchway-react-native-sdk",
-      "source_date_epoch": 1788220712,
+      "source_date_epoch": 1788224057,
       "source_tree_clean": true,
       "version": "1.0.0"
     }
   ],
   "generator": "scripts/docs_sdk_bundle.py",
-  "lock_sha256": "77e3031ae51743c1cfbf1a267549827b6e01970d353f88d900a1b02feaea68bd",
+  "lock_sha256": "8400f1c6598074cdd2951fc681c702bd9fe4ae817941a097578ed83fdfdad007",
   "outputs": [
     {
       "bytes": 37301,
@@ -583,27 +583,27 @@
     {
       "bytes": 36353,
       "path": "config/sdk-bundles/react-native/errors.json",
-      "sha256": "afc33962747e2710c42963cc873c1c200345737748a7e8b99c1db11734041bf9"
+      "sha256": "88fafe409c0fdc9cfc87537d816bc5d0c3a46fe736077b0338469496363a4541"
     },
     {
       "bytes": 2535,
       "path": "config/sdk-bundles/react-native/examples.json",
-      "sha256": "810823961dbf3297de389ae35050fd599d6479964264e570c31fafc9c4f0ac13"
+      "sha256": "254835a0daa9d3b42756bcd3f82b4ed7e37b521a517f271a56865715d5574bfb"
     },
     {
       "bytes": 46784,
       "path": "config/sdk-bundles/react-native/public-symbols.json",
-      "sha256": "7c70e2c97bd0225a1cca2c921bc2bc16caa4a951dbe05f360eccf8ce42804985"
+      "sha256": "a69226f3d91eb9bd2d5c9989169a9b022e4d4e934d009687a15b185fe4509c25"
     },
     {
       "bytes": 5398,
       "path": "config/sdk-bundles/react-native/supported-versions.json",
-      "sha256": "7f1c1c99010e19939f9f091ce707aafe0aec92bdbc570ba3028a77561b1e250f"
+      "sha256": "413085200fe332d8500b78d81c813cb42465aa30910bc23360dd9d7f5595d771"
     },
     {
       "bytes": 2054,
       "path": "reference/sdk-bundles.mdx",
-      "sha256": "6e7a2045cfb900b6ef3f9287577050d7193d434dc92731d479296b8cafadee16"
+      "sha256": "92b1a4ce28806a7ac573d25412702f6180a2b1cf67888766b093e5145d139323"
     },
     {
       "bytes": 23070,
@@ -623,7 +623,7 @@
     {
       "bytes": 8886,
       "path": "reference/sdk-bundles/react-native.mdx",
-      "sha256": "78c6a270026044ff41b9bf74e950043815dbd397303f0000041e183488ad0e79"
+      "sha256": "abff5e606fb741199c0a922da0d8cc0fb24b30c92cf1ff3b396322686b86b27a"
     },
     {
       "bytes": 2307,
@@ -798,32 +798,32 @@
     {
       "bytes": 5415,
       "path": "snippets/generated/react-native/frameworks/react-native-consumers.ts",
-      "sha256": "811a33bcef79ba4465fadf53714bd5aee80b44ee3cc7032dc877afc046390255"
+      "sha256": "3c4cee17f244d1e619ada5105fe465a34d02d4b66713c183f0aa57a28ba9ffa4"
     },
     {
       "bytes": 5377,
       "path": "snippets/generated/react-native/frameworks/react-native-consumers.ts.mdx",
-      "sha256": "5b85b762decea75f424cd98b5975e9609d53dc9feaa4dda0920d0b09a9b563cd"
+      "sha256": "805e38fd8fcee86e81ce2e50d3794c247831234c08cc7cd0bc8370cd6d395c6e"
     },
     {
       "bytes": 1204,
       "path": "snippets/generated/react-native/quickstart/create-client.tsx",
-      "sha256": "85b60fe9e35cf26059fb99b7bf495fc59d1d7469ad6e72a63df7b9bceddf1e85"
+      "sha256": "c76735145e6b501ea2d8a45f45304f67c467a5521645bec972803135990e6791"
     },
     {
       "bytes": 1144,
       "path": "snippets/generated/react-native/quickstart/create-client.tsx.mdx",
-      "sha256": "734ef35101eb2cfc13a11d05415dffa55c5382c5de0cc109035d141fc31fafa0"
+      "sha256": "6d167f1cf31c5bfc8d56e428cb57fc405bfa0ccbc781365c5cf8b783d3bfaa7c"
     },
     {
       "bytes": 1214,
       "path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx",
-      "sha256": "91df708ed782b38a4ef529bce2312d3984bcd853c621afc7948afda035d4c7cf"
+      "sha256": "68307781e377e878ffe9cebea339eabd44e898f1e9b7d7e699f033e3f8938fb7"
     },
     {
       "bytes": 1154,
       "path": "snippets/generated/react-native/quickstart/streaming-fetch.tsx.mdx",
-      "sha256": "92933cdf43939b814596aadd92c68aa4d9d530976b84ee31b605e0479db45303"
+      "sha256": "d79d3718a2f07e7322d6d82fa1f48b6f16f56e0f3d821aa8d2c7cce6a0789caa"
     }
   ],
   "schema_version": "latchway.generated-sdk-documentation.v1"
